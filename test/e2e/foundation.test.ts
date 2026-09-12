@@ -205,7 +205,6 @@ describe("scenario schema", () => {
 });
 
 describe("scenario corpus loader (collectYmlFiles)", () => {
-  /** A fresh temp root, removed on every path once `body` returns or throws. */
   function withTempRoot(body: (root: string) => void): void {
     const root = mkdtempSync(join(tmpdir(), "e2e-corpus-"));
     try {
@@ -255,18 +254,12 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
   );
 
   test("scenarioRoots names every registered section's scenarios/ path, present or not", () => {
-    // existsSync is false for an absent scenarios/ and for one under a
-    // mode-000 <key>/ (it stats the path, so only the parent's search bit
-    // matters), so a roots list filtered by it would drop the second as the
-    // first; the loader is the one place that tells absent from unreadable,
-    // so the roots are never filtered. The unreadable case the next test
-    // builds is a mode-000 scenarios/ itself, which existsSync would have kept
-    // and readdir then refuses.
+    // existsSync cannot tell an absent scenarios/ from one under a mode-000 parent, so the roots are
+    // never filtered; the loader is the one place that tells absent from unreadable.
     withTempRoot((sections) => {
       const roots = scenarioRoots(sections);
       expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));
       expect(roots.slice(1)).toEqual(SECTION_KEYS.map((key) => join(sections, key, "scenarios")));
-      // Every section path is absent here, and the corpus they form is empty.
       expect(loadScenarios(roots.slice(1))).toEqual([]);
     });
   });
@@ -362,10 +355,7 @@ describe("marker-label fixture pin (markerLabelFixtureMismatches)", () => {
 
 describe("harness identity constants", () => {
   test("no identity constant contains the inert token (leak-sweep disjointness)", () => {
-    // The runner sweeps EVERY public surface for E2E_TOKEN as a substring; an
-    // identity constant containing it (TOKEN_USER_LOGIN once nearly did, back
-    // when the token was "e2e-token") would turn a legitimate rendering of
-    // that fixture into a phantom token leak.
+    // An identity constant containing E2E_TOKEN (TOKEN_USER_LOGIN nearly did) turns a legitimate rendering into a phantom leak.
     const rendered = { ADMIN_OWNER, ADMIN_REPO, ADMIN_SLUG, TOKEN_USER_LOGIN, VIOLATION_PREFIX };
     for (const [name, value] of Object.entries(rendered)) {
       expect(`${name}="${value}"`.includes(E2E_TOKEN)).toBe(false);
@@ -373,11 +363,8 @@ describe("harness identity constants", () => {
   });
 
   test("section mock fragments mint identity from state.slug, never the harness constants", async () => {
-    // Served bodies must name the OWNING state's slug: the same bug (urls
-    // minted from ADMIN_SLUG, served verbatim for multi-repo targets)
-    // appeared independently in five fragments, so the class is banned at the
-    // import boundary - a fragment always has the owning state in scope and
-    // has no legitimate use for an identity constant.
+    // Urls minted from ADMIN_SLUG were served verbatim for multi-repo targets in five fragments, so the
+    // class is banned at the import boundary: a fragment always has the owning state in scope.
     const root = join(import.meta.dir, "..", "..");
     const offenders: string[] = [];
     let fragments = 0;
@@ -388,7 +375,6 @@ describe("harness identity constants", () => {
         offenders.push(file);
       }
     }
-    // Non-vacuity: the glob must actually find the fragments it polices.
     expect(fragments).toBeGreaterThan(0);
     expect(offenders.sort()).toEqual([]);
   });

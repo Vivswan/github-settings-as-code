@@ -25,17 +25,12 @@ import type { Scenario } from "./schema.js";
 
 describe("bundle build parity (harness vs production)", () => {
   test("the declared build:bundle script matches what the harness builds", () => {
-    // The e2e children run a bundle the HARNESS builds, so a flag added to
-    // build:bundle (minify, sourcemap, define) would ship an artifact e2e
-    // never exercises. This assertion lives in a unit test on purpose: it is
-    // the only place the pin can fire on the PR that trips it, since a
-    // package.json-only diff selects no sections and skips the e2e smoke job.
+    // A unit test on purpose: a package.json-only diff selects no sections and skips the e2e smoke
+    // job, so this is the only place the pin can fire on the PR that trips it.
     expect(bundleBuildParityFailure(declaredBuildBundleScript())).toBeUndefined();
   });
 
   test("a drifted or missing script is reported, naming both sides", () => {
-    // The inverse leg: prove the check can fail at all, and that its message
-    // carries the two commands a reader must reconcile.
     const drifted = bundleBuildParityFailure(
       "bun build src/main.ts --target=node --minify --outfile lib/index.js",
     );
@@ -51,10 +46,8 @@ describe("bundle build parity (harness vs production)", () => {
 
 describe("ARTIFACT_TEST_RECIPIENT", () => {
   test("is a valid age recipient the action's config validation accepts", () => {
-    // The artifact scenarios pin this constant as the report-public-key; if it
-    // ever stops parsing, every artifact-delivery scenario would silently fall
-    // into the config-rejection path instead. Pin it against the same validator
-    // the action uses at config parse.
+    // If this constant ever stops parsing, every artifact-delivery scenario would silently fall into
+    // the config-rejection path instead.
     expect(parseRecipient(ARTIFACT_TEST_RECIPIENT)).toEqual(ok());
   });
 });
@@ -65,16 +58,15 @@ describe("exitCodeFailure (expect.exit_code membership)", () => {
     ["a plain-number mismatch keeps the single-code message", 1, 0, "exit code 1 != expected 0"],
     ["an allowed-set member passes", 1, [0, 1], undefined],
     ["an exit outside the allowed set names the whole set", 2, [0, 1], "exit code 2 not in [0, 1]"],
-    // The fuzz expectation is spread from a Set, whose insertion order varies
-    // by seed; the failure text must not.
+    // The fuzz expectation is spread from a Set whose insertion order varies by seed; the failure text must not.
     [
       "the multi-element message renders sorted, whatever the set order",
       2,
       [1, 0],
       "exit code 2 not in [0, 1]",
     ],
-    // The fuzz oracle often predicts exactly one legal exit; the message must
-    // stay byte-identical to the plain-number form either way it is spelled.
+    // The fuzz oracle often predicts exactly one legal exit; the message must stay byte-identical to
+    // the plain-number form either way it is spelled.
     ["a one-element set keeps the single-code message", 1, [0], "exit code 1 != expected 0"],
   ];
   for (const [name, exitCode, expected, want] of cases) {
@@ -195,8 +187,6 @@ describe("stripMaskLines", () => {
   });
 
   test("a slug outside a mask directive survives (so a real leak is caught)", () => {
-    // The mask directive is the ONLY line allowed to carry the raw slug; a slug
-    // anywhere else must remain after stripping so checkLeaks can flag it.
     const stdout = ["::add-mask::acme/secret-repo", "::debug::acme/secret-repo leaked here"].join(
       "\n",
     );
@@ -206,10 +196,6 @@ describe("stripMaskLines", () => {
 
 describe("stripDebugLines (counterfactual rendered-surface guard)", () => {
   test("a canary only in a ::debug:: trace does NOT survive - so it cannot satisfy the counterfactual", () => {
-    // The counterfactual must judge RENDERED output, not API traces. A canary
-    // that appears solely in a debug request-trace line is stripped, so it would
-    // NOT count as having surfaced under show - a rendered-detail suppression
-    // regression is therefore still caught.
     const stdout = [
       '::debug::POST /repos/o/r/labels payload: {"name":"CANARY-42"}',
       "::debug::GET /repos/o/r/labels -> 200",
@@ -223,8 +209,8 @@ describe("stripDebugLines (counterfactual rendered-surface guard)", () => {
       'o/r: labels: updated label "CANARY-42"',
     ].join("\n");
     const rendered = stripDebugLines(stdout);
-    expect(rendered).not.toContain("payload"); // the debug trace is gone
-    expect(rendered).toContain('updated label "CANARY-42"'); // the rendered line stays
+    expect(rendered).not.toContain("payload");
+    expect(rendered).toContain('updated label "CANARY-42"');
   });
 });
 
@@ -312,7 +298,6 @@ describe("insertReplay (fuzz-issue report contract)", () => {
         "bun test/e2e/fuzz.ts --seed 42 --iterations 1",
         "```",
       ]);
-      // The original body survives below the inserted section.
       expect(lines).toContain("## Failures");
       expect(lines).toContain("Exit code: 1");
     } finally {
@@ -370,8 +355,7 @@ describe("failureArtifacts (a verdict the runner did not reach)", () => {
       const lines = readFileSync(join(dir as string, "report.md"), "utf8").split("\n");
       expect(lines[0]).toBe("# fuzz-oracle-42");
       expect(lines).toContain('- branches: observed "failed" not in predicted {clean,drift}');
-      // The same directory the runner's own dump writes, so the fuzz-issue
-      // action's upload step finds it.
+      // The same directory the runner's own dump writes, so the fuzz-issue action's upload step finds it.
       expect(dir).toContain(join("test", "e2e", ".artifacts"));
     } finally {
       rmSync(dir as string, { recursive: true, force: true });

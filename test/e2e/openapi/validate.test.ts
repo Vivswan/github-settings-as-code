@@ -1,11 +1,3 @@
-/**
- * Unit tests for the OpenAPI validator, run under the normal `bun test` suite.
- * They exercise the validator directly against the fetched trimmed spec with
- * hand-built LoggedRequest objects (no server, no subprocess), so the schema
- * preprocessing, path/method matching, body checks, and the denial/violation
- * exclusions are pinned without depending on the mock's runtime.
- */
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
@@ -20,7 +12,6 @@ import {
   validateExchange,
 } from "./validate.js";
 
-/** A LoggedRequest with sane defaults; each test overrides what it exercises. */
 function req(overrides: Partial<LoggedRequest>): LoggedRequest {
   return { method: "GET", pathname: "/", query: "", status: 200, ...overrides };
 }
@@ -40,8 +31,6 @@ describe("toJsonSchema", () => {
   });
 
   test("a nullable enum gains null (the code-quality runner_type shape)", () => {
-    // GitHub spells nullable enums as nullable:true beside an enum WITHOUT
-    // null; the widened type alone cannot get null past the enum keyword.
     expect(toJsonSchema({ type: "string", nullable: true, enum: ["standard", "labeled"] })).toEqual(
       { type: ["string", "null"], enum: ["standard", "labeled", null] },
     );
@@ -49,7 +38,6 @@ describe("toJsonSchema", () => {
       type: ["string", "null"],
       enum: ["weekly", null],
     });
-    // Not nullable: the enum stays as declared.
     expect(toJsonSchema({ type: "string", enum: ["standard"] })).toEqual({
       type: "string",
       enum: ["standard"],
@@ -57,23 +45,20 @@ describe("toJsonSchema", () => {
   });
 
   test("nullable without a type is dropped, not turned into a bare null type", () => {
-    // No `type` to extend, so nullable simply disappears (ajv treats a
-    // type-less schema as accept-anything, which is the safe reading).
+    // ajv treats a type-less schema as accept-anything, the safe reading.
     expect(toJsonSchema({ nullable: true, description: "x" })).toEqual({ description: "x" });
   });
 
   test("nullable beside a bare oneOf gains a null branch (the custom property value shape)", () => {
-    // GitHub's custom-property `value` schema is `oneOf [string, string[]]`
-    // with nullable:true and NO sibling type; a null value must validate.
+    // GitHub's custom-property `value` schema is `oneOf [string, string[]]` with nullable: true and
+    // NO sibling type; a null value must validate.
     const input = {
       nullable: true,
       oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
     };
-    // Request-body variant: oneOf survives, null matches exactly its branch.
     expect(toJsonSchema(input, true)).toEqual({
       oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
     });
-    // Relaxed variant: the oneOf becomes anyOf first and still gains null.
     expect(toJsonSchema(input)).toEqual({
       anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
     });
@@ -141,21 +126,16 @@ describe("toJsonSchema", () => {
         { type: "object", required: ["b"], properties: { b: { type: "string" } } },
       ],
     };
-    // Response variant (keepRequired false): oneOf -> anyOf, required stripped.
     expect(toJsonSchema(input)).toEqual({
       anyOf: [
         { type: "object", properties: { a: { type: "string" } } },
         { type: "object", properties: { b: { type: "string" } } },
       ],
     });
-    // Request variant (keepRequired true): oneOf and required both preserved.
     expect(toJsonSchema(input, true)).toEqual(input);
   });
 
   test("a widened oneOf that would fail exactly-one passes as anyOf end to end", () => {
-    // A value matching BOTH branches fails oneOf (exactly-one) but passes the
-    // relaxed anyOf. Drive it through a real OpenApiValidator over a tiny spec
-    // (public API, no internals): a GET whose 200 schema is a oneOf.
     const spec = {
       paths: {
         "/repos/{owner}/{repo}/thing": {
@@ -190,11 +170,8 @@ describe("toJsonSchema", () => {
   });
 
   test("the relaxed oneOf still accepts data matching exactly ONE original branch", () => {
-    // The GitHub-shaped case B2 named: a oneOf of [Simple User (required
-    // fields), Empty Object]. Under raw oneOf, {} matches only the Empty Object
-    // branch. Stripping Simple User's required fields would make {} match BOTH
-    // branches and oneOf reject valid data; anyOf keeps it accepted. This is the
-    // regression that proves relaxation does not break the common valid case.
+    // GitHub's oneOf [Simple User (required fields), Empty Object]: {} matches only Empty Object
+    // under raw oneOf; with required stripped it matches BOTH and oneOf rejects valid data.
     const spec = {
       paths: {
         "/repos/{owner}/{repo}/thing": {
@@ -222,7 +199,6 @@ describe("toJsonSchema", () => {
       },
     };
     const v = new OpenApiValidator(spec as never);
-    // {} matched exactly the Empty Object branch originally; must still pass.
     expect(
       v.validateRequest({
         method: "GET",
@@ -232,7 +208,6 @@ describe("toJsonSchema", () => {
         responseBody: {},
       }),
     ).toEqual([]);
-    // A well-formed Simple User (matched exactly branch 1 originally) also passes.
     expect(
       v.validateRequest({
         method: "GET",
@@ -296,7 +271,6 @@ describe("pathMatches greedy trailing params", () => {
 
   test("a non-contents template still matches one segment per param", () => {
     expect(pathMatches("/repos/{owner}/{repo}/labels/{name}", "/repos/o/r/labels/bug")).toBe(true);
-    // A stray extra segment must NOT match a single-segment param.
     expect(pathMatches("/repos/{owner}/{repo}/labels/{name}", "/repos/o/r/labels/bug/extra")).toBe(
       false,
     );
@@ -307,7 +281,7 @@ describe("OpenApiValidator against the fetched spec", () => {
   const v = sharedValidator();
 
   test("the fetched spec loads and shares one instance", () => {
-    expect(sharedValidator()).toBe(v); // process-wide singleton
+    expect(sharedValidator()).toBe(v);
   });
 
   test("a real repository GET with a plausible body passes", () => {
@@ -326,23 +300,13 @@ describe("OpenApiValidator against the fetched spec", () => {
         },
       }),
     );
-    // Route AND body: toJsonSchema strips `required` from response schemas
-    // (pinned by the strips-required test above), so this minimal body must
-    // validate cleanly - the whole violation list is empty, and a body
-    // violation cannot pass silently behind a matched route.
     expect(violations).toEqual([]);
   });
 
   test("every declared endpoint's pageSize matches the spec's documented per_page cap", () => {
-    // The per_page maximum is NOT machine-readable: the parameter schema
-    // carries only type and default, and the cap lives in the description
-    // prose. GitHub CLAMPS an oversized per_page rather than honoring it,
-    // and the page loop terminates on a short page - so a list endpoint
-    // with an undeclared sub-100 cap silently truncates after page one.
-    // This sweep parses the cap out of each declared endpoint's per_page
-    // description and pins EndpointDecl.pageSize to it, so a new section
-    // on a capped endpoint (the variables family is capped at 30) cannot
-    // ship the truncation bug.
+    // The per_page cap is not machine-readable: it lives in the description prose. GitHub CLAMPS an
+    // oversized per_page and the page loop stops on a short page, so an undeclared sub-100 cap
+    // silently truncates after page one (the variables family is capped at 30).
     const spec = JSON.parse(
       readFileSync(new URL("./github-openapi.trimmed.json", import.meta.url), "utf8"),
     ) as {
@@ -351,8 +315,7 @@ describe("OpenApiValidator against the fetched spec", () => {
         Record<string, { parameters?: unknown[] }> & { parameters?: unknown[] }
       >;
     };
-    // The trimmed spec is fetched fully dereferenced (trim-openapi.ts
-    // rejects any surviving $ref), so parameters are inline objects.
+    // trim-openapi.ts rejects any surviving $ref, so parameters are inline objects.
     const asParam = (param: unknown): { name?: string; description?: string } =>
       param as { name?: string; description?: string };
     let cappedEndpoints = 0;
@@ -362,9 +325,7 @@ describe("OpenApiValidator against the fetched spec", () => {
       const pathItem = spec.paths?.[path];
       const operation = pathItem?.[method];
       if (!operation) {
-        // Only the spec-undocumented supplemental routes miss here (LFS,
-        // the documentedInSpec: false gap); the other supplemental routes
-        // ARE in the trimmed spec and get checked below.
+        // Only the routes the descriptor omits (LFS) miss here.
         continue;
       }
       const parameters = [...(operation.parameters ?? []), ...(pathItem?.parameters ?? [])];
@@ -431,8 +392,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a body with a wrong-typed field is a request-body violation", () => {
-    // color must be a string per the spec; a number is a real shape drift the
-    // validator still catches (unlike a merely-absent required field).
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -445,9 +404,8 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an off-schema body the mock REJECTED as requestOffSpec skips only the body check", () => {
-    // Settings pass through verbatim, so a user typo the request schema
-    // forbids reaching the API and being 422'd is modeled behavior (the
-    // rulesets-invalid-rule-type scenario); the handler tags that rejection.
+    // Settings pass through verbatim, so a user typo the request schema forbids reaching the API
+    // and being 422'd is modeled behavior (the rulesets-invalid-rule-type scenario).
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -462,8 +420,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an off-schema body on an UNTAGGED 4xx is still a request-body violation", () => {
-    // The exemption is the handler's explicit tag, never the status: a plain
-    // 4xx with a drifted body stays a harness bug the validator reports.
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -477,9 +433,7 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("the tag exempts only the schema check; a missing required body still violates", () => {
-    // requestOffSpec asserts the BODY is deliberately off-schema, which
-    // presumes a body exists; omitting a required body altogether is a
-    // harness bug the presence check must keep reporting.
+    // requestOffSpec asserts the BODY is deliberately off-schema, which presumes a body exists.
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -495,8 +449,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a request body missing a required field IS a violation (presence enforced)", () => {
-    // The labels-create requestBody requires `name`; a body without it is a
-    // real mock/client bug the request-body variant catches.
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -509,8 +461,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a PRIMITIVE request body where an object is documented IS a violation", () => {
-    // labels-create documents an object body; a bare string must not be waved
-    // through (the fail-open the object-only guard used to allow).
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -523,8 +473,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a required request body sent as none IS a violation", () => {
-    // labels-create marks requestBody.required true; omitting it entirely is a
-    // contract break, distinct from sending an incomplete object.
     const violations = v.validateRequest(
       req({ method: "POST", pathname: "/repos/e2e-owner/e2e-repo/labels", status: 201 }),
     );
@@ -534,8 +482,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a JSON body sent to an op that documents NO request body IS a violation", () => {
-    // DELETE label documents no requestBody; a JSON value there is not accepted
-    // by GitHub, so it must not fail open.
     const violations = v.validateRequest(
       req({
         method: "DELETE",
@@ -550,8 +496,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a body on a documented no-content (204) success response IS a violation", () => {
-    // DELETE label documents a 204 with no content; a non-null body there means
-    // the mock returns something GitHub does not.
     const violations = v.validateRequest(
       req({
         method: "DELETE",
@@ -580,8 +524,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a RESPONSE body merely missing a documented field is NOT a violation (presence relaxed)", () => {
-    // The mock may serve only the subset of response fields the action reads;
-    // presence is relaxed for responses, only the shape of what is sent checked.
     const violations = v.validateRequest(
       req({
         method: "POST",
@@ -595,9 +537,7 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an undocumented 2xx status IS a response-body violation", () => {
-    // GitHub documents its success statuses. PUT environments returns 200 even
-    // on create (spec lists 200/422), so a 201 here means the EndpointDecl or
-    // mock serves a status GitHub does not - a real bug the validator catches.
+    // PUT environments answers 200 even on create (the spec lists 200/422), so a 201 is real drift.
     const violations = v.validateRequest(
       req({
         method: "PUT",
@@ -613,7 +553,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an undocumented 2xx status with NO body is still a violation", () => {
-    // Status validation must not hide behind body presence.
     const violations = v.validateRequest(
       req({
         method: "PUT",
@@ -627,9 +566,7 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an undocumented status >= 400 is accepted silently (spec omits most errors)", () => {
-    // GitHub's spec rarely documents 404s; the mock's absent-probe 404s and 409
-    // conflicts are realistic. A GET environments 404 (spec lists only 200) is
-    // accepted, not flagged.
+    // GET environments documents only 200; the mock's absent-probe 404 is realistic GitHub behavior.
     const violations = v.validateRequest(
       req({
         method: "GET",
@@ -654,8 +591,6 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("a primitive response body where an object is documented IS a violation", () => {
-    // A wrong_shape-style scalar (42) served against a JSON object endpoint is
-    // caught now that primitives are validated, not skipped.
     const violations = v.validateRequest(
       req({ method: "GET", pathname: "/repos/e2e-owner/e2e-repo", status: 200, responseBody: 42 }),
     );
@@ -663,8 +598,7 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 
   test("an offSpec response (raw media / synthetic fault) is excluded entirely", () => {
-    // A rate-limit 403 fault: status is undocumented AND body is off-spec, but
-    // offSpec makes the validator skip status and body both.
+    // A rate-limit 403 fault: the status is undocumented AND the body is off-spec; both are skipped.
     const violations = v.validateRequest(
       req({
         method: "GET",
@@ -720,16 +654,13 @@ describe("OpenApiValidator against the fetched spec", () => {
 
 describe("the fetched trimmed spec", () => {
   test("contains exactly the USED_PATHS paths (no more, no fewer)", () => {
-    // Read through the loaded validator (not a static JSON import) so a missing
-    // spec surfaces the actionable fetch error from load(), not a cryptic
-    // module-resolution failure.
+    // Read through the loaded validator, not a static JSON import, so a missing spec surfaces the
+    // actionable fetch error from load() rather than a module-resolution failure.
     const specPaths = [...sharedValidator().paths()].sort();
     expect(specPaths).toEqual([...USED_PATHS].sort());
   });
 
   test("a missing spec throws a loud, actionable fetch error naming the script", () => {
-    // The spec is a gitignored, fetched artifact: a fresh clone lacks it, and
-    // validation must fail loudly with the exact command, never skip silently.
     expect(() => OpenApiValidator.loadFrom("/nonexistent/github-openapi.trimmed.json")).toThrow(
       /bun \.github\/scripts\/trim-openapi\.ts/,
     );
@@ -747,8 +678,7 @@ describe("validateExchange adapter", () => {
   });
 
   test("returns errors for a misspelled request field", () => {
-    // colour (British spelling) is not a documented label field, but the schema
-    // also requires `name`; sending only the misspelled field trips required.
+    // The schema requires `name`, so sending only the misspelled `colour` trips required.
     const errors = validateExchange(
       {
         method: "POST",
@@ -777,10 +707,8 @@ describe("validateExchange adapter", () => {
   });
 
   test("an explicit null responseBody OVERRIDES the request's own field, not falls through", () => {
-    // A DELETE label 204 whose log carries a stale non-null responseBody, but
-    // the caller passes explicit null (the real empty body). With `??` the null
-    // would fall through to the stale object and wrongly flag a no-content
-    // violation; the sentinel makes the explicit null win, so no error.
+    // The log carries a stale non-null responseBody; with `??` the explicit null would fall through
+    // to it and wrongly flag a no-content violation.
     const errors = validateExchange(
       {
         method: "DELETE",
@@ -795,8 +723,6 @@ describe("validateExchange adapter", () => {
   });
 
   test("omitting responseBody falls back to the request's own field", () => {
-    // No second argument: the request's responseBody (a scalar 42 against the
-    // repo object) is used and flagged.
     const errors = validateExchange({
       method: "GET",
       pathname: "/repos/e2e-owner/e2e-repo",
@@ -808,8 +734,6 @@ describe("validateExchange adapter", () => {
   });
 
   test("passing explicit undefined behaves like omitting (falls back)", () => {
-    // undefined is the sentinel default, so it is indistinguishable from omitted
-    // and falls back to the request's own responseBody.
     const errors = validateExchange(
       {
         method: "GET",
@@ -826,12 +750,9 @@ describe("validateExchange adapter", () => {
 
 describe("mock rule-type catalog lockstep", () => {
   test("RULESET_RULE_TYPES matches the spec's rules[].type values exactly", async () => {
-    // The mock's catalog exists only to answer GitHub's real 422 for a typo'd
-    // rules[].type; the request-body validator checks accepted bodies against
-    // the SPEC's enums. If the two sets drift, either a real new rule type is
-    // falsely 422'd by the mock, or the mock accepts a type the validator then
-    // flags. Pinning them equal makes a spec refresh the single update point.
-    // Checked on BOTH operations the catalog serves (create and update).
+    // The mock catalog answers GitHub's real 422 for a typo'd rules[].type while the validator checks
+    // accepted bodies against the SPEC's enums. Drift either falsely 422s a real new type or lets
+    // the mock accept a type the validator flags; pinned equal, a spec refresh is the one update point.
     const { RULESET_RULE_TYPES } = await import("../mock/support.js");
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
@@ -844,10 +765,8 @@ describe("mock rule-type catalog lockstep", () => {
     ];
     for (const operation of operations) {
       const rules = operation.requestBody.content["application/json"].schema.properties.rules;
-      // Each rule variant sits directly under items.oneOf/anyOf with its type
-      // pinned by a single-value enum (or const). Only those TOP-LEVEL variants
-      // count: rule parameters nest their own `type` enums (actor kinds and the
-      // like) that a deep walk would wrongly collect.
+      // Only TOP-LEVEL variants count: rule parameters nest their own `type` enums (actor kinds and
+      // the like) that a deep walk would wrongly collect.
       const variants = (rules.items.oneOf ?? rules.items.anyOf ?? []) as Array<
         Record<string, unknown>
       >;
@@ -870,11 +789,8 @@ describe("mock rule-type catalog lockstep", () => {
 
 describe("invitation role vocabulary lockstep", () => {
   test("INVITATION_ROLES matches the spec's repository-invitation permissions enum exactly", async () => {
-    // The collaborators handler gates PATCH-vs-note on this set and the mock
-    // clamps stored invitation permissions into it, so a spec refresh that
-    // widens (or narrows) the enum must land here too. Checked on BOTH sides
-    // of the vocabulary: the GET's response enum (what a pending invitation
-    // can report) and the PATCH's request enum (what an update may send).
+    // The collaborators handler gates PATCH-vs-note on this set and the mock clamps stored invitation
+    // permissions into it, so a spec refresh that moves the enum must land here too.
     const { INVITATION_ROLES } = await import("../../../src/sections/shared/roles.js");
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
@@ -894,9 +810,7 @@ describe("invitation role vocabulary lockstep", () => {
 });
 
 describe("the hand-written /graphql branch", () => {
-  // An empty spec plus an injected known-name set: the branch never consults
-  // OpenAPI paths, and the injection makes the known-name check testable
-  // while no section declares operations yet.
+  // An empty spec plus an injected known-name set: the branch never consults OpenAPI paths.
   const validator = new OpenApiValidator({ paths: {} } as never, new Set(["RepoToggles"]));
 
   const goodBody = {

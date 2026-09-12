@@ -1,11 +1,6 @@
 /**
- * A REAL HandlerContext for handler-level unit tests: the endpoint comes
- * from the section declarations (never fabricated), and param() serves only
- * the tokens the caller supplies, throwing with the declared route otherwise
- * - the same loud-if-touched contract the pipeline's own extraction keeps.
- * Tests import this instead of casting a partial context, so an impossible
- * context (a handler under a key its section never declared) cannot be
- * constructed.
+ * A REAL HandlerContext for handler unit tests, built from the declarations so a context under a key its section never
+ * declared cannot be constructed; param() keeps the pipeline's loud-if-touched contract (dispatch.ts, paramAccessor).
  */
 
 import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
@@ -24,8 +19,6 @@ export function handlerTestContext(
     grade?: MaskGrade;
   } = {},
 ): Parameters<Handler>[0] {
-  // The key union already proves the endpoint exists; the lookup needs no
-  // runtime guard.
   const endpoint = allEndpoints()[key];
   return {
     state,

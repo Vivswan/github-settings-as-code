@@ -1,11 +1,4 @@
-/**
- * The request pipeline's shared vocabulary: the audit-trail log entry, the
- * chaos/fault directives a scenario can inject, the per-run mutable state,
- * the working-state union, the options the transport shell passes in, and
- * the pipeline's per-request decision. The stages that consume these live in
- * routes.ts (the pipeline), chaos.ts (fault and corruption injection),
- * core-paths.ts (the non-section routes), and server.ts (the transport).
- */
+/** The request pipeline's shared vocabulary; routes.ts, chaos.ts, core-paths.ts, and server.ts consume it. */
 
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { Scenario } from "../schema.js";
@@ -13,13 +6,9 @@ import type { MockState, MultiMockState } from "./state.js";
 import type { MockResponse } from "./support.js";
 
 /**
- * One logged request, the audit trail the runner asserts against. `pathname`
- * is the path only (no query string, GHES base prefix already stripped) and
- * `query` is the raw query string ("" when none), kept as separate fields: the
- * runner prefix-matches mutations/never against "METHOD pathname" and
- * substring-matches requests_contain (e.g. "page=2") against a rejoined
- * "METHOD pathname?query", so both rules hold without the mock guessing which
- * a scenario wants.
+ * One logged request, the audit trail the runner asserts against. `pathname` and `query` stay separate fields because
+ * the runner's two rules read different spellings: mutations/never prefix-match "METHOD pathname", requests_contain
+ * substring-matches "METHOD pathname?query".
  */
 export interface LoggedRequest {
   method: string;
@@ -28,52 +17,29 @@ export interface LoggedRequest {
   status: number;
   /** The masked resource that denied this request, when a denial fired. */
   deniedBy?: string;
-  /** Parsed JSON body for writes. */
   body?: unknown;
-  /**
-   * The response body the mock sent, captured by server.ts once the pipeline
-   * has decided. The OpenAPI validator checks it against responses[status];
-   * undefined for an empty (204) body. Not set by the pipeline itself - the
-   * transport shell attaches it from result.response.body after logging.
-   */
+  /** Attached by server.ts, not the pipeline, for the OpenAPI validator; unset for an off-spec response. */
   responseBody?: unknown;
   /**
-   * True when this whole response is deliberately off the OpenAPI contract -
-   * a raw media type (the settings-file fetch returns file text), a synthetic
-   * transport fault (rate-limit 403 / 429 / connection drop), or a chaos-corrupt
-   * body. The validator skips such entries entirely (status AND body): the spec
-   * documents neither the status nor the shape, by design. Set by server.ts.
+   * Set by server.ts when the whole response is deliberately off the OpenAPI contract (a raw media type, a transport
+   * fault, a chaos body); the validator skips status AND body.
    */
   offSpec?: boolean;
   /**
-   * True when the handler rejected a request whose BODY is deliberately off
-   * the spec's request schema (a passthrough user typo, e.g. an unknown
-   * rules[].type answered with GitHub's real 422). The validator skips only
-   * the request-body SCHEMA check; body-presence checks and the response are
-   * validated normally. Copied from MockResponse.requestOffSpec by the
-   * pipeline.
+   * The handler rejected a body deliberately off the request schema (a passthrough user typo answered with GitHub's real
+   * 422); the validator skips only the request-body SCHEMA check. Copied from MockResponse.requestOffSpec.
    */
   requestOffSpec?: boolean;
   /**
-   * The GraphQL operation behind this request, when it hit /graphql and
-   * resolved to a declared operation: the dispatched operationName plus its
-   * declared kind. What lets every log consumer stay exact where the HTTP
-   * method cannot: the runner's write classification (a GraphQL READ is a
-   * POST on the wire), the "GRAPHQL <opName>" expectation spelling, and the
-   * coverage tripwire's per-operation attribution all read it. Unset for a
-   * /graphql request that never resolved (a violation).
+   * Set when a /graphql request resolved to a declared operation. Where the HTTP method cannot be exact (a GraphQL read
+   * is a POST) consumers read this: the runner's write classification, the "GRAPHQL <opName>" spelling, the coverage tripwire.
    */
   graphql?: { operationName: string; kind: "read" | "write" };
 }
 
 /**
- * A corruption directive for a named endpoint's responses. `key` is a
- * "section.role" endpoint or a CORE_FAULT_KEYS core route. `times` (default 1)
- * is how many matching responses to corrupt: 1 (the default) corrupts only the
- * first, which octokit's retry plugin transparently retries away (a parse/shape
- * fault is not a 4xx, so it is retried; MAX_RETRIES=2) - a retry-resilience
- * test. A persistent count (>= 3, more than 1 + MAX_RETRIES) or "always"
- * defeats the retries so the client fails loudly.
+ * `times` bounds how many matching responses are corrupted; "always" leaves no clean response for the client to recover
+ * with. test/e2e/fuzz.ts drives the one-shot and persistent cases on labels.list.
  */
 export interface CorruptOption {
   key: string;
@@ -82,13 +48,8 @@ export interface CorruptOption {
 }
 
 /**
- * A transport-level fault applied to the first `times` (default 1) requests
- * matching `key` (a "section.role" endpoint or a CORE_FAULT_KEYS core route);
- * the fault barrier in runPipeline and the core-route hooks turn each kind
- * into its wire behavior. The client retries every kind (403/429 via the
- * throttling path, drops and 5xx via the retry plugin), so `times: 1` is a
- * transient the run recovers from and `times` >= 3 (1 + MAX_RETRIES) surfaces
- * as a hard failure; "always" faults every matching request.
+ * `times` is the recovery budget: 1 is a transient the client's retries absorb, and 1 + MAX_RETRIES faults every attempt,
+ * a hard failure. rate_limit_403 is the exception: a primary rate limit is fatal on its first firing whatever the budget.
  */
 export interface FaultOption {
   key: string;
@@ -96,47 +57,29 @@ export interface FaultOption {
   times?: number | "always";
 }
 
-/**
- * The mutable per-run state the pipeline threads through every request: the
- * chaos/fault fire counts and the two denial-barrier bookkeeping structures.
- * Grouped into one type with a single factory (`newPipelineRunState`) so a new
- * field cannot be forgotten at the construction site - adding one here without
- * adding it to the factory fails to compile, and the server spreads the factory
- * result wholesale rather than listing fields by hand.
- */
+/** One factory (newPipelineRunState) so a field added here without its initializer fails to compile; server.ts spreads the result wholesale. */
 export interface PipelineRunState {
   /** Per-endpoint chaos-corruption counts, mutated in place so `times` is honored. */
   corruptCounts: Map<string, number>;
   /** Per-endpoint fault fire counts, mutated in place so `times` is honored. */
   faultCounts: Map<string, number>;
   /**
-   * Target+section keys (`${slug}:${section}`, empty slug in single-repo mode)
-   * whose READ was permission-denied (fatally, not tolerated) earlier this run;
-   * mutated in place. The engine aborts a section at its first fatal denied
-   * read, so a write arriving for the same target+section afterwards proves
-   * broken sequencing (see the denial barrier). Keyed per target so one repo's
-   * denied read never arms the barrier for another repo's legitimate write.
+   * Keys whose read was fatally denied this run, per target so one repo's denial never arms another repo's write. The
+   * engine aborts a section at its first fatal denied read, so a later write for the same key proves broken sequencing.
    */
   deniedReadSections: Set<string>;
   /**
-   * The redaction visibility probe's window, per slug, so its denial never arms
-   * the repository-section barrier while a LATER repository.get still does. The
-   * probe is a `repository.get` issued during visibility resolution, before the
-   * target loop; a repository.get is the probe iff one is expected for the slug,
-   * none has delivered yet (`probeGetDelivered`), and the fault budget is not
-   * spent: this counts a slug's repository.get attempts that FAULTED at the
-   * transport barrier, and the probe retries up to 1 + MAX_RETRIES of them.
+   * Per slug, the repository.get attempts that faulted at the transport barrier. The probe retries up to 1 + MAX_RETRIES
+   * of them; routes.ts bounds the probe's denial-barrier exemption with this count.
    */
   probeGetFaults: Map<string, number>;
   /**
-   * Slugs whose repository.get has DELIVERED a real response (granted or
-   * denied). The probe delivers at most once, so any later repository.get is
-   * the section's own check-mode read. Both fields are mutated in place.
+   * Slugs whose repository.get delivered a real response. The probe delivers at most once, so any later repository.get
+   * is not the probe and arms the barrier normally.
    */
   probeGetDelivered: Set<string>;
 }
 
-/** Fresh per-run state with every field initialized - the single construction point. */
 export function newPipelineRunState(): PipelineRunState {
   return {
     corruptCounts: new Map(),
@@ -148,61 +91,38 @@ export function newPipelineRunState(): PipelineRunState {
 }
 
 /**
- * The working state, discriminated on the run shape so exactly one store
- * exists by construction. "single" carries the one MockState every request
- * dispatches into. "multi" carries the per-slug repos + discovery pool: the
- * pipeline resolves the target slug from the request path, dispatches into
- * that slug's MockState, and grades against that slug's permission mask; the
- * `/user/repos` and `/repos/{slug}/contents/{path}` endpoints are served from
- * here. Shared by PipelineOptions and the MockHandle, so no surface can decay
- * the XOR back into two independent optionals.
+ * Discriminated so exactly one store exists by construction; shared by PipelineOptions and the MockHandle, so no surface
+ * can decay the XOR back into two independent optionals.
  */
 export type WorkingState =
   | { mode: "single"; state: MockState }
   | { mode: "multi"; multi: MultiMockState };
 
-/** Options the server passes into the pipeline for each request. */
 export interface PipelineOptions extends PipelineRunState {
   scenario: Scenario;
   working: WorkingState;
   basePrefix?: string;
   corrupt?: CorruptOption;
-  /** Transport-level faults to inject on matching requests (see fault barrier). */
   faults?: FaultOption[];
   /**
-   * Whether the write barrier is armed for THIS request. The server passes the
-   * scenario's declared mode ORed with its one-way enterCheckMode() override,
-   * so the convergence re-run (same server, check-mode child) arms the barrier
-   * even though the scenario the server was built with is still apply-mode.
+   * The scenario's mode ORed with the server's one-way enterCheckMode() override, so the convergence re-run (same
+   * server, check-mode child) arms the barrier although the scenario is still apply-mode.
    */
   checkMode: boolean;
 }
 
-/** The pipeline's decision for one request: a response, a log entry, a note. */
 export interface PipelineResult {
   response: MockResponse;
   log: LoggedRequest;
-  /** A violation message, when the request broke the wire/route contract. */
   violation?: string;
   /**
-   * How the response leaves the wire when it is NOT the normal JSON delivery
-   * of `response.body` (the absent case). "raw" sends `text` verbatim (chaos
-   * invalid_json, an unparseable body). "drop" makes the server destroy the
-   * connection's socket before ANY response bytes leave - the connection_drop
-   * fault, a true network failure the client's retries can absorb (times 1)
-   * or exhaust into a hard connectivity error (times >= 1 + MAX_RETRIES). The
-   * log entry still records the attempt (status 0).
+   * "drop" destroys the socket before any response bytes leave: a true network failure the client's retries absorb
+   * (times 1) or exhaust into a hard connectivity error. The log still records the attempt with status 0.
    */
   wire?: { kind: "raw"; text: string } | { kind: "drop" };
   /**
-   * When true, this response is a DELIBERATE off-contract body the validator
-   * must skip, else it re-reports a corruption/fault the test already asserts.
-   * Set for: synthetic transport faults (rate-limit 403 / 429 - GitHub returns
-   * these on ANY endpoint, off any per-endpoint spec), the chaos corruptions
-   * (wrong_shape / missing_envelope; invalid_json uses the "raw" wire kind),
-   * and the connection_drop status-0 log. (Raw-MEDIA-TYPE bodies are exempted
-   * separately in server.ts, keyed on the request's raw Accept header, not
-   * this flag.)
+   * A deliberate off-contract body the validator must skip, else it re-reports a fault the test already asserts.
+   * Raw-media-type bodies are exempted separately in server.ts, keyed on the request's Accept header, not this flag.
    */
   offSpecBody?: boolean;
 }
@@ -211,11 +131,7 @@ export function violationResponse(message: string): MockResponse {
   return { status: 400, body: { message: `${VIOLATION_PREFIX} ${message}` } };
 }
 
-/**
- * The violation triple every pipeline stage returns - the 400 violation
- * response, the log entry, and the violation note - closed over one base log
- * so no stage hand-rolls a drifting copy.
- */
+/** Closed over one base log so no stage hand-rolls a drifting copy. */
 export function violationFor(baseLog: LoggedRequest): (message: string) => PipelineResult {
   return (message) => ({
     response: violationResponse(message),
@@ -225,14 +141,9 @@ export function violationFor(baseLog: LoggedRequest): (message: string) => Pipel
 }
 
 /**
- * Render a logged request to the string the runner's expectations match
- * against. Pathname and query are logged separately so both match rules
- * compose here: mutations/never match a "METHOD /pathname" PREFIX (query
- * omitted), requests_contain a substring of "METHOD /pathname?query". A
- * GraphQL request renders as "GRAPHQL <opName>": every GraphQL call shares
- * POST /graphql, so the operation name is the only spelling that pins one
- * operation. Every consumer (the runner's assertions, the apply-idempotence
- * proof) renders the log through here.
+ * The one rendering every log consumer (the runner, the apply-idempotence proof) matches against. A GraphQL request
+ * renders as "GRAPHQL <opName>": every GraphQL call shares POST /graphql, so the operation name is the only spelling that
+ * pins one operation.
  */
 export function renderRequest(request: LoggedRequest, includeQuery: boolean): string {
   if (request.graphql) {

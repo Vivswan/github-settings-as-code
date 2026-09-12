@@ -1,19 +1,7 @@
 /**
- * Fuzz generators for the e2e harness: random but valid-shaped settings per
- * section, random mock live state, and random whole scenarios. Everything is a
- * pure function of an Rng, so a failing fuzz iteration replays from its seed.
- *
- * The section-shaped generators live with their sections
- * (src/sections/<key>/generators.ts, over the shared helpers in
- * gen-support.ts); this module aggregates them into the SETTINGS_GENERATORS
- * table and keeps the cross-section machinery: the generators shared by
- * whole section families, the scenario/multi-repo/discovery generators, the
- * invalid-settings catalog, and the fault-target catalog.
- *
- * Three-way drift detection: every settings document a generator produces is
- * also validated against the published lib/settings.schema.json with ajv. If a
- * generator emits something the schema rejects, either the generator or the
- * schema is wrong, and the fuzz run fails loudly rather than silently drifting.
+ * Everything here is a pure function of an Rng, so a failing fuzz iteration replays from its seed. Every settings
+ * document a section generator draws is also validated against lib/settings.schema.json, so a generator drifting from
+ * the published schema fails the run instead of fuzzing a shape the schema rejects.
  */
 
 import { Ajv, type ValidateFunction } from "ajv";
@@ -84,27 +72,15 @@ import {
 } from "./schema.js";
 
 /**
- * A fixed, valid age recipient for the `artifact` private-report channel:
- * enough for the action's config validation to accept the key and for the
- * encrypter to produce ciphertext. Generated once with age-encryption's own
- * generateX25519Identity/identityToRecipient (runner.test.ts re-validates it
- * against src's parseRecipient so it cannot silently rot), then pinned so
- * scenarios and the fuzzer share one hermetic recipient. The matching identity
- * is never needed: the harness never decrypts (the artifact upload fails with a
- * safe warning because the runner token is absent), it only proves the run
- * stays green and leaks nothing when a real key is configured.
+ * A fixed age recipient, so scenarios and the fuzzer share one hermetic key; runner.test.ts re-validates it against
+ * src's parseRecipient so it cannot rot silently. The matching identity is never needed.
+ *   the harness never decrypts  -> the upload fails with a safe warning (no runner token)
+ *   what the run proves         -> a real key keeps the run green and leaks nothing
  */
 export const ARTIFACT_TEST_RECIPIENT =
   "age1wshulnlu6mpa4rx54w6xs9kscqw7uqem3fh748xsrfyqusgmfv2qfca3qt";
 
-/**
- * The secret sections' entries draw their `$NAME` references from
- * E2E_SECRET_ENV, the ONE fixed name -> plaintext pool shared with webhook
- * secrets; scenarioSecretEnv() builds the scenario `env` from the same map,
- * so a generated reference can never name a variable the child env lacks.
- * Shared by the four repository-level secret families - their settings
- * shapes are identical.
- */
+/** References draw from E2E_SECRET_ENV, the pool scenarioSecretEnv() builds the child env from, so none names a variable the env lacks. */
 function genSecretEntries(rng: Rng): EntriesForm {
   const names = Object.keys(E2E_SECRET_ENV);
   const count = rng.int(names.length) + 1;
@@ -120,10 +96,7 @@ function genActionsVariables(rng: Rng): EntriesForm {
   const out: Json[] = [];
   const count = rng.int(3) + 1;
   for (let i = 0; i < count; i++) {
-    // Names obey GitHub's variable naming rules (alphanumeric/underscore); the
-    // index suffix keeps them unique under the case-insensitive key. A draw
-    // sometimes lowercases the declared name, so the fuzz corpus exercises the
-    // case-insensitive match against the uppercase-stored live name.
+    // GitHub stores variable names uppercased, so a lowercased declared name exercises the case-insensitive match.
     let name = `${rng.pick(["DEPLOY_REGION", "BUILD_MODE", "LOG_LEVEL", "FEATURE_FLAG"])}_${i}`;
     if (rng.bool(0.3)) {
       name = name.toLowerCase();
@@ -145,14 +118,6 @@ const SECRET_LIST_SECTIONS = [
   "agents_secrets",
 ] as const satisfies readonly SectionKey[];
 
-/**
- * The child-env half of any `$NAME` secret references a generated settings
- * document declares - webhook config.secret, the four repository secret
- * sections, and every environment entry's nested secrets - drawn from
- * E2E_SECRET_ENV (the same pool the generators pick from). Undefined when
- * the document declares none, so secret-free scenarios stay byte-identical.
- * A reference outside the pool is a generator bug and throws.
- */
 export function scenarioSecretEnv(settings: Json): Record<string, string> | undefined {
   const env: Record<string, string> = {};
   let found = false;
@@ -193,14 +158,8 @@ export function scenarioSecretEnv(settings: Json): Record<string, string> | unde
 }
 
 /**
- * Strip secret references from one generated settings document. A multi-repo
- * target's settings.yml is fetched from the TARGET repository, where a
- * `$NAME` reference is refused by design (target provenance must not read
- * the operator's environment) - so the multi generator never declares one
- * there: webhook entries lose their config.secret, the four repository
- * secret sections (whose values are ALWAYS references) are removed outright,
- * and every environment entry loses its nested secrets list. Mutates the
- * document in place through entriesOf's by-reference entries.
+ * A target's own settings.yml refuses `$NAME` references (src/flows/multi.ts: target provenance never reads the
+ * operator's environment), so a multi target never declares one; the secret sections go outright, since their values are always references.
  */
 function stripSecretReferences(settings: Json): void {
   const webhooks = settings.webhooks;
@@ -223,20 +182,10 @@ function stripSecretReferences(settings: Json): void {
 }
 
 /**
- * Strip every environment entry's `deployment_branch_policies` AND
- * `deployment_protection_rules` keys when the drawn mask constrains the
- * permissions their endpoints carry as PER-ENDPOINT overrides (Actions read
- * for the list reads, Administration for the available-Apps read and the
- * writes - the same two resources gate both nested families). The fuzz
- * oracle grades permissions at SECTION level (PERMISSION_BY_KEY), so a
- * masked iteration keeping either key would be mispredicted - the same
- * reason genActions never emits oidc_customization_sub. Unlike the OIDC
- * key, these ARE generated: the strip fires only under a constraining mask,
- * so fully-granted iterations (including the convergence and idempotence
- * proofs) still exercise them, and the curated environment-*-denied
- * scenarios pin the denied paths. Stripping consumes no draws, so the main
- * stream stays stable. The paired singular flag stays: it rides the
- * environment PUT under the section's own permission.
+ * The nested keys' endpoints carry PER-ENDPOINT permission overrides (src/sections/environments/endpoints.ts) that the
+ * section-level oracle cannot grade, so a mask constraining either resource would mispredict them.
+ *   Actions "none" or Administration below "write"  -> both keys stripped; the curated environment-*-denied scenarios pin the denied paths
+ *   fully granted                                    -> kept, so the convergence and idempotence proofs still exercise them
  */
 function suppressMaskedEnvironmentOverrides(
   settings: Json,
@@ -257,23 +206,12 @@ function suppressMaskedEnvironmentOverrides(
 }
 
 /**
- * Strip a declared `custom_properties` section when the drawn mask denies the
- * custom_properties resource OUTRIGHT. The section's reads are
- * permission-"none" (the values GET is Metadata-gated only, the org probe is
- * public), so they can never be denied - but the oracle's grade-none fold
- * assumes a denied section's READ is deniable (under the 403 style it
- * predicts a preflight denial that cannot happen). A "read" grade stays: the
- * reads pass and the PATCH is denied mid-apply, which the "absent" semantics
- * model exactly. The curated custom-properties-write-denied scenario pins
- * the denial path this strip removes from the random stream. When the
- * section is the ONLY one declared, the mask entry is softened to "read"
- * instead, so the scenario never degenerates to an empty settings document.
- * The strip itself consumes no draws and generation stays deterministic per
- * seed - but it DOES shorten the section list, and later per-element draws
- * (requiredSections, the allowlist roll) walk that list, so draw alignment
- * between a stripped and an unstripped run of the same seed is NOT
- * preserved. That is fine: the strip is itself a pure function of the
- * seed's own mask roll, so every replay of a seed strips identically.
+ * custom_properties' reads are permission-"none" (src/sections/custom_properties/index.ts), so a mask denying the
+ * resource outright is ungradeable: the oracle's grade-none fold predicts a deniable read that cannot happen.
+ *   "none", other sections declared  -> the section is stripped; the curated custom-properties-write-denied scenario pins the path
+ *   "none", the only section         -> the mask softens to "read", so the document stays non-empty
+ *   "read"                           -> kept: the reads pass and the PATCH is denied mid-apply, which the oracle grades
+ * Stripping shortens the list later draws walk, but depends only on the seed's own mask roll, so a replay strips identically.
  */
 function suppressMaskedCustomProperties(
   settings: Json,
@@ -291,13 +229,6 @@ function suppressMaskedCustomProperties(
   }
 }
 
-/**
- * One settings generator per section, aggregated from the per-section
- * fragments (src/sections/<key>/generators.ts) plus the family-shared
- * generators above. The Record<SectionKey, ...> type IS the completeness
- * assert, both directions: a new section without a fragment entry and an
- * entry naming no section both fail typecheck here.
- */
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -327,16 +258,11 @@ const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   secret_scanning_custom_patterns: genSecretScanningPatterns,
 };
 
-/** A valid-shaped settings value for one section. */
 export function genSettings(rng: Rng, key: SectionKey): unknown {
   return SETTINGS_GENERATORS[key](rng);
 }
 
-/**
- * The sections the witness generator models, in SECTION_KEYS order. Repository is deferred: a
- * faithful matching witness needs normalized topics, the enable_* toggles, and fixture-aware
- * treatment of absent fields.
- */
+/** repository has no witness yet: a matching one needs normalized topics, the enable_* toggles, and fixture-aware absent fields. */
 export const WITNESS_SECTIONS = ["labels", "autolinks", "milestones", "deploy_keys"] as const;
 export type WitnessSection = (typeof WITNESS_SECTIONS)[number];
 
@@ -348,13 +274,6 @@ export const WITNESS_KINDS: Record<WitnessSection, readonly LiveWitnessKind[]> =
   deploy_keys: ["matching", "drift-update"],
 };
 
-/**
- * One witness builder per modeled section, aggregated from the section
- * fragments like SETTINGS_GENERATORS: the Record type keeps WITNESS_SECTIONS
- * and the builders in lockstep, so a new witness section without a builder
- * entry fails typecheck here instead of silently routing to another
- * section's builder.
- */
 const WITNESS_BUILDERS: Record<
   WitnessSection,
   (rng: Rng, declared: Json[], kind: LiveWitnessKind) => LiveWitness
@@ -366,11 +285,8 @@ const WITNESS_BUILDERS: Record<
 };
 
 /**
- * A live-state witness for one section: mock live state with a KNOWN semantic
- * relation to the declared settings, so the oracle can pin the exact outcome
- * class instead of accepting {clean, drift} either way. Returns the kind that
- * actually holds (drift-update falls back to matching when nothing is
- * perturbable); callers that need a specific kind must check it.
+ * Live state with a KNOWN relation to the declared settings, so the oracle pins one outcome class instead of {clean, drift}.
+ * The returned kind is the one that holds: drift-update falls back to matching when no entry is perturbable.
  */
 export function genLiveWitness(
   rng: Rng,
@@ -383,8 +299,7 @@ export function genLiveWitness(
       `genLiveWitness: ${key} does not support the "${kind}" witness (supported: ${WITNESS_KINDS[key].join(", ")}); add the kind to WITNESS_KINDS[${key}] and implement it in the section's witness builder`,
     );
   }
-  // The witness sections are generated in the plain array form only, but the
-  // unwrap keeps this correct if that exclusion ever moves.
+  // Witness sections draw the plain form only; the unwrap keeps this right if that ever moves.
   const declared = entriesOf(settings);
   return WITNESS_BUILDERS[key](rng, declared, kind);
 }
@@ -392,23 +307,17 @@ export function genLiveWitness(
 // --- Invalid-settings catalog (input-mode fuzz) -----------------------------
 
 /**
- * One deliberately invalid settings document plus a token the action's
- * rejection error must contain: a section path ("labels[2].name"), an unknown
- * top-level key, or a fixed wording fragment. Every case is a violation
- * validateSettingsDoc GENUINELY rejects. Values the loose shapes accept by
- * design stay out of the catalog - unknown nested keys (except inside the
- * strict actions.cache object, whose rejection the curated scenario
- * actions-cache-unknown-key-rejected pins), un-modeled enums
- * (milestones.state, most actions fields), arbitrary field types on loose
- * keys, `pages: null`, and underscore-prefixed top-level keys - because
- * generating them would assert failures the contract does not promise.
+ * Only violations validateSettingsDoc GENUINELY rejects belong here; values the loose shapes accept by design would
+ * assert failures the contract does not promise, so they stay out.
+ *   offendingToken  -> must appear in the rejection error: a section path ("labels[2].name"), an unknown key, or a wording fragment
+ *   stays out       -> unknown nested keys under a loose shape, un-modeled enums, arbitrary types on loose keys,
+ *                      `pages: null`, underscore-prefixed keys
  */
 export interface InvalidSettingsCase {
   doc: Json;
   offendingToken: string;
 }
 
-/** The sections whose settings value is a list. */
 const ARRAY_SECTIONS = [
   "labels",
   "rulesets",
@@ -431,7 +340,6 @@ const ARRAY_SECTIONS = [
   "secret_scanning_custom_patterns",
 ] as const satisfies readonly SectionKey[];
 
-/** The sections whose settings value is a single mapping (object-shaped schemas). */
 const RECORD_SECTIONS = [
   "repository",
   "actions",
@@ -440,12 +348,7 @@ const RECORD_SECTIONS = [
   "code_quality_setup",
 ] as const satisfies readonly SectionKey[];
 
-/**
- * Compile-time exhaustiveness: every section is classified as array, record,
- * pages, or interaction_limits (the two nullable-object sections, each
- * covered by its own catalog cases). A new section that lands unclassified
- * fails here instead of silently missing wrong-container fuzzing.
- */
+/** pages and interaction_limits are nullable objects with their own catalog cases; a section unclassified here fails typecheck. */
 type CoveredSection =
   | (typeof ARRAY_SECTIONS)[number]
   | (typeof RECORD_SECTIONS)[number]
@@ -453,7 +356,7 @@ type CoveredSection =
   | "interaction_limits";
 type _UnclassifiedSection = MustBeNever<Exclude<SectionKey, CoveredSection>>;
 
-/** The required string field each array section's item shape enforces. */
+/** The required field each array section's item shape enforces: a string, except webhooks' `config` object. */
 const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   labels: "name",
   rulesets: "name",
@@ -478,13 +381,7 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   secret_scanning_custom_patterns: "name",
 };
 
-/**
- * A valid generated array-section value plus a random item to break. The
- * knobbed sections sometimes come back in the wrapped `{entries}` form, so
- * the entries are unwrapped through the shared helper (mutations write
- * through by reference) and `itemToken` spells the issue path the validator
- * reports for whichever form was drawn (`labels[2]` or `labels.entries[2]`).
- */
+/** Entries come back by reference, so a case's mutation lands inside whichever form was drawn; itemToken spells that form's validator path. */
 function validItems(
   rng: Rng,
   key: (typeof ARRAY_SECTIONS)[number],
@@ -496,12 +393,6 @@ function validItems(
   return { value, entries, index, itemToken };
 }
 
-/**
- * The named rejection catalog. The fuzz stream draws random members and the
- * directed input battery runs every member each run, so a validator or
- * generator regression on any case fails loudly instead of hiding behind the
- * random draw.
- */
 export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   name: string;
   build: (rng: Rng) => InvalidSettingsCase;
@@ -509,8 +400,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "unknown-top-level-key",
     build: (rng) => {
-      // Near-miss typos of real section names; none underscore-prefixed
-      // (those are accepted as private keys by design).
+      // None underscore-prefixed: those are accepted as private keys by design.
       const typo = rng.pick(["labelz", "label", "milestone", "repositories", "branch"]);
       return {
         doc: { labels: genSettings(rng.fork("labels"), "labels") as Json, [typo]: [] },
@@ -522,8 +412,6 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     name: "array-section-wrong-type",
     build: (rng) => {
       const key = rng.pick(ARRAY_SECTIONS);
-      // { not: "an array" } keeps the input block's original fixed doc
-      // reachable as one member of this case.
       return { doc: { [key]: rng.pick([{ not: "an array" }, "oops", 7]) }, offendingToken: key };
     },
   },
@@ -552,7 +440,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "interaction-limits-bad-limit",
     build: (rng) => ({
-      // A missing or non-string `limit` fails the shape's one required key.
+      // Base keys ride a PUT that requires `limit`, so expiry alone fails the refinement; a non-string limit fails its type.
       doc: { interaction_limits: rng.pick([{ expiry: "one_week" }, { limit: 7 }] as const) },
       offendingToken: "interaction_limits",
     }),
@@ -604,7 +492,6 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "workflows-state-enum",
     build: (rng) => {
-      // The one enum any loose shape enforces.
       const { value, entries, index, itemToken } = validItems(rng, "workflows");
       (entries[index] as Json).state = rng.pick(["paused", "enabled", "on"]);
       return { doc: { workflows: value }, offendingToken: `${itemToken}.state` };
@@ -623,8 +510,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
-    // The {_undeclared, entries} wrapper is this action's own strict
-    // vocabulary, so a typo'd wrapper key must fail upfront, named.
+    // The wrapper is this action's own strict vocabulary, so a typo'd wrapper key must fail upfront, named.
     name: "wrapper-unknown-key",
     build: (rng) => {
       const key = rng.pick(UNDECLARED_POLICY_SECTIONS);
@@ -662,21 +548,15 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   },
 ];
 
-/**
- * One random catalog case, tagged with its case name so callers can label
- * failures and coverage checks can prove every case is actually drawn.
- */
+/** Tagged with the case name, so failures are labeled and coverage checks can prove every case is drawn. */
 export function genInvalidSettings(rng: Rng): InvalidSettingsCase & { name: string } {
   const { name, build } = rng.pick(INVALID_SETTINGS_CASES);
   return { name, ...build(rng) };
 }
 
 /**
- * Raw settings bodies the yaml parser GENUINELY throws on (each verified
- * against the yaml package: unclosed flow collections, an unterminated
- * quote, a compact nested mapping). Single-repo they hit the "cannot read
- * settings ... valid YAML" read path; multi-repo the "cannot parse <slug>"
- * target gate. Both fire before any section runs.
+ * Bodies the yaml package GENUINELY throws on. Single-repo they hit the "cannot read settings ... valid YAML" path
+ * (src/flows/single.ts), multi-repo the "cannot parse <slug>" target gate (src/flows/multi.ts); both fire before any section runs.
  */
 export const UNPARSEABLE_YAML = [
   "labels: [oops, unclosed",
@@ -687,23 +567,15 @@ export const UNPARSEABLE_YAML = [
 ] as const;
 
 /**
- * Raw bodies that PARSE fine but not to a mapping, so they pass the yaml
- * parser and fail validateSettingsDoc's top-level check ("must be a YAML
- * mapping ... parsed as a list/string") instead. In multi mode a target's
- * document is validated as written, so the same wording fires there with
- * the slug as the source label.
+ * Bodies that parse but not to a mapping, so they fail validateSettingsDoc's top-level "must be a YAML mapping" check
+ * instead of the parser; in multi mode the same wording fires with the slug as the source label.
  */
 export const NON_MAPPING_YAML = ["- a\n- b", "just a string"] as const;
 
 /**
- * Seed the live state that makes the "configure but cannot create" sections
- * converge: every declared branch name is present in `live_state.branches` (so a
- * protection PUT has a branch to attach to), and every declared workflow path is
- * present in `live_state.workflows` at its declared state (so enable/disable is a
- * no-op or a single flip that then converges). Returns undefined when the
- * settings declare neither section, leaving the scenario's live state absent.
- * Exported for the fault fuzz, whose single-section scenarios need the same
- * presence seeding to converge.
+ * branches and workflows can be configured but not created, so a declared protection or workflow state whose resource
+ * is absent live drifts forever on a skip note; seeding it lets a fully-granted apply converge. Exported for the fault
+ * fuzz's single-section scenarios.
  */
 export function presenceLiveState(settings: Json): LiveState | undefined {
   const live: LiveState = {};
@@ -714,9 +586,8 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
     if (literal.length > 0) {
       live.branches = literal;
     }
-    // Every environment a generated required_deployments can name exists
-    // live, so the mutation's silent drop (mimicked by the mock) never
-    // fails a fully-granted apply's read-back.
+    // GitHub silently drops an unknown environment from required_deployments (the mock mimics it), so every name the
+    // generator can draw exists live, or a fully-granted apply's read-back would fail.
     if (branches.some((b) => (b.protection as Json | null)?.required_deployments !== undefined)) {
       live.environments = Object.fromEntries(
         FUZZ_DEPLOYMENT_ENVIRONMENTS.map((name) => [name, { name }]),
@@ -738,9 +609,8 @@ export function presenceLiveState(settings: Json): LiveState | undefined {
 // --- Fault-target catalog (fault-mode fuzz) ---------------------------------
 
 /**
- * The one read each section issues in BOTH modes under the fault batteries'
- * document (SECTION_FAULT_FIXTURE for the key-gated ones), so a fault aimed
- * there is guaranteed to fire; the sections in UNFAULTABLE_SECTIONS have none.
+ * The one read each section issues in BOTH modes under the batteries' document (SECTION_FAULT_FIXTURE for the key-gated
+ * ones), so a fault aimed there fires for certain; UNFAULTABLE_SECTIONS have none.
  */
 export const SECTION_PRIMARY_READ = {
   repository: "repository.get",
@@ -765,9 +635,7 @@ export const SECTION_PRIMARY_READ = {
   agents_secrets: "agents_secrets.list",
   agents_variables: "agents_variables.list",
   webhooks: "webhooks.list",
-  // The values GET runs right after the org probe, in both modes, whenever
-  // the section is declared on an org owner (the fault batteries pin
-  // owner_kind: "org", so the probe never diverts it).
+  // Runs right after the org probe in both modes; the fault batteries pin owner_kind: "org", so the probe never diverts it.
   custom_properties: "custom_properties.list",
   deploy_keys: "deploy_keys.list",
   secret_scanning_custom_patterns: "secret_scanning_custom_patterns.list",
@@ -776,13 +644,10 @@ export const SECTION_PRIMARY_READ = {
 export type FaultableSection = keyof typeof SECTION_PRIMARY_READ;
 
 /**
- * The fault batteries' document for a section whose reads are each gated on
- * a declared key, so its SECTION_PRIMARY_READ fires for certain; sections
- * absent here read unconditionally, so their document stays random.
+ * The batteries' document for a section whose reads are each gated on a declared key, so its primary read fires for
+ * certain; a section absent here reads unconditionally, so its document stays random.
  */
 export const SECTION_FAULT_FIXTURE: {
-  // The real section config types, so a typo'd key here fails typecheck
-  // instead of silently leaving the primary read cold.
   readonly [K in FaultableSection]?: NonNullable<SettingsFile[K]>;
 } = {
   actions: { default_workflow_permissions: "read" },
@@ -791,11 +656,7 @@ export const SECTION_FAULT_FIXTURE: {
   interaction_limits: { limit: "collaborators_only", expiry: "one_week" },
 };
 
-/**
- * The sections whose reads all stay COLD in a trigger-avoiding apply (their
- * reads run only under check or under keys the battery omits); the negative
- * battery proves it. With SECTION_PRIMARY_READ this must cover every SectionKey.
- */
+/** Sections whose reads all stay COLD in a trigger-avoiding apply (check-only reads, or keys the battery omits); the negative battery proves it. */
 export const UNFAULTABLE_SECTIONS = [
   "check_suite_preferences",
 ] as const satisfies readonly SectionKey[];
@@ -803,41 +664,25 @@ export type UnfaultableSection = (typeof UNFAULTABLE_SECTIONS)[number];
 
 type FaultClassified = FaultableSection | UnfaultableSection;
 type _UnclassifiedFaultSection = MustBeNever<Exclude<SectionKey, FaultClassified>>;
-// And disjoint: a section cannot both carry a guaranteed read and be exempt.
 type _DoublyClassifiedFaultSection = MustBeNever<Extract<FaultableSection, UnfaultableSection>>;
 
 /**
- * Trigger-avoiding apply settings, one entry per UNFAULTABLE_SECTIONS member
- * (the Record type keeps the list and the catalog in lockstep). MAXIMAL on
- * purpose: each entry declares every key it can WITHOUT reaching a read -
- * reads here are check-mode-only or absent altogether - so the
- * battery's claim is "a full-width apply of this section issues no read",
- * not "an apply too small to read anything stays quiet". The fuzz battery
- * arms one-shot faults on EVERY one of the section's GET endpoints
- * (unfaultableReadKeys, derived from the ENDPOINTS declaration, never
- * hand-picked) and requires none to fire, so a section gaining ANY
- * unconditional apply read fails the battery no matter which endpoint
- * carries it.
+ * MAXIMAL on purpose: each entry declares every key it can without reaching a read, so the battery's claim is "a
+ * full-width apply issues no read", not "a tiny apply stays quiet". The battery arms one-shot faults on every GET the
+ * section declares (unfaultableReadKeys) and requires none to fire.
  */
 export const UNFAULTABLE_APPLY_SETTINGS: {
-  // The real section config types, so a typo'd key here fails typecheck
-  // instead of silently shrinking the battery's declared width.
   [K in UnfaultableSection]: NonNullable<SettingsFile[K]>;
 } = {
-  // The strongest member: the section declares NO read endpoint at all, so
-  // the battery has nothing to arm and the exemption holds by construction.
+  // The strongest member: the section declares NO read endpoint, so the battery has nothing to arm and the exemption holds by construction.
   check_suite_preferences: {
     auto_trigger_checks: [{ app_id: 15368, setting: false }],
   },
 };
 
 /**
- * Every read of a section as "section.role" fault keys - the REST GET
- * endpoints AND the GraphQL read operations - derived from the registry's
- * declarations, the same single source the mock routes and USED_PATHS derive
- * from, so the battery cannot arm a stale hand-copied key while the section
- * reads somewhere else. The GraphQL leg covers a section's read operations
- * the same way, so a key-gated query cannot escape the battery.
+ * Derived from the registry declarations, the same source the mock routes and USED_PATHS derive from, so the battery
+ * cannot arm a stale hand-copied key while the section reads somewhere else.
  */
 export function unfaultableReadKeys(section: UnfaultableSection): string[] {
   return [
@@ -852,7 +697,6 @@ export function unfaultableReadKeys(section: UnfaultableSection): string[] {
 
 let validator: ValidateFunction | undefined;
 
-/** Compile (once) the ajv validator for the published settings schema. */
 function settingsValidator(): ValidateFunction {
   if (!validator) {
     const ajv = new Ajv({ strict: false, allErrors: true });
@@ -863,7 +707,6 @@ function settingsValidator(): ValidateFunction {
   return validator;
 }
 
-/** The doc value at an ajv instancePath ("/labels/0/color"), for error rendering. */
 function valueAtPointer(doc: unknown, instancePath: string): unknown {
   let value = doc;
   for (const segment of instancePath.split("/").slice(1)) {
@@ -876,18 +719,11 @@ function valueAtPointer(doc: unknown, instancePath: string): unknown {
   return value;
 }
 
-/**
- * Validate a whole settings document against the PUBLISHED JSON schema
- * (lib/settings.schema.json). Throws with the ajv errors when it does not
- * match. This is one leg of the three-way drift check: a generated doc must
- * satisfy this, src's validateSettingsDoc, and each section's zod shape.
- */
+/** One leg of the three-way drift check; generators.test.ts runs it beside validateSettingsDoc and each section's zod shape. */
 export function validateAgainstPublishedSchema(doc: unknown): void {
   const validate = settingsValidator();
   if (!validate(doc)) {
-    // Each line carries the offending VALUE and the ajv params (e.g. the
-    // allowedValues of a failed enum): the doc is ephemeral, so without them
-    // a drift means replaying the seed and dumping the doc by hand.
+    // The doc is ephemeral, so without the offending VALUE and the ajv params a drift means replaying the seed and dumping by hand.
     const errors = (validate.errors ?? [])
       .map((e) => {
         const params =
@@ -899,35 +735,22 @@ export function validateAgainstPublishedSchema(doc: unknown): void {
   }
 }
 
-/** Options steering scenario generation, e.g. a biased or fixed section set. */
 export interface GenScenarioOptions {
   /** Restrict generation to these sections (a smoke or PR-diff subset). */
   sections?: SectionKey[];
 }
 
 /**
- * Sections whose permission carries an org-members gate (today: teams).
- * Derived from the registry's `permission` declarations - the same single
- * source that drives the oracle's sectionGrade and the mock's permission
- * gate - so a future org-gated section inherits the forced-private strip
- * below without a hand edit.
+ * Derived from the registry's `permission` declarations, the source the oracle's sectionGrade and the mock's gate read
+ * too, so a future org-gated section inherits the forced-private strip without a hand edit.
  */
 export const ORG_GATED_SECTIONS: ReadonlySet<SectionKey> = new Set(
   SECTIONS.filter((section) => section.permission.org === "members").map((section) => section.key),
 );
 
-/**
- * Permission-mask keys, taken from the schema's compile-complete tuple (its
- * MustBeNever tripwire covers every PatResource), so a new resource cannot be
- * left out of permission fuzzing by a stale manual copy here.
- */
 const MASK_KEYS: readonly MaskKey[] = SCHEMA_MASK_KEYS;
 
-/**
- * The generation facts the oracle needs to predict an outcome
- * class without re-parsing the scenario: which sections are declared, the
- * permission mask, the denial style, and the mode/policy/owner_kind.
- */
+/** The generation facts the oracle predicts from, so it never re-parses the scenario. */
 export interface ScenarioMeta {
   sections: SectionKey[];
   mask: Partial<Record<MaskKey, MaskGrade>>;
@@ -937,41 +760,21 @@ export interface ScenarioMeta {
   denialStyle: DenialStyle;
   requiredSections: SectionKey[];
   /**
-   * The `sections` (INPUT_SECTIONS) allowlist the run was generated under,
-   * when one is set; undefined means no allowlist, every declared section
-   * runs. The engine reports a declared-but-not-allowlisted section as
-   * "excluded" BEFORE its handler runs (orchestrate.ts), so the oracle folds
-   * exclusion ahead of grades and witnesses. genScenario rolls one on ~20%
-   * of scenarios (a strict nonempty subset of the declared sections).
+   * The `sections` allowlist the run was generated under; undefined means every declared section runs. orchestrate.ts
+   * reports a declared-but-not-allowlisted section as "excluded" BEFORE its handler runs, so the oracle folds exclusion
+   * ahead of grades and witnesses.
    */
   onlySections?: SectionKey[];
-  /**
-   * The live-state witness seeded per section (WITNESS_SECTIONS only):
-   * the KNOWN semantic relation between the generated live state and the
-   * declared settings, so the oracle can pin the exact success outcome. A
-   * section without an entry has no witness (absent live state, or a family
-   * the witness generator does not model) and keeps the loose prediction.
-   */
+  /** The witness seeded per WITNESS_SECTIONS member; a section without an entry has no witness and keeps the loose prediction. */
   liveKinds?: Partial<Record<SectionKey, LiveWitnessKind>>;
   /**
-   * The GLOBAL token mask, distinct from `mask` (the effective per-slug mask)
-   * ONLY in multi-repo mode. teams' org-scoped endpoints are graded by the mock
-   * against this global mask's org_members, not the per-slug overlay, so the
-   * oracle uses it for the teams org gate. Absent (undefined) in single-repo
-   * mode, where the effective mask IS the global mask.
+   * The GLOBAL token mask, which differs from `mask` (the effective per-slug mask) only in multi-repo mode: the mock
+   * grades teams' org gate against its org_members (mock/routes.ts), so the oracle does too. Undefined single-repo,
+   * where the effective mask IS the global one.
    */
   orgMask?: Partial<Record<MaskKey, MaskGrade>>;
 }
 
-/**
- * A random whole scenario plus the generation metadata the oracle consumes.
- * The scenario's settings pass the published schema; required_sections are
- * drawn only from the declared sections so the scenario is internally
- * consistent. denial_style draws from fine_grained, 403, and 404 (only 403
- * discriminates in the oracle; 404 shares fine_grained's outcome classes for
- * every operation currently generated). The returned meta echoes the raw
- * generation facts so the oracle does not re-derive them from the scenario.
- */
 export function genScenario(
   rng: Rng,
   options: GenScenarioOptions = {},
@@ -989,22 +792,10 @@ export function genScenario(
   }
   validateAgainstPublishedSchema(settings);
 
-  // Seed live state for the sections whose resource the action can configure but
-  // NOT create: branches (a protection PUT needs the branch to exist) and
-  // workflows (a workflow can only be enabled/disabled if its file is present).
-  // Without this the declared branch/workflow permanently drifts with a skip
-  // note ("does not exist ... apply will skip it") and never converges, which is
-  // correct engine behavior but not what a fully-granted apply should model. So
-  // the generated live state contains every declared branch name and workflow
-  // path, letting apply act on them and check converge.
   const presence = presenceLiveState(settings) ?? {};
 
-  // Live-state WITNESSES (WITNESS_SECTIONS): seed live state whose
-  // relation to the declared settings is known (matching, drift-update,
-  // extra-undeclared), so the oracle predicts the exact outcome instead of
-  // accepting {clean, drift} either way - a false-negative drift detector
-  // would otherwise pass every iteration. A quarter of the time the section
-  // keeps absent live state, preserving the create path.
+  // Witnesses pin the exact outcome; without them a false-negative drift detector would pass every iteration.
+  // A quarter of the time the section keeps absent live state, so the create path stays covered.
   const liveKinds: Partial<Record<SectionKey, LiveWitnessKind>> = {};
   const witnessState: LiveState = {};
   for (const key of WITNESS_SECTIONS) {
@@ -1021,11 +812,8 @@ export function genScenario(
     Object.assign(witnessState, witness.state);
   }
 
-  // Pending-invitation live state for collaborators: NEW draws, so they live
-  // on a forked stream (main-stream stability, like the input-sections fork).
-  // No liveKinds entry - the oracle keeps the loose collaborators prediction;
-  // the seeding's value is the convergence/idempotence gates walking the
-  // PATCH, cancel, and expired-re-invite paths over fuzz-shaped declarations.
+  // A forked stream, so recorded seeds keep reproducing. No liveKinds entry: the oracle keeps the loose collaborators
+  // prediction; the value is the convergence and idempotence gates walking the PATCH, cancel, and expired-re-invite paths.
   const invitationsRng = rng.fork("invitations");
   if (chosen.includes("collaborators") && invitationsRng.bool(0.5)) {
     const invitations = genInvitationsState(invitationsRng, entriesOf(settings.collaborators));
@@ -1043,33 +831,18 @@ export function genScenario(
       mask[resource] = rng.pick(["none", "read", "write"] as const);
     }
   }
-  // The branch-policy pattern and protection-rule endpoints carry
-  // per-endpoint permission overrides the oracle cannot grade at section
-  // level; strip the keys when this mask constrains them (see
-  // suppressMaskedEnvironmentOverrides).
   suppressMaskedEnvironmentOverrides(settings, mask);
-  // custom_properties' permission-"none" reads make a full denial ungradeable
-  // at section level; strip (or soften) it under that mask (see
-  // suppressMaskedCustomProperties).
   suppressMaskedCustomProperties(settings, mask, chosen);
 
   const mode = rng.pick(["apply", "check"] as const);
   const policy = rng.pick(["fail", "warn"] as const);
   const ownerKind: OwnerKind = rng.pick(["org", "user"] as const);
-  // 404 answers EVERY denial (read and write) with Not Found; the mock still
-  // classifies denied writes as PermissionDenied, so its outcome classes
-  // equal fine_grained for every operation the generator currently produces
-  // (a future generated write whose endpoint TOLERATES 404 would break that
-  // parity) - 403 stays the discriminating style.
+  // 404 answers every denial with Not Found, but the client still classifies a 404 on a write as a permission denial
+  // (src/github/api.ts), so its outcome classes equal fine_grained's for every operation generated today; 403 discriminates.
   const denialStyle: DenialStyle = rng.pick(["fine_grained", 403, 404] as const);
   const requiredDraw = chosen.filter(() => rng.bool(0.25));
-  // Occasionally run under a `sections` allowlist so the EXCLUDED outcome is
-  // exercised: a strict nonempty subset of the declared sections is allowed
-  // and the rest must render excluded. The oracle folds this before
-  // permissions and witnesses (predictSection), and excluded sections never
-  // preflight nor break the fullyGranted fixpoint gates.
-  // New draws live on a forked stream so the pre-existing main-stream
-  // sequence (and with it every recorded seed) stays stable.
+  // A strict nonempty subset of the declared sections, so the EXCLUDED outcome is always reachable.
+  // A forked stream, so the main-stream sequence and every recorded seed stay stable.
   const allowRng = rng.fork("input-sections");
   let onlySections: SectionKey[] | undefined;
   if (chosen.length >= 2 && allowRng.bool(0.2)) {
@@ -1081,20 +854,13 @@ export function genScenario(
           ? subset.slice(1)
           : subset;
   }
-  // Input validation rejects a required section the allowlist excludes (the
-  // run could never attempt it), so the generated inputs keep the two
-  // consistent: required sections are drawn from the ALLOWED set. A
-  // post-draw filter, not a different draw, so the main-stream sequence
-  // (and every recorded seed) stays stable.
+  // Input validation rejects a required section the allowlist excludes, so required sections are filtered to the
+  // allowed set. A post-draw filter, not a different draw, so the main stream stays stable.
   const requiredSections =
     onlySections === undefined
       ? requiredDraw
       : requiredDraw.filter((key) => onlySections.includes(key));
 
-  // The step-env half of any generated secret references (webhook secrets
-  // and actions_secrets values), from the SAME fixed pool the generators
-  // drew them from - single-sourced, so a reference can never name a
-  // variable the child env lacks.
   const secretEnv = scenarioSecretEnv(settings);
 
   const scenario: Scenario = {
@@ -1111,14 +877,11 @@ export function genScenario(
     token_permissions: Object.keys(mask).length > 0 ? mask : undefined,
     denial_style: denialStyle,
     owner_kind: ownerKind,
-    // Occasionally a GHES-style base URL prefix: the mock requires it on
-    // every request, proving the client joins base URLs without dropping or
-    // doubling the path (mirrors the curated ghes-prefix scenario). A new
-    // draw, so it comes from a fork (main-stream stability).
+    // A GHES-style prefix the mock requires on every request, proving the client joins base URLs without dropping or
+    // doubling the path (the curated ghes-prefix scenario pins it). A forked draw.
     ...(rng.fork("base-prefix").bool(0.15) ? { base_prefix: "/api/v3" } : {}),
     ...(liveState ? { live_state: liveState } : {}),
-    // The oracle predicts the outcome class after generation; a generated
-    // scenario carries a placeholder expect until the oracle fills it.
+    // A placeholder; the oracle fills expect after generation.
     expect: { exit_code: 0 },
   };
   const meta: ScenarioMeta = {
@@ -1135,76 +898,47 @@ export function genScenario(
   return { scenario, meta };
 }
 
-/**
- * What one multi-repo target IS. The discriminant makes the illegal
- * combinations unrepresentable: only a normal target carries a ScenarioMeta,
- * and only a raw-invalid one carries a raw kind ("unparseable" bodies throw
- * in the yaml parser - the "cannot parse <slug>" gate; "non-mapping" bodies
- * parse to a list/scalar and fail the top-level validator). Both raw kinds
- * fail the target before any section runs.
- */
+/** Both raw kinds fail the target before any section runs. */
 export type MultiRepoTarget =
   | { kind: "normal"; meta: ScenarioMeta }
   | { kind: "missing" }
   | { kind: "raw-invalid"; raw: "unparseable" | "non-mapping" };
 
-/** Generation facts for one target repo in a multi-repo scenario. */
 export interface MultiRepoMeta {
   slug: string;
-  /**
-   * The target's kind plus its kind-specific facts: "normal" runs sections
-   * under its meta, "missing" has no settings file (the action applies the
-   * defaults document to it, or skips it when the scenario has none),
-   * "raw-invalid" serves settings_raw that fails before any section runs.
-   */
+  /** "missing" has no settings file: the action applies the defaults document to it, or skips it when the scenario has none. */
   target: MultiRepoTarget;
-  /** The visibility planted in this target's mock repo (drives the redaction rule). */
   visibility: "public" | "private" | "internal";
   /**
-   * True when this target's administration-gated visibility probe is denied
-   * (mask.administration === "none"), so the resolver reads "unknown" and
-   * redaction fails closed regardless of the planted visibility.
+   * True when mask.administration is "none": the visibility probe is denied, the resolver reads "unknown", and
+   * redaction fails closed whatever the planted visibility (src/flows/multi.ts).
    */
   probeDenied: boolean;
   /**
-   * Whether the oracle expects this target hidden from the public view (policy
-   * is redact, the slug is not the self slug, and it is private/internal OR
-   * its probe was denied). A redacted target carries the redaction facts a
-   * shown one cannot have:
-   *   - `placeholder`: the "private repository #N" repos-result key the action
-   *     emits for it (numbered per redacted target in target order, the exact
-   *     numbering planRedaction assigns).
-   *   - `canaries`: unique strings planted in the target's private surfaces
-   *     (live label name/description, repo description, remote settings.yml)
-   *     that may appear in no public surface (the leak invariant).
+   * Redacted iff the policy is redact, the slug is not the self slug, and the target is private/internal or probe-denied.
+   *   placeholder  -> the repos-result key planRedaction assigns, numbered per redacted target in target order
+   *   canaries     -> unique strings planted in the target's private surfaces; none may appear in a public surface
    */
   redaction: { kind: "shown" } | { kind: "redacted"; placeholder: string; canaries: string[] };
 }
 
-/** The repos-result KEY the action emits: the placeholder when redacted, else the slug. */
 export function displayKeyOf(meta: MultiRepoMeta): string {
   return meta.redaction.kind === "redacted" ? meta.redaction.placeholder : meta.slug;
 }
 
-/** The canaries planted on a target; only a redacted one carries any. */
 export function canariesOf(meta: MultiRepoMeta): string[] {
   return meta.redaction.kind === "redacted" ? meta.redaction.canaries : [];
 }
 
-/**
- * The repos-result key redaction assigns the Nth redacted target - the one
- * place the placeholder format lives, mirroring planRedaction's numbering.
- */
+/** Mirrors planRedaction's format (src/flows/redact.ts); a change there must land here. */
 export function redactionPlaceholder(ordinal: number): string {
   return `private repository #${ordinal}`;
 }
 
-/** The generation facts a multi-repo scenario's oracle rollup consumes. */
 export interface MultiScenarioMeta {
   repos: MultiRepoMeta[];
   mode: "apply" | "check";
   policy: "fail" | "warn";
-  /** The `private-repos` policy the run was generated under (redact or show). */
   privateRepos: "redact" | "show";
   /**
    * The `private-report` channel; only `issue` or `artifact` under redact (the config rejects a
@@ -1215,71 +949,38 @@ export interface MultiScenarioMeta {
   /** GITHUB_REPOSITORY: a target whose slug equals it is never redacted. */
   selfSlug: string;
   /**
-   * The run's GLOBAL token mask (scenario token_permissions), varied only on
-   * org_members. The idempotence eligibility predicate reads it: a globally
-   * denied org gate makes a declared teams section a denied-path section even
-   * when every per-target mask is empty.
+   * The GLOBAL token mask (scenario token_permissions), varied only on org_members. The idempotence eligibility
+   * predicate reads it: a globally denied org gate makes a declared teams section a denied-path section even when
+   * every per-target mask is empty.
    */
   globalMask: Partial<Record<MaskKey, MaskGrade>>;
   /**
-   * The slug of the forced-private canary target, when redaction forced one
-   * (privateRepos === "redact"); undefined under show. Lets tests address
-   * THAT target exactly instead of pattern-matching redacted targets, which
-   * an unforced roll can also produce.
+   * The forced-private canary target under redact; undefined under show. Tests address THAT target, since an unforced
+   * roll can also produce a redacted target.
    */
   forcedPrivateSlug?: string;
   /**
-   * A core-route fault the FUZZ ITERATION injected (generation never sets
-   * this). `fatal` is the modeled VERDICT - the fault kills the FIRST
-   * target's settings fetch (an exhausting budget of 1 + MAX_RETRIES, or a
-   * rate_limit_403's first firing): targets are processed in generation
-   * order, the visibility probes consume nothing (they hit the repository
-   * route), and the fault hook precedes both the missing-file 404 and the
-   * permission gate - so the victim FAILS outright whatever its kind would
-   * otherwise report. A non-fatal fault is retried away and changes no
-   * prediction.
+   * A core-route fault the fuzz iteration injected; generation never sets this. `fatal` means the FIRST target's
+   * settings fetch dies, whatever its kind would otherwise report; a non-fatal fault is retried away and changes no prediction.
+   *   targets run in generation order -> the probes hit the repository route, consuming none of the fault
+   *   -> the hook fires before the missing-file 404 and the permission gate
    */
   coreFault?: { key: "core.contentsGet"; fatal: boolean };
   /**
-   * The ScenarioMeta a target WITHOUT a settings file runs under: the
-   * defaults document's sections with an empty per-slug mask, sharing the
-   * run's mode, policy, and denial style. Present exactly when the scenario
-   * has a defaults_file; absent, a fileless target is skipped.
+   * The ScenarioMeta a fileless target runs under: the defaults document's sections with an empty per-slug mask.
+   * Present exactly when the scenario has a defaults_file; absent, a fileless target is skipped.
    */
   defaults?: ScenarioMeta;
 }
 
 /**
- * A random multi-repo scenario: 2 to 5 target repos, each with its own
- * generated settings, live state, and permission mask. One repo is randomly
- * left without a settings file, so the action applies the defaults document
- * to it, and one may serve raw invalid settings text instead. The returned
- * meta records each repo's target kind (normal with its ScenarioMeta,
- * missing, or raw-invalid) for the per-repo oracle plus the worst-of rollup.
- */
-/**
- * Battery-construction forces: pin specific rolls so a directed battery entry
- * EXISTS for every master seed. Rejection sampling with ANY fixed fork budget
- * has miss seeds (live counterexample: seed 8181 missed an issue-channel draw
- * in 40 forks), and with live CI seeds every miss is a spurious failure - so
- * the batteries CONSTRUCT eligibility instead of sampling for it. When the
- * knob landed, the UNFORCED path was verified byte-identical to the
- * pre-force generator over 400 seeds; later generator changes move both
- * paths together. FORCED paths may consume a DIFFERENT draw
- * sequence (an overridden roll can gate later draws - e.g. a forced redact
- * consumes the report pick a rolled show would skip), which is safe: forced
- * generation is deterministic per (seed, force), and every battery replay
- * (--iterations 0) reapplies its force. No consumer generates forced and
- * replays unforced.
+ * Forces pin the rolls a directed battery needs, so its entry EXISTS for every master seed: rejection sampling with any
+ * fixed fork budget has miss seeds, each a spurious CI failure. A forced path may consume a different draw sequence
+ * than the unforced one; that is safe because forced generation is deterministic per (seed, force) and every battery replay reapplies its force.
  *
- * - "issue-report": the delivering issue channel (privateRepos redact +
- *   privateReport issue) - the report-fault battery's precondition.
- * - "idempotence-eligible": apply mode, non-delivering channel, no raw
- *   target, every normal target's mask empty - multiIdempotenceEligible by
- *   construction.
- * - "plain-first-target": privateRepos show (no canaries anywhere) and the
- *   raw target kept off index 0 - the contents-fault victim guard by
- *   construction.
+ * "issue-report"          -> redact + the issue channel, the report-fault battery's precondition
+ * "idempotence-eligible"  -> apply, non-delivering channel, no raw target, every normal mask empty (multiIdempotenceEligible)
+ * "plain-first-target"    -> show (no canaries) and the raw target kept off index 0, the contents-fault victim guard
  */
 export type MultiBatteryForce = "issue-report" | "idempotence-eligible" | "plain-first-target";
 
@@ -1287,16 +988,11 @@ export function genMultiScenario(
   rng: Rng,
   force?: MultiBatteryForce,
 ): { scenario: Scenario; meta: MultiScenarioMeta } {
-  const count = rng.int(4) + 2; // 2..5
+  const count = rng.int(4) + 2;
   const rolledMode = rng.pick(["apply", "check"] as const);
   const mode = force === "idempotence-eligible" ? "apply" : rolledMode;
   const policy = rng.pick(["fail", "warn"] as const);
   const denialStyle: DenialStyle = rng.pick(["fine_grained", 403] as const);
-  // The private-repos policy for the run: redact (the default) or show. Under
-  // redact, private/internal targets and probe-denied targets are hidden and
-  // keyed by a placeholder; under show, nothing is redacted. Chosen randomly so
-  // the fuzzer covers both, and the oracle predicts the placeholder keys and the
-  // leak invariant from it.
   const rolledPrivateRepos = rng.pick(["redact", "show"] as const);
   const privateRepos =
     force === "issue-report"
@@ -1304,51 +1000,31 @@ export function genMultiScenario(
       : force === "plain-first-target"
         ? "show"
         : rolledPrivateRepos;
-  // The private-report channel, picked only under redact (the config rejects a delivering channel
-  // + show): `issue` delivers per redacted target, `artifact` age-encrypts into one upload (a safe
-  // warning in the harness). `issue-on-failure` stays out: the oracle does not predict its writes.
   const rolledReport =
     privateRepos === "redact" ? rng.pick(["none", "issue", "artifact"] as const) : "none";
   const privateReport =
     force === "issue-report" ? "issue" : force === "idempotence-eligible" ? "none" : rolledReport;
-  // The admin repo the runner runs as (GITHUB_REPOSITORY); a target whose slug
-  // equals it is never redacted (the self carve-out).
   const selfSlug = ADMIN_SLUG;
-  // The GLOBAL token mask for the run, varied ONLY on org_members: the mock
-  // grades org-scoped endpoints (teams' org routes) against the global mask
-  // while repo-scoped ones use the per-slug overlay, so any other global
-  // entry would make mock and oracle grade DIFFERENT effective masks.
-  // org_members is org-scoped only, so both sides agree; each repo's oracle
-  // meta carries this as orgMask (the teams org gate in sectionGrade). The
-  // idempotence force clears it: a globally denied teams section under fail
-  // policy would preflight-abort and block the fixpoint proof.
-  // New draws, so they live on a forked stream: the pre-existing main-stream
-  // sequence (missingIndex and everything after) stays stable and recorded
-  // seeds keep reproducing.
+  // Varied ONLY on org_members: the mock grades org routes against the global mask and repo routes against the per-slug
+  // overlay (mock/routes.ts), so any other global entry would have mock and oracle grading different masks. The
+  // idempotence force clears it: a globally denied teams section under fail policy would preflight-abort the fixpoint proof.
   const globalMaskRng = rng.fork("global-mask");
   const globalMask: Partial<Record<MaskKey, MaskGrade>> = {};
   if (globalMaskRng.bool(0.3) && force !== "idempotence-eligible") {
     globalMask.org_members = globalMaskRng.pick(["none", "read", "write"] as const);
   }
-  // One repo (chosen up front) is missing its settings file, so the defaults
-  // document below is applied to it.
   const missingIndex = rng.int(count);
 
   const repos: Record<string, MultiRepo> = {};
   const repoMetas: MultiRepoMeta[] = [];
-  // Under redact, force ONE non-missing target private so the run always has a
-  // redacted target: otherwise a run where every target rolled public would give
-  // an empty forbidden set and a vacuous leak check. Pick any index != missing
-  // (count >= 2 guarantees one exists). Under show this is inert.
+  // Under redact ONE non-missing target is forced private, or a run where every target rolled public would give an
+  // empty forbidden set and a vacuous leak check. count >= 2 guarantees a non-missing index exists.
   const forcedPrivateIndex =
     privateRepos === "redact"
       ? (missingIndex + 1 + rng.int(count - 1)) % count // any non-missing index
       : -1;
-  // The running placeholder ordinal, incremented per redacted target in target
-  // order - the exact numbering planRedaction assigns (self and public skipped).
+  // Incremented per redacted target in target order: the exact numbering planRedaction assigns (self and public skipped).
   let redactedOrdinal = 0;
-  // Build a target's redaction facts: a redacted target takes the next
-  // placeholder ordinal and carries its canaries; a shown one carries neither.
   const redactionFor = (redacted: boolean, canaries: string[] = []): MultiRepoMeta["redaction"] => {
     if (!redacted) {
       return { kind: "shown" };
@@ -1356,17 +1032,13 @@ export function genMultiScenario(
     redactedOrdinal += 1;
     return { kind: "redacted", placeholder: redactionPlaceholder(redactedOrdinal), canaries };
   };
-  // With ~1/5 probability one further target serves RAW settings text: an
-  // unparseable body (the "cannot parse <slug>" gate) or one parsing to a
-  // non-mapping (the top-level validator gate). Never the missing target (its
-  // gate is the contents 404) and never the forced-private target (its canary
-  // flow must stay guaranteed for the leak counterfactual).
+  // Never the missing target (its gate is the contents 404) and never the forced-private one (its canary flow must
+  // stay guaranteed for the leak counterfactual).
   const rawCandidates = Array.from({ length: count }, (_, i) => i).filter(
     (i) =>
       i !== missingIndex &&
       i !== forcedPrivateIndex &&
-      // The contents-fault battery's victim is always index 0; keep the raw
-      // target off it by construction.
+      // The contents-fault battery's victim is always index 0; keep the raw target off it by construction.
       (force !== "plain-first-target" || i !== 0),
   );
   const rolledRawIndex = rawCandidates.length > 0 && rng.bool(0.2) ? rng.pick(rawCandidates) : -1;
@@ -1374,18 +1046,13 @@ export function genMultiScenario(
   const rawKind = rawIndex >= 0 ? rng.pick(["unparseable", "non-mapping"] as const) : undefined;
   for (let i = 0; i < count; i++) {
     const slug = `e2e-owner/repo-${i}`;
-    // Every target gets a random visibility; roughly half are non-public so the
-    // redaction path is exercised. One index is forced private (see above) so a
-    // redact run is never vacuous. The self slug is forced public-ish (its
-    // visibility never matters - the carve-out fires first).
+    // Roughly half non-public, so the redaction path is exercised.
     const visibility =
       i === forcedPrivateIndex
         ? rng.pick(["private", "internal"] as const)
         : rng.pick(["public", "public", "private", "internal"] as const);
     if (i === missingIndex) {
-      // No settings file: the action reads a 404 and applies the defaults
-      // document instead. It is still visibility-probed and can still be
-      // redacted (the placeholder key is assigned before the target loop runs).
+      // A fileless target is still probed, so it can still be redacted.
       const probeDenied = false;
       const redacted =
         privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
@@ -1404,11 +1071,7 @@ export function genMultiScenario(
       continue;
     }
     if (i === rawIndex && rawKind !== undefined) {
-      // Raw invalid settings text: the target fails at the parse gate (or the
-      // top-level validator, for the non-mapping kind) before any section
-      // runs. Fully granted (no mask) so the contents read always succeeds
-      // and the parse gate - not a permission gate - is what fires; the
-      // redaction mechanics stay identical to every other target.
+      // Fully granted (no mask), so the contents read succeeds and the parse or top-level-mapping gate, not a permission gate, is what fires.
       const raw =
         rawKind === "unparseable" ? rng.pick(UNPARSEABLE_YAML) : rng.pick(NON_MAPPING_YAML);
       const probeDenied = false;
@@ -1429,15 +1092,8 @@ export function genMultiScenario(
       continue;
     }
     const child = rng.fork(`repo:${i}`);
-    // A random section subset with its own settings and mask, sharing the run's
-    // mode and policy. teams is included now that the multi-repo mock serves the
-    // org-level probe (GET /orgs/{owner}) from shared org state under the global
-    // mask, so per-repo teams exercises the org-members AND-gate too.
-    // The secret sections are excluded at the draw: their values are ALWAYS
-    // $NAME references, which target provenance refuses, so the sections are
-    // unrepresentable in a target-fetched settings.yml (stripSecretReferences
-    // below backstops the same rule for the webhook secret FIELD and the
-    // nested environments secrets key).
+    // The secret sections are excluded at the draw: their values are ALWAYS $NAME references, which a target-fetched
+    // settings.yml refuses (stripSecretReferences below backstops the webhook secret field and the nested environments secrets).
     const pool = SECTION_KEYS.filter(
       (key) => !(SECRET_LIST_SECTIONS as readonly SectionKey[]).includes(key),
     );
@@ -1445,18 +1101,13 @@ export function genMultiScenario(
     if (sections.length === 0) {
       sections.push(child.pick(pool));
     }
-    // The forced-private target's design guarantees - it never
-    // preflight-aborts and its report always delivers - assume every section
-    // it declares is fully granted. A globally denied org gate
-    // (org_members: none) breaks that for org-gated sections (their reads are
-    // denied whatever the per-slug mask says), so the canary target drops
-    // them then; org-gated sections under a denied org gate stay covered on
-    // the OTHER targets.
+    // The forced-private target's guarantees (never preflight-aborts, always delivers) assume every declared section
+    // is fully granted; a globally denied org gate denies org-gated reads whatever the per-slug mask says, so it drops
+    // them. The OTHER targets keep them covered.
     if (i === forcedPrivateIndex && globalMask.org_members === "none") {
       sections = sections.filter((key) => !ORG_GATED_SECTIONS.has(key));
       if (sections.length === 0) {
-        // A new draw, so it forks off the child stream: the child's own
-        // downstream draws (per-target mask rolls) stay unshifted.
+        // A new draw, so it forks off the child stream: the child's downstream draws stay unshifted.
         sections.push(
           child.fork("canary-refill").pick(pool.filter((key) => !ORG_GATED_SECTIONS.has(key))),
         );
@@ -1466,10 +1117,6 @@ export function genMultiScenario(
     for (const key of sections) {
       settings[key] = genSettings(child.fork(`settings:${key}`), key);
     }
-    // A remote target's settings.yml is authored by the TARGET repository,
-    // where a $NAME secret reference is refused by design (target provenance
-    // cannot read the operator's environment) - so multi targets never
-    // declare one. The secret path stays covered by the single-repo stream.
     stripSecretReferences(settings);
     const mask: Partial<Record<MaskKey, MaskGrade>> = {};
     for (const resource of MASK_KEYS) {
@@ -1477,57 +1124,30 @@ export function genMultiScenario(
         mask[resource] = child.pick(["none", "read", "write"] as const);
       }
     }
-    // The forced-private target must be a REAL leak test, not sometimes-vacuous.
-    // It is fully GRANTED (every mask entry cleared to the write default): under
-    // apply + fail a single denied section read aborts the whole target at
-    // preflight and nothing - including the canary label - is ever rendered. A
-    // fully-granted target never preflight-aborts, so its canary label's name
-    // (and, in check mode, its description) always reaches the detail output that
-    // redaction must suppress. Its visibility is already private (forced above),
-    // so it stays redacted regardless. The OTHER targets keep their random masks,
-    // so denial coverage is unaffected.
-    // The idempotence battery force clears EVERY normal target's mask: the
-    // apply-idempotence gate requires fully-granted targets (empty masks by
-    // its deliberately narrow definition). The mask rolls themselves are
-    // consumed either way; only their outcome is discarded.
+    // The forced-private target must be a REAL leak test: under apply + fail one denied read preflight-aborts the target
+    // and nothing, canary included, is rendered, so its mask is cleared. The idempotence force clears every normal
+    // target's mask, since the apply-idempotence gate requires fully-granted targets.
     if (i === forcedPrivateIndex || force === "idempotence-eligible") {
       for (const resource of MASK_KEYS) {
         delete mask[resource];
       }
     }
-    // Same rule as the single-repo generator: a per-target mask constraining
-    // the branch-policy pattern and protection-rule overrides makes those
-    // keys ungradeable, so they are stripped for this target (the global
-    // mask varies only on org_members, so the per-target mask alone decides).
     suppressMaskedEnvironmentOverrides(settings, mask);
-    // And a per-target mask denying custom_properties outright strips (or
-    // softens) that section, as in the single-repo generator.
     suppressMaskedCustomProperties(settings, mask, sections);
-    // A denied administration mask denies the visibility probe (GET /repos), so
-    // the resolver reads "unknown" and redaction fails closed even for a public
-    // target. Matches the redaction rule in multi.ts.
     const probeDenied = mask.administration === "none";
     const redacted =
       privateRepos === "redact" && slug !== selfSlug && (visibility !== "public" || probeDenied);
 
-    // Seed each target's live state the same way single-repo genScenario does,
-    // so a target's declared branches/workflows exist and converge instead of
-    // drifting on a permanent skip note.
     const live: LiveState = presenceLiveState(settings) ?? {};
     if (visibility !== "public") {
       live.repo = { ...(live.repo ?? {}), private: true, visibility };
     }
 
-    // Plant canaries in a redacted target's private surfaces so a
-    // detail-SUPPRESSION regression (not just a slug leak) is caught. The canary
-    // is a declared label matched by a unique name; its live description DIFFERS
-    // from the declared one, so the label drifts in check mode and updates in
-    // apply mode - in both cases the label name and the differing description
-    // flow into the section's drift/change detail, which redaction must hide. A
-    // matched-by-name label keeps the outcome class the labels grade already
-    // predicts (drift/applied), so the oracle needs no special case. A third
-    // canary rides the live repo description. Under redaction none of these may
-    // reach any public surface; the leak invariant checks exactly that.
+    // Canaries catch a detail-SUPPRESSION regression, not just a slug leak; a name-matched label keeps the outcome
+    // class the labels grade already predicts. Redaction must hide every surface below.
+    //   label name (declared = live)      -> the apply change detail
+    //   descriptions (declared != live)   -> the check drift detail
+    //   repo canary                       -> the live repo description
     const canaries: string[] = [];
     if (redacted) {
       const nameCanary = `CANARY-${rng.seed}-${i}-name`;
@@ -1535,17 +1155,12 @@ export function genMultiScenario(
       const liveDescCanary = `CANARY-${rng.seed}-${i}-live`;
       const repoCanary = `CANARY-${rng.seed}-${i}-repo`;
       canaries.push(nameCanary, declaredDescCanary, liveDescCanary, repoCanary);
-      // The declared labels may be in either form (plain array or wrapper);
-      // entriesOf returns the live entry list by reference, so the push
-      // lands inside whichever container was generated.
       const declaredLabels = settings.labels === undefined ? [] : entriesOf(settings.labels);
       declaredLabels.push({ name: nameCanary, color: "abcdef", description: declaredDescCanary });
       if (settings.labels === undefined) {
         settings.labels = declaredLabels;
       }
       const liveLabels = Array.isArray(live.labels) ? (live.labels as Json[]) : [];
-      // Same name (so the engine matches and diffs it, not create+delete) but a
-      // DIFFERENT description, so the canary drifts into the detail line.
       liveLabels.push({ name: nameCanary, color: "abcdef", description: liveDescCanary });
       live.labels = liveLabels;
       live.repo = { ...(live.repo ?? {}), description: repoCanary };
@@ -1577,20 +1192,14 @@ export function genMultiScenario(
           ownerKind: "org",
           denialStyle,
           requiredSections: [],
-          // teams' org gate is graded by the mock against the GLOBAL mask, not
-          // this per-slug one; genMultiScenario varies that global mask on
-          // org_members only, and every target shares it.
           orgMask: globalMask,
         },
       },
     });
   }
 
-  // The defaults document: applied WHOLE to the fileless target and never to
-  // a target with its own file, so the fileless target's oracle meta is
-  // exactly the defaults' sections (under the default write mask: the missing
-  // repoSpec carries no per-slug permissions) and every other target's meta
-  // stays exactly its own declarations.
+  // Applied WHOLE to the fileless target and never merged into a target with its own file, so the fileless target's
+  // meta is exactly the defaults' sections under the default write mask and every other target's meta stays its own.
   const defaultsFile: Json = {
     labels: [{ name: "shared-default", color: "cccccc" }],
     milestones: [{ title: "shared-milestone", state: "open" }],
@@ -1615,15 +1224,13 @@ export function genMultiScenario(
       on_missing_permission: policy,
       private_repos: privateRepos,
       ...(privateReport !== "none" ? { private_report: privateReport } : {}),
-      // The artifact channel needs a valid age recipient; the config rejects it
-      // without one (and rejects a key set for any other channel), so forward the
-      // fixed test recipient exactly when the channel is artifact.
+      // The config rejects the artifact channel without a recipient, and a recipient with any other channel.
       ...(privateReport === "artifact" ? { report_public_key: ARTIFACT_TEST_RECIPIENT } : {}),
     },
     denial_style: denialStyle,
     owner_kind: "org",
     ...(Object.keys(globalMask).length > 0 ? { token_permissions: globalMask } : {}),
-    // Occasionally a GHES-style base URL prefix, as in genScenario.
+    // A GHES-style prefix, as in genScenario.
     ...(rng.fork("base-prefix").bool(0.15) ? { base_prefix: "/api/v3" } : {}),
     repos,
     defaults_file: defaultsFile,
@@ -1647,7 +1254,6 @@ export function genMultiScenario(
   };
 }
 
-/** The generation facts a discovery scenario's oracle check consumes. */
 export interface DiscoveryScenarioMeta {
   pool: Array<{
     slug: string;
@@ -1664,49 +1270,35 @@ export interface DiscoveryScenarioMeta {
     exclude?: string;
   };
   /**
-   * The `private-repos` policy the discovery run uses. Discovery targets are the
-   * one surface with TRUE non-disclosure (their names come only from the private
-   * /user/repos listing, never the operator's config), so the fuzzer runs them
-   * under redact and checks that a kept private/internal repo is keyed by a
-   * placeholder and its slug leaks nowhere.
+   * Always redact: discovery targets are the one surface with TRUE non-disclosure (their names come only from the
+   * private /user/repos listing, never the operator's config), so the fuzzer checks a kept private/internal repo is
+   * keyed by a placeholder and its slug leaks nowhere.
    */
   privateRepos: "redact" | "show";
 }
 
 /**
- * A random `repos: "*"` discovery scenario: a pool of 4 to 8 repos with random
- * archived/fork/visibility/topic attributes, plus a random subset of discovery
- * filters. Each pool repo carries one label so a kept repo applies. The returned
- * meta echoes the pool and filters so predictDiscovery can compute the kept set
- * INDEPENDENTLY, and the fuzz asserts the action discovered exactly those.
+ * Each pool repo carries one label, so a kept repo applies. The meta echoes the pool and filters, so predictDiscovery
+ * computes the kept set INDEPENDENTLY and the fuzz asserts the action discovered exactly those.
  */
 export function genDiscoveryScenario(
   rng: Rng,
   /**
-   * Battery construction: "converges" pins a non-empty kept set structurally
-   * (pool repo 0 non-archived + no filters), so the convergence battery entry
-   * exists for EVERY master seed instead of rejection-sampling for one. The
-   * unforced path is byte-identical to the pre-force generator; the forced
-   * path is deterministic per (seed, force) and battery replays reapply it.
+   * Battery construction: "converges" pins pool repo 0 non-archived with no filters, so the convergence battery entry
+   * exists for every master seed instead of being rejection-sampled. Deterministic per (seed, force); replays reapply it.
    */
   force?: "converges",
 ): {
   scenario: Scenario;
   meta: DiscoveryScenarioMeta;
 } {
-  const count = rng.int(5) + 4; // 4..8
+  const count = rng.int(5) + 4;
   const TOPIC_POOL = ["platform", "infra", "legacy", "misc"];
-  // Discovery always runs under redact (see privateRepos below), so force ONE
-  // pool repo non-public: an all-public pool would hand the leak invariant an
-  // empty forbidden set and the check would pass vacuously - the same guard
-  // genMultiScenario's forced-private target provides.
+  // One pool repo forced non-public, or an all-public pool would hand the leak invariant an empty forbidden set.
   const forcedPrivateIndex = rng.int(count);
   const pool: DiscoveryScenarioMeta["pool"] = [];
   for (let i = 0; i < count; i++) {
     const repo: DiscoveryScenarioMeta["pool"][number] = { slug: `e2e-owner/disc-${i}` };
-    // This particular roll IS consumed either way (only the outcome is
-    // masked): the converges force keeps repo 0 non-archived so the
-    // unfiltered kept set is provably non-empty.
     if (rng.bool(0.3) && !(force === "converges" && i === 0)) {
       repo.archived = true;
     }
@@ -1723,10 +1315,6 @@ export function genDiscoveryScenario(
     pool.push(repo);
   }
 
-  // A random subset of filters. Each is included ~40% of the time; the values
-  // are drawn from the documented allowed sets. exclude uses a glob over slugs.
-  // Rolled into `rolledFilters` (these rolls are consumed either way) and
-  // overridden to none under the converges force.
   const rolledFilters: DiscoveryScenarioMeta["filters"] = {};
   if (rng.bool(0.4)) {
     rolledFilters.visibility = rng.pick(["all", "public", "private", "internal"]);
@@ -1743,8 +1331,6 @@ export function genDiscoveryScenario(
   if (rng.bool(0.3)) {
     rolledFilters.exclude = `disc-${rng.int(count)}`;
   }
-  // Under the converges force no filter applies, so the kept set is exactly
-  // the non-archived pool - which provably contains repo 0.
   const filters: DiscoveryScenarioMeta["filters"] = force === "converges" ? {} : rolledFilters;
 
   const repos: Record<string, MultiRepo> = {};
@@ -1761,9 +1347,6 @@ export function genDiscoveryScenario(
     }
   }
 
-  // Discovery runs under redact (the default and the realistic case for a
-  // fleet with private members); the iteration maps kept private/internal repos
-  // to their placeholder keys and checks their slugs leak nowhere.
   const privateRepos = "redact" as const;
   const scenario: Scenario = {
     name: `fuzz-discovery-${rng.seed}`,
@@ -1782,21 +1365,19 @@ export function genDiscoveryScenario(
 
 // --- Layered merge scenarios (mode: merge fuzz) -----------------------------
 
-/** One settings layer as the runner files it: the file name the action reports, and the document. */
+/** `name` is the file name the runner writes and the action's refusals and notices report. */
 export interface MergeLayer {
   name: string;
   doc: Json;
 }
 
 /**
- * The refusal classes a generated layer can carry. Each is refused at the
- * layer boundary with a message naming the layer: two entries of one keyed
- * list sharing a key (a ruleset's rules by type, the labels by case-folded
- * name), an explicit `merge` directive on a knobbed section that has no
- * layering key (on the wrapper, or at the file level over a plain list), and
- * a directive value outside merge|replace (on a wrapper, or at the file
- * level). A reference cycle cannot be spelled in scenario JSON, so it is not
- * generated.
+ * Each is refused at the layer boundary with a message naming the layer. A reference cycle cannot be spelled in
+ * scenario JSON, so it is not generated.
+ *
+ * duplicate-rule-type / duplicate-label      -> two entries of one keyed list sharing a key (rules by type, labels by case-folded name)
+ * merge-on-unkeyed-wrapper / -file           -> an explicit `merge` on a knobbed section that has no layering key
+ * bad-wrapper-layering / bad-file-layering   -> a directive value outside merge|replace
  */
 export const MERGE_REFUSAL_KINDS = [
   "duplicate-rule-type",
@@ -1809,10 +1390,8 @@ export const MERGE_REFUSAL_KINDS = [
 type MergeRefusalKind = (typeof MERGE_REFUSAL_KINDS)[number];
 
 /**
- * The merge axes a stack exercises, read off the FINAL layer documents by
- * mergeFeaturesOf (never off the draws that produced them, which a later
- * mutation can undo), so the fuzz histogram and the generator tests count
- * shapes the run actually saw. A refused stack asserts no document, so it
+ * Read off the FINAL layer documents by mergeFeaturesOf, never off the draws (a later mutation can undo one), so the
+ * fuzz histogram and the generator tests count shapes the run actually saw. A refused stack asserts no document, so it
  * counts for "refused" alone.
  */
 export const MERGE_FEATURES = [
@@ -1836,33 +1415,21 @@ export const MERGE_FEATURES = [
   "null-entry-field",
   /** A top-level null over a section the fold does not hold. */
   "null-stays",
-  /** A knobbed wrapper carrying an explicit policy. */
   "wrapper-undeclared",
-  /** A knobbed wrapper carrying `_layering: merge`. */
   "wrapper-layering-merge",
-  /** A knobbed wrapper carrying `_layering: replace`. */
   "wrapper-layering-replace",
-  /** A layer carrying a top-level `_layering`. */
   "file-layering",
-  /** The run's `layering` input set to replace. */
   "run-layering-replace",
-  /** The run's `layering` input set to merge explicitly. */
   "run-layering-merge",
-  /** The run's `layering` input left at its default. */
   "run-layering-default",
-  /** A layer declaring nothing at all. */
   "empty-layer",
-  /** A stack carrying a refused layer. */
   "refused",
 ] as const;
 type MergeFeature = (typeof MERGE_FEATURES)[number];
 
 /**
- * The generation facts the merge oracle consumes: the layers exactly as the
- * runner files them (lowest first, settings.yml last) and the run's effective
- * default layering. `refusal` names the one layer built to be refused, when
- * the stack carries one, so tests can check the oracle's own boundary read
- * against the generator's intent.
+ * The layers exactly as the runner files them (lowest first, settings.yml last). `refusal` names the one layer built
+ * to be refused, so tests check the oracle's own boundary read against the generator's intent.
  */
 export interface MergeScenarioMeta {
   layers: MergeLayer[];
@@ -1872,11 +1439,8 @@ export interface MergeScenarioMeta {
 }
 
 /**
- * Battery construction for the merge family: a stack whose fold is a merged
- * document for certain under a pinned run layering (every mapping section
- * gets ONE contribution, so no cross-field rule can trip on a merge of two),
- * or one whose named layer carries a given refusal. Constructed, never
- * rejection-sampled, so every battery entry exists for every master seed.
+ * Constructed, never rejection-sampled, so every battery entry exists for every master seed. The valid force gives
+ * every mapping section ONE contribution, so no cross-field rule can trip on a merge of two.
  */
 export type MergeForce =
   | { kind: "valid"; layering: LayeringDirective }
@@ -1904,11 +1468,8 @@ function isPlainMapping(value: unknown): value is Json {
 }
 
 /**
- * A layer as its standalone validation sees it: every null the fold reads as
- * a marker dropped - a null-valued key at the top level or in any plain
- * mapping below a non-knobbed section, and a null field of a ruleset entry
- * (the one keyed list this generator places nulls in). Lists are data, so a
- * null inside one stays for the validator to judge.
+ * A layer as its standalone validation sees it: every null the fold reads as a marker is dropped, a ruleset entry's
+ * null field included (the one list this generator places nulls in). Other lists are data, so a null inside them stays for the validator to judge.
  */
 function markerNullsDropped(doc: Json): Json {
   const dropDeep = (value: unknown): unknown => {
@@ -1939,10 +1500,9 @@ function markerNullsDropped(doc: Json): Json {
 }
 
 /**
- * Whether a layer passes the action's own validation on its standalone view.
- * The published schema cannot spell the cross-field rules the zod shapes
- * refine (interaction_limits needs one of its limits, an actions allowlist
- * needs `allowed_actions: selected`), so a null placement is probed here.
+ * The published schema cannot spell the cross-field rules the zod shapes refine (interaction_limits needs one of its
+ * limits, selected_actions is refused beside an allowed_actions other than selected), so null placements are probed
+ * through the action's own validator.
  */
 function standaloneValid(doc: Json): boolean {
   return !("error" in validateSettingsDoc(markerNullsDropped(doc), "layer", new Set(), silentIo()));
@@ -1953,11 +1513,7 @@ function mergeLayerName(index: number, count: number): string {
   return index === count - 1 ? "settings.yml" : `layer-${index}.yml`;
 }
 
-/**
- * Every nested key path through the plain mappings of a non-knobbed section
- * value, as [section, ...keys] with at least one nested key; lists are data
- * to the merge, so the walk never enters one.
- */
+/** Every nested key path through a non-knobbed section's plain mappings; lists are data to the merge, so the walk never enters one. */
 function nestedMappingPaths(doc: Json): string[][] {
   const paths: string[][] = [];
   const walk = (value: unknown, path: string[]): void => {
@@ -1980,7 +1536,6 @@ function nestedMappingPaths(doc: Json): string[][] {
   return paths;
 }
 
-/** The value at a key path through plain mappings, or undefined when the path leaves them. */
 function valueAtPath(doc: Json, path: readonly string[]): unknown {
   let value: unknown = doc;
   for (const key of path) {
@@ -1992,7 +1547,6 @@ function valueAtPath(doc: Json, path: readonly string[]): unknown {
   return value;
 }
 
-/** A copy of the document with the key at `path` deleted (the parents are kept). */
 function withoutPath(doc: Json, path: readonly string[]): Json {
   const out = structuredClone(doc);
   const parent = valueAtPath(out, path.slice(0, -1));
@@ -2002,10 +1556,6 @@ function withoutPath(doc: Json, path: readonly string[]): Json {
   return out;
 }
 
-/**
- * Set `path` to `value`, creating the intermediate mappings a layer needs to
- * address a nested key it does not otherwise declare.
- */
 function setPath(doc: Json, path: readonly string[], value: unknown): void {
   let node: Json = doc;
   for (const key of path.slice(0, -1)) {
@@ -2018,11 +1568,7 @@ function setPath(doc: Json, path: readonly string[], value: unknown): void {
   node[path[path.length - 1] as string] = value;
 }
 
-/**
- * A copy of the document that declares the parents of `path` (created empty
- * where absent) but not the key itself: the standalone view of a layer whose
- * null at `path` the validator strips.
- */
+/** The standalone view of a layer whose null at `path` the validator strips. */
 function withParentsOnly(doc: Json, path: readonly string[]): Json {
   const out = structuredClone(doc);
   setPath(out, path, null);
@@ -2030,17 +1576,12 @@ function withParentsOnly(doc: Json, path: readonly string[]): Json {
   return out;
 }
 
-/** The ruleset entries a layer declares, in either form, or an empty list. */
 function rulesetEntries(doc: Json): Json[] {
   const value = doc.rulesets;
   return value === undefined || value === null ? [] : entriesOf(value);
 }
 
-/**
- * Ensure a layer declares a knobbed section and return its entry list by
- * reference (creating an empty plain list when absent), so a mutation can
- * append into whichever form the layer drew.
- */
+/** Returns the entry list by reference (an empty plain list when absent), so a mutation appends into whichever form the layer drew. */
 function ensureEntries(doc: Json, key: SectionKey): Json[] {
   const value = doc[key];
   if (value === undefined || value === null) {
@@ -2051,38 +1592,29 @@ function ensureEntries(doc: Json, key: SectionKey): Json[] {
   return entriesOf(value);
 }
 
-/** Directive values the boundary refuses: a case-variant, a made-up word, a non-string. */
 const BAD_LAYERING_VALUES = ["MERGE", "union", "both", 1] as const;
 
-/** One layer under construction: its document plus the directive facts the mutations read. */
 interface LayerDraft {
   doc: Json;
   fileDirective: LayeringDirective | undefined;
-  /** The wrapper directive per knobbed section the layer declares in wrapper form. */
   wrapperDirectives: Partial<Record<SectionKey, LayeringDirective>>;
 }
 
-/**
- * The fields a label's identity is read from, spelled as the entry spells
- * them, so one claims function serves the layer's entries and the held ones.
- */
+/** Spelled as the entry spells them, so one claims function serves the layer's entries and the held ones. */
 interface LabelIdentity {
   name: string;
   new_name?: string;
 }
 
 /**
- * What the fold holds of a keyed section's identities after the layers so
- * far, for the mutations and the feature read that need to know what a
- * higher layer's entry would meet: the labels with their spellings, and per
- * ruleset name its rules by type (as JSON, so a parameters difference shows).
+ * What the fold holds of the keyed sections after the layers so far: labels with their spellings, and per ruleset name
+ * its rules by type as JSON, so a parameters difference shows.
  */
 interface HeldKeyed {
   labels: LabelIdentity[];
   rulesets: Map<string, Map<string, string>>;
 }
 
-/** A label entry's identity fields; undefined when its name is not a string (the boundary refuses it). */
 function labelIdentity(entry: Json): LabelIdentity | undefined {
   if (typeof entry.name !== "string") {
     return undefined;
@@ -2092,10 +1624,7 @@ function labelIdentity(entry: Json): LabelIdentity | undefined {
     : { name: entry.name };
 }
 
-/**
- * The identities a label claims, case-folded: its name and its rename target.
- * Two labels are one resource when their claims intersect.
- */
+/** A label's claims, case-folded: its name and its rename target. Two labels are one resource when their claims intersect. */
 function labelClaims(label: LabelIdentity): string[] {
   const names = label.new_name === undefined ? [label.name] : [label.name, label.new_name];
   return [...new Set(names.map((name) => name.toLowerCase()))];
@@ -2115,7 +1644,6 @@ function heldLabelsFor(held: HeldKeyed, entry: Json): LabelIdentity[] {
   return held.labels.filter((label) => claimsIntersect(labelClaims(label), claims));
 }
 
-/** Advance the held identities past one layer's value for `key`, unioning or replacing as the fold would. */
 function advanceHeld(
   held: HeldKeyed,
   key: "labels" | "rulesets",
@@ -2137,7 +1665,6 @@ function advanceHeld(
       continue;
     }
     if (key === "labels") {
-      // A higher label supersedes every held label it pairs with.
       const identity = labelIdentity(entry) as LabelIdentity;
       const claims = labelClaims(identity);
       held.labels = held.labels.filter((label) => !claimsIntersect(labelClaims(label), claims));
@@ -2147,7 +1674,6 @@ function advanceHeld(
     const rules = unite
       ? (held.rulesets.get(entry.name) ?? new Map<string, string>())
       : new Map<string, string>();
-    // A unioned entry's `rules: null` deletes the held rules like any nested null.
     if (entry.rules === null) {
       rules.clear();
     }
@@ -2160,23 +1686,17 @@ function advanceHeld(
   }
 }
 
-/** A knobbed value's own directive, when it is a wrapper carrying one. */
 function wrapperDirective(value: unknown): unknown {
   return Array.isArray(value) || !isPlainMapping(value) ? undefined : value[LAYERING_KEY];
 }
 
-/** Whether a mapping carries a null at any depth through plain mappings. */
 function hasNestedNull(value: Json): boolean {
   return Object.values(value).some(
     (child) => child === null || (isPlainMapping(child) && hasNestedNull(child)),
   );
 }
 
-/**
- * The merge axes a finished stack exercises, read off the layer documents the
- * runner will file: the same walk over presence, directives, and held keyed
- * identities the fold performs, reduced to the shapes each layer adds.
- */
+/** The same walk over presence, directives, and held identities the fold performs, reduced to the shapes each layer adds. */
 export function mergeFeaturesOf(
   layers: readonly MergeLayer[],
   runInput: LayeringDirective | undefined,
@@ -2293,22 +1813,12 @@ export function mergeFeaturesOf(
 }
 
 /**
- * A random mode: merge scenario: 2 to 5 layers, each drawn from the per-section
- * generators and then mutated along the merge axes - sections dropped or
- * redeclared across layers, knobbed sections rewrapped with a policy and a
- * `_layering`, a top-level `_layering`, label names respelled in another
- * case and rules given parameters (so a keyed union is distinguishable from
- * a case-sensitive or merging one), nulls over declared keys (top-level,
- * nested in a mapping section, and inside a ruleset entry combined by name)
- * and over nothing (the nullable sections), the run's `layering` input drawn
- * at random. About a fifth of the stacks carry ONE refused layer. Every
- * layer is valid on its own by construction (each null placement is probed
- * through the action's validator on both the layer and the layer below).
- * The folded document is what the oracle predicts: usually a merged
- * document, sometimes one the validator rejects, since two valid mapping
- * sections can merge into a combination a cross-field rule forbids; the
- * valid force rules that out by giving every mapping section one
- * contribution.
+ * Every admitted layer is valid on its own by construction; the folded document is what the oracle predicts, and it is
+ * not always a merged one.
+ *   nested null placement              -> probed through the action's validator on this layer and the one below
+ *   top-level null                     -> drops out of the standalone view, so it needs no probe
+ *   the refused layer                  -> rewritten after the check, invalid by design
+ *   two valid mapping sections merged  -> can trip a cross-field rule; the valid force gives every mapping section one contribution
  */
 export function genMergeScenario(
   rng: Rng,
@@ -2354,8 +1864,7 @@ export function genMergeScenario(
       placeNulls(layerRng.fork("nulls"), draft, lower, present, pool, effectiveRunLayering);
     }
     if (!standaloneValid(draft.doc)) {
-      // Every placement above is probed, so an invalid layer here is a hole
-      // in the probes, not a scenario to run.
+      // Every placement above is probed, so an invalid layer here is a hole in the probes, not a scenario to run.
       throw new Error(
         `BUG: merge layer ${name} fails its standalone validation: ${JSON.stringify(draft.doc)}`,
       );
@@ -2417,13 +1926,8 @@ export function genMergeScenario(
 }
 
 /**
- * One layer's document before nulls: a section subset (the keyed sections
- * favored, so unions happen), rules sometimes given parameters, each knobbed
- * section rewrapped at random with a policy and a directive, and sometimes a
- * file-level directive. A file-level `merge` forces every unkeyed knobbed
- * section into a wrapper saying `replace`, the one spelling the boundary
- * admits for it. Validated against the published schema before any null is
- * placed.
+ * The keyed sections are favored, so unions happen. A file-level `merge` forces every unkeyed knobbed section into a
+ * wrapper saying `replace`, the one spelling the boundary admits for it.
  */
 function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
   const chosen = rng.bool(0.08)
@@ -2452,8 +1956,6 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
     }
     const keyed = KEYED_MERGE_SECTIONS.has(key);
     const mustWrap = fileDirective === "merge" && !keyed;
-    // The section generator's own form is discarded: the merge draws the
-    // plain list or a wrapper of its own, so both forms carry every knob.
     const entries = entriesOf(doc[key]);
     if (!mustWrap && !rng.bool(0.4)) {
       doc[key] = entries;
@@ -2483,10 +1985,8 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
 }
 
 /**
- * Respell some of a layer's labels in another case when the fold holds the
- * same name and this layer unions labels, so the union's case-folded
- * matching is what keeps the list from growing. A name without letters has
- * no other case and is left alone.
+ * Respell a unioned label in the other case, so the union's case-folded matching is what keeps the list from growing.
+ * A name without letters has no other case and is left alone.
  */
 function respellLabels(
   rng: Rng,
@@ -2516,10 +2016,6 @@ function respellLabels(
   }
 }
 
-/**
- * Whether a layer's labels union with what the fold holds: the fold holds
- * labels, this layer declares some, and its effective layering says merge.
- */
 function unionsLabels(
   draft: LayerDraft,
   run: LayeringDirective,
@@ -2535,12 +2031,9 @@ function unionsLabels(
 }
 
 /**
- * When the fold holds a label that renames and this layer unions labels,
- * usually point one of the layer's labels at that rename target, so the
- * union pairs the two through the alias (the lower's `new_name`) and the
- * merged document carries one label where a name-only match would keep two.
- * The retargeted entry keeps its own claims disjoint from its siblings, as
- * the boundary demands of every layer.
+ * Point one of the layer's labels at a held rename target, so the union pairs the two through the alias and the merged
+ * document carries one label where a name-only match would keep two. The retargeted entry keeps its claims disjoint
+ * from its siblings, as the boundary demands of every layer.
  */
 function renameLabelsIntoHeld(
   rng: Rng,
@@ -2573,7 +2066,6 @@ function renameLabelsIntoHeld(
   }
 }
 
-/** The layering a knobbed section combines under in this layer: wrapper, then file, then run. */
 function effectiveLayering(
   draft: LayerDraft,
   key: SectionKey,
@@ -2583,14 +2075,9 @@ function effectiveLayering(
 }
 
 /**
- * Place up to two nulls in a layer: over a section the fold holds (deleted
- * with a notice), over a nullable section it does not (stays as written),
- * over a nested key of a mapping section the layer right below declares, or
- * over a field of a ruleset entry the layer right below declares when this
- * layer combines rulesets by name. The nested placements are probed against
- * the published schema on both sides (the lower document without the key,
- * this document with the key's parents but without the key) so neither the
- * layer nor the folded document turns invalid.
+ * The nested placements are probed through the action's validator on both sides (the lower document without the key,
+ * this document with the key's parents but not the key), so the layer itself stays valid; the accumulated fold can
+ * still trip a cross-field rule, which the oracle predicts.
  */
 function placeNulls(
   rng: Rng,
@@ -2671,12 +2158,7 @@ function placeNulls(
   }
 }
 
-/**
- * Rewrite one layer so the boundary refuses it for the named reason. A kind
- * needs its section (labels, rulesets, an unkeyed knobbed one); when the
- * layer declares none, one is created, outside the pool if need be, since
- * the refusal is the point of the layer.
- */
+/** When the layer lacks the section a kind needs, one is created, outside the pool if need be: the refusal is the point of the layer. */
 function refuseLayer(
   rng: Rng,
   draft: LayerDraft,
@@ -2718,8 +2200,7 @@ function refuseLayer(
     }
     case "merge-on-unkeyed-file": {
       const key = unkeyedKey ?? "milestones";
-      // The plain list inherits the file directive; a wrapper saying replace
-      // would override it and admit the layer.
+      // The plain list inherits the file directive; a wrapper saying replace would override it and admit the layer.
       doc[key] = ensureEntries(doc, key);
       doc[LAYERING_KEY] = "merge";
       return;

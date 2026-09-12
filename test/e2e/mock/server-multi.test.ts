@@ -1,9 +1,3 @@
-/**
- * Unit tests for the mock server's multi-repo mode and the private-report
- * bypass, driven over the wire like server.test.ts: each test starts a real
- * server and asserts on the responses plus the handle's request log.
- */
-
 import { describe, expect, test } from "bun:test";
 import type { MockHandle } from "./server.js";
 import { call, json, jsonArray, mockServerLifecycle, scenario } from "./server-test-support.js";
@@ -13,7 +7,6 @@ const start = mockServerLifecycle();
 describe("multi-repo mode", () => {
   const RAW_ACCEPT = "application/vnd.github.raw+json";
   const settingsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
-  /** A contents GET with the raw Accept header the action sends. */
   const contentsGet = (h: MockHandle, slug: string) =>
     call(h, "GET", settingsPath(slug), { headers: { accept: RAW_ACCEPT } });
 
@@ -46,7 +39,7 @@ describe("multi-repo mode", () => {
 
   test("contents rejects a missing raw Accept header with a violation", async () => {
     const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
-    // The default call() sends application/vnd.github+json, not the raw type.
+    // call() sends no Accept header at all (server-test-support.ts AUTH), so the raw type is missing.
     const res = await call(h, "GET", settingsPath("e2e-owner/svc-a"));
     expect(res.status).toBe(400);
     expect(h.violations.some((v) => v.includes("Accept"))).toBe(true);
@@ -58,8 +51,7 @@ describe("multi-repo mode", () => {
         repos: { "e2e-owner/locked": { settings: {}, permissions: { contents: "none" } } },
       }),
     );
-    // fine_grained read denial -> 404 (the action then disambiguates via the
-    // repo probe); deniedBy names the contents resource.
+    // A fine_grained read denial is a 404 (the action disambiguates via the repo probe).
     const res = await contentsGet(h, "e2e-owner/locked");
     expect(res.status).toBe(404);
     const log = h.requests.find((r) => r.pathname === settingsPath("e2e-owner/locked"));
@@ -139,11 +131,11 @@ describe("multi-repo mode", () => {
   });
 
   test("/user/repos server-side visibility: private retains internal, public drops it", async () => {
-    // GitHub's server-side query narrows only coarsely: visibility=private
-    // returns private AND internal (no server-side "internal" value), and the
-    // ACTION drops internal client-side (discover.test.ts). visibility=public
-    // returns only public. The mock must mirror this exactly so the action's
-    // own client-side narrowing is what a scenario exercises.
+    // GitHub narrows visibility only coarsely, and the ACTION drops internal client-side
+    // (discover.test.ts), so the mock must not drop it either.
+    //   visibility=private -> private AND internal
+    //   visibility=public  -> public only
+    //   no param           -> the whole pool
     const h = await start(
       scenario({
         discovery: {
@@ -156,13 +148,10 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // private query keeps private AND internal (the mock does NOT drop internal).
     const priv = await jsonArray(await call(h, "GET", "/user/repos?visibility=private"));
     expect(priv.map((r) => r.full_name).sort()).toEqual(["e2e-owner/int", "e2e-owner/priv"]);
-    // public query keeps only public.
     const pub = await jsonArray(await call(h, "GET", "/user/repos?visibility=public"));
     expect(pub.map((r) => r.full_name)).toEqual(["e2e-owner/pub"]);
-    // no visibility param: the whole pool passes through.
     const all = await jsonArray(await call(h, "GET", "/user/repos"));
     expect(all).toHaveLength(3);
   });
@@ -180,7 +169,6 @@ describe("multi-repo mode", () => {
     const bLabels = await jsonArray(await call(h, "GET", "/repos/e2e-owner/svc-b/labels"));
     expect(aLabels.map((l) => l.name)).toEqual(["a-only"]);
     expect(bLabels.map((l) => l.name)).toEqual(["b-only"]);
-    // A create on svc-a does not leak into svc-b.
     await call(h, "POST", "/repos/e2e-owner/svc-a/labels", { body: { name: "new-a" } });
     const bAfter = await jsonArray(await call(h, "GET", "/repos/e2e-owner/svc-b/labels"));
     expect(bAfter.map((l) => l.name)).toEqual(["b-only"]);
@@ -194,8 +182,6 @@ describe("multi-repo mode", () => {
   });
 
   test("the org probe (GET /orgs/{owner}) is served from the shared org state, not slug-routed", async () => {
-    // Org-level endpoints are not repo-scoped; before this they hit the slug
-    // router and failed with "names no known target slug".
     const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
     const org = await call(h, "GET", "/orgs/e2e-owner");
     expect(org.status).toBe(200);
@@ -223,20 +209,17 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // The team-repo probe reads svc-a's teams state (role_name write), not svc-b's.
     const res = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-a");
     expect(res.status).toBe(200);
     expect((await json(res)).role_name).toBe("write");
-    // svc-b has no reviewers team -> 404, proving per-slug resolution.
     const missing = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-b");
     expect(missing.status).toBe(404);
     expect(h.violations).toHaveLength(0);
   });
 
   test("team-repo grading: org_members always grades against the GLOBAL mask", async () => {
-    // Hybrid grading: org_members is org-wide, so a per-slug org_members:write
-    // override must NOT loosen a global org_members:none. (The administration
-    // half - per-slug - is covered by the two tests below.)
+    // org_members is org-wide, so a per-slug org_members:write must NOT loosen a global
+    // org_members:none; the per-slug administration half is the two tests below.
     const h = await start(
       scenario({
         owner_kind: "org",
@@ -257,10 +240,8 @@ describe("multi-repo mode", () => {
   });
 
   test("team-repo grading: administration grades PER-SLUG (denied on A, allowed on B)", async () => {
-    // Hybrid grading: administration is a repository permission on the ADDRESSED
-    // repo. slug A denies it, slug B grants it; global org_members is write, so
-    // the team-repo call is denied on A and allowed on B - matching the oracle's
-    // orgMask model.
+    // administration is a repository permission on the ADDRESSED repo, so with global org_members
+    // write the team-repo call follows each slug's own grade, matching the oracle's orgMask model.
     const h = await start(
       scenario({
         owner_kind: "org",
@@ -279,13 +260,11 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // svc-a: administration denied per-slug -> the team-repo read is denied.
     const a = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-a");
     expect(a.status).toBe(404);
     expect(h.requests.find((r) => r.pathname.endsWith("/repos/e2e-owner/svc-a"))?.deniedBy).toBe(
       "administration",
     );
-    // svc-b: administration granted per-slug -> allowed.
     const b = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-b");
     expect(b.status).toBe(200);
   });
@@ -309,8 +288,6 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // Both repos grant administration per-slug, but the org-wide org_members is
-    // denied globally, so both team-repo calls are denied on org_members.
     for (const slug of ["svc-a", "svc-b"]) {
       const res = await call(h, "GET", `/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/${slug}`);
       expect(res.status).toBe(404);
@@ -329,15 +306,11 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // svc-a's labels read is denied (issues none -> 404); svc-b's is allowed.
     expect((await call(h, "GET", "/repos/e2e-owner/svc-a/labels")).status).toBe(404);
     expect((await call(h, "GET", "/repos/e2e-owner/svc-b/labels")).status).toBe(200);
   });
 
   test("the per-slug mask OVERLAYS the global mask (global is not a no-op)", async () => {
-    // Global denies issues; svc-a inherits that (no per-slug issues grade) and
-    // its labels read is denied. svc-b overrides issues to write, so its read is
-    // allowed - proving both layers compose.
     const h = await start(
       scenario({
         token_permissions: { issues: "none" },
@@ -359,9 +332,6 @@ describe("multi-repo mode", () => {
   });
 
   test("the denial barrier does not leak across slugs (per-target keying)", async () => {
-    // repo-1 (svc-a) denies issues -> its labels read is fatal-denied and arms
-    // the barrier for svc-a:labels. repo-2 (svc-b) grants issues -> its labels
-    // write is legitimate and must NOT be flagged by svc-a's denied read.
     const h = await start(
       scenario({
         denial_style: 403,
@@ -371,19 +341,15 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    // svc-a: denied read (fatal, 403) arms svc-a:labels.
     expect((await call(h, "GET", "/repos/e2e-owner/svc-a/labels")).status).toBe(403);
-    // svc-b: a legitimate labels create - the barrier must not fire across slugs.
     const write = await call(h, "POST", "/repos/e2e-owner/svc-b/labels", { body: { name: "x" } });
     expect(write.status).toBe(201);
     expect(h.violations).toHaveLength(0);
   });
 
   test("a team-repo route naming an unknown slug is a violation (not an orgState fallback)", async () => {
-    // The team-repo route carries a {owner}/{repo} tail; an unknown slug must be
-    // the unknown-target violation, NOT a silent fall-through to orgState (which
-    // would let a buggy write mutate shared org state). Only the BARE org probe
-    // (no slug) uses orgState.
+    // A silent fall-through to orgState would let a buggy write mutate shared org state; only
+    // slug-less routes (the bare org probe) use orgState.
     const h = await start(
       scenario({ owner_kind: "org", repos: { "e2e-owner/svc-a": { settings: {} } } }),
     );
@@ -392,21 +358,18 @@ describe("multi-repo mode", () => {
     });
     expect(res.status).toBe(400);
     expect(h.violations.some((v) => v.includes("no known target slug"))).toBe(true);
-    // The bare org probe (no repo tail) still works from orgState.
     expect((await call(h, "GET", "/orgs/e2e-owner")).status).toBe(200);
   });
 
   test("a fault does not mask the unknown-target violation (resolution runs first)", async () => {
-    // A fault on labels.list must not fire for a request naming a ghost slug:
-    // the unknown-target check is a harness-integrity invariant that resolution
-    // raises before the fault barrier.
+    // The unknown-target check is a harness-integrity invariant, so resolution raises it before the
+    // fault barrier can consume the budget.
     const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }), {
       faults: [{ key: "labels.list", kind: "rate_limit_403" }],
     });
     const res = await call(h, "GET", "/repos/e2e-owner/ghost/labels");
     expect(res.status).toBe(400); // the unknown-target violation, NOT the 403 fault
     expect(h.violations.some((v) => v.includes("no known target slug"))).toBe(true);
-    // The fault still fires for a VALID target (unchanged behavior).
     expect((await call(h, "GET", "/repos/e2e-owner/svc-a/labels")).status).toBe(403);
   });
 });
@@ -415,10 +378,8 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   const jsonHeaders = { "content-type": "application/json" };
 
   test("a marker-label POST in check mode to a PUBLIC target hits the check-mode barrier", async () => {
-    // The report-infra bypass writes even in check mode, but ONLY for a
-    // report-delivery target. A marker POST to a public slug (e.g. a buggy
-    // labels-section write of the injected marker) is NOT report infra: it falls
-    // through to the labels.create section route and the check-mode barrier fires.
+    // The report-infra bypass writes even in check mode, but ONLY for a report-delivery target; a
+    // marker POST to a public slug falls through to labels.create and the check-mode barrier.
     const target = "e2e-owner/svc-pub";
     const h = await start(
       scenario({
@@ -435,10 +396,8 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   });
 
   test("issue traffic to a PUBLIC (non-delivery) target is a loud no-route violation", async () => {
-    // An issue POST to a public slug is accidental delivery: the bypass does not
-    // serve it, so it falls through to section matching, which has no /issues
-    // route and raises the no-route violation. Fuzz can thus reject a stray
-    // report write to a repo that might be public.
+    // An issue POST to a public slug is accidental delivery: the bypass does not serve it, and no
+    // section has an /issues route, so fuzz can reject a stray report write to a public repo.
     const target = "e2e-owner/svc-pub";
     const h = await start(
       scenario({
@@ -455,9 +414,7 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   });
 
   test("the same issue POST to a PRIVATE delivery target IS served (control)", async () => {
-    // The mirror of the above: with a proven-private target and the issue
-    // channel on, the bypass serves the create (201), proving the scoping gates
-    // on visibility, not on the path alone.
+    // The scoping gates on proven visibility, not on the path alone.
     const target = "e2e-owner/svc-priv";
     const h = await start(
       scenario({
@@ -479,11 +436,8 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   });
 
   test("delivery to a private target whose PROBE is denied is a no-route violation", async () => {
-    // The fixture is private, but administration:none denies the visibility
-    // probe, so the action resolves "unknown" and must NOT deliver. The mock
-    // models provability, not the fixture alone: the issue POST is not served and
-    // falls through to the no-route violation, so a regression that delivers on
-    // an unprovable target is caught.
+    // The fixture is private, but administration:none denies the visibility probe, so the action
+    // resolves "unknown" and must NOT deliver. The mock models provability, not the fixture alone.
     const target = "e2e-owner/svc-unprovable";
     const h = await start(
       scenario({
@@ -506,8 +460,7 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   });
 
   test("delivery to a private target whose probe FAULTS out its budget is a no-route violation", async () => {
-    // A repository.get fault that exhausts the probe's retry budget makes the
-    // probe never resolve -> "unknown" -> no delivery. Same provability rule as
+    // A probe that faults out its whole retry budget never resolves: the same provability rule as
     // the denied probe, via the fault path.
     const target = "e2e-owner/svc-faulted";
     const h = await start(
@@ -531,10 +484,8 @@ describe("private-report bypass is scoped to redact-and-deliver targets", () => 
   });
 
   test("a DISCOVERY-supplied private target IS a delivery target (visibility needs no probe)", async () => {
-    // A private repo discovered via /user/repos carries its visibility already, so
-    // the action needs no probe and delivers. The mock seeds the discovered
-    // repo's state from the pool visibility, so its delivery gate agrees: the
-    // issue create is served (201), NOT flagged as an accidental delivery.
+    // A repo discovered via /user/repos carries its visibility already, so the action delivers
+    // without a probe; the mock seeds the discovered repo's state from the pool, so its gate agrees.
     const target = "e2e-owner/disc-priv";
     const h = await start(
       scenario({
