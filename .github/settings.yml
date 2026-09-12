@@ -63,6 +63,9 @@ labels:
   - name: e2e-fuzz
     color: B60205
     description: Automated e2e nightly failure
+  - name: docs-link-rot
+    color: D4A72C
+    description: Automated docs-site link-rot report
   - name: fuzz-nightly
     color: B60205
     description: Automated nightly fuzz failure
@@ -200,3 +203,5 @@ rulesets:
       - type: deletion
       - type: required_linear_history
     bypass_actors: []
+pages:
+  build_type: workflow
