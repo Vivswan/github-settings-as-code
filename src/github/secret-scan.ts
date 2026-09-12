@@ -50,9 +50,14 @@ function renderKeyPath(path: readonly string[]): string {
  *
  * a property         -> read through its descriptor; an enumerable accessor is rejected UNREAD (a getter could sabotage globals)
  * an object's keys   -> only Object.keys are copied, so symbol and non-enumerable keys never reach the copy (array indices do)
+ * a container again  -> rejected when it is one of its own ancestors (a YAML alias cycle); a sibling alias is copied twice
  * the wire           -> only the copy is sent
  */
-function normalizePlainData(value: unknown, path: string[] = []): unknown {
+function normalizePlainData(
+  value: unknown,
+  path: string[] = [],
+  ancestors: Set<object> = new Set(),
+): unknown {
   if (value === null) {
     return null;
   }
@@ -69,11 +74,16 @@ function normalizePlainData(value: unknown, path: string[] = []): unknown {
     default:
       throw new NotPlainDataError(path, nonPlainKind(value));
   }
-  // A class instance, a non-plain prototype, a function, a bigint: each THROWS into the caller's fail-closed catch
-  // (cycles exhaust the stack and are caught the same way). YAML reaches this through explicit tags: !!timestamp parses to a Date.
+  // A class instance, a non-plain prototype, a function, a bigint: each THROWS into the caller's fail-closed catch.
+  // YAML reaches this through explicit tags: !!timestamp parses to a Date.
   if (!isPlainJsonContainer(value)) {
     throw new NotPlainDataError(path, nonPlainKind(value));
   }
+  if (ancestors.has(value)) {
+    throw new NotPlainDataError(path, "a reference back to one of its own containers");
+  }
+  // One frame per nesting level: a helper for the container body would halve the depth a valid payload may reach.
+  ancestors.add(value);
   const descriptors = Object.getOwnPropertyDescriptors(value);
   if (Array.isArray(value)) {
     // A manual index loop over descriptors never dispatches .map or invokes an index accessor someone defineProperty'd onto the array.
@@ -88,8 +98,11 @@ function normalizePlainData(value: unknown, path: string[] = []): unknown {
         throw new NotPlainDataError([...path, String(index)], "an accessor property");
       }
       const item: unknown = descriptor.value;
-      items.push(item === undefined ? null : normalizePlainData(item, [...path, String(index)]));
+      items.push(
+        item === undefined ? null : normalizePlainData(item, [...path, String(index)], ancestors),
+      );
     }
+    ancestors.delete(value);
     return items;
   }
   const out: Record<string, unknown> = Object.create(null);
@@ -105,8 +118,9 @@ function normalizePlainData(value: unknown, path: string[] = []): unknown {
     if (item === undefined) {
       continue;
     }
-    out[key] = normalizePlainData(item, [...path, key]);
+    out[key] = normalizePlainData(item, [...path, key], ancestors);
   }
+  ancestors.delete(value);
   return out;
 }
 
