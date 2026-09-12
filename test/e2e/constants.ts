@@ -7,7 +7,7 @@ export const ADMIN_OWNER = "e2e-owner";
 export const ADMIN_REPO = "e2e-repo";
 export const ADMIN_SLUG = `${ADMIN_OWNER}/${ADMIN_REPO}`;
 
-/** The token user GET /user reports; the report module reads only `login`. */
+/** The creator the mock stamps on issues the report channel creates; the action never reads it. */
 export const TOKEN_USER_LOGIN = "e2e-token-user";
 
 /**

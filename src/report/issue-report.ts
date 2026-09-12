@@ -52,11 +52,6 @@ export const ISSUE_REPORT_ENDPOINTS = {
     route: "POST /repos/{owner}/{repo}/labels",
     statuses: { 201: "marker label created", 422: "the marker label already exists" },
   },
-  user: {
-    route: "GET /user",
-    statuses: { 200: "the token's user, for the fallback creator scan" },
-    permission: "none",
-  },
 } as const satisfies Record<string, EndpointDecl>;
 
 export type IssueReportMode = "always" | "on-failure";
@@ -79,11 +74,13 @@ function malformedWarning(what: string): { warning: string } {
   };
 }
 
+type ReportIssue = { number: number; url: string; labels: string[] };
+
 /**
  * The issues list includes pull requests, so they are skipped. The label names ride along so a fallback-scan hit can
  * reattach the stripped marker without clobbering human-added labels.
  */
-function reportIssueIn(items: unknown[]): { number: number; url: string; labels: string[] } | null {
+function reportIssueIn(items: unknown[]): ReportIssue | null {
   for (const item of items) {
     if (typeof item !== "object" || item === null) {
       continue;
@@ -114,39 +111,42 @@ function reportIssueIn(items: unknown[]): { number: number; url: string; labels:
 }
 
 /**
- * For a human-stripped marker label: scans the token user's own issues, oldest first, and runs BEFORE any create so a
- * stripped label never causes a duplicate under the same token user.
+ * Walks the issue list page by page until the report issue turns up; `lookup` names the query in the malformed
+ * warning without exposing the expanded path.
  */
-async function fallbackScan(
+async function findReportIssue(
   api: GithubClient,
   ref: { repo: RepoRef },
-): Promise<{ found: ReturnType<typeof reportIssueIn> } | { warning: string }> {
-  const user = await api.tryRequest("GET", expand(ISSUE_REPORT_ENDPOINTS.user, ref));
-  if ("error" in user) {
-    return deliveryWarning(user.error);
-  }
-  const login = (user.data as { login?: unknown } | null)?.login;
-  if (typeof login !== "string" || login === "") {
-    return malformedWarning("GET /user returned a response without the token user's login");
-  }
-  const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
-    state: "all",
-    creator: login,
-    sort: "created",
-    direction: "asc",
-  });
+  query: Readonly<Record<string, string>>,
+  lookup: string,
+): Promise<{ found: ReportIssue | null } | { warning: string }> {
+  const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, query);
   const page = await paginate(api, path, undefined, (items) => reportIssueIn(items) !== null);
   if ("error" in page) {
     return deliveryWarning(page.error);
   }
   if ("malformed" in page) {
-    return malformedWarning("the issue list (creator scan) returned a non-list page");
+    return malformedWarning(`${lookup} returned a non-list page`);
   }
   return { found: reportIssueIn(page.items) };
 }
 
 /**
- * The label ensure-create and the creator scan are skipped on purpose: both exist to keep a CREATE from duplicating, and
+ * For a human-stripped marker label: scans every issue by title, oldest first, and runs BEFORE any create so a
+ * stripped label never causes a duplicate. The creator is deliberately not a filter: a rotated PAT belongs to a
+ * different user, and a creator-scoped scan under it would miss the issue and open a second one.
+ */
+function fallbackScan(api: GithubClient, ref: { repo: RepoRef }) {
+  return findReportIssue(
+    api,
+    ref,
+    { state: "all", sort: "created", direction: "asc" },
+    "the issue list (title scan)",
+  );
+}
+
+/**
+ * The label ensure-create and the title scan are skipped on purpose: both exist to keep a CREATE from duplicating, and
  * this path never creates. The cost: a human-stripped marker leaves a stale open issue until the next needs-attention run.
  */
 async function closeIfOpen(
@@ -154,19 +154,16 @@ async function closeIfOpen(
   ref: { repo: RepoRef },
   body: string,
 ): Promise<IssueDelivery> {
-  const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
-    state: "open",
-    labels: MARKER_LABEL,
-    per_page: "100",
-  });
-  const listed = await api.tryRequest("GET", listPath);
-  if ("error" in listed) {
-    return deliveryWarning(listed.error);
+  const listed = await findReportIssue(
+    api,
+    ref,
+    { state: "open", labels: MARKER_LABEL },
+    "the open-issue lookup",
+  );
+  if ("warning" in listed) {
+    return listed;
   }
-  if (!Array.isArray(listed.data)) {
-    return malformedWarning("the open-issue lookup returned a non-list response");
-  }
-  const found = reportIssueIn(listed.data);
+  const found = listed.found;
   if (!found) {
     return { skipped: true };
   }
@@ -201,20 +198,17 @@ async function deliver(
   if ("error" in label && label.error.status !== 422) {
     return deliveryWarning(label.error);
   }
-  const listPath = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, {
-    state: "all",
-    labels: MARKER_LABEL,
-    per_page: "100",
-  });
-  const listed = await api.tryRequest("GET", listPath);
-  if ("error" in listed) {
-    return deliveryWarning(listed.error);
+  const listed = await findReportIssue(
+    api,
+    ref,
+    { state: "all", labels: MARKER_LABEL },
+    "the report-issue lookup",
+  );
+  if ("warning" in listed) {
+    return listed;
   }
-  if (!Array.isArray(listed.data)) {
-    return malformedWarning("the report-issue lookup returned a non-list response");
-  }
-  let found = reportIssueIn(listed.data);
-  // The PATCH leaves labels alone (a human may have added their own) unless the creator scan found the issue with the
+  let found = listed.found;
+  // The PATCH leaves labels alone (a human may have added their own) unless the title scan found the issue with the
   // marker stripped: without reattaching it, every label-filtered lookup, the on-failure close included, misses forever.
   let relabel: string[] | undefined;
   if (!found) {

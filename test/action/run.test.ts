@@ -402,7 +402,7 @@ describe("run in multi-repo mode (env glue)", () => {
   // Check mode; a drifting row has has_wiki: true against single.yml's false.
   const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const listPath = (state: string) =>
-    `GET /repos/o/priv/issues?state=${state}&labels=settings-as-code-report&per_page=100`;
+    `GET /repos/o/priv/issues?state=${state}&labels=settings-as-code-report&per_page=100&page=1`;
   const issue3 = { number: 3, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/3" };
   test.each<
     [

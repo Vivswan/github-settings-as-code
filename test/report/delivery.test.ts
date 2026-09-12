@@ -76,7 +76,7 @@ function target(slug: string, exitCode: 0 | 1) {
 function issueApi(overrides: ConstructorParameters<typeof MockApi>[0] = {}): MockApi {
   return new MockApi({
     "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
-    [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100`]: {
+    [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
       data: [{ number: 7, title: ISSUE_TITLE, html_url: "https://github.com/o/priv/issues/7" }],
     },
     "PATCH /repos/o/priv/issues/7": { data: { number: 7 } },
@@ -134,7 +134,7 @@ describe("the issue channel", () => {
 
   test("issue-on-failure writes nothing for a healthy target with no open issue", async () => {
     const api = issueApi({
-      [`GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100`]: { data: [] },
+      [`GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
     });
     const { io, annotations } = recordingIo();
     await open(api, "issue-on-failure", io)?.deliver({
@@ -143,7 +143,7 @@ describe("the issue channel", () => {
     });
     expect(api.mutations()).toEqual([]);
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100`,
+      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`,
     ]);
     expect(annotations).toEqual([]);
   });

@@ -58,12 +58,11 @@ expect:
     created_count: 0
     lookup_by_label: true
   # The closed issue is left alone: no PATCH at all, no issue create, no
-  # marker-label ensure, and no fallback creator scan.
+  # marker-label ensure, and no fallback title scan.
   never:
     - "POST /repos/e2e-owner/svc-closed/issues"
     - "PATCH /repos/e2e-owner/svc-closed/issues"
     - "POST /repos/e2e-owner/svc-closed/labels"
-    - "GET /user"
   # The single read: an indexed lookup for an OPEN report issue by the marker.
   requests_contain:
     - "GET /repos/e2e-owner/svc-closed/issues?state=open&labels=settings-as-code-report&per_page=100"

@@ -3,7 +3,7 @@
 # marker label). This run is clean, so the healthy path's single lookup finds
 # the open issue and closes it with the fresh report body - one PATCH, never a
 # second POST, and none of the create-guard machinery (no marker-label ensure,
-# no fallback creator scan).
+# no fallback title scan).
 name: multi-report-issue-on-failure-resolves
 settings: {}
 inputs:
@@ -65,6 +65,5 @@ expect:
   never:
     - "POST /repos/e2e-owner/svc-resolve/issues"
     - "POST /repos/e2e-owner/svc-resolve/labels"
-    - "GET /user"
   requests_contain:
     - "PATCH /repos/e2e-owner/svc-resolve/issues/7"
