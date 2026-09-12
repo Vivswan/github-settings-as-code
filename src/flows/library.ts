@@ -29,7 +29,6 @@ export function validateSettings(
   ).map((settings) => ({ settings, warnings: collected.lines.map((entry) => entry.line) }));
 }
 
-
 export type RepoRunReport = RepoRunResult & { log: CollectedLine[] };
 
 async function runMode(

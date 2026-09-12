@@ -38,7 +38,6 @@ import {
 } from "./redact.js";
 import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
-
 export interface TargetResult {
   result: RepoResult;
   outcomes: SectionOutcome[];
@@ -97,7 +96,6 @@ export interface DeliveryConfig {
   runUrl: string;
 }
 
-
 export interface RunFlowConfig extends DeliveryConfig {
   onMissingPermission: "fail" | "warn";
   sections: SectionSelection;
@@ -114,7 +112,6 @@ export function requireUploader(
     ? err({ code: "artifact-uploader-missing" })
     : ok();
 }
-
 
 export type Exposure = { kind: "shown" } | { kind: "redacted"; visibility: RepoVisibility };
 

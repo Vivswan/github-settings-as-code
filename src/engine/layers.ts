@@ -268,7 +268,6 @@ function checkKeyed(
   return ok();
 }
 
-
 function fileLayering(
   layer: string,
   doc: Readonly<Record<string, unknown>>,
@@ -282,7 +281,6 @@ function fileLayering(
   }
   return ok(value);
 }
-
 
 function admitSection(
   layer: string,
