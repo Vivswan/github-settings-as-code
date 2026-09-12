@@ -24,7 +24,6 @@ function layer(name: string, doc: unknown): Layer {
   return { name, doc: deepFreeze(doc) };
 }
 
-/** The fold's verdict as the tests pin it: the merged document, or the refusal's code and its prose. */
 function merge(layers: Layer[], layering: Layering = "merge") {
   return mergeLayers(layers, { layering }).match(
     (folded) => folded,

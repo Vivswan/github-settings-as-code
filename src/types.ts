@@ -19,8 +19,5 @@ export interface UndeclaredPolicyList<E> {
 
 export type MustBeNever<T extends never> = T;
 
-/**
- * Omit distributed over a union: `Omit<A | B, K>` collapses to the common
- * keys, losing each member's own fields, while this keeps one member per arm.
- */
+/** `Omit<A | B, K>` collapses to the common keys, losing each member's own fields; this keeps one member per arm. */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;

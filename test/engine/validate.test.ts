@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 
-/** The verdict's issue list, or null when the document validated. */
 function issuesOf(doc: Record<string, unknown>, sourceLabel = "f.yml"): readonly string[] | null {
   return validateSectionShapes(doc, sourceLabel).match(
     () => null,

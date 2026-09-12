@@ -55,7 +55,6 @@ export interface RepoRunOptions {
   settings: ValidatedSettings;
   mode: "apply" | "check";
   onMissingPermission: "fail" | "warn";
-  /** Which sections run and which must fully apply, validated together at construction. */
   sections: SectionSelection;
   /** Omitted, "operator". The multi-repo flow passes "target" for a target's own settings.yml, so its secret references are refused. */
   secretSource?: SettingsSource;

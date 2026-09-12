@@ -277,7 +277,7 @@ export const INPUT_DECLS = {
 
 export type InputName = keyof typeof INPUT_DECLS;
 
-/** The port parseConfig reads inputs through: the raw value, empty when unset; parseConfig trims it. */
+/** Empty when unset; parseConfig trims, so a port need not. */
 export type InputReader = (name: InputName) => string;
 
 /**
@@ -288,7 +288,6 @@ export type InputReader = (name: InputName) => string;
  */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
 
-/** The reader plus the declared-default fallback, so every helper reads one way. */
 interface Inputs {
   readonly value: InputReader;
   readonly orDefault: (name: InputName) => string;
@@ -569,7 +568,6 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
     const settingsFile = input.orDefault("settings-file");
 
     if (reposInput || reposDir) {
-  
       if (input.value("repository")) {
         return err({ code: "input-repository-with-multi" });
       }
@@ -589,7 +587,6 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       });
     }
 
-  
     if (discoveryFiltersSet.length > 0) {
       return err({
         code: "discovery-filters-without-wildcard",

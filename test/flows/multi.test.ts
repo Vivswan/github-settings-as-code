@@ -57,7 +57,6 @@ function captureIo(): {
 const redacted = (target: TargetOutcome | undefined): boolean =>
   target !== undefined && isPrivate(target.detail);
 
-/** The run's targets; a fatal problem fails the test with its rendered line. */
 async function runTargets(...args: Parameters<typeof runMulti>): Promise<TargetOutcome[]> {
   return (await runMulti(...args)).match(
     (targets) => targets,
@@ -67,7 +66,6 @@ async function runTargets(...args: Parameters<typeof runMulti>): Promise<TargetO
   );
 }
 
-/** The fatal problem a run ends in before any target executes. */
 async function runFatal(...args: Parameters<typeof runMulti>): Promise<Problem> {
   return (await runMulti(...args)).match(
     (targets) => {

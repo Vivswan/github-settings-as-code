@@ -142,12 +142,10 @@ export function discoverRepos(
   });
 }
 
-/** Keep the repositories the filters admit; group the rest by the first reason that hit. */
 function applyFilters(
   repos: readonly DiscoveredRepo[],
   filters: DiscoveryFilters,
 ): DiscoveryResult {
-
   const rules: Array<(repo: DiscoveredRepo) => string | null> = [
     (repo) => {
       const isInternal = repo.visibility === "internal";
