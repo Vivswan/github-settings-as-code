@@ -1,13 +1,12 @@
 /**
  * The mode: snapshot run flow: read each target's live settings back through
  * the section snapshot ports and write them as a settings document, one file
- * for one repository or one file per multi-repo target under a directory.
- * The document reaches ONLY the file. Every public surface (annotations, the
- * step summary, the outputs) carries section keys, statuses, and the notes
- * check mode prints for the same repository (a secret's name, a webhook's
- * URL, never a secret's value), routed through the target's redaction channel
- * exactly as check mode routes its lines, so a redacted target's file lands
- * on disk while nothing about it is printed.
+ * per repository. The document reaches ONLY the file. Every public surface
+ * (annotations, the step summary, the outputs) carries section keys, statuses,
+ * and the notes check mode prints for the same repository (a secret's name, a
+ * webhook's URL, never its value), routed through the target's redaction
+ * channel exactly as check mode routes its lines, so a redacted target's file
+ * lands on disk while nothing about it is printed.
  */
 
 import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -160,10 +159,14 @@ function isWithin(path: string, dir: string): boolean {
  * Whether one directory is or contains the other under either naming. As
  * spelled catches a symlink INSIDE one that leads into the other (repos-dir
  * "out/central" -> "../authored" under snapshot-dir "out"); as the filesystem
- * names them catches a case alias or a symlink TO the other.
+ * names them catches a case alias or a symlink TO the other. The dir form
+ * writes join(snapshotDir, owner, name), and join collapses "link/.." before
+ * the OS sees it, so the filesystem naming starts from the collapsed spelling
+ * too: "link/../snapshots" lands beside link, never inside its target. The
+ * file form writes its spelling raw and stays on OS semantics.
  */
 function overlap(a: string, b: string): boolean {
-  return [resolve, canonicalPath].some(
+  return [resolve, (p: string) => canonicalPath(resolve(p))].some(
     (name) => isWithin(name(a), name(b)) || isWithin(name(b), name(a)),
   );
 }

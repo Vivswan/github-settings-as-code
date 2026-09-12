@@ -693,6 +693,43 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
 });
 
 describe("runSnapshot, dir form", () => {
+  test("a snapshot-dir spelled through a link and .. lands where join puts it, beside the link, and is not refused", async () => {
+    // The write collapses "link/.." before the OS sees it; the guard must judge the same place, not link's target.
+    mkdirSync(join(dir, "central", "o"), { recursive: true });
+    mkdirSync(join(dir, "central", "inner"));
+    writeFileSync(join(dir, "central", "o", "r.yml"), "labels: []\n");
+    symlinkSync(join("central", "inner"), join(dir, "link"));
+    const api = new MockApi(labelsRoute("o/r", [BUG]));
+    const cfg = dirCfg({
+      snapshotDir: ["link", "..", "snapshots"].join(sep),
+      reposDir: "central",
+      reposInput: "",
+      privateRepos: "show",
+    });
+    const collected = collectingIo();
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(await run(api, cfg, collected.io)).toBe(0);
+    } finally {
+      process.chdir(previous);
+    }
+    expect(parseYaml(readFileSync(join(dir, "snapshots", "o", "r.yml"), "utf8"))).toEqual(doc(BUG));
+    expect(existsSync(join(dir, "central", "snapshots"))).toBe(false);
+    expect(readFileSync(join(dir, "central", "o", "r.yml"), "utf8")).toBe("labels: []\n");
+    expect(collected.outputs).toEqual({
+      "skipped-sections": "",
+      result: "snapshot",
+      "repos-result": JSON.stringify({
+        "o/r": { result: "snapshot", source: "central", skippedSections: [] },
+      }),
+    });
+    expect(collected.lines).toEqual([
+      { line: `o/r: snapshot written to ${join(cfg.snapshotDir, "o", "r.yml")}` },
+      { line: "result: snapshot" },
+    ]);
+  });
+
   test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", async () => {
     const api = new MockApi({
       "GET /repos/o/a": { data: { private: false } },
