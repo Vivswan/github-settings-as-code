@@ -48,6 +48,13 @@ export const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
     statuses: { 204: "signed-commit requirement removed" },
   },
+  // The snapshot's entry point: every branch a classic rule or a ruleset protects.
+  // Contents-gated like the probe below (the same branch family).
+  listProtected: {
+    route: "GET /repos/{owner}/{repo}/branches",
+    statuses: { 200: "the protected branches" },
+    permission: { repo: ["contents"] },
+  },
   // Advisory: tells a missing branch from an unprotected one after the protection 404. A token
   // without Contents is denied as a 404 "Not Found" too, so only MISSING_BRANCH changes the finding;
   // without Contents a missing branch surfaces at the PUT instead, which is why Contents stays out

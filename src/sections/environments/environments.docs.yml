@@ -1,7 +1,8 @@
 sections_table:
   endpoints: >-
-    PUT environments + per-environment variables, secrets, deployment branch policies, deployment
-    protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment + ReorderEnvironment)
+    environment listing + PUT environments + per-environment variables, secrets, deployment branch
+    policies, deployment protection rules, and pins (GraphQL EnvironmentPins + PinEnvironment +
+    ReorderEnvironment)
   notes: >-
     reviewers, wait timer, branch-policy flags; nested `variables`, `secrets`,
     `deployment_branch_policies`, and `deployment_protection_rules` keys reconcile per environment,
@@ -78,6 +79,16 @@ coverage:
       the leading ranks is moved after the declared block, surfaced as a note in BOTH modes so check
       and apply agree exactly. Everything reads back, so check mode reports exact pin membership and
       order drift (the order line names both sequences). Undeclared environments are left untouched.
+      Snapshot lists the environments (GET /repos/{owner}/{repo}/environments) and reads each one
+      back as an entry: the PUT-shape settings off its GET body, and every nested list that has
+      live items in its wrapped form under that list's default policy - variables with their
+      values, secrets as `$SECRET_ENVIRONMENT_<NAME>_<SECRET>` references with a note each (the
+      per-store minting the secret sections use, the environment folded into the store so
+      same-named secrets in two environments get two variables; two names the fold collapses are
+      noted once), branch-policy patterns while the custom_branch_policies flag is on, and the
+      enabled protection rules by App slug (those two lists sit behind the Actions grant, so a
+      denial there leaves the key out with a note and the rest of the environment reads back). The pin state is GraphQL-only and not read back (noted
+      once).
 schema:
   SettingsFile.environments: Deployment environments, upserted by name.
   DeploymentBranchPolicyConfig: >-

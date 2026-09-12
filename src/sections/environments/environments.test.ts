@@ -11,6 +11,7 @@ import {
   FLAG_PAIRING_FIXTURES,
 } from "../../../test/fixtures/environment-flag-pairing.js";
 import { MockApi } from "../../../test/mock-api.js";
+import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import {
   NO_SECRETS,
@@ -30,6 +31,7 @@ import type {
   EnvironmentConfig,
   EnvironmentVariableConfig,
 } from "./schema.js";
+import { PINNED_NOTE, sharedSecretNotes } from "./snapshot.js";
 
 const { plan, check, apply } = sectionRunners(environmentsSection);
 
@@ -141,6 +143,7 @@ describe("environments plan", () => {
   test("the read port exposes exactly the GET roles and the pins query, the probe in its absent posture", () => {
     const ctx = planContext(environmentsSection, new MockApi({}), REPO);
     expect(Object.keys(ctx.read).sort()).toEqual([
+      "list",
       "listPolicies",
       "listProtectionRuleApps",
       "listProtectionRules",
@@ -1454,5 +1457,137 @@ describe("environments convergence", () => {
     expect(second.notes).toEqual([
       "staging environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
     ]);
+  });
+});
+
+describe("environments snapshot", () => {
+  const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+
+  test("a disabled protection rule and patterns behind an off flag are not read back; a lowercase secret listing reads back under its uppercase key", async () => {
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {
+      environments: {
+        qa: {
+          name: "qa",
+          protection_rules: [],
+          deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+        },
+      },
+      environment_branch_policies: { qa: [{ id: 4001, name: "hidden/*", type: "branch" }] },
+      environment_protection_rules: {
+        qa: [
+          {
+            id: 7100,
+            node_id: "DPR_7100",
+            enabled: false,
+            app: { id: 3516, slug: "region-guard" },
+          },
+          { id: 7101, node_id: "DPR_7101", enabled: true, app: { id: 3515, slug: "deploy-gate" } },
+        ],
+      },
+      environment_secrets: { qa: [{ name: "github_pat", ...STAMPS }] },
+    });
+    const snapshot = await environmentsSection.snapshot(
+      planContext(environmentsSection, api, REPO),
+    );
+    expect(snapshot).toEqual({
+      value: [
+        {
+          name: "qa",
+          deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+          secrets: {
+            _undeclared: "keep",
+            entries: [{ name: "GITHUB_PAT", value: "$SECRET_ENVIRONMENT_QA_GITHUB_PAT" }],
+          },
+          deployment_protection_rules: { _undeclared: "keep", entries: [{ app: "deploy-gate" }] },
+        },
+      ],
+      notes: [
+        "environments[qa].secrets[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_QA_GITHUB_PAT before apply",
+        PINNED_NOTE,
+      ],
+    });
+    expect(api.writes).toEqual([]);
+  });
+
+  test("two environment names the reference fold collapses earn one shared-variable note", () => {
+    const secrets = (names: string[]) => ({
+      _undeclared: "keep" as const,
+      entries: names.map((name) => ({ name, value: `$${name}` })),
+    });
+    expect(
+      sharedSecretNotes([
+        { name: "prod-eu", secrets: secrets(["DEPLOY_TOKEN", "API_KEY"]) },
+        { name: "prod_eu", secrets: secrets(["DEPLOY_TOKEN"]) },
+        { name: "prod.eu", secrets: secrets(["DEPLOY_TOKEN"]) },
+        { name: "staging", secrets: secrets(["DEPLOY_TOKEN"]) },
+        { name: "dev" },
+      ]),
+    ).toEqual([
+      "secrets: environments[prod-eu].secrets[DEPLOY_TOKEN], environments[prod_eu].secrets[DEPLOY_TOKEN], " +
+        "environments[prod.eu].secrets[DEPLOY_TOKEN] all read their value from " +
+        "SECRET_ENVIRONMENT_PROD_EU_DEPLOY_TOKEN; edit a reference to give one its own value",
+    ]);
+  });
+
+  test("a token with only the Environments grant loses the Actions-gated keys to notes, not the section", async () => {
+    const inner = fragmentFake(environmentsSection, environmentsMockHandlers, {
+      environments: {
+        production: {
+          name: "production",
+          protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }],
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+        },
+      },
+      environment_variables: { production: [{ name: "REGION", value: "eu", ...STAMPS }] },
+      environment_branch_policies: {
+        production: [{ id: 4001, name: "release/*", type: "branch" }],
+      },
+      environment_protection_rules: {
+        production: [
+          { id: 7100, node_id: "DPR_7100", enabled: true, app: { id: 3516, slug: "region-guard" } },
+        ],
+      },
+    });
+    const actionsGated = /\/(deployment-branch-policies|deployment_protection_rules)(\?|$)/;
+    const api: GithubClient = {
+      tryRequest: (method, path, payload, options) =>
+        actionsGated.test(path)
+          ? Promise.resolve({
+              error: {
+                status: 403,
+                message: "Resource not accessible by personal access token",
+                body: "",
+              },
+            })
+          : inner.tryRequest(method, path, payload, options),
+      tryGraphql: (op, variables, slug) => inner.tryGraphql(op, variables, slug),
+    };
+    const snapshot = await environmentsSection.snapshot(
+      planContext(environmentsSection, api, REPO),
+    );
+    expect(snapshot).toEqual({
+      value: [
+        {
+          name: "production",
+          wait_timer: 5,
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+          variables: { _undeclared: "delete", entries: [{ name: "REGION", value: "eu" }] },
+        },
+      ],
+      notes: [
+        'environments[production].deployment_branch_policies: left out of the snapshot - the token was denied GET /repos/o/r/environments/production/deployment-branch-policies: 403 Resource not accessible by personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also mean the environment does not exist, or that its deployment_branch_policy does not set custom_branch_policies: true',
+        'environments[production].deployment_protection_rules: left out of the snapshot - the token was denied listing deployment protection rules of environment "production" failed - GET /repos/o/r/environments/production/deployment_protection_rules: 403 Resource not accessible by personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also mean the environment does not exist',
+        PINNED_NOTE,
+      ],
+    });
+    expect(inner.writes).toEqual([]);
+  });
+
+  test("no environment reads back as nothing to declare", async () => {
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {});
+    const snapshot = await environmentsSection.snapshot(
+      planContext(environmentsSection, api, REPO),
+    );
+    expect(snapshot).toEqual({ value: undefined, notes: [] });
   });
 });

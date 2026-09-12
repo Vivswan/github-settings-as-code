@@ -22,7 +22,7 @@ const LiveProtectionRule = z.looseObject({
 });
 type LiveProtectionRule = z.infer<typeof LiveProtectionRule>;
 
-function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
+export function liveRuleSlug(rule: LiveProtectionRule, envName: string): string {
   const slug = rule.app?.slug;
   if (typeof slug !== "string") {
     throw new Error(
@@ -47,7 +47,7 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): string {
  * the page loop would append a query GitHub never specified. Both envelope keys are optional in the
  * spec, so an ABSENT list reads as empty, while a PRESENT off-shape value fails loudly in parseLive.
  */
-async function listProtectionRules(
+export async function listProtectionRules(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
   envName: string,
