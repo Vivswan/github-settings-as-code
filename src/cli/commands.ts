@@ -8,6 +8,7 @@
 import {
   concludeMerge,
   concludeRun,
+  concludeSnapshot,
   describeProblem,
   failRun,
   type GithubClient,
@@ -20,6 +21,7 @@ import {
   runMerge,
   runMulti,
   runSingle,
+  runSnapshot,
   SECTIONS,
   type SectionModule,
   sectionGrant,
@@ -49,6 +51,12 @@ export async function runConfig(cfg: RunConfig, io: Io, host: CliHost): Promise<
     );
   }
   const api = host.createClient(cfg.token, io, cfg.apiVersion);
+  if (cfg.kind === "snapshot") {
+    return runSnapshot(api, cfg, io).match(
+      (finished) => concludeSnapshot(io, finished),
+      (problem) => failRun(io, problem),
+    );
+  }
   if (cfg.kind === "multi") {
     return runMulti(api, cfg, io).match(
       (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),

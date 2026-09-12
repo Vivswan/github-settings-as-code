@@ -1,0 +1,30 @@
+name: agents_variables-snapshot-roundtrip
+description: "mode: snapshot reads the live agents_variables back into snapshot.yml and writes nothing to GitHub. The agents_variables read back as name and value, the timestamps dropped. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  agents_variables:
+    - name: REGION
+      value: eu-west-1
+      created_at: 2026-01-01T00:00:00Z
+      updated_at: 2026-01-01T00:00:00Z
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: agents_variables
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    agents_variables: snapshot
+  snapshot:
+    agents_variables:
+      _undeclared: delete
+      entries:
+        - name: REGION
+          value: eu-west-1
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

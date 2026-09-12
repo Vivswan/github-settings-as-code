@@ -56,15 +56,23 @@ import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 /** The single source for the action.yml `settings-file` default, the multi-repo override guard in src/flows/inputs.ts, and the prose below. */
 export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 
-export interface MultiConfig extends RunFlowConfig {
+/**
+ * Where a multi-repo run's targets come from and how their slugs may appear:
+ * the inputs resolveTargets reads. Apply, check, and snapshot share it, so
+ * the three modes name the same fleet from the same inputs.
+ */
+export interface TargetsConfig extends Pick<RunFlowConfig, "privateRepos" | "selfSlug"> {
   reposDir: string;
   reposInput: string;
-  defaultsFile: string;
   /** The owner a bare `<name>.yml` file under repos-dir belongs to. */
   adminOwner: string;
   discoveryFilters: DiscoveryFilters;
   /** Filter inputs the user explicitly set, for the misuse rejections. */
   discoveryFiltersSet: string[];
+}
+
+export interface MultiConfig extends RunFlowConfig, TargetsConfig {
+  defaultsFile: string;
 }
 
 /** The channel is the only sink in scope, so a redacted target's text lands only in its report. */
@@ -154,7 +162,7 @@ async function processTarget(ctx: {
  * Channel and exposure come from ONE redaction decision, so a redacted channel never travels with a shown exposure.
  * Discovery's full_name is API data, so parseRepoSlug is checked here; a slug that fails it becomes the target's failure.
  */
-function openTarget(
+export function openTarget(
   plan: RedactionPlan,
   io: Io,
   slug: string,
@@ -212,12 +220,27 @@ async function readTargetSettings(
   return { raw: file.content, sourceLabel, source: "target" };
 }
 
-export function runMulti(
+/** The fleet a run acts on, with the redaction decision every target reports under. */
+export interface ResolvedTargets {
+  /** Deduped, central first, in the order the run processes them. */
+  targets: Target[];
+  plan: RedactionPlan;
+  /** A slug's resolved visibility; "unknown" for a slug never resolved. */
+  visibilityOf: (slug: string) => RepoVisibility;
+}
+
+/**
+ * Resolve the run's targets (repos-dir files, explicit repos, "*" discovery),
+ * decide redaction, and register every masked slug BEFORE the first line is
+ * emitted. A config problem (bad repos input, discovery failure, misplaced
+ * filters, no targets) comes back as the error; nothing has been emitted about
+ * a target when it does.
+ */
+export function resolveTargets(
   api: GithubClient,
-  cfg: MultiConfig,
+  cfg: TargetsConfig,
   io: Io,
-  uploader?: ArtifactUploader,
-): ResultAsync<TargetOutcome[], Problem> {
+): ResultAsync<ResolvedTargets, Problem> {
   // Central-resolution warnings are buffered so nothing emits before the redaction mask is registered; every exit path,
   // fatal or not, flushes them through this one helper (the fatal ones via orTee). They name repos-dir paths and slugs,
   // which are self-disclosed (checked into the public admin repo), so flushing them before masking on a fatal path leaks nothing.
@@ -236,14 +259,6 @@ export function runMulti(
   const fail = (problem: Problem): Err<never, Problem> => err(problem);
 
   return safeTry(async function* () {
-    yield* requireUploader(cfg, uploader);
-
-    let defaults: ValidatedSettings | null = null;
-    if (cfg.defaultsFile) {
-      const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
-      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections.only, io);
-    }
-
     let central: CentralTarget[] = [];
     if (cfg.reposDir) {
       const resolved = yield* resolveCentralTargets(cfg.reposDir, cfg.adminOwner);
@@ -357,6 +372,34 @@ export function runMulti(
     if (targets.length === 0) {
       return fail({ code: "no-targets", filteredOut: filteredOutCount });
     }
+    return ok({ targets, plan, visibilityOf });
+  }).orTee(flushWarnings);
+}
+
+/**
+ * Multi-repo orchestration. Config-level problems (bad defaults file, no
+ * targets, duplicate definitions, discovery failure) come back as the error
+ * before any target executes; per-target problems mark that target failed or
+ * skipped and never stop the others.
+ */
+export function runMulti(
+  api: GithubClient,
+  cfg: MultiConfig,
+  io: Io,
+  uploader?: ArtifactUploader,
+): ResultAsync<TargetOutcome[], Problem> {
+  return safeTry(async function* () {
+    yield* requireUploader(cfg, uploader);
+
+    // The defaults document is read before the fleet is resolved: nothing about
+    // a target has been emitted yet, so its failure names only the local file.
+    let defaults: ValidatedSettings | null = null;
+    if (cfg.defaultsFile) {
+      const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
+      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections.only, io);
+    }
+
+    const { targets, plan, visibilityOf } = yield* resolveTargets(api, cfg, io);
 
     const results = await withDelivery({ api, cfg, io, uploader }, async (delivery) => {
       const delivered: TargetOutcome[] = [];
@@ -383,5 +426,5 @@ export function runMulti(
     });
 
     return ok(results);
-  }).orTee(flushWarnings);
+  });
 }

@@ -61,9 +61,16 @@ const OwnerKindSchema = z.enum(["org", "user"]);
 /** The action inputs a scenario can set; the list inputs stay comma-separated strings, the action's own wire format. */
 const InputsSchema = z
   .object({
-    mode: z.enum(["apply", "check", "merge"]).optional(),
+    mode: z.enum(["apply", "check", "merge", "snapshot"]).optional(),
     /** The mode: merge run default for the keyed list sections (INPUT_LAYERING). */
     layering: z.enum(["merge", "replace"]).optional(),
+    /**
+     * mode: snapshot only, exactly one of the two: where the child writes,
+     * relative to the scenario's temp dir (its working directory), forwarded
+     * verbatim as INPUT_SNAPSHOT-FILE / INPUT_SNAPSHOT-DIR.
+     */
+    snapshot_file: z.string().optional(),
+    snapshot_dir: z.string().optional(),
     on_missing_permission: z.enum(["fail", "warn"]).optional(),
     required_sections: z.string().optional(),
     sections: z.string().optional(),
@@ -172,6 +179,19 @@ const ExpectSchema = z
      * YAML parse. A merge never runs the engine, so it cannot combine with a fixpoint re-run proof.
      */
     merged: SettingsSchema.optional(),
+    /**
+     * mode: snapshot, file form only: the EXACT document the run must write to
+     * snapshot_file, compared whole after a YAML parse (so the comment header
+     * is ignored). A dir-form target pins its file under `repos.<slug>.expect.snapshot`.
+     */
+    snapshot: SettingsSchema.optional(),
+    /**
+     * mode: snapshot, file form only. When true, the runner re-runs the bundle
+     * in CHECK mode with the written snapshot as its settings file against the
+     * SAME seeded state (the allowlist and the denial policy carried over) and
+     * expects exit 0, `result: clean`, and zero writes: the round trip.
+     */
+    snapshot_converges: z.boolean().optional(),
   })
   .strict()
   // apply_idempotent's final check-mode run IS the convergence proof, so arming both would rerun it.
@@ -191,6 +211,18 @@ const ExpectSchema = z
       expected.fixpoint === undefined ||
       (expected.converges === undefined && expected.apply_idempotent === undefined),
     { message: "set fixpoint or a legacy converges/apply_idempotent boolean, not both" },
+  )
+  // A snapshot applies nothing, so the apply-mode fixpoint proofs have no run to re-run.
+  .refine(
+    (expected) =>
+      (expected.snapshot === undefined && expected.snapshot_converges === undefined) ||
+      (expected.converges === undefined &&
+        expected.apply_idempotent === undefined &&
+        expected.fixpoint === undefined),
+    {
+      message:
+        "snapshot and snapshot_converges pin a mode: snapshot run, which has no apply-mode fixpoint",
+    },
   )
   // The two YAML booleans collapse into one armed proof, so consumers branch on a single enum instead
   // of two booleans whose exclusivity would otherwise live in a comment.
@@ -229,7 +261,14 @@ const MultiRepoSchema = z
     settings_raw: z.string().optional(),
     live_state: LiveStateSchema.optional(),
     permissions: TokenPermissionsSchema.optional(),
-    expect: z.object({ result: z.string().optional() }).strict().optional(),
+    expect: z
+      .object({
+        result: z.string().optional(),
+        /** mode: snapshot, dir form: the EXACT document written to `<snapshot_dir>/<owner>/<name>.yml`. */
+        snapshot: SettingsSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   // Both define the served settings.yml; setting both would silently favor one.
@@ -369,6 +408,41 @@ const ScenarioSchema = z
   // A merge runs no engine: a fixpoint re-run would be a check against nothing.
   .refine((s) => s.inputs?.mode !== "merge" || s.expect.fixpoint === undefined, {
     message: "a mode: merge scenario cannot arm converges or apply_idempotent",
+  })
+  // The snapshot destinations and their pins describe a mode: snapshot run and
+  // nothing else; anywhere else they would be dead configuration.
+  .refine(
+    (s) =>
+      s.inputs?.mode === "snapshot" ||
+      (s.inputs?.snapshot_file === undefined && s.inputs?.snapshot_dir === undefined),
+    { message: "snapshot_file and snapshot_dir only apply with inputs.mode: snapshot" },
+  )
+  .refine(
+    (s) =>
+      s.inputs?.mode !== "snapshot" ||
+      (s.inputs.snapshot_file === undefined) !== (s.inputs.snapshot_dir === undefined),
+    {
+      message:
+        "a mode: snapshot scenario sets exactly one of inputs.snapshot_file or inputs.snapshot_dir",
+    },
+  )
+  .refine(
+    (s) =>
+      (s.expect.snapshot === undefined && s.expect.snapshot_converges === undefined) ||
+      s.inputs?.snapshot_file !== undefined,
+    {
+      message: "expect.snapshot and expect.snapshot_converges only apply with inputs.snapshot_file",
+    },
+  )
+  .refine(
+    (s) =>
+      s.inputs?.snapshot_dir !== undefined ||
+      Object.values(s.repos ?? {}).every((repo) => repo.expect?.snapshot === undefined),
+    { message: "repos.<slug>.expect.snapshot only applies with inputs.snapshot_dir" },
+  )
+  // A snapshot never runs the engine's apply path, so a fixpoint proof has no run to re-run.
+  .refine((s) => s.inputs?.mode !== "snapshot" || s.expect.fixpoint === undefined, {
+    message: "a mode: snapshot scenario cannot arm converges or apply_idempotent",
   });
 
 export type MaskKey = z.infer<typeof MaskKeySchema>;
@@ -442,6 +516,7 @@ export function markerLabelFixtureMismatches(scenario: Scenario): string[] {
   for (const [slug, repo] of Object.entries(scenario.repos ?? {})) {
     roots.push([`repos.${slug}.settings`, repo.settings], [`repos.${slug}.expect`, repo.expect]);
   }
+  // Marker-label fixtures inside a pinned snapshot are declared data too.
   return roots.flatMap(([path, root]) => markerMismatchesIn(root, path));
 }
 

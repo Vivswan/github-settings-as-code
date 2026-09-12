@@ -1,0 +1,47 @@
+name: pages-snapshot-roundtrip
+description: "mode: snapshot reads the live pages back into snapshot.yml and writes nothing to GitHub. The live Pages site reads back as its declarable fields; the server-owned ones (url, status, html_url, the certificate) fall away. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    status: built
+    cname: docs.example.com
+    custom_404: false
+    html_url: https://e2e-owner.github.io/e2e-repo/
+    build_type: workflow
+    source:
+      branch: main
+      path: /
+    public: true
+    https_certificate:
+      state: approved
+      description: ok
+      domains:
+        - docs.example.com
+    https_enforced: true
+    protected_domain_state: null
+    pending_domain_unverified_at: null
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: pages
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    pages: snapshot
+  snapshot:
+    pages:
+      build_type: workflow
+      source:
+        branch: main
+        path: /
+      cname: docs.example.com
+      https_enforced: true
+      public: true
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

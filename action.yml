@@ -33,13 +33,17 @@ inputs:
     default: ".github/settings.yml"
   mode:
     description: >-
-      apply (mutate), check (report drift, exit 1 on any), or merge (fold the
+      apply (mutate), check (report drift, exit 1 on any), merge (fold the
       settings-file layers into one document written to merged-file, with no
       token and no GitHub API call; merge reads only settings-file,
       merged-file, and layering, ignores token, and rejects every other input
-      set to a non-default value, since each controls an apply or check run).
-      check makes no settings changes, though a private report may still be
-      delivered.
+      set to a non-default value, since each controls an apply or check run),
+      or snapshot (read the live settings of the target repositories back and
+      write each as a settings document to snapshot-file or under
+      snapshot-dir; nothing is written to GitHub, the document reaches only
+      the file, and every input that controls an apply, a check, or a merge is
+      rejected). check makes no settings changes, though a private report may
+      still be delivered.
     required: false
     default: "apply"
   merged-file:
@@ -53,6 +57,34 @@ inputs:
       apply or check step as its settings-file. Must not name one of the
       settings-file layers (the merge would overwrite it). Fails when set in
       apply or check.
+    required: false
+    default: ""
+  snapshot-file:
+    description: >-
+      mode: snapshot only, and exactly one of snapshot-file and snapshot-dir
+      is required there: the path one repository's live settings are written
+      to as a settings document (parent directories are created). The target
+      is the repository input, defaulting to the current repository, so it
+      cannot be combined with repos or repos-dir. The header pins the schema,
+      names the repository and the moment, and lists every section note;
+      secret values GitHub never reveals become $NAME references to export
+      before an apply. Must not be .github/settings.yml, the file apply and
+      check read: the snapshot would overwrite the document you author, so
+      write it beside that file and copy it over deliberately. Fails when set
+      in apply, check, or merge.
+    required: false
+    default: ""
+  snapshot-dir:
+    description: >-
+      mode: snapshot only, and exactly one of snapshot-file and snapshot-dir
+      is required there: the directory the multi-repo targets' live settings
+      are written under, one <owner>/<name>.yml per target (the repos-dir
+      layout, so the directory can later serve as a repos-dir). The targets
+      come from repos and repos-dir exactly as in a multi-repo apply,
+      discovery filters included; defaults-file does not apply. Must be
+      disjoint from the repos-dir (not the same directory, not above it, not
+      below it): the snapshots would overwrite the central files or be read
+      back as central files. Fails when set in apply, check, or merge.
     required: false
     default: ""
   on-missing-permission:
@@ -72,10 +104,10 @@ inputs:
     default: ""
   sections:
     description: >-
-      Optional comma-separated allowlist of sections to process. apply and
-      check only: mode: merge writes every section its layers declare, so the
-      allowlist belongs on the step that runs the merged document and fails
-      the merge when set.
+      Optional comma-separated allowlist of sections to process. apply, check,
+      and snapshot only: mode: merge writes every section its layers declare,
+      so the allowlist belongs on the step that runs the merged document and
+      fails the merge when set.
     required: false
     default: ""
   api-version:
@@ -219,18 +251,18 @@ outputs:
   result:
     description: >-
       applied | partial | clean | drift | failed (worst-of across all targets
-      in multi-repo mode, where skipped can also appear), or merged in mode:
-      merge.
+      in multi-repo mode, where skipped can also appear), merged in mode:
+      merge, or snapshot | partial | failed in mode: snapshot.
   skipped-sections:
     description: >-
       Comma-separated sections skipped for missing permissions (deduped union
       across targets in multi-repo mode).
   repos-result:
     description: >-
-      Multi-repo mode only: JSON map of owner/name to {result, source,
-      skippedSections}. A redacted private target is keyed by its "private
-      repository #N" placeholder instead of its slug. Empty in single-repo
-      mode.
+      Multi-repo mode (and the snapshot-dir form of mode: snapshot) only: JSON
+      map of owner/name to {result, source, skippedSections}. A redacted
+      private target is keyed by its "private repository #N" placeholder
+      instead of its slug. Empty in single-repo mode.
 # END GENERATED: action-outputs
 
 runs:

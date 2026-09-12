@@ -21,6 +21,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 | Use the engine from your own code | [reference/library.md](reference/library.md) |
 | Run check, apply, or validate from a terminal | [start/cli.md](start/cli.md) |
 | Detect drift on a schedule | [operate/check-mode.md](operate/check-mode.md) |
+| Write a repository's live settings to a file | [operate/snapshot.md](operate/snapshot.md) |
 | Fold several settings files into one | [operate/layering.md](operate/layering.md) |
 | Manage a fleet from one repository | [operate/multi-repo.md](operate/multi-repo.md) |
 | Keep private targets out of public logs | [operate/private-repositories.md](operate/private-repositories.md) |
@@ -50,6 +51,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 ## operate: day-to-day operation
 
 - [Check mode](operate/check-mode.md): drift detection on a schedule, exit codes, and what a "cannot verify" note is telling you.
+- [Snapshot mode](operate/snapshot.md): `mode: snapshot` writes the live settings as a settings file, the `$NAME` placeholders secrets become, the round trip and its exceptions, and the per-repo directory form.
 - [Layering settings files](operate/layering.md): `mode: merge` folds an ordered list of files into one document, the rules of the fold, the `_layering` directive, and the two-step workflow.
 - [Multi-repo mode](operate/multi-repo.md): manage a fleet from one admin repository with per-repo files, discovery, and a defaults-file fallback for repositories without a file.
 - [Private repositories](operate/private-repositories.md): the redaction that keeps private targets out of public logs, and the private-report channels.

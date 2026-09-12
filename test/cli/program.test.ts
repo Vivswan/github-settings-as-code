@@ -281,6 +281,53 @@ describe("merge", () => {
   });
 });
 
+describe("snapshot", () => {
+  const LABEL = { name: "bug", color: "d73a4a", description: "Something is broken" };
+
+  test("writes the live settings to the snapshot file, exits 0, and reports snapshot", async () => {
+    const out = join(tempDir(), "out", "snapshot.yml");
+    const api = new MockApi({
+      "GET /repos/o/r": { data: { private: false } },
+      "GET /repos/o/r/labels?per_page=100&page=1": { data: [LABEL] },
+    });
+    const result = await cli(
+      [
+        "snapshot",
+        "--token",
+        TOKEN,
+        "--repository",
+        "o/r",
+        "--snapshot-file",
+        out,
+        "--sections",
+        "labels",
+      ],
+      api,
+    );
+    expect(result).toEqual({
+      code: 0,
+      stdout: `snapshot written to ${out}\nresult: snapshot\nskipped-sections=\nresult=snapshot\n`,
+      stderr: "",
+    });
+    expect(api.mutations()).toEqual([]);
+    expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
+      labels: { _undeclared: "delete", entries: [LABEL] },
+    });
+  });
+
+  test("a snapshot without a destination fails before any API call, the action's line on stderr", async () => {
+    const api = new MockApi({});
+    const result = await cli(["snapshot", "--token", TOKEN, "--repository", "o/r"], api);
+    expect(api.calls).toHaveLength(0);
+    expect(result).toEqual({
+      code: 1,
+      stdout: "result: failed\nskipped-sections=\nresult=failed\n",
+      stderr:
+        'error: mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them\n',
+    });
+  });
+});
+
 describe("validate and permissions", () => {
   test("validate: a valid file exits 0 naming its sections; --json gives the verdict as an object", async () => {
     const plain = await cli(["validate", SINGLE]);

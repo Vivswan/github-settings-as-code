@@ -32,20 +32,27 @@ function parseFlags(argv: string[]): Flags {
 }
 
 /**
- * A multi scenario declares sections per target and a merge one may declare a section only in a lower
- * layer, so filtering on settings alone would drop both.
+ * A multi scenario declares sections per target, a merge one may declare a section only in a lower
+ * layer, and a snapshot one declares none (its pinned documents and `sections` allowlist name them),
+ * so filtering on settings alone would drop all three.
  */
 function scenarioSections(scenario: Scenario): Set<string> {
   const keys = new Set<string>(Object.keys(scenario.settings ?? {}));
-  for (const spec of Object.values(scenario.repos ?? {})) {
-    if (spec.settings) {
-      for (const key of Object.keys(spec.settings)) {
-        keys.add(key);
-      }
+  for (const key of (scenario.inputs?.sections ?? "").split(",")) {
+    if (key.trim() !== "") {
+      keys.add(key.trim());
     }
   }
-  for (const doc of [scenario.defaults_file ?? {}, ...(scenario.settings_layers ?? [])]) {
-    for (const key of Object.keys(doc)) {
+  const docs: Array<Record<string, unknown> | undefined> = [
+    scenario.defaults_file,
+    ...(scenario.settings_layers ?? []),
+    scenario.expect.snapshot,
+  ];
+  for (const spec of Object.values(scenario.repos ?? {})) {
+    docs.push(spec.settings ?? undefined, spec.expect?.snapshot);
+  }
+  for (const doc of docs) {
+    for (const key of Object.keys(doc ?? {})) {
       keys.add(key);
     }
   }

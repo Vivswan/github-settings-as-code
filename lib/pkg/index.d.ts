@@ -624,6 +624,23 @@ type Problem = {
   readonly inputs: readonly string[];
   readonly mode: EngineMode;
 } | {
+  readonly code: "input-snapshot-only";
+  readonly inputs: readonly string[];
+  readonly mode: EngineMode;
+} | {
+  readonly code: "input-rejected-in-snapshot";
+  readonly inputs: readonly string[];
+} | {
+  readonly code: "input-snapshot-destination-missing";
+} | {
+  readonly code: "input-snapshot-destinations-both";
+} | {
+  readonly code: "input-snapshot-file-with-multi";
+} | {
+  readonly code: "input-repository-with-snapshot-dir";
+} | {
+  readonly code: "input-snapshot-dir-without-targets";
+} | {
   readonly code: "input-token-missing";
 } | {
   readonly code: "input-report-without-redaction";
@@ -642,7 +659,7 @@ type Problem = {
   readonly code: "discovery-filters-without-wildcard";
   readonly filters: readonly string[];
   /** Where the run's targets come from instead of `repos: "*"`. */
-  readonly targets: "single-repo" | "explicit-repos" | "repos-dir";
+  readonly targets: "single-repo" | "explicit-repos" | "repos-dir" | "snapshot-file";
 } | {
   readonly code: "input-defaults-file-without-multi";
 } | {
@@ -723,6 +740,14 @@ type Problem = {
   readonly code: "merged-file-unwritable";
   readonly path: string;
   readonly reason: string;
+} | {
+  readonly code: "snapshot-file-is-settings-file";
+  readonly snapshotFile: string;
+  readonly settingsFile: string;
+} | {
+  readonly code: "snapshot-dir-overlaps-repos-dir";
+  readonly snapshotDir: string;
+  readonly reposDir: string;
 } | {
   readonly code: "no-targets";
   readonly filteredOut: number;
@@ -6539,6 +6564,47 @@ export declare function worstOf(results: Array<{
   result: RepoResult;
 }>, check: boolean): RepoResult;
 //#endregion
+//#region src/engine/snapshot.d.ts
+/**
+ * One section's end state: read back ("snapshot", its notes in detail), denied under the warn
+ * policy ("skipped"), without a snapshot handler ("unsupported", the reason in detail), or failed.
+ */
+interface SectionSnapshotOutcome {
+  key: SectionKey;
+  status: "snapshot" | "skipped" | "unsupported" | "failed";
+  detail: string[];
+}
+/**
+ * The document exists only when the run did not fail: a denial under the fail policy and a
+ * section producing a value its own schema rejects both withhold it, so a failed result cannot be
+ * rendered by mistake. "partial" says a section was skipped or failed without failing the run.
+ */
+type SnapshotResult = {
+  repo: string;
+  result: "snapshot" | "partial";
+  settings: ValidatedSettings;
+  outcomes: SectionSnapshotOutcome[];
+} | {
+  repo: string;
+  result: "failed";
+  settings?: never;
+  outcomes: SectionSnapshotOutcome[];
+};
+/** A snapshot result that carries a document. */
+type RenderableSnapshot = Extract<SnapshotResult, {
+  settings: ValidatedSettings;
+}>;
+/**
+ * The snapshot as a settings file: the language-server schema pin, a comment header naming the
+ * repository, the moment (supplied by the caller, so the text is deterministic), and every
+ * outcome line, then the document as the merge flow writes one. A message spanning several
+ * physical lines (an API error body) is commented line by line, so no line escapes the header.
+ */
+export declare function renderSnapshotYaml(result: RenderableSnapshot, opts: {
+  schemaUrl: string;
+  timestamp: string;
+}): string;
+//#endregion
 //#region src/github/repo-visibility.d.ts
 /** A repository's visibility as the probe established it; "unknown" means it could not. */
 type RepoVisibility = "public" | "private" | "internal" | "unknown";
@@ -6738,16 +6804,45 @@ export declare function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge
 //#region src/flows/multi.d.ts
 /** The single source for the action.yml `settings-file` default, the multi-repo override guard in src/flows/inputs.ts, and the prose below. */
 export declare const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
-interface MultiConfig extends RunFlowConfig {
+/**
+ * Where a multi-repo run's targets come from and how their slugs may appear:
+ * the inputs resolveTargets reads. Apply, check, and snapshot share it, so
+ * the three modes name the same fleet from the same inputs.
+ */
+interface TargetsConfig extends Pick<RunFlowConfig, "privateRepos" | "selfSlug"> {
   reposDir: string;
   reposInput: string;
-  defaultsFile: string;
   /** The owner a bare `<name>.yml` file under repos-dir belongs to. */
   adminOwner: string;
   discoveryFilters: DiscoveryFilters;
   /** Filter inputs the user explicitly set, for the misuse rejections. */
   discoveryFiltersSet: string[];
 }
+interface MultiConfig extends RunFlowConfig, TargetsConfig {
+  defaultsFile: string;
+}
+/** The fleet a run acts on, with the redaction decision every target reports under. */
+interface ResolvedTargets {
+  /** Deduped, central first, in the order the run processes them. */
+  targets: Target[];
+  plan: RedactionPlan;
+  /** A slug's resolved visibility; "unknown" for a slug never resolved. */
+  visibilityOf: (slug: string) => RepoVisibility;
+}
+/**
+ * Resolve the run's targets (repos-dir files, explicit repos, "*" discovery),
+ * decide redaction, and register every masked slug BEFORE the first line is
+ * emitted. A config problem (bad repos input, discovery failure, misplaced
+ * filters, no targets) comes back as the error; nothing has been emitted about
+ * a target when it does.
+ */
+export declare function resolveTargets(api: GithubClient, cfg: TargetsConfig, io: Io): ResultAsync<ResolvedTargets, Problem>;
+/**
+ * Multi-repo orchestration. Config-level problems (bad defaults file, no
+ * targets, duplicate definitions, discovery failure) come back as the error
+ * before any target executes; per-target problems mark that target failed or
+ * skipped and never stop the others.
+ */
 export declare function runMulti(api: GithubClient, cfg: MultiConfig, io: Io, uploader?: ArtifactUploader): ResultAsync<TargetOutcome[], Problem>;
 //#endregion
 //#region src/flows/single.d.ts
@@ -6757,6 +6852,81 @@ interface SingleConfig extends RunFlowConfig {
 }
 type SingleOutcome = Omit<TargetOutcome, "source">;
 export declare function runSingle(api: GithubClient, cfg: SingleConfig, io: Io, uploader?: ArtifactUploader): ResultAsync<SingleOutcome, Problem>;
+//#endregion
+//#region src/flows/snapshot.d.ts
+/**
+ * The `result` output of a mode: snapshot run, worst first: `failed` when a
+ * target failed (a denial under the fail policy, a value a section's own
+ * schema rejects, an unwritable file), `partial` when a section was skipped
+ * or failed without failing its target, `snapshot` when every target read
+ * fully back. Not RepoResult values: a snapshot applies nothing, so they
+ * never enter worstOf beside the per-repo values.
+ */
+export declare const SNAPSHOT_RESULTS: readonly ["failed", "partial", "snapshot"];
+type SnapshotRunResult = (typeof SNAPSHOT_RESULTS)[number];
+/**
+ * The schema the written file's editor hint points at: the schema of this
+ * release line, spelled as the README's quick start spells it. The marker
+ * lets a major release rewrite the tag here (release-please-config.json lists
+ * this file); test/docs/readme.test.ts pins it to the README's hint.
+ */
+export declare const SNAPSHOT_SCHEMA_URL = "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json";
+interface SnapshotConfigBase {
+  onMissingPermission: "fail" | "warn";
+  /** The allowlist; its required set is unused, since a snapshot never writes. */
+  sections: SectionSelection;
+  /** Whether to hide private/internal targets from the public view. */
+  privateRepos: PrivateReposPolicy;
+  /** The repository the run acts for; a target equal to it is never redacted. */
+  selfSlug: string;
+}
+/**
+ * A mode: snapshot run: one repository written to `snapshotFile`, or the
+ * multi-repo targets (resolved exactly as apply resolves them) written under
+ * `snapshotDir` as `<owner>/<name>.yml` each. No settings file, no report
+ * channel: a snapshot reads and writes a file, and the type carries that.
+ */
+type SnapshotConfig = (SnapshotConfigBase & {
+  form: "file";
+  repo: RepoRef;
+  snapshotFile: string;
+}) | (SnapshotConfigBase & TargetsConfig & {
+  form: "dir";
+  snapshotDir: string;
+});
+/** One target as the summary and the outputs see it: closed values, detail already projected. */
+interface SnapshotTargetView {
+  /** The public label: the slug, or its "private repository #N" placeholder. */
+  display: string;
+  source?: Target["source"];
+  result: SnapshotRunResult;
+  outcomes: Array<{
+    key: SectionKey;
+    status: SnapshotResult["outcomes"][number]["status"];
+    detail: string[];
+  }>;
+  note: string;
+  /** Where the file went, as the public view may show it. */
+  file?: string;
+}
+/** A finished mode: snapshot run as runSnapshot hands it over: every target's public view. */
+type FinishedSnapshot = {
+  form: "file";
+  view: SnapshotTargetView;
+} | {
+  form: "dir";
+  snapshotDir: string;
+  views: SnapshotTargetView[];
+};
+/**
+ * Execute a mode: snapshot run. A destination that would overwrite an authored
+ * file, or a fleet that cannot be resolved, comes back as the error before any
+ * target is read; otherwise every target's public view, which concludeSnapshot
+ * turns into the summary, the outputs, and the exit code.
+ */
+export declare function runSnapshot(api: GithubClient, cfg: SnapshotConfig, io: Io): ResultAsync<FinishedSnapshot, Problem>;
+/** A finished mode: snapshot run: the summary, the outputs, the result line, and the exit code. */
+export declare function concludeSnapshot(io: Io, finished: FinishedSnapshot): number;
 //#endregion
 //#region src/flows/inputs.d.ts
 /** Default `private-repos`, pinned against action.yml by the contract test. */
@@ -6810,12 +6980,22 @@ export declare const INPUT_DECLS: {
   readonly mode: {
     readonly description: string;
     readonly default: "apply";
-    readonly summary: "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub";
+    readonly summary: string;
   };
   readonly "merged-file": {
     readonly description: string;
     readonly default: "";
     readonly summary: "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run";
+  };
+  readonly "snapshot-file": {
+    readonly description: string;
+    readonly default: "";
+    readonly summary: "`mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document";
+  };
+  readonly "snapshot-dir": {
+    readonly description: string;
+    readonly default: "";
+    readonly summary: "`mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target";
   };
   readonly "on-missing-permission": {
     readonly description: "fail (default) or warn. Under warn, sections the token cannot access are skipped with a warning and the run stays green (partial success).";
@@ -6829,9 +7009,9 @@ export declare const INPUT_DECLS: {
     readonly list: true;
   };
   readonly sections: {
-    readonly description: "Optional comma-separated allowlist of sections to process. apply and check only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.";
+    readonly description: "Optional comma-separated allowlist of sections to process. apply, check, and snapshot only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.";
     readonly default: "";
-    readonly summary: "Comma-separated allowlist of sections to process (apply and check only; rejected in `mode: merge`)";
+    readonly summary: "Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: merge`)";
     readonly shownDefault: "(all declared)";
     readonly list: true;
   };
@@ -6926,8 +7106,14 @@ type InputReader = (name: InputName) => string;
  */
 type ConfigEnv = Readonly<Record<string, string | undefined>>;
 export declare const FILTER_INPUTS: readonly ["visibility", "archived", "forks", "exclude", "topics", "affiliation"];
-export declare const MODES: readonly ["apply", "check", "merge"];
+export declare const MODES: readonly ["apply", "check", "merge", "snapshot"];
 type Mode = (typeof MODES)[number];
+/**
+ * Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check
+ * reject a set one instead of silently ignoring it.
+ */
+export declare const MERGE_ONLY_INPUTS: readonly ["merged-file", "layering"];
+export declare const SNAPSHOT_ONLY_INPUTS: readonly ["snapshot-file", "snapshot-dir"];
 /** selfSlug (GITHUB_REPOSITORY) and runUrl are read from the environment once here, so the run flows stay env-free. */
 interface CommonConfig extends RunFlowConfig {
   token: string;
@@ -6939,7 +7125,9 @@ type RunConfig = (CommonConfig & (({
   kind: "multi";
 } & MultiConfig))) | ({
   kind: "merge";
-} & MergeConfig);
+} & MergeConfig) | ({
+  kind: "snapshot";
+} & Pick<CommonConfig, "token" | "apiVersion"> & SnapshotConfig);
 /**
  * `token` is tolerated unread (a workflow commonly sets it on every step). Every declared input NOT listed here is an
  * apply/check control, so the merge rejects it unless it holds its declared default, which the runner supplies whether
@@ -6951,6 +7139,17 @@ export declare const MERGE_INPUTS: readonly ["mode", "settings-file", "merged-fi
  * the layering guide's table is pinned to the whole set.
  */
 export declare const MERGE_REJECTED_INPUTS: readonly InputName[];
+/**
+ * Every declared input NOT listed here is an apply, check, or merge control, so the snapshot rejects it unless it
+ * holds its declared default, which the runner supplies whether or not the workflow set the input.
+ */
+export declare const SNAPSHOT_INPUTS: readonly ["token", "repository", "mode", "snapshot-file", "snapshot-dir", "on-missing-permission", "sections", "api-version", "repos", "repos-dir", "private-repos", "visibility", "archived", "forks", "exclude", "topics", "affiliation"];
+/**
+ * Derived from the declarations, so a future input is rejected by the snapshot until listed in SNAPSHOT_INPUTS;
+ * exported so the snapshot guide's table is pinned to the whole set.
+ */
+export declare const SNAPSHOT_REJECTED_INPUTS: readonly InputName[];
+/** Read and validate every input through `read`; the first problem wins. */
 export declare function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig, Problem>;
 //#endregion
 //#region src/flows/layers.d.ts
@@ -6976,6 +7175,30 @@ export declare function checkRepository(client: GithubClient, opts: Omit<RepoRun
 export declare function applyRepository(client: GithubClient, opts: Omit<RepoRunOptions, "mode">, io?: Io): Promise<RepoRunReport>;
 /** The merged document exactly as mode: merge writes it to merged-file. */
 export declare function renderMergedYaml(settings: ValidatedSettings): string;
+/** What a library snapshot may narrow: the selection, the denial policy, and the Io the lines go to. */
+interface SnapshotLibraryOptions {
+  sections?: SectionSelection;
+  onMissingPermission?: "fail" | "warn";
+  io?: Io;
+}
+/**
+ * The engine's snapshot result plus the file text mode: snapshot would write
+ * (absent exactly when the result is failed, which carries no document) and
+ * every line the run printed when the caller brought no Io of their own.
+ */
+type SnapshotReport = ((RenderableSnapshot & {
+  yaml: string;
+}) | (Extract<SnapshotResult, {
+  result: "failed";
+}> & {
+  yaml?: never;
+})) & {
+  log: CollectedLine[];
+};
+/** Read one repository's supported sections back as a settings document and its rendered file. */
+export declare function snapshotRepository(client: GithubClient, repo: RepoRef, options?: SnapshotLibraryOptions): Promise<SnapshotReport>;
+/** Snapshot several repositories in order, one report each; a failed target never stops the rest. */
+export declare function snapshotRepositories(client: GithubClient, targets: readonly RepoRef[], options?: SnapshotLibraryOptions): Promise<SnapshotReport[]>;
 //#endregion
 //#region src/flows/settings-read.d.ts
 /**
@@ -7034,4 +7257,4 @@ export declare const MARKER_LABEL_CONFIG: {
   readonly description: "managed by settings-as-code private reporting - do not remove";
 };
 //#endregion
-export type { AnnotationLevel, ApiError, ArtifactUploader, CentralFileProblem, CentralTarget, CollectedLine, ConfigEnv, DiscoveryFilters, DiscoveryProblem, EndpointDecl, FinishedMerge, GithubClient, GraphqlOp, GraphqlOpDecl, InputDecl, InputName, InputReader, Io, Justification, KeyedListLayering, Layer, LayerProblem, Layering, MaskPair, MergeConfig, Mode, MultiConfig, MustBeNever, OptOutNotice, OutputName, PatResource, PlannedOpBase, PrivateReportChannel, PrivateReposPolicy, Problem, ProblemOf, PublicTargetView, RemoteTarget, RepoRef, RepoResult, RepoRunOptions, RepoRunReport, RepoRunResult, RepoVisibility, ReportInput, Route, RunConfig, RunFlowConfig, SectionKey, SectionMeta, SectionModule, SectionOutcome, SectionPermission, SettingsFileRole, SettingsProblem, SingleConfig, SingleOutcome, TaggedEndpoint, Target, TargetOutcome, Tolerance, TopLevelShape, TraceIo, UndeclaredPolicy, UndeclaredPolicyList, UndeclaredPolicySection, Unverifiable, ValidatedSettings };
+export type { AnnotationLevel, ApiError, ArtifactUploader, CentralFileProblem, CentralTarget, CollectedLine, ConfigEnv, DiscoveryFilters, DiscoveryProblem, EndpointDecl, FinishedMerge, FinishedSnapshot, GithubClient, GraphqlOp, GraphqlOpDecl, InputDecl, InputName, InputReader, Io, Justification, KeyedListLayering, Layer, LayerProblem, Layering, MaskPair, MergeConfig, Mode, MultiConfig, MustBeNever, OptOutNotice, OutputName, PatResource, PlannedOpBase, PrivateReportChannel, PrivateReposPolicy, Problem, ProblemOf, PublicTargetView, RemoteTarget, RenderableSnapshot, RepoRef, RepoResult, RepoRunOptions, RepoRunReport, RepoRunResult, RepoVisibility, ReportInput, ResolvedTargets, Route, RunConfig, RunFlowConfig, SectionKey, SectionMeta, SectionModule, SectionOutcome, SectionPermission, SettingsFileRole, SettingsProblem, SingleConfig, SingleOutcome, SnapshotConfig, SnapshotLibraryOptions, SnapshotReport, SnapshotResult, SnapshotRunResult, SnapshotTargetView, TaggedEndpoint, Target, TargetOutcome, TargetsConfig, Tolerance, TopLevelShape, TraceIo, UndeclaredPolicy, UndeclaredPolicyList, UndeclaredPolicySection, Unverifiable, ValidatedSettings };

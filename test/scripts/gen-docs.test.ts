@@ -280,12 +280,12 @@ describe("renderPatCell", () => {
 });
 
 describe("renderOutputsList", () => {
-  test("lists the any-mode values in display order, then the multi-repo-only ones, then the merge result", () => {
+  test("lists the any-mode values in display order, then the multi-repo-only ones, then the merge and snapshot results", () => {
     expect(renderOutputsList(REPO_RESULTS)).toBe(
-      "`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge",
+      "`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot",
     );
     expect(renderOutputsList(["failed", "applied"])).toBe(
-      "`applied` / `failed`; worst-of across targets in multi-repo mode; `merged` in mode: merge",
+      "`applied` / `failed`; worst-of across targets in multi-repo mode; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot",
     );
   });
 });

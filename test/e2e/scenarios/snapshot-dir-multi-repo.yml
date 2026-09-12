@@ -1,0 +1,77 @@
+name: snapshot-dir-multi-repo
+description: "The dir form: the targets come from the repos input exactly as in a multi-repo apply, and each is written to <snapshot-dir>/<owner>/<name>.yml, the repos-dir layout. A private target (redacted by default) gets its file like the others, while the public surfaces know it only as its placeholder: its slug, its file name, and its label values appear nowhere in the log, the summary, or the outputs."
+settings: {}
+repos:
+  e2e-owner/svc-a:
+    live_state:
+      labels:
+        - name: stable
+          color: 0e8a16
+    expect:
+      result: snapshot
+      snapshot:
+        labels:
+          _undeclared: delete
+          entries:
+            - name: stable
+              color: 0e8a16
+              description: ""
+  e2e-owner/svc-b:
+    live_state:
+      labels:
+        - &a1
+          name: incident
+          color: b60205
+          description: Page the on-call
+    expect:
+      result: snapshot
+      snapshot:
+        labels:
+          _undeclared: delete
+          entries:
+            - *a1
+  e2e-owner/svc-private:
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      labels:
+        - &a2
+          name: hush-project
+          color: "000000"
+          description: Not for the public log
+    expect:
+      snapshot:
+        labels:
+          _undeclared: delete
+          entries:
+            - *a2
+inputs:
+  mode: snapshot
+  snapshot_dir: snapshots
+  sections: labels
+expect:
+  exit_code: 0
+  result: snapshot
+  repos_result:
+    e2e-owner/svc-a: snapshot
+    e2e-owner/svc-b: snapshot
+    "private repository #1": snapshot
+  summary_contains:
+    - "## github-settings-as-code (snapshot, 3 repositories)"
+    - "| e2e-owner/svc-a | remote | :white_check_mark: snapshot | snapshots/e2e-owner/svc-a.yml |"
+    - "| e2e-owner/svc-b | remote | :white_check_mark: snapshot | snapshots/e2e-owner/svc-b.yml |"
+    - "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |"
+  stdout_contains:
+    - "e2e-owner/svc-a: snapshot written to snapshots/e2e-owner/svc-a.yml"
+    - "e2e-owner/svc-b: snapshot written to snapshots/e2e-owner/svc-b.yml"
+  leaks_nowhere:
+    - svc-private
+    - hush-project
+    - Not for the public log
+    - _undeclared
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /

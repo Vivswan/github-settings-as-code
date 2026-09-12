@@ -1,0 +1,38 @@
+name: custom_properties-snapshot-roundtrip
+description: "mode: snapshot reads the live custom_properties back into snapshot.yml and writes nothing to GitHub. Set property values read back; a property with a null value is unset and omitted. The written file, fed back to a check run against the same state, reads clean."
+settings: {}
+live_state:
+  custom_property_values:
+    - property_name: tier
+      value: gold
+    - property_name: compliance
+      value:
+        - soc2
+        - hipaa
+    - property_name: pilot
+      value: null
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: custom_properties
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    custom_properties: snapshot
+  snapshot:
+    custom_properties:
+      _undeclared: keep
+      entries:
+        - property_name: tier
+          value: gold
+        - property_name: compliance
+          value:
+            - soc2
+            - hipaa
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

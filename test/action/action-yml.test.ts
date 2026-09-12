@@ -9,6 +9,7 @@ import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
 import { MERGE_RESULT } from "../../src/flows/deliver.js";
 import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
+import { SNAPSHOT_RESULTS } from "../../src/flows/snapshot.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -55,14 +56,20 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description mentions every RepoResult value and the merge result", () => {
-    // MERGE_RESULT is the one value outside REPO_RESULTS (a merge has no target).
-    const missing = [...REPO_RESULTS, MERGE_RESULT].filter(
-      (value) => !OUTPUT_DECLS.result.description.includes(value),
+  test("the result description enumerates exactly the RepoResult values, the merge result, and the snapshot results", () => {
+    // The enumerated values are the `a | b | c` chains; a value named only in prose ("in mode: snapshot") does not count.
+    const { description } = OUTPUT_DECLS.result;
+    const enumerated = (description.match(/[a-z]+(?: \| [a-z]+)+/g) ?? []).flatMap((chain) =>
+      chain.split(" | "),
     );
-    expect(
-      missing,
-      `the "result" output description omits result value(s): ${missing.join(", ")}`,
-    ).toEqual([]);
+    expect(new Set(enumerated)).toEqual(
+      new Set([...REPO_RESULTS.filter((value) => value !== "skipped"), ...SNAPSHOT_RESULTS]),
+    );
+    expect(description).toContain("where skipped can also appear");
+    expect(description).toContain(`${MERGE_RESULT} in mode: merge`);
+    // SNAPSHOT_RESULTS is worst-first; the description reads best-first like the RepoResult chain.
+    expect(description).toContain(
+      `${[...SNAPSHOT_RESULTS].reverse().join(" | ")} in mode: snapshot`,
+    );
   });
 });

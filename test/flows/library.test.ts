@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYamlDoc, stringify as stringifyYaml } from "yaml";
 import {
   applyRepository,
   checkRepository,
@@ -9,6 +9,9 @@ import {
   parseRepoSlug,
   renderMergedYaml,
   SectionSelection,
+  SNAPSHOT_SCHEMA_URL,
+  snapshotRepositories,
+  snapshotRepository,
   type ValidatedSettings,
   validateSettings,
 } from "../../src/index.js";
@@ -131,5 +134,99 @@ describe("renderMergedYaml", () => {
   test("is the document's YAML serialization, byte for byte", () => {
     expect(renderMergedYaml(settings)).toBe(stringifyYaml(settings));
     expect(renderMergedYaml(settings)).toBe("repository:\n  has_wiki: false\n");
+  });
+});
+
+describe("snapshotRepository and snapshotRepositories", () => {
+  const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+  const routes = (slug: string) => ({
+    [`GET /repos/${slug}/labels?per_page=100&page=1`]: {
+      data: [{ name: "bug", color: "d73a4a", description: "Something is broken" }],
+    },
+    [`GET /repos/${slug}/actions/secrets?per_page=100&page=1`]: {
+      data: { total_count: 1, secrets: [{ name: "DEPLOY_TOKEN", ...STAMPS }] },
+    },
+  });
+  const sections = SectionSelection.of({ only: ["labels", "actions_secrets"] })._unsafeUnwrap();
+  const SECRET_NOTE =
+    "actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply";
+
+  test("reads the allowed sections back, renders the file, and returns the lines when no Io is given", async () => {
+    const api = new MockApi(routes("o/r"));
+    const report = await snapshotRepository(api, repo, { sections });
+    expect(api.mutations()).toEqual([]);
+    expect(report).toEqual({
+      repo: "o/r",
+      result: "snapshot",
+      settings: branded({
+        labels: {
+          _undeclared: "delete",
+          entries: [{ name: "bug", color: "d73a4a", description: "Something is broken" }],
+        },
+        actions_secrets: {
+          _undeclared: "keep",
+          entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ACTIONS_DEPLOY_TOKEN" }],
+        },
+      }),
+      outcomes: [
+        { key: "labels", status: "snapshot", detail: [] },
+        { key: "actions_secrets", status: "snapshot", detail: [SECRET_NOTE] },
+      ],
+      yaml: expect.any(String),
+      log: [{ level: "notice", line: SECRET_NOTE }],
+    });
+    if (report.yaml === undefined) {
+      throw new Error("a snapshot result carries its file");
+    }
+    // The header, line by line and by equality: the pin is a URL, never a pattern.
+    const [pin, dated, note, first] = report.yaml.split("\n");
+    expect(pin).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
+    expect(dated).toMatch(
+      /^# Snapshot of o\/r taken \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
+    );
+    expect([note, first]).toEqual([`# ${SECRET_NOTE}`, "labels:"]);
+    expect(stringifyYaml(parseYamlDoc(report.yaml))).toBe(stringifyYaml(report.settings));
+  });
+
+  test("a denial under fail is a failed report with no yaml; a caller-supplied Io receives the lines and the log stays empty", async () => {
+    const api = new MockApi({});
+    const collected = collectingIo();
+    const report = await snapshotRepository(api, repo, {
+      sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap(),
+      io: collected.io,
+    });
+    expect(report).toEqual({
+      repo: "o/r",
+      result: "failed",
+      outcomes: [
+        {
+          key: "labels",
+          status: "failed",
+          detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/r\/labels/)],
+        },
+      ],
+      log: [],
+    });
+    expect(collected.lines).toEqual([
+      {
+        level: "error",
+        line: expect.stringMatching(/^labels: not snapshotted - the token was denied GET/),
+      },
+    ]);
+  });
+
+  test("snapshotRepositories reports each target in order; a failed target never stops the next", async () => {
+    const api = new MockApi(routes("o/b"));
+    const reports = await snapshotRepositories(
+      api,
+      [parseRepoSlug("o/a")._unsafeUnwrap(), parseRepoSlug("o/b")._unsafeUnwrap()],
+      { sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap() },
+    );
+    expect(
+      reports.map((report) => [report.repo, report.result, report.yaml === undefined]),
+    ).toEqual([
+      ["o/a", "failed", true],
+      ["o/b", "snapshot", false],
+    ]);
   });
 });
