@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
-
-import type { SettingsSource } from "../../src/action/secret-refs.js";
 import {
   runForRepo,
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
+import type { SettingsSource } from "../../src/engine/secret-refs.js";
 import { collectSecretValues } from "../../src/engine/secrets.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";

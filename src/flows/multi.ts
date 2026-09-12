@@ -30,6 +30,7 @@ import {
   type Target,
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
+import type { SettingsSource } from "../engine/secret-refs.js";
 import { type GithubClient, isPermissionError, RERUN_ADVICE } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
@@ -37,51 +38,47 @@ import type { Io } from "../io.js";
 import type { Private } from "../private.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { applyMarkerInjection } from "../report/delivery.js";
-import type { SectionKey } from "../schema.js";
 import {
   engineOutcome,
   failedTarget,
+  missingUploaderProblem,
   type OpenedTarget,
+  type RunFlowConfig,
   type TargetResult,
   targetFailure,
   withDelivery,
 } from "./deliver.js";
-import { DEFAULT_SETTINGS_FILE, quoteList } from "./inputs.js";
 import {
   attempt,
   openTargetChannel,
-  type PrivateReportChannel,
-  type PrivateReposPolicy,
   planRedaction,
   type RedactionPlan,
   type TargetChannel,
   type TargetOutcome,
 } from "./redact.js";
-import type { SettingsSource } from "./secret-refs.js";
 import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 
-export interface MultiConfig {
+/**
+ * The settings file a remote target is read from, and the action's default
+ * `settings-file`: the single source for the action.yml default, the
+ * multi-repo override guard in src/action/inputs.ts, and the prose below.
+ */
+export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
+
+/** Names as an error message lists them: each quoted, comma-separated. */
+export function quoteList(names: string[]): string {
+  return names.map((name) => `"${name}"`).join(", ");
+}
+
+export interface MultiConfig extends RunFlowConfig {
   reposDir: string;
   reposInput: string;
   defaultsFile: string;
+  /** The owner a bare `<name>.yml` file under repos-dir belongs to. */
   adminOwner: string;
-  mode: "apply" | "check";
-  onMissingPermission: "fail" | "warn";
-  requiredSections: Set<SectionKey>;
-  onlySections: Set<SectionKey>;
   discoveryFilters: DiscoveryFilters;
   /** Filter inputs the user explicitly set, for the misuse rejections. */
   discoveryFiltersSet: string[];
-  /** Whether to hide private/internal targets from the public view. */
-  privateRepos: PrivateReposPolicy;
-  /** Where the full unredacted report for a redacted target is delivered. */
-  privateReport: PrivateReportChannel;
-  /** The age recipient the artifact channel encrypts to (empty otherwise). */
-  reportPublicKey: string;
-  /** GITHUB_REPOSITORY: a target equal to it is never redacted (carve-out). */
-  selfSlug: string;
-  /** Link to the workflow run, for the private report metadata (may be empty). */
-  runUrl: string;
 }
 
 /**
@@ -261,9 +258,6 @@ export async function runMulti(
   api: GithubClient,
   cfg: MultiConfig,
   io: Io,
-  // The artifact upload port, injected only by tests alongside the stub api
-  // and capturing io; production omits it and the real @actions/artifact
-  // uploader applies.
   uploader?: ArtifactUploader,
 ): Promise<{ fatal: string | null; targets: TargetOutcome[] }> {
   // Central-resolution warnings are buffered so nothing emits before the
@@ -287,6 +281,11 @@ export async function runMulti(
     flushWarnings();
     return { fatal: message, targets: [] };
   };
+
+  const noUploader = missingUploaderProblem(cfg, uploader);
+  if (noUploader !== null) {
+    return fail(noUploader);
+  }
 
   let defaults: ValidatedSettings | null = null;
   if (cfg.defaultsFile) {

@@ -227,8 +227,8 @@ describe("actions_secrets planning", () => {
     expect(api.calls).toEqual([]);
   });
 
-  // orchestrate.ts validates references through action/secret-refs.ts (tested in
-  // test/action/secret-refs.test.ts); the section only extracts and looks up values.
+  // orchestrate.ts validates references through engine/secret-refs.ts (tested in
+  // test/engine/secret-refs.test.ts); the section only extracts and looks up values.
 });
 
 describe("actions_secrets execution", () => {

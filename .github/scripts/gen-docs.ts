@@ -5,8 +5,8 @@
 // map rendered from architecture.yml. Authored prose from the docs registry + coverage-data.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MERGE_RESULT } from "../../src/action/deliver.js";
 import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
+import { MERGE_RESULT } from "../../src/flows/deliver.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import {
   type SectionMeta,

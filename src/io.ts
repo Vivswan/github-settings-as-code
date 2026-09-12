@@ -85,3 +85,48 @@ export function prefixedIo(io: Io, prefix: string): Io {
     masked: io.masked,
   };
 }
+
+/** One recorded Io line: annotations carry their level, log lines do not. */
+export interface CollectedLine {
+  level?: AnnotationLevel;
+  line: string;
+}
+
+/** An Io that records instead of printing. The debug trace is dropped, as a runner without step debugging drops it. */
+export function collectingIo(): {
+  io: Io;
+  lines: CollectedLine[];
+  outputs: Partial<Record<OutputName, string>>;
+  summary: string[];
+} {
+  const lines: CollectedLine[] = [];
+  const outputs: Partial<Record<OutputName, string>> = {};
+  const summary: string[] = [];
+  return {
+    io: {
+      annotate: (level, message) => lines.push({ level, line: message }),
+      log: (line) => lines.push({ line }),
+      debug: () => {},
+      summary: (markdown) => summary.push(markdown),
+      output: (name, value) => {
+        outputs[name] = value;
+      },
+      ...maskRegistry(() => {}),
+    },
+    lines,
+    outputs,
+    summary,
+  };
+}
+
+/** An Io that drops everything. Fresh per call, so one caller's masks never reach another's registry. */
+export function silentIo(): Io {
+  return {
+    annotate: () => {},
+    log: () => {},
+    debug: () => {},
+    summary: () => {},
+    output: () => {},
+    ...maskRegistry(() => {}),
+  };
+}

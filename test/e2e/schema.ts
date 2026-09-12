@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { FILTER_INPUTS } from "../../src/action/inputs.js";
-import { RESERVED_REF_PREFIXES } from "../../src/action/secret-refs.js";
+import { RESERVED_REF_PREFIXES } from "../../src/engine/secret-refs.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";

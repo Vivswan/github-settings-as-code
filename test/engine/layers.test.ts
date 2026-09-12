@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
-import { silentIo } from "../io-fake.js";
 import { MockApi } from "../mock-api.js";
 import { REPO } from "../sections/section-run.js";
 

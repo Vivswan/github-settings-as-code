@@ -20,6 +20,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { silentIo } from "../../src/io.js";
 import {
   SECTION_KEYS,
   type SectionKey,
@@ -56,7 +57,6 @@ import { genTeams } from "../../src/sections/teams/generators.js";
 import { genWebhooks } from "../../src/sections/webhooks/generators.js";
 import { genWorkflows } from "../../src/sections/workflows/generators.js";
 import type { MustBeNever } from "../../src/types.js";
-import { silentIo } from "../io-fake.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
   E2E_SECRET_ENV,

@@ -4,11 +4,10 @@
  * plus the marker-label injection that keeps an apply from deleting the issue's label.
  */
 
-import type { PrivateReportChannel, RedactedDetail } from "../action/redact.js";
 import type { RepoRef } from "../discovery/targets.js";
-import type { RepoResult, ValidatedSettings } from "../engine/orchestrate.js";
+import type { RepoResult, RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
 import type { GithubClient } from "../github/api.js";
-import type { Io } from "../io.js";
+import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
@@ -19,6 +18,48 @@ import {
   injectMarkerLabel,
   MARKER_LABEL,
 } from "./issue-report.js";
+
+/**
+ * The `private-report` channel values. `none` delivers nothing; `issue` posts
+ * the full unredacted report to the private target repo itself (the one
+ * GitHub-ACL-private channel a public run has); `issue-on-failure` is the
+ * quiet variant of `issue` - it writes the issue only when the run needs
+ * attention (failed, or check-mode drift) and closes it on recovery, so a
+ * healthy repo never sees an issue; `artifact` uploads every redacted
+ * target's report as one age-encrypted workflow artifact, for readers who
+ * hold the key but no GitHub access to the targets.
+ */
+export const PRIVATE_REPORT_CHANNELS = ["none", "issue", "issue-on-failure", "artifact"] as const;
+
+export type PrivateReportChannel = (typeof PRIVATE_REPORT_CHANNELS)[number];
+
+/** The `artifact` channel cannot open without an upload port; the message names the fix. */
+export const ARTIFACT_NEEDS_UPLOADER =
+  "private-report: artifact needs an artifact uploader, and none was supplied: the action supplies its own; a library caller passes one as the uploader argument, or picks another private-report channel";
+
+/** The channels that deliver through the target repo's report issue. */
+export type IssueChannel = Extract<PrivateReportChannel, "issue" | "issue-on-failure">;
+
+/** Narrow a channel to the issue-delivering pair. */
+export function isIssueChannel(channel: PrivateReportChannel): channel is IssueChannel {
+  return channel === "issue" || channel === "issue-on-failure";
+}
+
+/**
+ * One target's rich end state: slug, section outcomes with live detail, and
+ * the note for a skip or failure that produced no outcomes. Open in the clear;
+ * sealed with the transcript when redacted.
+ */
+export interface TargetDetail {
+  slug: string;
+  outcomes: RepoRunResult["outcomes"];
+  note?: string;
+}
+
+/** A redacted target's detail also carries every line its run would have printed. */
+export interface RedactedDetail extends TargetDetail {
+  transcript: CollectedLine[];
+}
 
 /** The run metadata a private report needs, minus the per-target fields. */
 export interface ReportRunMeta {
@@ -109,7 +150,8 @@ export interface ReportChannel {
 /**
  * The run's report channel from the `private-report` input, null for `none`.
  * Issue channels post per target as it closes; the artifact channel uploads ONE
- * encrypted document on flush. `uploader` is the test port (production: undefined).
+ * encrypted document on flush through `uploader`, which the flows check for
+ * before any API work (missingUploaderProblem); the throw here is the backstop.
  */
 export function openReportChannel(
   api: GithubClient,
@@ -127,6 +169,9 @@ export function openReportChannel(
     case "issue-on-failure":
       return issueChannel(api, meta, "on-failure", io);
     case "artifact":
+      if (uploader === undefined) {
+        throw new Error(ARTIFACT_NEEDS_UPLOADER);
+      }
       return artifactChannel(meta, reportPublicKey, io, uploader);
   }
 }
@@ -196,7 +241,7 @@ function artifactChannel(
   meta: ReportRunMeta,
   reportPublicKey: string,
   io: Io,
-  uploader?: ArtifactUploader,
+  uploader: ArtifactUploader,
 ): ReportChannel {
   const reports: string[] = [];
   return {
@@ -207,7 +252,7 @@ function artifactChannel(
       if (reports.length === 0) {
         return;
       }
-      const delivery = await deliverArtifactReport(reports.join("\n\n"), reportPublicKey, uploader);
+      const delivery = await deliverArtifactReport(uploader, reports.join("\n\n"), reportPublicKey);
       if ("warning" in delivery) {
         io.annotate("warning", delivery.warning);
       }
