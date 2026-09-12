@@ -130,6 +130,39 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
     }
   });
 
+  /** An immediate scheduler whose every Group logs `<name>:<group id>` on schedule, so a test can see whose groups served a request. */
+  function recordingScheduler(name: string, served: string[]): Scheduler {
+    class RecordingGroup {
+      private readonly inner: InstanceType<Scheduler["Group"]>;
+      constructor(private readonly options: { id: string }) {
+        this.inner = new IMMEDIATE_SCHEDULER.Group(options);
+      }
+      key(id: string) {
+        const limiter = this.inner.key(id);
+        return {
+          on: (event: string, handler: Parameters<typeof limiter.on>[1]) =>
+            limiter.on(event, handler),
+          schedule: (...call: unknown[]) => {
+            served.push(`${name}:${this.options.id}`);
+            return limiter.schedule(...call);
+          },
+        };
+      }
+    }
+    class RecordingLimiter {
+      static Group = RecordingGroup;
+      static Events = IMMEDIATE_SCHEDULER.Events;
+      private readonly inner = new IMMEDIATE_SCHEDULER();
+      on(event: string, handler: Parameters<InstanceType<Scheduler>["on"]>[1]) {
+        return this.inner.on(event, handler);
+      }
+      schedule(...call: unknown[]) {
+        return this.inner.schedule(...call);
+      }
+    }
+    return RecordingLimiter;
+  }
+
   /** Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned e2e bundle does. */
   const envKnobClient = (io: ReturnType<typeof traceIo>["io"]) =>
     new GithubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
@@ -155,42 +188,51 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
 
   test("a 429 is recovered by the throttling plugin under the immediate scheduler the knob selects", async () => {
     // The retry plugin never sees a 429 (doNotRetry) and would ignore Retry-After if it did; only the throttling plugin's callback writes this
-    // trace line, so the line pins which plugin owned the recovery. At 50ms units the plugin asks for a 60-unit wait, a real 3s under timers;
-    // finishing within 1s proves the knob selected the immediate scheduler, with room for a loaded machine.
+    // trace line, so the line pins which plugin owned the recovery. No Bottleneck group serving a request pins that the knob selected the
+    // immediate scheduler, with no clock involved (the retry plugin schedules through a bare Bottleneck of its own, never a group).
     process.env.RETRY_BASE_MS = "50";
     const state = stubFetch([secondaryLimit("60"), okJson]);
     const trace = traceIo();
-    const started = Date.now();
-    const result = await envKnobClient(trace.io).tryRequest("GET", "/rl");
-    expect(state.calls).toBe(2);
-    expect("data" in result && result.data).toEqual({ ok: true });
-    expect(trace.lines).toContain(
-      `secondary rate limit on GET /rl; retry 1/${MAX_RETRIES} after 60s`,
-    );
-    expect(Date.now() - started).toBeLessThan(1000);
-  }, 10_000); // Lets a broken (timer-paced, ~3s) run reach the elapsed assertion.
+    const timers = spyOn(TIMERS_SCHEDULER.Group.prototype, "key");
+    try {
+      const result = await envKnobClient(trace.io).tryRequest("GET", "/rl");
+      expect(state.calls).toBe(2);
+      expect("data" in result && result.data).toEqual({ ok: true });
+      expect(trace.lines).toContain(
+        `secondary rate limit on GET /rl; retry 1/${MAX_RETRIES} after 60s`,
+      );
+      expect(timers).not.toHaveBeenCalled();
+    } finally {
+      timers.mockRestore();
+    }
+  }, 10_000); // Lets a broken (timer-paced, 3s) run reach the assertion.
 
   test("each client is paced by its own scheduler's groups, whichever scheduler came first", async () => {
-    // The plugin's shared groups are module singletons built from the first client's scheduler unless every group is passed in; the
-    // notification group spaces issue creates by 3s under timers, so two creates per client pin whose groups paced it.
-    const twoIssueCreates = async (scheduler: Scheduler) => {
+    // The plugin's shared groups are module singletons built from the first client's scheduler unless every group is passed in. Each
+    // recording scheduler is a distinct class, so an issue create (write + notification + global) logs which scheduler's groups served it.
+    const served: string[] = [];
+    const issueCreate = async (name: string) => {
       stubFetch([() => new Response('{"number":1}', { status: 201 })]);
       const client = new GithubApi({
         token: "t",
         io: traceIo().io,
         baseUrl: "https://api.test",
         retryBaseMs: 1,
-        scheduler,
+        scheduler: recordingScheduler(name, served),
       });
-      const started = Date.now();
       await client.tryRequest("POST", "/repos/o/r/issues", { title: "a" });
-      await client.tryRequest("POST", "/repos/o/r/issues", { title: "b" });
-      return Date.now() - started;
     };
-    expect(await twoIssueCreates(IMMEDIATE_SCHEDULER)).toBeLessThan(1000);
-    expect(await twoIssueCreates(TIMERS_SCHEDULER)).toBeGreaterThanOrEqual(2500);
-    expect(await twoIssueCreates(IMMEDIATE_SCHEDULER)).toBeLessThan(1000);
-  }, 20_000);
+    await issueCreate("first");
+    await issueCreate("second");
+    expect(served).toEqual([
+      "first:octokit-write",
+      "first:octokit-notifications",
+      "first:octokit-global",
+      "second:octokit-write",
+      "second:octokit-notifications",
+      "second:octokit-global",
+    ]);
+  });
 
   test("the scheduler alone decides whether Retry-After is slept: immediate at production units, timers at knob units", async () => {
     const recover = async (

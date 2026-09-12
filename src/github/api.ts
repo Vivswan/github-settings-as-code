@@ -15,6 +15,7 @@ import { type Io, maskRegistry } from "../io.js";
 import {
   IMMEDIATE_SCHEDULER,
   type Scheduler,
+  type ThrottleGroups,
   TIMERS_SCHEDULER,
   throttleGroups,
 } from "./scheduler.js";
@@ -412,7 +413,7 @@ export class GithubApi implements GithubClient {
         Bottleneck: scheduler as unknown as typeof Bottleneck,
         retryAfterBaseValue: retryBaseMs,
         // The plugin reads global and auth from its state, not from its declared options, hence the cast.
-        ...(throttleGroups(scheduler) as unknown as Record<string, Bottleneck.Group>),
+        ...(throttleGroups(scheduler) as Record<keyof ThrottleGroups, Bottleneck.Group>),
         write: new scheduler.Group({
           id: "octokit-write",
           maxConcurrent: 1,

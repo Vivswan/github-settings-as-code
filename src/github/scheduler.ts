@@ -61,8 +61,7 @@ const groupsByScheduler = new WeakMap<Scheduler, ThrottleGroups>();
 
 /**
  * The plugin builds these groups once per process from the FIRST client's scheduler and hands them to every later
- * client, so a process mixing schedulers would pace a client by a limiter it never chose. Built here per scheduler
- * instead, with the plugin's own ids and limits, and shared by every client on that scheduler as the plugin shares them.
+ * client, so a process mixing schedulers would pace a client by a limiter it never chose.
  */
 export function throttleGroups(scheduler: Scheduler): ThrottleGroups {
   const cached = groupsByScheduler.get(scheduler);
