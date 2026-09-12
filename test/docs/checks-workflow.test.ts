@@ -256,7 +256,10 @@ function theOne(steps: Step[], matches: (step: Step) => boolean, what: string): 
   return found[0] as number;
 }
 
-/** Per artifact: exactly one cache of its path under a string key, then exactly one fetch gated on that cache's miss, failure-propagating, under the shell a composite run step must declare. */
+/**
+ * Per artifact: exactly one cache of its path under a string key, then exactly one fetch gated
+ * on that cache's miss, failure-propagating, under the shell a composite run step must declare.
+ */
 function expectCompositeShape(action: CompositeAction): void {
   expect(action.runs.using, `${COMPOSITE_DIR} must be a composite action`).toBe("composite");
   const steps = action.runs.steps ?? [];
@@ -348,13 +351,19 @@ function installs(run: string | undefined): boolean {
   );
 }
 
-/** A run scalar executing `bun <script>` anywhere the shell would run it: as a command token on an executed line, however wrapped, but not quoted or commented. */
+/**
+ * A run scalar executing `bun <script>` anywhere the shell would run it: as a command token on
+ * an executed line, however wrapped, but not quoted or commented.
+ */
 function runsFetch(run: string | undefined, fetchScript: string): boolean {
   const token = new RegExp(`(?:^|[\\s!(;&|])bun ${escapeRegExp(fetchScript)}(?=[\\s;)&|]|$)`);
   return executedLines(run ?? "").some((line) => !line.trim().startsWith("#") && token.test(line));
 }
 
-/** Every artifact the job's loaders need is put on disk earlier by the job's one sanctioned provider, after setup-bun and an install, and skipped only when the loader is too. */
+/**
+ * Every artifact the job's loaders need is put on disk earlier by the job's one sanctioned
+ * provider, after setup-bun and an install, and skipped only when the loader is too.
+ */
 function expectArtifactsProvided(where: string, steps: Step[]): void {
   const uncached = UNCACHED_FETCH_JOBS.has(where);
   const provides = (step: Step, artifact: FetchedArtifact) =>

@@ -316,7 +316,10 @@ describe("throwFor context enrichment", () => {
       }),
     ).toThrow(
       new Error(
-        'rulesets: creating ruleset "quality" failed - POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+        'rulesets: creating ruleset "quality" failed - POST /repos/o/r/rulesets: 422 ' +
+          'Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected ' +
+          'the request; fix the "rulesets" values in the settings file to satisfy the message ' +
+          "above",
       ),
     );
   });
@@ -377,7 +380,11 @@ describe("throwFor context enrichment", () => {
       ),
     ).toThrow(
       new Error(
-        'rulesets: POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above. Usually this means a typo. The fields and values this endpoint accepts are documented at https://docs.github.com/rest/repos/rules',
+        "rulesets: POST /repos/o/r/rulesets: 422 Validation Failed " +
+          '([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the ' +
+          '"rulesets" values in the settings file to satisfy the message above. Usually this ' +
+          "means a typo. The fields and values this endpoint accepts are documented at " +
+          "https://docs.github.com/rest/repos/rules",
       ),
     );
   });
@@ -553,7 +560,11 @@ describe("throwFor context enrichment", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
-      'the token was denied GET /repos/o/r/environments/prod/deployment-branch-policies: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also mean the environment does not exist, or that its deployment_branch_policy does not set custom_branch_policies: true',
+      "the token was denied GET /repos/o/r/environments/prod/deployment-branch-policies: 404 " +
+        "Not Found (a 404 here can also mean the resource does not exist). To fix, grant " +
+        '"Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also ' +
+        "mean the environment does not exist, or that its deployment_branch_policy does not set " +
+        "custom_branch_policies: true",
     );
   });
 
@@ -604,7 +615,10 @@ describe("throwFor context enrichment", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
-      'the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
+      "the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. " +
+        'To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
+        'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +
+        "write)",
     );
   });
 });
@@ -1162,7 +1176,10 @@ describe("samePermission", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
-      'the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
+      "the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. " +
+        'To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
+        'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +
+        "write)",
     );
   });
 });

@@ -83,21 +83,36 @@ export const INPUT_DECLS = {
   },
   "settings-file": {
     description:
-      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the ordered list of settings files to fold instead, newline- or comma-separated, lowest layer first. Newlines and commas are list separators in every mode, so a settings-file path can never contain a comma. Single-repo and merge modes only; multi-repo targets read repos-dir files or each repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
+      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the " +
+      "ordered list of settings files to fold instead, newline- or comma-separated, lowest " +
+      "layer first. Newlines and commas are list separators in every mode, so a settings-file " +
+      "path can never contain a comma. Single-repo and merge modes only; multi-repo targets " +
+      "read repos-dir files or each repository's own .github/settings.yml, so overriding it " +
+      "alongside repos or repos-dir fails the run.",
     default: DEFAULT_SETTINGS_FILE,
     summary:
       "Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high",
   },
   mode: {
     description:
-      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file layers into one document written to merged-file, with no token and no GitHub API call; merge reads only settings-file, merged-file, and layering, ignores token, and rejects every other input set to a non-default value, since each controls an apply or check run). check makes no settings changes, though a private report may still be delivered.",
+      "apply (mutate), check (report drift, exit 1 on any), or merge (fold the settings-file " +
+      "layers into one document written to merged-file, with no token and no GitHub API call; " +
+      "merge reads only settings-file, merged-file, and layering, ignores token, and rejects " +
+      "every other input set to a non-default value, since each controls an apply or check " +
+      "run). check makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
       "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub",
   },
   "merged-file": {
     description:
-      "mode: merge only, and required there: the path the merged settings document is written to (parent directories are created). The file holds exactly what apply would run: every section validated, each section that takes an undeclared policy in its policy-wrapper form with the policy made explicit, the other sections in their own shape, and private underscore keys and the _layering directives dropped. Feed it to a later apply or check step as its settings-file. Must not name one of the settings-file layers (the merge would overwrite it). Fails when set in apply or check.",
+      "mode: merge only, and required there: the path the merged settings document is written " +
+      "to (parent directories are created). The file holds exactly what apply would run: every " +
+      "section validated, each section that takes an undeclared policy in its policy-wrapper " +
+      "form with the policy made explicit, the other sections in their own shape, and private " +
+      "underscore keys and the _layering directives dropped. Feed it to a later apply or check " +
+      "step as its settings-file. Must not name one of the settings-file layers (the merge " +
+      "would overwrite it). Fails when set in apply or check.",
     default: "",
     summary:
       "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
@@ -162,7 +177,11 @@ export const INPUT_DECLS = {
   },
   layering: {
     description:
-      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed list sections (labels, rulesets) combine with the layers below them; a layer's own _layering directive, at its top level or on a section's {entries} wrapper, overrides it per file or per section. Every other list is replaced by the higher layer's. Fails when set in apply or check.",
+      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed " +
+      "list sections (labels, rulesets) combine with the layers below them; a layer's own " +
+      "_layering directive, at its top level or on a section's {entries} wrapper, overrides it " +
+      "per file or per section. Every other list is replaced by the higher layer's. Fails when " +
+      "set in apply or check.",
     default: "",
     summary:
       "`mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it",
@@ -541,7 +560,11 @@ function parseMergeConfig(): { config: MergeConfig } | { error: string } {
   });
   if (rejected.length > 0) {
     return {
-      error: `the ${quoteList(rejected)} input(s) do not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input(s), or move them to the apply or check step that runs the merged document`,
+      error:
+        `the ${quoteList(rejected)} input(s) do not apply to mode: merge, which only folds the ` +
+        `settings-file layers into merged-file: it never targets a repository, calls the GitHub ` +
+        `API, delivers a report, or narrows the sections it writes. Remove the input(s), or move ` +
+        `them to the apply or check step that runs the merged document`,
     };
   }
   const mergedFile = input("merged-file");
@@ -569,7 +592,11 @@ function parseMergeConfig(): { config: MergeConfig } | { error: string } {
   const collision = settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
   if (collision !== -1) {
     return {
-      error: `the "merged-file" input "${mergedFile}" is layer ${collision + 1} of the "settings-file" list ("${settingsFiles[collision]}"): the merge would overwrite that layer with the folded document, and the next run would fold the merged document as a layer. Write the merged document to a path outside the layer list`,
+      error:
+        `the "merged-file" input "${mergedFile}" is layer ${collision + 1} of the ` +
+        `"settings-file" list ("${settingsFiles[collision]}"): the merge would overwrite that ` +
+        `layer with the folded document, and the next run would fold the merged document as a ` +
+        `layer. Write the merged document to a path outside the layer list`,
     };
   }
   return { config: { kind: "merge", settingsFiles, mergedFile, layering } };
@@ -771,7 +798,11 @@ export function parseConfig(): { config: RunConfig } | { error: string } {
   // even a stray separator ("only.yml,") is rejected rather than repaired.
   if (LIST_SEPARATOR.test(settingsFile)) {
     return {
-      error: `the "settings-file" input is "${settingsFile}", which contains a list separator: ${mode} mode reads exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file, or set mode: merge to fold the list into one document`,
+      error:
+        `the "settings-file" input is "${settingsFile}", which contains a list separator: ` +
+        `${mode} mode reads exactly one settings file, and only mode: merge takes a newline- or ` +
+        `comma-separated list. Name one file, or set mode: merge to fold the list into one ` +
+        `document`,
     };
   }
   const rawRepo = input("repository") || githubRepository;
