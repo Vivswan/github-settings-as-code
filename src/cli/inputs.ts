@@ -7,7 +7,7 @@
  * here does.
  */
 
-import { Option } from "commander";
+import { InvalidArgumentError, Option } from "commander";
 import {
   INPUT_DECLS,
   type InputName,
@@ -43,14 +43,40 @@ export function exposedInputs(): InputName[] {
   return INPUT_NAMES.filter((name) => flags.has(name));
 }
 
-/** A repeated flag accumulates as a newline-separated list, the form parseConfig splits. */
+/**
+ * The inputs parseConfig splits on newlines and commas (its splitList calls),
+ * so a repeated flag may accumulate into one list. Pinned to parseConfig in
+ * test/cli/inputs.test.ts: every name here accepts a newline-joined pair.
+ */
+export const LIST_INPUTS = [
+  "settings-file",
+  "required-sections",
+  "sections",
+  "repos",
+  "exclude",
+  "topics",
+  "affiliation",
+] as const satisfies readonly InputName[];
+
+/** A repeated list flag accumulates as a newline-separated list, the form parseConfig splits. */
 function accumulate(value: string, previous?: string): string {
   return previous === undefined ? value : `${previous}\n${value}`;
 }
 
+/** A repeated single-value flag is refused: joined, it would form a value the action cannot receive. */
+export function once(flag: string): (value: string, previous?: string) => string {
+  return (value, previous) => {
+    if (previous !== undefined) {
+      throw new InvalidArgumentError(`--${flag} takes one value and was given more than once`);
+    }
+    return value;
+  };
+}
+
 /** The commander option for one input: `--<name> <value>` with the action's description. */
 export function inputOption(name: InputName): Option {
-  return new Option(`--${name} <value>`, INPUT_DECLS[name].description).argParser(accumulate);
+  const parse = (LIST_INPUTS as readonly InputName[]).includes(name) ? accumulate : once(name);
+  return new Option(`--${name} <value>`, INPUT_DECLS[name].description).argParser(parse);
 }
 
 /** Commander's attribute for each flag (camelCase of the name), read from commander itself. */

@@ -10,7 +10,7 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
-import { exposedInputs, inputsForMode } from "../../src/cli/inputs.js";
+import { exposedInputs, inputsForMode, LIST_INPUTS } from "../../src/cli/inputs.js";
 import { maskedStreams } from "../../src/cli/io.js";
 import { buildProgram, CLI_COMMANDS, main } from "../../src/cli/program.js";
 import {
@@ -21,6 +21,7 @@ import {
   MODES,
   type Mode,
   parseConfig,
+  parseReposInput,
   type RunConfig,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
@@ -345,6 +346,66 @@ describe("the per-mode flag split", () => {
           ).toMatch(/^input-(merge-only|rejected-in-merge)$/);
         }
       }
+    }
+  });
+
+  test("every LIST_INPUTS entry is one parseConfig splits: a newline-joined pair is accepted whole", () => {
+    // Two entries per list input, each valid alone; the pair must come out of the
+    // parse as those two values, which only the library's own splitting can prove
+    // (repos is split downstream by parseReposInput, so that is what reads it).
+    const engine: Inputs = { mode: "check", token: "ghp" };
+    const discovery: Inputs = { ...engine, repos: "*" };
+    const cases: Record<
+      (typeof LIST_INPUTS)[number],
+      [Inputs, [string, string], (cfg: RunConfig) => readonly string[]]
+    > = {
+      "settings-file": [
+        { mode: "merge", "merged-file": "out.yml" },
+        ["a.yml", "b.yml"],
+        (cfg) => (cfg.kind === "merge" ? cfg.settingsFiles : []),
+      ],
+      "required-sections": [
+        engine,
+        ["labels", "milestones"],
+        (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.required]),
+      ],
+      sections: [
+        engine,
+        ["labels", "milestones"],
+        (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.only]),
+      ],
+      repos: [
+        engine,
+        ["o/a", "o/b"],
+        (cfg) =>
+          cfg.kind === "multi"
+            ? parseReposInput(cfg.reposInput)
+                .map((r) => r.slugs)
+                .unwrapOr([])
+            : [],
+      ],
+      exclude: [
+        discovery,
+        ["x/*", "tmp-*"],
+        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.exclude : []),
+      ],
+      topics: [
+        discovery,
+        ["a", "b"],
+        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.topics : []),
+      ],
+      affiliation: [
+        discovery,
+        ["owner", "collaborator"],
+        (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.affiliation : []),
+      ],
+    };
+    const env: ConfigEnv = { GITHUB_REPOSITORY: "o/self" };
+    for (const name of LIST_INPUTS) {
+      const [companions, pair, kept] = cases[name];
+      const result = parseConfig(recordReader({ ...companions, [name]: pair.join("\n") }), env);
+      expect(result.isOk(), `${name}: ${result.match(() => "", describeProblem)}`).toBe(true);
+      expect(result.map(kept).unwrapOr([]), name).toEqual(pair);
     }
   });
 

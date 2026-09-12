@@ -98,7 +98,7 @@ describe("README front door", () => {
 
   test("stays a front door in size", () => {
     // The tripwire against the reference tables growing back.
-    expect(readme.split("\n").length).toBeLessThanOrEqual(105);
+    expect(readme.split("\n").length).toBeLessThanOrEqual(101);
   });
 });
 

@@ -276,12 +276,47 @@ describe("the commands this build cannot run", () => {
 });
 
 describe("commander's own exits", () => {
-  test("--help exits 0 and names every subcommand", async () => {
+  test("--help exits 0, prints the bin name, and names every subcommand", async () => {
     const result = await cli(["--help"]);
     expect(result.code).toBe(0);
+    expect(result.stdout).toStartWith("Usage: github-settings-as-code [options] [command]");
+    expect(result.stdout).toContain("gsac");
     for (const command of CLI_COMMANDS) {
       expect(result.stdout).toContain(`  ${command}`);
     }
+  });
+
+  test("a repeated single-value flag exits 1 naming the flag; a repeated list flag accumulates", async () => {
+    const repeated = await cli(
+      ["check", "--token", TOKEN, "--repository", "a/b", "--repository", "c/d"],
+      new MockApi({}),
+    );
+    expect(repeated.code).toBe(1);
+    expect(repeated.stderr).toBe(
+      "error: option '--repository <value>' argument 'c/d' is invalid. --repository takes one value and was given more than once\n",
+    );
+    // Both unknown names must be reported: a last-wins parser would name only the second.
+    const list = await cli([
+      "check",
+      "--token",
+      TOKEN,
+      "--repository",
+      "o/r",
+      "--sections",
+      "nope",
+      "--sections",
+      "also",
+    ]);
+    expect(list.code).toBe(1);
+    expect(list.stderr).toStartWith(
+      'error: unknown sections "nope", "also" in the "sections" input',
+    );
+    // Both token values were registered before the parse, so the echo is masked.
+    const token = await cli(["check", "--token", "first", "--token", "second"]);
+    expect(token.code).toBe(1);
+    expect(token.stderr).toBe(
+      "error: option '--token <value>' argument '***' is invalid. --token takes one value and was given more than once\n",
+    );
   });
 
   test("an unknown flag exits 1 with commander's line on stderr", async () => {

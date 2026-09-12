@@ -6,7 +6,7 @@
  * argv to its exit code without touching the process.
  */
 
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
 import pc from "picocolors";
 import {
   failRun,
@@ -25,7 +25,7 @@ import {
   unavailable,
   validateFile,
 } from "./commands.js";
-import { argvReader, inputOption, inputsForMode, tokenValues } from "./inputs.js";
+import { argvReader, inputOption, inputsForMode, once, tokenValues } from "./inputs.js";
 import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.js";
 
 /** Every subcommand, in help order; the package smoke asserts the installed help names each. */
@@ -101,10 +101,22 @@ export function buildProgram(options: ProgramOptions): {
   }
   let exitCode = 0;
   const program = new Command()
-    .description("Apply, check, merge, and validate declarative GitHub repository settings")
-    .option("--token <value>", `${INPUT_DECLS.token.description} Falls back to GITHUB_TOKEN.`)
+    .name("github-settings-as-code")
+    .description(
+      "Apply, check, merge, and validate declarative GitHub repository settings (also installed as gsac)",
+    )
+    .addOption(
+      new Option(
+        "--token <value>",
+        `${INPUT_DECLS.token.description} Falls back to GITHUB_TOKEN.`,
+      ).argParser(once("token")),
+    )
     .option("--json", "Print the outputs as one JSON object on stdout; log lines move to stderr")
-    .option("--summary <file>", "Append the run's markdown summary to this file")
+    .addOption(
+      new Option("--summary <file>", "Append the run's markdown summary to this file").argParser(
+        once("summary"),
+      ),
+    )
     .option("--verbose", "Show the debug trace on stderr")
     .exitOverride()
     .configureOutput({
