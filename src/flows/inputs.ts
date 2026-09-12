@@ -640,6 +640,66 @@ export const SNAPSHOT_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(SNAPSHOT_INPUTS as readonly string[]).includes(name));
 
+/** The file form of a mode: snapshot run: one repository written to snapshotFile. */
+export type SnapshotFileConfig = Extract<RunConfig, { kind: "snapshot"; form: "file" }>;
+
+/** What both snapshot forms read before the destination picks the arm. */
+function readSnapshotBase(input: Inputs, env: ConfigEnv) {
+  return safeTry(function* () {
+    const token = yield* readToken(input, env);
+    const policies = yield* readPolicies(input);
+    const filters = yield* readDiscoveryFilters(input);
+    return ok({
+      base: {
+        kind: "snapshot" as const,
+        token,
+        apiVersion: input.orDefault("api-version"),
+        onMissingPermission: policies.onMissingPermission,
+        sections: policies.sections,
+        privateRepos: policies.privateRepos,
+        selfSlug: env.GITHUB_REPOSITORY ?? "",
+      },
+      filters,
+    });
+  });
+}
+
+/** The file arm: one repository, the fleet inputs refused. */
+function parseSnapshotFileArm(
+  input: Inputs,
+  env: ConfigEnv,
+  snapshotFile: string,
+): Result<SnapshotFileConfig, Problem> {
+  return safeTry(function* () {
+    const { base, filters } = yield* readSnapshotBase(input, env);
+    if (input.value("repos") || input.value("repos-dir")) {
+      return err({ code: "input-snapshot-file-with-multi" });
+    }
+    if (filters.discoveryFiltersSet.length > 0) {
+      return err({
+        code: "discovery-filters-without-wildcard",
+        filters: filters.discoveryFiltersSet,
+        targets: "snapshot-file",
+      });
+    }
+    const repo = yield* readSingleTarget(input, base.selfSlug);
+    return ok({ ...base, form: "file" as const, repo, snapshotFile });
+  });
+}
+
+/**
+ * The file arm for a caller whose destination is fixed: the CLI's init writes
+ * the settings file, so it reads no snapshot-file input and can never be the
+ * dir form.
+ */
+export function parseSnapshotFileConfig(
+  read: InputReader,
+  env: ConfigEnv,
+  snapshotFile: string,
+): Result<SnapshotFileConfig, Problem> {
+  return parseSnapshotFileArm(inputs(read), env, snapshotFile);
+}
+
 /** Read and validate the mode: snapshot inputs; the first problem wins. */
 function parseSnapshotConfig(
   input: Inputs,
@@ -661,38 +721,15 @@ function parseSnapshotConfig(
     if (!snapshotFile && !snapshotDir) {
       return err({ code: "input-snapshot-destination-missing" });
     }
-    const token = yield* readToken(input, env);
-    const githubRepository = env.GITHUB_REPOSITORY ?? "";
-    const policies = yield* readPolicies(input);
-    const filters = yield* readDiscoveryFilters(input);
-    const base = {
-      kind: "snapshot" as const,
-      token,
-      apiVersion: input.orDefault("api-version"),
-      onMissingPermission: policies.onMissingPermission,
-      sections: policies.sections,
-      privateRepos: policies.privateRepos,
-      selfSlug: githubRepository,
-    };
-    const reposInput = input.value("repos");
-    const reposDir = input.value("repos-dir");
     if (snapshotFile) {
-      if (reposInput || reposDir) {
-        return err({ code: "input-snapshot-file-with-multi" });
-      }
-      if (filters.discoveryFiltersSet.length > 0) {
-        return err({
-          code: "discovery-filters-without-wildcard",
-          filters: filters.discoveryFiltersSet,
-          targets: "snapshot-file",
-        });
-      }
-      const repo = yield* readSingleTarget(input, githubRepository);
-      return ok({ ...base, form: "file" as const, repo, snapshotFile });
+      return parseSnapshotFileArm(input, env, snapshotFile);
     }
+    const { base, filters } = yield* readSnapshotBase(input, env);
     if (input.value("repository")) {
       return err({ code: "input-repository-with-snapshot-dir" });
     }
+    const reposInput = input.value("repos");
+    const reposDir = input.value("repos-dir");
     if (!reposInput && !reposDir) {
       return err({ code: "input-snapshot-dir-without-targets" });
     }
@@ -702,7 +739,7 @@ function parseSnapshotConfig(
       snapshotDir,
       reposInput,
       reposDir,
-      adminOwner: githubRepository.split("/")[0] ?? "",
+      adminOwner: base.selfSlug.split("/")[0] ?? "",
       discoveryFilters: filters.discoveryFilters,
       discoveryFiltersSet: filters.discoveryFiltersSet,
     });

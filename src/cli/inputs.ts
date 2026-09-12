@@ -65,15 +65,12 @@ const INIT_FLAGS: ReadonlySet<InputName> = new Set<InputName>([
 ]);
 export const INIT_INPUTS: readonly InputName[] = INPUT_NAMES.filter((name) => INIT_FLAGS.has(name));
 
-/** The init flags whose declaration describes another command's use of the input. */
-export const INIT_DESCRIPTIONS: Partial<Record<InputName, string>> = {
-  repository:
-    "Target repository (owner/name). Required outside GitHub Actions, where GITHUB_REPOSITORY supplies it.",
-  "settings-file":
-    "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.",
-  sections:
-    "Optional comma-separated allowlist of sections to read back; every other section is left out of the file.",
-};
+/**
+ * init's one reworded flag: the declaration describes the file apply and check
+ * READ, and init WRITES it; every other init flag keeps its declared text.
+ */
+export const INIT_SETTINGS_FILE_DESCRIPTION =
+  "Where the settings document is written: the file apply and check read. One path; an existing file is kept unless --force is passed.";
 
 /** Every input some subcommand or the program exposes; the mode is the subcommand itself. */
 export function exposedInputs(): InputName[] {

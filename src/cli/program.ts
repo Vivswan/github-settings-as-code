@@ -30,8 +30,8 @@ import {
 import { failInit, type InitConfig, parseInitConfig, runInit } from "./init.js";
 import {
   argvReader,
-  INIT_DESCRIPTIONS,
   INIT_INPUTS,
+  INIT_SETTINGS_FILE_DESCRIPTION,
   inputOption,
   inputsForMode,
   once,
@@ -187,7 +187,11 @@ export function buildProgram(options: ProgramOptions): {
 
   const init = program.command("init").description(DESCRIPTION.init);
   for (const input of INIT_INPUTS) {
-    init.addOption(inputOption(input, INIT_DESCRIPTIONS[input]));
+    init.addOption(
+      input === "settings-file"
+        ? inputOption(input, INIT_SETTINGS_FILE_DESCRIPTION)
+        : inputOption(input),
+    );
   }
   init
     .option("--force", "Replace the settings file when it already exists; without it, init refuses")

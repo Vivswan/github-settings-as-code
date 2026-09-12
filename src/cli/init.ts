@@ -17,7 +17,7 @@ import {
   type InputReader,
   type Io,
   type Problem,
-  parseConfig,
+  parseSnapshotFileConfig,
   type RepoRef,
   type SectionSelection,
   type SnapshotReport,
@@ -54,20 +54,17 @@ export type InitProblem =
       readonly settingsFile: string;
     }
   | {
-      readonly code: "init-partial-and-empty";
+      readonly code: "init-empty-document";
       readonly repository: string;
       readonly settingsFile: string;
+      /** Why each selected section declares nothing, keyed by the outcome's status. */
+      readonly reasons: ReadonlyArray<readonly [label: string, keys: readonly string[]]>;
     };
 
 /** The separators every mode reads as a list, which one path can therefore never contain. */
 const LIST_SEPARATOR = /[\n,]/;
 
-/**
- * Read the init flags as the snapshot of one repository they are: the library
- * validates the shared inputs (token, slug, sections, policy, API version)
- * with the settings file standing where the snapshot file would, so every
- * problem is the one the snapshot subcommand would print for the same value.
- */
+/** The init flags are the snapshot inputs of one repository, so every problem is the snapshot subcommand's. */
 export function parseInitConfig(
   read: InputReader,
   force: boolean,
@@ -77,25 +74,8 @@ export function parseInitConfig(
   if (LIST_SEPARATOR.test(settingsFile)) {
     return err({ code: "init-settings-file-is-list", value: settingsFile });
   }
-  const asSnapshot: InputReader = (name) => {
-    switch (name) {
-      case "mode":
-        return "snapshot";
-      case "snapshot-file":
-        return settingsFile;
-      case "settings-file":
-        return "";
-      default:
-        return read(name);
-    }
-  };
-  return parseConfig(asSnapshot, env).map((cfg): InitConfig => {
-    if (cfg.kind !== "snapshot" || cfg.form !== "file") {
-      throw new Error(
-        `BUG: the init flags parsed as a ${cfg.kind} config; with mode snapshot and a snapshot-file they can only be the file form`,
-      );
-    }
-    return {
+  return parseSnapshotFileConfig(read, env, settingsFile).map(
+    (cfg): InitConfig => ({
       kind: "init",
       token: cfg.token,
       apiVersion: cfg.apiVersion,
@@ -104,8 +84,8 @@ export function parseInitConfig(
       sections: cfg.sections,
       onMissingPermission: cfg.onMissingPermission,
       force,
-    };
-  });
+    }),
+  );
 }
 
 /** The wording for every problem init can end in: its own here, the library's through the CLI's rewording. */
@@ -119,8 +99,13 @@ function describeInitProblem(problem: InitProblem): string {
       return `cannot write the settings file ${problem.settingsFile}: ${problem.reason}. Check that --settings-file names a writable path`;
     case "init-snapshot-failed":
       return `the snapshot of ${problem.repository} failed, so ${problem.settingsFile} was not written; the errors above name the section and the fix`;
-    case "init-partial-and-empty":
-      return `the snapshot of ${problem.repository} is partial and its document is empty (the warnings and errors above name the sections that were skipped or failed), so ${problem.settingsFile} was not written`;
+    case "init-empty-document": {
+      const why = problem.reasons
+        .filter(([, keys]) => keys.length > 0)
+        .map(([label, keys]) => `${label}: ${keys.join(", ")}`)
+        .join("; ");
+      return `the snapshot of ${problem.repository} declares no section (${why}), so ${problem.settingsFile} was not written. Choose sections init can read back, or drop --sections to read every section`;
+    }
     default:
       return describeCliProblem(problem);
   }
@@ -180,18 +165,25 @@ export function runInit(
         });
       }
       const grant = grantTable(report.settings, bold);
-      // A section failing on its own (a 500, bad credentials) leaves the run partial, not failed;
-      // a document those failures emptied is no starting point, and under --force it would erase the file.
-      if (report.result === "partial" && grant.sections.length === 0) {
+      const unsupported = keysWith(report, "unsupported");
+      const skipped = keysWith(report, "skipped", "failed");
+      // An empty document is no starting point, and under --force it would erase the file:
+      // a section failing on its own leaves the run partial, and an unsupported-only
+      // selection reads back nothing at all.
+      if (grant.sections.length === 0) {
         return err({
-          code: "init-partial-and-empty",
+          code: "init-empty-document",
           repository: cfg.repo.slug,
           settingsFile: cfg.settingsFile,
+          reasons: [
+            ["cannot be read back", unsupported],
+            ["skipped", keysWith(report, "skipped")],
+            ["failed", keysWith(report, "failed")],
+            ["nothing exists on the repository", keysWith(report, "snapshot")],
+          ],
         });
       }
       return writeSettingsFile(cfg, report.yaml).map((): Rendered => {
-        const unsupported = keysWith(report, "unsupported");
-        const skipped = keysWith(report, "skipped", "failed");
         return {
           code: 0,
           lines: [
