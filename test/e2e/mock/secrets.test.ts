@@ -1,11 +1,6 @@
 /**
- * The mock's secrets crypto proof, at the pipeline level: a PUT's ciphertext
- * is UNSEALED with the fixed test keypair (verifying key decode, sealed-box
- * construction, and base64 round-trip), the state stores a deterministic
- * digest and never the plaintext, create answers 201 and update 204, and a
- * re-write of the same value keeps the digest and created_at stable while
- * updated_at moves, exactly like GitHub (the idempotence snapshot excludes
- * only that volatile field).
+ * The mock's secrets crypto proof at the pipeline level. A same-value re-write keeps the digest and
+ * created_at while updated_at MOVES, exactly like GitHub; the idempotence snapshot excludes only that field.
  */
 
 import { beforeAll, describe, expect, test } from "bun:test";
@@ -64,10 +59,6 @@ describe("mock secrets crypto", () => {
     expect(state.actions_secret_digests.DEPLOY_TOKEN).toBe(secretDigest("plain-one"));
     expect(JSON.stringify(state)).not.toContain("plain-one");
 
-    // A re-seal of the SAME value produces different ciphertext but the same
-    // digest: 204, no new entry, created_at untouched - and updated_at MOVES,
-    // exactly like GitHub (the idempotence snapshot excludes it for that
-    // reason; the digest is what proves the value did not change).
     const before = state.actions_secrets[0] as Record<string, unknown>;
     const createdAt = before.created_at;
     const updatedAtFirst = before.updated_at;
@@ -84,7 +75,6 @@ describe("mock secrets crypto", () => {
     expect(after.created_at).toBe(createdAt);
     expect(after.updated_at).not.toBe(updatedAtFirst);
 
-    // A rotated value keeps the entry but moves the digest.
     const rotated = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), "plain-two");
     expect(
       request(state, "PUT", path, { encrypted_value: rotated, key_id: MOCK_SECRETS_KEY_ID })

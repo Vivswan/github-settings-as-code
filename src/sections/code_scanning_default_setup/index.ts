@@ -1,9 +1,3 @@
-/**
- * `code_scanning_default_setup:` section - the CodeQL default-setup
- * configuration, PATCHed verbatim by the shared setup factory
- * (../shared/setup-section.ts).
- */
-
 import { setupSection } from "../shared/setup-section.js";
 
 export const codeScanningDefaultSetupSection = setupSection({

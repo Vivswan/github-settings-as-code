@@ -1,23 +1,13 @@
 /**
- * The `issue` private-report channel: the full unredacted report lands as
- * a deterministically-titled issue on the private target repo itself - the
- * one GitHub-ACL-private channel a public run has under PAT auth. One issue
- * per repo, reused every run: the body is REPLACED (prior reports stay in
- * the issue-body edit history) and the state mirrors the run's exit
- * semantics (open = needs attention, closed = latest report inside, all
- * well).
+ * The `issue` private-report channel: the unredacted report lands as one exact-titled issue on the private target repo,
+ * the one GitHub-ACL-private channel a public run has under PAT auth. The body is REPLACED each run (prior reports stay
+ * in the edit history) and the state mirrors the run: open needs attention, closed is all well.
  *
- * Two delivery modes, one per channel value: `always` (the `issue` channel)
- * writes the issue on every run; `on-failure` (the `issue-on-failure`
- * channel) writes only when the run needs attention - a healthy run does one
- * read-only lookup and closes a still-open issue from a previous failure, or
- * touches nothing at all.
+ * `issue`             -> written every run
+ * `issue-on-failure`  -> created only when the run needs attention; a healthy run closes a still-open issue (body included) or touches nothing
  *
- * Shaped like a SectionModule where it matters - an ENDPOINTS dictionary
- * and a permission declaration - so the mock route table, USED_PATHS, and
- * the PAT grant prose pick it up through the existing machinery. It is NOT
- * a settings section (never registered in sections/registry.ts): report
- * delivery is infrastructure that writes even in check mode.
+ * Shaped like a SectionModule (ENDPOINTS, a permission) so the mock routes, USED_PATHS, and the PAT prose pick it up,
+ * but never registered in sections/registry.ts: report delivery is infrastructure that writes even in check mode.
  */
 
 import type { RepoRef } from "../discovery/targets.js";
@@ -34,14 +24,9 @@ import type { UndeclaredPolicyList } from "../types.js";
 /** The lookup key: one exact-titled report issue per repo, forever reused. */
 export const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
 
-/**
- * The marker label that makes the lookup one indexed, database-consistent
- * request (the search API is eventually consistent and separately
- * throttled, so it is not used at all).
- */
+/** Makes the lookup one indexed request; the search API is eventually consistent and separately throttled, so it is never used. */
 export const MARKER_LABEL = "settings-as-code-report";
 
-/** The marker label as the labels section (and ensure-create) declares it. */
 export const MARKER_LABEL_CONFIG = {
   name: MARKER_LABEL,
   color: "0e2a47",
@@ -74,25 +59,12 @@ export const ISSUE_REPORT_ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * When to write the report issue: `always` mirrors every run into it;
- * `on-failure` writes only on needs-attention runs, closing (never creating)
- * on healthy ones.
- */
 export type IssueReportMode = "always" | "on-failure";
 
-/**
- * Success carries the issue URL for the run summary; failure a safe warning;
- * `skipped` is the on-failure mode's healthy path when no open issue needed
- * closing - nothing was written, by design.
- */
+/** `skipped` is on-failure's healthy path: no open issue needed closing, so nothing was written. */
 export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
 
-/**
- * The one failure surface, and it must stay public-safe: the warning names
- * the HTTP status and generic advice only - never the slug, the request
- * path, or the API's message, all of which would leak into public logs.
- */
+/** Public-safe by construction: the HTTP status and generic advice only. The slug, the path, or the API message would land in public logs. */
 function deliveryWarning(error: ApiError): { warning: string } {
   const advice = isPermissionError(error)
     ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
@@ -100,12 +72,7 @@ function deliveryWarning(error: ApiError): { warning: string } {
   return { warning: `could not deliver the private report (HTTP ${error.status}). ${advice}` };
 }
 
-/**
- * The malformed-response twin of deliveryWarning, equally public-safe: `what`
- * names the failing request as a route template or a structural fact (never
- * the slug, the expanded path, or response content), so the operator can
- * tell WHICH of the channel's requests answered off-contract.
- */
+/** Under the same public-safety rule: `what` is a route template or a structural fact, never the expanded path or response content. */
 function malformedWarning(what: string): { warning: string } {
   return {
     warning: `could not deliver the private report: ${what}. Check the "api-version" input, or set private-report: none`,
@@ -113,10 +80,8 @@ function malformedWarning(what: string): { warning: string } {
 }
 
 /**
- * The report issue in a page of issue-list entries: skips pull requests
- * (the issues list includes them) and demands the exact title. Carries the
- * issue's current label names so a fallback-scan hit can reattach the
- * stripped marker without clobbering human-added labels.
+ * The issues list includes pull requests, so they are skipped. The label names ride along so a fallback-scan hit can
+ * reattach the stripped marker without clobbering human-added labels.
  */
 function reportIssueIn(items: unknown[]): { number: number; url: string; labels: string[] } | null {
   for (const item of items) {
@@ -149,9 +114,8 @@ function reportIssueIn(items: unknown[]): { number: number; url: string; labels:
 }
 
 /**
- * The fallback lookup for when a human stripped the marker label: an
- * early-exit scan of the token user's own issues in creation order. It runs
- * BEFORE any create, so a stripped label can never cause a duplicate.
+ * For a human-stripped marker label: scans the token user's own issues, oldest first, and runs BEFORE any create so a
+ * stripped label never causes a duplicate under the same token user.
  */
 async function fallbackScan(
   api: GithubClient,
@@ -182,13 +146,8 @@ async function fallbackScan(
 }
 
 /**
- * The on-failure mode's healthy path: one indexed lookup for an OPEN report
- * issue (a previous failure), closed with the healthy report when found;
- * otherwise nothing is written at all. The label ensure-create and the
- * fallback creator scan are skipped on purpose - both exist only to keep a
- * CREATE from duplicating, and this path never creates. The trade-off: a
- * human-stripped marker label leaves a stale open issue until the next
- * needs-attention run repairs the label.
+ * The label ensure-create and the creator scan are skipped on purpose: both exist to keep a CREATE from duplicating, and
+ * this path never creates. The cost: a human-stripped marker leaves a stale open issue until the next needs-attention run.
  */
 async function closeIfOpen(
   api: GithubClient,
@@ -233,8 +192,7 @@ async function deliver(
   if (mode === "on-failure" && !needsAttention) {
     return closeIfOpen(api, ref, body);
   }
-  // Ensure the marker label exists so lookup stays one indexed request;
-  // a 422 means it already does.
+  // A 422 means the marker label already exists.
   const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
     name: MARKER_LABEL_CONFIG.name,
     color: MARKER_LABEL_CONFIG.color,
@@ -256,11 +214,8 @@ async function deliver(
     return malformedWarning("the report-issue lookup returned a non-list response");
   }
   let found = reportIssueIn(listed.data);
-  // The PATCH normally leaves labels alone (a human may have added their own).
-  // But when the label lookup missed and the creator scan hit, the marker was
-  // stripped from the issue; without reattaching it here, every future
-  // label-filtered lookup - including the on-failure healthy close - misses
-  // this issue forever.
+  // The PATCH leaves labels alone (a human may have added their own) unless the creator scan found the issue with the
+  // marker stripped: without reattaching it, every label-filtered lookup, the on-failure close included, misses forever.
   let relabel: string[] | undefined;
   if (!found) {
     const scanned = await fallbackScan(api, ref);
@@ -314,17 +269,9 @@ async function deliver(
 }
 
 /**
- * Upsert the report issue on the target repo: ensure the marker label, find
- * the issue by label (one request) or by the early-exit creator scan, then
- * PATCH the body and state - or POST it with the marker label attached.
- * `needsAttention` opens the issue (failed / check-mode drift, exactly the
- * results that fail the run) and anything else closes it. Under the
- * `on-failure` mode a healthy run only closes an already-open issue (or does
- * nothing); a needs-attention run behaves exactly like `always`. Never
- * throws: report delivery is auxiliary, so every failure comes back as a
- * safe warning and the run's result stays untouched. `repo` is the parsed
- * owner/name pair from the run flows' boundary, so this module never
- * re-splits a slug.
+ * Never throws: report delivery is auxiliary, so every failure comes back as a public-safe warning and the run's result
+ * stays untouched. `needsAttention` (failed, or check-mode drift: exactly what fails the run) opens the issue; a healthy
+ * run closes it, or under `on-failure` closes only a still-open one.
  */
 export async function deliverIssueReport(
   api: GithubClient,
@@ -336,8 +283,7 @@ export async function deliverIssueReport(
   try {
     return await deliver(api, repo, body, needsAttention, mode);
   } catch {
-    // A throw is a network-level failure whose message embeds the request
-    // path (the private slug), so nothing from it may escape.
+    // A throw is a network-level failure whose message embeds the request path (the private slug), so nothing from it may escape.
     return {
       warning:
         "could not deliver the private report: the request failed before an HTTP response arrived. Re-run the workflow, or set private-report: none if it persists",
@@ -346,27 +292,15 @@ export async function deliverIssueReport(
 }
 
 /**
- * Marker-label injection, closing the undeclaredDefault hole: when the
- * settings declare a `labels` section, an apply would DELETE the
- * undeclared marker label right after report delivery created it. Appending
- * the marker to the declared set (when no entry already manages it) lets the
- * labels section manage it like any other label.
- *
- * A declared entry whose name OR new_name resolves to the marker already
- * manages it, so no injection is needed. But an entry that RENAMES the marker
- * AWAY (name is the marker, new_name is something else) would break the
- * next run's marker lookup, so its rename is refused: the new_name is stripped
- * and the outcome is "rename-refused". Pure: the input settings object is
- * never mutated.
+ * A declared `labels` section under the delete policy would DELETE the marker label an earlier run's report delivery
+ * created, so the marker joins the declared set unless an entry already manages it. An entry renaming the marker AWAY
+ * would break the next run's lookup, so its `new_name` is stripped instead ("rename-refused").
  */
 export function injectMarkerLabel(settings: SettingsFile): {
   settings: SettingsFile;
   outcome: "unchanged" | "injected" | "rename-refused";
 } {
-  // The labels section takes the undeclared-policy knob, so the declaration
-  // is either the plain entry array or the wrapped {_undeclared, entries}
-  // form; unwrap here and rebuild in the SAME form below, so the injection
-  // never rewrites the operator's chosen shape (or their policy).
+  // Unwrapped here and rebuilt in the SAME form below, so the injection never rewrites the operator's chosen shape or policy.
   const declaration = settings.labels;
   const wrapped = !Array.isArray(declaration);
   const labels = wrapped
@@ -380,8 +314,6 @@ export function injectMarkerLabel(settings: SettingsFile): {
   const rebuild = (entries: LabelConfig[]): SettingsFile["labels"] =>
     wrapped ? { ...(declaration as UndeclaredPolicyList<LabelConfig>), entries } : entries;
   const marker = nameKey(MARKER_LABEL);
-  // An entry that renames the marker to a different name: keep the entry but
-  // drop the rename so the marker label keeps its name.
   const renamesMarkerAway = (label: LabelConfig): boolean =>
     nameKey(label.name) === marker &&
     label.new_name !== undefined &&

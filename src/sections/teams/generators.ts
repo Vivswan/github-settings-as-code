@@ -1,7 +1,6 @@
 /**
- * The teams fuzz fragment: the entry generator walks the team slice, so a new schema field is
- * fuzzed without an edit here; only the slug pool and the unique-slug invariant live in this file.
- * Imports only the test-tree seams; the bundle entry is src/main.ts, so this never reaches lib/index.js.
+ * The teams fuzz generator fragment. It imports test-tree seams on purpose: the bundle entry is
+ * src/main.ts, so this file never reaches lib/index.js.
  */
 
 import { generatorFromSlice, type Json, uniqueBy } from "../../../test/e2e/gen-support.js";
@@ -18,6 +17,5 @@ const genTeam = generatorFromSlice(TeamsConfig.element, {
 
 export function genTeams(rng: Rng): Json[] {
   const teams = Array.from({ length: rng.int(2) + 1 }, () => genTeam(rng));
-  // The section's own rule: one entry per slug, case-insensitively.
   return uniqueBy(teams, ["name"], (slug) => slug.toLowerCase());
 }

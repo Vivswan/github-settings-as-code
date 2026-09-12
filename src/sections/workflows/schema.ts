@@ -9,5 +9,4 @@ const WorkflowConfig = z
   })
   .meta({ id: "WorkflowConfig" });
 
-/** The `workflows:` document slice: the entry list the document composes from. */
 export const WorkflowsConfig = z.array(WorkflowConfig);

@@ -39,16 +39,14 @@ describe("dedupeTargets", () => {
       (m) => notices.push(m),
       () => "private repository #1",
     );
-    // The whole notice: the placeholder replaces the slug everywhere, the
-    // origin noun phrase is wrapped without a doubled article.
+    // Pinned whole: wrapping the origin noun phrase must not double its article.
     expect(notices).toEqual([
       'private repository #1: using the central file repos/x.yml; the entry for the same repository from the "repos" input is ignored',
     ]);
   });
 
   test("a redacted target's central origin is rendered generically, never the file path", () => {
-    // The central file path (repos/secret.yml) can embed the real repo name, so for
-    // a redacted target it must not appear next to the placeholder.
+    // The central file path (repos/secret.yml) can embed the real repo name, so it must not appear next to the placeholder.
     const notices: string[] = [];
     dedupeTargets(
       [

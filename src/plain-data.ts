@@ -1,18 +1,11 @@
 /**
- * The vocabulary for values that are not plain JSON/YAML data: the one
- * plain-mapping test, and the rejection prose shared by the boundaries that
- * refuse tagged values (engine/validate.ts, github/secret-scan.ts). One
- * prototype ladder, so no two boundaries describe the same tagged value
- * differently.
+ * The one plain-mapping test and the rejection prose, shared by the boundaries that refuse tagged values
+ * (engine/validate.ts, github/secret-scan.ts), so no two of them describe the same value differently.
  */
 
 /**
- * A PLAIN mapping only: the prototype must be Object.prototype or null. A
- * YAML explicit tag (!!timestamp, !!set) parses to a Date or Set, which is
- * an object too - treating one as a mapping would spread it into `{}` and
- * quietly hand the merge (or a knobbed-section normalization) a document
- * nobody wrote. Non-plain objects REPLACE like scalars, surviving the merge
- * as written for post-merge validation to reject.
+ * A YAML tag (!!timestamp, !!set) parses to a Date or Set, an object too; spread as a mapping it would become `{}` and
+ * hand the merge a document nobody wrote. Non-plain objects replace like scalars and survive for validation to reject.
  */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -22,11 +15,7 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return proto === Object.prototype || proto === null;
 }
 
-/**
- * The value class of a non-plain value, for rejection prose. Prototype
- * comparison only - the same reflective read the callers already perform;
- * no payload method is ever dispatched.
- */
+/** Prototype comparison only, the same reflective read the callers already perform; no payload method is ever dispatched. */
 export function nonPlainKind(value: unknown): string {
   if (typeof value !== "object" || value === null) {
     return `a ${typeof value}`;

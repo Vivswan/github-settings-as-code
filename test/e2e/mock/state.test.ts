@@ -1,12 +1,6 @@
 /**
- * State-layer unit tests: buildState overlay semantics and the write-to-read
- * transformer round trips. These run under the normal `bun test` suite (no
- * server, no subprocess). The transformer tests import the ENGINE's real
- * flatteners (flattenProtection, flattenEnvironment) and assert that flattening
- * a transformer's output reproduces the payload under the same declared-keys-
- * only subsetDiff the engine uses. Importing the real functions (not local
- * copies) is deliberate: it makes the test fail if a transformer and its
- * flattener ever drift, which is the whole point of the round trip.
+ * buildState overlay semantics and the write-to-read round trips. The round trips import the SECTIONS' real
+ * flatteners (src/sections/branches, src/sections/environments), not local copies, so a transformer that drifts from its flattener fails here.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -60,9 +54,7 @@ describe("buildState overlay semantics", () => {
       "org",
     );
     expect(state.repo.description).toBe("overridden");
-    // Deep merge keeps sibling fixture fields under permissions.
     expect(state.repo.permissions).toMatchObject({ admin: false, push: true, pull: true });
-    // Untouched top-level fixture fields survive.
     expect(state.repo.default_branch).toBe("main");
   });
 
@@ -80,7 +72,6 @@ describe("buildState overlay semantics", () => {
     for (const label of state.labels) {
       expect((label as Record<string, unknown>).color).toBe("abcdef");
     }
-    // Generated ids are unique.
     const ids = new Set(state.labels.map((l) => (l as Record<string, unknown>).id));
     expect(ids.size).toBe(3);
   });
@@ -94,8 +85,6 @@ describe("buildState overlay semantics", () => {
       },
       "org",
     );
-    // Each explicit list replaces the empty baseline outright (one seed, one item), and the ids
-    // are minted in seed order from the 90_000_000 pool.
     expect(state.labels).toEqual([
       {
         name: "bug",
@@ -115,9 +104,8 @@ describe("buildState overlay semantics", () => {
         id: 90_000_001,
       },
     ]);
-    // The seed's comment is stripped the way a created key is stored, so a converging apply over a
-    // seeded key still proves the section compares algorithm + blob, not the raw string. The id is
-    // the third mint from the 90_000_000 pool (the label and the autolink took the first two).
+    // The seed's comment is stripped the way a created key is stored, so a converging apply over a seeded
+    // key proves the section compares algorithm + blob.
     expect(state.deploy_keys[0]).toEqual({
       title: "bot",
       key: "ssh-ed25519 AAAAC3seedseedseed",
@@ -130,8 +118,6 @@ describe("buildState overlay semantics", () => {
   });
 
   test("a pinned seed id anywhere in the overlay is reserved before any family mints", () => {
-    // One pinned id sits in a list collection (last, after a minted sibling), one nested two levels
-    // down in a non-list family; every id every family mints must still clear both.
     const state = buildState(
       {
         labels: [{ name: "minted" }, { name: "pinned", id: 90_000_001 }],
@@ -158,8 +144,6 @@ describe("buildState overlay semantics", () => {
   });
 
   test("every id in a generated scenario's state is distinct, across every minting family", () => {
-    // The one id counter starts past every seeded id, so nothing a family mints can collide with a
-    // seed or with another family; generated live state exercises every seeding path at once.
     const mintingFamilies = (state: MockState) => [
       ...state.labels,
       ...state.autolinks,
@@ -210,23 +194,16 @@ describe("buildState overlay semantics", () => {
   });
 
   test("reslugging one state's nested owner does not contaminate the fixture singleton", () => {
-    // deepMerge shallow-copied the top level, so before the clone fix state.repo
-    // .owner aliased the imported fixture's nested owner object; reslugRepo then
-    // mutated owner.login on the module singleton, contaminating later builds.
-    // buildStateForSlug re-slugs owner.login; a second, unrelated build must
-    // still see the pristine fixture owner.
+    // deepMerge shallow-copies the top level, so an uncloned fixture would alias state.repo.owner to the
+    // module singleton and reslugRepo would write owner.login into every later build.
     const first = buildStateForSlug("e2e-owner/svc-a", { settingsYaml: null }, "org");
     expect((first.repo.owner as Record<string, unknown>).login).toBe("e2e-owner");
-    // Build a second state with a live_state.repo overlay (the deepMerge path)
-    // and re-slug it to a different owner.
     const second = buildStateForSlug(
       "other-owner/svc-b",
       { settingsYaml: null, liveState: { repo: { description: "x" } } },
       "org",
     );
     expect((second.repo.owner as Record<string, unknown>).login).toBe("other-owner");
-    // A third, plain build must see the untouched fixture owner - proof the
-    // module singleton was never mutated by the re-slugs above.
     const third = buildState(undefined, "org");
     expect((third.repo.owner as Record<string, unknown>).login).toBe("e2e-owner");
     expect(third.repo.full_name).toBe("e2e-owner/e2e-repo");
@@ -235,9 +212,6 @@ describe("buildState overlay semantics", () => {
 
 describe("protectionFromPut round trip", () => {
   test("the engine flattener over protectionFromPut(payload) shows no drift", () => {
-    // A payload exercising every field the branches section reads: the four
-    // required core keys, the boolean toggles, nested review settings, and the
-    // actor string arrays that must expand then collapse back to strings.
     const payload = {
       required_status_checks: { strict: true, contexts: ["all-green"] },
       enforce_admins: true,
@@ -258,8 +232,7 @@ describe("protectionFromPut round trip", () => {
       lock_branch: false,
       allow_fork_syncing: true,
     };
-    // subsetDiff is exactly how the branches section compares declared
-    // protection against the flattened live GET; no drift proves the round trip.
+    // subsetDiff is exactly how the branches section compares declared protection against the flattened live GET.
     const flattened = flattenProtection(protectionFromPut(payload));
     expect(subsetDiff(payload, flattened, "protection")).toEqual([]);
   });
@@ -272,8 +245,7 @@ describe("protectionFromPut round trip", () => {
   });
 
   test("required_signatures is dropped from the PUT shape (its sub-endpoint owns it)", () => {
-    // GitHub's protection PUT silently discards the toggle, so the stored GET
-    // shape must not gain it from a PUT body.
+    // GitHub's PUT silently discards the toggle, so the stored GET shape must not gain it.
     expect(protectionFromPut({ enforce_admins: true, required_signatures: true })).toEqual({
       enforce_admins: { enabled: true },
     });
@@ -282,10 +254,6 @@ describe("protectionFromPut round trip", () => {
 
 describe("branch protection rule projections", () => {
   test("the section's classicViewOfRule over ruleFromProtection shows no drift", () => {
-    // A LITERAL rule with every translated key plus the GraphQL-only extras:
-    // projecting the stored REST GET shape into a rule node and reading it
-    // back through the engine's classic view must reproduce the declaration
-    // under the same declared-keys-only subsetDiff the section uses.
     const payload = {
       enforce_admins: true,
       required_linear_history: true,
@@ -318,8 +286,6 @@ describe("branch protection rule projections", () => {
   });
 
   test("required_signatures projects from the GET sub-resource shape", () => {
-    // The sub-endpoint stores {enabled} on the GET shape; the rule node's
-    // requiresCommitSignatures twin must read it back.
     const node = ruleFromProtection(
       "main",
       { enforce_admins: { enabled: true }, required_signatures: { enabled: true } },
@@ -370,8 +336,8 @@ describe("branch protection rule projections", () => {
       "e2e-owner/platform",
       "app/deploy-gate",
     ]);
-    // GitHub keeps only names of EXISTING environments and still succeeds;
-    // "ghost" must vanish so the section's read-back check can catch it.
+    // GitHub keeps only names of EXISTING environments and still succeeds; "ghost" must vanish so the
+    // section's read-back check can catch it.
     expect(stored.requiredDeploymentEnvironments).toEqual(["prod"]);
     expect(bypassActorStrings(ruleWireNode(stored) as Record<string, unknown>)).toEqual([
       "octocat",
@@ -403,8 +369,6 @@ describe("branch protection rule projections", () => {
       requiredDeploymentEnvironments: ["prod", "ghost"],
     });
     expect(applied).toEqual({ ok: true });
-    // The translated twin lands back on the REST GET shape (one underlying
-    // rule), while the GraphQL-only fields live in the extras family.
     expect((state.branch_protection.main as Record<string, unknown>).enforce_admins).toEqual({
       enabled: true,
     });
@@ -427,9 +391,8 @@ describe("environmentFromPut round trip", () => {
       ],
       deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
     };
-    // flattenEnvironment leaves the un-nested protection_rules on the object;
-    // subsetDiff (declared-keys-only, exactly as the environments section
-    // uses it) ignores that undeclared key and confirms the payload survives.
+    // flattenEnvironment leaves the un-nested protection_rules on the object; subsetDiff (declared-keys-only,
+    // exactly as the environments section uses it) ignores that undeclared key.
     const flattened = flattenEnvironment(environmentFromPut(payload));
     expect(subsetDiff(payload, flattened, "environments[production]")).toEqual([]);
   });
@@ -478,16 +441,14 @@ describe("invitationFromPut round-trips the PUT permission into the invitation v
     expect((invitation.invitee as { login: string }).login).toBe("alice");
     expect(invitation.permissions).toBe(roleForPermission("push"));
     expect(invitation.permissions).toBe("write");
-    // The section's converged-pending comparison reads exactly these two
-    // fields plus `expired`, which a fresh invitation must not carry as true.
+    // The section's converged-pending comparison reads exactly these two fields plus `expired`.
     expect(invitation.expired).toBe(false);
     expect(invitation.id).toBe(42);
   });
 
   test("defaults to push when permission is absent; a custom role clamps to its base grant", () => {
     expect(invitationFromPut("bob", {}, 1, repo, "e2e-owner/e2e-repo").permissions).toBe("write");
-    // GitHub never reports a custom role name on an invitation (the
-    // permissions field is a spec enum), so the mock stores the base grant.
+    // GitHub never reports a custom role name on an invitation (the permissions field is a spec enum).
     expect(
       invitationFromPut("carol", { permission: "security-team" }, 2, repo, "e2e-owner/e2e-repo")
         .permissions,
@@ -504,8 +465,7 @@ describe("invitationFromPut round-trips the PUT permission into the invitation v
     );
     expect((invitation.inviter as { login: string }).login).toBe("e2e-owner");
     expect(invitation.url).toBe("https://api.github.com/repos/e2e-owner/e2e-repo/invitations/3");
-    // A clone of the repo, not the live reference: stored invitations must
-    // not mirror later repo mutations (the snapshot layer keys on families).
+    // A clone, not the live reference: stored invitations must not mirror later repo mutations.
     expect(invitation.repository).toEqual(repo);
     expect(invitation.repository).not.toBe(repo);
   });
@@ -547,8 +507,7 @@ describe("completeInvitation", () => {
   });
 
   test("a multi-repo target's seeded invitation derives from the re-slugged repo", () => {
-    // Re-slugging must happen BEFORE family completion (the buildState slug
-    // param), or the invitation scaffold bakes the fixture slug into its urls.
+    // Re-slugging must happen BEFORE family completion, or the scaffold bakes the fixture slug into its urls.
     const state = buildStateForSlug(
       "acme/payments",
       {
@@ -620,9 +579,8 @@ describe("mock node ids", () => {
   });
 
   test("foreign ids do not decode", () => {
-    // A GitHub-realistic legacy id, an arbitrary string, and an empty string:
-    // none of them are the mock's, so a mutation carrying one is a violation
-    // the pipeline can only raise if the codec refuses to guess.
+    // A GitHub-realistic legacy id, an arbitrary string, and an empty string: a mutation carrying only such
+    // ids is a violation the pipeline can only raise if the codec refuses to guess.
     expect(decodeNodeId("MDU6TGFiZWw5MDAwMDAwMQ==")).toBeNull();
     expect(decodeNodeId("not-base64-at-all")).toBeNull();
     expect(decodeNodeId("")).toBeNull();
@@ -652,9 +610,6 @@ describe("mock node ids", () => {
   });
 
   test("generated labels and completed hooks name the TARGET slug in their urls", () => {
-    // The url is served state like any other field: a multi-repo target's
-    // generated labels and seeded hooks must name the target repository, not
-    // the admin fixture the mock happens to run as.
     const state = buildStateForSlug(
       "acme/private",
       {
@@ -676,10 +631,6 @@ describe("mock node ids", () => {
   });
 
   test("no fixture identity survives anywhere in a re-slugged repo body", () => {
-    // reslugRepo rewrites the explicit identity fields AND every url/template
-    // string (html_url, hooks_url, clone_url, the owner's own urls, ...): a
-    // target's GET /repos/{slug} body must nowhere point at the admin
-    // fixture's repository.
     const state = buildStateForSlug("acme/private", { settingsYaml: null }, "org");
     const body = JSON.stringify(state.repo);
     expect(body).not.toContain("e2e-owner");
@@ -691,10 +642,9 @@ describe("mock node ids", () => {
   });
 
   test("re-slugging is exact for identities overlapping the fixture's", () => {
-    // The substitution is two-phase through placeholder tokens: a sequential
-    // replace would re-match the old owner INSIDE a new identity that
-    // contains it, corrupting the urls (e2e-owner-fork -> e2e-owner-fork-fork,
-    // my-e2e-owner-repo -> my-<owner>-repo).
+    // A sequential replace would re-match the old owner INSIDE a new identity that contains it.
+    //   e2e-owner-fork/service  -> e2e-owner-fork-fork/service
+    //   acme/my-e2e-owner-repo  -> acme/my-<owner>-repo
     const forkOwner = buildStateForSlug("e2e-owner-fork/service", { settingsYaml: null }, "org");
     expect(String(forkOwner.repo.html_url)).toBe("https://github.com/e2e-owner-fork/service");
     const nameCarrier = buildStateForSlug("acme/my-e2e-owner-repo", { settingsYaml: null }, "org");
@@ -702,7 +652,6 @@ describe("mock node ids", () => {
   });
 
   test("re-slugging rewrites only url fields, never seeded content", () => {
-    // A description MENTIONING the fixture owner is content, not identity.
     const state = buildStateForSlug(
       "acme/private",
       {
@@ -721,8 +670,7 @@ describe("normalizePinnedSeed", () => {
       { name: "a", position: 1 },
       { name: "b", position: 2 },
     ]);
-    // Explicit hole-y positions survive verbatim and come back rank-sorted,
-    // so a scenario can seed the layouts live GitHub produces after unpins.
+    // Explicit hole-y positions survive verbatim and come back rank-sorted: the layouts live GitHub produces after unpins.
     expect(
       normalizePinnedSeed([
         { name: "b", position: 5 },
@@ -732,7 +680,6 @@ describe("normalizePinnedSeed", () => {
       { name: "a", position: 2 },
       { name: "b", position: 5 },
     ]);
-    // A string after an explicit entry continues past the largest position.
     expect(normalizePinnedSeed([{ name: "a", position: 3 }, "b"])).toEqual([
       { name: "a", position: 3 },
       { name: "b", position: 4 },
@@ -750,7 +697,6 @@ describe("normalizePinnedSeed", () => {
       "org",
     );
     expect(state._pinned_position_counter).toBe(5);
-    // An empty seed leaves the counter at zero, so the first pin takes 1.
     expect(buildState(undefined, "org")._pinned_position_counter).toBe(0);
   });
 });

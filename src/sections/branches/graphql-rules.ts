@@ -1,12 +1,4 @@
-/**
- * The GraphQL BranchProtectionRule surface of the `branches:` section: the
- * classic-to-GraphQL translation vocabulary, the rules read and the three
- * rule mutations, the per-run working state (live rules, actor and repository
- * node ids), and the two plan steps that ride the mutations - a wildcard
- * entry's whole reconciliation and a literal entry's routed keys
- * (force_push_bypassers, required_deployments). index.ts owns the REST
- * protection surface and decides which entries reach this module.
- */
+/** index.ts decides which entries reach this module; nothing here classifies entries. */
 
 import { subsetDiff } from "../../engine/diff.js";
 import { repoVariables } from "../contract/endpoints.js";
@@ -17,15 +9,10 @@ import { type BranchConfig, type BranchProtectionConfig, parseBypassActor } from
 
 // --- The classic-to-GraphQL vocabulary -------------------------------------
 //
-// A wildcard entry keeps the classic snake_case protection vocabulary; these
-// tables are its EXPLICIT translation to the BranchProtectionRule mutation
-// inputs, verified field for field against GitHub's published schema by
-// test/sections/graphql-queries.test.ts, whose twin-superset test asserts
-// the rules query below selects every twin.
-// The e2e mock imports them to project stored REST state into GraphQL rule
-// nodes, so the two views cannot drift.
+// These tables are the EXPLICIT translation of the classic vocabulary to the mutation inputs.
+// test/sections/graphql-queries.test.ts asserts the rules query selects every twin, and the e2e
+// mock imports them to project stored REST state into rule nodes, so the two views cannot drift.
 
-/** Classic boolean toggles with a same-meaning GraphQL rule field. */
 export const GRAPHQL_BOOLEAN_TWINS = {
   enforce_admins: "isAdminEnforced",
   required_linear_history: "requiresLinearHistory",
@@ -38,7 +25,6 @@ export const GRAPHQL_BOOLEAN_TWINS = {
   required_signatures: "requiresCommitSignatures",
 } as const;
 
-/** required_pull_request_reviews sub-keys with a GraphQL twin. */
 export const GRAPHQL_REVIEW_TWINS = {
   required_approving_review_count: "requiredApprovingReviewCount",
   require_code_owner_reviews: "requiresCodeOwnerReviews",
@@ -46,13 +32,11 @@ export const GRAPHQL_REVIEW_TWINS = {
   require_last_push_approval: "requireLastPushApproval",
 } as const;
 
-/** required_status_checks sub-keys with a GraphQL twin. */
 export const GRAPHQL_STATUS_CHECK_TWINS = {
   strict: "requiresStrictStatusChecks",
   contexts: "requiredStatusCheckContexts",
 } as const;
 
-/** Every protection key a WILDCARD entry may declare. */
 export const WILDCARD_KEYS = [
   ...Object.keys(GRAPHQL_BOOLEAN_TWINS),
   "required_status_checks",
@@ -66,13 +50,9 @@ export const WILDCARD_KEY_SET: ReadonlySet<string> = new Set(WILDCARD_KEYS);
 // --- GraphQL operations -------------------------------------------------------
 
 /**
- * The one rules read: every classic rule (literal and wildcard patterns
- * alike - classic protection IS a BranchProtectionRule upstream), selecting
- * the node id, every translation-table twin, and the force-push allowance
- * actors. Fired only when an entry has a wildcard name or declares a
- * GraphQL-routed key. NOT_FOUND is a tolerated outcome so a fine-grained
- * denial reads as "no rules visible", preserving the section's
- * denial-surfaces-at-the-first-write semantics.
+ * Classic protection IS a BranchProtectionRule upstream, so this lists literal and wildcard rules
+ * alike. NOT_FOUND is tolerated so a fine-grained denial reads as "no rules visible" and surfaces
+ * at the first write, the section's posture everywhere.
  */
 const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRules",
@@ -126,10 +106,8 @@ const RULES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
 });
 
 /**
- * The repository's GraphQL node id, needed only to CREATE a wildcard rule.
- * Execution-phase, like the two actor lookups: a fine-grained denial answers
- * NOT_FOUND, which none of the three tolerates, so they may only run where
- * the section's posture puts the denial - at the first write.
+ * Execution-phase, like the two actor lookups: a fine-grained denial answers NOT_FOUND, which none
+ * of the three tolerates, so they may only run where the posture puts the denial, at the first write.
  */
 const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
   name: "BranchProtectionRepository",
@@ -142,10 +120,9 @@ const REPO_LOOKUP = graphqlOp<{ owner: string; repo: string }>()({
 });
 
 /**
- * A user actor's NEW-format node id. REST /users/{username} can still carry
- * a legacy node_id for old accounts (the mutation would answer a deprecation
- * warning), so users resolve through GraphQL. The repository selection also
- * routes the read (every repo-addressed read takes $owner/$repo).
+ * REST /users/{username} can still carry a legacy node_id for old accounts (the mutation would
+ * answer a deprecation warning), so users resolve through GraphQL. The repository selection routes
+ * the read: every repo-addressed read takes $owner/$repo.
  */
 const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
   name: "BranchProtectionActorUser",
@@ -163,7 +140,6 @@ const ACTOR_USER = graphqlOp<{ owner: string; repo: string; login: string }>()({
 }`,
 });
 
-/** A team actor's node id, addressed as organization login plus team slug. */
 const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: string }>()({
   name: "BranchProtectionActorTeam",
   kind: "read",
@@ -181,10 +157,9 @@ const ACTOR_TEAM = graphqlOp<{ owner: string; repo: string; org: string; team: s
 });
 
 /**
- * The three rule mutations. Each payload re-reads the persisted rule, so
- * selecting requiredDeploymentEnvironments IS the post-mutation read-back
- * the silent-drop check needs (GitHub drops names of environments that do
- * not exist without failing the mutation).
+ * The create and update payloads re-read the persisted rule, so selecting
+ * requiredDeploymentEnvironments IS the post-mutation read-back the silent-drop check needs (GitHub
+ * drops names of environments that do not exist without failing the mutation).
  */
 const CREATE_RULE = graphqlOp<{ input: Record<string, unknown> }>()({
   name: "CreateBranchProtectionRule",
@@ -234,7 +209,6 @@ export const GRAPHQL = {
   deleteRule: DELETE_RULE,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-/** True when the entry declares a key that must ride the rule mutation. */
 export function hasRoutedGraphqlKeys(protection: BranchProtectionConfig | null): boolean {
   return (
     protection !== null &&
@@ -242,50 +216,41 @@ export function hasRoutedGraphqlKeys(protection: BranchProtectionConfig | null):
   );
 }
 
-/** One live rule node as the rules query returns it. */
 type RuleNode = Record<string, unknown>;
 
 /**
- * The live rules by pattern, or null when the rules query answered its
- * tolerated NOT_FOUND: the view is unreadable, which is not the same as
- * empty - a declared routed key must not read as clean against it.
+ * null when the rules query answered its tolerated NOT_FOUND: unreadable is not the same as empty,
+ * so a declared routed key must not read as clean against it.
  */
 type LiveRules = Map<string, RuleNode> | null;
 
-/** Per-run GraphQL working state: the rules by pattern, and the two caches. */
 export interface GraphqlRun {
   rules: LiveRules;
   repoId: string | null;
   actorIds: Map<string, string>;
   /**
-   * Every bypass actor a planned mutation resolves at execution, appended
-   * by ruleVariables() as it seals one; plan() resolves them all ahead of
-   * the FIRST write, whichever entry they belong to.
+   * Every bypass actor a planned mutation resolves at execution, appended by ruleVariables() as it
+   * seals one; plan() resolves them all ahead of the FIRST write, whichever entry they belong to.
    */
   lateActors: string[];
 }
 
-/** The plan context over this section's literal dictionaries. */
 export type BranchesContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL>;
 
-/** The plan this section returns, its operations typed over its own roles. */
 export type BranchesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS, typeof GRAPHQL>>;
 
 export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
   const read = await ctx.read.rulesQuery.listConnection(repoVariables(ctx));
   if ("error" in read) {
-    // The one tolerated outcome is the declared NOT_FOUND: a fine-grained
-    // denial reads as "rules not visible" (the probeAbsent posture), so the
-    // denial surfaces at the first write instead of here.
+    // The declared NOT_FOUND: the denial surfaces at the first write instead of here.
     return null;
   }
   const byPattern = new Map<string, RuleNode>();
   for (const node of read.items) {
     if (typeof node === "object" && node !== null) {
       const rule = node as RuleNode;
-      // The nested allowance connection is read in one 100-node page; a rule
-      // beyond that would silently truncate, so check would report phantom
-      // drift and apply would shrink the live list. Fail loudly instead.
+      // The nested allowance connection is read in one 100-node page; a rule beyond that would
+      // silently truncate, so check would report phantom drift against the truncated list.
       const allowances = rule.bypassForcePushAllowances as
         | { pageInfo?: { hasNextPage?: unknown } }
         | undefined;
@@ -300,7 +265,6 @@ export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
   return byPattern;
 }
 
-/** The live allowance actors of a rule, flattened back to the declared strings. */
 export function bypassActorStrings(node: RuleNode): string[] {
   const allowances = (node.bypassForcePushAllowances as { nodes?: unknown } | undefined)?.nodes;
   if (!Array.isArray(allowances)) {
@@ -324,14 +288,9 @@ export function bypassActorStrings(node: RuleNode): string[] {
 }
 
 /**
- * Project a live rule node back into the classic snake_case vocabulary, the
- * inverse of translateWildcardProtection: check mode diffs declared keys
- * against this view, and the e2e state test proves the mock's REST-state
- * projection round-trips through it. The two structured keys collapse to
- * null when their umbrella boolean is off (the PUT vocabulary's spelling);
- * the real REST GET omits an off control instead (probe-verified), but
- * subsetDiff reads null, absent, and "" as one empty value, so null stays
- * for the clearer drift message.
+ * The real REST GET omits an off control where this view spells null; subsetDiff reads null, absent,
+ * and "" as one empty value, so null stays for the clearer drift message. The e2e state test proves
+ * the mock's REST-state projection round-trips through it.
  */
 export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -368,11 +327,7 @@ export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
   return out;
 }
 
-/**
- * Translate a wildcard entry's classic protection into the rule mutation's
- * input fields (minus the two routed keys, which the caller resolves). Shape
- * validation already restricted the keys, so an unknown key here is a bug.
- */
+/** Shape validation already restricted a wildcard entry's keys, so an unknown key here is a bug. */
 function translateWildcardProtection(protection: BranchProtectionConfig): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(protection)) {
@@ -417,7 +372,6 @@ function translateWildcardProtection(protection: BranchProtectionConfig): Record
   return input;
 }
 
-/** The two mutation input fields the required_deployments key declares. */
 function deploymentInputFields(
   declared: NonNullable<BranchProtectionConfig["required_deployments"]> | null,
 ): Record<string, unknown> {
@@ -428,10 +382,8 @@ function deploymentInputFields(
 }
 
 /**
- * Case-insensitive set equality for the two routed-key lists: GitHub
- * canonicalizes actor and environment names, so a declared "Octocat" reads
- * back as "octocat" and must not drift. Duplicates are rejected upfront by
- * the shape, so sorted-lowercase comparison is exact.
+ * GitHub canonicalizes actor and environment names, so a declared "Octocat" reads back as "octocat"
+ * and must not drift. Duplicates are rejected upfront by the shape, so sorted-lowercase comparison is exact.
  */
 function sameNamesFold(declared: readonly string[], live: readonly string[]): boolean {
   if (declared.length !== live.length) {
@@ -442,17 +394,12 @@ function sameNamesFold(declared: readonly string[], live: readonly string[]): bo
   return a.every((name, i) => name === b[i]);
 }
 
-/** The mutation payload field carrying the persisted rule, per mutation. */
 type MutationPayloadKey = "createBranchProtectionRule" | "updateBranchProtectionRule";
 
 /**
- * GitHub accepts requiredDeploymentEnvironments names of environments that
- * do not exist and DROPS them without failing the mutation (verified live),
- * so the payload's re-read is compared against the declaration: a dropped
- * name fails the run with the fix, and any other divergence (the re-read is
- * authoritative) fails with its own message instead of reporting the apply
- * as converged. Names compare case-insensitively (GitHub's are). The
- * environments section runs first, so same-file environments exist here.
+ * GitHub accepts requiredDeploymentEnvironments names of environments that do not exist and DROPS
+ * them without failing the mutation (verified live), so the payload's re-read is compared against
+ * the declaration. The environments section runs first, so same-file environments exist here.
  */
 function verifyDeploymentReadback(
   entryName: string,
@@ -501,7 +448,6 @@ function verifyDeploymentReadback(
   }
 }
 
-/** Drift lines for the two GraphQL-routed keys, shared by both entry kinds. */
 function routedKeyDrift(
   prefix: string,
   protection: BranchProtectionConfig,
@@ -510,8 +456,7 @@ function routedKeyDrift(
 ): string[] {
   const drift: string[] = [];
   if (rules === null) {
-    // Nothing to compare against: the declared value is written as before
-    // the comparison existed, so an unreadable view can never read as clean.
+    // An unreadable view can never read as clean, so the declared value is written regardless.
     for (const key of ["force_push_bypassers", "required_deployments"] as const) {
       if (protection[key] !== undefined) {
         drift.push(
@@ -565,13 +510,12 @@ function routedKeyDrift(
 }
 
 /**
- * Resolve one declared actor string to its GraphQL node id, cached per run
- * under the case-folded string (GitHub canonicalizes actor names, so two
- * spellings are one actor): users and teams through GraphQL (new-format
- * ids), Apps through the public REST lookup (see the appLookup declaration
- * for the legacy-id caveat). The GraphQL reads also select the repository's
- * node id - required anyway to route a repo-addressed read - so a later
- * rule CREATE can reuse it instead of a dedicated lookup.
+ * Cached per run under the case-folded string: GitHub canonicalizes actor names. A user or team read
+ * also selects the repository's node id, which a later rule CREATE reuses instead of a dedicated lookup.
+ *
+ * user  -> GraphQL (REST /users can still carry a legacy node_id; see ACTOR_USER)
+ * team  -> GraphQL
+ * app   -> the public REST lookup (legacy-id caveat on appLookup in endpoints.ts); no repository id
  */
 async function resolveActorId(
   ctx: BranchesContext,
@@ -635,7 +579,6 @@ async function resolveActorId(
   return id;
 }
 
-/** Keep the repository node id an actor read already carried. */
 function adoptRepoId(graphqlRun: GraphqlRun, data: Record<string, unknown>): void {
   const id = (data.repository as Record<string, unknown> | null)?.id;
   if (graphqlRun.repoId === null && typeof id === "string" && id.length > 0) {
@@ -644,9 +587,8 @@ function adoptRepoId(graphqlRun: GraphqlRun, data: Record<string, unknown>): voi
 }
 
 /**
- * A literal branch's rule id, read at EXECUTION time when the plan-time
- * fetch did not carry it: the PUT planned before this lookup creates the
- * rule, or the fetch could not see a rule the REST view shows.
+ * Read at EXECUTION time when the plan-time fetch did not carry the rule: a PUT planned earlier may
+ * have created it, or the rules query answered its tolerated NOT_FOUND.
  */
 async function lateRuleId(ctx: BranchesContext, pattern: string): Promise<unknown> {
   const node = (await fetchRules(ctx))?.get(pattern);
@@ -661,10 +603,7 @@ async function lateRuleId(ctx: BranchesContext, pattern: string): Promise<unknow
   return node.id;
 }
 
-/**
- * Resolve a declared actor list to node ids IN DECLARED ORDER, one lookup at
- * a time (the request log stays deterministic), through the per-run cache.
- */
+/** IN DECLARED ORDER, one lookup at a time, so the request log stays deterministic. */
 export async function resolveActorIds(
   ctx: BranchesContext,
   exec: ExecTools,
@@ -678,7 +617,6 @@ export async function resolveActorIds(
   return ids;
 }
 
-/** The mutation input fields for a wildcard entry the plan knows up front: every key but the actors. */
 function wildcardInput(protection: BranchProtectionConfig): Record<string, unknown> {
   const input = translateWildcardProtection(protection);
   if (protection.required_deployments !== undefined) {
@@ -687,16 +625,13 @@ function wildcardInput(protection: BranchProtectionConfig): Record<string, unkno
   return input;
 }
 
-/** A rule mutation's variables: a value, or a thunk the executor seals right before the request. */
 type RuleVariables = { input: Record<string, unknown> } | Late<{ input: Record<string, unknown> }>;
 
 /**
- * A rule mutation's variables: the plan-time `fields` plus what only the read
- * port supplies at EXECUTION time - the bypass actors' node ids and any id
- * `late` looks up (the repository's, a rule's the PUT ahead creates). Check
- * mode must never issue those lookups: a fine-grained denial answers NOT_FOUND
- * where the section's posture promises the denial surfaces at the first write.
- * A value when nothing is late, so the idempotence proof compares it by field.
+ * Check mode must never issue the execution-time lookups (actor ids, the repository id, a rule id
+ * the plan-time fetch did not carry): a fine-grained denial answers NOT_FOUND where the posture
+ * promises the denial surfaces at the first write. A plain value when nothing is late, so the
+ * idempotence proof compares it by field.
  */
 function ruleVariables(
   ctx: BranchesContext,
@@ -711,8 +646,8 @@ function ruleVariables(
   if (actors !== undefined) {
     graphqlRun.lateActors.push(...actors);
   }
-  // The actors resolve first: their reads select the repository's node id
-  // too, which spares a create its dedicated lookup (see adoptRepoId).
+  // The actors resolve first: a user or team read also selects the repository's node id, which
+  // spares a create its dedicated lookup (adoptRepoId).
   return async (exec) => ({
     input: {
       ...fields,
@@ -724,7 +659,6 @@ function ruleVariables(
   });
 }
 
-/** The repository's node id: one an actor read already carried, else the dedicated lookup. */
 async function repositoryNodeId(
   ctx: BranchesContext,
   exec: ExecTools,
@@ -745,20 +679,12 @@ async function repositoryNodeId(
   return graphqlRun.repoId;
 }
 
-/**
- * A drift list proven non-empty - the justification every planned write
- * carries - or null, in which case nothing is planned.
- */
+/** Every planned write carries a non-empty drift list as its justification. */
 export function justified(lines: readonly string[]): readonly [string, ...string[]] | null {
   const [first, ...rest] = lines;
   return first === undefined ? null : [first, ...rest];
 }
 
-/**
- * An op's change line, rendered only once the mutation's read-back agrees
- * with the declared required_deployments (a throw is the verification
- * failure); the plain line when the entry declares none.
- */
 function verifiedChange(
   line: string,
   entryName: string,
@@ -774,11 +700,6 @@ function verifiedChange(
   };
 }
 
-/**
- * Plan a literal entry's rule mutation for its routed keys. Its bypass
- * actors, when declared, seal into the mutation's variables at execution
- * (ruleVariables), and plan() resolves them ahead of the section's first write.
- */
 export function planRoutedUpdate(
   ctx: BranchesContext,
   graphqlRun: GraphqlRun,
@@ -813,8 +734,8 @@ export function planRoutedUpdate(
   plan.ops.push({
     role: "updateRule",
     describe: `setting the GraphQL-only protection fields of branch "${name}"`,
-    // A rule the plan-time fetch did not carry (the PUT planned above
-    // creates it) is looked up once that operation has run.
+    // A rule the plan-time fetch did not carry is looked up at execution: the PUT planned above may
+    // create it, or the rules query answered NOT_FOUND.
     variables:
       node !== undefined
         ? ruleVariables(
@@ -836,7 +757,6 @@ export function planRoutedUpdate(
   });
 }
 
-/** Plan one wildcard entry, entirely through the GraphQL rule surface. */
 export async function planWildcardEntry(
   ctx: BranchesContext,
   graphqlRun: GraphqlRun,

@@ -1,14 +1,10 @@
 /**
- * The architecture lint (bun run lint:arch): the imports between the layers
- * of src/ are exactly the edges architecture.yml declares - an undeclared
- * edge and a stale allowance both fail. gen-docs.ts renders the same
- * declaration as the module map. dependency-cruiser was the intended tool but
- * cannot cruise this repository: it needs the TypeScript compiler API, which
- * the pinned typescript 7 no longer ships, so it resolves nothing.
- *
- * An edge is any way one file names another: the runtime loads the
- * changed-sections scanner reads, plus type-only imports, re-exports, and
- * `import("./x.js").T` and `import X = require("./x.js")` in type positions.
+ * The architecture lint (bun run lint:arch): src/ imports between layers must be exactly the edges architecture.yml
+ * declares; an undeclared edge and a stale allowance both fail. dependency-cruiser was the intended tool, but it
+ * needs the TypeScript compiler API, which the pinned typescript 7 no longer ships, so it resolves nothing here.
+ *   runtime loads (what the changed-sections scanner reads)                   -> edges
+ *   type-only imports, re-exports                                            -> edges too
+ *   `import("./x.js").T`, `import X = require("./x.js")` in type positions   -> edges too
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -31,7 +27,6 @@ export function readArchitecture(root: string): Architecture {
   return parseYaml(readFileSync(join(root, ARCHITECTURE_PATH), "utf8")) as Architecture;
 }
 
-/** The layer owning a repo-relative path, or undefined. */
 function layerOf(arch: Architecture, path: string): string | undefined {
   return Object.entries(arch.layers).find(([, paths]) =>
     paths.some((owned) => (owned.endsWith("/") ? path.startsWith(owned) : path === owned)),
@@ -53,7 +48,6 @@ function* nodesOf(value: unknown): Generator<Node> {
   }
 }
 
-/** Every relative specifier `text` names, runtime and type-level alike. */
 export function importSpecifiers(text: string, file: string): string[] {
   const { program, module } = parseSync(file, text);
   const typeLevel = [...nodesOf(program)].flatMap((node) => {
@@ -76,11 +70,6 @@ export function importSpecifiers(text: string, file: string): string[] {
   return [...all].filter((specifier) => /^\.\.?\//.test(specifier));
 }
 
-/**
- * The lint verdict for `root`: an import between layers the declaration lacks
- * (naming both files), a declared edge no file draws, or a cruised file outside
- * every layer. Empty means the declaration is exactly the tree.
- */
 export function lintArchitecture(root: string, arch = readArchitecture(root)): string[] {
   const excluded = arch.exclude.map((pattern) => new Bun.Glob(pattern));
   const drawn = new Map<string, string[]>();
@@ -129,7 +118,7 @@ export function lintArchitecture(root: string, arch = readArchitecture(root)): s
   return problems;
 }
 
-/** The module map over the DECLARED edges; a hyphen in a layer name is edge syntax to mermaid. */
+/** A hyphen in a layer name is edge syntax to mermaid, so ids swap it for an underscore. */
 export function renderArchitectureMermaid(arch: Architecture): string {
   const id = (layer: string): string => layer.replace(/-/g, "_");
   return [

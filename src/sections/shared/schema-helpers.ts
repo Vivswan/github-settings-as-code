@@ -1,12 +1,7 @@
 /**
- * Leaf schema helpers shared by the root src/schema.ts and the per-section
- * schema modules under src/sections/<key>/schema.ts. This module imports
- * ONLY zod and its zod-only sibling renamed-key.ts: a section schema
- * importing root schema.ts back would be a cycle whose top-level const
- * evaluation TDZ-crashes at import time, so everything both sides need lives
- * here. The smoke selector
- * (.github/scripts/changed-sections.ts) derives this file's section fan-out
- * from the import graph.
+ * Imports ONLY zod and renamed-key.ts: a section schema importing src/schema.ts back would be a cycle
+ * whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
+ * The smoke selector (.github/scripts/changed-sections.ts) derives this file's section fan-out from the import graph.
  */
 
 import { z } from "zod";
@@ -15,13 +10,11 @@ import { renamedKeyError } from "./renamed-key.js";
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
 /**
- * The merge-time directive on a top-level knobbed wrapper or at the document
- * root; consumed by engine/layers.ts. Described once in shared.docs.yml
- * (`UndeclaredPolicyList<*>._layering`) and src/schema.docs.yml.
+ * engine/layers.ts declares the same value set in its own Layering type and acts on the parsed value, so a
+ * new value lands in both. Described in shared.docs.yml and src/schema.docs.yml.
  */
 export const LayeringSchema = z.enum(["merge", "replace"]);
 
-/** The wrapper's error map: a v2 file (policy key `undeclared`) fails with the rename in hand. */
 const wrapperKeyError = renamedKeyError(
   "wrapper's policy",
   "undeclared",
@@ -30,20 +23,13 @@ const wrapperKeyError = renamedKeyError(
 );
 
 /**
- * The knobbed form of a list value: the plain entry array, or the strict
- * {_undeclared, entries} wrapper (published under the definition name
- * "UndeclaredPolicyList<Entry>", matching the UndeclaredPolicyList type;
- * each key's meaning is its `UndeclaredPolicyList<*>.<key>` description in
- * shared.docs.yml, which the generator attaches). loosen() recognizes this union and rewraps it with the routed check that
- * keeps precise per-entry issue paths. The wrapper's definition name derives
- * from the entry schema's own .meta({id}), so the document composition and a
- * section's runtime derivation can never label the same entry differently -
- * an entry without an id (or a clone that shed it) throws at MODULE LOAD,
- * not typecheck. Each call mints a fresh wrapper registered
- * under the same id; that is fine for z.toJSONSchema(SettingsFile) (it
- * resolves metadata by schema identity), but a generator iterating
- * z.globalRegistry's id map would see only the last-registered wrapper -
- * keep the published schema on the single-schema path.
+ * loosen() (../contract/module.ts) recognizes this union and rewraps it with the routed check that keeps
+ * per-entry issue paths. The wrapper's definition name derives from the entry's own .meta({id}), so the
+ * document composition and a section's runtime derivation can never label one entry differently.
+ *
+ *   entry without an id                        -> throws at MODULE LOAD, not typecheck
+ *   z.toJSONSchema(SettingsFile)               -> fine: it resolves metadata by schema identity
+ *   a generator over z.globalRegistry's ids    -> sees only the last-registered wrapper (each call mints a fresh one under the same id)
  */
 function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
   entry: T,
@@ -68,8 +54,7 @@ function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
 }
 
 /**
- * A TOP-LEVEL section's knobbed value, whose wrapper also takes the
- * `_layering` directive: the layered merge combines sections, so only a
+ * Only a TOP-LEVEL wrapper takes `_layering`: the layered merge combines sections, so only a
  * section-level wrapper has layers below it to address.
  */
 export function knobbed<T extends z.ZodType>(entry: T) {
@@ -77,9 +62,8 @@ export function knobbed<T extends z.ZodType>(entry: T) {
 }
 
 /**
- * A knobbed list NESTED inside a section entry (environments[].variables),
- * whose wrapper rejects `_layering`: a nested list is replaced wholesale by
- * a higher layer, so the directive would be accepted and never act.
+ * A nested list (environments[].variables) is replaced wholesale by a higher layer, so `_layering`
+ * would be accepted and never act; the wrapper rejects it.
  */
 export function nestedKnobbed<T extends z.ZodType>(entry: T) {
   return knobbedList(entry, (knobs) => knobs);

@@ -1,16 +1,3 @@
-/**
- * Schema-vs-runtime semantic agreement over the real corpus: every settings
- * fragment the curated e2e scenarios declare, plus seeded generator output,
- * is validated BOTH by the published lib/settings.schema.json (through ajv,
- * exactly as the e2e generators compile it) and by the runtime's
- * validateSectionShapes - and the verdicts must agree. The published schema
- * and the zod source can then never drift apart silently: a schema too
- * strict rejects a document the action would apply, a schema too loose
- * blesses a document the run then fails on. The few deliberate
- * disagreements are enumerated in KNOWN_DIVERGENCES with their reasons;
- * anything else is a failure.
- */
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -30,12 +17,10 @@ interface CorpusDoc {
   doc: Record<string, unknown>;
 }
 
-/** Every settings-document fragment in the curated scenarios: the top-level
- * settings, the multi-repo defaults file, and each per-repo settings. The
- * file set is definitionally what the e2e runner loads: every root
- * scenarioRoots() names, walked by the same collectYmlFiles the scenario
- * loader uses, with each root asserted non-empty so a renamed or dropped
- * scenario directory fails here instead of silently shrinking the corpus. */
+/**
+ * Every settings fragment in the curated scenarios, walked by the same collectYmlFiles the scenario loader uses; each root is asserted non-empty so a
+ * renamed directory fails here instead of shrinking the corpus.
+ */
 function scenarioDocs(): CorpusDoc[] {
   const files: string[] = [];
   for (const root of scenarioRoots()) {
@@ -46,9 +31,8 @@ function scenarioDocs(): CorpusDoc[] {
     files.push(...inRoot);
   }
   const docs: CorpusDoc[] = [];
-  // Labels key KNOWN_DIVERGENCES, so file basenames must stay unique
-  // corpus-wide; nothing else pins that (loadScenarios pins the YAML name
-  // field, which is not in lockstep with the filename), hence this assert.
+  // Labels key KNOWN_DIVERGENCES, so basenames must stay unique corpus-wide; nothing else pins that (the YAML name field is not in lockstep with the
+  // filename).
   const seenBasenames = new Map<string, string>();
   for (const file of [...files].sort()) {
     const dup = seenBasenames.get(basename(file));
@@ -74,15 +58,12 @@ function scenarioDocs(): CorpusDoc[] {
       push(`${name} ${repo} settings`, entry?.settings);
     }
   }
-  // The corpus size is pinned exactly so a loader that silently drops a root,
-  // a file, or a document kind cannot pass; a new scenario updates the number.
+  // The corpus size is pinned exactly so a loader that silently drops a root, a file, or a document kind cannot pass.
   expect(docs.length).toBe(256);
   return docs;
 }
 
-/** Seeded generator output: one single-section document per section per seed,
- * always shape-valid by construction (the generators' own three-way drift
- * check pins that), so schema and runtime must BOTH accept every one. */
+/** Seeded generator output, shape-valid by construction, so schema and runtime must BOTH accept every one. */
 function generatedDocs(): CorpusDoc[] {
   const docs: CorpusDoc[] = [];
   for (const key of SECTION_KEYS) {
@@ -97,14 +78,9 @@ function generatedDocs(): CorpusDoc[] {
 }
 
 /**
- * The enumerated schema-vs-runtime disagreements, each deliberate. Two kinds:
- * - "schema-looser": the runtime invariant is a zod superRefine or a
- *   closedSurface declaration, which JSON Schema cannot (or must not)
- *   express - the run still rejects the document upfront.
- * - "schema-stricter": the published schema would reject documents the action
- *   applies; none are tolerated. The deferral enums (e.g. deployment
- *   branch-policy `type`) document upstream vocabulary the runtime leaves to
- *   GitHub, so a corpus doc hitting one needs a decision, not an allowlist entry.
+ * The deliberate schema-vs-runtime disagreements; anything else fails.
+ *   schema-looser   -> a runtime invariant the schema does not carry (a cross-field superRefine, an open closedSurface); the run rejects upfront
+ *   schema-stricter -> would reject documents the action applies; none are tolerated (a deferral enum hit needs a decision, not an entry)
  */
 const KNOWN_DIVERGENCES: Record<string, string> = {
   "actions-selected-contradiction-rejected.yml settings":
@@ -136,9 +112,7 @@ describe("published schema agrees with the runtime over the corpus", () => {
       }
       if (KNOWN_DIVERGENCES[label] !== undefined) {
         staleAllowlist.delete(label);
-        // A KNOWN divergence must stay schema-looser: the schema accepting
-        // a runtime-rejected document costs one loud run; the reverse would
-        // reject documents the action applies.
+        // A KNOWN divergence must stay schema-looser: the reverse would reject documents the action applies.
         expect(
           schemaAccepts,
           `${label}: expected the schema to be the looser side (${KNOWN_DIVERGENCES[label]})`,

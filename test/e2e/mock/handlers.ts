@@ -1,12 +1,6 @@
 /**
- * The merged per-endpoint handler tables, one entry per "section.role" key in
- * allEndpoints() / allGraphqlOps(), and the construction-time assertions that
- * pin the merged tables against the declarations in both directions. The
- * entries themselves live in each section's src/sections/<key>/mock.ts,
- * registered per SectionKey in sections.ts. Since the fragment record is a
- * mapped type over SectionKey and each fragment is a Record over its exact
- * key union, both assertions below are unreachable by construction; they
- * stay as runtime backstops behind that type-level claim.
+ * The merged handler tables and the assertions pinning them against allEndpoints() / allGraphqlOps() in both directions.
+ * The mapped types in sections.ts make both unreachable; they stay as runtime backstops behind that type-level claim.
  */
 
 import {
@@ -23,11 +17,6 @@ export const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = sectionGraphqlHa
 
 // --- Startup assertions ---------------------------------------------------
 
-/**
- * Where a missing key's handler belongs, read from the declaration's own
- * section tag: the section's fragment in src/sections/<section>/mock.ts -
- * so the error names the exact file to edit.
- */
 function missingHandlerPointer(missing: Array<[string, { section: string }]>): string {
   return missing
     .map(([key, { section }]) => `${key} (add it in src/sections/${section}/mock.ts)`)
@@ -35,11 +24,6 @@ function missingHandlerPointer(missing: Array<[string, { section: string }]>): s
     .join(", ");
 }
 
-/**
- * The one completeness assertion both tables share: every declared key MUST
- * have a handler and every handler key MUST name a declaration, both
- * directions. Only the prose differs per table, so it arrives as arguments.
- */
 function assertTableCompleteness(
   declared: Readonly<Record<string, { section: string }>>,
   handlers: Record<string, unknown>,
@@ -61,13 +45,7 @@ function assertTableCompleteness(
   }
 }
 
-/**
- * Every allEndpoints() key MUST have a handler and every handler key MUST
- * exist in allEndpoints(), both directions. Adding a section endpoint without
- * a mock handler (or leaving a stale handler after a route is removed) fails
- * here, at server construction, instead of hiding until a scenario happens to
- * exercise that route. Exported so a unit test can assert on it directly.
- */
+/** Fails at server construction instead of hiding until a scenario happens to exercise the route. Exported for a unit test. */
 export function assertHandlerCompleteness(
   endpoints: Readonly<Record<string, TaggedEndpoint>> = allEndpoints(),
   handlers: Record<string, Handler> = HANDLERS,
@@ -79,12 +57,7 @@ export function assertHandlerCompleteness(
   });
 }
 
-/**
- * assertHandlerCompleteness for the GraphQL table: every allGraphqlOps() key
- * MUST have a handler and every handler key MUST name a declared operation,
- * both directions, asserted at server construction. Exported with injectable
- * dictionaries so a unit test can drive both failure directions.
- */
+/** The GraphQL table's twin; injectable dictionaries so a unit test can drive both failure directions. */
 export function assertGraphqlHandlerCompleteness(
   ops: Readonly<Record<string, TaggedGraphqlOp>> = allGraphqlOps(),
   handlers: Record<string, GraphqlHandler> = GRAPHQL_HANDLERS,

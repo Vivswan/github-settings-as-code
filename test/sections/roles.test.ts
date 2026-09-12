@@ -17,9 +17,7 @@ describe("roleForPermission", () => {
 
 describe("DEFAULT_ROLE", () => {
   test("is push, the write default both collaborators and teams fall back to", () => {
-    // Pins the shared default: collaborators.ts and teams.ts both read this
-    // symbol, so an accidental change here would move both sections at once
-    // (and this test would flag it) rather than letting them silently diverge.
+    // collaborators.ts and teams.ts both read this symbol, so a change moves both sections at once rather than letting them diverge.
     expect(DEFAULT_ROLE).toBe("push");
     expect(roleForPermission(DEFAULT_ROLE)).toBe("write");
   });

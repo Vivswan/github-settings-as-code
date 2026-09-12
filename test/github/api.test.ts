@@ -40,10 +40,8 @@ describe("retry and throttling", () => {
   }, 10_000); // The retry plugin's backoff is a fixed ~1s for the first retry.
 
   test("every attempt leaves a trace line carrying GitHub's request id", async () => {
-    // The request-log plugin writes one line per attempt, failed ones included,
-    // with the x-github-request-id support asks for; dropping the plugin from
-    // the Octokit build (as an @octokit/rest to @octokit/core swap would) loses
-    // exactly these lines while every request still succeeds.
+    // The request-log plugin writes one line per attempt, failed attempts included, with the x-github-request-id support asks for; removing
+    // `requestLog` from the plugin list loses exactly these lines while every request still succeeds.
     const withId = (id: string, status: number, body: string | null) =>
       new Response(body, {
         status,
@@ -94,8 +92,7 @@ describe("retry and throttling", () => {
   });
 
   test("a rate-limit reset beyond the 60s cap fails now instead of stalling", async () => {
-    // The throttling plugin derives the wait from x-ratelimit-reset for
-    // primary limits; an hour-away reset must fail loudly, not stall.
+    // The throttling plugin derives the wait from x-ratelimit-reset; an hour-away reset must fail loudly, not stall.
     const reset = String(Math.floor(Date.now() / 1000) + 3600);
     const state = stubFetch([
       () =>
@@ -128,10 +125,8 @@ describe("throttle plugin honors the test knob", () => {
   });
 
   test("under RETRY_BASE_MS, many writes complete without the write limiter's ~1s spacing", async () => {
-    // The throttle plugin's write limiter spaces mutations by ~1000ms in
-    // production; under the test knob it must not, so a many-write run stays
-    // fast. Construct WITHOUT the retryBaseMs arg so the client reads the env
-    // exactly as the spawned bundle does.
+    // The write limiter spaces mutations by ~1000ms in production. Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned
+    // bundle does.
     process.env.RETRY_BASE_MS = "1";
     stubFetch([() => new Response(null, { status: 204 })]);
     const client = new GithubApi({
@@ -144,16 +139,14 @@ describe("throttle plugin honors the test knob", () => {
     for (let i = 0; i < 12; i++) {
       await client.tryRequest("PATCH", `/repos/o/r${i}`, { i });
     }
-    // Production spacing floors at ~11s (eleven 1000ms gaps), so 8s still
-    // discriminates; the band is wide because a loaded machine can starve
-    // even stubbed awaits for seconds (2s flaked under parallel gate runs).
+    // Production spacing floors at ~11s, so 8s discriminates; the band is wide because a loaded machine starves even stubbed awaits for seconds (2s
+    // flaked under parallel gate runs).
     expect(Date.now() - started).toBeLessThan(8000);
   }, 30_000); // Lets a broken (production-spaced, ~11s) run reach the elapsed assertion.
 
   test("without the knob the throttle plugin stays enabled (429s are retried)", async () => {
     delete process.env.RETRY_BASE_MS;
-    // No env, explicit retryBaseMs=1 arg keeps waits short. A 429 that resolves
-    // on retry proves the throttle plugin is active.
+    // A 429 that resolves on retry proves the throttle plugin is active.
     const state = stubFetch([rateLimited, okJson]);
     const client = new GithubApi({
       token: "t",
@@ -168,19 +161,12 @@ describe("throttle plugin honors the test knob", () => {
   });
 
   test("UNDER the knob a 429-then-200 recovers on quadratic backoff, ignoring Retry-After", async () => {
-    // With the throttle plugin disabled under the knob, the retry plugin takes
-    // over 429 (dropped from doNotRetry under the knob) so a transient 429 still
-    // RECOVERS. The retry plugin IGNORES the Retry-After header - it backs off
-    // (n^2 * retryBaseMs) instead. The 429 here carries a large Retry-After; the
-    // fact that recovery is one retry and stays fast (not the header's 30s) is
-    // the observable proof the header is not honored on its raw scale, and pins
-    // that the retry path is what recovers, not throttle pacing.
+    // Under the knob the retry plugin owns 429 (dropped from doNotRetry) and IGNORES Retry-After, backing off n^2 * retryBaseMs instead; fast
+    // recovery despite a 30s Retry-After is the observable proof.
     process.env.RETRY_BASE_MS = "1";
     const rateLimitedSlowHeader = () =>
       new Response('{"message":"rate limited"}', {
         status: 429,
-        // A large Retry-After: if it were honored on its raw seconds scale the
-        // retry would blow past any sane test timeout.
         headers: { "retry-after": "30", "x-ratelimit-remaining": "0" },
       });
     const state = stubFetch([rateLimitedSlowHeader, okJson]);
@@ -194,9 +180,8 @@ describe("throttle plugin honors the test knob", () => {
     const result = await client.tryRequest("GET", "/rl");
     expect(state.calls).toBe(2);
     expect("data" in result && result.data).toEqual({ ok: true });
-    // Honoring the 30s header would floor recovery at 30s, so 10s still
-    // discriminates; the band is wide because a loaded machine can starve
-    // even stubbed awaits for seconds (2s flaked under parallel gate runs).
+    // Honoring the 30s header would floor recovery at 30s, so 10s discriminates; the band is wide because a loaded machine starves even stubbed
+    // awaits for seconds (2s flaked under parallel gate runs).
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 60_000); // Lets a broken (header-honoring, ~30s) run reach the elapsed assertion.
 });
@@ -229,12 +214,8 @@ describe("error classification", () => {
   });
 
   test("a 403 with retry-after classifies structurally even without the phrase", async () => {
-    // The body never says "rate limit", so the message fallback cannot fire:
-    // only the structural signals (here the retry-after header, which no
-    // documented non-limit 403 carries) prove the classification. Misreading
-    // this as a missing grant would hand out permission advice - and, under
-    // on-missing-permission: warn, a green run that silently skipped the
-    // section.
+    // The body never says "rate limit", so only the retry-after header (which no documented non-limit 403 carries) proves the classification.
+    // Misreading it as a missing grant would hand out permission advice and, under on-missing-permission: warn, silently skip the section.
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: "Forbidden" }), {
@@ -270,10 +251,8 @@ describe("error classification", () => {
   });
 
   test("a permission 403 on the token's LAST quota unit stays a permission error", async () => {
-    // x-ratelimit-remaining: 0 is ambiguous alone: a genuine denial issued on
-    // the last quota unit carries it too, and misreading it as a rate limit
-    // would hide the missing grant behind retry advice. The readable message
-    // disambiguates, so the zero header must contribute nothing here.
+    // x-ratelimit-remaining: 0 alone is ambiguous: a genuine denial on the last quota unit carries it too. The readable message disambiguates, so the
+    // zero header must contribute nothing here.
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
@@ -325,7 +304,6 @@ describe("error body shaping", () => {
     expect("error" in result && result.error.documentationUrl).toBe(
       "https://docs.github.com/rest/repos/rules",
     );
-    // errors[] stays appended to the message, as before.
     expect("error" in result && result.error.message).toBe(
       'Validation Failed ([{"field":"rules","message":"Invalid rule"}])',
     );
@@ -340,8 +318,7 @@ describe("error body shaping", () => {
 });
 
 describe("debug-trace hardening for redacted slugs", () => {
-  // Every test reads the debug lines its OWN trace facet received, so a
-  // concurrent test's output can never pollute the observation.
+  // Every test reads the debug lines its OWN trace facet received, so a concurrent test's output cannot pollute the observation.
 
   test("a slug masked through the Io port is redacted from the trace with no second registration", async () => {
     const dbg = traceIo();
@@ -371,7 +348,6 @@ describe("debug-trace hardening for redacted slugs", () => {
     stubFetch([() => new Response(null, { status: 204 })]);
     await api(dbg.io).tryRequest("PATCH", "/repos/o/secretrepo", { description: "CANARY-live" });
     const trace = dbg.lines.join("");
-    // whole path collapses to the constant, no /repos/ prefix, no tail
     expect(trace).toContain("PATCH <redacted> ->");
     expect(trace).not.toContain("o/secretrepo");
     expect(trace).not.toContain("CANARY-live");
@@ -379,9 +355,7 @@ describe("debug-trace hardening for redacted slugs", () => {
   });
 
   test("a team-repo route redacts its PREFIX too (no team slug leak)", async () => {
-    // /orgs/{org}/teams/{team}/repos/{owner}/{repo} - the team slug rides in the
-    // prefix before /repos/, so truncating to /repos/<redacted> would leak it.
-    // The whole path must collapse to the constant.
+    // The team slug rides in the prefix before /repos/, so truncating to /repos/<redacted> would leak it.
     const dbg = traceIo();
     dbg.io.mask("acme/private");
     stubFetch([() => new Response(null, { status: 204 })]);
@@ -404,9 +378,8 @@ describe("debug-trace hardening for redacted slugs", () => {
   });
 
   test("redactingOctokitLog routes redacted content to the debug channel and never to stderr", () => {
-    // The exact leak class from the fuzz stderr scan: octokit's plugins log a
-    // request line like "GET /repos/owner/repo - 404 ..." (and worse, live-state
-    // segments like branch names) to stderr via the default console logger.
+    // The leak class the fuzz stderr scan found: octokit's plugins log request lines (with live-state segments like branch names) to stderr via the
+    // default console logger.
     const dbg = traceIo();
     dbg.io.mask("e2e-owner/repo-1");
     const log = redactingOctokitLog(new TraceRedaction(dbg.io));
@@ -419,10 +392,8 @@ describe("debug-trace hardening for redacted slugs", () => {
       for (const level of ["debug", "info", "warn", "error"] as const) {
         log[level]("PUT /repos/e2e-owner/repo-1/branches/dev-secret/protection - 403 in 3ms");
       }
-      // The gap a path-only redactor misses: the slug NOT in /repos/ position.
-      // Octokit's retry/throttle plugins emit free-text prose like this.
+      // The gap a path-only redactor misses: the slug outside /repos/ position, as the retry/throttle plugins' free-text prose puts it.
       log.warn("retrying request to e2e-owner/repo-1 after 429");
-      // And octokit's own request-tracking format, slug followed by prose.
       log.debug("GET /repos/e2e-owner/repo-1 - 200 with id undefined in 3ms");
     } finally {
       stderrSpy.mockRestore();
@@ -438,10 +409,7 @@ describe("debug-trace hardening for redacted slugs", () => {
   });
 
   test("redactingOctokitLog redacts a MIXED-CASE octokit line, slug outside /repos/ position", () => {
-    // Octokit logs free-text prose and does not normalize case; the message
-    // scan is case-insensitive and position-independent, so a slug written in a
-    // different case, and sitting mid-sentence rather than in a /repos/ path,
-    // still collapses the whole line.
+    // Octokit does not normalize case, so a slug in another case and mid-sentence must still collapse the line.
     const dbg = traceIo();
     dbg.io.mask("e2e-owner/svc-private");
     const log = redactingOctokitLog(new TraceRedaction(dbg.io));
@@ -451,15 +419,12 @@ describe("debug-trace hardening for redacted slugs", () => {
   });
 
   test("redactTrace holds the slug for the request only; the same client traces it legibly afterwards", async () => {
-    // The visibility probe must not leak its target before the answer is
-    // known, so its request holds the slug redacted; a plain request to the
-    // same slug afterwards (once the flow decided it is public) is legible again.
+    // The visibility probe must not leak its target before the answer is known; once the flow decided it is public, the same slug is legible again.
     stubFetch([() => new Response(null, { status: 204 })]);
     const dbg = traceIo();
     const client = api(dbg.io);
     await client.tryRequest("GET", "/repos/owner/probed", undefined, { redactTrace: true });
-    // Octokit's own request lines ride the same channel, so the whole window
-    // (client trace plus octokit chatter) must stay free of the slug.
+    // Octokit's own request lines ride the same channel, so the whole window must stay free of the slug.
     const held = dbg.lines.join("\n");
     expect(held).toContain("GET <redacted> -> 204");
     expect(held).not.toContain("owner/probed");
@@ -473,8 +438,7 @@ describe("debug-trace hardening for redacted slugs", () => {
   });
 
   test("a rate-limited visibility probe leaks no raw slug in any trace", async () => {
-    // The throttle-callback trace fires on the 429 retry, before the probe
-    // result exists - so the probe's request-window hold is what redacts it.
+    // The throttle-callback trace fires on the 429 retry, before the probe result exists, so the probe's request-window hold is what redacts it.
     const { createVisibilityResolver } = await import("../../src/github/repo-visibility.js");
     stubFetch([
       rateLimited,
@@ -483,7 +447,6 @@ describe("debug-trace hardening for redacted slugs", () => {
     const dbg = traceIo();
     expect(await createVisibilityResolver(api(dbg.io))("secret-owner/secret-repo")).toBe("private");
     const trace = dbg.lines.join("");
-    // neither the direct trace nor the throttle "rate limit on ..." line names it
     expect(trace).not.toContain("secret-repo");
     expect(trace).toContain("rate limit on GET <redacted>");
   });
@@ -494,11 +457,8 @@ describe("withheld() rebuilds from the allowlist", () => {
   const rebuilt = { status: 422, message: "withheld reason", body: "withheld reason" };
   const rebuiltRateLimited = { ...rebuilt, rateLimited: true };
 
-  // Each shape smuggles CANARY past a different field FILTER (spread, copy
-  // loop, for..in); only a rebuild that names its fields drops them all. The
-  // third column is the exact output, own keys in declaration order: a
-  // rateLimited: true anywhere on the input (own or inherited) is the one
-  // field that survives beside the status.
+  // Each shape smuggles CANARY past a different field FILTER (spread, copy loop, for..in); only a rebuild that names its fields drops them all.
+  // rateLimited: true anywhere on the input, own or inherited, is the one field that survives beside the status.
   test.each([
     [
       "extra fields",
@@ -564,8 +524,7 @@ describe("withheld() rebuilds from the allowlist", () => {
       "r",
     );
     expect(dropped).toEqual({ status: 403, message: "r", body: "r" });
-    // A type list smuggling free text - or a non-string that merely prints as
-    // a token - loses the WHOLE field, not just the entry.
+    // A type list smuggling free text, or a non-string that merely prints as a token, loses the WHOLE field, not just the entry.
     const smuggled = withheld(
       { status: 404, message: "m", body: "b", graphqlTypes: ["NOT_FOUND", "o/CANARY"] },
       "r",
@@ -585,12 +544,9 @@ describe("withheld() rebuilds from the allowlist", () => {
 });
 
 describe("secret-field request redaction and fail-closed error responses", () => {
-  // Requests here use the hookco/hookrepo slug rather than the o/r other
-  // suites use, so these traces stay independent of slug redaction: this
-  // suite is about FIELD redaction, and a slug hit would collapse the whole
-  // line before the field-level assertions could see anything.
+  // The hookco/hookrepo slug keeps these traces independent of slug redaction: a slug hit would collapse the whole line before the field-level
+  // assertions could see anything.
 
-  /** Fetch stub that also records every outgoing request body. */
   function stubFetchCapturingBodies(response: () => Response): { bodies: string[] } {
     const state = { bodies: [] as string[] };
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
@@ -600,16 +556,14 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     return state;
   }
 
-  // A value hostile to exact-literal masking: JSON escaping turns the quotes,
-  // backslash, and newline into \" \\ \n in the response body, so no literal
-  // scan for the original string would find the echo.
+  // Hostile to exact-literal masking: JSON escaping turns the quotes, backslash, and newline into \" \\ \n, so no literal scan for the original
+  // string finds the echo.
   const hostileSecret = 'he said "no" \\ back\nslash';
 
   // The fixed tail of every unsent-payload abort, after the scan's reason clause.
   const NOT_SENT_TAIL =
     ", so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file";
-  // The reason when the scan has no typed rejection to name a field with: a
-  // hostile proxy, a bare bigint, a cycle.
+  // The reason when the scan has no typed rejection to name a field with: a hostile proxy, a bare bigint, a cycle.
   const NOT_PLAIN_FALLBACK =
     "its payload is not plain JSON data (a cyclic value, or a value carrying a function or exotic prototype)";
 
@@ -623,9 +577,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const trace = dbg.lines.join("");
     expect(trace).toContain('"secret":"***"');
     expect(trace).not.toContain("he said");
-    // Non-secret payload fields still trace normally.
     expect(trace).toContain('"url":"https://example.test/hook"');
-    // The wire carries the real value; only the trace is masked.
     expect(sent.bodies).toEqual([
       JSON.stringify({
         name: "web",
@@ -668,16 +620,13 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       throw new Error("expected an error result");
     }
     expect(result.error.status).toBe(422);
-    // Nothing response-derived survives - not even documentation_url.
     expect(result.error.documentationUrl).toBeUndefined();
-    // message/errors/body are gone wholesale, not filtered by field name.
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
     expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
     for (const fragment of ["he said", "back", "slash", "too weak", "Hook"]) {
       expect(result.error.message).not.toContain(fragment);
       expect(result.error.body).not.toContain(fragment);
     }
-    // The debug trace never saw the value either.
     expect(dbg.lines.join("")).not.toContain("he said");
   });
 
@@ -704,9 +653,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a TOP-LEVEL secret (the hook config sub-endpoint shape) is masked and fail-closed", async () => {
-    // PATCH /hooks/{id}/config sends the config object bare, so `secret`
-    // sits at the top level - the shape 3C sends on every run with a
-    // declared secret.
+    // PATCH /hooks/{id}/config sends the config object bare, so `secret` sits at the top level.
     const sent = stubFetchCapturingBodies(
       () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
     );
@@ -757,9 +704,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a transport failure on a secret-carrying request withholds the error detail", async () => {
-    // No HTTP response at all; the rejection message quotes request details
-    // including the secret, with the quotes/backslash/newline that defeat
-    // literal masking.
     globalThis.fetch = (async () => {
       throw new Error(`request to https://x failed, body was: {"secret":"${hostileSecret}"}`);
     }) as unknown as typeof fetch;
@@ -775,7 +719,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (thrown === undefined) {
       throw new Error("expected a thrown transport error");
     }
-    // The withholding clause replaces the transport's own text wholesale.
     expect(thrown.message).toBe(
       "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
         "response arrived (details withheld: the request carried a secret field). Check network " +
@@ -799,12 +742,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
-    // isRateLimitError normally reads the message, which the wholesale
-    // replacement destroys; the content-free flag must carry the
-    // classification so the section gets retry advice, not a permission
-    // failure. The flag derives from the plugin-matched signals (headers,
-    // the secondary-rate phrase, errors[].type), never from arbitrary
-    // body text.
+    // The wholesale replacement destroys the message isRateLimitError reads, so the content-free flag must carry the classification;
+    // apiErrorFromHttp classifies on the original body before replacing it.
     stubFetch([
       () =>
         new Response(
@@ -835,10 +774,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a WITHHELD 403 with only the zero-quota header still reads as a rate limit", async () => {
-    // The wholesale replacement destroys the message that would normally
-    // disambiguate, so the ambiguous x-ratelimit-remaining: 0 is accepted on
-    // this path only - the lesser evil against telling a rate-limited user
-    // to fix their token.
+    // With the message destroyed, the ambiguous x-ratelimit-remaining: 0 is accepted on this path only: the lesser evil against telling a
+    // rate-limited user to fix their token.
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: `denied (echo: ${hostileSecret})` }), {
@@ -858,10 +795,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("an echoed 'rate limit' string cannot spoof the classification", async () => {
-    // The classification uses the throttling plugin's exact secondary-limit
-    // phrase (\bsecondary rate\b), so a body merely containing "rate limit"
-    // (imagine a secret's own text echoing it) with no rate-limit headers
-    // stays a permission failure and keeps its grant advice.
+    // The classification uses the throttling plugin's exact phrase (\bsecondary rate\b), so a body merely echoing "rate limit" without rate-limit
+    // headers stays a permission failure.
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: "rate limit rate limit rate limit" }), {
@@ -881,11 +816,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a HEADERLESS secondary rate limit (message-only) still classifies as one", async () => {
-    // GitHub documents secondary limits where neither x-ratelimit-remaining
-    // nor retry-after is present - the message is the only signal. Missing
-    // this would misread a rate limit as a permission failure, telling the
-    // user to fix their PAT (or silently skipping the section under
-    // on-missing-permission: warn).
+    // GitHub documents secondary limits with neither x-ratelimit-remaining nor retry-after; misreading one as a permission failure would tell the
+    // user to fix their PAT, or silently skip the section under on-missing-permission: warn.
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: "You have exceeded a secondary rate limit." }), {
@@ -923,15 +855,12 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
-  // Hostile toJSON shapes, one skeleton: the hand-rolled normalization never
-  // consults toJSON and rejects a function-valued property as non-plain data,
-  // so every shape aborts unsent. The shared calls === 0 assertion is the
-  // proof - a stringify-based normalization would have invoked toJSON, and a
-  // stateful one could show the scan a clean object and the wire the secret.
+  // The hand-rolled normalization never consults toJSON and rejects a function-valued property, so every shape aborts unsent.
+  // calls === 0 is the proof: a stringify-based normalization would have invoked toJSON, and a stateful one could show the scan a clean object and
+  // the wire the secret.
   const hostileToJson: Array<[string, (record: () => void) => unknown]> = [
     [
-      // Plain data never changes container-ness through a JSON round-trip; a
-      // collapse to a primitive would dodge the field-name scan entirely.
+      // A collapse to a primitive would dodge the field-name scan entirely.
       "collapsing the payload to a primitive",
       (record) => ({
         note: "clean-looking",
@@ -951,8 +880,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       }),
     ],
     [
-      // First serialization would return a clean object, every later one the
-      // secret.
       "returning clean output first and the secret later",
       (record) => {
         let serializations = 0;
@@ -969,9 +896,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       },
     ],
     [
-      // The sharpest shape: a DIFFERENT plain container where the secret sits
-      // under no field name at all, so a stringify scan would find nothing to
-      // mask and trace the value verbatim.
+      // The sharpest shape: the secret under no field name at all, where a stringify scan would trace it verbatim.
       "hiding the secret in a renamed container",
       (record) => ({
         secret: hostileSecret,
@@ -982,8 +907,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       }),
     ],
     [
-      // The field exists only in toJSON's output; a stringify-based
-      // normalization would have to mask it after the fact.
+      // The field exists only in toJSON's output; a stringify-based normalization would have to mask it after the fact.
       "smuggling a secret field into clean-looking output",
       (record) => ({
         note: "clean-looking",
@@ -1019,9 +943,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   );
 
   test("a proxy with a throwing getPrototypeOf trap aborts without leaking its error", async () => {
-    // The reflective container check itself can throw on a hostile proxy;
-    // that throw must be caught by the fail-closed path, not escape with
-    // the trap's message.
+    // The reflective container check itself throws on this proxy; the fail-closed path must catch it rather than let the trap's message escape.
     const hostileProxy = new Proxy(
       { url: "https://example.test" },
       {
@@ -1045,9 +967,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("an accessor property is rejected unread - its getter never runs", async () => {
-    // A getter is code, not data: even a getter that would RETURN clean
-    // data could sabotage globals as a side effect. Descriptors reject it
-    // without invoking it.
+    // A getter is code, not data: even one returning clean data could sabotage globals, so descriptors reject it uninvoked.
     let getterRan = false;
     const trapped = {
       url: "https://example.test",
@@ -1071,9 +991,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("an array subclass with an overridden map is rejected, its code never run", async () => {
-    // .map on a subclass dispatches to the override - foreign code that
-    // could substitute [secret]. Only base-class arrays are plain data,
-    // and the normalizer iterates by index rather than dispatching.
+    // .map on a subclass dispatches to the override, foreign code that could substitute [secret]; only base-class arrays are plain data and the
+    // normalizer iterates by index.
     let overrideRan = false;
     class SneakyArray extends Array<unknown> {
       override map<U>(_fn: (v: unknown, i: number, a: unknown[]) => U): U[] {
@@ -1097,10 +1016,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a YAML !!timestamp value (a Date) reaches the abort with the tag named", async () => {
-    // Reachable in production: the loose section shapes pass unknown fields
-    // through verbatim, and the yaml package parses explicit !!timestamp
-    // tags to Date objects. The abort message must point at the YAML tag,
-    // not at secret handling.
+    // validate.ts already rejects a Date (findNonPlain), so this is the belt under it: the yaml package parses explicit !!timestamp tags to Date
+    // objects, and the abort must name the tag.
     const parsed = parseYaml("stamp: !!timestamp 2024-01-01") as Record<string, unknown>;
     expect(parsed.stamp instanceof Date).toBe(true);
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
@@ -1131,10 +1048,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a non-plain-object payload (a Buffer) is never sent", async () => {
-    // Octokit passes non-plain objects to fetch verbatim; normalizing one
-    // would silently change the wire, and sending it unscanned would be a
-    // blind spot - so it aborts instead. Nothing sends such a payload
-    // today; this pins the boundary.
+    // Octokit passes non-plain objects to fetch verbatim; normalizing one would change the wire and sending it unscanned would be a blind spot, so it
+    // aborts. Nothing sends such a payload today; this pins the boundary.
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
     let thrown: Error | undefined;
     try {
@@ -1172,11 +1087,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a payload the scan cannot walk is never sent at all", async () => {
-    // A throwing accessor is the sharpest case: the getter's error message
-    // IS the secret. Normalization resolves accessors inside a try, so the
-    // failure aborts the request with a sanitized throw - sending what the
-    // scan could not inspect would let a stateful object show the scan one
-    // thing and the wire another. The secret appears nowhere.
+    // The getter's error message IS the secret; sending what the scan could not inspect would let a stateful object show the scan one thing and the
+    // wire another.
     const boobyTrapped = {
       url: "https://example.test/hook",
       get secret(): string {
@@ -1194,7 +1106,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (thrown === undefined) {
       throw new Error("expected a thrown abort");
     }
-    // The abort names the field but never the getter's own message.
     expect(thrown.message).toBe(
       `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "secret" is not plain JSON data (an accessor property)${NOT_SENT_TAIL}`,
     );
@@ -1221,9 +1132,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("field-name matching is case-insensitive", async () => {
-    // No GitHub field is anything but lowercase snake_case, but a passthrough
-    // payload can carry arbitrary user keys; a `Secret:` spelling must not
-    // slip the scan.
+    // A passthrough payload can carry arbitrary user keys, so a `Secret:` spelling must not slip the scan.
     stubFetch([() => new Response(null, { status: 204 })]);
     const dbg = traceIo();
     await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/anything", {
@@ -1237,9 +1146,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("an own __proto__ key survives in the trace instead of vanishing", async () => {
-    // JSON.parse creates __proto__ as an own DATA property; the masked copy
-    // must keep the branch (a plain {} target would hit the prototype
-    // setter and drop it, breaking trace fidelity).
+    // JSON.parse creates __proto__ as an own DATA property; a plain {} copy target would hit the prototype setter and drop the branch.
     stubFetch([() => new Response(null, { status: 204 })]);
     const dbg = traceIo();
     await api(dbg.io).tryRequest(
@@ -1289,8 +1196,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a non-secret request's trace and error are unchanged by the scan", async () => {
-    // Includes a config object WITHOUT secret fields: presence of `config`
-    // alone must not trigger anything.
     const payload = { name: "web", config: { url: "https://example.test", content_type: "json" } };
     stubFetch([
       () =>
@@ -1305,13 +1210,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     ]);
     const dbg = traceIo();
     const result = await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", payload);
-    // The traced payload is the original object, byte-identical JSON.
     expect(dbg.lines.join("")).toContain(` payload: ${JSON.stringify(payload)}`);
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    // The error keeps the message/errors/body shaping exactly as before; the
-    // body is the response JSON re-serialized, key order intact.
     expect(result.error.message).toBe(
       'Validation Failed ([{"field":"name","message":"bad name"}])',
     );
@@ -1324,12 +1226,8 @@ describe("secret-field request redaction and fail-closed error responses", () =>
 
 describe("DELETE request bodies reach the wire", () => {
   test("a DELETE payload transmits end-to-end through a real HTTP server", async () => {
-    // The secret-scanning custom-pattern bulk DELETE is the one endpoint
-    // whose DELETE carries a REQUIRED request body ({patterns, and this
-    // action's fixed post_delete_action}). tryRequest is method-agnostic,
-    // but octokit/undici dropping a DELETE body would surface as a 400 only
-    // deep inside the e2e suite - so this pins the transport property
-    // directly, against a real server rather than a fetch stub.
+    // The secret-scanning custom-pattern bulk DELETE is the one endpoint whose DELETE carries a REQUIRED body; octokit/undici dropping it would
+    // surface as a 400 only deep in the e2e suite, so the transport property is pinned here against a real server.
     const received: Array<{ method: string; body: string }> = [];
     const server = Bun.serve({
       port: 0,

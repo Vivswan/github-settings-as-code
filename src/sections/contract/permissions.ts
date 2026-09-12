@@ -1,5 +1,3 @@
-/** Fine-grained-PAT permission vocabulary and the grant prose derived from it. */
-
 /** A fine-grained-PAT permission resource under Repository permissions. */
 export type PatResource =
   | "administration"
@@ -20,11 +18,6 @@ export type PatResource =
   | "agent_variables"
   | "checks";
 
-/**
- * The machine-readable permission a section requires. `repo` lists the
- * fine-grained-PAT Repository permissions where ANY one grants access;
- * `org` names the extra Organization permission a section needs (teams).
- */
 export interface SectionPermission {
   /** Fine-grained PAT repository permissions; ANY one of these grants access. */
   readonly repo: readonly [PatResource, ...PatResource[]];
@@ -32,8 +25,7 @@ export interface SectionPermission {
   readonly org?: "members";
 }
 
-// Set equality over the repo alternatives (unordered, duplicates collapse) plus the org grant;
-// "none" equals only itself. Declarations are distinct literals, so identity cannot group them.
+// Declarations are distinct literals, so identity cannot group them: compare as sets.
 export function samePermission(
   a: SectionPermission | "none",
   b: SectionPermission | "none",
@@ -71,7 +63,6 @@ export const RESOURCE_LABEL: Record<PatResource, string> = {
   checks: "Checks",
 };
 
-/** Human-facing label for each PAT organization resource. */
 export const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, string> = {
   members: "Members",
 };
@@ -79,9 +70,8 @@ export const RESOURCE_LABEL_ORG: Record<NonNullable<SectionPermission["org"]>, s
 // Each PAT resource's query parameter on GitHub's pre-filled token form (the generated token-form
 // link, in this order); total over PatResource, so a new resource names its parameter or records a null exemption.
 export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
-  // The parameter names follow the App-permissions schema where they differ from ours; every
-  // non-null slug below was verified against the live token form on 2026-07-28 (each pre-selects
-  // its permission; the form drops unknown parameters silently, which is how the old variables= spelling failed).
+  // The form drops unknown parameters silently (the old variables= spelling failed that way), so every
+  // non-null slug was verified against the live token form on 2026-07-28.
   administration: "administration",
   issues: "issues",
   environments: "environments",
@@ -93,35 +83,20 @@ export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
   secrets: "secrets",
   dependabot_secrets: "dependabot_secrets",
   codespaces_secrets: "codespaces_secrets",
-  // The Copilot agents stores. Verified 2026-08-10 against GitHub's
-  // machine-readable fine-grained-PAT permission data (github/docs,
-  // src/github-apps/data/fpt-2022-11-28/fine-grained-pat-permissions.json),
-  // which keys the repository permissions for the /agents/secrets and
-  // /agents/variables endpoints as "agent_secrets"/"agent_variables" - the
-  // same vocabulary file that carries every form-verified slug above,
-  // including the three that differ from our resource names.
+  // Verified 2026-08-10 against github/docs src/github-apps/data/fpt-2022-11-28/fine-grained-pat-permissions.json, not the live form.
   agent_secrets: "agent_secrets",
   agent_variables: "agent_variables",
   custom_properties: "repository_custom_properties",
   secret_scanning_alerts: "secret_scanning_alerts",
   contents: "contents",
-  // Rides the repo PATCH's security_and_analysis passthrough for setup;
-  // the alerts grant has no verified form parameter today.
+  // A grant alternative of code_scanning_default_setup; it has no verified token-form parameter today.
   code_scanning_alerts: null,
 };
 
 /**
- * Render a SectionPermission into the grant prose used verbatim in
- * permission errors. `caveat`, when given, is appended after "; ". `access`
- * names the level the advice asks for: section grants keep the "write"
- * default (a section both reads and writes), while a denial on an endpoint
- * with its own permission override passes the level the SECTION needs on
- * that permission (overrideAdviceLevel: read unless a sibling endpoint
- * writes with it), so the advice never asks for a broader grant than the
- * section can use - nor a narrower one than it will need next. The default
- * output is user-facing error prose: the EXPECTED_GRANT snapshot in
- * test/sections/registry.test.ts pins every section's grant character for
- * character, and the docs/reference/sections.md "Sections" table mirrors those grants.
+ * `access` defaults to "write" (a section both reads and writes), and a denial on an override endpoint
+ * passes overrideAdviceLevel (./errors.ts) so the advice asks for exactly the level the section needs.
+ * The output is user-facing: EXPECTED_GRANT in test/sections/registry.test.ts pins every grant character for character.
  */
 export function grantFor(
   permission: SectionPermission,

@@ -1,6 +1,5 @@
 /**
- * Handler-level tests for the rulesets mock fragment: the bypass_actors
- * visibility rule, which no scenario reads off the wire directly.
+ * No scenario reads the bypass_actors visibility rule off the wire directly, so it is pinned here against the handler.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -46,8 +45,7 @@ describe("rulesets bypass_actors visibility", () => {
   }
 
   test("a ruleset stored without the key reads bypass_actors: [] at write grade, like GitHub", () => {
-    // Otherwise an admin declaring a non-empty list against such a ruleset
-    // would see the hidden-key notice instead of the genuine drift.
+    // Otherwise an admin declaring a non-empty list against such a ruleset would see the hidden-key notice instead of the genuine drift.
     const bare = buildStateForSlug(
       "acme/repo",
       { settingsYaml: null, liveState: { rulesets: [withoutBypass] } },

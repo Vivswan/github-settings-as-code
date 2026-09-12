@@ -1,8 +1,3 @@
-/**
- * Unit tests for the routed `pinned` scalar: the GraphQL pin, unpin, and
- * reorder plans over the pins connection, check-mode drift, and the schema cap.
- */
-
 import { describe, expect, test } from "bun:test";
 import { MockApi } from "../../../test/mock-api.js";
 import { NO_SECRETS, REPO, sectionRunners } from "../../../test/sections/section-run.js";
@@ -13,9 +8,8 @@ import { environmentsSection } from "./index.js";
 const { plan, check, apply } = sectionRunners(environmentsSection);
 
 /**
- * A pins-connection body. `pins` are either names (contiguous positions
- * 1..N) or {name, position} pairs for the hole-y layouts live GitHub
- * produces after an unpin.
+ * A pins-connection body; `pins` are names at contiguous positions 1..N, or {name, position} pairs for the hole-y layouts live GitHub produces after
+ * an unpin.
  */
 function pinsBody(pins: Array<string | { name: string; position: number }>) {
   return {
@@ -49,8 +43,7 @@ function graphqlWrites(api: MockApi) {
 
 describe("environments pinned apply mode", () => {
   test("pinned never reaches the PUT body, and a created environment's pin addresses the node id its PUT answered with", async () => {
-    // The environment does not exist yet, so its node id is known only once
-    // the PUT has run: the PUT's capture hands it to the pin mutation.
+    // The environment does not exist yet, so its node id is known only once the PUT has run: the PUT's capture hands it to the pin mutation.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody([]),
@@ -87,11 +80,8 @@ describe("environments pinned apply mode", () => {
   });
 
   test("minimal mutations in cap-safe order: unpin, then pin, then leftward reorders", async () => {
-    // Live [c, b]; declared order pins a then b, and c declares pinned:
-    // false. The unpin runs FIRST (a swap can never transiently exceed the
-    // cap), the missing a is pinned to the tail, and one reorder pulls a
-    // left to position 1 - b then already sits at position 2, so no second
-    // reorder is issued.
+    // Live [c, b]; declared pins a then b, c pinned: false. The unpin runs first (a swap can never transiently exceed the cap); after a is pinned to
+    // the tail, one reorder pulls it to 1 and b already sits at 2.
     const api = new MockApi({
       "PUT /repos/o/r/environments/a": envBody("a"),
       "GET /repos/o/r/environments/b": envBody("b"),
@@ -130,10 +120,8 @@ describe("environments pinned apply mode", () => {
   });
 
   test("hole-y live positions in the right order are converged: rank, not literal numbers", async () => {
-    // Verified live behavior: unpinning leaves a hole (positions 1 and 3
-    // with nothing at 2), and re-pins append via a monotonic counter - so a
-    // list whose RANK order matches the declaration must read converged,
-    // never as position drift.
+    // Verified live: unpinning leaves a hole (positions 1 and 3, nothing at 2) and re-pins append via a monotonic counter, so rank order, not the
+    // literal numbers, is what converges.
     const api = new MockApi({
       "GET /repos/o/r/environments/a": envBody("a"),
       "GET /repos/o/r/environments/b": envBody("b"),
@@ -150,9 +138,7 @@ describe("environments pinned apply mode", () => {
   });
 
   test("two fresh pins land in declaration order with zero reorders (tail appends)", async () => {
-    // Pins append at the tail (verified live behavior), so pinning a then b
-    // onto an empty list already realizes the declared order - the plan
-    // must not emit compensating reorders.
+    // Pins append at the tail (verified live), so pinning a then b onto an empty list already realizes the declared order.
     const api = new MockApi({
       "PUT /repos/o/r/environments/a": envBody("a"),
       "PUT /repos/o/r/environments/b": envBody("b"),
@@ -169,11 +155,8 @@ describe("environments pinned apply mode", () => {
   });
 
   test("live pins nobody declared count toward the cap: overflow fails BEFORE any mutation", async () => {
-    // The shape's upfront cap sees only declared entries; ten live undeclared
-    // pins (which the section never unpins) plus one declared pin overflow
-    // GitHub's cap, and discovering that on the pin mutation would leave the
-    // list half-applied. The first pin mutation's thunk refuses before its
-    // request leaves; the environment PUT before it has landed.
+    // The shape's upfront cap sees only declared entries; ten live undeclared pins (never unpinned) plus one declared overflow GitHub's cap, so the
+    // first pin thunk refuses before its request leaves, after the environment PUT landed.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody([
@@ -190,8 +173,7 @@ describe("environments pinned apply mode", () => {
       ]),
     }).allowMutations("GRAPHQL PinEnvironment");
     const planned = await plan(api, [{ name: "prod", pinned: true }]);
-    // The note sits beside the drift in both modes (u1 also earns the
-    // interleaving note: it leads the list the declared pin should lead).
+    // u1 also earns the interleaving note: it leads the list the declared pin should lead.
     expect(planned.notes).toEqual([
       'pinned environment(s) "u1" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
       "apply will fail: pinning the 1 declared environment(s) not yet pinned would leave 11 " +
@@ -209,10 +191,8 @@ describe("environments pinned apply mode", () => {
   });
 
   test("a raced-full pinned list surfaces GitHub's cap rejection on the pin mutation", async () => {
-    // Nine live pins pass the overflow gate (9 + 1 = 10), but a pin raced in
-    // between the read and the mutation makes GitHub reject with
-    // UNPROCESSABLE - the belt under the gate, classified like any other
-    // rejected request and naming the operation.
+    // Nine live pins pass the overflow gate (9 + 1 = 10); a pin raced in between the read and the mutation makes GitHub reject with UNPROCESSABLE,
+    // the belt under the gate.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": pinsBody(["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"]),
@@ -231,8 +211,7 @@ describe("environments pinned apply mode", () => {
   });
 
   test("a PUT response without a node_id fails that operation, records no line, and fires no pin", async () => {
-    // The capture extracts the id synchronously as the PUT lands, so the
-    // failure is the PUT's own (no change line) and the pin never runs.
+    // The capture extracts the id synchronously as the PUT lands, so the failure is the PUT's own (no change line) and the pin never runs.
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
       "GRAPHQL EnvironmentPins": pinsBody([]),
@@ -251,9 +230,7 @@ describe("environments pinned apply mode", () => {
   });
 
   test("EVERY planned mutation's id resolves before the FIRST one fires", async () => {
-    // Two pins are planned and the SECOND environment's PUT body lacks its
-    // node_id: resolve-before-write means the first pin must not have fired
-    // when the resolution throws, or the list would be half-applied.
+    // The SECOND environment's PUT body lacks its node_id: resolve-before-write means the first pin must not have fired when the resolution throws.
     const api = new MockApi({
       "PUT /repos/o/r/environments/a": envBody("a"),
       "PUT /repos/o/r/environments/b": { data: { name: "b" } },
@@ -269,9 +246,7 @@ describe("environments pinned apply mode", () => {
   });
 
   test("a converged run never resolves ids, so a missing node_id cannot fail it", async () => {
-    // The plan carries no pin mutation, so no thunk resolves an id: an API
-    // that stopped carrying node_id must not break a repository that is
-    // already in the declared state.
+    // No pin mutation is planned, so no thunk resolves an id: an API that stopped carrying node_id must not break a converged repository.
     const api = new MockApi({
       "GET /repos/o/r/environments/a": { data: { name: "a", protection_rules: [] } },
       "GRAPHQL EnvironmentPins": pinsBody(["a"]),
@@ -324,9 +299,7 @@ describe("environments pinned check mode", () => {
   });
 
   test("every reorder after the first is a continuation of the one order line, never per-environment pin drift", async () => {
-    // Live [c, b, a], all three declared pinned: a moves to 1, then b to 2 (c
-    // slid right). The order line explains the sequence once; a misplaced pin
-    // never earns an environments[x].pinned line.
+    // After a moves to 1, c has slid right, so b still needs its own move to 2.
     const api = new MockApi({
       "GET /repos/o/r/environments/a": envBody("a"),
       "GET /repos/o/r/environments/b": envBody("b"),
@@ -350,7 +323,6 @@ describe("environments pinned check mode", () => {
         'environments.pinned: apply will also move "b" to position 2 in that reordering',
       ],
     ]);
-    // No per-environment pin drift joins the two order lines.
     expect(planDrift(planned)).toEqual([
       "environments.pinned: the declared pin order is [a, b, c] but the live pinned order is [c, b, a]; apply will reorder the pins so the declared ones lead in declaration order",
       'environments.pinned: apply will also move "b" to position 2 in that reordering',
@@ -367,11 +339,8 @@ describe("environments pinned check mode", () => {
       { name: "a", pinned: true },
       { name: "b", pinned: true },
     ]);
-    // Also the diff-leak pin: a routed `pinned` reaching subsetDiff would
-    // add an "environments[a].pinned: declared true ..." line here.
+    // A routed `pinned` reaching subsetDiff would add an "environments[a].pinned: declared true ..." line here.
     expect(result.drift).toEqual([]);
-    // legacy sits AFTER the declared block, so apply would not move it: no
-    // interleaving note, check and apply agree exactly.
     expect(result.notes).toEqual([]);
   });
 
@@ -416,10 +385,8 @@ describe("environments pinned check mode", () => {
   });
 
   test("a tolerated NOT_FOUND on the pins read reads as no pins, never a permission error", async () => {
-    // The fine-grained-denial disguise: GraphQL conceals a denied repository
-    // as NOT_FOUND, which the pins read declares as an outcome - the same
-    // absent posture as the section's REST probe, so check reports drift
-    // and the denial surfaces on the first write in apply mode.
+    // GraphQL conceals a denied repository as NOT_FOUND, which the pins read declares as an outcome (the same absent posture as the REST probe), so
+    // check reports drift and the denial surfaces on the first write in apply mode.
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": envBody("prod"),
       "GRAPHQL EnvironmentPins": {

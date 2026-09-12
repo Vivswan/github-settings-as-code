@@ -1,8 +1,4 @@
-/**
- * `collaborators:` section - direct collaborators by username plus their pending invitations, which
- * converge, get PATCHed, or are cancelled and re-sent once expired. Undeclared collaborators are REMOVED
- * and undeclared invitations cancelled by default, never the owner; `_undeclared: keep` softens both to notes.
- */
+/** `collaborators:` section: direct collaborators by username plus their pending invitations; the owner is never removed. */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -22,17 +18,14 @@ import { DEFAULT_ROLE, INVITATION_ROLES, roleForPermission } from "../shared/rol
 import { knobbed } from "../shared/schema-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
-/** The fields of a live collaborator this section reads; extras ride along. */
 const LiveCollaborator = z.looseObject({
   login: z.string(),
   permissions: z.record(z.string(), z.boolean()).optional(),
   role_name: z.string().optional(),
 });
 
-/**
- * A pending invitation as listed: `permissions` speaks the READ vocabulary (read/write/...) that
- * roleForPermission maps declared permissions into; `invitee` is null on email invitations.
- */
+// `permissions` speaks the READ vocabulary (read/write/...) that roleForPermission maps declared
+// permissions into; `invitee` is null on email invitations.
 const LiveInvitation = z.looseObject({
   id: z.number(),
   invitee: z.looseObject({ login: z.string().optional() }).nullable().optional(),
@@ -41,13 +34,8 @@ const LiveInvitation = z.looseObject({
 });
 type LiveInvitation = z.infer<typeof LiveInvitation>;
 
-/** An invitation PROVEN username-addressed: the type carries the login. */
 type NamedInvitation = LiveInvitation & { invitee: { login: string } };
 
-/**
- * The partition predicate: a NON-EMPTY string login, so an empty login stays in the email pool
- * and an off-contract non-string login never reaches the named pool's string operations.
- */
 function isNamedInvitation(invitation: LiveInvitation): invitation is NamedInvitation {
   return typeof invitation.invitee?.login === "string" && invitation.invitee.login !== "";
 }
@@ -88,8 +76,7 @@ export const collaboratorsSection = {
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CollaboratorConfig)),
-  // Closed surface: the PUT accepts exactly one setting ("permission"), so an extra key is always
-  // a typo - and a misspelled "permission" would silently grant the default role and report clean.
+  // The PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { username: true, permission: true },
     describe: (c) => c.username,
@@ -111,8 +98,8 @@ export const collaboratorsSection = {
     );
     const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
     // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
-    // undeclared in the other pool; the predicate partitions the invitations once, and email
-    // invitations (null invitee, which no username can declare) split into their own pool.
+    // undeclared in the other pool; email invitations (null invitee, which no username can declare)
+    // split into their own pool.
     const allInvitations = parseLive(
       this,
       ENDPOINTS.listInvitations,
@@ -136,8 +123,7 @@ export const collaboratorsSection = {
       const label = `collaborators[${username}]`;
       const existing = liveByLogin.get(login);
       if (existing) {
-        // On GitHub a user is never a collaborator AND an invitee at once,
-        // so the collaborator branch settles the entry.
+        // On GitHub a user is never a collaborator AND an invitee at once, so this branch settles the entry.
         if ((existing.role_name ?? "") !== wantRole) {
           plan.ops.push({
             role: "update",
@@ -163,8 +149,7 @@ export const collaboratorsSection = {
           continue;
         }
         if ((invitation.permissions ?? "") !== wantRole) {
-          // The invitation PATCH speaks the READ vocabulary, so it takes the
-          // mapped role, not the declared permission.
+          // The invitation PATCH speaks the READ vocabulary, so it takes the mapped role, not the declared permission.
           plan.ops.push({
             role: "updateInvitation",
             params: { invitation_id: String(invitation.id) },
@@ -179,8 +164,7 @@ export const collaboratorsSection = {
         continue;
       }
       if (invitation) {
-        // An expired invitation cannot be revived by a PATCH: cancel it, and
-        // the PUT below mints a fresh one.
+        // An expired invitation cannot be revived by a PATCH: cancel it, and the PUT below mints a fresh one.
         plan.ops.push({
           role: "cancelInvitation",
           params: { invitation_id: String(invitation.id) },
@@ -208,7 +192,7 @@ export const collaboratorsSection = {
     for (const collaborator of live) {
       const login = collaborator.login.toLowerCase();
       if (login === ctx.repo.owner.toLowerCase() || declaredKeys.has(login)) {
-        continue; // never remove the owner (under either policy)
+        continue;
       }
       if (policy === "keep") {
         plan.notes.push(

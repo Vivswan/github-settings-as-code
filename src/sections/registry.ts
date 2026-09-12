@@ -1,12 +1,9 @@
 /**
- * The single registration point for section modules. `byKey` is checked
- * against a mapped type, so the compiler enforces that every SectionKey has
- * a module AND that each module sits under its own key, while `satisfies`
- * keeps each module's LITERAL type - its exact endpoint and GraphQL role
- * names - for the key unions derived below; execution order comes from
- * SECTION_KEYS alone. Adding a section: create sections/<key>/ exporting
- * a SectionModule, add the key to SECTION_KEYS in schema.ts, and add one
- * line here.
+ * `byKey` is checked against a mapped type (every SectionKey has a module, under its own key) while
+ * `satisfies` keeps each module's LITERAL type for the key unions derived below; execution order comes
+ * from SECTION_KEYS alone.
+ *
+ *   adding a section: create sections/<key>/ -> add the key to SECTION_KEYS in schema.ts -> add one line here
  */
 
 import type { z } from "zod";
@@ -72,44 +69,28 @@ const byKey = {
   secret_scanning_custom_patterns: secretScanningPatternsSection,
 } satisfies { [K in SectionKey]: SectionModule<K> };
 
-/** Each section's module with its literal endpoint/GraphQL dictionaries. */
 type SectionModules = typeof byKey;
 
-/**
- * The declarations a module's plan() was TYPED over - the two dictionaries behind its context plus
- * its declared-value parameter. Read off the handler signature, not the module's own declarations,
- * so the two can be compared.
- */
+/** Read off the handler signature, not the module's own declarations, so the two can be compared. */
 type PlanTypedOver<M> = M extends {
   plan: (ctx: PlanContext<infer E, infer G>, desired: infer D) => unknown;
 }
   ? { endpoints: E; graphql: G; desired: D }
   : never;
 
-/**
- * What a module's plan() MUST be typed over, derived from what the module
- * actually declares: its own endpoint dictionary, its own GraphQL
- * dictionary (the SectionModule default when it declares none, which is
- * what `SectionModule<"key", typeof ENDPOINTS>` supplies), and its own
- * section's declared value.
- */
+/** The GraphQL arm defaults to GraphqlDict when the module declares none, which is what `SectionModule<"key", typeof ENDPOINTS>` supplies. */
 type ExpectedPlanDeclarations<K extends SectionKey, M> = {
   endpoints: M extends { endpoints: infer E extends EndpointDict } ? E : never;
   graphql: M extends { graphql: infer G extends GraphqlDict } ? G : GraphqlDict;
   desired: Exclude<SettingsFile[K], undefined>;
 };
 
-/** Mutual assignability - equality up to structure, in both directions. */
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 /**
- * `K` when module `M`'s plan() is typed over anything but its own
- * declarations, never when it is exact. Comparing the dictionaries as
- * PROPERTIES is what makes the comparison strict: reaching them through the
- * context would compare the bound read helpers, whose METHOD parameters
- * TypeScript checks bivariantly, so a wider endpoint dictionary, a phantom
- * role planContext never binds, a widened GraphQL variables shape, or a
- * narrowed declared value would all measure as equal. Exported for its
+ * Compares the dictionaries as PROPERTIES: reaching them through the context would compare the bound read
+ * helpers, whose METHOD parameters TypeScript checks bivariantly, so a wider dictionary, a phantom role, a
+ * widened variables shape, or a narrowed declared value would all measure as equal. Exported for its
  * negative control (test/sections/registry.test.ts).
  */
 export type MisdeclaredPlanModule<K extends SectionKey, M> =
@@ -120,30 +101,19 @@ type MisdeclaredPlanModules = {
 }[SectionKey];
 
 /**
- * Compile-time lockstep: a plan section whose handler is typed over
- * anything but its own literal dictionaries and declared value (the shape
- * `satisfies SectionModule<"key", typeof ENDPOINTS>` produces) fails here,
- * naming itself, instead of losing role checking silently.
+ * A plan typed over anything but its own literal dictionaries and declared value fails here naming
+ * itself, instead of losing role checking silently.
  */
 type _PlanModulesAreExact = MustBeNever<MisdeclaredPlanModules>;
 
 /**
- * The `${section}.${role}` key union for REST endpoints - per section, or
- * across all sections by default. Derived from each module's literal
- * ENDPOINTS type, so this union (and every consumer: the mock handler
- * tables, dispatch, fault directives) tracks the declarations by
- * construction; a key naming no declared endpoint does not compile.
+ * Derived from each module's literal ENDPOINTS, so every consumer (the mock handler tables, dispatch,
+ * fault directives) tracks the declarations by construction.
  */
 export type SectionEndpointKey<K extends SectionKey = SectionKey> = {
   [S in SectionKey]: `${S}.${keyof SectionModules[S]["endpoints"] & string}`;
 }[K];
 
-/**
- * The `${section}.${role}` key union for GraphQL operations, the
- * SectionEndpointKey sibling. A module without a `graphql` dictionary
- * contributes nothing (never), so the union spans exactly the declaring
- * sections.
- */
 export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
   [S in SectionKey]: SectionModules[S] extends { readonly graphql: infer G }
     ? `${S}.${keyof G & string}`
@@ -151,19 +121,14 @@ export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
 }[K];
 
 /**
- * The same registry under per-key SectionModule<K> types: the erased view
- * SECTIONS and sectionModule() serve. Erasure must go through THIS mapped
- * annotation (not straight from the literal types) because the compiler
- * relates SectionModule<K> to SectionModule<SectionKey> by variance, while
- * a literal module's closedSurface would be compared structurally against
- * the union-collapsed (never-keyed) wide form and rejected.
+ * Erasure must go through THIS mapped annotation: the compiler relates SectionModule<K> to
+ * SectionModule<SectionKey> by variance, while a literal module's closedSurface compared structurally
+ * against the union-collapsed wide form would be rejected.
  */
 const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
-/** Every section module, in execution order. */
 export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => byKeyErased[key]);
 
-/** The loose shape validation accepts for a section's declared value. */
 export function sectionShape(key: SectionKey): z.ZodType {
   return byKey[key].shape;
 }
@@ -173,18 +138,14 @@ export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
   return byKeyErased[key];
 }
 
-/** One endpoint in the flattened cross-section view, tagged with its owner. */
 export type TaggedEndpoint = EndpointDecl & {
   readonly section: SectionKey;
   readonly role: string;
 };
 
 /**
- * Construction-time guard on the "section.role" key space: ":" is RESERVED
- * for a future scope prefix ("<scope>:<section>.<role>", where a scope could
- * qualify a key by owner or ring), so no bare section key or role may
- * contain it - a colon smuggled in today would be indistinguishable from a
- * scoped key later. Both flattened views call this on every entry.
+ * ":" is RESERVED for a future scope prefix ("<scope>:<section>.<role>"); a colon smuggled in today
+ * would be indistinguishable from a scoped key later.
  */
 function assertScopeFree(kind: "section key" | "role", value: string): void {
   if (value.includes(":")) {
@@ -195,14 +156,11 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
 }
 
 /**
- * Every section's endpoints flattened into one dictionary keyed
- * `${sectionKey}.${role}` ("labels.update", "teams.org", ...): the single
- * view the e2e mock's route table and the USED_PATHS derivation iterate,
- * keyed by the exact SectionEndpointKey union so a lookup no section declares
- * does not compile. The record, each tagged entry, and the nested
- * statuses/permission objects are frozen: they reference the section
- * declarations, which must never mutate at runtime. `sections` is injectable
- * so the scope-free assert is testable; an injected list keeps string keys.
+ * The single view the e2e mock's route table and USED_PATHS iterate, keyed by the exact SectionEndpointKey
+ * union so an undeclared lookup does not compile.
+ *
+ *   frozen (record, tagged entries, nested statuses/permission)  -> they reference the declarations, which must never mutate
+ *   `sections` injectable                                        -> the scope-free assert is testable; an injected list keeps string keys
  */
 export function allEndpoints(): Readonly<Record<SectionEndpointKey, TaggedEndpoint>>;
 export function allEndpoints(
@@ -227,21 +185,15 @@ export function allEndpoints(
   return Object.freeze(out);
 }
 
-/** One GraphQL operation in the flattened cross-section view, tagged with its owner. */
 export type TaggedGraphqlOp = GraphqlOpDecl & {
   readonly section: SectionKey;
   readonly role: string;
 };
 
 /**
- * Every section's GraphQL operations flattened into one dictionary keyed
- * `${sectionKey}.${role}`, the allEndpoints() sibling the e2e mock's dispatch
- * table, the coverage tripwire, and the fault-key universe iterate; frozen
- * for the same reason. Asserted at construction: operation NAMES are globally
- * unique (the name is the wire dispatch key, so a duplicate makes the mock's
- * dispatch ambiguous), and a role never collides with a REST role in the same
- * section (fault directives address both dictionaries through one
- * "section.role" key space). `sections` is injectable for the tests.
+ * The allEndpoints() sibling for the mock's dispatch table, the coverage tripwire, and the fault-key
+ * universe; frozen for the same reason. Operation NAMES must be globally unique (the wire dispatch key),
+ * and a role never collides with a REST role in the same section (fault directives share one "section.role" key space).
  */
 export function allGraphqlOps(): Readonly<Record<SectionGraphqlKey, TaggedGraphqlOp>>;
 export function allGraphqlOps(

@@ -1,7 +1,6 @@
 /**
- * `deploy_keys:` section - deploy keys matched by exact title; the declared material is a PUBLIC key.
- * Immutable upstream (no update role), so a changed key or read_only flag is delete plus recreate; both
- * sides compare only algorithm + blob (GitHub may strip the trailing comment). Undeclared keys are KEPT.
+ * `deploy_keys:` section: deploy keys matched by exact title; the declared material is a PUBLIC key.
+ * Immutable upstream (no update role), so a changed key or read_only flag is delete plus recreate.
  */
 
 import { z } from "zod";
@@ -9,7 +8,6 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { listSection } from "../shared/list-section.js";
 import { DeployKeyConfig } from "./schema.js";
 
-/** The fields of a live deploy key this section reads; extras ride along. */
 const LiveDeployKey = z.looseObject({
   id: z.number(),
   title: z.string(),
@@ -37,11 +35,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * The comparable form of deploy key material: the algorithm and base64 blob (the first two
- * whitespace-separated fields), without the trailing comment GitHub may strip. Null when the value
- * has fewer than two fields; callers raise their own loud error instead of comparing garbage.
- */
+/** GitHub may strip the trailing comment, so only the algorithm and the base64 blob compare. */
 export function normalizeKeyMaterial(key: string): string | null {
   const fields = key.trim().split(/\s+/);
   const algorithm = fields[0];
@@ -52,7 +46,6 @@ export function normalizeKeyMaterial(key: string): string | null {
   return `${algorithm} ${blob}`;
 }
 
-/** The declared key's comparable material, or a loud settings-file error. */
 function declaredMaterial(title: string, key: string): string {
   const normalized = normalizeKeyMaterial(key);
   if (normalized === null) {
@@ -63,7 +56,6 @@ function declaredMaterial(title: string, key: string): string {
   return normalized;
 }
 
-/** A live key's comparable material; sub-two-field material is a contract violation, never a silent skip. */
 function liveMaterial(live: LiveDeployKey): string {
   const normalized = normalizeKeyMaterial(live.key);
   if (normalized === null) {
@@ -89,8 +81,8 @@ export const deployKeysSection = listSection({
   identity: { field: "title" },
   address: (live) => ({ key_id: String(live.id) }),
   lens: {
-    // read_only is written and compared only when DECLARED: GitHub defaults it
-    // to false on create, and an undeclared toggle is not managed by this file.
+    // GitHub defaults read_only to false on create; an undeclared toggle is not compared, since this
+    // file does not manage it.
     toWrite: ({ title, key, read_only, ...passthrough }) => ({
       title,
       key: declaredMaterial(title, key),

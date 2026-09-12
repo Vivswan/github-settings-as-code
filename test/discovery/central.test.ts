@@ -4,8 +4,7 @@ import { resolveCentralTargets } from "../../src/discovery/central.js";
 
 describe("resolveCentralTargets", () => {
   test("reads owner-shorthand and owner/name files, warns on strays", () => {
-    // The walk sorts directory entries, so the target and warning order is
-    // fixed: top-level files first, then each owner directory.
+    // The walk sorts directory entries, so the order is fixed: top-level files first, then each owner directory.
     expect(resolveCentralTargets("test/fixtures/repos", "viv")).toEqual(
       ok({
         targets: [

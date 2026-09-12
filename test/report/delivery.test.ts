@@ -223,8 +223,7 @@ describe("the artifact channel", () => {
 });
 
 describe("applyMarkerInjection", () => {
-  // Fixtures are branded through the REAL boundary, so an invalid one fails
-  // here instead of riding a cast into the injection.
+  // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast into the injection.
   const validated = (doc: SettingsFile): ValidatedSettings => {
     const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silentIo());
     if (verdict.isErr()) {

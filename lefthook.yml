@@ -1,7 +1,5 @@
-# Git hooks, installed by `bun install` (the prepare script). The hook is
-# deliberately cheap: staged lint plus a whole-project typecheck (~0.5s);
-# builds, tests, and schema freshness are CI's job behind the all-green
-# gate.
+# Git hooks, installed by `bun install` (the prepare script). Deliberately cheap: staged lint plus a whole-project
+# typecheck; builds, tests, and schema freshness are CI's job behind the all-green gate.
 pre-commit:
   parallel: true
   jobs:

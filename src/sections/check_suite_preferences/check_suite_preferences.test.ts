@@ -52,9 +52,8 @@ describe("check_suite_preferences", () => {
       drift: [],
     });
     expect(api.calls).toEqual([]);
-    // The change line counts the ECHOED entries: three against two declared
-    // can only come from GitHub's post-state, so the fallback cannot be what
-    // rendered it. A shapeless echo falls back to the declared list.
+    // Three echoed entries against two declared can only come from GitHub's post-state, so the fallback cannot be what rendered it; a shapeless echo
+    // falls back to the declared list.
     expect(
       rendered(result, {
         preferences: { auto_trigger_checks: [...declared.auto_trigger_checks, { app_id: 1 }] },
@@ -86,8 +85,7 @@ describe("check_suite_preferences", () => {
     expect(second.ops.map((op) => op.role)).toEqual(["update"]);
     expect(first.notes).toEqual([note]);
     expect(second.notes).toEqual([note]);
-    // Both executions (the proof also runs the converged plan) sent the
-    // declaration verbatim; nothing was ever read.
+    // provePlanIdempotent executes the converged plan too, hence two PATCHes.
     expect(api.calls).toEqual([
       { method: "PATCH", path, payload: declared },
       { method: "PATCH", path, payload: declared },
@@ -118,9 +116,8 @@ describe("check_suite_preferences", () => {
     ctx.read.update;
     // @ts-expect-error nor the raw client
     ctx.api;
-    // Compile-time only: the operations are never executed. Each rejected
-    // shape is built first and assigned on one line, so the directive
-    // anchors to the assignment whichever property the compiler blames.
+    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
+    // property the compiler blames.
     type Op = PlannedOp<typeof checkSuitePreferencesSection.endpoints>;
     const rewrite: Op = { role: "update", payload: declared, drift: [], change: "" };
     expect(rewrite.drift).toEqual([]);

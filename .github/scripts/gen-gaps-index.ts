@@ -1,12 +1,9 @@
 /**
- * Regenerate src/upstream-gaps/index.ts WHOLESALE from the directory listing.
- * The index is a generated file (biome-exempt, header-marked): each gap file
- * contributes one import and one GAPS array element, in sorted file order,
- * and the type/value derivations split the two gap kinds by their `kind`
- * field, so the generator needs nothing but the file names. The graduate
- * script calls regenerateIndex() after deleting or transforming gap files;
- * run `bun .github/scripts/gen-gaps-index.ts` by hand after adding one. A
- * unit test pins the committed index to a fresh regeneration.
+ * Regenerates src/upstream-gaps/index.ts WHOLESALE from the directory listing: the derivations split the two gap
+ * kinds by their `kind` field, so nothing but the file names is needed.
+ *   a gap file added by hand                     -> `bun .github/scripts/gen-gaps-index.ts`
+ *   graduate-upstream-gaps.ts                    -> calls regenerateIndex() itself
+ *   test/scripts/graduate-upstream-gaps.test.ts  -> pins the committed index to a fresh regeneration
  */
 
 import { readdirSync, writeFileSync } from "node:fs";
@@ -16,18 +13,9 @@ const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
 const INDEX_PATH = `${GAPS_DIR}/index.ts`;
 
-/**
- * The directory's infrastructure files: the generated index and the shared
- * gap machinery.
- */
 export const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["index.ts", "gap.ts"]);
 
-/**
- * True for a bare file name the toolchain treats as a gap file: a .ts source
- * directly in the directory that is neither infrastructure nor a
- * declaration/test stray (a scratch notes.d.ts must not regenerate into a
- * phantom import).
- */
+/** A stray notes.d.ts or a test must not regenerate into a phantom import. */
 export function isGapFileName(name: string): boolean {
   return (
     name.endsWith(".ts") &&
@@ -42,7 +30,6 @@ export function camelCaseGapName(base: string): string {
   return base.replace(/-([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
 }
 
-/** The sorted gap-file base names in a directory listing. */
 export function gapFileBases(listing: readonly string[]): string[] {
   return listing
     .filter(isGapFileName)
@@ -50,11 +37,8 @@ export function gapFileBases(listing: readonly string[]): string[] {
     .sort();
 }
 
-/**
- * Render the full index.ts source for the given gap-file base names. Pure
- * and deterministic (the bases are re-sorted), so tests can compare the
- * committed index against a fresh render without touching the disk.
- */
+/** Pure and deterministic (the bases are re-sorted), so tests compare the committed index against a fresh render
+ * without touching the disk. */
 export function generateIndex(bases: readonly string[]): string {
   const sorted = [...bases].sort();
   const imports = [
@@ -113,7 +97,6 @@ export const UNDOCUMENTED_ROUTES: readonly (SupplementalRoute | SpecOnlyRoute)[]
 `;
 }
 
-/** Re-list the real directory and rewrite the index in place. */
 export function regenerateIndex(): number {
   const bases = gapFileBases(readdirSync(join(ROOT, GAPS_DIR)));
   writeFileSync(join(ROOT, INDEX_PATH), generateIndex(bases));

@@ -1,14 +1,12 @@
 /**
- * Fetch one file's raw content from a repository's default branch.
- * A contents 404 is ambiguous (missing file, missing Contents permission, or
- * a token that cannot see the repo at all), so `missing` means PROVEN ABSENT:
- * the repo probe (Metadata, which every fine-grained PAT can read) names the
- * default branch, and reading that branch's git ref - a call that needs
- * Contents: read and succeeds whether or not the file exists - proves the
- * token could have read the file. A ref read that fails leaves the proof
- * inconclusive (a denied grant, or an empty repository whose default branch
- * has no commit): `unproven` carries a message naming both, distinct from
- * `error` (a failure of the reads themselves) and never a missing file.
+ * A contents 404 is ambiguous (missing file, missing Contents grant, or a repo the token cannot see), so `missing` means
+ * PROVEN ABSENT, and `unproven` is distinct from both it and `error`.
+ *
+ *   contents 404 -> GET /repos (Metadata, readable by every fine-grained PAT) names the default branch
+ *                -> that branch's git ref is read, which needs Contents: read and succeeds whether or not the file exists
+ *                -> the token could have read the file, so it is missing
+ *
+ * A failed ref read leaves the proof inconclusive: a denied grant, or an empty repository whose branch has no commit.
  */
 
 import { type ApiError, type GithubClient, isRateLimitError } from "./api.js";
@@ -43,8 +41,8 @@ export async function getRepoFile(
     };
   }
   const ref = `heads/${defaultBranch}`;
-  // A branch name may carry any URL-significant character but "/", which
-  // GitHub routes as a segment separator, so each segment is encoded on its own.
+  // Each segment is encoded on its own: a branch name may contain "/", which GitHub routes as a segment separator and
+  // must stay unencoded, while any other URL-significant character must be encoded.
   const refPath = defaultBranch.split("/").map(encodeURIComponent).join("/");
   const refProbe = await api.tryRequest("GET", `/repos/${slug}/git/ref/heads/${refPath}`);
   if (!("error" in refProbe)) {

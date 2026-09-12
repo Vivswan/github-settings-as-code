@@ -1,17 +1,8 @@
-/**
- * The Io implementation over @actions/core - the only module outside the
- * runner that may import it, so every channel has one production path.
- */
-
 import { appendFileSync } from "node:fs";
 import * as core from "@actions/core";
 import { type Io, maskRegistry, type OutputName } from "../index.js";
 
-/**
- * The description of every action output, generated into the action.yml
- * `outputs` block (bun run build:action-docs). The satisfies clause locks the
- * keys to OutputName: a missing or phantom output fails to compile here.
- */
+/** Generated into the action.yml `outputs` block (bun run build:action-docs); the satisfies clause locks the keys to OutputName. */
 export const OUTPUT_DECLS = {
   result: {
     description:
@@ -27,10 +18,8 @@ export const OUTPUT_DECLS = {
   },
 } as const satisfies Record<OutputName, { readonly description: string }>;
 
-// @actions/core owns workflow-command escaping (%, CR, LF); the static map
-// keeps the namespace access tree-shakeable (biome noDynamicNamespaceImportAccess).
-// The references are captured at module load, so a test spying on core.warning
-// after import would not be observed here - none does today.
+// @actions/core owns workflow-command escaping (%, CR, LF). The static map keeps the namespace access tree-shakeable
+// (biome noDynamicNamespaceImportAccess); the references are captured at module load, so a spy installed after import is not seen.
 const annotators = { notice: core.notice, warning: core.warning, error: core.error } as const;
 
 export function annotate(level: keyof typeof annotators, message: string): void {
@@ -44,7 +33,6 @@ function setOutput(name: OutputName, value: string): void {
   }
 }
 
-/** Append one summary block; skipped when GITHUB_STEP_SUMMARY is unset (local/test runs). */
 function appendSummary(markdown: string): void {
   const file = process.env.GITHUB_STEP_SUMMARY;
   if (!file) {
@@ -53,7 +41,6 @@ function appendSummary(markdown: string): void {
   appendFileSync(file, `${markdown}\n`);
 }
 
-/** The production Io sink: annotations and the trace via the runner, logs to stdout. */
 export const actionsIo: Io = {
   annotate,
   log: (line) => console.log(line),

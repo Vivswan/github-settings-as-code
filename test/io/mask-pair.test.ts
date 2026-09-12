@@ -11,9 +11,8 @@ const channels: Omit<Io, keyof MaskPair> = {
 
 describe("the Io mask pair", () => {
   test("a plain function is not a mask member, even replacing one minted member after a spread", () => {
-    // Each literal is the divergence the brand forbids: mask forwards nothing
-    // into the set masked() reads, so trace redaction would see an empty
-    // registry while the runner masks the value.
+    // Each literal is the divergence the brand forbids: a mask that forwards nothing into masked() would let trace redaction see an empty registry
+    // while the runner masks the value.
     const forgedMask: Io = {
       ...channels,
       ...maskRegistry(() => {}),

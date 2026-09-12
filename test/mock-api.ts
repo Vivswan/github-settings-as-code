@@ -5,12 +5,8 @@ export type Route = { data?: unknown; error?: ApiError };
 export type MockApiOptions = { unroutedMutations?: "throw" | "succeed" };
 
 /**
- * Duck-typed GithubClient over a route table; records every mutation.
- * GraphQL operations route through the same table under the key
- * `GRAPHQL <opName>` (`data` must be the response's data object), and are
- * recorded with their declared kind so mutations() can tell a GraphQL read
- * from a write - every GraphQL call shares the POST method, so the method
- * alone cannot.
+ * Duck-typed GithubClient over a route table. GraphQL operations route under `GRAPHQL <opName>` and record their declared kind, since every GraphQL
+ * call shares the POST method and mutations() could not tell a read from a write otherwise.
  */
 export class MockApi implements GithubClient {
   calls: Array<{

@@ -1,9 +1,3 @@
-/**
- * Regenerate the declaration-derived regions of action.yml, the inputs, policy,
- * and permissions references, and the check-mode guide between their BEGIN/END
- * GENERATED markers: pure renderers plus a CLI (`bun run build:action-docs`).
- */
-
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
@@ -32,7 +26,6 @@ const ROOT = join(import.meta.dir, "..", "..");
 /** Column budget for a folded description line, indent included. */
 const YAML_WIDTH = 78;
 
-/** Greedy word wrap of a single-line string to `width` columns. */
 function wrap(text: string, width: number): string[] {
   const lines: string[] = [];
   let current = "";
@@ -47,11 +40,8 @@ function wrap(text: string, width: number): string[] {
   return current === "" ? lines : [...lines, current];
 }
 
-/**
- * A `description: >-` folded block scalar at `indent` spaces. Folding turns
- * each line break back into one space, so only single-spaced prose without
- * edge spaces parses back to the declaration verbatim; anything else is rejected.
- */
+/** Folding turns each line break back into one space, so only single-spaced prose without edge spaces parses back to
+ * the declaration verbatim; anything else is rejected. */
 function foldedDescription(text: string, indent: number): string {
   if (text === "" || /^ | $|[^ \S]| {2}/.test(text)) {
     throw new Error(`a description must be single-spaced prose to fold losslessly: ${text}`);
@@ -66,12 +56,10 @@ function foldedDescription(text: string, indent: number): string {
 /** Words a YAML 1.1 parser would re-type if left as a plain key. */
 const YAML_WORDS = new Set(["null", "true", "false", "yes", "no", "on", "off", "y", "n"]);
 
-/** A mapping key: plain when it round-trips as itself, double-quoted otherwise. */
 function yamlKey(name: string): string {
   return /^[a-z][a-z0-9-]*$/.test(name) && !YAML_WORDS.has(name) ? name : JSON.stringify(name);
 }
 
-/** The action.yml `inputs` entries, one per declaration, in declaration order. */
 export function renderActionInputs(
   decls: Readonly<Record<string, Pick<InputDecl, "description" | "default">>>,
 ): string {
@@ -81,15 +69,13 @@ export function renderActionInputs(
         `  ${yamlKey(name)}:`,
         foldedDescription(decl.description, 4),
         "    required: false",
-        // Always double-quoted: a bare default could otherwise re-type itself
-        // (2022-11-28 is a YAML timestamp, "" needs its quotes to exist).
+        // Always double-quoted: a bare default could re-type itself (2022-11-28 is a YAML timestamp, "" needs its quotes to exist).
         `    default: ${JSON.stringify(decl.default)}`,
       ].join("\n"),
     )
     .join("\n");
 }
 
-/** The action.yml `outputs` entries, one per declaration, in declaration order. */
 export function renderActionOutputs(
   decls: Readonly<Record<string, { readonly description: string }>>,
 ): string {
@@ -111,12 +97,10 @@ function cell(text: string): string {
   );
 }
 
-/** One markdown table row over already-rendered cell texts. */
 function row(cells: readonly string[]): string {
   return `| ${cells.map(cell).join(" | ")} |`;
 }
 
-/** The Inputs table's Default cell: the shown default, else the raw one (empty reads "(empty)"). */
 function shownDefault(decl: Pick<InputDecl, "default" | "shownDefault">): string {
   if (decl.shownDefault !== undefined) {
     return decl.shownDefault;
@@ -124,23 +108,20 @@ function shownDefault(decl: Pick<InputDecl, "default" | "shownDefault">): string
   return decl.default === "" ? "(empty)" : `\`${decl.default}\``;
 }
 
-/** The Inputs table's header and rule lines, as rendered and as the region shape expects them. */
 const INPUTS_TABLE_HEADER = "| Input | Default | Meaning |\n|---|---|---|";
 
 /** A link target that is not a repository path: a URI scheme (any case), protocol-relative, or site-absolute. */
 const ABSOLUTE_TARGET = /^(?:[a-z][a-z0-9+.-]*:|\/)/i;
 
-/**
- * `text` with every relative markdown link target, written root-relative in the declarations,
- * rebased onto `pageDir`, so one summary reads right from every page the table renders on.
- */
+/** Link targets are written root-relative in the declarations and rebased onto `pageDir`, so one summary reads right
+ * from every page the table renders on. */
 function rebaseLinks(text: string, pageDir: string): string {
   return text.replace(/\]\(([^)#]+)(#[^)]*)?\)/g, (match, target: string, fragment: string = "") =>
     ABSOLUTE_TARGET.test(target) ? match : `](${posix.relative(pageDir, target)}${fragment})`,
   );
 }
 
-/** The Inputs table, header included, for the page in `pageDir` (the repository root is "."). */
+/** `pageDir` is "." for the repository root. */
 export function renderInputsTable(
   decls: Readonly<Record<string, Pick<InputDecl, "default" | "shownDefault" | "summary">>>,
   pageDir: string,
@@ -153,7 +134,6 @@ export function renderInputsTable(
   ].join("\n");
 }
 
-/** "a, b, and c" (Oxford comma), "a and b", or "a". */
 function proseList(items: readonly string[]): string {
   if (items.length <= 2) {
     return items.join(" and ");
@@ -161,13 +141,11 @@ function proseList(items: readonly string[]): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-/** A knobbed section as the policy page renders it. */
 export interface KnobbedSection {
   readonly key: string;
   readonly undeclaredDefault: "delete" | "keep";
 }
 
-/** Delete-by-default sections first, each group in the given order. */
 function deleteFirst(sections: readonly KnobbedSection[]): KnobbedSection[] {
   return [
     ...sections.filter((section) => section.undeclaredDefault === "delete"),
@@ -175,10 +153,8 @@ function deleteFirst(sections: readonly KnobbedSection[]): KnobbedSection[] {
   ];
 }
 
-/** The count sentence between its count word and its section list, as rendered and as the region shape expects it. */
 const COUNT_SENTENCE_LEAD = " sections list the live resources sitting next to the declared ones: ";
 
-/** The policy page's opening sentence: the count and every knobbed section. */
 export function renderPolicyCountSentence(sections: readonly KnobbedSection[]): string {
   const word = countWord(sections.length);
   const keys = deleteFirst(sections).map((section) => `\`${section.key}\``);
@@ -191,10 +167,8 @@ export interface PolicyRowProse {
   readonly override: string;
 }
 
-/** The Defaults table's header and rule lines, as rendered and as the region shape expects them. */
 const DEFAULTS_TABLE_HEADER = "| Section | Default | The override buys you |\n|---|---|---|";
 
-/** The `## Defaults per section` table, header included. */
 export function renderPolicyDefaultsTable(
   sections: readonly KnobbedSection[],
   prose: Readonly<Record<string, PolicyRowProse>>,
@@ -215,10 +189,6 @@ export function renderPolicyDefaultsTable(
   return [DEFAULTS_TABLE_HEADER, ...rows].join("\n");
 }
 
-/**
- * The per-section prose of the Defaults table. Total over the knobbed
- * sections by type, so a new knob fails to compile until its row is written.
- */
 export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> = {
   labels: {
     caveat: "Probot parity",
@@ -269,24 +239,16 @@ function primaryLabel(permission: SectionPermission): string {
   return RESOURCE_LABEL[permission.repo[0]];
 }
 
-/** Insertion-ordered dedupe. */
 function unique(items: readonly string[]): string[] {
   return [...new Set(items)];
 }
 
-/** The token-UI label of a permission's organization grant, if it has one. */
 function orgLabel(permission: SectionPermission): string[] {
   return permission.org === undefined ? [] : [RESOURCE_LABEL_ORG[permission.org]];
 }
 
-/** The grant sentence's opening words, as rendered and as the region shape expects them. */
 const GRANT_SENTENCE_LEAD = "To manage everything in one PAT, grant ";
 
-/**
- * The manage-everything sentence: each section's primary resource at write,
- * each endpoint override at its advised level (write joins the write list),
- * and every organization grant (section or override) at read.
- */
 export function renderGrantSentence(sections: readonly SectionMeta[]): string {
   const writes: string[] = [];
   const reads: string[] = [];
@@ -321,10 +283,6 @@ export function renderGrantSentence(sections: readonly SectionMeta[]): string {
   return `${GRANT_SENTENCE_LEAD}${proseList(writeList)} at write${plus}.`;
 }
 
-/**
- * One bullet per section with a write-gated read, naming the gated reads' own
- * permissions; a partly gated section names the gated routes. Empty when none.
- */
 export function renderGatedReads(sections: readonly SectionMeta[]): string {
   return sections
     .flatMap((section) => {
@@ -334,7 +292,6 @@ export function renderGatedReads(sections: readonly SectionMeta[]): string {
       }
       const labels = unique(gated.map((read) => primaryLabel(read.permission)));
       if (readGating(section) === "write-gated") {
-        // "its" grant only for the section's own permission; an override is named.
         const grant = gated.every((read) => samePermission(read.permission, section.permission))
           ? "its write grant"
           : `the ${proseList(labels)} write grant`;
@@ -350,12 +307,10 @@ export function renderGatedReads(sections: readonly SectionMeta[]): string {
     .join("\n");
 }
 
-/** The check-mode caveat's two fixed texts, as rendered and as the region shape expects them. */
 const NO_GATED_READS = "A read-only PAT covers every section in check mode.";
 const GATED_READS_LEAD_IN =
   "The read-only rule has exceptions, each a section to drop from the preview or grant at write:";
 
-/** The check-mode guide's read-only-PAT caveat: the gated reads under their lead-in, or the plain sentence when none is write-gated. */
 export function renderCheckModeGatedReads(sections: readonly SectionMeta[]): string {
   const bullets = renderGatedReads(sections);
   if (bullets === "") {
@@ -364,7 +319,6 @@ export function renderCheckModeGatedReads(sections: readonly SectionMeta[]): str
   return `${GATED_READS_LEAD_IN}\n\n${bullets}`;
 }
 
-/** The knobbed sections with their declared defaults, in UNDECLARED_POLICY_SECTIONS order. */
 function knobbedSections(): KnobbedSection[] {
   const byKey = new Map(SECTIONS.map((section) => [section.key, section]));
   return UNDECLARED_POLICY_SECTIONS.map((key) => {
@@ -376,15 +330,11 @@ function knobbedSections(): KnobbedSection[] {
   });
 }
 
-/**
- * A block body's shape: its opening newline, then `lines` (a source over newline-terminated
- * lines), an empty rendering's second newline, or nothing (a freshly placed region).
- */
+/** The empty alternative admits a freshly placed region and an empty rendering alike. */
 function blockShape(lines: string): RegExp {
   return new RegExp(String.raw`^\n(?:${lines}|\n)?$`);
 }
 
-/** The shape of a markdown table body under `header`: the header, then rows of `cells` (a source over the cells between the outer pipes). */
 function tableShape(header: string, cells: string): RegExp {
   return blockShape(String.raw`${escapeRe(header)}\n(?:\| ${cells} \|\n)*`);
 }
@@ -400,25 +350,17 @@ const QUOTED_KEY = `(?:"(?:${YAML_WORD})"|(?!"[a-z][a-z0-9-]*")${JSON_STRING})`;
 /** An action.yml mapping key line at two spaces, as yamlKey() renders it. */
 const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_KEY}|${QUOTED_KEY}):\n`;
 
-/** A folded `description: >-` block at four spaces with its six-space lines, each starting on a word. */
 const YAML_DESCRIPTION = String.raw`    description: >-\n(?:      \S[^\n]*\n)+`;
 
-/**
- * One gated-reads bullet in any form renderGatedReads() writes: a wholly gated section ("even
- * the ... reads", its own or a named grant) or a partly gated one (routes named, "to verify what
- * they return").
- */
 const GATED_READ_BULLET =
   String.raw`- GitHub gates (?:even )?the [^\n]+ reads at write, so \x60[a-z_]+\x60 needs ` +
   String.raw`(?:its|the)(?: [^\n]+)? write grant in check mode (?:too|to verify what they ` +
   String.raw`return)\.\n`;
 
-/** A block region's renderer: the rendered lines on lines of their own between the markers. */
 function block(render: () => string): () => string {
   return () => `\n${render()}\n`;
 }
 
-/** The Inputs table as region `name` under `heading` of the page at `path`, its links rebased onto that page. */
 function inputsTableRegion(name: string, heading: string, path: string): GeneratedRegion {
   return {
     name,
@@ -430,11 +372,8 @@ function inputsTableRegion(name: string, heading: string, path: string): Generat
 
 const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
 
-/**
- * Every generated region, keyed by file, with where it sits and the shape of every body this
- * generator could have written for it, so a marker moved elsewhere fails instead of regenerating
- * in the wrong place or erasing authored text.
- */
+/** Each region's `body` matches every body this generator could have written for it, so a marker moved elsewhere
+ * fails instead of regenerating in the wrong place or erasing authored text. */
 export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
   "action.yml": [
     {
@@ -499,7 +438,6 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
   ],
 };
 
-/** `text` with every one of `path`'s registered regions checked for placement, then regenerated. */
 export function regenerateText(path: string, text: string): string {
   const regions = GENERATED_REGIONS[path];
   if (regions === undefined) {
@@ -508,7 +446,6 @@ export function regenerateText(path: string, text: string): string {
   return regenerateRegions(text, regions, path);
 }
 
-/** Rewrite every registered file in place; returns the paths whose bytes changed. */
 export function regenerateAll(): string[] {
   const changed: string[] = [];
   for (const path of Object.keys(GENERATED_REGIONS)) {

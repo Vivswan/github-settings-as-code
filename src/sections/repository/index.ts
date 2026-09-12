@@ -1,10 +1,3 @@
-/**
- * `repository:` section - PATCH passthrough for repo fields, plus the
- * settings that live on their own endpoints even though the settings file
- * nests them here: topics, the feature toggles, and the two GraphQL-only
- * keys (the Sponsor button and the issue creation policy).
- */
-
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
@@ -26,7 +19,6 @@ import {
 } from "../contract/plan.js";
 import { RepositoryConfig } from "./schema.js";
 
-/** Topics: accept a comma-separated string or an array; lowercase, dedupe. */
 export function normalizeTopics(raw: unknown): string[] {
   const values = Array.isArray(raw)
     ? raw.map(String)
@@ -37,38 +29,21 @@ export function normalizeTopics(raw: unknown): string[] {
 }
 
 /**
- * A repository key the settings schema declares a type for. Typing the
- * toggle and routed-key tables with it keeps them in lockstep with
- * schema.ts, which now carries the value validation (and its YAML
- * boolean-gotcha error prose) the shape sweep here used to do: a toggle
+ * Typing the toggle and routed-key tables with it keeps them in lockstep with schema.ts: a toggle
  * added below without a schema declaration fails to compile.
  */
 type DeclaredRepositoryKey = keyof typeof RepositoryConfig.shape & string;
 
 const permission: SectionPermission = { repo: ["administration"] };
 
-/**
- * The LFS endpoints' 403 is ambiguous three ways: LFS disabled account-wide,
- * disabled for the root of the repository network, or (on organization
- * repositories) a credential without billing access - none of which a token
- * grant fixes.
- */
 const LFS_DENIAL_HINT =
   "a 403 here can also mean Git LFS is disabled account-wide or for the root of this " +
   "repository network, or that the credential lacks billing access (organization repositories " +
   "need an organization owner or billing manager), rather than a missing token grant";
 
-/**
- * The declared meaning of the 409 both immutable-releases writes answer when
- * the repository owner enforces the feature; the apply note and the check
- * drift prose build on the same words.
- */
 const OWNER_ENFORCED = "the repository owner enforces immutable releases";
 
-// The repo-level endpoints plus each security toggle's own GET/PUT/DELETE
-// triple, all in one dictionary so the mock server and USED_PATHS derivation
-// see every path this section can touch. FEATURE_TOGGLES below names these
-// same entries by role, so declaration and use cannot drift.
+// FEATURE_TOGGLES names these entries by role, so declaration and use cannot drift.
 const ENDPOINTS = {
   get: {
     route: "GET /repos/{owner}/{repo}",
@@ -136,8 +111,7 @@ const ENDPOINTS = {
     route: "DELETE /repos/{owner}/{repo}/immutable-releases",
     statuses: { 204: "immutable releases disabled", 409: OWNER_ENFORCED },
   },
-  // Git LFS has no read endpoint, so the declared state is re-asserted on
-  // every apply: alwaysRewrite by contract, like the sealed secret PUTs.
+  // Git LFS has no read endpoint, so the declared state is re-asserted on every apply.
   lfsPut: {
     route: "PUT /repos/{owner}/{repo}/lfs",
     statuses: { 202: "Git LFS enabled (GitHub processes the change asynchronously)" },
@@ -152,12 +126,7 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/**
- * The repo GET fields this section reads BY NAME (the rest of the body rides
- * into subsetDiff as passthrough): topics, whose set comparison below sorts
- * a real string list; nullish absorbs an absent or null list exactly as the
- * pre-parse fallback did.
- */
+// GitHub may return topics as null or omit them; the rest of the body rides into subsetDiff as passthrough.
 const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
 
 const FEATURES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
@@ -170,7 +139,6 @@ const FEATURES_QUERY = graphqlOp<{ owner: string; repo: string }>()({
   },
 });
 
-/** The settings-file vocabulary for issue_creation_policy -> GitHub's enum. */
 const ISSUE_CREATION_POLICIES = {
   all: "ALL",
   collaborators_only: "COLLABORATORS_ONLY",
@@ -178,9 +146,8 @@ const ISSUE_CREATION_POLICIES = {
 
 type IssueCreationPolicy = keyof typeof ISSUE_CREATION_POLICIES;
 
-// The GraphQL absent-variable rule makes one mutation serve any declared
-// subset: an input field fed by an unprovided variable is treated as not
-// provided, so the input carries exactly the keys apply needs to move.
+// GraphQL treats an input field fed by an unprovided variable as not provided, so one mutation
+// serves any declared subset: the input carries exactly the keys apply needs to move.
 const UPDATE_FEATURES = graphqlOp<{
   repositoryId: string;
   hasSponsorshipsEnabled?: boolean;
@@ -211,20 +178,17 @@ const GRAPHQL_OPS = {
   updateFeatures: UPDATE_FEATURES,
 } as const satisfies Record<string, GraphqlOpDecl>;
 
-/** This section's plan context, operations, and plan, over its literal dictionaries. */
 type RepositoryContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 type RepositoryOp = PlannedOp<typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 type RepositoryPlan = SectionPlan<RepositoryOp>;
 
-/** The REST write roles an operation may name. */
 type RestWriteRole = Extract<RepositoryOp, { variables?: never }>["role"];
 
-/** The write roles whose declaration is alwaysRewrite: the only ones a driftless operation may name. */
 type RewriteRole = {
   [R in RestWriteRole]: (typeof ENDPOINTS)[R] extends { readonly alwaysRewrite: true } ? R : never;
 }[RestWriteRole];
 
-/** The read roles bound as absence probes: a toggle's GET, whose 404 means "not enabled". */
+/** A toggle's GET, whose 404 means "not enabled". */
 type ProbeRole = {
   [R in keyof RepositoryContext["read"]]: RepositoryContext["read"][R] extends {
     probeAbsent: unknown;
@@ -233,14 +197,8 @@ type ProbeRole = {
     : never;
 }[keyof RepositoryContext["read"]];
 
-/** The mutation's variables; each routed key contributes its own field. */
 type FeatureVariables = GraphqlVariablesOf<typeof UPDATE_FEATURES>;
 
-/**
- * One boolean settings key backed by PUT/DELETE on its own sub-resource,
- * named by ROLE in ENDPOINTS so a planned operation types against the
- * declaration it executes.
- */
 interface FeatureToggle {
   key: DeclaredRepositoryKey;
   label: string;
@@ -249,35 +207,23 @@ interface FeatureToggle {
 }
 
 /**
- * A toggle whose state can be read back: the GET's declared tolerable
- * statuses mean "not enabled", a write's mean "nothing changed here"
+ * The GET's declared tolerable statuses mean "not enabled"; a write's mean "nothing changed here"
  * (owner-enforced, already off) and are tolerated by declaration.
  */
 interface ReadableToggle extends FeatureToggle {
   get: ProbeRole;
-  /**
-   * The documented shape of a successful GET body, parsed at the boundary
-   * (parseLive) so a body off the contract fails loudly instead of reading
-   * as a definite on or off state that drives a write.
-   */
+  /** Parsed at the boundary, so an off-contract body fails loudly instead of driving a write. */
   live: z.ZodType<LiveToggle>;
-  /** Read the enabled state from the parsed GET body. */
   isEnabled: (live: LiveToggle) => boolean;
-  /**
-   * Whether the live state is enforced above the repository (immutable
-   * releases' enforced_by_owner), so the drift prose says apply cannot
-   * change it instead of promising to.
-   */
+  /** Enforced above the repository (immutable releases' enforced_by_owner), so the drift prose says apply cannot change it. */
   isEnforced?: (live: LiveToggle) => boolean;
 }
 
-/** A toggle GET's body: the 204 no-content answer, or the documented state object. */
+/** null is the 204 no-content answer a toggle GET gives when the feature is on. */
 type LiveToggle = null | { enabled: boolean; enforced_by_owner?: boolean };
 
-/** The 204 no-content body a toggle GET answers when the feature is on. */
 const LiveNoContent = z.null();
 
-/** The `{enabled}` state object, with immutable releases' enforcement flag. */
 const LiveToggleState = z.looseObject({
   enabled: z.boolean(),
   enforced_by_owner: z.boolean().optional(),
@@ -324,10 +270,7 @@ const READABLE_TOGGLES: readonly ReadableToggle[] = [
   },
 ];
 
-/**
- * A toggle with no read endpoint: its writes must be alwaysRewrite by
- * declaration, since no drift can ever justify them.
- */
+/** No read endpoint, so the writes must be alwaysRewrite by declaration: no drift can ever justify them. */
 interface WriteOnlyToggle extends FeatureToggle {
   put: RewriteRole;
   remove: RewriteRole;
@@ -343,40 +286,26 @@ const WRITE_ONLY_TOGGLES: readonly WriteOnlyToggle[] = [
 ];
 
 /**
- * The GraphQL-routed keys: two repository settings whose ONLY surface is
- * GraphQL. The issue creation policy is live-verified both ways (the REST
- * repo PATCH answers 200 and silently ignores an issue_creation_policy
- * field, and no REST GET returns one); the sponsor button has no REST field
- * at all. One read serves every declared key AND supplies the node id the
- * mutation addresses, so neither mode needs an extra round trip. SPECIAL_KEYS,
- * the compare, and the mutate-and-verify operation all iterate this list, so
- * a new key cannot compile into a stripped-but-never-applied no-op.
+ * Two settings whose ONLY surface is GraphQL. SPECIAL_KEYS, the compare, and the mutate-and-verify
+ * operation all iterate this list, so a new key cannot compile into a stripped-but-never-applied no-op.
+ *
+ * issue_creation_policy  -> the REST repo PATCH answers 200 and silently ignores it (live-verified)
+ * enable_sponsorships    -> no REST field at all
  */
 interface RoutedKey {
-  /** The settings-file key. */
   readonly key: DeclaredRepositoryKey;
   /** The change-line label ("sponsor button: enabled"). */
   readonly label: string;
-  /** The Repository read field the live value and the echo are read from. */
   readonly field: "hasSponsorshipsEnabled" | "issueCreationPolicy";
-  /** The mutation variable carrying a valid declared value. */
   variables(declared: unknown): Omit<FeatureVariables, "repositoryId">;
   /**
-   * Map a readback field value to the settings-file vocabulary, or
-   * undefined when the value is outside the vocabulary this section reads
-   * (the caller fails loudly; folding to a default could report a clean
-   * check against state the section does not understand).
+   * undefined when the value is outside the vocabulary this section reads; the caller fails loudly,
+   * since folding to a default could report a clean check against state the section does not understand.
    */
   decode(live: unknown): unknown;
-  /** Render a settings-vocabulary value for drift prose (raw, like the toggles' drift lines). */
   show(value: unknown): string;
-  /** Render a settings-vocabulary value for a change line ("enabled", "collaborators_only"). */
   changeText(value: unknown): string;
-  /**
-   * Appended to the unreadable-value error for a vocabulary this section
-   * knows can surprise (the policy's SDL-nullable read). One sentence, no
-   * trailing period.
-   */
+  /** Appended to the unreadable-value error; one sentence, no trailing period. */
   readonly unreadableHint?: string;
 }
 
@@ -401,20 +330,16 @@ const GRAPHQL_ROUTED_KEYS = [
       live === "ALL" ? "all" : live === "COLLABORATORS_ONLY" ? "collaborators_only" : undefined,
     show: (value) => String(value),
     changeText: (value) => String(value),
-    // The SDL marks Repository.issueCreationPolicy nullable, though a live
-    // probe never observed null (the policy is retained even with issues
-    // disabled), so a null read stays a loud failure with honest prose.
+    // The SDL marks Repository.issueCreationPolicy nullable, though a live probe never observed null
+    // (the policy is retained even with issues disabled), so a null read stays a loud failure.
     unreadableHint:
       "a null policy means GitHub reported no issue creation policy for this repository; otherwise the field vocabulary may have changed",
   },
 ] as const satisfies readonly RoutedKey[];
 
 /**
- * Decode the routed fields of a repository object for the DECLARED keys
- * only, into the settings-file vocabulary. Scoping the strictness to
- * `routed` is deliberate: an unreadable value (the SDL-nullable policy, a
- * future enum member) must fail loudly for a key the file declares, and
- * must not fail a run that never declared it.
+ * Strictness is scoped to the DECLARED keys: an unreadable value (the SDL-nullable policy, a future
+ * enum member) must fail loudly for a key the file declares and must not fail a run that never declared it.
  */
 function decodeRoutedFields(
   fields: Record<string, unknown>,
@@ -435,7 +360,6 @@ function decodeRoutedFields(
   return values;
 }
 
-/** The routed-state read: the mutation's node id plus each declared key's live value. */
 interface LiveRoutedState {
   id: string;
   values: Record<string, unknown>;
@@ -455,33 +379,20 @@ async function fetchRoutedState(
   return { id: repository.id, values: decodeRoutedFields(repository, routed, FEATURES_QUERY.name) };
 }
 
-/**
- * Every feature toggle, exported for the table-driven test that pins each
- * one to its own PUT/DELETE pair, never the base PATCH.
- */
+/** Exported for the table-driven test that pins each toggle to its own PUT/DELETE pair, never the base PATCH. */
 export const FEATURE_TOGGLES: readonly FeatureToggle[] = [
   ...READABLE_TOGGLES,
   ...WRITE_ONLY_TOGGLES,
 ];
 
-/**
- * The keys the repository section handles specially instead of sending them
- * through the base PATCH: `topics` (its own PUT), the feature toggles
- * (each a PUT/DELETE sub-endpoint), and the GraphQL-routed keys
- * (GRAPHQL_ROUTED_KEYS). Exported as the single source the README's
- * repository special-keys documentation is pinned against.
- */
+/** Exported for the docs examples test (test/docs/settings-examples.ts). */
 export const SPECIAL_KEYS = new Set([
   "topics",
   ...FEATURE_TOGGLES.map((toggle) => toggle.key),
   ...GRAPHQL_ROUTED_KEYS.map((routed) => routed.key),
 ]);
 
-/**
- * The note a toggle write's tolerated status turns into: a 409 means owner
- * enforcement; a 404/422 on a remove means the feature does not apply here
- * and was already off.
- */
+/** A 409 means owner enforcement; any other tolerated status means the feature does not apply here and was already off. */
 function toggleTolerated(
   section: SectionMeta,
   toggle: FeatureToggle,
@@ -513,9 +424,8 @@ export const repositorySection = {
 
     const live = parseLive(this, ENDPOINTS.get, LiveRepository, await ctx.read.get.call());
     if (Object.keys(patch).length > 0) {
-      // The PATCH is diff-gated and the fields pass through, so a declared
-      // key GitHub ignores would re-PATCH on every apply without converging;
-      // say so (the labels/milestones phantom-key idiom).
+      // The PATCH is diff-gated and the fields pass through, so a declared key GitHub ignores would
+      // re-PATCH on every apply without converging.
       const phantom = phantomKeys(patch, live);
       if (phantom.length > 0) {
         plan.notes.push(phantomNote("repository", phantom, "repository", "this PATCH will re-run"));
@@ -562,9 +472,8 @@ export const repositorySection = {
       }
       const enforced = live !== undefined && toggle.isEnforced?.(live) === true;
       const role = want ? toggle.put : toggle.remove;
-      // The write's declared tolerable statuses (409 owner-enforced, 404/422
-      // already off on a remove) mean nothing changed: a note, never a change
-      // line. A write declaring no tolerable statuses tolerates nothing.
+      // The write's declared tolerable statuses (409 owner-enforced, 404/422 already off on a remove)
+      // mean nothing changed: a note, never a change line. A write declaring none tolerates nothing.
       plan.ops.push({
         role,
         drift: [
@@ -587,7 +496,6 @@ export const repositorySection = {
       plan.notes.push(
         `repository.${toggle.key}: GitHub exposes no endpoint to read this state back, so check mode cannot verify it; apply re-asserts the declared value (${JSON.stringify(desired[toggle.key])}) on every run`,
       );
-      // alwaysRewrite by declaration: no drift to report, the write recurs.
       plan.ops.push({
         role: want ? toggle.put : toggle.remove,
         drift: [],
@@ -596,8 +504,8 @@ export const repositorySection = {
     }
     const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
     if (declaredRouted.length > 0) {
-      // The routed-state read supplies the mutation's node id, so the
-      // comparison is free and a converged repo issues no GraphQL write.
+      // The routed-state read supplies the mutation's node id, so the comparison is free and a
+      // converged repo issues no GraphQL write.
       const liveRouted = await fetchRoutedState(ctx, declaredRouted);
       const diverged = declaredRouted.filter(
         (routed) => desired[routed.key] !== liveRouted.values[routed.key],
@@ -615,9 +523,8 @@ export const repositorySection = {
             (routed) =>
               `repository.${routed.key}: declared ${routed.show(desired[routed.key])} != live ${routed.show(liveRouted.values[routed.key])}; apply will set the declared value`,
           ) as [string, ...string[]],
-          // The mutation selects the post-state on purpose: a silently
-          // ignored field is the REST failure mode that forced these keys
-          // onto GraphQL, so each value is verified against the echo.
+          // The mutation selects the post-state on purpose: a silently ignored field is the REST
+          // failure mode that forced these keys onto GraphQL, so each value is verified against the echo.
           change: (response) => {
             const echoedRepo = (
               response as { updateRepository?: { repository?: Record<string, unknown> } }

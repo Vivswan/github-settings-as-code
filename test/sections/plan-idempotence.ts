@@ -1,10 +1,5 @@
 /**
- * The unit idempotence proof for a plan section: plan against a live fake,
- * execute the plan, plan again over the state the execution left behind,
- * and require the second plan to be empty except for the writes the
- * declarations say recur (alwaysRewrite). The per-section twin of the e2e
- * apply-idempotence proof, runnable in a unit test because the plan
- * contract separates deciding from doing.
+ * The per-section twin of the e2e apply-idempotence proof.
  */
 
 import { expect } from "bun:test";
@@ -18,14 +13,8 @@ import { NO_SECRETS, REPO } from "./section-run.js";
 const SEALED = Symbol("a thunk the plan builds afresh on every pass");
 
 /**
- * One planned operation's IDENTITY, as comparing two planning passes needs
- * it: every facet but the payload and variables, which a section may build
- * as a thunk (a fresh closure per pass, unequal by reference and opaque to
- * a value comparison). A thunk's identity is that it exists - what it seals
- * is a secret the plan is not allowed to expose - so it folds to a marker,
- * as does a change thunk (it renders from a response the plan has not
- * seen). A capture hook counts by presence, as does a before hook (what it
- * reads is execution-time state), a tolerance by its statuses.
+ * One operation's IDENTITY across planning passes: a thunk (payload, variables, change) folds to a marker, since a fresh closure per pass is unequal
+ * by reference; capture and before hooks count by presence, a tolerance by its statuses.
  */
 export function identityOf(op: SectionPlan["ops"][number]): unknown {
   const sealed = (value: unknown): unknown => (typeof value === "function" ? SEALED : value);
@@ -88,16 +77,13 @@ export async function provePlanIdempotent<M extends SectionModule>(
     }
     return execution;
   };
-  // An alwaysRewrite operation recurs whatever the live state, so across
-  // passes its identity is the REQUEST it issues, not what it renders: the
-  // first pass may render "created" where the second renders "updated".
+  // An alwaysRewrite operation recurs whatever the live state, so its identity across passes is the REQUEST it issues, not what it renders
+  // ("created", then "updated").
   const rewrites = (of: SectionPlan): unknown[] =>
     of.ops.filter((op) => section.endpoints[op.role]?.alwaysRewrite === true).map(requestOf);
 
   const first = await plan();
-  // One op per execution keeps each op's lines attributable: a tolerated op
-  // renders a note and no line, a string change exactly itself (a thunk's
-  // lines are the executor's contract). The executor carries no state across ops.
+  // One op per execution keeps each op's lines attributable: a tolerated op renders a note and no line, a string change exactly itself.
   const changes: string[] = [];
   const notes: string[] = [];
   for (const op of first.ops) {
@@ -115,8 +101,7 @@ export async function provePlanIdempotent<M extends SectionModule>(
   }
 
   const second = await plan();
-  // An unverifiable op recurs for its facet alone: any drift line it still
-  // carries is state the execution should have converged.
+  // An unverifiable op recurs for its facet alone: any drift line it still carries is state the execution should have converged.
   expect(
     second.ops
       .filter(
@@ -133,8 +118,6 @@ export async function provePlanIdempotent<M extends SectionModule>(
   ).toEqual(rewrites(first));
   expect(second.drift).toEqual(first.drift);
 
-  // State stability: executing the converged plan (one op at a time, as
-  // above) changes nothing a third plan can see.
   for (const op of second.ops) {
     await execute({ ops: [op], notes: [], drift: [] });
   }

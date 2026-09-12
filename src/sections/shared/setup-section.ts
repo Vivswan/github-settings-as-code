@@ -22,14 +22,9 @@ import {
   type SectionPlan,
 } from "../contract/plan.js";
 
-/** The section keys the factory may mint. */
 export type SetupKey = "code_scanning_default_setup" | "code_quality_setup";
 
-/**
- * Each setup's path under /repos/{owner}/{repo}, schema slice, and GET grade,
- * keyed by section: the factory derives routes, shape, and grade from THIS
- * map, so a key paired with another setup's facts is unrepresentable.
- */
+/** The factory derives routes, shape, and grade from THIS map, so a key paired with another setup's facts is unrepresentable. */
 const SETUPS = {
   code_scanning_default_setup: {
     path: "code-scanning/default-setup",
@@ -39,8 +34,7 @@ const SETUPS = {
   code_quality_setup: {
     path: "code-quality/setup",
     slice: CodeQualitySetupConfig,
-    // GitHub gates this GET at write (the Codespaces secrets precedent), so
-    // a read-only token is denied it.
+    // GitHub gates this GET at write (the Codespaces secrets precedent), so a read-only token is denied it.
     read: { accessGrade: "write" },
   },
 } as const satisfies Record<
@@ -48,12 +42,10 @@ const SETUPS = {
   { path: string; slice: z.ZodType; read: { accessGrade?: "write" } }
 >;
 
-/** One setup's facts, derived from its key. */
 type Setup<K extends SetupKey = SetupKey> = (typeof SETUPS)[K];
 
 /**
- * The GET/PATCH dictionary of one setup, routes as LITERAL types, so the
- * registry's SectionEndpointKey union, the typed mock fragments, and
+ * Routes as LITERAL types, so the registry's SectionEndpointKey union, the typed mock fragments, and
  * USED_PATHS see exactly what a hand-written dictionary would declare.
  */
 type SetupEndpoints<K extends SetupKey> = {
@@ -69,7 +61,6 @@ type SetupEndpoints<K extends SetupKey> = {
   };
 };
 
-/** The declared value of one setup section, exactly as the settings document types it. */
 type SetupDeclared<K extends SetupKey> = Exclude<SettingsFile[K], undefined>;
 
 /**
@@ -84,29 +75,22 @@ type SetupPlan<K extends SetupKey> = {
   ) => Promise<SectionPlan<PlannedOp<SetupEndpoints<F>>>>;
 }[K];
 
-/** Every setup's routes as one dictionary: the view the factory body plans over. */
 type WideEndpoints = SetupEndpoints<SetupKey>;
 
-/** The one plan the factory builds, over the wide dictionary and either declared value. */
 type SharedPlan = (
   ctx: PlanContext<WideEndpoints>,
   declared: SetupDeclared<SetupKey>,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
-/** Mutual assignability - equality up to structure, in both directions. */
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-/** Compile-time pin: the shared plan IS each setup's exact plan; a divergent setup fails by name. */
 type _SharedPlanIsEverySetupPlan = MustBeNever<
   {
     [K in SetupKey]: Invariant<SharedPlan, SetupPlan<K>> extends true ? never : K;
   }[SetupKey]
 >;
 
-/**
- * The PATCH answer's fields the plan reads: the 202 body's configuration run.
- * Nullish covers the spec's plain 200, an EMPTY object with neither field.
- */
+/** The 202 body's configuration run; the optional fields admit the spec's plain-200 EMPTY object, nullish a null or absent body. */
 const LiveConfigurationRun = z
   .looseObject({ run_id: z.number().optional(), run_url: z.string().optional() })
   .nullish();
@@ -122,11 +106,7 @@ export interface SetupSectionModule<K extends SetupKey> {
   readonly plan: SetupPlan<K>;
 }
 
-/**
- * Mint one setup section: the verbatim-PATCH plan (declared keys only,
- * `languages` as a set), the named 202 configuration run, and the 409 advice
- * live here once; routes, shape, and read grade derive from the key.
- */
+/** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
 export function setupSection<K extends SetupKey>(setup: {
   key: K;
   /** The fine-grained-PAT permission gating both endpoints. */
@@ -143,8 +123,7 @@ export function setupSection<K extends SetupKey>(setup: {
     get: {
       route: `GET /repos/{owner}/{repo}/${path}`,
       statuses: { 200: `the current ${noun} configuration` },
-      // A fine-grained token conceals a denied GET as 404, which is a denial
-      // here: the section stops instead of reading "not configured".
+      // A fine-grained token conceals a denied GET as 404; reading it as "not configured" would be wrong, so it is a denial.
       primaryRead: { notFound: "denied" },
       ...readGrade,
     },
@@ -170,8 +149,7 @@ export function setupSection<K extends SetupKey>(setup: {
       role: "update",
       payload: plainData(desired),
       drift,
-      // The 409 is a declared status of the PATCH, so the tolerance can name
-      // it and give wait-and-retry advice instead of throwFor's generic text.
+      // 409 is a declared status of the PATCH, so the tolerance can give wait-and-retry advice instead of throwFor's generic text.
       tolerate: {
         statuses: [409],
         outcome: (error) => ({

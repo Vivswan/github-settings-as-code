@@ -1,9 +1,6 @@
 /**
- * Handler-level tests for the pages mock fragment: the GitHub-fidelity
- * behaviors the e2e engine flow cannot reach. The action never PUTs the
- * Pages config after a delete (an absent site takes the POST create path),
- * so the update-after-delete contract is pinned here, directly against the
- * handler.
+ * The action never PUTs the Pages config after a delete (an absent site takes the POST create path), so the update-after-delete contract is pinned
+ * here, directly against the handler.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -11,8 +8,7 @@ import { handlerTestContext } from "../../../test/e2e/mock/handler-test-ctx.js";
 import { buildStateForSlug, type MockState } from "../../../test/e2e/mock/state.js";
 import { pagesMockHandlers } from "./mock.js";
 
-// The fragment's exact key union makes a typo'd key a compile error, so no
-// runtime not-found guard is needed here.
+// The fragment's exact key union makes a typo'd key a compile error, so no runtime not-found guard is needed.
 function handler<K extends keyof typeof pagesMockHandlers>(key: K): (typeof pagesMockHandlers)[K] {
   return pagesMockHandlers[key];
 }
@@ -31,7 +27,6 @@ describe("pages mock handlers", () => {
       handlerTestContext("pages.update", state, { body: { build_type: "legacy" } }),
     );
     expect(response.status).toBe(404);
-    // The load-bearing half: the PUT must NOT have re-created the site.
     expect(state.pages).toBeNull();
   });
 
@@ -43,8 +38,7 @@ describe("pages mock handlers", () => {
     expect(response.status).toBe(204);
     expect(state.pages).toMatchObject({
       build_type: "legacy",
-      // The seeded site carried no url, so the update completed it from the
-      // state slug (an existing stored url would win, matching create).
+      // The seeded site carried no url, so the update completed it from the state slug (an existing stored url would win, matching create).
       url: "https://api.github.com/repos/acme/private/pages",
     });
   });

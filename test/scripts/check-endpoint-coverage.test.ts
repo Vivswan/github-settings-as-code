@@ -1,9 +1,3 @@
-/**
- * Unit test for the endpoint-coverage tripwire's pure logic: attributing mock
- * requests to registered routes and computing cold routes against an injected
- * route set (so the test does not depend on the live endpoint count).
- */
-
 import { describe, expect, test } from "bun:test";
 import {
   coldRoutes,

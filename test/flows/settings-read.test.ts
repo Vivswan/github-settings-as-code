@@ -3,11 +3,8 @@ import { err, ok } from "neverthrow";
 import { parseSettingsDoc } from "../../src/flows/settings-read.js";
 
 /**
- * Runs `fn` while recording every process warning and every stderr write it
- * causes: a document's source lines must never reach the log through the
- * parser, so the whole outcome (result, warnings, stderr) is what a test pins.
- * Warnings are emitted on a later tick, so the capture drains one before it
- * detaches.
+ * A document's source lines must never reach the log through the parser, so the whole outcome (result, warnings, stderr) is pinned. Warnings are
+ * emitted on a later tick, so the capture drains one before it detaches.
  */
 async function captureOutput<T>(
   fn: () => T,
@@ -36,12 +33,8 @@ async function captureOutput<T>(
 const MARKER = "MARKER_VALUE_MUST_NOT_PRINT";
 
 /**
- * A representative set of documents the yaml library parses successfully
- * while emitting a warning at its default log level (others exist, such as
- * an unsupported %YAML version); each warning quotes the offending source
- * line (the collection key, its stringified key), so each document carries
- * the marker there. The parse result is the one the library produced before
- * the warnings were silenced.
+ * Documents the yaml library parses successfully while warning at its default log level; each warning quotes the offending source line, so each
+ * document carries the marker there.
  */
 const WARNING_DOCUMENTS: Array<{ name: string; raw: string; doc: unknown }> = [
   {

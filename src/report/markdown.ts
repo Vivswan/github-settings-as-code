@@ -1,15 +1,6 @@
-/**
- * Markdown building blocks shared by every surface that renders one: the
- * private-report composer (this directory) and the action layer's step
- * summary. Deliberately action-layer-free so the composer's independence
- * holds.
- */
+/** Markdown building blocks shared by the private-report composer and the step summary; action-layer-free so the composer's independence holds. */
 
-/**
- * Escape a markdown table cell: backslashes FIRST (a bare backslash before an
- * escaped pipe would read as an escaped backslash plus a live pipe and split
- * the row), then pipes, then newlines flattened to spaces.
- */
+/** Backslashes FIRST: a bare backslash before an escaped pipe would read as an escaped backslash plus a live pipe and split the row. */
 export function markdownCell(text: string): string {
   return text
     .replace(/\\/g, "\\\\")

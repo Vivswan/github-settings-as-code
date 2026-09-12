@@ -38,11 +38,7 @@ describe("normalizeRuleset", () => {
 /** A live ruleset as the list summary and the by-id read return it. */
 type LiveRuleset = Record<string, unknown> & { id: number; name: string; source_type?: string };
 
-/**
- * A stateful fake of the rulesets API: reads reflect every write, so a plan
- * over executed state sees the converged repository. `ignoredKeys` are
- * accepted on a write and dropped, as GitHub does with a key it does not know.
- */
+/** A stateful fake of the rulesets API; `ignoredKeys` are accepted on a write and dropped, as GitHub does with a key it does not know. */
 function liveRepo(
   rulesets: LiveRuleset[],
   ignoredKeys: readonly string[] = [],
@@ -133,7 +129,6 @@ describe("rulesets", () => {
       ],
       drift: [],
     });
-    // Planning reads and never writes, even against a client that would accept one.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([listRoute]);
   });
 
@@ -180,17 +175,14 @@ describe("rulesets", () => {
   });
 
   test("a declared key the live ruleset lacks is drift plus a phantom-key note", async () => {
-    // A declared key the read-back lacks is either ignored (a typo) or
-    // write-only; one read cannot tell, so the update still runs and the
-    // note warns that it will keep running until the key is fixed or removed.
+    // One read cannot tell a typo from a write-only key, so the update still runs and the note warns it recurs until the key is fixed or removed.
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {
         data: { id: 9, name: "main", target: "branch", enforcement: "active" },
       },
     });
-    // A variable, not a literal, so the extra key is a passthrough field to
-    // the type checker rather than an excess property.
+    // A variable, not a literal, so the extra key is a passthrough field to the type checker rather than an excess property.
     const misspelled = { name: "main", target: "branch" as const, enforcemant: "evaluate" };
     const result = await plan(api, [misspelled]);
     expect(result).toEqual({
@@ -214,8 +206,7 @@ describe("rulesets", () => {
   });
 
   test("a key GitHub drops re-plans the identical update and note on every pass: documented non-convergence", async () => {
-    // One read cannot tell a typo from a field GitHub omits until set, so the
-    // write is never withheld; the note is what tells the user it recurs.
+    // One read cannot tell a typo from a field GitHub omits until set, so the write is never withheld.
     const api = liveRepo(
       [{ id: 9, name: "main", source_type: "Repository", target: "branch", enforcement: "active" }],
       ["enforcemant"],
@@ -259,8 +250,7 @@ describe("rulesets", () => {
   });
 
   describe("bypass_actors visibility", () => {
-    // GitHub answers a non-admin GET without the bypass_actors KEY (never `[]`),
-    // so the declared list cannot be judged: converged, one note, no phantom.
+    // GitHub answers a non-admin GET without the bypass_actors key (never `[]`), so the declared list cannot be judged.
     const BASE = { id: 9, name: "main", target: "branch", enforcement: "active" };
     const HIDDEN_NOTE =
       "rulesets[main]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it";
@@ -331,8 +321,6 @@ describe("rulesets", () => {
     }
 
     test("a hidden bypass_actors beside real drift: the note, the drift, and the full declared payload", async () => {
-      // The write path is unchanged: the PUT carries the whole declaration,
-      // hidden list included, and the hidden key is not a phantom.
       const api = writable({
         [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
         "GET /repos/o/r/rulesets/9": { data: { ...BASE, enforcement: "evaluate" } },
@@ -452,9 +440,7 @@ describe("rulesets", () => {
   });
 
   test("_undeclared:delete never deletes a ruleset without an explicit Repository source", async () => {
-    // source_type is optional in the API type; a missing field is not proof
-    // of repository ownership, and deletion cannot be undone. Organization
-    // and enterprise rulesets never enter the managed list at all.
+    // source_type is optional in the API type; a missing field is not proof of repository ownership, and deletion cannot be undone.
     const api = writable({
       [listRoute]: {
         data: [
@@ -545,9 +531,8 @@ describe("rulesets", () => {
   });
 
   test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only: the plans are never executed. Each rejected shape
-    // is built first and assigned on one line, so the directive anchors to
-    // the assignment whichever property the compiler blames.
+    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
+    // property the compiler blames.
     type Op = PlannedOp<typeof rulesetsSection.endpoints>;
     const _create: Op = { role: "create", payload: { name: "x" }, drift: ["missing"], change: "" };
     const read = { role: "get", params: { ruleset_id: "1" }, drift: ["x"], change: "" } as const;

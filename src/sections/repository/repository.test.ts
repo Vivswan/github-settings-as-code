@@ -10,7 +10,6 @@ import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
 
-/** The verdict's error prose, or null when the document validated. */
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
 }
@@ -62,11 +61,7 @@ const echo = (fields: Record<string, unknown>) => ({
   "GRAPHQL UpdateRepositoryFeatures": { data: { updateRepository: { repository: fields } } },
 });
 
-/**
- * A stateful fake of everything the repository section touches: the repo
- * body, the four readable toggles (each GET answers as GitHub does), the
- * write-only LFS pair (stored nowhere), and the two GraphQL-only fields.
- */
+/** A stateful fake of the repository API: each toggle GET answers as GitHub does, and the write-only LFS pair is stored nowhere. */
 function liveRepo(seed: {
   repo?: Record<string, unknown>;
   toggles?: Record<string, boolean>;
@@ -186,8 +181,7 @@ describe("repository", () => {
   });
 
   test("a declared field the repository GET does not return is noted as a phantom key", async () => {
-    // The PATCH is diff-gated: such a key would re-PATCH on every apply
-    // without ever converging, so the note says so alongside the drift.
+    // The PATCH is diff-gated, so such a key would re-PATCH on every apply without converging.
     const api = new MockApi({ [GET]: { data: { description: "d" } } });
     const result = await plan(api, { description: "d", extra_field: "x" });
     expect(result.notes).toEqual([
@@ -205,8 +199,7 @@ describe("repository", () => {
   ] as const)(
     "a toggle GET body off the documented shape fails loudly (%s: %p)",
     async (feature, body) => {
-      // Neither a definite on nor a definite off may be read off a body the
-      // contract does not document, since either would drive a write.
+      // Neither a definite on nor a definite off may be read off a body the contract does not document, since either would drive a write.
       const key = {
         "vulnerability-alerts": "enable_vulnerability_alerts",
         "automated-security-fixes": "enable_automated_security_fixes",
@@ -253,9 +246,8 @@ describe("repository", () => {
   });
 
   /**
-   * Every toggle's endpoint pair, spelled explicitly so a swapped production
-   * role fails here instead of being read back as the expectation;
-   * `enabledBody` is the GET's answer when the feature is on (LFS has none).
+   * Every toggle's endpoint pair, spelled out so a swapped production role fails here instead of being read back as the expectation; `enabledBody` is
+   * the GET's answer when the feature is on (LFS has none).
    */
   const TOGGLE_CASES = [
     ["enable_vulnerability_alerts", "vulnerability alerts", "vulnerability-alerts", null],
@@ -289,9 +281,8 @@ describe("repository", () => {
   test.each(TOGGLE_CASES)(
     "%s toggles its own endpoint: PUT on true, DELETE on false, never in the PATCH",
     async (key, label, feature, enabledBody) => {
-      // Readable toggles start opposite each declaration; LFS has no live
-      // state. So every direction plans its write, and the exact-mutations
-      // assertion proves no toggle leaks into the repository PATCH.
+      // Readable toggles start opposite each declaration and LFS has no live state, so every direction plans its write; the exact-mutations assertion
+      // proves no toggle leaks into the PATCH.
       const path = `/repos/o/r/${feature}`;
       const on = new MockApi({ [GET]: { data: {} } }).allowMutations(`PUT ${path}`);
       const enabled = await apply(on, { [key]: true });
@@ -350,9 +341,6 @@ describe("repository", () => {
   ] as const)(
     "%s is a note, never a change line",
     async (_what, desired, live, write, status, note) => {
-      // The feature changed under the plan (or is enforced above the repo):
-      // the tolerated status says nothing changed, in the status's declared
-      // meaning, and the run goes on.
       const api = new MockApi({
         [GET]: { data: {} },
         ...live,
@@ -395,8 +383,7 @@ describe("repository", () => {
   test.each([404, 422])(
     "a %i on the private vulnerability reporting probe reads as not applicable, so off",
     async (status) => {
-      // A repo where the feature does not apply (private repos): a matching
-      // declared false is clean, a declared true is drift with the PUT due.
+      // A repo where the feature does not apply (private repos): a matching declared false is clean, a declared true is drift with the PUT due.
       const check = new MockApi({
         [GET]: { data: {} },
         "GET /repos/o/r/private-vulnerability-reporting": {
@@ -449,10 +436,8 @@ describe("repository", () => {
   });
 
   test("a cyclic toggle value is rejected with a message, never a formatter throw", () => {
-    // A YAML alias cycle (enable_git_lfs: &v { self: *v }) reaches the shape
-    // as a self-referential object; the error text must be built without
-    // JSON.stringify on it, or validation itself would die and the run would
-    // lose its normal failed result.
+    // A YAML alias cycle (enable_git_lfs: &v { self: *v }) reaches the shape as a self-referential object; the error text must be built without
+    // JSON.stringify on it, or validation itself would die.
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     const error = shapeError({ repository: { enable_git_lfs: cyclic } }, "f.yml");
@@ -461,15 +446,12 @@ describe("repository", () => {
   });
 
   test("the section accepts plain mappings only, like the record shape always did", () => {
-    // requirePlainMapping guards the passthrough mapping: a YAML !!timestamp
-    // document parses to a Date, which zod's object schemas would accept as
-    // an empty mapping, so it must fail shape validation instead.
+    // A YAML !!timestamp document parses to a Date, which zod's object schemas would accept as an empty mapping.
     expect(shapeError({ repository: new Date("2020-01-01") }, "f.yml")).toContain("repository");
     expect(shapeError({ repository: [1, 2] }, "f.yml")).toContain("repository");
   });
 
   test("immutable releases reads the {enabled} body, treats 404 as off, and names owner enforcement", async () => {
-    // Live enabled, declared false: ordinary drift with the apply promise.
     const liveOn = new MockApi({
       [GET]: { data: {} },
       "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: false } },
@@ -483,8 +465,6 @@ describe("repository", () => {
         ],
       ],
     ]);
-    // The probe's 404 reads as off: drift against declared true, clean against
-    // declared false.
     const liveOff = new MockApi({
       [GET]: { data: {} },
       "GET /repos/o/r/immutable-releases": {
@@ -495,8 +475,7 @@ describe("repository", () => {
       "repository.enable_immutable_releases: declared true != live false; apply will set the declared value",
     ]);
     expect((await plan(liveOff, { enable_immutable_releases: false })).ops).toEqual([]);
-    // Owner-enforced: the drift says apply cannot change it (the write is
-    // still planned; its 409 is covered by the tolerated-status cases).
+    // The write is still planned under enforcement; its 409 is covered by the tolerated-status cases.
     const enforced = new MockApi({
       [GET]: { data: {} },
       "GET /repos/o/r/immutable-releases": { data: { enabled: true, enforced_by_owner: true } },
@@ -510,7 +489,6 @@ describe("repository", () => {
         ],
       ],
     ]);
-    // A matching declaration stays clean even under enforcement.
     expect((await plan(enforced, { enable_immutable_releases: true })).ops).toEqual([]);
   });
 
@@ -548,8 +526,7 @@ describe("repository", () => {
     ]);
     expect(second.ops.map((op) => op.role)).toEqual(["lfsPut"]);
     expect(second.notes).toEqual(first.notes);
-    // Two executions (the proof also runs the converged plan): every write
-    // once, the LFS re-assertion each time.
+    // provePlanIdempotent executes the converged plan too, hence the second LFS PUT.
     expect(api.writes).toEqual([
       "PATCH /repos/o/r",
       "PUT /repos/o/r/topics",
@@ -646,7 +623,6 @@ describe("repository GraphQL-routed keys", () => {
       notes: [],
       landed: 1,
     });
-    // The complete call sequence: the repo GET, ONE features read, then the mutation.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       GET,
       "GRAPHQL RepositoryFeatures",
@@ -655,9 +631,6 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("partial divergence: the mutation and the change lines carry only the diverged key", async () => {
-    // enable_sponsorships already matches live; only the policy moves. A
-    // change line for the untouched sponsor button would be a false claim
-    // (the section's own 409 rule: a note, never a false change line).
     const api = new MockApi({
       [GET]: { data: {} },
       ...features({ hasSponsorshipsEnabled: true }),
@@ -691,8 +664,7 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("an echo reporting the old value, or no echo at all, fails the write loudly after it landed", async () => {
-    // "Accepted but silently ignored" is the REST failure mode that forced
-    // these keys onto GraphQL; the mutation's echoed post-state is the guard.
+    // "Accepted but silently ignored" is the REST failure mode that forced these keys onto GraphQL; the mutation's echoed post-state is the guard.
     const stale = new MockApi({
       [GET]: { data: {} },
       ...features(),
@@ -740,10 +712,8 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("an unreadable value on a DECLARED key fails loudly instead of folding to a default", async () => {
-    // A null issueCreationPolicy (the SDL marks the field nullable) or a
-    // non-boolean sponsorship flag must never read as "all"/false - that
-    // could report a clean check against state the section does not
-    // understand.
+    // A null issueCreationPolicy (the SDL marks the field nullable) or a non-boolean sponsorship flag must never fold to "all"/false: that could
+    // report a clean check against state the section does not understand.
     const nullPolicy = new MockApi({
       [GET]: { data: {} },
       ...features({ issueCreationPolicy: null }),
@@ -768,8 +738,7 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("an unreadable value on an UNDECLARED key never fails the run", async () => {
-    // The strictness is scoped to declared keys: a null policy (SDL-nullable)
-    // must not fail a run that only declared the sponsor button.
+    // The strictness is scoped to declared keys: a null policy (SDL-nullable) must not fail a run that only declared the sponsor button.
     const api = new MockApi({
       [GET]: { data: {} },
       ...features({ hasSponsorshipsEnabled: true, issueCreationPolicy: null }),
@@ -810,9 +779,8 @@ describe("repository GraphQL-routed keys", () => {
   });
 
   test("prototype-chain property names never pass the policy vocabulary", () => {
-    // `"constructor" in ISSUE_CREATION_POLICIES` is true via the prototype
-    // chain; the vocabulary check must be an own-property check or these
-    // would validate and then map to garbage at the GraphQL boundary.
+    // `"constructor" in ISSUE_CREATION_POLICIES` is true via the prototype chain, so the vocabulary check must be an own-property check or these
+    // would map to garbage at the GraphQL boundary.
     for (const name of ["constructor", "toString", "__proto__"]) {
       expect(
         shapeError({ repository: { issue_creation_policy: name } }, "f.yml"),

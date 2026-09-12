@@ -1,15 +1,10 @@
 /**
- * The repository-level sealed-secret section factory. GitHub's four
- * repo-scoped secret families (Actions, Dependabot, Codespaces, Copilot
- * agents) expose the same four endpoints under a different path segment and
- * differ only in PAT resource, output noun, and - for Codespaces - the access
- * grade GitHub gates the reads at, so each section module is ONE
- * repoSecretsSection() call carrying its family's facts. The factory sits
- * above the shared secrets engine (./secrets-engine.ts), which owns the
- * existence-based reconciliation and client-side sealing; the per-environment
- * secrets family (environments) consumes the engine directly with its own
- * nested scopes. The smoke selector (.github/scripts/changed-sections.ts)
- * derives this file's section fan-out from the import graph.
+ * GitHub's four repo-scoped secret families (Actions, Dependabot, Codespaces, Copilot agents) expose the
+ * same four endpoints under a different path segment and differ only in PAT resource, noun, and (Codespaces)
+ * the grade GitHub gates the reads at, so each section module is ONE repoSecretsSection() call.
+ *
+ *   environments section                    -> consumes ./secrets-engine.ts directly, with nested scopes
+ *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
 import type { z } from "zod";
@@ -38,7 +33,6 @@ import {
   type SecretsPlanScope,
 } from "./secrets-engine.js";
 
-/** The section keys the factory may mint, each with its API path segment. */
 export type RepoSecretsKey =
   | "actions_secrets"
   | "dependabot_secrets"
@@ -46,13 +40,9 @@ export type RepoSecretsKey =
   | "agents_secrets";
 
 /**
- * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
- * the factory derives the routes from THIS map, so a key paired with another
- * family's segment (which the mock would faithfully serve, hiding the swap)
- * is unrepresentable. The `satisfies` pins every VALUE to the segment its
- * own KEY spells, so the map cannot lie either - each section key is exactly
- * `<segment>_secrets`, and a fifth family that broke that naming would have
- * to say so here rather than silently mis-route.
+ * The factory derives the routes from THIS map, so a key paired with another family's segment (which the
+ * mock would faithfully serve, hiding the swap) is unrepresentable; the `satisfies` pins each VALUE to the
+ * segment its own KEY spells, so a fifth family breaking the `<segment>_secrets` naming must say so here.
  */
 const SECRETS_SEGMENTS = {
   actions_secrets: "actions",
@@ -62,10 +52,8 @@ const SECRETS_SEGMENTS = {
 } as const satisfies { [K in RepoSecretsKey]: SegmentOfSecretsKey<K> };
 
 /**
- * Each family's entry slice (src/sections/<key>/schema.ts), keyed by section
- * like SECRETS_SEGMENTS: the factory derives the runtime shape from THIS
- * map, so a key paired with another family's config - structurally identical
- * and invisible to every gate - is unrepresentable.
+ * The factory derives the runtime shape from THIS map, so a key paired with another family's config
+ * (structurally identical, invisible to every gate) is unrepresentable.
  */
 const SECRETS_ENTRIES = {
   actions_secrets: ActionsSecretConfig,
@@ -74,19 +62,14 @@ const SECRETS_ENTRIES = {
   agents_secrets: AgentsSecretConfig,
 } as const satisfies Record<RepoSecretsKey, ReturnType<typeof sealedSecretConfig>>;
 
-/** The path segment a `<segment>_secrets` section key spells. */
 type SegmentOfSecretsKey<K extends RepoSecretsKey> = K extends `${infer S}_secrets` ? S : never;
 
-/** The path segment a secret family lives at, derived from its key. */
 type SecretsSegment<K extends RepoSecretsKey = RepoSecretsKey> = (typeof SECRETS_SEGMENTS)[K];
 
 /**
- * The four-endpoint dictionary of one family, its routes derived from the
- * family's path segment as LITERAL types - so the registry's
- * SectionEndpointKey union, the typed mock fragments, and USED_PATHS see the
- * same exact roles and routes a hand-written dictionary would declare. A
- * type alias, not an interface, so it keeps the implicit index signature
- * EndpointDict expects.
+ * Routes as LITERAL types, so the registry's SectionEndpointKey union, the typed mock fragments, and
+ * USED_PATHS see exactly what a hand-written dictionary would declare. A type alias, not an interface,
+ * so it keeps the implicit index signature EndpointDict expects.
  */
 type RepoSecretsEndpoints<P extends SecretsSegment> = {
   readonly list: {
@@ -111,7 +94,6 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
   };
 };
 
-/** The declared value of one family's section, exactly as the settings document types it. */
 type RepoSecretsDeclared<K extends RepoSecretsKey> = Exclude<SettingsFile[K], undefined>;
 
 /**
@@ -133,22 +115,15 @@ type RepoSecretsPlan<K extends RepoSecretsKey> = {
  */
 type WideEndpoints = RepoSecretsEndpoints<SecretsSegment>;
 
-/** The declared value every family accepts: the entry list, plain or wrapped. */
 type WideDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
 
-/** The one plan the factory builds, over the wide dictionary. */
 type SharedPlan = (
   ctx: PlanContext<WideEndpoints>,
   declared: WideDeclared,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
-/** Mutual assignability - equality up to structure, in both directions. */
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-/**
- * Compile-time pin: the shared plan IS each family's exact plan, so a family
- * whose roles, params, or declared value diverge fails here by name.
- */
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
   {
     [K in RepoSecretsKey]: Invariant<SharedPlan, RepoSecretsPlan<K>> extends true ? never : K;
@@ -156,31 +131,20 @@ type _SharedPlanIsEveryFamilyPlan = MustBeNever<
 >;
 
 /**
- * The closed entry surface every family shares, checked HERE as a fresh
- * object literal against the same mapped type SectionModule declares it
- * with - once per family key, since a conditional type over a generic K
- * cannot be checked inside the factory body. Freshness is the point: the
- * factory hands the registry a module IDENTIFIER, where excess-property
- * checking no longer runs, so a `known` key none of the four entry types
- * carries any more would otherwise compile silently for all of them. (An
- * intersection admits a property present in ANY constituent, so a key that
- * only ONE family dropped would still pass - a divergence that would break
- * SecretEntry and the shared plan signature first.) The missing-key
- * direction is plain assignability and still bites at the registry line.
+ * Checked HERE as a fresh object literal, once per family key: the factory hands ../registry.ts a module
+ * IDENTIFIER, where excess-property checking no longer runs, so a `known` key no entry type carries any
+ * more would otherwise compile silently. The intersection admits a key present in ANY constituent, but a
+ * key only one family dropped breaks SecretEntry and the shared plan signature first.
  */
 const CLOSED_SURFACE = {
   known: { name: true, value: true },
   describe: (entry: SecretEntry) => entry.name,
-  // The PUT body is built from the sealed value alone, so an extra entry key
-  // never reaches GitHub: it would apply "successfully" forever while doing
-  // nothing, which is exactly what closed surfaces exist to reject.
   consequence: "the API body carries only the sealed value, so the key would silently do nothing",
 } satisfies ClosedSurfaceOf<"actions_secrets"> &
   ClosedSurfaceOf<"dependabot_secrets"> &
   ClosedSurfaceOf<"codespaces_secrets"> &
   ClosedSurfaceOf<"agents_secrets">;
 
-/** The closedSurface declaration one section key's SectionModule requires. */
 type ClosedSurfaceOf<K extends RepoSecretsKey> = NonNullable<SectionModule<K>["closedSurface"]>;
 
 /** The module shape repoSecretsSection() mints (SectionModule<K> at the registry). */
@@ -196,13 +160,8 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
 }
 
 /**
- * Mint one repository-level secret family's section module. Everything the
- * families share - the reconcile-by-existence plan, the engine wiring, the
- * closed {name, value} entry surface, the keep-by-default posture (deleted
- * secret values are unrecoverable, so deletion is opt-in via the wrapped
- * `_undeclared: delete` form) - lives here once, and the routes derive from
- * the key through SECRETS_SEGMENTS; a family supplies only its key, PAT
- * resource, noun, and (Codespaces) read grade.
+ * Keep-by-default on purpose: a deleted secret's value is unrecoverable, so deletion is opt-in via the
+ * wrapped `_undeclared: delete` form. A family supplies only its key, PAT resource, noun, and (Codespaces) read grade.
  */
 export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   key: K;
@@ -211,10 +170,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   /** The output noun for notes ("Actions secret", "Dependabot secret", ...). */
   noun: string;
   /**
-   * The access grade GitHub gates the family's READS (list and public-key)
-   * at, when it is not the method-derived one: the fine-grained "Codespaces
-   * secrets" permission gates even those GETs at write. The writes are
-   * write-graded by method already, so the override applies to the GETs.
+   * The fine-grained "Codespaces secrets" permission gates even the GETs (list, public-key) at write;
+   * the writes are write-graded by method already.
    */
   accessGrade?: "write";
 }): RepoSecretsSectionModule<K> {
@@ -226,8 +183,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/secrets`,
       statuses: { 200: "the secrets list (names and timestamps; never values)" },
       ...readGrade,
-      // A fine-grained token conceals a denied list as 404, which is a
-      // denial here: the section stops instead of reading "no secrets".
+      // A fine-grained token conceals a denied list as 404; reading it as "no secrets" would be wrong, so it is a denial.
       primaryRead: { notFound: "denied" },
     },
     publicKey: {
@@ -251,8 +207,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
     rejectDuplicateSecretNames(section, entries);
-    // Built where the routes are known, so params typecheck; each write carries
-    // the describe prose a failing request renders.
+    // Built where the routes are known, so params typecheck.
     type Op = PlannedOp<WideEndpoints>;
     type Described<R extends Op["role"]> = Extract<Op, { role: R }> & { readonly describe: string };
     const scope: SecretsPlanScope<Described<"put">, Described<"remove">> = {
@@ -283,8 +238,6 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
         describe: deletion.describe,
       }),
     };
-    // The engine validates every $NAME reference before any section plans and,
-    // in apply mode, resolves and masks them; the PUT thunks read them through ExecTools.
     return planSecrets(section, scope, { entries, policy, defaultPolicy });
   };
 
@@ -294,8 +247,6 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     permission: { repo: [resource] },
     endpoints,
     shape: loosen(knobbed(SECRETS_ENTRIES[key])),
-    // The engine's shared list extractor: the declared value of every entry,
-    // for the up-front reference resolution.
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
     plan,

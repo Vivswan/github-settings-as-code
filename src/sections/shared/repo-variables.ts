@@ -1,14 +1,10 @@
 /**
- * The repository-level variable section factory, the sibling of
- * repo-secrets.ts: GitHub's two repo-scoped variable families (Actions,
- * Copilot agents) expose the same four endpoints under a different path
- * segment and differ only in PAT resource and output noun, so each section
- * module is ONE repoVariablesSection() call carrying its family's facts. The
- * factory sits above the shared variables engine (variables-engine.ts),
- * which owns the value-based reconciliation; the per-environment variables
- * family (environments) consumes the engine directly with its own nested
- * scopes. The smoke selector (.github/scripts/changed-sections.ts) derives
- * this file's section fan-out from the import graph.
+ * GitHub's two repo-scoped variable families (Actions, Copilot agents) expose the same four endpoints under
+ * a different path segment and differ only in PAT resource and noun, so each section module is ONE
+ * repoVariablesSection() call.
+ *
+ *   environments section                    -> consumes ./variables-engine.ts directly, with nested scopes
+ *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
 import { z } from "zod";
@@ -30,16 +26,12 @@ import {
   variableKey,
 } from "./variables-engine.js";
 
-/** The section keys the factory may mint, each with its API path segment. */
 export type RepoVariablesKey = "actions_variables" | "agents_variables";
 
 /**
- * Each family's path segment under /repos/{owner}/{repo}, keyed by section:
- * the factory derives the routes from THIS map, so a key paired with the
- * other family's segment (which the mock would faithfully serve, hiding the
- * swap) is unrepresentable. The `satisfies` pins every VALUE to the segment
- * its own KEY spells, so the map cannot lie either - each section key is
- * exactly `<segment>_variables`.
+ * The factory derives the routes from THIS map, so a key paired with the other family's segment (which
+ * the mock would faithfully serve, hiding the swap) is unrepresentable; the `satisfies` pins each VALUE
+ * to the segment its own KEY spells.
  */
 const VARIABLES_SEGMENTS = {
   actions_variables: "actions",
@@ -47,32 +39,25 @@ const VARIABLES_SEGMENTS = {
 } as const satisfies { [K in RepoVariablesKey]: SegmentOfVariablesKey<K> };
 
 /**
- * Each family's entry slice (src/sections/<key>/schema.ts), keyed by section
- * like VARIABLES_SEGMENTS: the factory derives the runtime shape from THIS
- * map, so a key paired with the other family's config - structurally
- * identical and invisible to every gate - is unrepresentable.
+ * The factory derives the runtime shape from THIS map, so a key paired with the other family's config
+ * (structurally identical, invisible to every gate) is unrepresentable.
  */
 const VARIABLES_ENTRIES = {
   actions_variables: ActionsVariableConfig,
   agents_variables: AgentsVariableConfig,
 } as const satisfies Record<RepoVariablesKey, z.ZodType<VariableEntry>>;
 
-/** The path segment a `<segment>_variables` section key spells. */
 type SegmentOfVariablesKey<K extends RepoVariablesKey> = K extends `${infer S}_variables`
   ? S
   : never;
 
-/** The path segment a variable family lives at, derived from its key. */
 type VariablesSegment<K extends RepoVariablesKey = RepoVariablesKey> =
   (typeof VARIABLES_SEGMENTS)[K];
 
 /**
- * The four-endpoint dictionary of one family, its routes derived from the
- * family's path segment as LITERAL types - so the registry's
- * SectionEndpointKey union, the typed mock fragments, and USED_PATHS see the
- * same exact roles and routes a hand-written dictionary would declare. A
- * type alias, not an interface, so it keeps the implicit index signature
- * EndpointDict expects.
+ * Routes as LITERAL types, so the registry's SectionEndpointKey union, the typed mock fragments, and
+ * USED_PATHS see exactly what a hand-written dictionary would declare. A type alias, not an interface,
+ * so it keeps the implicit index signature EndpointDict expects.
  */
 type RepoVariablesEndpoints<P extends VariablesSegment> = {
   readonly list: {
@@ -95,7 +80,6 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
   };
 };
 
-/** The declared value of one family's section, exactly as the settings document types it. */
 type RepoVariablesDeclared<K extends RepoVariablesKey> = Exclude<SettingsFile[K], undefined>;
 
 /**
@@ -113,19 +97,15 @@ type RepoVariablesPlan<K extends RepoVariablesKey> = {
 /** Every family's routes as one dictionary; see repo-secrets.ts for why the plan is written over it. */
 type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
 
-/** The declared value every family accepts: the entry list, plain or wrapped. */
 type WideDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
 
-/** The one plan the factory builds, over the wide dictionary. */
 type SharedPlan = (
   ctx: PlanContext<WideEndpoints>,
   declared: WideDeclared,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
-/** Mutual assignability - equality up to structure, in both directions. */
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-/** Compile-time pin: the shared plan IS each family's exact plan (the repo-secrets.ts pin). */
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
   {
     [K in RepoVariablesKey]: Invariant<SharedPlan, RepoVariablesPlan<K>> extends true ? never : K;
@@ -143,13 +123,8 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
 }
 
 /**
- * Mint one repository-level variable family's section module. Everything the
- * families share - the upsert-by-case-insensitive-name plan, the engine
- * wiring, the delete-undeclared-by-default posture (variables are readable,
- * recreatable configuration; the wrapped `_undeclared: keep` form softens
- * deletion to notes) - lives here once, and the routes derive from the key
- * through VARIABLES_SEGMENTS; a family supplies only its key, PAT resource,
- * and noun.
+ * Delete-undeclared-by-default: variables are readable, recreatable configuration; the wrapped
+ * `_undeclared: keep` form softens deletion to notes. A family supplies only its key, PAT resource, and noun.
  */
 export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   key: K;
@@ -164,11 +139,9 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     list: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/variables`,
       statuses: { 200: `the ${noun}s list` },
-      // This list endpoint caps per_page at 30 (not the standard 100); asking
-      // for more would be silently clamped and truncate the walk to one page.
+      // GitHub caps this list's per_page at 30; asking for more is silently clamped and would truncate the walk to one page.
       pageSize: 30,
-      // A fine-grained token conceals a denied list as 404, which is a
-      // denial here: the section stops instead of reading "no variables".
+      // A fine-grained token conceals a denied list as 404; reading it as "no variables" would be wrong, so it is a denial.
       primaryRead: { notFound: "denied" },
     },
     create: {
@@ -189,16 +162,14 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-    // Variable names are case-insensitive on GitHub, so two entries differing
-    // only in case name the same variable and would fight on every run.
+    // Variable names are case-insensitive on GitHub, so two entries differing only in case name one variable.
     rejectDuplicates(
       section,
       entries,
       (variable) => variableKey(variable.name),
       (variable) => variable.name,
     );
-    // The engine's operations, built here where the routes are known so the
-    // params contract compile-checks ({name} on update/remove).
+    // Built where the routes are known, so params typecheck ({name} on update/remove).
     type Op = PlannedOp<WideEndpoints>;
     const scope: VariablesPlanScope<
       Extract<Op, { role: "create" }>,
@@ -239,8 +210,6 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
 
   const section: RepoVariablesSectionModule<K> = {
     key,
-    // Undeclared variables are deleted by default, loudly on purpose; the
-    // wrapped `_undeclared: keep` form downgrades each to a note.
     undeclaredDefault: "delete",
     permission: { repo: [resource] },
     endpoints,

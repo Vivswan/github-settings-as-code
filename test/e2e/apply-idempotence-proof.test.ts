@@ -1,8 +1,4 @@
-/**
- * Unit tests for the apply-idempotence layer: the declaration-derived recurrence rules
- * (apply-idempotence.ts) and the proof engine's pure classifiers (apply-idempotence-proof.ts). Each
- * exported classifier is tested directly so the corresponding e2e assertion is provably able to fire.
- */
+/** Each exported classifier is tested directly so the corresponding e2e assertion is provably able to fire. */
 
 import { describe, expect, test } from "bun:test";
 import { endpointMethod } from "../../src/sections/contract/endpoints.js";
@@ -68,9 +64,6 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write rule)", () => {
   });
 
   test("the exemption is per endpoint: a section's alwaysRewrite write passes while its drift-gated sibling fires", () => {
-    // repository owns the Git LFS toggle (alwaysRewrite) beside its drift-gated PATCH; the secret
-    // families' sealed PUT passes beside their DELETE; environments' nested secret PUT beside its
-    // own PUT. In every case only the flagged request line is exempt.
     const pairs: Array<[LoggedRequest, LoggedRequest]> = [
       [write("PUT", "/repos/e2e-owner/e2e-repo/lfs"), write("PATCH", "/repos/e2e-owner/e2e-repo")],
       [
@@ -137,33 +130,24 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
   });
 
   test("a same-path write in the other direction is not a re-issue", () => {
-    // The Git LFS toggle's PUT and DELETE share one path: a second apply
-    // that disabled what the first enabled must fire, not pass.
     const lfs = "/repos/e2e-owner/e2e-repo/lfs";
     const failures = missingSecondApplyRewrites([write("PUT", lfs)], [write("DELETE", lfs)]);
-    // Both directions fire: the PUT was dropped and the DELETE is new work.
     expect(failures).toHaveLength(2);
     expect(failures[0]).toContain(`DELETE ${lfs} 0 time(s) and the second 1`);
     expect(failures[1]).toContain(`PUT ${lfs} 1 time(s) and the second 0`);
     expect(missingSecondApplyRewrites([write("PUT", lfs)], [write("PUT", lfs)])).toEqual([]);
-    // Counted, not set-compared: a write the first apply issued twice must
-    // recur exactly twice - one fewer dropped a write, one more did new work.
     expect(
       missingSecondApplyRewrites([write("PUT", lfs), write("PUT", lfs)], [write("PUT", lfs)]),
     ).toHaveLength(1);
     expect(
       missingSecondApplyRewrites([write("PUT", lfs)], [write("PUT", lfs), write("PUT", lfs)]),
     ).toHaveLength(1);
-    // The query string is part of the identity: a differing one is a
-    // different request, a matching one is the re-issue.
     const withQuery = (query: string): LoggedRequest => ({ ...write("PUT", lfs), query });
     expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=2")])).toHaveLength(2);
     expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=1")])).toEqual([]);
   });
 
   test("a re-issued secret PUT passes; unflagged writes never bind, an unverifiable one included", () => {
-    // A rulesets PUT and a webhook config PATCH on the first run create no re-write obligation:
-    // only alwaysRewrite endpoints must recur (an unverifiable write merely may).
     expect(
       missingSecondApplyRewrites(
         [
@@ -198,9 +182,6 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
   });
 
   test("every family's sealed PUT binds: dependabot, codespaces, environment secrets", () => {
-    // The obligation derives from the EndpointDecl alwaysRewrite flag, so a
-    // skipped first-apply PUT fires for each family - and crucially, the
-    // ENVIRONMENT PUT itself (same section, no flag) creates no obligation.
     const firstWrites = [
       write("PUT", "/repos/e2e-owner/e2e-repo/dependabot/secrets/REGISTRY_TOKEN"),
       write("PUT", "/repos/e2e-owner/e2e-repo/codespaces/secrets/DOTFILES_PAT"),
@@ -217,7 +198,6 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
 });
 
 describe("unwitnessedExemptEndpoints (apply-idempotence corpus witness)", () => {
-  /** A witness map with every exempt endpoint written on both sides. */
   const coveredWitness = (): ExemptWriteWitness =>
     new Map(
       [...recurringEndpointKeys("always"), ...recurringEndpointKeys("may")].map((key) => [
@@ -248,7 +228,6 @@ describe("unwitnessedExemptEndpoints (apply-idempotence corpus witness)", () => 
     expect(failures).toHaveLength(1);
     expect(failures[0]).toContain('"webhooks"');
     expect(failures[0]).toContain("no second apply in the corpus re-issued");
-    // One re-issued endpoint of the section satisfies the section's witness.
     witness.set("webhooks.updateConfig", { first: 2, second: 2 });
     expect(unwitnessedExemptEndpoints(witness)).toEqual([]);
   });
@@ -258,8 +237,6 @@ describe("unwitnessedExemptEndpoints (apply-idempotence corpus witness)", () => 
     recordExemptWrites(
       witness,
       [
-        // labels compares before writing and report traffic matches no section endpoint, so
-        // neither enters the witness; the repo PATCH is repository's drift-gated write.
         write("POST", "/repos/e2e-owner/e2e-repo/labels"),
         write("POST", "/repos/e2e-owner/svc-private/issues"),
         write("PATCH", "/repos/e2e-owner/e2e-repo"),

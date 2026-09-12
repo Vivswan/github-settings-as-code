@@ -1,6 +1,4 @@
-// COVERAGE.md contract tests over its sources: the rendered page's file citations resolve on disk,
-// and the authored gaps never name a surface the action already calls (implementing a gap forces
-// its row out). Supported rows are pinned in test/sections/docs-registry.test.ts, the page in test/scripts/gen-docs.test.ts.
+// Supported rows are pinned in test/sections/docs-registry.test.ts and the rendered page in test/scripts/gen-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -22,9 +20,8 @@ const coverage = renderCoverage(SECTIONS, DOCS, COVERAGE_DATA);
 
 describe("COVERAGE path citations", () => {
   test("every src/ or test/ path citation resolves on disk", () => {
-    // File moves silently rot prose citations; existence on disk is the contract. A citation
-    // must carry a file extension so prose slash-pairs ("test/lint jobs") do not read as paths;
-    // a directory citation is invisible here, so cite files.
+    // A citation must carry a file extension so prose slash-pairs ("test/lint jobs") do not read as paths; a directory citation is invisible here, so
+    // cite files.
     const cited =
       coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.[a-z]+\b/g) ?? [];
     expect(cited.length, "COVERAGE.md cites no src/ or test/ path at all").toBeGreaterThan(0);
@@ -38,11 +35,9 @@ describe("COVERAGE path citations", () => {
 });
 
 describe("COVERAGE gaps anti-test", () => {
-  /** The facet of a GraphQL operation the collision check reads: its document text. */
   type GraphqlDocument = { readonly query: string };
 
-  // The root fields an operation's document selects, with root-level fragment spreads and inline
-  // fragments expanded so a refactor into fragments cannot hide a field.
+  // Root-level fragment spreads and inline fragments are expanded so a refactor into fragments cannot hide a field.
   function rootFields(op: GraphqlDocument): string[] {
     const document = parse(op.query);
     const fragments = new Map<string, SelectionSetNode>();
@@ -79,8 +74,7 @@ describe("COVERAGE gaps anti-test", () => {
   /** A well-formed route path: one or more segments, each a literal of route characters or one {param}. */
   const REST_PATH = /^(?:\/(?:[A-Za-z0-9_.-]+|\{[A-Za-z_][A-Za-z0-9_]*\}))+$/;
 
-  // A gap endpoint split into method and target, or a throw when the target is not a shape the
-  // collision check can inspect: a check that cannot read its input must fail, not say "no collision".
+  // A check that cannot read its input must fail, not say "no collision".
   function parseGap(gap: string): { method: string; target: string } {
     const space = gap.indexOf(" ");
     const method = gap.slice(0, space);
@@ -94,9 +88,7 @@ describe("COVERAGE gaps anti-test", () => {
     return { method, target };
   }
 
-  // Every gap endpoint colliding with a surface the action calls, as "<gap> -> <route or op>": a
-  // REST gap matches a same-method route template (each {param} becomes a placeholder segment,
-  // since matchesTemplate takes a CONCRETE path), a GraphQL gap an op selecting its root field.
+  // Each REST {param} becomes a placeholder segment, since matchesTemplate takes a CONCRETE path.
   function gapCollisions(
     rows: readonly GapRow[],
     routes: ReadonlyArray<Route>,
@@ -128,9 +120,6 @@ describe("COVERAGE gaps anti-test", () => {
   test("no gap endpoint matches a registered endpoint or GraphQL operation", () => {
     const routes = Object.values(allEndpoints()).map((endpoint) => endpoint.route);
     const ops = Object.values(allGraphqlOps());
-    // Controls: a called route is caught in either parameter spelling, a same-path other-method
-    // row is not; a selected GraphQL root field is caught with or without arguments, in the
-    // operation, a spread, or an inline fragment; an unselected field and an op's own NAME are not.
     const labels: GapRow = {
       area: "control",
       endpoints: ["POST /repos/{owner}/{repo}/labels", "DELETE /repos/{o}/{r}/labels/{name}"],

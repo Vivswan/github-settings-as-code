@@ -1,10 +1,6 @@
 /**
- * Direct pins for loosen()'s own guarantees (src/sections/contract/module.ts).
- * The section suites cover it indirectly through every shape; these tests pin
- * the derivation rules themselves, including the loud-failure paths - and,
- * because cloneWith patches zod's internal def through a hand-mirrored view,
- * they are the tripwire that a zod-internal rename (element, innerType,
- * valueType, catchall) would otherwise turn into a silent no-op.
+ * cloneWith patches zod's internal def through a hand-mirrored view, so these are the tripwire a zod-internal rename (element, innerType, valueType,
+ * catchall) would otherwise turn into a silent no-op.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -37,8 +33,7 @@ describe("loosen", () => {
   });
 
   test("array elements and record values are loosened (the def-surgery tripwire)", () => {
-    // The parsed DATA carries the unknown key: a strip object would parse the
-    // same input successfully while dropping it, so success alone proves nothing.
+    // The parsed DATA carries the unknown key: a strip object would parse the same input while dropping it, so success alone proves nothing.
     const viaArray = loosen(z.array(z.object({ name: z.string() })));
     expect(viaArray.safeParse([{ name: "a", extra: 1 }])).toEqual({
       success: true,

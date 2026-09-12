@@ -1,9 +1,3 @@
-/**
- * The setup sections setupSection() mints, pinned from one key-correlated
- * table: the shared plan behavior once per section, over the facts they
- * differ on (the route, the change-line noun, the availability a 403 names).
- */
-
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
 import type { GithubClient } from "../../src/github/api.js";
@@ -85,11 +79,6 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
   },
 };
 
-/**
- * Compile-time, over each minted module's literal endpoints: the read port
- * spells the GET alone (a write role is not a read), and a "denied" primary
- * read offers no 404-tolerant helper.
- */
 type ReadPort<K extends SetupKey> = PlanContext<SetupSectionModule<K>["endpoints"]>["read"];
 type _ReadPortIsTheGetAlone = MustBeNever<
   Exclude<{ [K in SetupKey]: keyof ReadPort<K> }[SetupKey], "get">
@@ -101,11 +90,6 @@ type _DeniedReadHasNoProbe = MustBeNever<
   Extract<{ [K in SetupKey]: GetHelpers<K> }[SetupKey], "probeAbsent" | "tryCall">
 >;
 
-/**
- * Compile-time: each minted plan() is typed over exactly its own section's
- * declared value, so the other setup's field is an excess property (the
- * negative control beside each passing one).
- */
 type DeclaredOf<K extends SetupKey> = Parameters<SetupSectionModule<K>["plan"]>[1];
 ({ query_suite: "extended" }) satisfies DeclaredOf<"code_scanning_default_setup">;
 // @ts-expect-error ai_findings_option belongs to code_quality_setup alone
@@ -115,9 +99,8 @@ type DeclaredOf<K extends SetupKey> = Parameters<SetupSectionModule<K>["plan"]>[
 ({ query_suite: "extended" }) satisfies DeclaredOf<"code_quality_setup">;
 
 /**
- * A stateful fake of a setup endpoint: the GET serves what the PATCH last
- * merged over the seeded body, and the PATCH answers the spec's plain 200,
- * an EMPTY object, so the change thunk sees the real wire shape.
+ * A stateful fake: the GET serves what the PATCH last merged over the seeded body, and the PATCH answers the spec's plain 200, an EMPTY object, so
+ * the change thunk sees the real wire shape.
  */
 function liveSetup(
   path: string,
@@ -165,7 +148,6 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
 
     test("plans the verbatim PATCH on declared-keys-only drift, languages as a set", async () => {
       const api = new MockApi({ [`GET ${path}`]: { data: live } });
-      // Planning reads through the GET port alone, and never writes.
       expect(Object.keys(planContext(section, api, REPO).read)).toEqual(["get"]);
       const drifted = await plan(api, driftDeclared);
       expect(drifted.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
@@ -209,8 +191,6 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
     ])(
       "a %s on the PATCH fails with the section's own advice",
       async (_status, status, message, advice) => {
-        // The tolerated 409 carries the wait-and-retry advice; the 403
-        // classifies through throwFor and names the section's availability.
         const api = new MockApi({
           [`GET ${path}`]: { data: live },
           [`PATCH ${path}`]: { error: { status, message, body: "" } },

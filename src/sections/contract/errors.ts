@@ -1,5 +1,3 @@
-/** Error classification: permission denials, rate limits, and rejection advice. */
-
 import type { ApiError } from "../../github/api.js";
 import { isPermissionError, isRateLimitError } from "../../github/api.js";
 import type { HintableStatus } from "./endpoints.js";
@@ -25,14 +23,9 @@ export class PermissionDenied extends Error {
 }
 
 /**
- * The access level denial advice should ask for on an override permission:
- * "write" when ANY of the section's endpoints or GraphQL operations carrying
- * that same effective permission is write-graded, else "read". Grading by
- * the SECTION's need keeps the fix to one round trip: apply-mode preflight
- * probes with reads, so read-level advice on a permission the section also
- * writes with (the OIDC GET/PUT pair) would pass preflight and fail again on
- * the write. A permission the section only reads with (the branch-policy
- * list; its write siblings use another permission) still advises read.
+ * Graded by the SECTION's need so the fix costs one round trip: apply-mode preflight probes with reads,
+ * so read-level advice on a permission the section also writes with (the OIDC GET/PUT pair) would pass
+ * preflight and fail on the write. A permission the section only reads with still advises read.
  */
 export function overrideAdviceLevel(
   section: SectionMeta,
@@ -53,25 +46,19 @@ export function throwFor(
   context?: {
     operation?: string;
     /**
-     * The declaration behind the failing request - a REST EndpointDecl or a
-     * GraphqlOpDecl (a GraphQL failure renders `GRAPHQL <opName>` in the
-     * method/path slot). Supplies the status hints and denial hint, and
-     * resolves the EFFECTIVE permission: an operation with a permission
-     * override renders its own grant advice instead of the section's, and a
-     * public operation ("none") cannot be a missing-grant failure at all, so
-     * its 403/404 takes the generic branch.
+     * Supplies the hints and denial hint and resolves the EFFECTIVE permission: an override renders its
+     * own grant advice, and a public operation ("none") cannot be a missing-grant failure, so its 403/404
+     * takes the generic branch; a GraphQL failure renders `GRAPHQL <opName>` in the method/path slot.
      */
     op?: FailingOp;
   },
 ): never {
-  // "creating ruleset "x" failed - POST /repos/...": the operation label says
-  // WHAT was being done in settings-file terms; the raw method/path stays so
-  // the failing request is still identifiable.
+  // The operation label says WHAT was being done in settings-file terms; the raw method/path keeps the request identifiable.
+  //   creating ruleset "x" failed - POST /repos/...: 422 ...
   const operation = context?.operation ? `${context.operation} failed - ` : "";
   const cause = `${operation}${method} ${path}: ${error.status} ${error.message}`;
   if (isRateLimitError(error)) {
-    // Includes primary and secondary rate limits delivered as 403; those
-    // must not be mistaken for missing permissions.
+    // Secondary rate limits arrive as 403 and must not read as missing permissions.
     throw new Error(
       `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
     );
@@ -80,12 +67,7 @@ export function throwFor(
   if (isPermissionError(error) && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
-    // An operation whose 403/404 is AMBIGUOUS (it can mean something other
-    // than a missing grant) says so here, right where the user reads the
-    // grant advice.
     const denialHint = context?.op?.denialHint ? `. Note: ${context.op.denialHint}` : "";
-    // The section's caveated grant stays the default; only an override naming a structurally
-    // DIFFERENT permission re-derives the advice, at the level the SECTION needs on it.
     const grant =
       effective !== undefined && !samePermission(effective, section.permission)
         ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
@@ -106,9 +88,7 @@ export function throwFor(
       `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
     );
   }
-  // A GraphQL rejection carries error types instead of a status; the op's
-  // declared outcome for each observed type is the same kind of advice as a
-  // status-keyed REST hint.
+  // A GraphQL rejection carries error types, not a status; its declared outcomes stand in for status-keyed hints.
   const op = context?.op;
   const advice =
     op === undefined
@@ -118,8 +98,7 @@ export function throwFor(
             .filter((type) => error.graphqlTypes?.includes(type))
             .map((type) => op.outcomes[type])
             .filter((outcome): outcome is string => outcome !== undefined)
-            // Outcome prose is written lowercase (it doubles as a declaration
-            // description); as a sentence after the advice it starts a new one.
+            // Outcome prose is lowercase (it doubles as the declaration's description); here it starts a sentence.
             .map((outcome) => outcome.charAt(0).toUpperCase() + outcome.slice(1))
             .join(". ")
         : op.hints?.[error.status as HintableStatus];

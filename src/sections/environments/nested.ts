@@ -1,9 +1,3 @@
-/**
- * The nested planning seam: the NESTED_KEYS/NESTED_PLANNERS table plan()
- * loops over, splitEntry, and the per-environment variables and secrets
- * planners; a missing environment's entries plan as creates without a read.
- */
-
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
@@ -42,9 +36,8 @@ import type {
 } from "./schema.js";
 
 /**
- * The per-environment keys that are NOT part of the environment PUT body:
- * each is a sub-resource planned after the PUT by its NESTED_PLANNERS entry;
- * splitEntry strips them so none can leak into the PUT or the environment diff.
+ * Stripped from the environment PUT body by splitEntry; each plans as its own sub-resource after
+ * the PUT, so none can leak into the PUT payload or the environment diff.
  */
 export const NESTED_KEYS = [
   "variables",
@@ -54,23 +47,14 @@ export const NESTED_KEYS = [
 ] as const satisfies readonly (keyof EnvironmentConfig)[];
 type NestedKey = (typeof NESTED_KEYS)[number];
 
-/** The declared value of one nested key, once its optionality is peeled off. */
 type NestedDeclared = { [K in NestedKey]: NonNullable<EnvironmentConfig[K]> };
 
-/** The entry type of one nested key's list, seen through the wrapped form. */
 type NestedEntry<K extends NestedKey> = EntryOf<NestedDeclared[K]>;
 
 /**
- * The EnvironmentConfig keys whose type takes the wrapped
- * `{_undeclared, entries}` form. Taking the wrapper is a rule this section
- * commits to for every nested sub-resource list (plain-array PUT fields
- * like `reviewers` never take it), and the guarantee below rests on it:
- * the lockstep types pin NESTED_KEYS to the wrapped keys in both
- * directions, so a wrapped key added to EnvironmentConfig cannot silently
- * leak into the PUT body, and a listed key must really take the wrapper.
- * A nested list declared as a bare array would evade both checks and ride
- * into the PUT unnoticed - give a new key the wrapped form, never a bare
- * array.
+ * Every nested sub-resource list takes the wrapped `{_undeclared, entries}` form, and the two
+ * lockstep types below pin NESTED_KEYS to exactly those keys. A nested list declared as a bare
+ * array would evade both checks and ride into the PUT body unnoticed, so give a new key the wrapper.
  */
 type NestedByType = {
   [K in keyof EnvironmentConfig]-?: [
@@ -82,44 +66,28 @@ type NestedByType = {
 type _NestedListComplete = MustBeNever<Exclude<NestedByType, NestedKey>>;
 type _NestedListSound = MustBeNever<Exclude<NestedKey, NestedByType>>;
 
-/** What one nested planner contributes: its operations, in wire order, and its notes. */
 export interface NestedPlan {
   ops: EnvironmentRestOp[];
   notes: string[];
 }
 
 /**
- * One nested key's handling, so plan() can loop over NESTED_KEYS instead of
- * branching per key. The table below is a mapped type over NestedKey, so a
- * key added to NESTED_KEYS without a matching entry fails to compile (the
- * section-registry pattern). Function-valued properties on purpose, not
- * method shorthand: method parameters check bivariantly, properties
- * strictly. The strict checking does real work now that the branch-policy
- * entry type differs from the variable/secret ones - a swapped pairing is a
- * compile error, not a runtime surprise.
+ * Function-valued properties, not method shorthand: method parameters check bivariantly,
+ * properties strictly, so a planner paired with the wrong key's entry type is a compile error.
  */
 interface NestedPlanner<K extends NestedKey> {
   /**
-   * The policy for live sub-resources WITHIN a declared key that its entries
-   * do not declare, the single source every unwrap reads. An explicit
-   * value per key on purpose: the section-level default ("untouched")
-   * describes sibling ENVIRONMENTS, not the resources inside one, and no
-   * other declaration supplies a policy for a nested list.
+   * The policy for live sub-resources the declared list omits. The section-level "untouched"
+   * default describes sibling environments, not the resources inside one, so each key states its own.
    */
   defaultPolicy: UndeclaredPolicy;
   /**
-   * The note beside a declared environment that does not exist yet: its
-   * sub-resources cannot be listed, so the declared list plans against an
-   * empty environment (every entry a create) instead of a verified one.
+   * Beside a declared environment that does not exist yet: its sub-resources cannot be listed,
+   * so every entry plans as a create against an empty environment.
    */
   missingNote: (envName: string) => string;
-  /**
-   * Upfront rejection of misdeclared entries (duplicates, or a cross-key
-   * precondition on the rest of the entry), run for ALL environments before
-   * any write.
-   */
+  /** Rejects misdeclared entries for every environment before anything is read or written. */
   validate?: (env: EnvironmentConfig, entries: readonly NestedEntry<K>[]) => void;
-  /** Plan one environment's declared list against the live sub-resources. */
   plan: (
     ctx: EnvironmentsRestContext,
     section: SectionMeta,
@@ -127,9 +95,8 @@ interface NestedPlanner<K extends NestedKey> {
     policy: UndeclaredPolicy,
     entries: readonly NestedEntry<K>[],
     /**
-     * The probed live environment body, or undefined for one the plan creates
-     * (its sub-resources 404 until the PUT lands, so the planner reads nothing
-     * and plans every entry as a create; branch policies also read its flag).
+     * undefined for an environment the plan creates: its sub-resources 404 until the PUT lands,
+     * so the planner reads nothing and plans every entry as a create.
      */
     liveEnv: Record<string, unknown> | undefined,
   ) => Promise<NestedPlan>;
@@ -171,16 +138,10 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
 };
 
 /**
- * Unwrap one nested key's declared value against its own table default.
- * Generic over K so the table lookup and the declared value stay correlated
- * to the same literal key; the union-typed loop variable in plan() cannot
- * express that without casts. The parameter is spelled
- * NonNullable<EnvironmentConfig[K]> rather than the identical
- * NestedDeclared[K]: tsc relates the guarded env[key] to the former
- * directly, while the mapped-type spelling forces a fallback to the
- * intersection over every key, which the differing entry types cannot
- * satisfy. The one cast restates the type in the spelling undeclaredPolicy
- * infers its entry type from.
+ * Generic over K so the table default and the declared value stay correlated to one literal key.
+ * The parameter is spelled NonNullable<EnvironmentConfig[K]>, not the identical NestedDeclared[K]:
+ * tsc relates the guarded env[key] to the former directly, while the mapped-type spelling falls
+ * back to an intersection over every key that the differing entry types cannot satisfy.
  */
 function unwrapNested<K extends NestedKey>(
   key: K,
@@ -192,7 +153,6 @@ function unwrapNested<K extends NestedKey>(
   );
 }
 
-/** Run one nested key's upfront validation (see NestedPlanner.validate). */
 export function validateNested<K extends NestedKey>(key: K, env: EnvironmentConfig): void {
   const declared = env[key];
   if (declared !== undefined) {
@@ -200,10 +160,6 @@ export function validateNested<K extends NestedKey>(key: K, env: EnvironmentConf
   }
 }
 
-/**
- * Plan one nested key of one environment (generic like validateNested); on a
- * missing environment the missing-environment note joins the planner's creates.
- */
 export async function planNested<K extends NestedKey>(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
@@ -226,18 +182,10 @@ export async function planNested<K extends NestedKey>(
 }
 
 /**
- * The per-environment SCALAR keys that are NOT part of the environment PUT
- * body: each is applied through its own routed operation (pinned rides the
- * GraphQL pin mutations) after every PUT has landed. splitEntry strips them
- * alongside NESTED_KEYS, so a routed scalar can never leak into the
- * passthrough PUT payload or the check-mode environment diff. The lockstep
- * below is bidirectional like the nested one: the keys are pinned to
- * EnvironmentRoutedScalars (the schema-side interface where routed-ness is
- * DECLARED), so a scalar added to that interface without a strip entry - or
- * listed here without being declared there - fails to compile. A routed
- * scalar declared directly on EnvironmentConfig would evade both checks and
- * ride into the PUT unnoticed - declare it on EnvironmentRoutedScalars,
- * never on the config body.
+ * Scalars the environment PUT does not accept: splitEntry strips them beside NESTED_KEYS, and each
+ * applies through its own routed operation after every PUT (pinned rides the GraphQL pin mutations).
+ * The lockstep types pin this list to EnvironmentRoutedScalars, where schema.ts declares routed-ness;
+ * a routed scalar declared on EnvironmentConfig itself would ride the PUT body unnoticed.
  */
 const ROUTED_SCALAR_KEYS = [
   "pinned",
@@ -246,14 +194,9 @@ type RoutedScalarKey = (typeof ROUTED_SCALAR_KEYS)[number];
 type _RoutedScalarsComplete = MustBeNever<Exclude<keyof EnvironmentRoutedScalars, RoutedScalarKey>>;
 type _RoutedScalarsSound = MustBeNever<Exclude<RoutedScalarKey, keyof EnvironmentRoutedScalars>>;
 
-/**
- * NESTED_KEYS and ROUTED_SCALAR_KEYS partition the stripped keys: a key in
- * both lists would be stripped twice with whichever handling ran last
- * silently winning, so overlap is a compile error.
- */
+// A key in both strip lists would be claimed by whichever loop ran first and never reach the other's handling.
 type _StripListsDisjoint = MustBeNever<Extract<NestedKey, RoutedScalarKey>>;
 
-/** Split one declared entry into the PUT/diff payload, the nested sub-resources, and the routed scalars. */
 export function splitEntry(env: EnvironmentConfig): {
   settings: Record<string, unknown>;
   nested: Pick<EnvironmentConfig, NestedKey>;
@@ -277,11 +220,7 @@ export function splitEntry(env: EnvironmentConfig): {
   return { settings: settings as Record<string, unknown>, nested, routed };
 }
 
-/**
- * Reject two declared variables whose names collapse to the same
- * case-insensitive key: they would fight each other on every run. All
- * colliding pairs are reported at once (the rejectDuplicates posture).
- */
+/** Two spellings of one case-insensitive name would fight each other on every run. */
 function rejectDuplicateVariables(
   envName: string,
   entries: readonly EnvironmentVariableConfig[],
@@ -304,11 +243,6 @@ function rejectDuplicateVariables(
   }
 }
 
-/**
- * Plan one environment's `variables`: create missing, update divergent values
- * and passthrough fields (PATCH at the LIVE name), and apply the undeclared
- * policy to the rest; every line names the environment.
- */
 async function planVariables(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
@@ -350,9 +284,8 @@ async function planVariables(
       });
       continue;
     }
-    // The live name never drifts against the declaration: GitHub stores it
-    // uppercased whatever casing the file uses, so only the value (and any
-    // declared passthrough fields) can diverge.
+    // GitHub stores the name uppercased whatever casing the file uses, so the name never drifts;
+    // only the value and the declared passthrough fields can.
     const drift = [
       ...(existing.value === variable.value
         ? []
@@ -408,11 +341,7 @@ async function planVariables(
   return planned;
 }
 
-/**
- * Reject two declared secrets whose names collapse to the same
- * case-insensitive key (GitHub stores secret names uppercase): they would
- * fight each other on every run. All colliding pairs are reported at once.
- */
+/** Two spellings of one case-insensitive name (GitHub stores secret names uppercase) would fight each other on every run. */
 function rejectDuplicateSecrets(
   envName: string,
   entries: readonly EnvironmentSecretConfig[],
@@ -436,9 +365,9 @@ function rejectDuplicateSecrets(
 }
 
 /**
- * Plan one environment's `secrets`: existence is the only comparable state
- * (a missing name is drift; every declared secret is a sealed alwaysRewrite
- * PUT), and the sealing key is read inside the first thunk, after the PUT.
+ * Existence is the only comparable state (values never read back), so every declared secret is a
+ * sealed PUT. The sealing key is read inside the first payload thunk: in apply the environment PUT
+ * may only just have created the environment the key belongs to.
  */
 async function planEnvironmentSecrets(
   ctx: EnvironmentsRestContext,
@@ -462,8 +391,7 @@ async function planEnvironmentSecrets(
           await ctx.read.listSecrets.listAllEnveloped("secrets", { params }),
           `environment "${envName}"`,
         );
-  // Uppercase key -> the name as the API listed it (already uppercase on real
-  // GitHub; normalizing keeps a differently-cased mock or proxy harmless).
+  // Real GitHub lists names uppercase already; keying by secretKey keeps a differently-cased mock or proxy harmless.
   const liveByKey = new Map(live.map((item) => [secretKey(item.name), item.name]));
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
   const planned: NestedPlan = { ops: [], notes: [] };
@@ -490,17 +418,15 @@ async function planEnvironmentSecrets(
         : [
             `${label}[${name}]: missing - declared in the settings file but not on the environment; apply will create it`,
           ],
-      // Existence from the listing decides the verb; the PUT's own 201/204
-      // says the same thing but the executor deliberately does not surface
-      // statuses.
+      // The listing decides the verb: the PUT's own 201/204 would say the same, but the executor
+      // deliberately does not surface statuses.
       change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
       describe: `writing secret "${name}"${suffix}`,
     });
   }
   if (entries.length > 0 && liveEnv !== undefined) {
-    // ONE note per environment (the LFS precedent); an environment the plan
-    // creates already carries the missing-environment note, which says the
-    // same of its whole list.
+    // One note per environment; an environment the plan creates already carries the
+    // missing-environment note, which covers its whole list.
     planned.notes.push(
       `${noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`,
     );

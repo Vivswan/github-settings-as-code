@@ -1,7 +1,6 @@
 /**
- * The labels fuzz fragment: the entry generator walks the LabelConfig slice and the witness derives
- * from the lens, so only the corpus invariants live here (pools, unique identities, sentinels).
- * Imports only the test-tree seams; the bundle entry is src/main.ts, so this never reaches lib/index.js.
+ * The labels fuzz generator fragment. It imports test-tree seams on purpose: the bundle entry is
+ * src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {
@@ -29,9 +28,6 @@ const genLabel = generatorFromSlice(LabelConfig, {
 
 export function genLabels(rng: Rng): Json[] {
   const labels = Array.from({ length: rng.int(4) + 1 }, () => genLabel(rng));
-  // The section's own rule: every identity an entry claims (its name and its
-  // rename target) belongs to one entry, case-insensitively. labels is a
-  // WITNESS section: always the plain array form, never maybeWrapUndeclared.
   return uniqueBy(labels, ["name", "new_name"], nameKey);
 }
 

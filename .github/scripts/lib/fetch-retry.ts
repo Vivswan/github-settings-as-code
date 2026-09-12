@@ -1,12 +1,7 @@
 /**
- * Bounded fetch retry with backoff for the artifact-fetching scripts
- * (trim-openapi.ts, fetch-graphql-schema.ts). Both run on a cache miss
- * inside the CI gate, so a single network blip must not fail all-green;
- * a deterministic failure (a 4xx for a wrong ref or file name) still
- * surfaces immediately for the caller to report with its own advice.
- *
- * Lives under lib/ so knip treats it as project code, not an entry point:
- * if every caller stops importing it, knip flags it as unused.
+ * Bounded fetch retry with backoff for trim-openapi.ts and fetch-graphql-schema.ts, which run on a cache miss inside
+ * the CI gate, so a single network blip must not fail all-green; a deterministic 4xx still surfaces immediately.
+ * Under lib/ so knip treats it as project code: if every caller stops importing it, knip flags it as unused.
  */
 
 const FETCH_ATTEMPTS = 3;
@@ -15,12 +10,11 @@ const BACKOFF_BASE_MS = 2_000;
 /** Statuses below 500 that are still transient, not deterministic. */
 const TRANSIENT_STATUSES = new Set([408, 429]);
 
-/** The outcome of a fetch: the status line plus the fully read body. */
 export interface FetchedText {
   ok: boolean;
   status: number;
   statusText: string;
-  /** The response body; empty on a non-ok response (callers report status). */
+  /** Empty on a non-ok response; callers report the status. */
   text: string;
 }
 
@@ -32,14 +26,8 @@ export interface FetchRetryDeps {
   warn?: (line: string) => void;
 }
 
-/**
- * Fetch `url` and read its whole body, retrying transient failures (network
- * errors, timeouts - including mid-body, so a dropped connection while a
- * multi-MB artifact downloads retries too - 5xx, 408, 429) up to
- * FETCH_ATTEMPTS times with exponential backoff. A deterministic non-ok
- * response (a plain 4xx) is returned as-is with an empty body. `label`
- * names the artifact in retry warnings and the exhaustion error.
- */
+/** Timeouts include mid-body, so a dropped connection while a multi-MB artifact downloads retries too. A deterministic
+ * non-ok response (a plain 4xx) comes back as-is with an empty body rather than retrying. */
 export async function fetchTextWithRetry(
   label: string,
   url: string,
@@ -64,8 +52,7 @@ export async function fetchTextWithRetry(
         };
       }
       if (response.ok) {
-        // The body read shares the attempt's AbortSignal, so a stall here
-        // also times out and lands in the catch below to be retried.
+        // The body read shares the attempt's AbortSignal, so a stall here also times out and is retried.
         const text = await response.text();
         return { ok: true, status: response.status, statusText: response.statusText, text };
       }

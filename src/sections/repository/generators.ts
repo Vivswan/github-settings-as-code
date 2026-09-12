@@ -1,8 +1,6 @@
 /**
- * The repository section's fuzz generator fragment, aggregated by
- * test/e2e/generators.ts. Imports only the test-tree leaf seams
- * (gen-support.ts, prng.ts) - the src -> test inversion is deliberate; the
- * bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The repository fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports only the
+ * test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import type { Json } from "../../../test/e2e/gen-support.js";
@@ -33,9 +31,7 @@ export function genRepository(rng: Rng): Json {
   if (rng.bool(0.3)) {
     repo.enable_immutable_releases = rng.bool();
   }
-  // The GraphQL-routed keys are NEW draws, so they live on a forked stream:
-  // the main stream stays stable and recorded seeds keep reproducing (the
-  // required-signatures precedent in genBranches).
+  // The GraphQL-routed keys are later draws on a forked stream, so recorded seeds keep reproducing.
   const toggleRng = rng.fork("repo-toggles");
   if (toggleRng.bool(0.3)) {
     repo.enable_sponsorships = toggleRng.bool();
@@ -43,7 +39,6 @@ export function genRepository(rng: Rng): Json {
   if (toggleRng.bool(0.3)) {
     repo.issue_creation_policy = toggleRng.pick(["all", "collaborators_only"]);
   }
-  // Always leave at least one key so the section does real work.
   if (Object.keys(repo).length === 0) {
     repo.has_issues = rng.bool();
   }

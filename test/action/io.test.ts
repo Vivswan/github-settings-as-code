@@ -5,11 +5,7 @@ import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
 import { writeSummary } from "../../src/flows/summary.js";
 
-/**
- * Whether `source` names the runner module as a module specifier - a static
- * import, a re-export, a dynamic import(), or a require() all quote it; a
- * comment mentioning it bare does not.
- */
+/** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
 function namesActionsCore(source: string): boolean {
   return /["']@actions\/core["']/.test(source);
 }
@@ -28,9 +24,7 @@ describe("the Io port boundary", () => {
   });
 
   test("only src/action/ names @actions/core", () => {
-    // Every other layer reaches the runner through the Io port, so redaction
-    // and capture have one place to stand. A new direct dependency anywhere
-    // else is a leak this scan names.
+    // Every other layer reaches the runner through the Io port, so redaction and capture have one place to stand.
     const srcDir = join(import.meta.dir, "..", "..", "src");
     const files = readdirSync(srcDir, { recursive: true }) as string[];
     const offenders: string[] = [];
@@ -45,8 +39,7 @@ describe("the Io port boundary", () => {
       }
     }
     expect(offenders).toEqual([]);
-    // The scan saw the tree (a wrong root would pass vacuously), and the one
-    // permitted importer is where the check expects it.
+    // The scan saw the tree (a wrong root would pass vacuously).
     expect(scanned).toBeGreaterThan(50);
     expect(namesActionsCore(readFileSync(join(srcDir, "action", "io.ts"), "utf8"))).toBe(true);
   });

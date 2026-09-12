@@ -1,16 +1,12 @@
 /**
- * The layered merge: an ORDERED list of settings documents folded low to
- * high into one document. Plain objects merge key by key; a higher scalar,
- * array, or YAML-tagged value replaces; a higher `null` deletes what a lower
- * layer declared (reported as a notice) and stays as written when nothing
- * below declares the key, so `pages: null` keeps its engine meaning. The
- * knobbed list sections (UNDECLARED_POLICY_SECTIONS) are the one place lists
- * combine: under "merge", a section whose module declares a `layering` unions
- * its entries by identity (two entries whose key sets intersect are one);
- * every other list is replaced by the higher layer's.
- * A layer that refers back into itself (a YAML anchor aliased inside its own
- * node) is refused at the boundary: layers are trees.
- * Pure: no Io, no GitHub. The helpers merge.ts shares live here too.
+ * The layered merge, folded low to high; pure (no Io, no GitHub), and layers are trees: a document aliasing a node
+ * inside itself is refused. Lists never combine except a knobbed section's entries under "merge", unioned by the
+ * module's key (and the nested lists that key declares).
+ *
+ * higher plain mapping                  -> merged key by key
+ * higher scalar, list, tagged           -> replaces
+ * higher null over a lower declaration  -> deletes it (an opt-out notice)
+ * higher null over nothing, or a null   -> stays as written, so `pages: null` keeps its engine meaning
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -27,7 +23,6 @@ export interface Layer {
   readonly doc: unknown;
 }
 
-/** How a knobbed section combines with the layers below it. */
 export type Layering = "merge" | "replace";
 
 /** A lower declaration a higher layer deleted with `null`. */
@@ -36,7 +31,6 @@ export interface OptOutNotice {
   readonly path: string;
 }
 
-/** The directive key, on a knobbed wrapper or at a document's top level. */
 const LAYERING_KEY = "_layering";
 
 const LAYERINGS: readonly Layering[] = ["merge", "replace"];
@@ -46,20 +40,10 @@ function isLayering(value: unknown): value is Layering {
 }
 
 /**
- * Rewrite each UNDECLARED_POLICY_SECTIONS value from the plain array form to
- * the wrapped one, PRESERVING OMISSION of the policy key - a plain array
- * becomes `{entries}` with NO `_undeclared`. That omission is what lets a
- * merge inherit a lower layer's policy: had the plain form been resolved to
- * its default here, the higher layer's resolved default would overwrite the
- * lower's explicit policy. Values in neither form (null opt-outs, malformed
- * declarations) pass through untouched so the null semantics and post-merge
- * validation see them as written; a wrapper keeps every key it carries,
- * `_layering` included. Returns a shallow copy; the input is never mutated.
+ * A plain array becomes `{entries}` with NO `_undeclared`: that omission is what lets a merge inherit a lower layer's
+ * policy. Resolved to the section default here, a higher layer's default would overwrite the lower's explicit policy.
  */
 function normalizeKnobbedSections(settings: unknown): unknown {
-  // A document that is not a mapping (a raw list, a scalar) has no sections
-  // to normalize; hand it on untouched so the top-level validator still sees
-  // exactly what was written.
   if (!isPlainObject(settings)) {
     return settings;
   }
@@ -73,16 +57,11 @@ function normalizeKnobbedSections(settings: unknown): unknown {
   return out;
 }
 
-/** The section's own default policy, from its undeclaredDefault declaration. */
 function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
   return defaultUndeclaredPolicy(sectionModule(key));
 }
 
-/**
- * After a merge: a wrapped section that still carries no explicit policy
- * resolves to the section's default, so the merged document is
- * self-describing. Runs on the merged document the caller owns.
- */
+/** After the fold, a wrapper still without `_undeclared` takes the section default, so the merged document is self-describing. */
 function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = merged[key];
@@ -93,31 +72,22 @@ function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
 }
 
 /**
- * The clone in progress of every node on the current descent. A node met
- * again while its clone is being built encloses itself and gets that clone,
- * so a cyclic document terminates; a node aliased twice without enclosing
- * itself is cloned per occurrence, in the position each occurrence sits in
- * (a wrapper shared between a private key and `rulesets` is data under one
- * and a keyed list under the other).
+ * The clone in progress of every node on the current descent: a node met again inside itself gets that clone, so a
+ * cyclic document terminates. A node aliased twice WITHOUT enclosing itself is cloned per occurrence, in the position
+ * each sits in (a wrapper shared between a private key and `rulesets` is data under one and a keyed list under the other).
  */
 type Descent = WeakMap<object, unknown>;
 
-/** The keyed layering of a knobbed section's entries; undefined for a section that always replaces. */
 function sectionLayering(key: string): KeyedListLayering | undefined {
   const section = UNDECLARED_POLICY_SECTIONS.find((candidate) => candidate === key);
   return section === undefined ? undefined : sectionModule(section).layering;
 }
 
-/** A value the merge does not merge into: a mapping walks on, anything else is copied as written. */
 function stripValue(value: unknown, descent: Descent): unknown {
   return isPlainObject(value) ? stripMapping(value, undefined, descent) : structuredClone(value);
 }
 
-/**
- * The merge's walk over one mapping (mergeMappings): every null-valued key
- * is a marker and drops; `keyed` names the fields whose lists the merge
- * combines by key, exactly as it names them there.
- */
+/** Mirrors mergeMappings: a null-valued key is a marker and drops, and `keyed` names the same fields it names there. */
 function stripMapping(
   map: Readonly<Record<string, unknown>>,
   keyed: Readonly<Record<string, KeyedListLayering>> | undefined,
@@ -144,12 +114,7 @@ function stripMapping(
   return out;
 }
 
-/**
- * A keyed list as the merge combines it (unionKeyed): only a "merge"-combined
- * list is entered, its mapping entries walked with their own nested keyed
- * lists; a "replace"-combined list, or a value that is not a list, is data
- * the merge copies as written, nulls included.
- */
+/** Mirrors unionKeyed: the same lists are entered. */
 function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descent): unknown {
   if (!Array.isArray(list) || keyed.combine === "replace") {
     return stripValue(list, descent);
@@ -170,15 +135,12 @@ function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descen
 }
 
 /**
- * Drop every null the merge would read as a marker, so a layer validated on
- * its own is seen as the merge could leave it: null-valued mapping keys at
- * any depth the merge walks, including inside the entries of a keyed list it
- * combines by key (`rulesets[main].bypass_actors: null`). Every other list is
- * data the merge copies as written, so a null inside one stays for the
- * validator to judge (`branches[].protection: null`, a null list element). A
- * knobbed section is read in either of its forms, the plain list or the
- * wrapper. Returns a fresh document; a cyclic input yields a cyclic clone,
- * finite like the input (the merge is what refuses those).
+ * A layer validated on its own is seen as the merge could leave it: every null the merge would read as a marker drops,
+ * every other null stays for the validator to judge. A cyclic input yields a cyclic clone; the merge is what refuses those.
+ *
+ * `rulesets[main].bypass_actors: null`  -> dropped (a mapping key inside a keyed list the merge combines)
+ * `branches[].protection: null`         -> kept (inside a list the merge copies as written)
+ * a null list element                   -> kept
  */
 export function stripNulls(doc: unknown): unknown {
   if (!isPlainObject(doc)) {
@@ -209,59 +171,44 @@ export function stripNulls(doc: unknown): unknown {
 type Refusal = DistributiveOmit<LayerProblem, "layer" | "site">;
 
 /**
- * A refusal at `site` of `layer`. INVARIANT, pinned by the marker test in
- * test/engine/layers.test.ts: `actual` is the only document value a refusal
- * carries (describeProblem describes it by shape); `keyField` is the module's
- * declared key field; `site` is built from section keys, entry indices,
- * module-declared field names, LAYERING_KEY, and the fixed phrase "the
- * document". A document key or value never enters the prose.
+ * No document key or value ever enters a refusal's prose; the marker test in test/engine/layers.test.ts pins it.
+ *
+ * `actual`    -> the only document value carried, and describeProblem describes it by shape
+ * `keyField`  -> the module's declared key field
+ * `site`      -> section keys, entry indices, module-declared field names, LAYERING_KEY, "the document"
  */
 function refuse(layer: string, site: string, refusal: Refusal): Result<never, LayerProblem> {
   return err({ layer, site, ...refusal });
 }
 
-/**
- * An opt-out notice's prose; value-free under the same invariant as the
- * refusals (mode: merge has no redaction context, so no document value may
- * reach a log through the merge).
- */
+/** Value-free under the refusals' invariant: mode: merge has no redaction context, so no document value may reach a log through the merge. */
 export function describeOptOut(notice: OptOutNotice): string {
   return `${notice.layer}: null removed ${notice.path} declared by a lower layer`;
 }
 
-/** The fold state one layer's step reads and reports into. */
 interface Step {
   readonly layer: string;
   readonly notices: OptOutNotice[];
 }
 
-/** A knobbed section of one admitted layer, ready to combine. */
 interface AdmittedSection {
-  /** The wrapper's keys besides `entries` and `_layering` (`_undeclared`, or a typo for validation). */
+  /** The wrapper's keys besides `entries` and `_layering`: `_undeclared`, or a typo kept for validation to name. */
   readonly knobs: Readonly<Record<string, unknown>>;
   readonly entries: readonly Readonly<Record<string, unknown>>[];
-  /** How this section combines with the layers below it in this step. */
   readonly layering: Layering;
-  /** The section module's keyed layering, absent for a section that always replaces. */
   readonly keyed: KeyedListLayering | undefined;
 }
 
-/** One layer past the boundary: every knobbed section checked and typed, the rest as written. */
 interface AdmittedLayer {
   readonly name: string;
   readonly doc: Readonly<Record<string, unknown>>;
   readonly sections: ReadonlyMap<string, AdmittedSection>;
 }
 
-/** The entries as mappings, or null when one is not. */
 function asMappings(list: readonly unknown[]): readonly Readonly<Record<string, unknown>>[] | null {
   return list.every(isPlainObject) ? list : null;
 }
 
-/**
- * The entries as mappings, or a refusal naming the first that is not, by its
- * index under `path` and its shape.
- */
 function admitEntries(
   layer: string,
   path: string,
@@ -279,14 +226,7 @@ function admitEntries(
   });
 }
 
-/**
- * Refuse a keyed list a layer declares with an entry that carries no key or
- * two entries claiming one key (a label renaming into a sibling's name), at
- * any nesting the declaration names; each entry's nested keyed lists are
- * checked the same way. Past this check, every entry of the list has keys
- * and no two claim one, so a layer's entries never collide among themselves
- * in the union.
- */
+/** Two entries of one layer claiming a key (a label renaming into a sibling's name) are refused here, so unionKeyed never meets them. */
 function checkKeyed(
   layer: string,
   entries: readonly Readonly<Record<string, unknown>>[],
@@ -328,10 +268,6 @@ function checkKeyed(
   return ok();
 }
 
-/**
- * The top-level `_layering` of a document, validated; undefined when absent.
- * Consumed here, so it never reaches the merged document.
- */
 function fileLayering(
   layer: string,
   doc: Readonly<Record<string, unknown>>,
@@ -346,7 +282,6 @@ function fileLayering(
   return ok(value);
 }
 
-/** One knobbed section past the boundary, or a refusal naming the layer and the section. */
 function admitSection(
   layer: string,
   key: UndeclaredPolicySection,
@@ -382,11 +317,8 @@ function admitSection(
 }
 
 /**
- * Whether a node refers back into itself through lists and plain mappings (a
- * YAML anchor aliased inside its own node). A node aliased twice without
- * enclosing itself is a tree to the merge, which clones it per site, so only
- * a node on the current descent counts; a node fully walked without one is
- * never entered again.
+ * Only a node on the current descent counts: a node aliased twice without enclosing itself is a tree to the merge, which
+ * clones it per site. `walked` keeps a fully walked node from being entered again.
  */
 function hasCycle(value: unknown, descent: WeakSet<object>, walked: WeakSet<object>): boolean {
   if (!Array.isArray(value) && !isPlainObject(value)) {
@@ -407,10 +339,8 @@ function hasCycle(value: unknown, descent: WeakSet<object>, walked: WeakSet<obje
 }
 
 /**
- * The layer boundary: a cyclic document is refused before anything walks it;
- * a non-mapping document passes as written (the top-level validator names
- * it); a mapping has its directive and every knobbed section checked once, so
- * the fold below never meets an unkeyed or duplicated entry.
+ * The layer boundary: past it the fold never meets a cycle, an unkeyed entry, or a duplicated key. A non-mapping
+ * passes as written for the top-level validator to name.
  */
 function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerProblem> {
   if (hasCycle(layer.doc, new WeakSet(), new WeakSet())) {
@@ -456,11 +386,6 @@ function put(record: Record<string, unknown>, key: string, value: unknown): void
   });
 }
 
-/**
- * A higher `null`: deletes a lower declaration and says so, or stays as
- * written when nothing below declares the key. A lower null is not a
- * declaration, so nulling it again is not an opt-out and earns no notice.
- */
 function applyNull(out: Record<string, unknown>, key: string, path: string, step: Step): void {
   const lower = own(out, key);
   if (lower !== undefined && lower !== null) {
@@ -471,10 +396,6 @@ function applyNull(out: Record<string, unknown>, key: string, path: string, step
   put(out, key, null);
 }
 
-/**
- * A higher value over a lower one: mappings merge key by key (with `keyed`
- * naming the nested keyed lists, see mergeMappings), anything else replaces.
- */
 function mergeValue(
   below: unknown,
   above: unknown,
@@ -488,11 +409,6 @@ function mergeValue(
   return structuredClone(above);
 }
 
-/**
- * Key-by-key merge of two mappings; `keyed` names the fields whose arrays on
- * both sides are keyed lists (a merged ruleset's `rules`). Lower key order is
- * preserved and higher-only keys follow.
- */
 function mergeMappings(
   below: Readonly<Record<string, unknown>>,
   above: Readonly<Record<string, unknown>>,
@@ -521,11 +437,7 @@ function mergeMappings(
   return out;
 }
 
-/**
- * A higher entry's place in the union: at the slot of the first lower entry it
- * matches, or appended. `index` is its position in the higher list, which is
- * how the layer's notices name it.
- */
+/** `index` is the entry's position in the higher list, which is how the layer's notices name it. */
 type Placement =
   | {
       readonly item: Readonly<Record<string, unknown>>;
@@ -536,17 +448,9 @@ type Placement =
   | { readonly item: unknown; readonly slot: undefined };
 
 /**
- * The keyed union. A higher entry supersedes every lower entry it matches
- * (their key sets intersect) and stands where the first of them stood: under
- * "replace" as written, under "merge" merged key by key into that first one,
- * with its own nested keyed lists. Unmatched lower entries keep their order;
- * higher-only entries append in theirs. Matching reads the lower list as it
- * stood before this layer, so which entries result does not depend on the
- * higher entries' order (only their order within one slot does): a lower
- * entry two higher entries claim between them is superseded by both, and
- * since the boundary keeps a layer's entries key-disjoint, the result is one
- * the section's planner accepts. Total over whatever the lists hold: an item
- * without keys pairs with nothing.
+ * Matching reads the lower list as it stood before this layer, so which entries result does not depend on the higher
+ * entries' order; a lower entry two higher entries claim is superseded by both, and checkKeyed's key-disjointness keeps
+ * the result one the section's planner accepts.
  */
 function unionKeyed(
   lower: readonly unknown[],
@@ -590,12 +494,6 @@ function unionKeyed(
   return out;
 }
 
-/**
- * One knobbed section over the accumulated document: the knobs merge key by
- * key (an omitted `_undeclared` inherits the lower one), the entries combine
- * per the section's layering in this step. A lower value that is not a
- * wrapper (absent, or a null that stayed as written) declares nothing.
- */
 function mergeSection(
   key: string,
   lower: unknown,
@@ -613,10 +511,8 @@ function mergeSection(
   return out;
 }
 
-/** One fold step: the admitted layer over the accumulated document. */
 function mergeStep(acc: unknown, layer: AdmittedLayer, notices: OptOutNotice[]): unknown {
   const step: Step = { layer: layer.name, notices };
-  // A non-mapping below cannot be merged into; the mapping replaces it.
   const below = isPlainObject(acc) ? acc : {};
   const out: Record<string, unknown> = { ...below };
   for (const [key, value] of Object.entries(layer.doc)) {
@@ -640,15 +536,6 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, notices: OptOutNotice[]):
   return out;
 }
 
-/**
- * Fold the layers low to high into one settings document (see the module
- * header for the dialect). `layering` is the run's default for the knobbed
- * sections; a layer overrides it per section with the wrapper's `_layering`,
- * or for the whole document with a top-level one, both consumed here. The
- * result carries every knobbed section resolved to an explicit policy and
- * never a `_layering` key. Inputs are never mutated; a layer the boundary
- * refuses comes back as the problem naming it.
- */
 export function mergeLayers(
   layers: readonly Layer[],
   options: { readonly layering: Layering },

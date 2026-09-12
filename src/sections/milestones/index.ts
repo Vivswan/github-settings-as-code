@@ -1,8 +1,6 @@
 /**
- * `milestones:` section - upsert by title. Divergence from Probot:
- * undeclared milestones are kept by default (deleting a milestone detaches
- * it from every issue carrying it) and surfaced as notes. The wrapped
- * `_undeclared: delete` form hardens that to deletion, detachment included.
+ * `milestones:` section: upsert by title. Undeclared milestones are kept by default, unlike Probot:
+ * deleting a milestone detaches it from every issue carrying it.
  */
 
 import { z } from "zod";
@@ -23,7 +21,6 @@ import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { MilestoneConfig } from "./schema.js";
 
-/** The fields of a live milestone this section reads; extras ride along. */
 const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
 
 const permission: SectionPermission = { repo: ["issues"] };
@@ -65,8 +62,7 @@ export const milestonesSection = {
       (m) => m.title,
       (m) => m.title,
     );
-    // Closed milestones are still listed under state=all; the default listing
-    // omits them, and a declared closed milestone would read as missing.
+    // The default listing omits closed milestones, so a declared closed one would read as missing.
     const live = parseLive(
       this,
       ENDPOINTS.list,
@@ -81,7 +77,6 @@ export const milestonesSection = {
       declaredKeys.add(milestone.title);
       const label = `milestones[${milestone.title}]`;
       const existing = liveByTitle.get(milestone.title);
-      // Every declared key (including ones this schema does not name) is sent verbatim.
       const payload = plainData({ ...milestone });
       if (existing === undefined) {
         plan.ops.push({

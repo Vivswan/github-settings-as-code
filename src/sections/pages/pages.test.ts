@@ -8,10 +8,7 @@ import { pagesSection } from "./index.js";
 
 const GET = "GET /repos/o/r/pages";
 
-/**
- * A stateful fake of the Pages API: the GET reflects every create, update,
- * and delete, so a plan over executed state sees the converged site.
- */
+/** A stateful fake of the Pages API, so a plan over executed state sees the converged site. */
 function liveRepo(site: Record<string, unknown> | null): GithubClient & { writes: string[] } {
   let live = site;
   return {
@@ -75,7 +72,6 @@ describe("pages", () => {
       notes: [],
       drift: [],
     });
-    // Planning reads and never writes.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([GET]);
   });
 
@@ -112,8 +108,7 @@ describe("pages", () => {
   });
 
   test("a passthrough key named like a prototype member still reaches the second PUT", async () => {
-    // The create body is a plain object, so an `in` check would see
-    // Object.prototype's members and drop such a key from the remainder.
+    // The create body is a plain object, so an `in` check would see Object.prototype's members and drop such a key from the remainder.
     const api = new MockApi({});
     const result = await plan(api, {
       source: { branch: "main" },
@@ -126,8 +121,7 @@ describe("pages", () => {
   });
 
   test("a passthrough value JSON cannot carry is a BUG naming its path, never a wire body", async () => {
-    // Every pages payload crosses plainData(): the loose shape lets an
-    // arbitrary passthrough value through, and only a JSON-plain one may leave.
+    // The loose shape lets an arbitrary passthrough value through; plainData() is where only a JSON-plain one may leave.
     const api = new MockApi({ [GET]: { data: {} } });
     await expect(
       plan(api, { cname: "docs.example.com", hook: () => "x" } as unknown as Parameters<

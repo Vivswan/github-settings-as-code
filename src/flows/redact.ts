@@ -1,14 +1,8 @@
 /**
- * Private-repo redaction: the plan that decides which targets are hidden,
- * the placeholder names that replace their slugs everywhere the run is
- * publicly readable, the per-target channel that routes a redacted target's
- * lines into a transcript and seals its end state, and the projections that
- * open the seal into the public view.
- *
- * GitHub Actions has no log-level access control: run logs, summaries, and
- * outputs inherit the admin repository's visibility. When that repository is
- * public, a target's slug and its live settings would leak. Redaction is the
- * choke point that keeps private and internal targets out of the public view.
+ * GitHub Actions has no log-level access control: run logs, summaries, and outputs inherit the admin repository's
+ * visibility, so a public admin repo would leak a private target's slug and live settings. Redaction is the choke
+ * point: the plan decides which targets hide, the channel routes their lines into a transcript and seals the end state,
+ * and the projections open the seal into the public view.
  */
 
 import type { Target } from "../discovery/targets.js";
@@ -20,27 +14,18 @@ import { revealPrivate } from "../private-open.js";
 import type { RedactedDetail, TargetDetail } from "../report/delivery.js";
 import type { SectionKey } from "../schema.js";
 
-/** The `private-repos` input values; the single source its type derives from. */
 export const PRIVATE_REPOS_POLICIES = ["redact", "show"] as const;
 
 export type PrivateReposPolicy = (typeof PRIVATE_REPOS_POLICIES)[number];
 
-/**
- * The note appended to every redacted line: it names the two escape hatches
- * (opt out, or run from a context where the target's own logs are private).
- */
 export const REDACTED_NOTE =
   "details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository";
 
-/** The placeholder that replaces every hidden detail value in the public view. */
 export const REDACTED_DETAIL = "hidden (private repository)";
 
 /**
- * The notice for a redacted target whose visibility could not be PROVEN
- * private or internal, so the private report was withheld (delivery fails
- * closed the opposite way from redaction). Shared verbatim by the single-
- * and multi-repo run flows - the cause and the fix are slug-free, so one
- * wording serves both without leaking anything.
+ * For a redacted target whose visibility could not be PROVEN private or internal, so the report was withheld (delivery
+ * fails closed the opposite way from redaction). Shared verbatim by both run flows: the cause and the fix are slug-free.
  */
 export const WITHHELD_REPORT_NOTICE =
   "visibility could not be verified (the repository-metadata probe failed or was inconclusive " +
@@ -65,15 +50,11 @@ type RedactedOutcome = {
 };
 
 /**
- * Strip a redacted target's section outcomes to safe values: the key and
- * status (closed enums, provably leak-free) survive, and every detail value is
- * replaced with the placeholder - plus the HTTP code on failed/skipped
- * sections, the one piece of error context that is a safe closed value.
+ * The key and status (closed enums, provably leak-free) survive; every detail value becomes the placeholder plus, on
+ * failed/skipped rows, the HTTP code.
  */
 function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] {
   return outcomes.map((o) => {
-    // The SectionOutcome union proves a code exists only on failed/skipped
-    // rows, so presence alone decides.
     const withCode =
       o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
     return { key: o.key, status: o.status, detail: [withCode] };
@@ -86,11 +67,6 @@ export interface PublicDetail {
   note?: string;
 }
 
-/**
- * The leak-free projection of a target's detail: sealed detail reduces to
- * statuses (plus HTTP codes) and the generic note, open detail passes through
- * byte-identical. The one place a seal opens for a public surface.
- */
 export function publicDetail(detail: TargetOutcome["detail"]): PublicDetail {
   if (isPrivate(detail)) {
     return { outcomes: redactOutcomes(revealPrivate(detail).outcomes), note: REDACTED_NOTE };
@@ -101,7 +77,6 @@ export function publicDetail(detail: TargetOutcome["detail"]): PublicDetail {
   };
 }
 
-/** The public view of one multi-repo target (summary, outputs, annotations). */
 export interface PublicTargetView extends PublicDetail {
   display: string;
   source: Target["source"];
@@ -117,15 +92,13 @@ export function toPublicView(target: TargetOutcome): PublicTargetView {
   };
 }
 
-/** True when a resolved visibility PROVES the repo private or internal. */
 export function isPrivateVisibility(visibility: RepoVisibility): boolean {
   return visibility === "private" || visibility === "internal";
 }
 
 /**
- * The single generic annotation a redacted target gets: a failure names the
- * failed section keys and HTTP codes, a drift its drifted keys (closed values
- * only), a skip is noticed, a healthy run says nothing.
+ * The single generic annotation a redacted target gets, closed values only: failed and drifted section keys, HTTP
+ * codes; a healthy run says nothing.
  */
 export function emitRedactedResult(
   io: Io,
@@ -153,34 +126,19 @@ export function emitRedactedResult(
   }
 }
 
-/**
- * The redaction decision for one run: which slugs are hidden, the
- * placeholder each redacted slug renders as, and the full masked set the
- * caller registers with `io.mask` and the trace hardening. All slug lookups
- * are case-insensitive; a central and a remote entry for the same repository
- * share one placeholder.
- */
 export interface RedactionPlan {
-  /** True when this slug must be hidden from the public view. */
   isRedacted(slug: string): boolean;
-  /** The placeholder for a redacted slug, or the slug itself when not redacted. */
   display(slug: string): string;
   /** Every slug that must be masked: redacted targets plus discovery-filtered privates. */
   maskedSlugs: string[];
 }
 
-/** The plan under `private-repos: show`: nothing is hidden, nothing is masked. */
 const SHOW_EVERYTHING: RedactionPlan = {
   isRedacted: () => false,
   display: (slug) => slug,
   maskedSlugs: [],
 };
 
-/**
- * Build the redaction plan (the identity plan under `show`): private targets
- * get `private repository #N` in target order, discovery-filtered privates are
- * only masked (not targets), and the self slug is never redacted.
- */
 export function planRedaction(
   policy: PrivateReposPolicy,
   orderedTargetSlugs: string[],
@@ -211,7 +169,6 @@ export function planRedaction(
     if (key === self || masked.has(key)) {
       continue;
     }
-    // Discovery-filtered privates are masked but never placeholdered.
     masked.set(key, slug);
   }
 
@@ -223,9 +180,8 @@ export function planRedaction(
 }
 
 /**
- * An Io that lets nothing textual out: annotate/log are recorded for the
- * private report, debug/summary/output are dropped (those surfaces are written
- * from the public view), only the mask registry passes through.
+ * Lets nothing textual out: annotate/log are recorded for the private report, debug/summary/output are dropped (those
+ * surfaces are written from the public view), only the mask registry passes through.
  */
 export function capturingIo(io: Io): { io: Io; drain(): CollectedLine[] } {
   const captured: CollectedLine[] = [];
@@ -244,9 +200,8 @@ export function capturingIo(io: Io): { io: Io; drain(): CollectedLine[] } {
 }
 
 /**
- * The channel one target reports through, opened ONCE from the redaction
- * decision: in the clear it emits publicly and closes open, redacted it
- * captures every line and closes sealed. Processing code holds only this.
+ * Opened ONCE from the redaction decision: in the clear it emits publicly and closes open, redacted it captures every
+ * annotation and log line and closes sealed. Processing code holds only this.
  */
 export interface TargetChannel {
   /** The public label: the slug, or its placeholder. */
@@ -255,11 +210,9 @@ export interface TargetChannel {
   io: Io;
   /** Sink for lines that already name their source (validation warnings): unprefixed, or the same capture. */
   unprefixed: Io;
-  /** Close the channel with the target's section outcomes and skip/failure note. */
   close(outcomes: RepoRunResult["outcomes"], note?: string): TargetOutcome["detail"];
 }
 
-/** A target in the clear; `attributed` prefixes its lines with the slug (multi-repo mode). */
 export function publicChannel(io: Io, slug: string, attributed: boolean): TargetChannel {
   return {
     display: slug,
@@ -269,7 +222,6 @@ export function publicChannel(io: Io, slug: string, attributed: boolean): Target
   };
 }
 
-/** A redacted target: every line is captured, and the detail closes sealed with the transcript. */
 export function redactedChannel(io: Io, slug: string, display: string): TargetChannel {
   const capture = capturingIo(io);
   return {
@@ -281,8 +233,7 @@ export function redactedChannel(io: Io, slug: string, display: string): TargetCh
 }
 
 /**
- * Run `work` through the channel: a crash (a preflight write attempt naming its
- * path, an engine bug) is the target's failure, spoken only through the
+ * A crash (a preflight write attempt naming its path, an engine bug) is the target's failure, spoken only through the
  * channel's sink, so a redacted repository's text never reaches a top-level handler.
  */
 export async function attempt<T>(
@@ -299,7 +250,6 @@ export async function attempt<T>(
   }
 }
 
-/** Open a multi-repo target's channel from the plan; lines in the clear carry the slug prefix. */
 export function openTargetChannel(plan: RedactionPlan, io: Io, slug: string): TargetChannel {
   return plan.isRedacted(slug)
     ? redactedChannel(io, slug, plan.display(slug))

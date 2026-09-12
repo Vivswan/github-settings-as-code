@@ -41,10 +41,7 @@ function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: s
   };
 }
 
-/**
- * Brand test fixtures through the REAL boundary: an invalid fixture fails
- * here instead of riding a cast into runForRepo.
- */
+/** Brand fixtures through the REAL boundary: an invalid fixture fails here instead of riding a cast into runForRepo. */
 function validated(doc: SettingsFile): ValidatedSettings {
   const silent: Io = {
     annotate: () => {},
@@ -107,11 +104,6 @@ describe("runForRepo", () => {
     expect(logs[0]).toStartWith("o/r: drift: repository.has_wiki");
   });
 
-  /**
-   * Run one section with its plan() stubbed to record the declared value it
-   * receives; the recorded values are the preflight probe's and the apply
-   * pass's, in that order.
-   */
   async function receivedBy<S extends { plan: (ctx: never, desired: never) => Promise<unknown> }>(
     section: S,
     raw: SettingsFile,
@@ -145,8 +137,7 @@ describe("runForRepo", () => {
   };
 
   test("a mapping section receives zod's parsed copy: own __proto__ dropped at every schema node, a passthrough subtree by reference (its own __proto__ ships verbatim)", async () => {
-    // JSON.parse creates "__proto__" as an OWN key; the control proves the raw
-    // document carries it at every level before the hand-off is tested.
+    // JSON.parse creates "__proto__" as an OWN key; the control proves the raw document carries it at every level.
     const raw = JSON.parse(
       '{"pages":{"source":{"branch":"main","__proto__":{"planted":1}},"__proto__":{"planted":2},"cname":"docs.example.com","extra":{"__proto__":{"planted":3},"k":1}}}',
     );
@@ -164,9 +155,7 @@ describe("runForRepo", () => {
     });
     prototypeClean(desired);
     prototypeClean(desired.source);
-    // The deliberate residual: the shape describes no node under `extra`, so
-    // the value rides by reference and reaches GitHub as written, as it
-    // always has.
+    // The deliberate residual: the shape describes no node under `extra`, so the value rides by reference and reaches GitHub as written.
     expect(desired.extra).toBe(raw.pages.extra);
   });
 
@@ -191,8 +180,7 @@ describe("runForRepo", () => {
     prototypeClean(wrappedDesired);
     prototypeClean(wrappedDesired.entries[0] as object);
 
-    // The wrapper is this action's own strict vocabulary, so an own
-    // "__proto__" there is an unrecognized key and fails validation upfront.
+    // The wrapper is this action's own strict vocabulary, so an own "__proto__" there is an unrecognized key and fails validation upfront.
     const polluted = JSON.parse(
       '{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}',
     );
@@ -247,10 +235,8 @@ describe("runForRepo secret references", () => {
       trackingIo,
     );
     expect(result.result).toBe("applied");
-    // The plaintext was registered with masking BEFORE any write left the client.
     expect(masked).toEqual(["s3cret-plaintext"]);
     expect(mutationsAtMaskTime).toEqual([0]);
-    // ...and the handler sent the resolved plaintext, not the reference.
     const post = api.mutations()[0]?.payload as { config?: { secret?: string } };
     expect(post?.config?.secret).toBe("s3cret-plaintext");
   });
@@ -359,9 +345,7 @@ describe("validateSettingsDoc", () => {
   });
 
   test("a YAML-tagged top-level value (a Date) is rejected, never branded", () => {
-    // parse("!!timestamp ...") returns a Date - an object with no keys - and
-    // branding it valid would turn the whole document into a silent green
-    // no-op. Only a plain-prototype mapping may pass the boundary.
+    // parse("!!timestamp ...") returns a Date, an object with no keys; branding it valid would turn the whole document into a silent green no-op.
     const { io } = captureIo();
     const tagged = err({ code: "settings-not-plain-mapping" as const, source: "f.yml" });
     expect(validateSettingsDoc(new Date(0), "f.yml", new Set(), io)).toEqual(tagged);
@@ -391,8 +375,7 @@ describe("worstOf", () => {
 
 describe("preflightProbe", () => {
   test("preflight swallows an ordinary probe error, and the section loop reports it as the section's failure", async () => {
-    // A section cannot write during the probe (its port binds reads only), so the only
-    // preflight-specific outcome is a denial; any other failure is left to the section loop.
+    // A section cannot write during the probe (its port binds reads only), so the only preflight-specific outcome is a denial.
     const failure = "some transient probe failure";
     const planSpy = spyOn(pagesSection, "plan").mockRejectedValue(new Error(failure));
     const api = new MockApi({});
@@ -413,9 +396,6 @@ describe("preflightProbe", () => {
 });
 
 describe("runForRepo plan sections", () => {
-  // workflows is the plan-contract section: the engine plans it in both
-  // modes and only apply executes, so these are the engine-level twins of
-  // the section's own plan() tests.
   const WORKFLOWS_LIST = "GET /repos/o/r/actions/workflows?per_page=100&page=1";
   const live = {
     total_count: 2,
@@ -432,8 +412,7 @@ describe("runForRepo plan sections", () => {
   });
 
   test("check mode renders the plan as drift and issues zero writes even with drift", async () => {
-    // The fake would ACCEPT a write (unroutedMutations: succeed), so a write
-    // reaching it would be recorded, not thrown: the zero below is the proof.
+    // The fake would ACCEPT a write (unroutedMutations: succeed), so a write reaching it would be recorded, not thrown: the zero is the proof.
     const api = new MockApi({ [WORKFLOWS_LIST]: { data: live } }, { unroutedMutations: "succeed" });
     const { io, logs } = captureIo();
     const result = await runForRepo(api, opts({ mode: "check", settings: drifting }), io);
@@ -491,9 +470,8 @@ describe("runForRepo plan sections", () => {
   });
 
   test("a failure mid-plan reports the notes and the operations that already applied", async () => {
-    // Two PUTs planned, the second rejected, plus an op-less finding: the
-    // first change is real (no transactions) and, with the note, must show
-    // in the log and the failed outcome instead of vanishing behind the error.
+    // The first change is real (no transactions) and, with the op-less note, must show in the log and the failed outcome instead of vanishing behind
+    // the error.
     const api = new MockApi({
       [WORKFLOWS_LIST]: { data: live },
       "PUT /repos/o/r/actions/workflows/1/disable": { data: null },
@@ -536,8 +514,8 @@ describe("runForRepo plan sections", () => {
   });
 
   describe("a stubbed plan", () => {
-    // No registered plan section tolerates a status or renders from the
-    // response yet, so the workflows plan is stubbed through the erased view.
+    // The workflows plan is stubbed through the erased view so the tests can hand the orchestrator tolerate, facet, and response-rendering ops
+    // directly.
     let stubbed: ReturnType<typeof spyOn<typeof workflowsSection, "plan">> | undefined;
     const disable = workflowsSection.endpoints.disable;
     afterEach(() => {
@@ -640,9 +618,7 @@ describe("runForRepo plan sections", () => {
     });
 
     test("a change thunk failing after its request landed reports a partial mutation, not a clean failure", async () => {
-      // The first operation's PUT is accepted, then its thunk throws: no
-      // change line rendered, but the repository changed, and the failure
-      // must say so instead of reading as "nothing was written".
+      // The PUT landed, then the thunk threw: the repository changed, and the failure must say so instead of reading as "nothing was written".
       stub({
         ...disabling("1"),
         change: () => {
@@ -667,8 +643,7 @@ describe("runForRepo plan sections", () => {
   });
 
   test("a denial after an operation landed fails the run even under the warn policy", async () => {
-    // The first PUT succeeds and the second is denied. A skip would claim the
-    // repository was left alone; it was not, so the policy cannot soften it.
+    // A skip would claim the repository was left alone; it was not, so the policy cannot soften it.
     const api = new MockApi({
       [WORKFLOWS_LIST]: { data: live },
       "PUT /repos/o/r/actions/workflows/1/disable": { data: null },

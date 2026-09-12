@@ -1,10 +1,7 @@
-# The import layering of src/: one declaration, two readers. `bun run lint:arch`
-# (.github/scripts/arch-lint.ts) fails on an import between two layers that is
-# not listed under `edges`, and on a listed edge no file draws; `bun run
-# build:docs` renders the same list as the module map in
-# docs/reference/architecture.md. An edge counts whether the import is runtime
-# or type-only. Imports inside one layer are not edges. The e2e fragments
-# beside each section (mock.ts, generators.ts) are test code and excluded.
+# The import layering of src/: one declaration, two readers. An edge counts whether the import is runtime or
+# type-only; imports inside one layer are not edges.
+#   bun run lint:arch (.github/scripts/arch-lint.ts)  -> fails on an import between layers not under `edges`, and on a listed edge no file draws
+#   bun run build:docs                                -> renders the same list as the module map in docs/reference/architecture.md
 
 layers:
   main: [src/main.ts]

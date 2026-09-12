@@ -1,8 +1,6 @@
 /**
- * The workflows section's e2e mock fragment, registered in
- * test/e2e/mock/sections.ts. Imports the test-tree seams (mock/support.ts)
- * on purpose - the bundle entry is src/main.ts, so this fragment never
- * reaches lib/index.js - and never routes.ts or sections.ts.
+ * The workflows e2e mock fragment (registered in test/e2e/mock/sections.ts). It imports the
+ * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
 import {

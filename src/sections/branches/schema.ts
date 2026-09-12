@@ -4,7 +4,6 @@ import { z } from "zod";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
 
-/** A parsed force_push_bypassers actor string. */
 export type BypassActor =
   | { kind: "user"; login: string }
   | { kind: "team"; org: string; team: string }
@@ -12,12 +11,7 @@ export type BypassActor =
 
 const NAME_SEGMENT = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*)$/;
 
-/**
- * Parse one declared actor string, or null when it fits no form: a bare
- * login is a user, "org/team-slug" is a team, and "app/slug" is a GitHub
- * App (the "app" head is reserved; an organization named "app" cannot be
- * addressed as a team holder here).
- */
+/** The lowercase "app" head is reserved for GitHub Apps. */
 export function parseBypassActor(raw: string): BypassActor | null {
   const parts = raw.split("/");
   if (parts.length === 1) {
@@ -37,7 +31,6 @@ export function parseBypassActor(raw: string): BypassActor | null {
 const ACTOR_FORM_ERROR =
   'each force_push_bypassers actor must be a bare user login ("octocat"), "org/team-slug" for a team, or "app/slug" for a GitHub App';
 
-/** The first duplicate under case-insensitive comparison, or null. */
 function duplicateIn(list: readonly string[]): string | null {
   const seen = new Set<string>();
   for (const item of list) {
@@ -77,11 +70,9 @@ export const BranchConfig = z
     protection: BranchProtectionConfig.nullable(),
   })
   .superRefine((entry, refineCtx) => {
-    // The routed lists are replace-wholesale semantics keyed by actor or
-    // environment identity, which GitHub canonicalizes case-insensitively:
-    // a duplicate would apply "successfully" and then drift forever
-    // against the deduplicated read-back, so both lists reject them
-    // upfront (rejectDuplicates' precedent, at the field level).
+    // GitHub canonicalizes actor and environment names case-insensitively and the routed lists
+    // replace wholesale, so a duplicate would apply "successfully" and then drift forever against
+    // the deduplicated read-back.
     const routed = entry.protection;
     if (routed !== null) {
       const duplicateActor = duplicateIn(routed.force_push_bypassers ?? []);
@@ -109,5 +100,4 @@ export const BranchConfig = z
   .meta({ id: "BranchConfig" });
 export type BranchConfig = z.infer<typeof BranchConfig>;
 
-/** The `branches:` document slice: the entry list the document composes from. */
 export const BranchesConfig = z.array(BranchConfig);

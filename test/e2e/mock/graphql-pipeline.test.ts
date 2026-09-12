@@ -1,18 +1,9 @@
 /**
- * The mock's GraphQL pipeline, tested at three levels:
- *   - through the wire (startMockServer + fetch) for the parts that need no
- *     declared operation: the POST-only rule, the body-shape rule, and the
- *     unknown-operationName violation (the fixture names below are declared
- *     by no section, so they stay unknown at the wire);
- *   - through handleGraphqlRequest with FIXTURE operation/handler tables (the
- *     same injectable-dictionary idiom as assertHandlerCompleteness) for
- *     dispatch, the check-mode barrier, the permission gate and denial
- *     barrier, slug resolution from variables and node ids, the
- *     declared-outcomes response guard, and the fault/corruption hooks;
- *   - through the PRODUCTION tables for the pinned-environments position
- *     semantics the mock must model exactly (verified live behavior: tail
- *     appends via a monotonic counter, holes on unpin, renormalization only
- *     on reorder).
+ * The mock's GraphQL pipeline at three levels. The fixture operations below are declared by no
+ * section, so at the wire they stay unknown and only the rules needing no declared op are tested.
+ *   wire (startMockServer + fetch)          -> POST-only, body shape, unknown operationName
+ *   handleGraphqlRequest with fixture tables -> dispatch, barriers, gate, slug resolution, faults
+ *   the production tables                    -> pinned-environments positions (verified live)
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -95,7 +86,6 @@ const HANDLERS: Record<string, GraphqlHandler> = {
   },
 };
 
-/** The wire body for a fixture operation. */
 function gqlBody(op: TaggedGraphqlOp, variables: Json): Json {
   return { query: op.query, operationName: op.name, variables };
 }
@@ -114,7 +104,6 @@ function baseLog(body: unknown): LoggedRequest {
   return { method: "POST", pathname: "/graphql", query: "", status: 0, body };
 }
 
-/** Dispatch one fixture operation through the pipeline branch. */
 function dispatch(op: TaggedGraphqlOp, variables: Json, opts: PipelineOptions, method = "POST") {
   const body = gqlBody(op, variables);
   return handleGraphqlRequest({ method, body }, opts, baseLog(body), OPS, HANDLERS);
@@ -211,8 +200,8 @@ describe("GraphQL dispatch and logging", () => {
   });
 
   test("sectionForRequest attributes a /graphql request through its body", () => {
-    // Attribution reads the live registry, where no section declares ops yet,
-    // so an unknown name resolves null - the REST fallback stays intact.
+    // The live registry declares no "RepoToggles", so attribution resolves null and the REST
+    // fallback stays intact.
     expect(sectionForRequest("POST", "/graphql", gqlBody(G_READ, {}))).toBeNull();
     expect(sectionForRequest("GET", `/repos/${OWNER}/${REPO}`)).toBe("repository");
   });
@@ -326,8 +315,6 @@ describe("GraphQL denial barrier (shared with REST)", () => {
       data: null,
       errors: graphqlDenialErrors("fine_grained", "read"),
     });
-    // The write is denied on its own merits (an ordinary FORBIDDEN, no
-    // barrier violation) and leaves the state untouched.
     const wikiBefore = state.repo.has_wiki;
     const write = dispatch(
       G_WRITE,
@@ -463,7 +450,6 @@ describe("GraphQL response guard and chaos", () => {
     expect(faulted.response.status).toBe(403);
     expect(faulted.offSpecBody).toBe(true);
     expect(opts.faultCounts.get("repository.gToggles")).toBe(1);
-    // The fault budget spent, the next request serves normally.
     const next = dispatch(G_READ, { owner: OWNER, repo: REPO }, opts);
     expect(next.response.status).toBe(200);
   });
@@ -494,10 +480,6 @@ describe("assertGraphqlHandlerCompleteness", () => {
 });
 
 describe("pinned-environments position semantics (production tables)", () => {
-  // The DEFAULT ops/handlers serve these dispatches, so what is pinned here
-  // is the real mock's model of the verified live behavior: a new pin
-  // appends at a monotonic counter, an unpin leaves a hole, and only the
-  // reorder mutation renormalizes the numbering.
   const pinOp = allGraphqlOps()["environments.pin"] as TaggedGraphqlOp;
   const reorderOp = allGraphqlOps()["environments.reorder"] as TaggedGraphqlOp;
 

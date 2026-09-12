@@ -1,8 +1,6 @@
 /**
- * The workflow-snippet version-pin sweep shared by the README and guides
- * tests: one home for the manifest read, the pre-release guard, the major
- * derivation, and the uses:-pin pattern, so the two tests cannot drift on
- * what counts as a pin. Callers keep their own file sets and messages.
+ * One home for the manifest read, the pre-release guard, the major derivation, and the uses:-pin pattern, so the README and guides tests cannot drift
+ * on what counts as a pin.
  */
 
 import { readFileSync } from "node:fs";
@@ -18,12 +16,7 @@ export interface StalePin {
   text: string;
 }
 
-/**
- * Scan `files` for `uses:` pins of this action and report the current moving
- * major tag, the total pin count, and every pin naming anything else. Returns
- * null before the first release (manifest version 0.0.0), when no tag exists
- * and no pin can be right yet.
- */
+/** Returns null before the first release (manifest version 0.0.0), when no tag exists and no pin can be right yet. */
 export function stalePins(
   files: ReadonlyArray<{ label: string; text: string }>,
 ): { major: string; references: number; stale: StalePin[] } | null {

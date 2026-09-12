@@ -1,8 +1,3 @@
-/**
- * Cross-checks the noble sealed box against libsodium in both directions, and
- * pins fixed vectors that lock the construction with no libsodium in the loop.
- */
-
 import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
 import {
@@ -84,9 +79,8 @@ describe("sealBox against libsodium", () => {
 });
 
 describe("fixed vectors (no libsodium in the loop)", () => {
-  // Recipient secret key 01..20 and ephemeral secret key a0..bf; the expected
-  // bytes came from libsodium's crypto_scalarmult_base, crypto_generichash(24)
-  // and crypto_box_easy run by hand with the same ephemeral key.
+  // Recipient secret key 01..20, ephemeral secret key a0..bf; the expected bytes came from libsodium's crypto_scalarmult_base,
+  // crypto_generichash(24), and crypto_box_easy run by hand.
   const recipientSecretKey = fromHex(
     "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
   );

@@ -1,10 +1,7 @@
 /**
- * The single-repo run flow: one local settings file applied to, or checked
- * against, one repository. The file is operator-authored, so its read, parse,
- * and validation errors name only the local path and never redact. Only the
- * engine's live-value output and the fail/preflight annotations can carry the
- * target's state, so those go through the target's channel, which captures
- * them when the target is a different, non-public repository.
+ * The single-repo run flow. The file is operator-authored, so its read, parse, and validation errors name only the local
+ * path and never redact; only the engine's output and the fail/preflight annotations can carry the target's state, so
+ * those go through the target's channel, which captures them when the target is a different, non-public repository.
  */
 
 import { ResultAsync } from "neverthrow";
@@ -35,15 +32,10 @@ import { readSettingsFile } from "./settings-read.js";
 
 export interface SingleConfig extends RunFlowConfig {
   repo: RepoRef;
-  /** The local settings file, read and validated before the target is touched. */
   settingsFile: string;
 }
 
-/**
- * Open the single-repo target's channel, masking its slug when redacted.
- * Redaction fails closed: the target is hidden unless the probe proves it
- * public (the self repository and the `show` policy skip the probe).
- */
+/** Redaction fails closed: the target is hidden unless the probe proves it public (the self repository and the `show` policy skip the probe). */
 async function openSingleRepoChannel(
   api: GithubClient,
   cfg: Pick<SingleConfig, "privateRepos" | "repo" | "selfSlug">,
@@ -70,15 +62,8 @@ async function openSingleRepoChannel(
   };
 }
 
-/** The one target's outcome; the source is implied (the local settings file). */
 export type SingleOutcome = Omit<TargetOutcome, "source">;
 
-/**
- * Run one repository from its settings file. A problem before the target runs
- * (no uploader for the artifact channel, an unreadable or invalid settings
- * file) comes back as the error; otherwise the target's outcome, which
- * concludeRun turns into the summary, the outputs, and the exit code.
- */
 export function runSingle(
   api: GithubClient,
   cfg: SingleConfig,
@@ -93,7 +78,6 @@ export function runSingle(
     );
 }
 
-/** The target's run, past every check that could refuse it: open its channel, run, deliver. */
 async function runTarget(
   api: GithubClient,
   cfg: SingleConfig,

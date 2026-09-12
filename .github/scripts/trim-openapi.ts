@@ -1,18 +1,12 @@
 /**
- * Trim the published GitHub OpenAPI description down to exactly the paths the
- * action can reach, and write it to disk. The e2e validator (test/e2e/openapi/
- * validate.ts) loads the trimmed spec from disk - never the network - so runs
- * stay hermetic and fast; this script is the ONLY thing that touches the
- * network. The output is a FETCHED, gitignored artifact (a ~2MB generated blob
- * kept out of history): local devs run this once, and CI restores it from
- * actions/cache or re-fetches on a miss.
+ * Trims the published GitHub OpenAPI description to exactly the paths the action can reach and writes it to disk.
+ * This script is the ONLY thing that touches the network; the output is a fetched, gitignored artifact (~2MB).
+ *   test/e2e/openapi/validate.ts  -> loads it from disk
+ *   local dev                     -> runs this once
+ *   CI                            -> restores it from cache, re-fetches on a miss
+ *   UPSTREAM_REF                  -> PINNED to a commit SHA, so two runs months apart produce byte-identical output from the same USED_PATHS
  *
- * Run: `bun .github/scripts/trim-openapi.ts` (writes the trimmed JSON in place).
- * Re-run whenever USED_PATHS changes (a new section endpoint) or to adopt a
- * newer upstream ref.
- *
- * The upstream ref is PINNED to a commit SHA, not a moving branch, so two runs
- * months apart produce byte-identical output from the same USED_PATHS.
+ * Run: `bun .github/scripts/trim-openapi.ts`; re-run when USED_PATHS changes or after bumping UPSTREAM_REF.
  */
 
 import { renameSync, writeFileSync } from "node:fs";
@@ -21,19 +15,10 @@ import { DEFAULT_API_VERSION } from "../../src/github/api.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
 import { fetchTextWithRetry } from "./lib/fetch-retry.js";
 
-/**
- * The github/rest-api-description commit the trimmed spec is cut from. Bump
- * this (and re-run) to adopt upstream changes; pinning to a SHA keeps the
- * output reproducible.
- */
 const UPSTREAM_REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
 
-/**
- * The ref actually fetched: the TRIM_UPSTREAM_REF environment variable
- * overrides the pin for one run (the nightly upstream probe points it at the
- * latest descriptor); unset or blank means the pinned SHA, so default runs
- * stay byte-identical.
- */
+/** TRIM_UPSTREAM_REF overrides the pin for one run (the nightly upstream probe points it at the latest descriptor);
+ * unset or blank means the pinned SHA, so default runs stay byte-identical. */
 const REF = resolveRef(process.env.TRIM_UPSTREAM_REF);
 
 function resolveRef(override: string | undefined): string {
@@ -41,8 +26,7 @@ function resolveRef(override: string | undefined): string {
   if (!ref) {
     return UPSTREAM_REF;
   }
-  // The ref lands in a URL path: refuse anything that could reshape the URL
-  // (query, fragment, traversal) instead of fetching something surprising.
+  // The ref lands in a URL path: refuse anything that could reshape the URL (query, fragment, traversal).
   if (!/^[A-Za-z0-9._/-]+$/.test(ref) || ref.includes("..")) {
     throw new Error(
       `TRIM_UPSTREAM_REF "${ref}" is not a plain git ref (letters, digits, ".", "_", "/", "-"; no "..")`,
@@ -51,11 +35,8 @@ function resolveRef(override: string | undefined): string {
   return ref;
 }
 
-/**
- * The dereferenced (no $ref) descriptor for our pinned API version. Dereferenced
- * so the trimmed slice is self-contained: keeping a path drags its inlined
- * schemas along, with no components/schemas graph to also carry.
- */
+/** The dereferenced (no $ref) descriptor, so the trimmed slice is self-contained: keeping a path drags its inlined
+ * schemas along, with no components/schemas graph to also carry. */
 const SPEC_URL =
   `https://raw.githubusercontent.com/github/rest-api-description/${REF}` +
   `/descriptions/api.github.com/dereferenced/api.github.com.${DEFAULT_API_VERSION}.deref.json`;
@@ -70,7 +51,6 @@ const OUT_PATH = join(
   "github-openapi.trimmed.json",
 );
 
-/** The minimal OpenAPI shape we read: a paths map plus top-level metadata. */
 interface OpenApiDoc {
   openapi: string;
   info: unknown;
@@ -78,14 +58,9 @@ interface OpenApiDoc {
   [key: string]: unknown;
 }
 
-/** Abandon a fetch attempt if the (large) descriptor has not arrived in this long. */
 const FETCH_TIMEOUT_MS = 60_000;
 
 async function fetchSpec(url: string): Promise<OpenApiDoc> {
-  // Per-attempt timeout plus bounded retry (lib/fetch-retry.ts): a hung
-  // connection or a transient blip - even mid-download - fails loudly with
-  // advice instead of the script stalling forever, or one blip failing the
-  // whole CI gate.
   const fetched = await fetchTextWithRetry("OpenAPI descriptor", url, FETCH_TIMEOUT_MS);
   if (!fetched.ok) {
     throw new Error(
@@ -108,17 +83,11 @@ async function fetchSpec(url: string): Promise<OpenApiDoc> {
   return doc;
 }
 
-/**
- * Assert the trimmed slice carries no $ref. The dereferenced descriptor should
- * be fully inlined, but a partial deref upstream (or a wrong file name) could
- * leave dangling $refs the disk-only validator cannot resolve - which would
- * make ajv either throw at compile time or silently skip a subschema. Catching
- * it here, at generation, keeps the trimmed spec self-contained by contract.
- */
+/** A partial deref upstream or a wrong file name would leave dangling $refs the disk-only validator cannot resolve:
+ * ajv would throw at compile time or silently skip a subschema. Caught here, at generation. */
 function assertRefFree(trimmed: OpenApiDoc): void {
   const serialized = JSON.stringify(trimmed);
   if (serialized.includes('"$ref"')) {
-    // Surface a couple of offending paths to make the upstream problem concrete.
     const matches = [...serialized.matchAll(/"\$ref":\s*"([^"]+)"/g)].slice(0, 5);
     const sample = matches.map((m) => m[1]).join(", ");
     throw new Error(
@@ -127,13 +96,9 @@ function assertRefFree(trimmed: OpenApiDoc): void {
   }
 }
 
-/**
- * Keep only the USED_PATHS entries. USED_PATHS spells templates the same way
- * OpenAPI keys them ("/repos/{owner}/{repo}/labels"), so the match is exact
- * string equality - no normalization guessing. A USED_PATHS entry absent from
- * the upstream spec is a hard error: it means the action calls a path GitHub
- * does not document at this version, which the validator could never check.
- */
+/** USED_PATHS spells templates as OpenAPI keys them ("/repos/{owner}/{repo}/labels"), so the match is exact string
+ * equality. An entry absent upstream is a hard error: the action calls a path GitHub does not document at this
+ * version, which the validator could never check. */
 function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; missing: string[] } {
   const kept: string[] = [];
   const missing: string[] = [];
@@ -159,14 +124,12 @@ function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; miss
 async function main(): Promise<number> {
   console.log(`fetching ${SPEC_URL}`);
   const doc = await fetchSpec(SPEC_URL);
-  // The mirror of the missing-path check below: an UNDOCUMENTED_PATHS entry
-  // exists precisely BECAUSE the descriptor lacks it, so the moment upstream
-  // documents one, the carve-out must go (and validation switch on).
+  // An UNDOCUMENTED_PATHS entry exists precisely BECAUSE the descriptor lacks it, so the moment upstream documents
+  // one, the carve-out must go (and validation switch on).
   const nowDocumented = UNDOCUMENTED_PATHS.filter((path) => doc.paths[path] !== undefined);
   if (nowDocumented.length > 0) {
-    // On a probe run (overridden ref) the pinned descriptor may still lack
-    // the paths, so retiring the gap right away would break pinned runs:
-    // the pin must move first.
+    // On a probe run (overridden ref) the pinned descriptor may still lack the paths, so retiring the gap right away
+    // would break pinned runs: the pin must move first.
     const remedy =
       REF === UPSTREAM_REF
         ? "Retire the owning gap in src/upstream-gaps/ (delete the spec-only file, " +
@@ -185,15 +148,11 @@ async function main(): Promise<number> {
       `these USED_PATHS are not in the upstream descriptor at ${REF} for ${DEFAULT_API_VERSION}:\n  ${missing.join("\n  ")}\nEither the path is wrong in test/e2e/openapi/paths.ts, or UPSTREAM_REF/api-version needs updating`,
     );
   }
-  // The dereferenced slice must be fully inlined; a stray $ref means the
-  // trimmed slice would not be self-contained for the disk-only validator.
   assertRefFree(trimmed);
-  // Stable key order and a trailing newline so re-runs are byte-identical and
-  // the file plays nicely with the repo's formatting.
+  // Stable key order and a trailing newline, so re-runs are byte-identical.
   const json = `${JSON.stringify(trimmed, null, 2)}\n`;
-  // Atomic write: serialize to a temp file, then rename over the target. A
-  // crash or an aborted run then leaves the previously written spec intact
-  // rather than a half-written file the validator would fail to parse.
+  // Temp file then rename, so an aborted run leaves the previously written spec intact rather than a half-written
+  // file the validator would fail to parse.
   const tmpPath = `${OUT_PATH}.tmp`;
   writeFileSync(tmpPath, json);
   renameSync(tmpPath, OUT_PATH);

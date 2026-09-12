@@ -1,18 +1,8 @@
 /**
- * Validate the mock's traffic against GitHub's published OpenAPI contract. The
- * trimmed spec (github-openapi.trimmed.json, produced by
- * .github/scripts/trim-openapi.ts) is a fetched, gitignored artifact loaded
- * from disk - never the network - so validation is always on in run.ts and
- * fuzz.ts without a hermeticity or speed cost. Every logged request's
- * path/method/body and every mock response body is checked; a request to a
- * path/method the spec does not document is a failure, as is a body that
- * violates the schema. A missing spec fails loudly with the fetch command (see
- * load()), never a silent skip.
- *
- * Why validate the MOCK against the real spec: the mock is our stand-in for
- * GitHub, so any drift between what it serves and what GitHub documents is a
- * bug in the mock (or a stale spec). Catching it here means the e2e suite tests
- * the action against a faithful GitHub, not a convenient fiction.
+ * Validates the mock's traffic against GitHub's published OpenAPI contract: the mock stands in for
+ * GitHub, so drift between what it serves and what GitHub documents is a mock bug (or a stale spec).
+ * The trimmed spec is a fetched, gitignored artifact read from disk, never the network, so the runner
+ * keeps validation always on; a missing spec fails with the fetch command (see load()).
  */
 
 import { readFileSync } from "node:fs";
@@ -30,41 +20,27 @@ import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/contract.js";
 
-/** A plain JSON object. */
 type Json = Record<string, unknown>;
 
 const SPEC_PATH = join(import.meta.dir, "github-openapi.trimmed.json");
 
-/**
- * Split a path into non-empty segments (query already absent from a pathname).
- * Shared by the greedy trailing-param matcher below.
- */
 function segments(path: string): string[] {
   return path.split("/").filter((s) => s.length > 0);
 }
 
 /**
- * The trailing params GitHub routes greedily: `{path}` on the contents
- * endpoint absorbs a file path with slashes (".github/settings.yml"), and
- * `{ref}` on the git ref endpoint absorbs a fully qualified ref
- * ("heads/release/1.x").
+ * GitHub routes these trailing params greedily, so one segment per param would miss real paths.
+ *   {path} on contents  -> ".github/settings.yml"
+ *   {ref} on git ref    -> "heads/release/1.x"
  */
 const GREEDY_TRAILING_PARAMS: ReadonlySet<string> = new Set(["{path}", "{ref}"]);
 
-/**
- * True when a concrete pathname matches a spec template. Most GitHub params are
- * one segment, which the shared matchesTemplate handles. For a template ending
- * in a GREEDY_TRAILING_PARAMS member, match the fixed prefix and let the param
- * take one-or-more remaining segments, mirroring GitHub's own routing.
- */
 export function pathMatches(template: string, pathname: string): boolean {
   const templateSegs = segments(template);
   const lastTemplate = templateSegs[templateSegs.length - 1];
   if (lastTemplate !== undefined && GREEDY_TRAILING_PARAMS.has(lastTemplate)) {
     const prefix = templateSegs.slice(0, -1);
     const pathSegs = segments(pathname);
-    // The prefix must match segment-for-segment, then at least one more
-    // segment remains for the trailing param to absorb.
     if (pathSegs.length <= prefix.length) {
       return false;
     }
@@ -73,37 +49,21 @@ export function pathMatches(template: string, pathname: string): boolean {
   return matchesTemplate(template, pathname);
 }
 
-/** One contract violation the validator found, ready to fold into a run's failures. */
 export interface OpenApiViolation {
   /** "METHOD /pathname" the violation is attributed to. */
   request: string;
-  /** Whether the request body or a response body broke the schema. */
   kind: "unknown-route" | "request-body" | "response-body";
   detail: string;
 }
 
 /**
- * OpenAPI 3.0 uses `nullable: true` and carries annotation keywords (example,
- * xml, discriminator) that JSON Schema draft-07 ajv does not understand. Rewrite
- * a deep-cloned schema so ajv accepts it: fold nullable into the `type` array,
- * and drop the annotation-only keywords. Pure over a fresh clone; the spec in
- * memory is never mutated.
+ * Rewrites an OpenAPI 3.0 schema into what draft-07 ajv accepts; the spec in memory is never mutated.
+ * Response bodies drop `required` because GitHub marks nearly every field of a resource required and
+ * the mock serves only the subset the action reads; request bodies keep it (small, author-controlled).
  *
- * `keepRequired` controls whether `required` survives. Request bodies keep it
- * (they are small and author-controlled - a missing required field there is a
- * real mock bug worth catching). Response bodies drop it: GitHub marks nearly
- * every field of a resource required (every url-template field on a user/repo
- * object), but a mock legitimately serves only the subset the action reads, so
- * enforcing presence would drown the useful signal - type mismatches, bad
- * enums, wrong shapes - in hundreds of "missing url field" lines. Either way the
- * validator still checks that what the mock DOES send is well-typed.
- *
- * When relaxing (keepRequired false), a `oneOf` is rewritten to `anyOf`.
- * Stripping `required` widens each branch, so a value that the spec meant to
- * match EXACTLY one branch can now match several - which fails ajv's oneOf
- * (exactly-one semantics). anyOf (at-least-one) is the correct relaxed reading:
- * the mock's body matching some documented variant is what we want to assert,
- * not that it matches a unique one.
+ *   nullable: true            -> "null" joins the type array (and a sibling enum)
+ *   example/xml/discriminator -> dropped, annotation only
+ *   oneOf, required dropped   -> anyOf: the widened branches overlap, so exactly-one would fail
  */
 export function toJsonSchema(node: unknown, keepRequired = false): unknown {
   if (Array.isArray(node)) {
@@ -115,9 +75,6 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
   const input = node as Json;
   const out: Json = {};
   for (const [key, value] of Object.entries(input)) {
-    // Annotation/OpenAPI-only keywords ajv would either choke on (xml,
-    // discriminator) or that only add noise (example, examples); `nullable`
-    // is folded in below; `required` is dropped unless keepRequired.
     if (
       key === "nullable" ||
       key === "example" ||
@@ -130,10 +87,7 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
     if (key === "required" && !keepRequired) {
       continue;
     }
-    // Relaxed variant: oneOf's exactly-one semantics break once required is
-    // stripped (widened branches overlap), so read it as anyOf. If the node
-    // already carries an anyOf sibling (rare), leave oneOf intact rather than
-    // clobber - correctness over the micro-optimization.
+    // A sibling anyOf would be clobbered, so such a node keeps its oneOf.
     if (key === "oneOf" && !keepRequired && !("anyOf" in input)) {
       out.anyOf = toJsonSchema(value, keepRequired);
       continue;
@@ -141,23 +95,18 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
     out[key] = toJsonSchema(value, keepRequired);
   }
   if (input.nullable === true && out.type !== undefined) {
-    // type: "string" -> ["string", "null"]; an existing array gains "null".
     const types = Array.isArray(out.type) ? out.type : [out.type];
     if (!types.includes("null")) {
       out.type = [...types, "null"];
     }
-    // A sibling enum must gain null too: OpenAPI 3.0 nullable permits null
-    // even when the enum omits it (GitHub's descriptor spells nullable
-    // enums exactly that way), and a widened type alone cannot get a null
-    // value past the enum keyword.
+    // GitHub spells nullable enums as nullable: true beside an enum WITHOUT null; a widened type
+    // alone cannot get null past the enum keyword.
     if (Array.isArray(out.enum) && !out.enum.includes(null)) {
       out.enum = [...out.enum, null];
     }
   } else if (input.nullable === true) {
-    // nullable beside a bare oneOf/anyOf (no sibling type; the custom
-    // property `value` schema is the known case): add a null branch. A null
-    // value matches exactly that branch, so oneOf's exactly-one semantics
-    // survive; every non-null value matches its original branch unchanged.
+    // nullable beside a bare oneOf/anyOf (the custom property `value` schema): a null branch keeps
+    // oneOf's exactly-one semantics, since null matches only that branch.
     for (const combinator of ["oneOf", "anyOf"] as const) {
       const branches = out[combinator];
       if (Array.isArray(branches)) {
@@ -183,11 +132,7 @@ interface OpenApiSpec {
   paths: Record<string, PathItem>;
 }
 
-/**
- * The compiled validator: the spec's template paths plus a schema-compiling
- * cache. Built once from the trimmed spec and reused across every scenario in
- * a run, so ajv compiles each schema at most once.
- */
+/** Built once per process and reused across scenarios, so schemas compile once per variant, not per run. */
 export class OpenApiValidator {
   private readonly ajv: Ajv;
   private readonly templates: string[];
@@ -200,15 +145,11 @@ export class OpenApiValidator {
 
   constructor(
     private readonly spec: OpenApiSpec,
-    // Injectable so the /graphql branch's known-name check is testable while
-    // no section declares operations yet; production takes the registry.
+    // Injectable so tests can check the known-name rule with fixture names.
     graphqlOpNames?: ReadonlySet<string>,
   ) {
-    // strict:false because a trimmed OpenAPI doc still carries vocabulary ajv
-    // treats as unknown; validateFormats:false because GitHub's `format`
-    // values (e.g. "uri", "date-time") are advisory here and we validate
-    // structure, not string formats. addFormats still registers them so a
-    // schema naming one does not error.
+    // strict: false because the trimmed doc still carries vocabulary ajv treats as unknown;
+    // validateFormats: false because structure is checked, not string formats.
     this.ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true });
     addFormats(this.ajv);
     this.templates = Object.keys(spec.paths);
@@ -216,14 +157,7 @@ export class OpenApiValidator {
       graphqlOpNames ?? new Set(Object.values(allGraphqlOps()).map((op) => op.name));
   }
 
-  /**
-   * Load the trimmed spec from disk and build a validator. The spec is a
-   * FETCHED, gitignored artifact (not committed - it is a ~2MB generated blob),
-   * so a fresh clone will not have it yet. When it is missing, throw a loud,
-   * actionable error naming the exact command instead of silently skipping
-   * validation - always-on means always-on. Local devs run the fetch once; CI
-   * restores it from actions/cache or re-fetches on a miss.
-   */
+  /** A fresh clone lacks the fetched spec; a missing file fails naming the fetch command, never skips. */
   static load(): OpenApiValidator {
     return OpenApiValidator.loadFrom(SPEC_PATH);
   }
@@ -245,7 +179,6 @@ export class OpenApiValidator {
     return new OpenApiValidator(spec);
   }
 
-  /** The spec template that matches a concrete pathname, or null if none. */
   private matchTemplate(pathname: string): string | null {
     for (const template of this.templates) {
       if (pathMatches(template, pathname)) {
@@ -255,17 +188,12 @@ export class OpenApiValidator {
     return null;
   }
 
-  /** The path templates the loaded spec documents (for the coverage assertion). */
+  /** The path templates the loaded spec documents; validate.test.ts pins them equal to USED_PATHS. */
   paths(): readonly string[] {
     return this.templates;
   }
 
-  /**
-   * Compile (once) and run a schema against a value; empty array = valid.
-   * `keepRequired` selects the request-body variant (presence enforced) vs the
-   * response-body variant (presence relaxed); the cache is keyed on both so the
-   * two compilations of one shared schema never collide.
-   */
+  /** Two caches, not one: a schema shared by a request and a response body compiles once per variant. */
   private check(schema: unknown, value: unknown, keepRequired: boolean): string[] {
     if (schema === undefined) {
       return [];
@@ -289,33 +217,25 @@ export class OpenApiValidator {
   }
 
   /**
-   * Validate one logged request and its response against the spec. Denied
-   * requests (deniedBy set: the 403/404 the permission gate returns) and mock
-   * VIOLATION 400s are EXCLUDED: those are the harness's own error shapes, not
-   * GitHub payloads, so the spec never documents them. Returns every violation
-   * found (0..n) so a run collects them all rather than stopping at the first.
+   * Every violation in one exchange, so a run collects them all. The harness's own shapes (denials,
+   * mock violations, off-spec bodies) are excluded: the spec never documents them.
    */
   validateRequest(request: LoggedRequest): OpenApiViolation[] {
     if (request.offSpec) {
-      // A raw media type, a synthetic transport fault, or a chaos-corrupt body:
-      // deliberately off the contract, so neither status nor shape is checked.
       return [];
     }
     if (request.deniedBy !== undefined) {
       return []; // a permission denial, not a documented GitHub response
     }
     if (request.status < 100) {
-      // A non-HTTP status sentinel (e.g. a connection drop logs status 0);
-      // no documented response exists. Redundant with offSpec for the built-in
-      // faults, but kept so a bare sentinel is never mistaken for a real status.
+      // A connection drop logs status 0; kept beside offSpec so a bare sentinel never reads as real.
       return [];
     }
     if (request.status === 400 && isMockViolationBody(request.responseBody)) {
       return []; // the mock's own contract-violation reply
     }
     if (request.pathname === "/graphql") {
-      // GraphQL is outside the OpenAPI descriptor entirely, so this branch is
-      // hand-written against the GraphQL wire contract - never a silent skip.
+      // The OpenAPI descriptor never covers /graphql, so this branch is hand-written, not a skip.
       return this.validateGraphql(request);
     }
     const label = `${request.method} ${request.pathname}`;
@@ -328,10 +248,8 @@ export class OpenApiValidator {
             pathMatches(endpointPath(route), request.pathname),
         )
       ) {
-        // A real endpoint GitHub's descriptor does not document (see
-        // UNDOCUMENTED_ROUTES): no schema exists, so nothing can be checked.
-        // Method-exact on purpose - an unlisted method on the same path is
-        // still an unknown route.
+        // A real endpoint the descriptor omits (src/upstream-gaps): nothing to check. Method-exact
+        // on purpose: an unlisted method on the same path is still an unknown route.
         return [];
       }
       return [
@@ -354,32 +272,21 @@ export class OpenApiValidator {
       ];
     }
     const violations: OpenApiViolation[] = [];
-    // Request body. Presence IS enforced (keepRequired true): a request body is
-    // small and author-controlled, so a missing required field is a real bug.
-    // The requestOffSpec tag exempts only the SCHEMA check: a handler sets it
-    // when rejecting a passthrough user typo the request schema forbids (an
-    // unknown rules[].type), and the mock answering GitHub's real 4xx is the
-    // behavior under test. The presence checks below stay active even for
-    // tagged requests - a missing required body, or a body sent to a bodyless
-    // operation, is a harness bug regardless of how the handler answered.
+    // Request bodies keep `required`: they are small and author-controlled. requestOffSpec exempts
+    // only the schema check (a handler tags a passthrough user typo it answers with GitHub's real
+    // 4xx); a missing required body, or a body on a bodyless operation, stays a harness bug.
     const requestBody = operation.requestBody;
     const requestSchema = this.jsonSchema(requestBody?.content);
     if (request.body !== undefined) {
       if (requestSchema !== undefined) {
         if (request.requestOffSpec !== true) {
-          // Validate whatever the client sent - object, array, OR primitive. A
-          // primitive where the schema wants an object is real drift; skipping
-          // non-objects would fail open (the gap B1 flagged).
           for (const detail of this.check(requestSchema, request.body, true)) {
             violations.push({ request: label, kind: "request-body", detail });
           }
         }
       } else if (requestBody === undefined && typeof request.body !== "string") {
-        // The operation documents NO request body at all (a GET/DELETE), yet the
-        // client sent a JSON value: GitHub accepts none there, so flag it. A
-        // string body is the raw/malformed-client case the harness exercises
-        // elsewhere, and an op that documents a body but no application/json
-        // schema (rare) has nothing to shape-check, so both fall through.
+        // GitHub accepts no body here. A string body is the raw/malformed-client case exercised
+        // elsewhere, and an op documenting a body without a JSON schema has nothing to shape-check.
         violations.push({
           request: label,
           kind: "request-body",
@@ -387,24 +294,15 @@ export class OpenApiValidator {
         });
       }
     } else if (requestBody?.required === true) {
-      // The operation documents a mandatory body but the client sent none: a
-      // real contract break (the mock/section omitted a required payload).
       violations.push({
         request: label,
         kind: "request-body",
         detail: `the spec marks the request body required for ${request.method} "${template}", but the client sent none`,
       });
     }
-    // Response status. GitHub's published spec routinely omits error statuses
-    // (especially 404s: many endpoints return one that the descriptor never
-    // lists), and the mock's absent-probe 404s / 409 conflicts are realistic
-    // GitHub behavior - the same rationale as the mock's own statusAllowed. So
-    // an undocumented status >= 400 is accepted silently (no body schema to
-    // check anyway). An undocumented status < 400 (a 2xx/3xx the spec does not
-    // list) is a HARD error: GitHub documents its success statuses, so serving
-    // an undocumented one means our EndpointDecl or the mock handler is wrong.
-    // This is the drift worth catching (e.g. a PUT that answers 201 where
-    // GitHub documents only 200).
+    // GitHub's spec routinely omits error statuses (many 404s), so an undocumented >= 400 passes,
+    // matching the mock's statusAllowed. It documents its success statuses, so an undocumented
+    // 2xx/3xx means the EndpointDecl or the handler serves a status GitHub does not.
     const response = operation.responses?.[String(request.status)];
     if (!response && request.status < 400) {
       violations.push({
@@ -413,19 +311,11 @@ export class OpenApiValidator {
         detail: `the spec lists no ${request.status} response for ${request.method} "${template}"; GitHub documents its success statuses, so an undocumented 2xx/3xx means the EndpointDecl or mock handler serves a status GitHub does not`,
       });
     }
-    // Response body SHAPE. server.ts leaves responseBody unset for the cases
-    // that must not be checked - raw media types, synthetic faults, off-spec
-    // chaos - so anything here is a JSON body the spec should describe,
-    // primitives included. Presence is relaxed (keepRequired false): the mock
-    // serves the subset of fields the action reads, but their SHAPES are
-    // checked. Three sub-cases:
-    //   - the documented status carries a JSON schema: validate against it.
-    //   - a documented SUCCESS status (< 400) is no-content (a 204, empty
-    //     `content`) yet the mock sent a NON-NULL body: a contract break (GitHub
-    //     sends none). A null body is the correct empty 204 and is fine.
-    //   - a >= 400 status with no schema: the spec routinely omits error bodies,
-    //     and a realistic error message body is acceptable, so it is not flagged
-    //     (mirrors the undocumented->=400 acceptance above).
+    // server.ts leaves responseBody unset for what must not be checked, so anything here is a JSON
+    // body the spec should describe, primitives included.
+    //   documented schema           -> validated (presence relaxed, shapes checked)
+    //   success status, no content  -> a non-null body is a contract break; null is the empty 204
+    //   >= 400, no schema           -> not flagged: the spec omits most error bodies
     const body = request.responseBody;
     if (body !== undefined && body !== null && response) {
       const schema = this.jsonSchema(response.content);
@@ -444,21 +334,11 @@ export class OpenApiValidator {
     return violations;
   }
 
-  /** Validate an entire request log, flattening every request's violations. */
   validateLog(requests: readonly LoggedRequest[]): OpenApiViolation[] {
     return requests.flatMap((request) => this.validateRequest(request));
   }
 
-  /**
-   * The /graphql exchange contract: the request must be a POST whose body
-   * carries {query: string, operationName: <a declared operation's name>,
-   * variables: object}, and the response must be an HTTP 200 whose body
-   * carries {data: object|null} plus an optional errors[] of
-   * {type: <a GRAPHQL_ERROR_TYPES member>, message: string} entries. Anything
-   * else is a finding, attributed like the OpenAPI checks: the request side
-   * as "request-body", the response side as "response-body", and a wrong
-   * method as "unknown-route".
-   */
+  /** The GraphQL wire contract; findings take the OpenAPI kinds so a run reports them alike. */
   private validateGraphql(request: LoggedRequest): OpenApiViolation[] {
     const label = `${request.method} /graphql`;
     if (request.method !== "POST") {
@@ -567,11 +447,6 @@ export class OpenApiValidator {
   }
 }
 
-/**
- * True when a documented response declares NO body content: either no `content`
- * object at all, or one with no media types (a 204-style empty response). The
- * mock returning a body against such a response is a contract break.
- */
 function isNoContent(response: { content?: Record<string, unknown> }): boolean {
   return response.content === undefined || Object.keys(response.content).length === 0;
 }
@@ -586,11 +461,7 @@ function isMockViolationBody(body: unknown): boolean {
   );
 }
 
-/**
- * The process-wide validator, compiled once from the trimmed spec on first
- * use. run.ts and fuzz.ts both funnel through the runner, which calls this, so
- * the spec is parsed and its schemas compiled a single time per process.
- */
+/** Compiled once per process: run.ts and fuzz.ts both reach it through the runner. */
 let shared: OpenApiValidator | undefined;
 export function sharedValidator(): OpenApiValidator {
   if (!shared) {
@@ -600,16 +471,8 @@ export function sharedValidator(): OpenApiValidator {
 }
 
 /**
- * Validate one request/response exchange against the trimmed spec, returning
- * plain error strings. A thin adapter over the shared validator for callers
- * that hold the request and its response body separately. The `responseBody`
- * argument, when it is anything OTHER than the omitted/undefined default,
- * overrides request.responseBody - an explicit `null` counts as supplied and
- * overrides (the empty-204 case), whereas omitting the argument (or passing
- * `undefined`) falls back to the request's own field. Using a distinct sentinel
- * rather than `??` is what lets an explicit null win instead of silently
- * falling through. Denied, mock-violation, off-spec, and sentinel exchanges
- * return no errors, matching validateRequest.
+ * validateRequest for callers holding the response body apart from the request. An explicit `null`
+ * responseBody OVERRIDES the request's field (the empty 204), so the default is a sentinel, not `??`.
  */
 const NOT_PROVIDED = Symbol("responseBody-not-provided");
 export function validateExchange(

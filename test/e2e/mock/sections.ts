@@ -1,19 +1,7 @@
 /**
- * The section handler fragments the mock's route pipeline aggregates. Each
- * settings section contributes exactly one fragment - its REST handlers plus,
- * when it declares GraphQL operations, its GraphQL handlers - registered in
- * the FRAGMENTS record below, whose mapped type is keyed by SectionKey: a
- * section without a fragment, a fragment under the wrong key, a missing
- * GraphQL half, or a GraphQL half on a REST-only section all fail to
- * compile. Together with the per-fragment key-union types
- * (SectionRestHandlers/SectionGraphqlHandlers) this makes the merged
- * handler tables complete by construction; the runtime asserts in
- * handlers.ts remain only as backstops. A per-section mock.ts deliberately
- * imports the test-tree seams (this file's siblings support.ts and state.ts,
- * never routes.ts); the bundle entry is src/main.ts, so mock fragments never
- * reach lib/index.js. The merge still asserts key uniqueness loudly, though
- * two fragments claiming the same endpoint can no longer be expressed: every
- * fragment's keys are prefixed with its own section key by type.
+ * The mapped and section-prefixed key types make a missing, misplaced, or colliding fragment a compile error, so the
+ * runtime asserts in handlers.ts are only backstops. A section's mock.ts imports the test-tree seams beside this file
+ * (support.ts, state.ts, and their siblings), never routes.ts; the bundle entry is src/main.ts, so fragments never reach lib/index.js.
  */
 
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
@@ -60,23 +48,11 @@ import type {
   SectionRestHandlers,
 } from "./support.js";
 
-/**
- * One section's mock handlers: its REST fragment plus, exactly when the
- * section declares GraphQL operations, its GraphQL fragment. The conditional
- * makes both mispairings unrepresentable: a GraphQL-declaring section cannot
- * omit its GraphQL half, and a REST-only section cannot register one.
- */
 type SectionMockFragment<K extends SectionKey> = [SectionGraphqlKey<K>] extends [never]
   ? { rest: SectionRestHandlers<K>; graphql?: never }
   : { rest: SectionRestHandlers<K>; graphql: SectionGraphqlHandlers<K> };
 
-/**
- * The per-section fragments, one entry per SectionKey by mapped type. Reads
- * serve fixture-backed MockState; writes mutate it via the state.ts
- * transformers and reply with a body/status drawn ONLY from the endpoint's
- * declared statuses (a startup check proves every status a handler can
- * return is declared).
- */
+/** Writes answer only statuses the endpoint declares or an undeclared error; statusAllowed in routes.ts proves it on every request. */
 const FRAGMENTS: { readonly [K in SectionKey]: SectionMockFragment<K> } = {
   repository: { rest: repositoryMockHandlers, graphql: repositoryMockGraphqlHandlers },
   labels: { rest: labelsMockHandlers },
@@ -106,13 +82,7 @@ const FRAGMENTS: { readonly [K in SectionKey]: SectionMockFragment<K> } = {
   secret_scanning_custom_patterns: { rest: secretScanningCustomPatternsMockHandlers },
 };
 
-/**
- * Merge fragments into one handler table, failing loudly when two fragments
- * register the same "section.role" key. Unreachable by construction now -
- * every fragment's keys are prefixed with its own section key by type, so a
- * collision cannot be expressed - kept as the runtime backstop behind that
- * type-level claim.
- */
+/** Unreachable by construction (fragment keys are section-prefixed by type); kept as the runtime backstop behind that claim. */
 function mergeFragments<H>(
   kind: "REST" | "GraphQL",
   fragments: ReadonlyArray<Record<string, H>>,
@@ -135,7 +105,6 @@ function mergeFragments<H>(
   return merged;
 }
 
-/** Every section's REST handlers, merged with the duplicate-key backstop. */
 export function sectionHandlerFragments(): Record<string, Handler> {
   return mergeFragments(
     "REST",
@@ -143,7 +112,6 @@ export function sectionHandlerFragments(): Record<string, Handler> {
   );
 }
 
-/** Every section's GraphQL handlers, merged with the duplicate-key backstop. */
 export function sectionGraphqlHandlerFragments(): Record<string, GraphqlHandler> {
   return mergeFragments(
     "GraphQL",

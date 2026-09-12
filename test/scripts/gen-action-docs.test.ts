@@ -1,6 +1,3 @@
-// Each renderer against a fixture with an exact expected text, and the committed files against
-// a fresh regeneration (the splice itself is pinned in generated-regions.test.ts).
-
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -63,8 +60,6 @@ describe("action.yml renderers", () => {
         '    default: ""',
       ].join("\n"),
     );
-    // The date default stays a string and every description folds back to
-    // the declaration character for character.
     expect(parseYaml(`inputs:\n${text}\n`).inputs).toEqual(
       Object.fromEntries(
         Object.entries(decls).map(([name, decl]) => [name, { ...decl, required: false }]),
@@ -230,9 +225,6 @@ describe("undeclared-policy renderers", () => {
 
 describe("permissions renderers", () => {
   test("the grant sentence names each primary grant once, a read-only override at read, and the org grant", () => {
-    // labels: Issues. branches: Administration, Contents probe override at
-    // read. teams: Administration plus the Members org grant. actions:
-    // Administration, with a writing Actions override that joins the write list.
     const sections = ["labels", "branches", "teams", "actions"].map((key) =>
       sectionModule(key as "labels" | "branches" | "teams" | "actions"),
     );
@@ -301,9 +293,8 @@ describe("permissions renderers", () => {
   });
 
   test("a section with only some reads write-gated names those reads by route", () => {
-    // GitHub gates per endpoint (the interaction-limits pull request cap GETs
-    // are Administration-write beside an Administration-read base GET), so
-    // the bullet cannot say "even the ... reads": it names the gated routes.
+    // GitHub gates per endpoint (the interaction-limits cap GETs are Administration-write beside an Administration-read base GET), so the bullet
+    // names the gated routes.
     const mixed: SectionMeta = {
       ...sectionModule("labels"),
       permission: { repo: ["administration"] },
@@ -359,9 +350,8 @@ describe("generated files", () => {
       ]),
     ),
   )("refuses to regenerate %s moved away from its home in %s", (name, path, region) => {
-    // Each region pasted after the file's last top-level key (YAML) or last section heading
-    // (markdown), both of which lie outside its declared home; the mechanics of every other
-    // misplacement are pinned in generated-regions.test.ts.
+    // Each region pasted after the file's last top-level key (YAML) or last section heading (markdown), both outside its declared home; other
+    // misplacements are pinned in generated-regions.test.ts.
     const text = readFileSync(join(ROOT, path), "utf8");
     const { placement } = region;
     const anchor =
@@ -378,9 +368,6 @@ describe("generated files", () => {
   });
 
   test("each region's body shape accepts its renderer's output on edge-case declarations", () => {
-    // The shapes are what the placement check holds a committed body to, so every text a
-    // renderer can write must pass them: quoted and escaped keys, folded descriptions, escaped
-    // pipes, caveats, and both the empty and the populated gated-reads forms.
     const shapes = new Map(
       Object.values(GENERATED_REGIONS)
         .flat()
@@ -397,9 +384,7 @@ describe("generated files", () => {
         "settings-file": { description: "Plain.", default: "" },
       }),
     );
-    // Hand-edited bodies the renderers never write, each valid YAML the shape must still refuse:
-    // a bare quote in a default, a YAML-only escape and a raw tab in it, a description line
-    // indented past the fold's six spaces, a YAML word left bare, and a plain name quoted.
+    // Hand-edited bodies the renderers never write, each of which the shape must still refuse.
     for (const [key, defaultValue, description] of [
       ["x", '"bad"quote"', "      D.\n"],
       ["x", '"\\x61pply"', "      D.\n"],
@@ -429,8 +414,6 @@ describe("generated files", () => {
       }),
     );
     accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
-    // Every bullet form: none, a wholly gated section on its own grant, one on a named override
-    // grant, and a partly gated section naming its routes.
     const overrideGated: SectionMeta = {
       ...sectionModule("labels"),
       endpoints: {
@@ -464,10 +447,8 @@ describe("generated files", () => {
   });
 
   test("each region's body shape rejects authored text and every other region's body", () => {
-    // The negative half of the shape pin: a shape loosened to accept anything would still pass
-    // the renderer test above, so each must refuse prose, a heading, and its look-alike siblings
-    // (the other tables, sentences, and bullet lists the same pages carry). A sibling sharing the
-    // shape is the same table in another home, which the shape accepts by design.
+    // A shape loosened to accept anything would still pass the renderer test above; a sibling sharing the shape is the same table in another home,
+    // which the shape accepts by design.
     const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
       list.map((region) => ({ path, region })),
     );

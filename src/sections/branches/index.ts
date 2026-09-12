@@ -1,22 +1,11 @@
 /**
- * `branches:` section - classic branch protection, Probot schema:
- * [{name, protection: {...} | null}]. The protection PUT requires the four
- * core keys to be present (null is a valid value); protection: null removes
- * protection entirely. Three surfaces are REST-invisible and route through
- * GraphQL instead:
- *   - required_signatures is stripped from the PUT (GitHub silently drops
- *     it) and applied through its own POST/DELETE sub-endpoint;
- *   - force_push_bypassers and required_deployments have no REST field at
- *     all, so both are stripped from the PUT and applied through ONE
- *     updateBranchProtectionRule mutation, planned when they drift and
- *     again after any planned PUT;
- *   - a WILDCARD entry (its name contains one of the characters git
- *     refnames forbid: `*`, `?`, `[`) is invisible to every REST protection
- *     endpoint, so it reconciles entirely through the GraphQL rule
- *     mutations, its protection restricted to the keys with exact GraphQL
- *     twins (GRAPHQL_BOOLEAN_TWINS and the two structured pairs in graphql-rules.ts).
- * The one rules query behind all of this fires only when an entry needs it;
- * a pure-REST declaration issues no GraphQL request at all.
+ * `branches:` section: classic branch protection, [{name, protection: {...} | null}]. Three keys
+ * cannot ride the protection PUT; the one rules query fires only when an entry needs the GraphQL
+ * surface, so a pure-REST declaration issues no GraphQL request at all.
+ *
+ * required_signatures                          -> GitHub's PUT silently drops it; its own POST/DELETE sub-endpoint applies it
+ * force_push_bypassers, required_deployments   -> no REST field at all; one updateBranchProtectionRule mutation applies both
+ * a WILDCARD name (contains `*`, `?`, or `[`)  -> invisible to every REST protection endpoint; the rule mutations, GraphQL-twin keys only
  */
 
 import { z } from "zod";
@@ -53,27 +42,22 @@ const REQUIRED_PROTECTION_KEYS = [
   "restrictions",
 ] as const;
 
-/**
- * True for a name no literal git branch can carry (refnames forbid `*`, `?`,
- * and `[`), so a wildcard entry can never collide with a literal one.
- */
+/** Git refnames forbid `*`, `?`, and `[`, so a wildcard entry can never collide with a literal branch. */
 export function isWildcardPattern(name: string): boolean {
   return /[*?[]/.test(name);
 }
 
-/**
- * The one list GitHub spells two ways inside required_status_checks: the
- * GET returns both, so a declaration carrying either covers the other.
- */
+// GitHub spells this one list two ways inside required_status_checks and the GET returns both,
+// so a declaration carrying either covers the other.
 const STATUS_CHECK_ALIASES: Readonly<Record<string, string>> = {
   "required_status_checks.checks": "required_status_checks.contexts",
   "required_status_checks.contexts": "required_status_checks.checks",
 };
 
 /**
- * Nothing the replacing PUT would need to preserve: a default scalar (GitHub's
- * fill under a declared block), an empty list, or an actor holder with empty
- * lists. Any other nested object is a control that is ON by its presence.
+ * Nothing the replacing PUT would need to preserve: GitHub's default fill under a declared block,
+ * an empty list, or an actor holder with empty lists. Any other nested object is a control that is
+ * ON by its presence.
  */
 function isEmptySetting(value: unknown): boolean {
   if (value === null || value === undefined || value === false || value === "" || value === 0) {
@@ -92,9 +76,8 @@ function isEmptySetting(value: unknown): boolean {
 }
 
 /**
- * The live settings the replacing PUT would reset because the settings file
- * omits them: every non-empty live value at a path the declaration does not
- * carry, at any depth (the PUT replaces each nested object whole).
+ * The PUT replaces each nested object whole, so every non-empty live value at a path the
+ * declaration omits, at any depth, would be reset by it.
  */
 function omittedLiveDrift(
   declared: Record<string, unknown>,
@@ -131,9 +114,8 @@ function isPlainMapping(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * GitHub's own reply for a branch that does not exist.
- * A denied probe is a 404 too (fine-grained tokens conceal denied reads), with the body "Not Found".
- * Reading that as a missing branch skipped protecting an existing branch on every apply.
+ * A denied probe is a 404 too (fine-grained tokens conceal denied reads), with the body "Not Found";
+ * reading that as a missing branch skipped protecting an existing branch on every apply.
  */
 function isMissingBranch(error: ApiError): boolean {
   return error.status === 404 && error.message === "Branch not found";
@@ -141,24 +123,11 @@ function isMissingBranch(error: ApiError): boolean {
 
 const permission: SectionPermission = { repo: ["administration"] };
 
-/**
- * The protection GET body: a mapping, of which this section reads
- * required_signatures BY NAME (its {enabled} wrapper flattens to the boolean
- * the diff compares); every other field rides through flattenProtection as
- * passthrough.
- */
 const LiveProtection = z.looseObject({
   required_signatures: z.looseObject({ enabled: z.boolean() }).optional(),
 });
 
-/**
- * One declared entry paired with its GraphQL proof at classification time: a
- * wildcard entry always carries the run state (its whole reconciliation is
- * the GraphQL surface), a literal entry carries it exactly when it declares
- * a routed key. The tag is built in the ONE place that decides whether the
- * run state exists, so an entry that needs GraphQL without the state being
- * constructed is unrepresentable - no cast, no predicate re-spelling.
- */
+/** Built in the ONE place that decides whether the GraphQL run state exists, so no other site re-spells the predicate. */
 type ClassifiedEntry =
   | { kind: "wildcard"; branch: BranchConfig; graphqlRun: GraphqlRun }
   | { kind: "literal"; branch: BranchConfig; routed: { graphqlRun: GraphqlRun } | null };
@@ -174,11 +143,8 @@ export const branchesSection = {
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL,
-  // The wildcard-entry key sweep composes onto the schema-derived shape HERE,
-  // not in schema.ts: it reads the GraphQL translation tables (WILDCARD_KEYS,
-  // the structured twins), which are this section's own machinery. Wildcard
-  // entries reject every key outside those tables, since nothing else can
-  // reach a wildcard rule.
+  // The wildcard key sweep composes HERE, not in schema.ts: it reads the GraphQL translation tables,
+  // which are this section's own machinery, and nothing outside them can reach a wildcard rule.
   shape: loosen(BranchesConfig).superRefine((declared, refineCtx) => {
     if (!Array.isArray(declared)) {
       return;
@@ -197,11 +163,8 @@ export const branchesSection = {
           });
         }
       }
-      // The structured pairs translate NAMED sub-keys only, so an unknown
-      // sub-key on a wildcard entry would be silently lost - reject it with
-      // the same pointer. A non-object value (a scalar or an array, both of
-      // which the classic REST endpoint would reject server-side) is
-      // rejected here too: nothing downstream could translate it.
+      // The structured pairs translate NAMED sub-keys only, so an unknown sub-key would be silently
+      // lost; a non-object value is rejected too, since nothing downstream could translate it.
       const nested: Array<[string, Record<string, string>]> = [
         ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
         ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
@@ -236,8 +199,7 @@ export const branchesSection = {
     });
   }),
   async plan(ctx, desired): Promise<BranchesPlan> {
-    // Protection is keyed by exact branch name or pattern; two entries for
-    // the same one would overwrite each other's write on every run.
+    // Two entries for one branch or pattern would overwrite each other's write on every run.
     rejectDuplicates(
       this,
       desired,
@@ -245,10 +207,8 @@ export const branchesSection = {
       (b) => b.name,
     );
     const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
-    // The one rules read, fired only when an entry needs the GraphQL
-    // surface: a pure-REST declaration issues no GraphQL request at all.
-    // The SAME predicate that gates the fetch classifies the entries, so
-    // every entry that needs the run state gets it attached right here.
+    // The SAME predicate that gates the one rules read classifies the entries, so every entry that
+    // needs the run state gets it attached right here.
     const needsGraphql = (branch: BranchConfig): boolean =>
       isWildcardPattern(branch.name) || hasRoutedGraphqlKeys(branch.protection);
     let entries: ClassifiedEntry[];
@@ -274,7 +234,6 @@ export const branchesSection = {
             },
       );
     } else {
-      // No entry satisfies the predicate, so every entry is a plain literal.
       entries = desired.map((branch) => ({ kind: "literal", branch, routed: null }));
     }
     for (const entry of entries) {
@@ -284,10 +243,9 @@ export const branchesSection = {
       }
       await planLiteralEntry(ctx, this, entry.routed, entry.branch, plan);
     }
-    // Every actor a planned mutation resolves at execution resolves ahead of
-    // the plan's FIRST write, whichever entry it belongs to: a misspelled
-    // actor fails while every branch's live protection is still untouched,
-    // and the mutations' thunks then find the ids cached.
+    // Every actor a planned mutation resolves at execution resolves ahead of the plan's FIRST write,
+    // whichever entry it belongs to: a misspelled actor fails while every branch's live protection
+    // is still untouched, and the mutations' thunks then find the ids cached.
     const [lead, ...rest] = plan.ops;
     if (graphqlRun !== null && graphqlRun.lateActors.length > 0 && lead !== undefined) {
       plan.ops = [
@@ -304,11 +262,6 @@ export const branchesSection = {
   },
 } satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;
 
-/**
- * Plan one literal-branch entry: the protection PUT, the signature
- * sub-endpoint, and the rule mutation, each justified by its drift. `routed`
- * is non-null exactly when the entry declares a GraphQL-routed key.
- */
 async function planLiteralEntry(
   ctx: BranchesContext,
   section: SectionMeta,
@@ -333,35 +286,30 @@ async function planLiteralEntry(
     });
     return;
   }
-  // The routed keys never ride the REST payload: GitHub's protection PUT
-  // silently DROPS required_signatures (its sub-endpoint applies it), and
-  // force_push_bypassers/required_deployments have no REST field at all
-  // (one rule mutation applies both).
+  // GitHub's protection PUT silently DROPS required_signatures, and the other two routed keys have
+  // no REST field at all, so none of them may ride the REST payload.
   const {
     required_signatures: requiredSignatures,
     force_push_bypassers: forcePushBypassers,
     required_deployments: requiredDeployments,
     ...payload
   } = branch.protection;
-  // The classic API rejects payloads missing the core keys; fill nulls.
+  // The classic API rejects payloads missing the core keys; null is a valid value for each.
   for (const key of REQUIRED_PROTECTION_KEYS) {
     if (!(key in payload)) {
       payload[key] = null;
     }
   }
-  // The flattened live protection the declared keys diff against; null for
-  // an unprotected branch, which has no requirement and no allowance.
   let live: Record<string, unknown> | null = null;
-  // GitHub does not document whether the PUT preserves the sub-resource and
-  // the GraphQL-only fields, so a planned PUT re-applies every declared one.
+  // GitHub does not document whether the PUT preserves the sub-resource and the GraphQL-only
+  // fields, so a planned PUT re-applies every declared one.
   let putPlanned = false;
   if ("missing" in probe) {
-    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart.
-    // A denied probe (no Contents grant) keeps the plain unprotected reading.
+    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart, and a
+    // denied probe (no Contents grant) keeps the plain unprotected reading.
     const branchProbe = await ctx.read.branchProbe.tryCall({ params });
     if ("error" in branchProbe && isMissingBranch(branchProbe.error)) {
-      // Nothing to plan: no operation can create a branch. Check reports
-      // the drift; apply surfaces it as a note.
+      // No operation can create a branch.
       plan.drift.push(
         `branches[${branch.name}]: declared in the settings file but the branch does not exist on the repo, so apply cannot protect it; create the branch, or remove it from the settings file`,
       );
@@ -379,8 +327,6 @@ async function planLiteralEntry(
     });
     putPlanned = true;
   } else {
-    // The parse pins the one field read BY NAME (required_signatures'
-    // {enabled} wrapper); everything else flattens generically.
     live = flattenProtection(
       parseLive(
         section,
@@ -390,9 +336,8 @@ async function planLiteralEntry(
         `branch "${branch.name}"`,
       ),
     );
-    // The protection GET OMITS required_signatures entirely when signed
-    // commits are not required, so an absent live field means false;
-    // normalize before the diff so declared false does not read as drift.
+    // The protection GET OMITS required_signatures entirely when signed commits are not required,
+    // so an absent live field means false; normalized so declared false does not read as drift.
     if (!("required_signatures" in live)) {
       live.required_signatures = false;
     }
@@ -402,9 +347,8 @@ async function planLiteralEntry(
         delete declaredRest[key];
       }
     }
-    // The PUT replaces the whole protection, so live settings the
-    // declaration omits are REMOVED by it - drift, not silence. The signature
-    // toggle is the one live field the PUT never touches (its own sub-resource).
+    // The PUT replaces the whole protection, so live settings the declaration omits are REMOVED by
+    // it: drift, not silence. The signature toggle is the one live field the PUT never touches.
     const { required_signatures: _liveSignatures, ...liveRest } = live;
     const restDrift = [
       ...subsetDiff(declaredRest, live, prefix),
@@ -423,9 +367,8 @@ async function planLiteralEntry(
       putPlanned = true;
     }
   }
-  // The declared toggle applies through its sub-endpoint once the PUT has
-  // ensured the protection (and with it the sub-resource) exists; an
-  // undeclared toggle leaves the live requirement alone.
+  // The toggle applies through its sub-endpoint once the PUT has ensured the protection (and with it
+  // the sub-resource) exists; an undeclared toggle leaves the live requirement alone.
   if (requiredSignatures !== undefined) {
     const sigDrift = subsetDiff(
       { required_signatures: requiredSignatures },
@@ -469,12 +412,9 @@ async function planLiteralEntry(
 }
 
 /**
- * GET /protection wraps booleans as {url, enabled} and expands actor lists
- * (restrictions, dismissal_restrictions, bypass_pull_request_allowances)
- * into user/team/app OBJECTS, while the PUT shape uses login/slug strings.
- * Unwrap both so check mode compares like with like. Exported so the e2e
- * state tests assert their protectionFromPut transformer inverts this exact
- * function (not a lookalike copy).
+ * GET /protection wraps booleans as {url, enabled} and expands actor lists into user/team/app
+ * OBJECTS, while the PUT shape uses login/slug strings; both unwrap so check compares like with
+ * like. Exported so the e2e state tests can assert their protectionFromPut inverts this exact function.
  */
 export function flattenProtection(live: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -491,10 +431,7 @@ export function flattenProtection(live: Record<string, unknown>): Record<string,
   return out;
 }
 
-/**
- * GET-only metadata the PUT vocabulary has no word for (url keys drop
- * generically; `required_status_checks.enforcement_level` drops above).
- */
+// GET-only metadata the PUT vocabulary has no word for (url keys drop generically).
 const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled"]);
 
 const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url");
@@ -533,7 +470,7 @@ function flattenValue(value: unknown): unknown {
         return actor;
       });
     } else if (isUrlKey(key)) {
-      // URLs never appear in the PUT shape; drop to avoid noise.
+      // URLs never appear in the PUT shape.
     } else {
       out[key] = flattenValue(inner);
     }

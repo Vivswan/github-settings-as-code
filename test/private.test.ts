@@ -6,9 +6,8 @@ import { isPrivate, markPrivate } from "../src/private.js";
 import { revealPrivate } from "../src/private-open.js";
 
 /**
- * The files allowed to import the opener module, each with its full export
- * list: a new export name is an explicit review, and leaking the opener through
- * an EXISTING export's value is the accepted residual of reviewed trusted code.
+ * A new export name on an opener importer is an explicit review; leaking the opener through an EXISTING export's value is the accepted residual of
+ * reviewed trusted code.
  */
 const OPENER_IMPORTERS: Record<string, string[]> = {
   "src/flows/redact.ts": [
@@ -62,11 +61,7 @@ const toOpener = (file: string, specifier: string): boolean =>
   resolve(dirname(file), specifier.replace(/[?#].*$/, "").replace(/\.[cm]?[jt]s$/, "")) ===
   OPENER_MODULE;
 
-/**
- * Bun's scan lists imports and exports but folds `export * from` into an
- * import edge with no export name, so that one shape is read from oxc. A
- * computed specifier already fails the changed-sections selector tripwire.
- */
+/** Bun's scan folds `export * from` into an import edge with no export name, so that one shape is read from oxc. */
 function openerSurface(file: string, text: string): OpenerSurface {
   const scan = TRANSPILER.scan(text);
   const imports = scan.imports.some((entry) => toOpener(file, entry.path));
