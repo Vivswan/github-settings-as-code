@@ -106,7 +106,7 @@ Every `gsac` subcommand prints one object under `--json`, `result` first:
 
 ## 8. A failed snapshot section fails the target
 
-Every mode now applies one crash rule: a section that fails on its own (an API error, a value the section's own schema rejects) fails its target, `result` is `failed`, the run exits 1, and no snapshot file is written for that target. v2 wrote the file without the section and reported `partial` with exit 0. A denial under `on-missing-permission: warn` still skips the section and still reports `partial`.
+Every mode now applies one crash rule: a section whose read throws (an API error) fails its target, `result` is `failed`, the run exits 1, and no snapshot file is written for that target. v2 wrote the file without the section and reported `partial` with exit 0. A value the section's own schema rejects already failed the target in v2; that case did not move. A denial under `on-missing-permission: warn` still skips the section and still reports `partial`.
 
 `gsac init` follows: a failed section refuses to write the settings file, with the errors above naming the section and the fix.
 

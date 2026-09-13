@@ -71,13 +71,18 @@ export type InitProblem =
 /** The separators every mode reads as a list, which one path can therefore never contain. */
 const LIST_SEPARATOR = /[\n,]/;
 
+/** The file init writes: the one named, else the one apply and check read. Known before any parsing, so a failure names it. */
+export function initSettingsFile(read: InputReader): string {
+  return read("settings-file") || DEFAULT_SETTINGS_FILE;
+}
+
 /** The init flags are the snapshot inputs of one repository, so every problem is the snapshot subcommand's. */
 export function parseInitConfig(
   read: InputReader,
   force: boolean,
   env: ConfigEnv,
 ): Result<InitConfig, InitProblem> {
-  const settingsFile = read("settings-file") || DEFAULT_SETTINGS_FILE;
+  const settingsFile = initSettingsFile(read);
   if (LIST_SEPARATOR.test(settingsFile)) {
     return err({ code: "init-settings-file-is-list", value: settingsFile });
   }
@@ -118,7 +123,7 @@ function describeInitProblem(problem: InitProblem): string {
   }
 }
 
-/** `file` is the settings file once the config named one; a problem in the flags themselves has none. */
+/** `file` is the settings file the command was told (or defaulted to); only a test that renders no command omits it. */
 export function failInit(io: Io, problem: InitProblem, file?: string): Rendered {
   const message = describeInitProblem(problem);
   io.annotate("error", message);

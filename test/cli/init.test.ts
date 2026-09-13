@@ -403,6 +403,44 @@ describe("init: an existing settings file", () => {
     });
   });
 
+  test("is left byte for byte as it was when --force gets past the check and a section then fails", async () => {
+    const file = join(tempDir(), "settings.yml");
+    const original = "repository:\n  has_wiki: false\n";
+    writeFileSync(file, original);
+    const api = new MockApi({
+      "GET /repos/o/r/labels?per_page=100&page=1": {
+        error: { status: 500, message: "Server Error", body: "" },
+      },
+    });
+    const result = await cli([...target(file), "--force"], api);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/^error: labels: /);
+    const problem = `the snapshot of o/r failed, so ${file} was not written; the errors above name the section and the fix`;
+    expect(result.stderr).toEndWith(`error: ${problem}\n`);
+    expect(readFileSync(file, "utf8")).toBe(original);
+    const json = await cli([...target(file), "--force", "--json"], api);
+    expect(json.code).toBe(1);
+    expect(json.stderr).toBe(result.stderr);
+    expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
+    expect(readFileSync(file, "utf8")).toBe(original);
+  });
+
+  test("a problem in the flags names the settings file in the envelope when the command was told one", async () => {
+    const file = join(tempDir(), "settings.yml");
+    const result = await cli(
+      ["init", "--repository", "o/r", "--settings-file", file, "--json"],
+      new MockApi({}),
+    );
+    const problem =
+      "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN";
+    expect(result).toEqual({
+      code: 1,
+      stdout: `${JSON.stringify({ result: "failed", file, problem })}\n`,
+      stderr: `error: ${problem}\n`,
+    });
+  });
+
   const NO_MILESTONES = { "GET /repos/o/r/milestones?state=all&per_page=100&page=1": { data: [] } };
   test.each<[string, string, Record<string, unknown>, string, number | undefined]>([
     [

@@ -29,7 +29,7 @@ import {
   type Rendered,
   validateFile,
 } from "./commands.js";
-import { failInit, type InitConfig, parseInitConfig, runInit } from "./init.js";
+import { failInit, type InitConfig, initSettingsFile, parseInitConfig, runInit } from "./init.js";
 import {
   argvReader,
   INIT_INPUTS,
@@ -221,13 +221,10 @@ export function buildProgram(options: ProgramOptions): {
         Globals & { force?: boolean } & Record<string, unknown>
       >();
       const { io } = openIo(values);
-      const rendered = await parseInitConfig(
-        argvReader("snapshot", values),
-        values.force === true,
-        host.env,
-      ).match(
+      const read = argvReader("snapshot", values);
+      const rendered = await parseInitConfig(read, values.force === true, host.env).match(
         (cfg) => executeInit(cfg, io),
-        async (problem) => failInit(io, problem),
+        async (problem) => failInit(io, problem, initSettingsFile(read)),
       );
       present(rendered, values);
       exitCode = rendered.code;
@@ -273,10 +270,13 @@ export async function main(
     streams.mask(token);
   }
   const { program, exitCode } = buildProgram({ ...options, streams });
-  // The parser is the one reader of --json: its verdict stands even when the parse ends in an error, since commander
-  // records the options it saw before raising one (a `--summary --json` is a summary path, not the flag).
+  // Under --json stdout is one object, a parser error's included. The parser's verdict comes first (it read every token,
+  // so `--summary -- --json` is the flag); the argv scan covers an error raised before the parser reached the flag
+  // (`--token a --token b --json`). Tokens after a `--` terminator are arguments, never the flag.
+  const terminator = argv.indexOf("--");
+  const optionTokens = argv.slice(0, terminator === -1 ? argv.length : terminator);
   const failedJson = (message: string): void => {
-    if (program.opts<Globals>().json === true) {
+    if (program.opts<Globals>().json === true || optionTokens.includes("--json")) {
       streams.stdout.write(`${JSON.stringify(failedEnvelope(message))}\n`);
     }
   };

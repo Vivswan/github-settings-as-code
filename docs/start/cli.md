@@ -161,7 +161,7 @@ With `--json` the outputs are one object instead, and stdout carries nothing els
 {"result":"clean","skipped-sections":[],"repos-result":{}}
 ```
 
-A run that fails before any target runs (a missing input, a value the mode refuses) prints the same object with `result: "failed"` and the stderr line as `problem`; a parser error or a crash prints `{"result":"failed","problem":"<the line>"}`. Under `--json`, stdout is always exactly one object.
+A run that fails before any target runs (a missing input, a value the mode refuses) prints the same object with `result: "failed"` and the stderr line as `problem`; a parser error or a crash prints `{"result":"failed","problem":"<the line>"}`. Under `--json`, stdout is always exactly one object, with one exception: `--help` prints the usage and exits 0, as it does without the flag.
 
 The exit codes are the action's:
 

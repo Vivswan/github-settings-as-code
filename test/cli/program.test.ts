@@ -434,6 +434,11 @@ describe("the --json failure envelope", () => {
     ],
     ["a missing required input", ["merge", "--settings-file", SINGLE, "--json"]],
     ["a parser error", ["validate", "--json"]],
+    // The duplicate is refused at the second --token, before the parser reaches --json.
+    [
+      "a parser error raised before the flag",
+      ["check", "--token", "ghp_first", "--token", "ghp_second", "--json"],
+    ],
   ])(
     "%s: stdout is one failed envelope carrying the stderr line as its problem, exit 1",
     async (_case, argv) => {
@@ -456,28 +461,33 @@ describe("the --json failure envelope", () => {
       false,
     ],
     [
-      "a --json consumed as --summary's value is a path",
+      "a --json the parser took as --summary's value still reads as the flag",
       ["validate", "--summary", "--json"],
-      false,
+      true,
     ],
     [
       "a --json after --summary took -- as its value is the flag",
       ["validate", "--summary", "--", "--json"],
       true,
     ],
-  ])(
-    "the parser decides what --json is: %s, so a parser error prints an envelope only when the flag was read",
-    async (_case, argv, envelope) => {
-      const result = await cli(argv);
-      expect(result.code).toBe(1);
-      expect(result.stderr).toStartWith("error: ");
-      expect(result.stdout).toBe(
-        envelope
-          ? `${JSON.stringify({ result: "failed", problem: "missing required argument 'file'" })}\n`
-          : "",
-      );
-    },
-  );
+  ])("what counts as --json on a parser error: %s", async (_case, argv, envelope) => {
+    const result = await cli(argv);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toStartWith("error: ");
+    expect(result.stdout).toBe(
+      envelope
+        ? `${JSON.stringify({ result: "failed", problem: "missing required argument 'file'" })}\n`
+        : "",
+    );
+  });
+
+  test("--help under --json is the one exception: the usage on stdout, no envelope, exit 0", async () => {
+    const result = await cli(["--json", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toStartWith("Usage: github-settings-as-code");
+    expect(result.stdout).not.toContain('"result"');
+  });
 
   test("no subcommand under --json: the usage on stderr, an envelope naming the missing subcommand, exit 1", async () => {
     const result = await cli(["--json"]);
