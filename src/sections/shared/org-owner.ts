@@ -17,11 +17,6 @@ export const ORG_PROBE = {
   permission: "none",
 } as const satisfies EndpointDecl;
 
-/**
- * Undefined under an organization owner. On a personal account (the probe answered "missing"), the note
- * the section emits instead of planning or snapshotting; a plan's says how to silence it, since the
- * section is declared in the file.
- */
 export function personalAccountNote(
   section: SectionMeta,
   owner: string,
