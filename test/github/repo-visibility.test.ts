@@ -24,11 +24,6 @@ describe("createVisibilityResolver", () => {
     expect(await createVisibilityResolver(api)("o/r")).toBe("unknown");
   });
 
-  test("a 200 body with neither visibility nor private fails closed to unknown", async () => {
-    const api = new MockApi({ "GET /repos/o/r": { data: { full_name: "o/r" } } });
-    expect(await createVisibilityResolver(api)("o/r")).toBe("unknown");
-  });
-
   test("private === true wins over a stale/forged visibility: public", async () => {
     const api = new MockApi({
       "GET /repos/o/liar": { data: { visibility: "public", private: true } },
@@ -44,6 +39,7 @@ describe("createVisibilityResolver", () => {
   });
 
   test.each([
+    ["a 200 body with neither visibility nor private", { full_name: "o/odd" }],
     ["a string 'false' private flag", { private: "false" }],
     ["a numeric 0 private flag", { private: 0 }],
     ["an out-of-enum visibility string", { visibility: "PUBLIC" }],
