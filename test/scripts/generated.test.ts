@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GENERATED_OUTPUTS, generatedPaths } from "../../.github/scripts/generated.js";
+import {
+  hasGeneratedRegion,
+  markerSyntaxFor,
+} from "../../.github/scripts/lib/generated-regions.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
-/** A generated-region marker in either comment syntax, opening a line. */
-const BEGIN_MARKER = /^[ \t]*(?:<!-- |# )BEGIN GENERATED: /m;
 /** The file types generated-regions.ts has a marker syntax for; a marker string anywhere else is test or script text. */
 const REGION_FILE = /\.(?:md|ya?ml)$/;
 
@@ -16,7 +19,9 @@ const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "
 
 describe("the generated-output table", () => {
   const carrying = tracked.filter(
-    (path) => REGION_FILE.test(path) && BEGIN_MARKER.test(readFileSync(join(ROOT, path), "utf8")),
+    (path) =>
+      REGION_FILE.test(path) &&
+      hasGeneratedRegion(readFileSync(join(ROOT, path), "utf8"), markerSyntaxFor(path)),
   );
   /** The outputs the marker scan cannot see: whole generated files. */
   const WHOLE_FILES = ["lib/settings.schema.json", "src/upstream-gaps/index.ts"];
@@ -26,6 +31,26 @@ describe("the generated-output table", () => {
       (output) => output.path,
     );
     expect([...new Set(registered)].sort()).toEqual(carrying.sort());
+  });
+
+  test("the scan reads the shared marker grammar: an inline HTML marker counts, a marker-shaped scalar does not", () => {
+    // inputs.md's outputs-list marker sits mid-line; a line-anchored scan would drop that page from the pin.
+    expect(
+      hasGeneratedRegion(
+        "- `result`: <!-- BEGIN GENERATED: a (h) -->x<!-- END GENERATED: a -->",
+        "html",
+      ),
+    ).toBe(true);
+    expect(
+      hasGeneratedRegion("<!-- BEGIN GENERATED: a -->\n<!-- END GENERATED: a -->\n", "html"),
+    ).toBe(true);
+    expect(hasGeneratedRegion("the words BEGIN GENERATED: a outside a comment\n", "html")).toBe(
+      false,
+    );
+    expect(
+      hasGeneratedRegion("inputs:\n  # BEGIN GENERATED: a\n  # END GENERATED: a\n", "yaml"),
+    ).toBe(true);
+    expect(hasGeneratedRegion('d: "one\n  # BEGIN GENERATED: a\n  two"\n', "yaml")).toBe(false);
   });
 
   test("names the whole-file outputs the marker scan cannot see, each tracked with one writer", () => {
@@ -61,4 +86,61 @@ describe("the generated-output table", () => {
       GENERATED_OUTPUTS.filter((output) => output.path === "docs/reference/inputs.md"),
     ).toHaveLength(2);
   });
+});
+
+describe("the build:check runner", () => {
+  const RUNNER = ".github/scripts/generated.ts";
+
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8" });
+  }
+
+  function runner(cwd: string): { status: number; stdout: string; stderr: string } {
+    const run = Bun.spawnSync([process.execPath, RUNNER], { cwd, stdout: "pipe", stderr: "pipe" });
+    return {
+      status: run.exitCode,
+      stdout: run.stdout.toString(),
+      stderr: run.stderr.toString(),
+    };
+  }
+
+  test(
+    "a clean clone passes; a staged stale byte in a region file and in a whole file fails naming both",
+    () =>
+      withTempDir("build-check-", (dir) => {
+        // HEAD of this tree, its own index and working tree, sharing the object store and node_modules.
+        git(ROOT, "clone", "--quiet", "--shared", ROOT, dir);
+        symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+
+        const clean = runner(dir);
+        expect(clean.stderr).toBe("");
+        expect(clean.status).toBe(0);
+        expect(clean.stdout).toContain(
+          `build:check: ${generatedPaths().length} generated files match their generators`,
+        );
+        // The node_modules link is untracked by design; everything else is exactly HEAD.
+        expect(git(dir, "status", "--porcelain", "--", ".", ":(exclude)node_modules")).toBe("");
+
+        // A stale cell the generator repairs (the row shape holds), and a stale byte in a wholesale file.
+        const table = join(dir, "docs/reference/sections.md");
+        const page = readFileSync(table, "utf8");
+        expect(page).toContain("| `labels` |");
+        writeFileSync(table, page.replace("| `labels` |", "| `labelz` |"));
+        const index = join(dir, "src/upstream-gaps/index.ts");
+        writeFileSync(index, `${readFileSync(index, "utf8")}\n`);
+        git(dir, "add", "docs/reference/sections.md", "src/upstream-gaps/index.ts");
+
+        const stale = runner(dir);
+        expect(stale.status).toBe(1);
+        expect(stale.stderr).toContain("build:check: generated output drifted");
+        expect(stale.stderr).toContain("  modified:  docs/reference/sections.md");
+        expect(stale.stderr).toContain("  modified:  src/upstream-gaps/index.ts");
+        // The generators repaired the working tree; only the staged stale copies differ.
+        expect(git(dir, "diff", "--name-only").trim().split("\n").sort()).toEqual([
+          "docs/reference/sections.md",
+          "src/upstream-gaps/index.ts",
+        ]);
+      }),
+    120_000,
+  );
 });
