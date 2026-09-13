@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GENERATED_OUTPUTS, generatedPaths } from "../../.github/scripts/generated.js";
 import {
@@ -108,9 +108,14 @@ describe("the build:check runner", () => {
     "a clean clone passes; a staged stale byte in a region file and in a whole file fails naming both",
     () =>
       withTempDir("build-check-", (dir) => {
-        // HEAD of this tree, its own index and working tree, sharing the object store and node_modules.
+        // HEAD's tree with its own index, sharing the object store and node_modules; the runner and the
+        // generators are copied from the working tree, so the code under test is the code being edited.
         git(ROOT, "clone", "--quiet", "--shared", ROOT, dir);
         symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+        cpSync(join(ROOT, ".github", "scripts"), join(dir, ".github", "scripts"), {
+          recursive: true,
+        });
+        const untouched = [".", ":(exclude)node_modules", ":(exclude).github/scripts"];
 
         const clean = runner(dir);
         expect(clean.stderr).toBe("");
@@ -118,8 +123,7 @@ describe("the build:check runner", () => {
         expect(clean.stdout).toContain(
           `build:check: ${generatedPaths().length} generated files match their generators`,
         );
-        // The node_modules link is untracked by design; everything else is exactly HEAD.
-        expect(git(dir, "status", "--porcelain", "--", ".", ":(exclude)node_modules")).toBe("");
+        expect(git(dir, "status", "--porcelain", "--", ...untouched)).toBe("");
 
         // A stale cell the generator repairs (the row shape holds), and a stale byte in a wholesale file.
         const table = join(dir, "docs/reference/sections.md");
@@ -136,10 +140,12 @@ describe("the build:check runner", () => {
         expect(stale.stderr).toContain("  modified:  docs/reference/sections.md");
         expect(stale.stderr).toContain("  modified:  src/upstream-gaps/index.ts");
         // The generators repaired the working tree; only the staged stale copies differ.
-        expect(git(dir, "diff", "--name-only").trim().split("\n").sort()).toEqual([
-          "docs/reference/sections.md",
-          "src/upstream-gaps/index.ts",
-        ]);
+        expect(
+          git(dir, "diff", "--name-only", "--", ...untouched)
+            .trim()
+            .split("\n")
+            .sort(),
+        ).toEqual(["docs/reference/sections.md", "src/upstream-gaps/index.ts"]);
       }),
     120_000,
   );
