@@ -62,13 +62,14 @@ describe("the build:check runner", () => {
     return execFileSync("git", args, { cwd, encoding: "utf8" });
   }
 
-  function runner(cwd: string): { status: number; stderr: string } {
+  /** The runner's exit code and everything it printed on either stream. */
+  function runner(cwd: string): { status: number; printed: string } {
     const run = Bun.spawnSync([process.execPath, ".github/scripts/generated.ts"], {
       cwd,
       stdout: "pipe",
       stderr: "pipe",
     });
-    return { status: run.exitCode, stderr: run.stderr.toString() };
+    return { status: run.exitCode, printed: run.stdout.toString() + run.stderr.toString() };
   }
 
   test(
@@ -85,8 +86,8 @@ describe("the build:check runner", () => {
         const untouched = [".", ":(exclude)node_modules", ":(exclude).github/scripts"];
 
         const clean = runner(dir);
-        expect(clean.stderr).toBe("");
         expect(clean.status).toBe(0);
+        expect(clean.printed).not.toContain("drifted");
         expect(git(dir, "status", "--porcelain", "--", ...untouched)).toBe("");
 
         // A stale cell the generator repairs (the row shape holds), and a stale byte in a wholesale file.
@@ -100,8 +101,9 @@ describe("the build:check runner", () => {
 
         const stale = runner(dir);
         expect(stale.status).toBe(1);
-        expect(stale.stderr).toContain("  modified:  docs/reference/sections.md");
-        expect(stale.stderr).toContain("  modified:  src/upstream-gaps/index.ts");
+        // git's own --stat lists the two staged stale paths.
+        expect(stale.printed).toContain("docs/reference/sections.md");
+        expect(stale.printed).toContain("src/upstream-gaps/index.ts");
         // The generators repaired the working tree; only the staged stale copies differ.
         expect(
           git(dir, "diff", "--name-only", "--", ...untouched)

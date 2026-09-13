@@ -40,39 +40,34 @@ export function generatedPaths(): string[] {
   return [...new Set(GENERATED_OUTPUTS.map((output) => output.path))];
 }
 
-function git(args: readonly string[]): string[] {
-  const run = Bun.spawnSync(["git", ...args], { cwd: ROOT, stdout: "pipe", stderr: "inherit" });
-  if (run.exitCode !== 0) {
-    throw new Error(`build:check: git ${args[0]} exited ${run.exitCode}`);
-  }
-  return run.stdout
-    .toString()
-    .split("\n")
-    .filter((line) => line !== "");
+/** Runs `argv` at the repository root on the terminal's stdio; the exit code is the verdict. */
+function run(argv: string[]): number {
+  return Bun.spawnSync(argv, { cwd: ROOT, stdout: "inherit", stderr: "inherit" }).exitCode;
 }
 
 if (import.meta.main) {
   for (const generator of new Set(GENERATED_OUTPUTS.map((output) => output.generator))) {
-    const run = Bun.spawnSync([process.execPath, generator], {
-      cwd: ROOT,
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    if (run.exitCode !== 0) {
-      console.error(`build:check: ${generator} exited ${run.exitCode}`);
+    if (run([process.execPath, generator]) !== 0) {
+      console.error(`build:check: ${generator} failed`);
       process.exit(1);
     }
   }
   const paths = generatedPaths();
-  // Working tree against the index: a regenerated file already staged passes, a stale one fails.
-  const drifted = git(["diff", "--name-only", "--", ...paths]);
-  const untracked = git(["ls-files", "--others", "--exclude-standard", "--", ...paths]);
-  if (drifted.length > 0 || untracked.length > 0) {
+  // Working tree against the index: a regenerated file already staged passes, a stale one fails. git lists the
+  // drifted paths itself; an untracked registered path is listed the same way.
+  const untracked = Bun.spawnSync(
+    ["git", "ls-files", "--others", "--exclude-standard", "--", ...paths],
+    { cwd: ROOT, stderr: "inherit" },
+  );
+  if (untracked.exitCode !== 0) {
+    console.error("build:check: git ls-files failed");
+    process.exit(1);
+  }
+  const drifted = run(["git", "diff", "--exit-code", "--stat", "--", ...paths]) !== 0;
+  if (drifted || untracked.stdout.length > 0) {
+    process.stdout.write(untracked.stdout);
     console.error(
-      `build:check: generated output drifted from the committed tree; commit the regenerated files:\n${[
-        ...drifted.map((path) => `  modified:  ${path}`),
-        ...untracked.map((path) => `  untracked: ${path}`),
-      ].join("\n")}`,
+      "build:check: generated output drifted from the committed tree; commit the files listed above",
     );
     process.exit(1);
   }

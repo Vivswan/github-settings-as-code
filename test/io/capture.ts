@@ -11,7 +11,6 @@ export interface CapturedIo {
   /** `<level>: <message>` per annotate call. */
   annotations: string[];
   logs: string[];
-  summaries: string[];
   outputs: Partial<Record<OutputName, string>>;
   /** Every value registered through mask, in call order; io.masked() is the live set. */
   masks: string[];
@@ -23,12 +22,11 @@ export function captureIo(onMask: (value: string) => void = () => {}): CapturedI
   const captured: Omit<CapturedIo, "io"> = {
     annotations: [],
     logs: [],
-    summaries: [],
     outputs: {},
     masks: [],
     events: [],
   };
-  const { annotations, logs, summaries, outputs, masks, events } = captured;
+  const { annotations, logs, outputs, masks, events } = captured;
   return {
     io: {
       annotate: (level, message) => {
@@ -41,7 +39,6 @@ export function captureIo(onMask: (value: string) => void = () => {}): CapturedI
       },
       debug: () => {},
       summary: (markdown) => {
-        summaries.push(markdown);
         // Coerced first: a test forcing an opaque Private box through the port must not crash the fake.
         events.push(`summary: ${`${markdown}`.split("\n")[0]}`);
       },
