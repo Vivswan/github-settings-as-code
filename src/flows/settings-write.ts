@@ -52,7 +52,17 @@ export function canonicalPath(path: string): string {
 }
 
 const SEGMENT = sep === "\\" ? /[\\/]/ : sep;
-const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
+const SEPARATORS = sep === "\\" ? "\\/" : "/";
+
+/** `path` without its trailing separators, the root's own kept: basename ignores them, so slicing its length off `out.yml/` would leave `o`. */
+function withoutTrailingSeparators(path: string): string {
+  const floor = parse(path).root.length;
+  let end = path.length;
+  while (end > floor && SEPARATORS.includes(path[end - 1] ?? "")) {
+    end--;
+  }
+  return path.slice(0, end);
+}
 
 /** An entry's identity on its filesystem, the same under every name it has. */
 function entryId(stat: { dev: number | bigint; ino: number | bigint }): string {
@@ -176,8 +186,7 @@ function isSymlink(path: string): boolean {
  * NAME_MAX), and takes an existing regular destination's mode, so a replaced 0600 file stays 0600.
  */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  // Trailing separators first: basename ignores them, so slicing its length off `out.yml/` would leave `o`.
-  const spelled = path.replace(TRAILING_SEPARATORS, "");
+  const spelled = withoutTrailingSeparators(path);
   const directory = spelled.slice(0, spelled.length - basename(spelled).length);
   const staging = `${directory}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
   // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
