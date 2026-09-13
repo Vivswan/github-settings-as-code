@@ -1,0 +1,34 @@
+# Check mode over a protected branch whose live toggles diverge from the
+# settings file: enforce_admins and required_linear_history are declared true
+# but live false, so the run reports each field's drift, exits 1, and writes
+# nothing.
+name: branches-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_linear_history: true
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: false
+      required_linear_history:
+        enabled: false
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - "branches[main].protection.enforce_admins: true != false"
+    - "branches[main].protection.required_linear_history: true != false"
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"

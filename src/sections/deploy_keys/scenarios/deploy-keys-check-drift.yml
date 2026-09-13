@@ -1,4 +1,4 @@
-name: deploy-keys-check
+name: deploy-keys-check-drift
 description: >-
   Check mode reports deploy-key drift without writing: a declared-but-missing
   key (apply would create it), a declared key whose live material and

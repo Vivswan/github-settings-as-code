@@ -126,15 +126,15 @@ type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) &
   } & { readonly [R in keyof Ends & "get"]: GetDecl };
 
 /**
- * The write fields a `secrets` declaration may name: a dotted path under `mapping`, admitted only where
- * both carriers (`create` and `updateConfig`) declare `unverifiable: true`, since the value is re-sent on
- * every run; an immutable resource admits none.
+ * The write fields a `secrets` declaration may name: a dotted path under `mapping` (the field the
+ * `updateConfig` role writes), admitted only where both carriers (`create` and `updateConfig`) declare
+ * `unverifiable: true`, since the value is re-sent on every run; an immutable resource admits none.
  */
-type SecretPath<Ends> = Ends extends {
+type SecretPath<Ends, M extends string> = Ends extends {
   readonly create: { readonly unverifiable: true };
   readonly updateConfig: { readonly unverifiable: true };
 }
-  ? `${string}.${string}`
+  ? `${M}.${string}`
   : never;
 
 export function updateRole(endpoints: ListEndpoints): UpdateDecl | undefined {
@@ -222,11 +222,26 @@ interface ConcealedField {
   readonly remedy: string;
 }
 
-/** With an `updateConfig` role, the entry field holding the mapping that endpoint sets field by field. */
-type MappingFacet<K extends ListSectionKey, Ends> = Ends extends {
+/**
+ * ONE string literal: not `string`, not `never`, not a union, not a pattern (`Lowercase<string>`, a
+ * template with a `${string}` or `${any}` hole). A mapped type over one literal has a required property,
+ * so the empty object is not assignable to it; over anything else it has an index signature or nothing.
+ */
+type IsStringLiteral<M extends string> =
+  IsUnion<M> extends true ? false : Record<never, never> extends { [P in M]: 0 } ? false : true;
+
+/**
+ * With an `updateConfig` role, the entry field holding the mapping that endpoint sets field by field;
+ * `M` is its literal, so SecretPath can demand that every secret path sit under it. ONE literal: a
+ * union, `string`, or a pattern would admit a path under a mapping the declaration does not have, and
+ * the planner would route that secret through the general update, so it is refused. The type catches an
+ * ACCIDENTAL dotted secret path outside the declared mapping; a declaration written to defeat it (a
+ * mapping cast to a type the check does not see) is deliberate and out of its scope.
+ */
+type MappingFacet<K extends ListSectionKey, Ends, M extends string> = Ends extends {
   readonly updateConfig: EndpointDecl;
 }
-  ? { readonly mapping: keyof Entry<K> & string }
+  ? { readonly mapping: IsStringLiteral<M> extends true ? M & keyof Entry<K> : never }
   : { readonly mapping?: never };
 
 interface Identity<K extends ListSectionKey, F extends string, Key extends string> {
@@ -262,7 +277,8 @@ export type ListSectionDecl<
   Live extends object,
   F extends string,
   Key extends string,
-> = ListSectionDeclFields<K, Ends, Live, F, Key> & MappingFacet<K, Ends>;
+  M extends string = never,
+> = ListSectionDeclFields<K, Ends, Live, F, Key, M> & MappingFacet<K, Ends, M>;
 
 interface ListSectionDeclFields<
   K extends ListSectionKey,
@@ -270,6 +286,7 @@ interface ListSectionDeclFields<
   Live extends object,
   F extends string,
   Key extends string,
+  M extends string,
 > {
   readonly key: K;
   readonly permission: SectionPermission;
@@ -331,9 +348,10 @@ interface ListSectionDeclFields<
    * Write fields (dotted paths) holding a `$NAME` reference to a value GitHub never echoes back (a
    * webhook's config.secret): left out of the comparison, resolved when the write executes, re-sent
    * on every run under an unverifiable facet, and read back by a snapshot as a per-item reference.
-   * SecretPath admits a path only where its carriers declare the facet; checkDecl holds a dotted path to `mapping`.
+   * SecretPath admits a path only under `mapping`, and only where its carriers declare the facet; `mapping`
+   * alone infers `M`, so a stray path is the error, never a re-inferred mapping.
    */
-  readonly secrets?: readonly SecretPath<Ends>[];
+  readonly secrets?: readonly SecretPath<Ends, NoInfer<M>>[];
   readonly prose: {
     /** What apply does to an undeclared live resource, as the note and drift spell it ("DELETE it"). */
     readonly undeclaredAction: string;
@@ -354,6 +372,7 @@ export interface ListSectionModule<
   Live extends object,
   F extends string,
   Key extends string,
+  M extends string = never,
 > {
   readonly key: K;
   readonly permission: SectionPermission;
@@ -368,7 +387,7 @@ export interface ListSectionModule<
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
   readonly snapshot: (ctx: SnapshotContext<Ends, GraphqlDict, K>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
-  readonly decl: ListSectionDecl<K, Ends, Live, F, Key>;
+  readonly decl: ListSectionDecl<K, Ends, Live, F, Key, M>;
 }
 
 /**
@@ -411,7 +430,8 @@ interface ErasedDecl<Key extends string> {
     ListEndpoints,
     object,
     string,
-    Key
+    Key,
+    string
   >["prose"];
 }
 
@@ -983,25 +1003,6 @@ function secretValuesFor(decl: ErasedDecl<string>, declared: unknown): DeclaredS
 }
 
 /**
- * The declaration fact the types cannot spell, since no type says "under this key": a secret path must sit
- * under `mapping`, the field the `updateConfig` role writes.
- */
-function checkDecl(decl: ErasedDecl<string>): void {
-  const { key, mapping, secrets } = decl;
-  for (const field of secrets ?? []) {
-    const [head, ...rest] = pathOf(field);
-    if (rest.length > 0 && head === mapping) {
-      continue;
-    }
-    throw new Error(
-      mapping === undefined
-        ? `BUG: ${key} declares the secret field "${field}" without a mapping (an updateConfig role) to carry it under the unverifiable facet`
-        : `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
-    );
-  }
-}
-
-/**
  * The planner runs over the erased view while the module surface stays typed over the literal dictionary
  * and declared value the registry pins; the casts are that one boundary.
  */
@@ -1011,10 +1012,10 @@ export function listSection<
   Live extends object,
   F extends string,
   Key extends string,
->(decl: ListSectionDecl<K, Ends, Live, F, Key>): ListSectionModule<K, Ends, Live, F, Key> {
+  M extends string = never,
+>(decl: ListSectionDecl<K, Ends, Live, F, Key, M>): ListSectionModule<K, Ends, Live, F, Key, M> {
   const erased = decl as unknown as ErasedDecl<Key>;
-  checkDecl(erased);
-  const section: ListSectionModule<K, Ends, Live, F, Key> = {
+  const section: ListSectionModule<K, Ends, Live, F, Key, M> = {
     key: decl.key,
     permission: decl.permission,
     undeclaredDefault: decl.undeclaredDefault,

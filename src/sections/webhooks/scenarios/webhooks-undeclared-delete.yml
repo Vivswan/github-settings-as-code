@@ -1,0 +1,43 @@
+name: webhooks-undeclared-delete
+description: >-
+  Under the wrapped "_undeclared: delete" form a live webhook the settings
+  file does not declare is DELETED; the declared hook is already converged
+  and untouched. Apply stays green, and a check rerun over the mutated state
+  converges.
+settings:
+  webhooks:
+    _undeclared: delete
+    entries:
+      - config:
+          url: https://ci.example.com/hook
+          content_type: json
+        events: [push]
+        active: true
+live_state:
+  hooks:
+    - id: 601
+      active: true
+      events: [push]
+      config:
+        url: https://ci.example.com/hook
+        content_type: json
+    - id: 602
+      config:
+        url: https://stray.example.com/hook
+        content_type: json
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    webhooks: applied
+  mutations:
+    - DELETE /repos/{repo}/hooks/602
+  never:
+    - PATCH /repos/{repo}/hooks/601
+    - DELETE /repos/{repo}/hooks/601
+    - POST /repos/{repo}/hooks
+  stdout_contains:
+    - 'DELETED undeclared webhook "https://stray.example.com/hook"'
+  fixpoint: converges

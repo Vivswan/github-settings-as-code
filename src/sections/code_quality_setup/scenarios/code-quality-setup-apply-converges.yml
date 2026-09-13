@@ -1,4 +1,4 @@
-name: code-quality-apply-converges
+name: code-quality-setup-apply-converges
 description: >-
   Apply over a repository whose code quality setup diverges (no languages
   change, so the PATCH answers 200 synchronously). A check rerun converges

@@ -74,7 +74,7 @@ flowchart LR
 - The one knob on the live axis is `_undeclared`: what happens to a live resource the file does not declare, per list section.
 - Re-running an apply rewrites nothing the engine can read back, and a check right after it reads clean. Two writes recur by design because their values cannot be read back: `interaction_limits` re-arms its expiry on every apply, and every declared secret is re-sealed and rewritten on every apply.
 
-Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [src/sections/actions_variables/scenarios/actions-variables-undeclared-keep.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep.yml), [src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
+Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml), [src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
 
 ## The mode ladder
 

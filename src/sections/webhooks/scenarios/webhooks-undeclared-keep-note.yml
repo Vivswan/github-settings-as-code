@@ -1,0 +1,43 @@
+name: webhooks-undeclared-keep-note
+description: >-
+  The section's keep default: a live webhook the plain-array form does not
+  declare is KEPT and surfaced as a note naming the "_undeclared: delete"
+  knob that would remove it. The declared hook is already converged, so apply
+  writes nothing, stays green, and a check rerun converges (the kept hook is
+  a note, not drift).
+settings:
+  webhooks:
+    - config:
+        url: https://ci.example.com/hook
+        content_type: json
+      events: [push]
+      active: true
+live_state:
+  hooks:
+    - id: 601
+      active: true
+      events: [push]
+      config:
+        url: https://ci.example.com/hook
+        content_type: json
+    - id: 602
+      config:
+        url: https://stray.example.com/hook
+        content_type: json
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    webhooks: applied
+  never:
+    - DELETE /repos/{repo}/hooks/602
+    - PATCH /repos/{repo}/hooks/602
+    - DELETE /repos/{repo}/hooks/601
+    - PATCH /repos/{repo}/hooks/601
+    - POST /repos/{repo}/hooks
+  stdout_contains:
+    - 'webhook "https://stray.example.com/hook" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep"'
+    - 'or set "_undeclared: delete" to have apply'
+  fixpoint: converges

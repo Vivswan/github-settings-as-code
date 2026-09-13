@@ -1,0 +1,32 @@
+name: labels-undeclared-delete
+description: >-
+  The section's delete default: a live label the plain-array form does not
+  declare is DELETED, the declared label (already converged) is left alone,
+  apply stays green, and a check rerun over the mutated state converges.
+settings:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something isn't working
+live_state:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something isn't working
+    - name: wontfix
+      color: ffffff
+      description: This will not be worked on
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    labels: applied
+  mutations:
+    - "DELETE /repos/{repo}/labels/wontfix"
+  never:
+    - "PATCH /repos/{repo}/labels/bug"
+    - "DELETE /repos/{repo}/labels/bug"
+    - "POST /repos/{repo}/labels"
+  stdout_contains:
+    - 'DELETED undeclared label "wontfix"'
+  fixpoint: converges

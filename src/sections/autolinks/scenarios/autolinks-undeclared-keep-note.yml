@@ -1,0 +1,37 @@
+# The wrapped "_undeclared: keep" form softens the section's delete default: a
+# live autolink the settings file does not declare is KEPT and surfaced as a
+# note naming the "_undeclared: delete" knob that would remove it. The declared
+# autolink is already converged, so apply writes nothing, stays green, and a
+# check rerun converges (the kept autolink is a note, not drift).
+name: autolinks-undeclared-keep-note
+settings:
+  autolinks:
+    _undeclared: keep
+    entries:
+      - key_prefix: "TICKET-"
+        url_template: "https://example.com/TICKET?q=<num>"
+        is_alphanumeric: true
+live_state:
+  autolinks:
+    - id: 10
+      key_prefix: "TICKET-"
+      url_template: "https://example.com/TICKET?q=<num>"
+      is_alphanumeric: true
+    - id: 20
+      key_prefix: "JIRA-"
+      url_template: "https://jira.example.com/<num>"
+      is_alphanumeric: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    autolinks: applied
+  never:
+    - "DELETE /repos/{repo}/autolinks"
+    - "POST /repos/{repo}/autolinks"
+  stdout_contains:
+    - 'autolink "JIRA-" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep"'
+    - 'or set "_undeclared: delete" to have apply'
+  fixpoint: converges

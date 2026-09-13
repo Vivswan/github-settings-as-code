@@ -1,0 +1,31 @@
+name: custom-properties-undeclared-delete
+description: >
+  Under the wrapped "_undeclared: delete" form a live custom property value
+  the settings file does not declare is unset through the bulk PATCH (a null
+  value reverts it to the org default, if any); the declared property is
+  already converged. Apply stays green, and the idempotence re-run issues zero
+  writes.
+settings:
+  custom_properties:
+    _undeclared: delete
+    entries:
+      - property_name: team
+        value: platform
+live_state:
+  custom_property_values:
+    - property_name: team
+      value: platform
+    - property_name: tier
+      value: gold
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    custom_properties: applied
+  mutations:
+    - PATCH /repos/{repo}/properties/values
+  stdout_contains:
+    - '"tier"'
+  fixpoint: apply_idempotent

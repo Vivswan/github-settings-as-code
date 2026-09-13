@@ -1,4 +1,4 @@
-name: check-suite-preferences-apply
+name: check-suite-preferences-apply-converges
 description: >-
   Apply PATCHes the declared per-app auto_trigger_checks toggles verbatim
   and logs the change from the echoed preferences. Nothing can be read back

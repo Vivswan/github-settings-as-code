@@ -1,0 +1,29 @@
+# The section's keep default: a repository-sourced ruleset the settings file
+# does not name is KEPT and surfaced as a note naming the "_undeclared: delete"
+# knob that would remove it. Apply writes nothing, stays green, and a check
+# rerun converges, since the kept ruleset is a note, not drift.
+name: rulesets-undeclared-keep-note
+settings:
+  rulesets: []
+live_state:
+  rulesets:
+    - id: 42
+      name: legacy-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  never:
+    - "DELETE /repos/{repo}/rulesets/42"
+    - "PUT /repos/{repo}/rulesets/42"
+    - "POST /repos/{repo}/rulesets"
+  stdout_contains:
+    - 'ruleset "legacy-protection" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep"'
+    - 'or set "_undeclared: delete" to have apply'
+  fixpoint: converges

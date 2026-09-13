@@ -1,20 +1,20 @@
-name: agents-variables-undeclared-keep
+name: actions-variables-undeclared-keep-note
 description: >-
-  The wrapped agents_variables form with "_undeclared: keep" softens the
+  The wrapped actions_variables form with "_undeclared: keep" softens the
   section's delete default: a live variable the settings file does not
   declare is KEPT and surfaced as a note instead of being deleted. The
   declared variable still updates, apply stays green, and a check rerun
   converges (the kept variable is a note, not drift).
 settings:
-  agents_variables:
+  actions_variables:
     _undeclared: keep
     entries:
-      - name: AGENT_MODEL
-        value: extended
+      - name: DEPLOY_REGION
+        value: eu-west-1
 live_state:
-  agents_variables:
-    - name: AGENT_MODEL
-      value: default
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: us-east-1
       created_at: "2026-01-01T00:00:00Z"
       updated_at: "2026-01-01T00:00:00Z"
     - name: RETIRED_FLAG
@@ -25,12 +25,15 @@ expect:
   exit_code: 0
   result: applied
   outcomes:
-    agents_variables: applied
+    actions_variables: applied
   mutations:
-    - "PATCH /repos/{repo}/agents/variables/AGENT_MODEL"
+    - "PATCH /repos/{repo}/actions/variables/DEPLOY_REGION"
   never:
-    - "DELETE /repos/{repo}/agents/variables"
+    - "DELETE /repos/{repo}/actions/variables"
+    - "PATCH /repos/{repo}/actions/variables/RETIRED_FLAG"
+    - "POST /repos/{repo}/actions/variables"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
+    - 'or set "_undeclared: delete" to have apply'
     - RETIRED_FLAG
   fixpoint: converges

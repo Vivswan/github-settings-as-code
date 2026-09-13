@@ -1,4 +1,4 @@
-name: pages-apply-update
+name: pages-apply-converges
 description: >-
   A live Pages site exists but its cname diverges from the settings file.
   Apply PUTs the new configuration, and a check rerun over the mutated state

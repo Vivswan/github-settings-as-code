@@ -1,0 +1,30 @@
+name: custom-properties-undeclared-keep-note
+description: >
+  The section's keep default: a live custom property value the plain-array
+  form does not declare is KEPT and surfaced as a note naming the
+  "_undeclared: delete" knob that would unset it. The declared property is
+  already converged, so apply issues no PATCH, stays green, and a check rerun
+  converges (the kept property is a note, not drift).
+settings:
+  custom_properties:
+    - property_name: team
+      value: platform
+live_state:
+  custom_property_values:
+    - property_name: team
+      value: platform
+    - property_name: tier
+      value: gold
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    custom_properties: applied
+  never:
+    - PATCH /repos/{repo}/properties/values
+  stdout_contains:
+    - 'custom property "tier" is set on the repo but not declared in the settings file; kept under "_undeclared: keep"'
+    - 'or set "_undeclared: delete" to have apply'
+  fixpoint: converges

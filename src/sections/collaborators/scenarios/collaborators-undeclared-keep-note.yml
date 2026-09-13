@@ -1,0 +1,31 @@
+name: collaborators-undeclared-keep-note
+description: >-
+  The wrapped `_undeclared: keep` form softens the section's delete default: a
+  collaborator the settings file does not name keeps their access and is
+  surfaced as a note naming the "_undeclared: delete" knob that would remove
+  them. The declared collaborator is already at the declared role, so apply
+  writes nothing, stays green, and a check rerun converges.
+settings:
+  collaborators:
+    _undeclared: keep
+    entries:
+      - username: e2e-existing
+        permission: admin
+live_state:
+  collaborators:
+    - login: e2e-existing
+      role_name: admin
+    - login: e2e-stale
+      role_name: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "DELETE /repos/{repo}/collaborators/"
+  stdout_contains:
+    - 'collaborator "e2e-stale" has access but is not declared in the settings file; kept under "_undeclared: keep"'
+    - 'or set "_undeclared: delete" to have apply'
+  fixpoint: converges

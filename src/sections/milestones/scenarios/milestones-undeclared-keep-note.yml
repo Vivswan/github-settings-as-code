@@ -1,4 +1,4 @@
-name: milestones-keep-undeclared
+name: milestones-undeclared-keep-note
 description: >-
   A live milestone the settings file does not declare is KEPT (the
   plain-array form uses the milestone default of keep), surfaced as a note;
@@ -29,4 +29,5 @@ expect:
   stdout_contains:
     - "created milestone \"v1.0\""
     - "v0.9"
+    - 'or set "_undeclared: delete" to have apply'
   fixpoint: converges
