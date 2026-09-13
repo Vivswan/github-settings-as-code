@@ -9,7 +9,7 @@ import {
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
-import { hasDrift, plainData } from "../contract/plan.js";
+import { type ExecTools, hasDrift, plainData } from "../contract/plan.js";
 import {
   LIVE_SECRET_NAMES,
   parseSealingKey,
@@ -396,8 +396,8 @@ export async function listEnvironmentSecrets(
 
 /**
  * Existence is the only comparable state (values never read back), so every declared secret is a
- * sealed PUT. The sealing key is read inside the first payload thunk: in apply the environment PUT
- * may only just have created the environment the key belongs to.
+ * sealed PUT. The sealing key is an execution-phase read (endpoints.ts), issued once per environment
+ * from the first payload thunk that runs; the token it demands is the one the thunk received.
  */
 async function planEnvironmentSecrets(
   ctx: EnvironmentsRestContext,
@@ -418,9 +418,9 @@ async function planEnvironmentSecrets(
   const planned: NestedPlan = { ops: [], notes: [] };
 
   let sealingKey: Promise<SealingKey> | undefined;
-  const readSealingKey = (): Promise<SealingKey> => {
+  const readSealingKey = (exec: ExecTools): Promise<SealingKey> => {
     sealingKey ??= ctx.read.secretsPublicKey
-      .call({ params, describe: `reading the ${label} sealing key` })
+      .call(exec, { params, describe: `reading the ${label} sealing key` })
       .then((body) => parseSealingKey(section, { label }, ENDPOINTS.secretsPublicKey, body));
     return sealingKey;
   };
@@ -432,7 +432,7 @@ async function planEnvironmentSecrets(
       params: { ...params, secret_name: name },
       payload: async (exec) => {
         const plaintext = exec.resolveSecret(entry.value);
-        return (await readSealingKey()).seal(plaintext);
+        return (await readSealingKey(exec)).seal(plaintext);
       },
       drift: exists
         ? []

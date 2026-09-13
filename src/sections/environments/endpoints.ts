@@ -53,9 +53,12 @@ export const ENDPOINTS = {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets",
     statuses: { 200: "the environment secrets list (names and timestamps; never values)" },
   },
+  // Read inside the secret PUT's payload thunk (nested.ts): in apply the environment PUT may only just
+  // have created the environment the key belongs to, so check mode never issues it.
   secretsPublicKey: {
     route: "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key",
     statuses: { 200: "the environment sealing public key" },
+    phase: "execution",
   },
   putSecret: {
     route: "PUT /repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}",
@@ -102,12 +105,15 @@ export const ENDPOINTS = {
     permission: { repo: ["actions"] },
     denialHint: PROTECTION_RULES_DENIAL_HINT,
   },
+  // Read inside the enabling POST's payload thunk (protection-rules.ts), once per environment
+  // that has a missing rule, so check mode never issues it.
   listProtectionRuleApps: {
     route:
       "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/apps",
     statuses: { 200: "the protection-rule Apps available to this environment" },
     permission: { repo: ["administration"] },
     denialHint: PROTECTION_RULES_DENIAL_HINT,
+    phase: "execution",
   },
   createProtectionRule: {
     route: "POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules",
