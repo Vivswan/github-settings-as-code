@@ -38,6 +38,7 @@ import {
   clone,
   commitAll,
   createOf,
+  expectPackage,
   FIXTURE_IDENTITY,
   type Fixture,
   git,
@@ -48,7 +49,6 @@ import {
   latestTag,
   localIdentity,
   moveOf,
-  PACKAGED_DIFF,
   PERMANENT,
   PLANTED_PACKAGES,
   packagedOf,
@@ -60,7 +60,6 @@ import {
   seedFixture,
   shallowClone,
   subcommand,
-  treePaths,
   withPushPlans,
   write,
   writeBuild,
@@ -175,29 +174,13 @@ describe("packageRelease", () => {
     ]);
     expect(packagedOf(fx, fx.mergeSha)).toBe(packaged);
     expect(latestTag(fx)).toBe(packaged);
-    expect(parentsOf(fx.origin, packaged)).toEqual([fx.mergeSha]);
-    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, packaged)).toBe(PACKAGED_DIFF);
-    expect(treePaths(fx.origin, packaged)).toEqual([
-      ".github/dependabot.yml",
-      ".github/workflows/ci.yml",
-      ".gitignore",
-      ".release-please-manifest.json",
-      "CHANGELOG.md",
-      "lib/index.js",
-      "lib/pkg/index.d.ts",
-      "lib/pkg/index.js",
-      "package.json",
-      "release-please-config.json",
-      "src/marker.ts",
-    ]);
-    expect(git(fx.origin, "show", `${packaged}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
-    expect(git(fx.origin, "show", `${packaged}:lib/pkg/index.js`)).toBe(
-      "library-packaged-bundle-bytes-1",
+    expectPackage(
+      fx,
+      packaged,
+      fx.mergeSha,
+      "packaged-bundle-bytes-1",
+      "https://example.invalid/actions/runs/1",
     );
-    expect(git(fx.origin, "log", "-1", "--format=%B", packaged)).toBe(
-      `build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}\n\nWorkflow-run: https://example.invalid/actions/runs/1`,
-    );
-    expect(identityOf(fx.origin, packaged)).toBe(BOT_IDENTITY);
     expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
 
     const rerun = checkoutOf(fx, "rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");

@@ -4,7 +4,7 @@
  * a landing between a read and the write it informs), and the helpers the test files share.
  */
 
-import { afterAll, beforeAll } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -174,7 +174,7 @@ const FIXTURE_SCRIPTS = {
   test: "bun test",
 };
 /** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
-export const STRIPPED_SCRIPTS = { test: "bun test" };
+const STRIPPED_SCRIPTS = { test: "bun test" };
 
 /** What a packaged commit's package.json looks like: the pipeline strips the preparation scripts when it mints one. */
 function stripPrepare(cwd: string): void {
@@ -188,12 +188,12 @@ function stripPrepare(cwd: string): void {
   git(cwd, "add", "package.json");
 }
 
-export function treePaths(cwd: string, sha: string): string[] {
+function treePaths(cwd: string, sha: string): string[] {
   return git(cwd, "ls-tree", "-r", "--name-only", sha).split("\n");
 }
 
 /** The paths a packaged commit's diff against its source lists: the build outputs and the stripped manifest. */
-export const PACKAGED_DIFF = "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
+const PACKAGED_DIFF = "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
 
 export const CHANGELOG_21 = `# Changelog
 
@@ -222,6 +222,47 @@ export interface Fixture {
   work: string;
   seedSha: string;
   mergeSha: string;
+}
+
+/** The whole packaged-commit contract: `source`'s child, its tree plus the build of `bundle` and the stripped
+ * manifest and nothing else, the pipeline's subject and run trailer, the bot identity. */
+export function expectPackage(
+  fx: Fixture,
+  packaged: string,
+  source: string,
+  bundle: string,
+  runUrl: string,
+): void {
+  expect(parentsOf(fx.origin, packaged)).toEqual([source]);
+  expect(git(fx.origin, "diff", "--name-only", source, packaged)).toBe(PACKAGED_DIFF);
+  expect(treePaths(fx.origin, packaged)).toEqual([
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    ".release-please-manifest.json",
+    "CHANGELOG.md",
+    "lib/index.js",
+    "lib/pkg/index.d.ts",
+    "lib/pkg/index.js",
+    "package.json",
+    "release-please-config.json",
+    "src/marker.ts",
+  ]);
+  for (const [file, content] of Object.entries(builtFiles(bundle))) {
+    expect(git(fx.origin, "show", `${packaged}:${file}`)).toBe(content);
+  }
+  expect(git(fx.origin, "show", `${packaged}:package.json`)).toBe(
+    manifestJson(
+      git(fx.origin, "show", `${source}:.release-please-manifest.json`).match(
+        /"\."\s*:\s*"([^"]+)"/,
+      )?.[1] ?? "",
+      STRIPPED_SCRIPTS,
+    ).trimEnd(),
+  );
+  expect(git(fx.origin, "log", "-1", "--format=%B", packaged)).toBe(
+    `build: main at ${git(fx.origin, "rev-parse", "--short", source)}\n\nWorkflow-run: ${runUrl}`,
+  );
+  expect(identityOf(fx.origin, packaged)).toBe(BOT_IDENTITY);
 }
 
 /**

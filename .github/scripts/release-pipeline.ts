@@ -255,7 +255,9 @@ function assertPackageOf(
   assertCarries(cwd, packaged, what, remedy);
   if (built !== undefined) {
     throw new Error(
-      `${what} packages ${sourceSha}, but its tree ${actual} is not the tree ${built} this checkout's build packages, so the two differ under ${PACKAGED}: either the commit was not built from this source or the build is not reproducible. Diff the two trees by hand; ${remedy}`,
+      `${what} packages ${sourceSha}, but its tree ${actual} is not the tree ${built} this checkout's build packages, ` +
+        `so the two differ under ${PACKAGED}: either the commit was not built from this source or the build is not ` +
+        `reproducible. Diff the two trees by hand; ${remedy}`,
     );
   }
 }
@@ -462,7 +464,7 @@ export function movePointer(cwd: string, ref: string, candidate: Packaged): Poin
       const mainHead = fetchMainHead(cwd);
       const parents = git(cwd, "log", "-1", "--format=%P", at).split(" ").filter(Boolean);
       const current = parents.length === 1 ? parents[0] : undefined;
-      // The unknown-source arm moves over the retired chain's tip on the first run after landing; it goes once that run is history.
+      // A pointer whose commit is no child of a main commit (the retired chain's tip, a hand-pushed bare root) is replaced, not judged.
       if (current !== undefined && isAncestor(cwd, current, mainHead)) {
         if (isAncestor(cwd, candidate.source, current)) {
           assertPackageOf(cwd, at, current, `${ref} (${at})`, "inspect it by hand.");

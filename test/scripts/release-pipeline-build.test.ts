@@ -16,7 +16,6 @@ import {
   retagMajor,
 } from "../../.github/scripts/release-pipeline.js";
 import {
-  BOT_IDENTITY,
   buildTagOf,
   buildTags,
   builtFiles,
@@ -26,10 +25,10 @@ import {
   createdSha,
   createOf,
   deleteOf,
+  expectPackage,
   FIXTURE_IDENTITY,
   type Fixture,
   git,
-  identityOf,
   installReleasePipelineFixture,
   LATEST,
   latestTag,
@@ -37,7 +36,6 @@ import {
   manifestJson,
   moveOf,
   originHolds,
-  PACKAGED_DIFF,
   PERMANENT,
   PLANTED_PACKAGES,
   packagedOf,
@@ -48,11 +46,9 @@ import {
   pushGreenCommit,
   remoteRef,
   rivalPackage,
-  STRIPPED_SCRIPTS,
   seedFixture,
   shallowClone,
   subcommand,
-  treePaths,
   withPushPlans,
   write,
   writeBuild,
@@ -95,36 +91,7 @@ describe("packageCommit", () => {
     expect(pushes).toEqual([createOf(packaged, ref), moveOf(LATEST, "", packaged)]);
     expect(buildTags(fx)).toEqual([ref]);
     expect(latestTag(fx)).toBe(packaged);
-    expect(parentsOf(fx.origin, packaged)).toEqual([fx.mergeSha]);
-    expect(git(fx.origin, "diff", "--name-only", fx.mergeSha, packaged)).toBe(PACKAGED_DIFF);
-    // The workflow file rides along: the parent is the source, so no diff shows a workflow change.
-    expect(treePaths(fx.origin, packaged)).toEqual([
-      ".github/dependabot.yml",
-      ".github/workflows/ci.yml",
-      ".gitignore",
-      ".release-please-manifest.json",
-      "CHANGELOG.md",
-      "lib/index.js",
-      "lib/pkg/index.d.ts",
-      "lib/pkg/index.js",
-      "package.json",
-      "release-please-config.json",
-      "src/marker.ts",
-    ]);
-    expect(git(fx.origin, "show", `${packaged}:lib/index.js`)).toBe("packaged-bundle-bytes-1");
-    expect(git(fx.origin, "show", `${packaged}:lib/pkg/index.js`)).toBe(
-      "library-packaged-bundle-bytes-1",
-    );
-    expect(git(fx.origin, "show", `${packaged}:lib/pkg/index.d.ts`)).toBe(
-      "types-packaged-bundle-bytes-1",
-    );
-    expect(git(fx.origin, "show", `${packaged}:package.json`)).toBe(
-      manifestJson("2.1.0", STRIPPED_SCRIPTS).trimEnd(),
-    );
-    expect(git(fx.origin, "log", "-1", "--format=%B", packaged)).toBe(
-      `build: main at ${git(fx.origin, "rev-parse", "--short", fx.mergeSha)}\n\nWorkflow-run: ${RUN_URL}`,
-    );
-    expect(identityOf(fx.origin, packaged)).toBe(BOT_IDENTITY);
+    expectPackage(fx, packaged, fx.mergeSha, "packaged-bundle-bytes-1", RUN_URL);
     expect(localIdentity(fx.work)).toBe(FIXTURE_IDENTITY);
     expect(git(fx.work, "rev-parse", "HEAD")).toBe(fx.mergeSha);
     expect(git(fx.work, "status", "--porcelain")).toBe("");
@@ -258,7 +225,9 @@ describe("packageCommit", () => {
     });
     expect(String((error as Error).message)).toMatch(
       new RegExp(
-        `^${ref} \\(${packaged}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build packages, so the two differ under lib/index\\.js and lib/pkg/.*Diff the two trees by hand; no run replaces a packaged commit it did not mint; if the build is wrong, delete the tag by hand and rerun\\.$`,
+        `^${ref} \\(${packaged}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} ` +
+          "this checkout's build packages, so the two differ under lib/index\\.js and lib/pkg/.*Diff the two trees by hand; " +
+          "no run replaces a packaged commit it did not mint; if the build is wrong, delete the tag by hand and rerun\\.$",
       ),
     );
     expect(pushes).toEqual([]);
