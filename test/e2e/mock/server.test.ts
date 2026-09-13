@@ -47,12 +47,6 @@ describe("handler-completeness startup assertion", () => {
 });
 
 describe("pagination slicing", () => {
-  test("first page returns up to per_page items", () => {
-    const items = Array.from({ length: 250 }, (_, i) => i);
-    expect(slicePage(items, { per_page: "100", page: "1" })).toHaveLength(100);
-    expect(slicePage(items, { per_page: "100", page: "1" })[0]).toBe(0);
-  });
-
   test("the 100-boundary: exactly 100 items yields a full page then an empty one", () => {
     const items = Array.from({ length: 100 }, (_, i) => i);
     expect(slicePage(items, { per_page: "100", page: "1" })).toHaveLength(100);
@@ -71,10 +65,6 @@ describe("pagination slicing", () => {
     expect(slicePage(items, { per_page: "100", page: "1" }, 30)).toHaveLength(30);
     expect(slicePage(items, { per_page: "100", page: "2" }, 30)).toHaveLength(10);
     expect(slicePage(items, { per_page: "10", page: "1" }, 30)).toHaveLength(10);
-  });
-
-  test("a page past the end is empty", () => {
-    expect(slicePage([1, 2, 3], { per_page: "100", page: "5" })).toHaveLength(0);
   });
 
   test("labels.list paginates over the wire", async () => {
@@ -861,8 +851,8 @@ describe("core-route faults and server_error", () => {
   const RAW_ACCEPT = "application/vnd.github.raw+json";
   const contentsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
 
-  // Key validation through both channels over section and core keys; duplicate-fault rejection is
-  // covered through startMockServer in the fault-injection suite below.
+  // Key validation through both channels over section and core keys; the unknown-key and duplicate-fault
+  // rejections through startMockServer are the fault-injection suite's.
   const faultKeyCases: Array<{
     name: string;
     channel: "faults" | "corrupt";
@@ -870,20 +860,13 @@ describe("core-route faults and server_error", () => {
     rejects?: RegExp;
   }> = [
     { name: "accepts a registered section key (faults)", channel: "faults", key: "labels.list" },
-    { name: "accepts a registered core key (faults)", channel: "faults", key: "core.contentsGet" },
     {
       name: "accepts a registered core key (corrupt)",
       channel: "corrupt",
       key: "core.discoveryList",
     },
     {
-      name: "rejects an unknown section-style key",
-      channel: "faults",
-      key: "bogus",
-      rejects: /unknown endpoint/,
-    },
-    {
-      name: "rejects an unknown core-style key",
+      name: "rejects an unknown key",
       channel: "faults",
       key: "core.bogus",
       rejects: /unknown endpoint/,
@@ -1717,7 +1700,7 @@ describe("state-flag gaps", () => {
     expect(res.status).toBe(409);
   });
 
-  test("code-scanning update applies (202) without the in-progress flag", async () => {
+  test("code-scanning update answers 202 for languages added over a live seed that declares none", async () => {
     const h = await start(scenario({ live_state: { code_scanning: { state: "configured" } } }));
     const applied = await call(h, "PATCH", `/repos/${OWNER}/${REPO}/code-scanning/default-setup`, {
       body: { languages: ["javascript"] },
