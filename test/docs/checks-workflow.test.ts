@@ -31,13 +31,12 @@ const FETCHED_ARTIFACTS: readonly FetchedArtifact[] = [
   {
     label: "trimmed OpenAPI spec",
     path: "test/e2e/openapi/github-openapi.trimmed.json",
-    // The imports under src/ and test/ decide which paths and which API version are trimmed; the script's own lib/ helpers only carry the fetch.
+    // Every import of both scripts: the paths and the API version trimmed, and the fetch helper the bytes come through.
     hashInputs: () => [
       TRIM_TS,
       PATHS_TS,
-      ...[...relativeImportsOf(TRIM_TS), ...relativeImportsOf(PATHS_TS)].filter((file) =>
-        /^(?:src|test)\//.test(file),
-      ),
+      ...relativeImportsOf(TRIM_TS),
+      ...relativeImportsOf(PATHS_TS),
     ],
   },
   {
@@ -152,7 +151,9 @@ describe("the fetch-test-artifacts cache keys", () => {
   test("each key hashes every input its artifact depends on", () => {
     // The import walk found the scripts' own imports, so the coverage below is not vacuous.
     expect(OPENAPI.hashInputs().length).toBeGreaterThan(2);
-    expect(OPENAPI.hashInputs()).toContain("src/github/api.ts");
+    expect(OPENAPI.hashInputs()).toEqual(
+      expect.arrayContaining(["src/github/api.ts", ".github/scripts/lib/fetch-retry.ts"]),
+    );
     // Every call in the key contributes, wherever the expression puts it.
     expect(
       hashFilesPatterns(

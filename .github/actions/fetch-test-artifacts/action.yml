@@ -7,8 +7,8 @@ description: Restore the trimmed OpenAPI spec and the GraphQL schema from cache,
 runs:
   using: composite
   steps:
-    # Hashes every input that changes the output: the trim script (UPSTREAM_REF),
-    # USED_PATHS and its route-data imports, and the DEFAULT_API_VERSION source.
+    # Hashes every input that changes the output: the trim script (UPSTREAM_REF) and its
+    # fetch helper, USED_PATHS and its route-data imports, and the DEFAULT_API_VERSION source.
     - name: Cache the trimmed OpenAPI spec
       id: openapi-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -16,8 +16,9 @@ runs:
         path: test/e2e/openapi/github-openapi.trimmed.json
         key: >-
           openapi-trimmed-${{ hashFiles('.github/scripts/trim-openapi.ts',
-          'test/e2e/openapi/paths.ts', 'src/report/issue-report.ts', 'src/sections/**',
-          'src/upstream-gaps/**', 'src/schema.ts', 'src/github/api.ts') }}
+          '.github/scripts/lib/fetch-retry.ts', 'test/e2e/openapi/paths.ts',
+          'src/report/issue-report.ts', 'src/sections/**', 'src/upstream-gaps/**',
+          'src/schema.ts', 'src/github/api.ts') }}
     - name: Fetch the trimmed OpenAPI spec (cache miss)
       if: steps.openapi-cache.outputs.cache-hit != 'true'
       shell: bash
