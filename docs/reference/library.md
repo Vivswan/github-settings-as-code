@@ -22,7 +22,7 @@ The `github:` form installs a packaged commit: the child of one `main` commit, c
 
 - Its `package.json` carries none of the scripts npm's git fetcher takes as a reason to install devDependencies and run a prepare step (`prepare`, `prepack`, `build`, the install hooks), so nothing is built or installed on your side.
 - Every green push to `main` mints one under the tag `build/<position>.<sha7>` and then prunes the tags to the ten newest: once ten newer commits have been packaged, a tag is deleted and GitHub may collect its commit, so a pin taken from an old tag can go on the next merge. A durable pin names a release tag's commit (`git rev-parse v2.1.0`) or an npm version.
-- The tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits; the retired `build` branch holds the packaged commits minted before the per-commit tags until the owner deletes it.
+- The tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits; the packaged commits minted before the per-commit tags lived on the `build` branch, deleted on 2026-09-13.
 
 To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/`: the entry and the internal entry with their declarations, and the CLI, the files the manifest's `exports` and `bin` point at.
 

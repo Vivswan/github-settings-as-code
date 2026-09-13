@@ -35,26 +35,21 @@ describe("registeredRoutes", () => {
 });
 
 describe("recordHits", () => {
-  test("attributes a concrete request to its route template", () => {
+  test("attributes each request to the route with its method and path template, accumulating across calls", () => {
     const hit = new Set<string>();
-    recordHits([req("GET", "/repos/o/r/labels")], ROUTES, hit);
+    recordHits([req("GET", "/repos/o/r/labels"), req("GET", "/repos/o/r/unknown")], ROUTES, hit);
     expect(hit).toEqual(new Set(["labels.list"]));
-  });
-
-  test("distinguishes method and path (POST vs GET, param vs collection)", () => {
-    const hit = new Set<string>();
+    // A route already hit precedes the ones these requests reach, so a scan that stops at it misses them.
     recordHits(
-      [req("POST", "/repos/o/r/labels"), req("PATCH", "/repos/o/r/labels/bug")],
+      [
+        req("POST", "/repos/o/r/labels"),
+        req("PATCH", "/repos/o/r/labels/bug"),
+        req("GET", "/orgs/acme"),
+      ],
       ROUTES,
       hit,
     );
-    expect(hit).toEqual(new Set(["labels.create", "labels.update"]));
-  });
-
-  test("a request matching no route records nothing", () => {
-    const hit = new Set<string>();
-    recordHits([req("GET", "/repos/o/r/unknown")], ROUTES, hit);
-    expect(hit.size).toBe(0);
+    expect(hit).toEqual(new Set(["labels.list", "labels.create", "labels.update", "teams.org"]));
   });
 
   test("a GraphQL request attributes by the logged operationName, never the path", () => {
@@ -70,26 +65,12 @@ describe("recordHits", () => {
     );
     expect(hit).toEqual(new Set(["repository.gToggles"]));
   });
-
-  test("accumulates across calls without double counting", () => {
-    const hit = new Set<string>();
-    recordHits([req("GET", "/repos/o/r/labels")], ROUTES, hit);
-    recordHits([req("GET", "/repos/x/y/labels"), req("GET", "/orgs/acme")], ROUTES, hit);
-    expect(hit).toEqual(new Set(["labels.list", "teams.org"]));
-  });
 });
 
 describe("coldRoutes", () => {
   test("names every route no request reached, sorted by key", () => {
-    const hit = new Set(["labels.list", "teams.org"]);
-    expect(coldRoutes(hit, ROUTES)).toEqual([
-      "labels.create",
-      "labels.update",
-      "repository.gToggles",
-    ]);
-  });
-
-  test("returns empty when every route was hit", () => {
-    expect(coldRoutes(new Set(ROUTES.map((r) => r.key)), ROUTES)).toEqual([]);
+    // The cold routes sit in ROUTES as labels.create, teams.org, repository.gToggles: not key order.
+    const hit = new Set(["labels.list", "labels.update"]);
+    expect(coldRoutes(hit, ROUTES)).toEqual(["labels.create", "repository.gToggles", "teams.org"]);
   });
 });
