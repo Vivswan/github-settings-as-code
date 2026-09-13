@@ -34,7 +34,7 @@ import {
 } from "./generators.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
-import { collectYmlFiles, parseScenario } from "./schema.js";
+import { collectYmlFiles, MASK_KEYS, parseScenario } from "./schema.js";
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
@@ -485,26 +485,7 @@ describe("genInvalidSettings", () => {
 });
 
 describe("genScenario", () => {
-  const KNOWN_MASK_KEYS = new Set([
-    "administration",
-    "issues",
-    "environments",
-    "actions",
-    "pages",
-    "code_scanning_alerts",
-    "contents",
-    "variables",
-    "webhooks",
-    "secrets",
-    "dependabot_secrets",
-    "codespaces_secrets",
-    "custom_properties",
-    "secret_scanning_alerts",
-    "agent_secrets",
-    "agent_variables",
-    "checks",
-    "org_members",
-  ]);
+  const KNOWN_MASK_KEYS = new Set<string>(MASK_KEYS);
 
   test("produces internally consistent, schema-valid scenarios with sound meta", () => {
     for (let i = 0; i < 200; i++) {
