@@ -5,7 +5,8 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 ## Toolchain
 
 - `src/` is TypeScript built with [bun](https://bun.com). The scripts in `package.json` are the commands; `bun run check` is the whole local gate.
-- `lib/settings.schema.json` is the one committed generated artifact; `bun run build:check` fails when it or the generated docs drift.
+- Committed generated output is the table in `.github/scripts/generated.ts`: `lib/settings.schema.json`, `src/upstream-gaps/index.ts`, and the generated regions of `action.yml`, `COVERAGE.md`, and the docs pages.
+- `bun run build:check` regenerates every table entry and fails on drift.
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into them.
 - [COVERAGE.md](COVERAGE.md) is the inventory of the supported API surface. A change that adds or extends a section keeps it in step.
 
@@ -15,9 +16,17 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
 - A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first: with 3.0.0 in preparation, every v3-marked path goes before v3 cuts.
 
+## Code conventions
+
+- Line caps: code wraps at biome's `lineWidth` of 100; comments, YAML, and prose stay under the fleet's 256-character cap, and a comment block is at most 10 lines.
+- Markdown keeps one source line per paragraph or list item, so a long item is split into items, never wrapped.
+- A source file under `src/` or `.github/scripts/` opens with a one-paragraph header comment saying what the file owns; test files need none.
+- Tests live in two places: a section's unit tests sit beside it in `src/sections/<key>/`; everything else is under `test/`, mirroring `src/`.
+
 ## Tests
 
 - A test's temp directory lives inside the test body: `withTempDir()` or `tempDirTest()` from `test/temp-dir.ts` (try/finally, removed on every exit path); no afterEach or afterAll hook cleans up.
+- An Io a test records through is `captureIo()` from `test/io/capture.ts`: every channel in its own list and in one ordered event log.
 
 ## End-to-end tests
 

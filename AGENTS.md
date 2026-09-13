@@ -35,7 +35,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 
 ### Hard rules
 
-- Generated artifacts (`lib/settings.schema.json`, the generated docs, the generated `action.yml` regions) are regenerated, never hand-edited; `bun run build:check` fails on drift.
+- Generated artifacts (`lib/settings.schema.json`, `src/upstream-gaps/index.ts`, the generated docs and `action.yml` regions) are regenerated, never hand-edited; `.github/scripts/generated.ts` lists them and `bun run build:check` fails on drift.
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built, never committed on main; the packaged `build` branch carries them.
 - Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`throwFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
