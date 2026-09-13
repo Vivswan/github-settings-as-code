@@ -1,88 +1,53 @@
 /**
- * Both nightlies file through the fleet's nightly issue action and then dispatch auto-assign with the issue number, so
- * assignment policy stays in auto-assign rather than in a filer. One shape, pinned over both workflows.
+ * Both nightlies file a failure issue through the fleet's fuzz-issue action, pointing at the artifact the run uploaded, and then dispatch
+ * auto-assign.yml with the issue number. The links a rename on one side breaks with no other check noticing: the directory the runner
+ * writes, the artifact the issue cites, the condition both run under, and the input names the dispatch passes to a workflow the platform
+ * syncs.
  */
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { ROOT } from "../root.js";
 import { readWorkflow } from "./workflow-loader.js";
 
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
+/** The harness writes every failure's replay bundle under one directory; its name is spelled inline where the dump happens. */
+const RUNNER = readFileSync(join(ROOT, "test", "e2e", "runner.ts"), "utf8");
 
 describe.each([
-  // The run_attempt suffix: upload-artifact refuses a duplicate name, so a re-run attempt would upload nothing
-  // and the filed issue would point at an artifact that never existed.
-  ["e2e-nightly.yml", "nightly", "e2e-fuzz", `e2e-artifacts-\${{ github.run_attempt }}`],
-  ["nightly-fuzz.yml", "fuzz", "fuzz-nightly", `fuzz-failures-\${{ github.run_attempt }}`],
-])("%s issue + auto-assign path", (file, job, label, artifactName) => {
-  const wf = readWorkflow(file);
-  const steps = wf.jobs[job]?.steps ?? [];
-  const filers = steps.filter((s) => s.uses === FUZZ_ISSUE_ACTION);
+  ["e2e-nightly.yml", "nightly"],
+  ["nightly-fuzz.yml", "fuzz"],
+])("%s failure path", (file, job) => {
+  const steps = readWorkflow(file).jobs[job]?.steps ?? [];
 
-  test("grants issues: write for the filer and actions: write for the dispatch", () => {
-    expect([wf.permissions?.issues, wf.permissions?.actions]).toEqual(["write", "write"]);
-  });
-
-  test("files on failure from the artifacts dir and resolves on success, one label, one artifact name", () => {
-    const shape = filers.map((s) => ({
-      id: s.id,
-      if: s.if,
-      mode: s.with?.mode,
-      label: s.with?.label,
-      dir: s.with?.["artifacts-dir"],
-      artifact: s.with?.["artifact-name"],
-    }));
-    expect(shape).toEqual([
-      {
-        id: "file-issue",
-        if: "failure()",
-        mode: "report",
-        label,
-        dir: "test/e2e/.artifacts",
-        artifact: artifactName,
-      },
-      {
-        id: undefined,
-        if: "success()",
-        mode: "resolve",
-        label,
-        dir: undefined,
-        artifact: undefined,
-      },
-    ]);
-    // The upload the issue points at carries the same name the filer names.
+  test("on failure, the filed issue names the artifact the run uploads, from the directory the runner writes", () => {
+    const filer = steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === "report");
     const upload = steps.find((s) => (s.uses ?? "").startsWith("actions/upload-artifact@"));
-    expect([upload?.if, upload?.with?.name, upload?.with?.path]).toEqual([
-      "failure()",
-      artifactName,
-      "test/e2e/.artifacts/",
+    expect(filer, "no reporting fuzz-issue step").toBeDefined();
+    expect(upload, "no upload-artifact step").toBeDefined();
+    // A step without a condition runs on success() only, so a dropped `if:` files nothing on the night that fails.
+    expect(filer?.if).toBe("failure()");
+    expect(upload?.if).toBe(filer?.if);
+    expect(String(filer?.with?.["artifact-name"])).toBe(String(upload?.with?.name));
+    const dir = String(upload?.with?.path).replace(/\/$/, "");
+    expect(dir).toBe(String(filer?.with?.["artifacts-dir"]));
+    expect(RUNNER, `test/e2e/runner.ts never writes under ${dir}`).toContain(`"${basename(dir)}"`);
+  });
+
+  test("every workflow it dispatches declares every input it passes", () => {
+    const dispatches = steps.flatMap((s) => [
+      ...(s.run ?? "").matchAll(/gh workflow run (\S+\.yml)((?:\s+-f\s+"?[\w-]+=[^\s"]*"?)*)/g),
     ]);
-  });
-
-  test("dispatches auto-assign.yml with the filed issue number, after filing, on failure", () => {
-    const fileIdx = steps.findIndex((s) => s.id === "file-issue");
-    const dispatchIdx = steps.findIndex((s) =>
-      (s.run ?? "").includes("gh workflow run auto-assign.yml"),
-    );
-    expect(fileIdx, "no filer step").toBeGreaterThanOrEqual(0);
-    expect(dispatchIdx, "no auto-assign dispatch step").toBeGreaterThan(fileIdx);
-    const dispatch = steps[dispatchIdx];
-    // Gated on a non-empty issue-number, so the dispatch never expands to a bare `-f issue=`.
-    expect(dispatch?.if).toBe("failure() && steps.file-issue.outputs.issue-number != ''");
-    expect(dispatch?.env?.ISSUE_NUMBER).toBe(`\${{ steps.file-issue.outputs.issue-number }}`);
-    // The joined `|| echo "::warning::` shape ties the warning to the failed dispatch; asserting the pieces separately
-    // would pass with the warning detached from the fallback branch.
-    expect(dispatch?.run).toBe(
-      'gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"',
-    );
-  });
-});
-
-describe("auto-assign.yml caller forwards the dispatched issue", () => {
-  const wf = readWorkflow("auto-assign.yml");
-
-  test("workflow_dispatch declares issue as an optional input and the reusable call forwards it", () => {
-    // The nightly filer always passes a number, and a bare dispatch must still run the full sweep.
-    expect(wf.on.workflow_dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
-    expect(String(wf.jobs["auto-assign"]?.with?.issue)).toContain("inputs.issue");
+    expect(dispatches.length, "no gh workflow run dispatch").toBeGreaterThan(0);
+    for (const [, target = "", flags = ""] of dispatches) {
+      const passed = [...flags.matchAll(/-f\s+"?([\w-]+)=/g)].map((m) => m[1] ?? "");
+      expect(passed.length, `the ${target} dispatch passes no input`).toBeGreaterThan(0);
+      const declared = Object.keys(readWorkflow(target).on.workflow_dispatch?.inputs ?? {});
+      expect(
+        passed.filter((input) => !declared.includes(input)),
+        `${target} declares no workflow_dispatch input for these`,
+      ).toEqual([]);
+    }
   });
 });

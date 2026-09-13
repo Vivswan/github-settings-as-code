@@ -28,6 +28,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - Every temp directory a test creates is removed on every exit path, failure included: `withTempDir()` from `test/temp-dir.ts`, or a try/finally of its own. A fixture that outlives one test removes its dir when it ends (the release-pipeline fixture in afterAll, the e2e bundle on process exit).
 - An Io a test records through is `captureIo()` from `test/io/capture.ts`: every channel in its own list and in one ordered event log.
 - A repository-relative path in a test resolves from `ROOT` in `test/root.ts`; a file beside the test resolves from `import.meta.dir`.
+- A test in `test/docs` guards an invariant between artifacts (a doc's claim against the code, a workflow against the constant a script prints); a pin of one file's own text is not kept.
 
 ## End-to-end tests
 

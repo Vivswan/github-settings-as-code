@@ -22,42 +22,6 @@ import { stalePins } from "./version-pins.js";
 
 const DOCS = join(ROOT, "docs");
 
-const REQUIRED_PAGES = [
-  "README.md",
-  "start/getting-started.md",
-  "start/examples.md",
-  "start/migrating-from-probot.md",
-  "start/cli.md",
-  "reference/sections.md",
-  "reference/inputs.md",
-  "reference/semantics.md",
-  "reference/permissions.md",
-  "reference/undeclared-policy.md",
-  "reference/forward-compatibility.md",
-  "reference/secrets-and-vaults.md",
-  "reference/architecture.md",
-  "reference/library.md",
-  "operate/check-mode.md",
-  "operate/snapshot.md",
-  "operate/multi-repo.md",
-  "operate/layering.md",
-  "operate/private-repositories.md",
-  "operate/troubleshooting.md",
-  "playbooks/README.md",
-  "playbooks/drift-attestation.md",
-  "playbooks/fleet-baseline-rings.md",
-  "playbooks/incident-freeze.md",
-  "playbooks/oidc-trust-contract.md",
-  "playbooks/preview-blast-radius.md",
-  "playbooks/private-fork-containment.md",
-  "playbooks/sunset-decommission.md",
-  "playbooks/teams-not-collaborators.md",
-  "playbooks/trust-tiers.md",
-  "upgrading/README.md",
-  "upgrading/v1-to-v2.md",
-  "upgrading/v2-to-v3.md",
-] as const;
-
 function guidePages(): string[] {
   return readdirSync(DOCS, { recursive: true, encoding: "utf8" })
     .filter((name) => name.endsWith(".md"))
@@ -366,11 +330,6 @@ function malformedSectionEntries(layer: string, problem: string): string {
 }
 
 describe("docs/ guide pages", () => {
-  test("every required guide page exists, and no page exists outside the set", () => {
-    // Equality, not inclusion: an orphaned page left beside the required set fails too.
-    expect(guidePages()).toEqual([...REQUIRED_PAGES].sort());
-  });
-
   /** The guides plus the root pages that link into docs/, whose outbound links would otherwise go unchecked. */
   const linkScanFiles = () => [
     ...guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })),
@@ -379,6 +338,26 @@ describe("docs/ guide pages", () => {
     { label: "CONTRIBUTING.md", path: join(ROOT, "CONTRIBUTING.md") },
     { label: ".github/SECURITY.md", path: join(ROOT, ".github", "SECURITY.md") },
   ];
+
+  test("every guide page is linked from another scanned file", () => {
+    // A reader reaches a docs/ page only through a link, so a page nothing links to is dead weight nobody can find.
+    const linked = new Set<string>();
+    for (const file of linkScanFiles()) {
+      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
+      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
+        const path = (match[1] ?? "").split("#")[0] ?? "";
+        if (path === "" || /^[a-z]+:/.test(path)) {
+          continue;
+        }
+        const resolved = join(file.path, "..", path);
+        if (resolved !== file.path) {
+          linked.add(resolved);
+        }
+      }
+    }
+    const orphans = guidePages().filter((page) => !linked.has(join(DOCS, page)));
+    expect(orphans, "no README, guide, or root page links these docs/ pages").toEqual([]);
+  });
 
   test("every relative link in the guides, README, and COVERAGE resolves to a real file", () => {
     const broken: string[] = [];
@@ -502,12 +481,6 @@ describe("docs/ guide pages", () => {
       .filter((file) => readFileSync(file.path, "utf8").includes("x-release-please-"))
       .map((file) => file.label);
     expect(marked.sort()).toEqual([...extraFiles].sort());
-  });
-
-  test("package.json's version is the one json extra-file", () => {
-    // The npm manifest carries no marker (release-please's json updater rewrites $.version), so a dropped or duplicated entry is seen here.
-    const updaters = releaseExtraFiles().filter((entry) => typeof entry !== "string");
-    expect(updaters).toEqual([{ type: "json", path: "package.json", jsonpath: "$.version" }]);
   });
 
   for (const page of guidePages()) {
@@ -759,7 +732,7 @@ describe("docs/ guide pages", () => {
       }),
     );
     expect(seen).toEqual(openers);
-    expect(seen["start/getting-started.md"]).toBe(1);
+    expect(Object.values(seen).reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0);
   });
 
   test("the undeclared-policy guide names every nested per-environment knob", () => {

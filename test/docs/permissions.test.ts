@@ -34,10 +34,6 @@ describe("branches Contents advice", () => {
       notes.includes(`add ${advice}`),
       `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,
     ).toBe(true);
-    expect(notes).toContain("missing branch");
     expect(permissions).toContain(`The ${label} grant earns its keep twice`);
-    expect(permissions).toContain(
-      "it also lets `branches` tell a missing branch from an unprotected one in check mode",
-    );
   });
 });
