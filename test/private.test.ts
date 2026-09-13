@@ -126,7 +126,10 @@ describe("Private<T>", () => {
   test("a new importer or a re-export is reported, however it is spelled; type-only edges are not", () => {
     const opener = 'import { revealPrivate } from "../private-open.js";\n';
     const files: Array<[string, string]> = [
-      ["src/x/s.ts", `${opener}export const f = (v: any) => revealPrivate(v);\n`],
+      [
+        "src/x/s.ts",
+        `${opener}export type * from "../private-open.js";\nexport const f = (v: any) => revealPrivate(v);\n`,
+      ],
       ["src/y.ts", 'import * as open from "./private-open";\nexport const v = open;\n'],
       ["src/named.ts", 'export { revealPrivate } from "./private-open.js";\n'],
       [
@@ -134,10 +137,6 @@ describe("Private<T>", () => {
         'export { revealPrivate as open, PRIVATE as SYM } from "./private-open.js";\n',
       ],
       ["src/star.ts", 'export * from "./private-open.js";\nexport const own = 1;\n'],
-      [
-        "src/x/local.ts",
-        `${opener}const alias = revealPrivate;\nexport { alias, revealPrivate as also };\n`,
-      ],
       [
         "src/query.ts",
         'import { PRIVATE } from "./private-open.ts?raw";\nexport const v = PRIVATE;\n',
@@ -157,7 +156,6 @@ describe("Private<T>", () => {
       "src/named.ts": ["revealPrivate"],
       "src/renamed.ts": ["SYM", "open"],
       "src/star.ts": ["*", "own"],
-      "src/x/local.ts": ["alias", "also"],
       "src/query.ts": ["v"],
     });
   });

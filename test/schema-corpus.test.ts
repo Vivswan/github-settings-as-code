@@ -114,6 +114,13 @@ describe("published schema agrees with the runtime over the corpus", () => {
     for (const { label, doc } of [...scenarioDocs(), ...generatedDocs()]) {
       const schemaAccepts = validate(doc) === true;
       const runtimeAccepts = !("error" in validateSectionShapes(doc, label));
+      if (label.startsWith("generated ") && !(schemaAccepts && runtimeAccepts)) {
+        // Shape-valid by construction, so a rejection by either side is a break in that validator, not a divergence to tolerate.
+        disagreements.push(
+          `${label}: a generated document must be accepted by both (schema ${schemaAccepts}, runtime ${runtimeAccepts})`,
+        );
+        continue;
+      }
       if (schemaAccepts === runtimeAccepts) {
         continue;
       }
