@@ -1,5 +1,8 @@
 /** The one normalizer shared by two sections: collaborators and teams. */
 
+import type { SectionMeta } from "../contract/module.js";
+import { leftOutOfSnapshot } from "./snapshot-helpers.js";
+
 /** Both handlers default an entry without `permission` to it, so the two sections cannot disagree; "push" is GitHub's own write default. */
 export const DEFAULT_ROLE = "push";
 
@@ -43,3 +46,27 @@ export const INVITATION_ROLES: ReadonlySet<string> = new Set([
   "triage",
   "admin",
 ]);
+
+/**
+ * The permission a live role reads back as, for a snapshot. A role no declaration plans as ("push" in a
+ * settings file means the "write" role) has no entry: where the section's default policy deletes what
+ * the file omits, dropping the entry would plan a removal, so it throws; elsewhere the entry is left out
+ * with a note and undefined comes back.
+ */
+export function readBackPermission(
+  section: SectionMeta,
+  label: string,
+  role: string,
+  notes: string[],
+): string | undefined {
+  const permission = permissionForRole(role);
+  if (permission !== undefined) {
+    return permission;
+  }
+  const reason = `the live role "${role}" has no declaration that plans as itself ("${role}" in a settings file means the "${roleForPermission(role)}" role)`;
+  if (section.undeclaredDefault === "delete") {
+    throw new Error(`${label}: ${reason}, so it cannot be read back`);
+  }
+  notes.push(leftOutOfSnapshot(label, reason));
+  return undefined;
+}

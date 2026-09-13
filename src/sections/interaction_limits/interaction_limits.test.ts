@@ -92,7 +92,7 @@ describe("interaction_limits", () => {
       ],
     ]);
     expect(result.notes).toEqual([
-      "interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run",
+      "interaction_limits.expiry: GitHub reports only the computed expires_at, so check mode cannot verify the declared duration; apply re-arms it on every run",
     ]);
     expect(api.mutations()).toEqual([]);
   });

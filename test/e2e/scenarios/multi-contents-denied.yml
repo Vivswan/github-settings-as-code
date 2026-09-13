@@ -45,7 +45,11 @@ expect:
     # The proof was attempted: the default branch ref read follows the 404.
     - "GET /repos/e2e-owner/svc-locked/git/ref/heads/main"
   stdout_contains:
-    - "svc-locked: cannot prove .github/settings.yml is absent: reading the default branch ref heads/main returned 404. Grant the token Contents: read on this repository, or initialize its default branch; a repository whose file cannot be read never receives the defaults. To stop managing it instead, remove e2e-owner/svc-locked from the \"repos\" input"
+    - >-
+      svc-locked: cannot prove .github/settings.yml is absent: reading the default branch ref heads/main
+      returned 404. Grant the token Contents: read on this repository, or initialize its default branch; a
+      repository whose file cannot be read never receives the defaults. To stop managing it instead,
+      remove e2e-owner/svc-locked from the "repos" input
   stdout_lacks:
     - "applying the defaults file"
     - "skipped - the repository has no"

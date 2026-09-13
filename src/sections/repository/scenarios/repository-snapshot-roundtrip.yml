@@ -1,5 +1,10 @@
 name: repository-snapshot-roundtrip
-description: "mode: snapshot reads the live repository back into snapshot.yml and writes nothing to GitHub. The GET's documented PATCH fields, the topics, every readable security toggle, and the two GraphQL-only keys read back; ids, urls, counts, the owner, the license, and has_downloads fall away, and Git LFS is noted since GitHub exposes no read for it. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live repository back into snapshot.yml and writes nothing to GitHub. The
+  GET's documented PATCH fields, the topics, every readable security toggle, and the two
+  GraphQL-only keys read back; ids, urls, counts, the owner, the license, and has_downloads fall
+  away, and Git LFS is noted since GitHub exposes no read for it. The written file, fed back to a
+  check run against the same state, reads clean.
 settings: {}
 live_state:
   repo:

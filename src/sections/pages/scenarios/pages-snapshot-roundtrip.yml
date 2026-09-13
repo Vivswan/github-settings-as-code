@@ -1,5 +1,9 @@
 name: pages-snapshot-roundtrip
-description: "mode: snapshot reads the live pages back into snapshot.yml and writes nothing to GitHub. The live Pages site reads back as its declarable fields; the server-owned ones (url, status, html_url, the certificate) fall away. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live pages back into snapshot.yml and writes nothing to GitHub. The live
+  Pages site reads back as its declarable fields; the server-owned ones (url, status, html_url, the
+  certificate) fall away. The written file, fed back to a check run against the same state, reads
+  clean.
 settings: {}
 live_state:
   pages:

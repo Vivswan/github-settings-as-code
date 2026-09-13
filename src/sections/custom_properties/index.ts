@@ -1,7 +1,8 @@
 /**
  * `custom_properties:` section: values of organization-defined custom properties, set through ONE
  * bulk PATCH. Definitions are org-scoped, so only values are managed; a personal account no-ops
- * with a note, and `value: null` unsets (reverting to the org default).
+ * with a note, and `value: null` unsets (reverting to the org default). Bespoke, not on listSection:
+ * every value rides one write, so there is no per-item create, update, or delete to declare.
  */
 
 import { z } from "zod";
@@ -15,10 +16,12 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
+  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
+import { ORG_PROBE, personalAccountNote } from "../shared/org-owner.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
@@ -81,14 +84,8 @@ function rejectMalformedList(property: CustomPropertyConfig): void {
 }
 
 const ENDPOINTS = {
-  // GET /orgs/{org} is public, so no token permission. Its 404 is the personal-account signal and
-  // the only 404 the section can meet: the values GET is Metadata-gated, which every token holds.
-  org: {
-    route: "GET /orgs/{org}",
-    statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
-    permission: "none",
-    primaryRead: { notFound: "absent" },
-  },
+  // The only 404 the section can meet: the values GET is Metadata-gated, which every token holds.
+  org: { ...ORG_PROBE, primaryRead: { notFound: "absent" } },
   // Metadata (read) only, so it can never be permission-denied; only the PATCH needs the grant.
   list: {
     route: "GET /repos/{owner}/{repo}/properties/values",
@@ -155,11 +152,14 @@ export const customPropertiesSection = {
       rejectMalformedList(property);
     }
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
-    if ("missing" in orgProbe) {
-      plan.notes.push(
-        `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note`,
-      );
+    const personal = personalAccountNote(
+      this,
+      ctx.repo.owner,
+      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
+      "plan",
+    );
+    if (personal !== undefined) {
+      plan.notes.push(personal);
       return plan;
     }
     // Not paginated upstream: one GET carries every value.
@@ -188,7 +188,7 @@ export const customPropertiesSection = {
           : {
               property_name: name,
               value: wanted,
-              drift: `${label}: declared ${show(wanted)} != live ${show(current)}; apply will set the declared value`,
+              drift: valueDrift(label, show(wanted), show(current)),
               change: `set custom property "${name}" to ${show(wanted)}`,
             },
       );
@@ -237,14 +237,14 @@ export const customPropertiesSection = {
   // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
   // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
-    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
-    if ("missing" in orgProbe) {
-      return {
-        value: undefined,
-        notes: [
-          `custom_properties: owner "${ctx.repo.owner}" is a personal account, and custom properties require an organization-owned repository; nothing to snapshot`,
-        ],
-      };
+    const personal = personalAccountNote(
+      this,
+      ctx.repo.owner,
+      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
+      "snapshot",
+    );
+    if (personal !== undefined) {
+      return { value: undefined, notes: [personal] };
     }
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
     propertiesByName(this, live);

@@ -20,7 +20,7 @@ Twenty-four breaks (the ninth, the twenty-third, and the last are for library co
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
 | Two live items under one identity fail the section | The last one listed won silently in most sections | Every list section refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
 | The webhook snapshot placeholder | `$WEBHOOK_SECRET_<id>` | `$SECRET_WEBHOOK_<id>` | No error: an old reference keeps resolving from its old export; a new snapshot writes the new name, so move both together; [section 12](#12-the-webhook-snapshot-placeholder-leads-with-secret_) |
-| One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each on the converted sites | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
+| One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
 | A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
 | Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Only `_layering` and `_undeclared` exist; any other underscore key fails validation, on a wrapper and at the top level alike | Validation fails before any section runs, naming the two directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
@@ -222,12 +222,10 @@ Every snapshot secret now leads with `SECRET_`, the store name second. A file ho
 
 ## 13. One wording per concept in drift lines and notes
 
-Anything that greps the check output for these lines needs the new spelling. Two templates reach only the sites this release converts:
+Anything that greps the check output for these lines needs the new spelling. Two templates reach every site:
 
-- the cannot-verify line: the webhook secret and the write-only `check_suite_preferences` note;
-- the left-out line: rulesets, webhooks, and the secondary snapshot reads (actions, environments, repository) a denied grant skips under `on-missing-permission: warn`; a denied primary read still says `skipped`.
-
-The other cannot-verify and omission notes (interaction_limits, teams, collaborators) keep their v2 line until a later release.
+- the cannot-verify line: the webhook secret, the write-only `check_suite_preferences` note, `interaction_limits.expiry`, and the repository toggles GitHub cannot read back (`enable_git_lfs`);
+- the left-out line: rulesets, webhooks, the teams and collaborators snapshot notes, an inherited interaction limit, and the secondary snapshot reads (actions, environments, repository) a denied grant skips under `on-missing-permission: warn`; a denied primary read still says `skipped`.
 
 | Line | v2 | v3 |
 |---|---|---|
@@ -235,7 +233,9 @@ The other cannot-verify and omission notes (interaction_limits, teams, collabora
 | A field mismatch (milestones, rulesets, collaborators, teams, every list section) | `milestones[v1].state: "closed" != "open"` and `teams[platform]: live role "read" != declared "write"` | `milestones[v1].state: declared "closed" != live "open"; apply will set the declared value` |
 | A webhook's events | `... declared [...] != live [...] (compared order-insensitively)` | one line per element: `webhooks[<url>].events: missing "release"` |
 | A value check mode cannot compare | `... so the declared value cannot be verified; apply re-sends it on every run so rotations propagate` | `<label>: <why>, so check mode cannot verify <what>; apply <re-sends it> on every run` |
-| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` | `<label>: left out of the snapshot - <reason>` |
+| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` and `teams[x]: ...; not declared` | `<label>: left out of the snapshot - <reason>` |
+| An email invitation in a collaborators snapshot | `invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched` | `collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched` |
+| A personal account under `teams` or `custom_properties` | `teams: owner "o" is a personal account, not an organization, so team access does not apply` and `custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository` | `<section>: owner "o" is a personal account, not an organization, so this section does not apply` |
 | A ruleset update's change line | `updated ruleset "main" (id 42)` | `updated ruleset "main"` |
 | A milestone delete's change line | `DELETED undeclared milestone "v0.9" (detached from every issue that carried it)` | `DELETED undeclared milestone "v0.9"` (the drift line beside it still names the detaching) |
 

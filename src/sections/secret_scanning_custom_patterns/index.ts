@@ -1,6 +1,7 @@
 /**
  * The pattern name is immutable upstream (the PATCH takes no name field), so a renamed entry is a
- * create under the new name while the old pattern follows the undeclared policy.
+ * create under the new name while the old pattern follows the undeclared policy. Bespoke, not on
+ * listSection: creates and deletes are bulk writes over the collection path, and the PATCH carries a version.
  *
  * undeclared pattern  -> KEPT by default: removing a pattern disposes of its alerts
  * every DELETE        -> post_delete_action "resolve_alerts", never delete_alerts: a settings change must not destroy alert history
@@ -13,11 +14,13 @@ import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  missingDrift,
   type SectionMeta,
   type SectionModule,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
+  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
@@ -195,7 +198,7 @@ export const secretScanningPatternsSection = {
         const liveValue = existing.fields[field as UpdatableKey];
         // JSON.stringify(undefined) is not a string; spell absence out.
         const liveRendered = liveValue === undefined ? "(absent)" : JSON.stringify(liveValue);
-        return `${key}[${entry.name}].${field}: declared ${JSON.stringify(value)} != live ${liveRendered}; apply will set the declared value`;
+        return valueDrift(`${key}[${entry.name}].${field}`, JSON.stringify(value), liveRendered);
       });
       if (!hasDrift(drift)) {
         continue;
@@ -234,8 +237,7 @@ export const secretScanningPatternsSection = {
 
     const [firstCreate, ...restCreate] = toCreate;
     if (firstCreate !== undefined) {
-      const missing = (p: SecretScanningPatternConfig): string =>
-        `${key}[${p.name}]: missing - declared in the settings file but not on the repo; apply will create it`;
+      const missing = (p: SecretScanningPatternConfig): string => missingDrift(`${key}[${p.name}]`);
       const created = (p: SecretScanningPatternConfig): string =>
         `created secret scanning custom pattern "${p.name}"`;
       plan.ops.push({

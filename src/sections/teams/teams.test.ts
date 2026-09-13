@@ -22,7 +22,7 @@ describe("teams", () => {
     expect(result).toEqual({
       ops: [],
       notes: [
-        'teams: owner "o" is a personal account, not an organization, so team access does not apply; section skipped - remove the teams section from the settings file to silence this note',
+        'teams: owner "o" is a personal account, not an organization, so this section does not apply; section skipped - remove the teams section from the settings file to silence this note',
       ],
       drift: [],
     });
@@ -229,12 +229,12 @@ describe("teams", () => {
           ],
         },
         notes: [
-          "teams[everyone]: access to o/r is granted at the organization level, not on the repository; not declared, since declaring it would grant direct access",
-          "teams[gone]: listed with access to o/r, but the access probe answered 404, read here as no access; not declared. " +
+          "teams[everyone]: left out of the snapshot - access to o/r is granted at the organization level, not on the repository, and declaring it would grant direct access",
+          "teams[gone]: left out of the snapshot - listed with access to o/r, but the access probe answered 404, read here as no access. " +
             "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
             'grant "Members" (read) under the PAT\'s Organization permissions and "Administration" (read and write) under its Repository permissions, then snapshot again',
-          "teams[roleless]: has access to o/r, but GitHub reported no role for it; not declared - add the entry with the intended permission",
-          'teams[pushy]: the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role); not declared',
+          "teams[roleless]: left out of the snapshot - has access to o/r, but GitHub reported no role for it; add the entry with the intended permission",
+          'teams[pushy]: left out of the snapshot - the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role)',
         ],
       });
       expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -254,7 +254,7 @@ describe("teams", () => {
       expect(await snapshot(personal)).toEqual({
         value: undefined,
         notes: [
-          'teams: owner "o" is a personal account, not an organization, so team access does not apply',
+          'teams: owner "o" is a personal account, not an organization, so this section does not apply',
         ],
       });
       expect(personal.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);

@@ -7,7 +7,12 @@ import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
 import { liveByIdentity, parseLive } from "../contract/live.js";
-import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
+import {
+  missingDrift,
+  type SectionMeta,
+  undeclaredDrift,
+  undeclaredNote,
+} from "../contract/module.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
@@ -148,7 +153,7 @@ export async function planBranchPolicies(
         drift: [
           hidden
             ? `${label}: not verifiable until custom_branch_policies is true; apply will create it once the flag is set`
-            : `${label}: missing - declared in the settings file but not on the environment; apply will create it`,
+            : missingDrift(label, { where: "on the environment" }),
         ],
         change: `created deployment branch policy "${pattern.name}" in environment "${envName}"`,
       });

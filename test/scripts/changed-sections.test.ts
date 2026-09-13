@@ -80,6 +80,7 @@ describe("changed-sections derived fan-out", () => {
     // decision.
     expect(deriveSharedFanOut(ROOT)).toEqual({
       "roles.ts": inKeyOrder("collaborators", "teams"),
+      "org-owner.ts": inKeyOrder("custom_properties", "teams"),
       "secrets-engine.ts": inKeyOrder(
         "environments",
         "actions_secrets",

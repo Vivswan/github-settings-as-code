@@ -24,7 +24,7 @@ export const row: Row = {
       ],
     },
     notes: [
-      'teams[pushy]: the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role); not declared',
+      'teams[pushy]: left out of the snapshot - the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role)',
     ],
   },
 };

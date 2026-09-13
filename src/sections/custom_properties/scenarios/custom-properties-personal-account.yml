@@ -17,4 +17,4 @@ expect:
     - "GET /repos/{repo}/properties/values"
     - "PATCH /repos/{repo}/properties/values"
   stdout_contains:
-    - "organization-owned repository"
+    - "is a personal account, not an organization, so this section does not apply"

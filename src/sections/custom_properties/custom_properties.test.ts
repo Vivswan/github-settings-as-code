@@ -72,7 +72,7 @@ describe("custom_properties", () => {
     expect(result).toEqual({
       ops: [],
       notes: [
-        'custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository; section skipped - remove the custom_properties section from the settings file to silence this note',
+        'custom_properties: owner "o" is a personal account, not an organization, so this section does not apply; section skipped - remove the custom_properties section from the settings file to silence this note',
       ],
       drift: [],
     });

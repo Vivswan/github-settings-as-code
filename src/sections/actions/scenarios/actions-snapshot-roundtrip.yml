@@ -1,5 +1,11 @@
 name: actions-snapshot-roundtrip
-description: "mode: snapshot reads the live Actions settings back into snapshot.yml and writes nothing to GitHub. Every endpoint reads back onto its key: the permissions policy with its selected-actions allowlist, the workflow token defaults, the access level, the retention and cache limits, a customized OIDC subject claim, and both fork pull request policies; selected_actions_url and maximum_allowed_days fall away. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live Actions settings back into snapshot.yml and writes nothing to
+  GitHub. Every endpoint reads back onto its key: the permissions policy with its selected-actions
+  allowlist, the workflow token defaults, the access level, the retention and cache limits, a
+  customized OIDC subject claim, and both fork pull request policies; selected_actions_url and
+  maximum_allowed_days fall away. The written file, fed back to a check run against the same state,
+  reads clean.
 settings: {}
 live_state:
   actions_permissions:

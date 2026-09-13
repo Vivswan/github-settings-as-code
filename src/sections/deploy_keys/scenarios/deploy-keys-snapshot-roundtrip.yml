@@ -1,5 +1,8 @@
 name: deploy-keys-snapshot-roundtrip
-description: "mode: snapshot reads the live deploy_keys back into snapshot.yml and writes nothing to GitHub. Live deploy keys read back by title, key (the comment GitHub drops is dropped here too), and read_only flag. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live deploy_keys back into snapshot.yml and writes nothing to GitHub.
+  Live deploy keys read back by title, key (the comment GitHub drops is dropped here too), and
+  read_only flag. The written file, fed back to a check run against the same state, reads clean.
 settings: {}
 live_state:
   deploy_keys:

@@ -6,11 +6,13 @@ import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
 import { parseLive } from "../contract/live.js";
 import {
+  cannotVerifyNote,
   loosen,
   requirePlainMapping,
   type SectionMeta,
   type SectionModule,
   sectionGrant,
+  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -581,10 +583,14 @@ export const repositorySection = {
       plan.ops.push({
         role,
         drift: [
-          enforced
-            ? `repository.${toggle.key}: declared ${want} != live ${enabled}; the repository owner enforces ${toggle.label}, ` +
-              "so apply cannot change it from the repository"
-            : `repository.${toggle.key}: declared ${want} != live ${enabled}; apply will set the declared value`,
+          valueDrift(
+            `repository.${toggle.key}`,
+            String(want),
+            String(enabled),
+            enforced
+              ? `the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
+              : undefined,
+          ),
         ],
         tolerate: {
           outcome: (error) => ({ note: toggleTolerated(this, toggle, role, error.status) }),
@@ -598,7 +604,11 @@ export const repositorySection = {
       }
       const want = desired[toggle.key] === true;
       plan.notes.push(
-        `repository.${toggle.key}: GitHub exposes no endpoint to read this state back, so check mode cannot verify it; apply re-asserts the declared value (${JSON.stringify(desired[toggle.key])}) on every run`,
+        cannotVerifyNote(`repository.${toggle.key}`, {
+          why: "GitHub exposes no endpoint to read this state back",
+          what: "it",
+          reasserts: `re-asserts the declared value (${JSON.stringify(desired[toggle.key])})`,
+        }),
       );
       plan.ops.push({
         role: want ? toggle.put : toggle.remove,
@@ -623,9 +633,12 @@ export const repositorySection = {
         plan.ops.push({
           role: "updateFeatures",
           variables,
-          drift: diverged.map(
-            (routed) =>
-              `repository.${routed.key}: declared ${routed.show(desired[routed.key])} != live ${routed.show(liveRouted.values[routed.key])}; apply will set the declared value`,
+          drift: diverged.map((routed) =>
+            valueDrift(
+              `repository.${routed.key}`,
+              routed.show(desired[routed.key]),
+              routed.show(liveRouted.values[routed.key]),
+            ),
           ) as [string, ...string[]],
           // The mutation selects the post-state on purpose: a silently ignored field is the REST
           // failure mode that forced these keys onto GraphQL, so each value is verified against the echo.
