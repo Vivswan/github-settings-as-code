@@ -19,6 +19,7 @@ import {
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
+import type { RunOutcome } from "./outcome.js";
 import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
 import type { SectionSelection } from "./section-selection.js";
@@ -61,22 +62,10 @@ export interface RepoRunOptions {
   secretEnv?: Record<string, string | undefined>;
 }
 
+/** What one repository's apply or check ends in; a subset of RunOutcome, pinned below. */
 export type RepoResult = "applied" | "partial" | "clean" | "drift" | "failed" | "skipped";
 
-/**
- * Worst-first, the ranking worstOf() applies; the single source for the action.yml `result` output docs too (the
- * contract test imports it). The lockstep below keeps it locked to RepoResult.
- */
-export const REPO_RESULTS = [
-  "failed",
-  "drift",
-  "partial",
-  "skipped",
-  "applied",
-  "clean",
-] as const satisfies readonly RepoResult[];
-
-type _UnlistedResult = MustBeNever<Exclude<RepoResult, (typeof REPO_RESULTS)[number]>>;
+type _UnrankedRepoResult = MustBeNever<Exclude<RepoResult, RunOutcome>>;
 
 export interface RepoRunResult {
   repo: string;
@@ -86,8 +75,9 @@ export interface RepoRunResult {
   preflightDenied: string[];
 }
 
+/** The keys of the skipped rows, over any mode's section outcomes: only the closed status decides. */
 export function skippedSectionKeys(
-  outcomes: ReadonlyArray<Pick<SectionOutcome, "key" | "status">>,
+  outcomes: ReadonlyArray<{ key: SectionKey; status: string }>,
 ): SectionKey[] {
   return outcomes.filter((o) => o.status === "skipped").map((o) => o.key);
 }
@@ -451,13 +441,4 @@ export async function runForRepo(
     outcomes,
     preflightDenied: [],
   };
-}
-
-export function worstOf(results: Array<{ result: RepoResult }>, check: boolean): RepoResult {
-  for (const rank of REPO_RESULTS) {
-    if (results.some((r) => r.result === rank)) {
-      return rank;
-    }
-  }
-  return check ? "clean" : "applied";
 }

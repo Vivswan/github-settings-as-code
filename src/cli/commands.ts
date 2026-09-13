@@ -11,6 +11,7 @@ import {
   type Io,
   PRIVATE_REPORT_CHANNELS,
   type Problem,
+  type RunOutcome,
   readSettingsFile,
   SECTIONS,
   type SectionModule,
@@ -25,11 +26,27 @@ export interface CliHost {
   createClient(token: string, io: Io, apiVersion: string): GithubClient;
 }
 
-/** What a file-only command prints; the program picks `lines` or `json` by the --json flag. */
+/**
+ * What a file-only command prints; the program picks `lines` or `json` by the --json flag. The envelope is the one
+ * every subcommand's --json prints: `result` always, `file` once a file is known, `problem` on a failure, then the
+ * command's own data.
+ */
 export interface Rendered {
   readonly code: number;
   readonly lines: readonly string[];
-  readonly json: unknown;
+  readonly json: Envelope;
+}
+
+/** A file-only command validated its file ("valid"), or ended as a run does. */
+export type Envelope = {
+  readonly result: RunOutcome | "valid";
+  readonly file?: string;
+  readonly problem?: string;
+} & Record<string, unknown>;
+
+/** The failed envelope of a file-only command: the problem's text, beside the file when one was named. */
+export function failedEnvelope(message: string, file?: string): Envelope {
+  return { result: "failed", ...(file === undefined ? {} : { file }), problem: message };
 }
 
 /** The section modules a validated document declares, in execution order. */
@@ -59,13 +76,13 @@ export function validateFile(file: string, io: Io): Rendered {
         lines: [
           `${file} is valid: ${sections.length} section(s) declared (${sections.join(", ")})`,
         ],
-        json: { file, valid: true, sections },
+        json: { result: "valid", file, sections },
       };
     },
     (problem): Rendered => {
       const message = describeProblem(problem);
       io.annotate("error", message);
-      return { code: 1, lines: [], json: { file, valid: false, problem: message } };
+      return { code: 1, lines: [], json: failedEnvelope(message, file) };
     },
   );
 }
@@ -90,12 +107,12 @@ export function permissionsFor(file: string, io: Io, bold: (text: string) => str
   return readValidated(file, io).match(
     (settings): Rendered => {
       const { lines, json } = grantTable(settings, bold);
-      return { code: 0, lines, json };
+      return { code: 0, lines, json: { result: "valid", file, grant: json } };
     },
     (problem): Rendered => {
       const message = describeProblem(problem);
       io.annotate("error", message);
-      return { code: 1, lines: [], json: { file, valid: false, problem: message } };
+      return { code: 1, lines: [], json: failedEnvelope(message, file) };
     },
   );
 }

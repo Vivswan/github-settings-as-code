@@ -23,7 +23,9 @@ import {
 } from "../sections/contract/module.js";
 import { type MissingPermissionPolicy, snapshotContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
+import type { MustBeNever } from "../types.js";
 import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
+import type { RunOutcome } from "./outcome.js";
 import type { SectionSelection } from "./section-selection.js";
 
 export interface SnapshotOptions {
@@ -41,16 +43,16 @@ export interface SnapshotOptions {
  * One section's end state: read back ("snapshot", its notes in detail), denied under the warn
  * policy ("skipped"), without a snapshot handler ("unsupported", the reason in detail), or failed.
  */
-interface SectionSnapshotOutcome {
+export interface SectionSnapshotOutcome {
   key: SectionKey;
   status: "snapshot" | "skipped" | "unsupported" | "failed";
   detail: string[];
 }
 
 /**
- * The document exists only when the run did not fail: a denial under the fail policy and a
- * section producing a value its own schema rejects both withhold it, so a failed result cannot be
- * rendered by mistake. "partial" says a section was skipped or failed without failing the run.
+ * The document exists only when the run did not fail: a failed section (a denial under the fail
+ * policy, a throw, a value its own schema rejects) withholds it, so a failed result cannot be
+ * rendered by mistake. "partial" says a section was skipped under the warn policy.
  */
 export type SnapshotResult =
   | {
@@ -60,6 +62,8 @@ export type SnapshotResult =
       outcomes: SectionSnapshotOutcome[];
     }
   | { repo: string; result: "failed"; settings?: never; outcomes: SectionSnapshotOutcome[] };
+
+type _UnrankedSnapshotResult = MustBeNever<Exclude<SnapshotResult["result"], RunOutcome>>;
 
 /** A snapshot result that carries a document. */
 export type RenderableSnapshot = Extract<SnapshotResult, { settings: ValidatedSettings }>;
@@ -159,7 +163,7 @@ export async function snapshotRepository(
         : `${section.key}: ${message}`;
       io.annotate("error", prefixed);
       outcomes.push({ key: section.key, status: "failed", detail: [prefixed] });
-      partial = true;
+      failed = true;
       continue;
     }
     for (const note of snapshot.notes) {

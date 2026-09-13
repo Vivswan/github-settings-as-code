@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
-import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
+import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { DEFAULT_PRIVATE_REPOS } from "../../src/flows/inputs.js";
 import { REDACTED_DETAIL } from "../../src/flows/redact.js";
 import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
@@ -328,11 +328,12 @@ describe("private repositories guide", () => {
     expect(section).toContain("gh run download");
   });
 
-  test("the overall-result enumeration names exactly the REPO_RESULTS members", () => {
+  test("the overall-result enumeration names exactly the per-target RUN_RESULTS words", () => {
+    // A merge has no target, so `merged` never heads a per-target row; every other word can.
     assertBacktickedEnumeration(
       section.replace(/\n/g, " "),
       /the overall result \(([^)]*)\)/,
-      REPO_RESULTS,
+      RUN_RESULTS.filter((result) => result !== "merged"),
       'the guide must enumerate the result values in "the overall result (...)"',
     );
   });

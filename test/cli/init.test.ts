@@ -54,7 +54,7 @@ async function parsed(argv: readonly string[], env: ConfigEnv = {}) {
     colors: false,
     executeInit: async (config) => {
       cfg = config;
-      return { code: 0, lines: [], json: {} };
+      return { code: 0, lines: [], json: { result: "snapshot" } };
     },
   });
   return { cfg, code, stderr: stderr.text() };
@@ -221,18 +221,17 @@ describe("init: the written file and the printed grant", () => {
     const declared = Object.keys(parseYaml(readFileSync(file, "utf8")));
     expect(declared).toEqual(["labels"]);
     expect(JSON.parse(result.stdout)).toEqual({
+      result: "snapshot",
       file,
       repository: "o/r",
-      result: "snapshot",
-      skippedSections: [],
-      failedSections: [],
+      "skipped-sections": [],
       grant: Object.fromEntries(
         declared.map((key) => [key, sectionGrant(sectionModule(key as "labels"))]),
       ),
     });
   });
 
-  test("a section failing beside one that read back is reported failed, never skipped", async () => {
+  test("a section failing beside one that read back fails init: no file, the errors name the section", async () => {
     const file = join(tempDir(), "settings.yml");
     const api = new MockApi({
       "GET /repos/o/r/labels?per_page=100&page=1": {
@@ -254,25 +253,15 @@ describe("init: the written file and the printed grant", () => {
       "labels,milestones",
     ];
     const plain = await cli(args, api);
-    expect(plain.code).toBe(0);
+    expect(plain.code).toBe(1);
+    expect(plain.stdout).toBe("");
     expect(plain.stderr).toMatch(/^error: labels: /);
-    expect(plain.stdout).toBe(
-      [
-        `${file} written from o/r: 1 section(s) declared (milestones)`,
-        "failed: labels (the file omits them; the errors above say why)",
-        "Token permissions the file needs:",
-        `  milestones: ${sectionGrant(sectionModule("milestones"))}`,
-        "",
-      ].join("\n"),
-    );
-    expect(Object.keys(parseYaml(readFileSync(file, "utf8")))).toEqual(["milestones"]);
-    const json = await cli([...args, "--force", "--json"], api);
-    expect(json.code).toBe(0);
-    expect(JSON.parse(json.stdout)).toMatchObject({
-      result: "partial",
-      skippedSections: [],
-      failedSections: ["labels"],
-    });
+    const problem = `the snapshot of o/r failed, so ${file} was not written; the errors above name the section and the fix`;
+    expect(plain.stderr).toEndWith(`error: ${problem}\n`);
+    expect(existsSync(file)).toBe(false);
+    const json = await cli([...args, "--json"], api);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
   });
 
   test("a check over the written file reads clean against the same repository", async () => {
@@ -311,7 +300,7 @@ describe("init: the written file and the printed grant", () => {
     );
     expect(check).toEqual({
       code: 0,
-      stdout: "result: clean\nskipped-sections=\nresult=clean\n",
+      stdout: "result: clean\nresult=clean\nskipped-sections=\nrepos-result={}\n",
       stderr: "",
     });
   });
@@ -409,12 +398,11 @@ describe("init: an existing settings file", () => {
     expect(json.code).toBe(1);
     expect(JSON.parse(json.stdout)).toEqual({
       result: "failed",
+      file,
       problem: result.stderr.slice("error: ".length, -1),
     });
   });
 
-  const SERVER_ERROR = { error: { status: 500, message: "Server Error", body: "" } };
-  const LABELS_500 = { "GET /repos/o/r/labels?per_page=100&page=1": SERVER_ERROR };
   const NO_MILESTONES = { "GET /repos/o/r/milestones?state=all&per_page=100&page=1": { data: [] } };
   test.each<[string, string, Record<string, unknown>, string, number | undefined]>([
     [
@@ -424,13 +412,12 @@ describe("init: an existing settings file", () => {
       "cannot be read back: check_suite_preferences",
       0,
     ],
-    ["every section failed", "labels", LABELS_500, "failed: labels", undefined],
     // custom_properties reads back "nothing live" (no /orgs/o route): read, declaring nothing.
     [
-      "the only section that read back declares nothing",
-      "labels,custom_properties",
-      LABELS_500,
-      "failed: labels; nothing exists on the repository: custom_properties",
+      "the only section reads back nothing",
+      "custom_properties",
+      {},
+      "nothing exists on the repository: custom_properties",
       undefined,
     ],
     [

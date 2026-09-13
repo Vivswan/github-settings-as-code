@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";
 import type { RepoResult, SectionOutcome } from "../../src/engine/orchestrate.js";
+import type { RunOutcome } from "../../src/engine/outcome.js";
 import {
   concludeRun,
   type Delivery,
@@ -121,9 +122,7 @@ async function delivered(
 }
 
 describe("runOutcome", () => {
-  test.each<[RepoResult[], boolean, RepoResult, 0 | 1]>([
-    [[], false, "applied", 0],
-    [[], true, "clean", 0],
+  test.each<[RunOutcome[], boolean, RunOutcome, 0 | 1]>([
     [["applied", "clean"], false, "applied", 0],
     [["clean", "skipped", "applied"], false, "skipped", 0],
     [["clean", "partial"], false, "partial", 0],
@@ -131,12 +130,19 @@ describe("runOutcome", () => {
     [["clean", "drift"], true, "drift", 1],
     [["applied", "failed", "drift"], false, "failed", 1],
     [["clean", "failed"], true, "failed", 1],
+    [["snapshot", "partial"], false, "partial", 0],
+    [["snapshot", "failed"], false, "failed", 1],
+    [["merged"], false, "merged", 0],
   ])("%j in check=%p -> %s exits %i", (results, check, result, exitCode) => {
     const conclusion = runOutcome(
       results.map((r) => ({ result: r })),
       check,
     );
     expect([conclusion.result, conclusion.exitCode]).toEqual([result, exitCode]);
+  });
+
+  test("a run without targets is a bug, never a healthy conclusion", () => {
+    expect(() => runOutcome([], true)).toThrow("BUG: worstOf was given no results");
   });
 });
 
@@ -353,11 +359,16 @@ describe("concludeRun", () => {
       },
     });
     expect(code).toBe(1);
-    expect(outputs).toEqual({ "skipped-sections": "rulesets", result: "drift" });
+    expect(outputs).toEqual({
+      result: "drift",
+      "skipped-sections": "rulesets",
+      "repos-result": "{}",
+    });
     expect(events).toEqual([
       "summary: ## github-settings-as-code (check)",
-      "output skipped-sections=rulesets",
       "output result=drift",
+      "output skipped-sections=rulesets",
+      "output repos-result={}",
       "log: result: drift",
     ]);
   });
@@ -386,23 +397,23 @@ describe("concludeRun", () => {
     });
     expect(code).toBe(0);
     expect(JSON.parse(outputs["repos-result"] ?? "")).toEqual({
-      "o/pub": { result: "partial", source: "remote", skippedSections: ["rulesets"] },
+      "o/pub": { result: "partial", source: "remote", "skipped-sections": ["rulesets"] },
       "private repository #1": {
         result: "partial",
         source: "central",
-        skippedSections: ["rulesets"],
+        "skipped-sections": ["rulesets"],
       },
     });
     expect(outputs).toEqual({
-      "repos-result": outputs["repos-result"] ?? "",
-      "skipped-sections": "rulesets",
       result: "partial",
+      "skipped-sections": "rulesets",
+      "repos-result": outputs["repos-result"] ?? "",
     });
     expect(events.map((e) => e.split("=")[0])).toEqual([
       "summary: ## github-settings-as-code (apply, 2 repositories)",
-      "output repos-result",
-      "output skipped-sections",
       "output result",
+      "output skipped-sections",
+      "output repos-result",
       "log: result: partial",
     ]);
     expect(events.join("\n")).not.toContain("o/priv");
@@ -411,11 +422,12 @@ describe("concludeRun", () => {
   test("failRun: the problem's line, then the conclusion a failed target gets, with no summary", () => {
     const { io, events, outputs } = eventIo();
     expect(failRun(io, { code: "input-token-missing" })).toBe(1);
-    expect(outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
     expect(events).toEqual([
       'error: cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
-      "output skipped-sections=",
       "output result=failed",
+      "output skipped-sections=",
+      "output repos-result={}",
       "log: result: failed",
     ]);
   });

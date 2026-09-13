@@ -250,19 +250,23 @@ outputs:
   # BEGIN GENERATED: action-outputs (bun run build:action-docs; edit src/action/io.ts)
   result:
     description: >-
-      applied | partial | clean | drift | failed (worst-of across all targets
-      in multi-repo mode, where skipped can also appear), merged in mode:
-      merge, or snapshot | partial | failed in mode: snapshot.
+      The worst result across the run's targets: failed | drift | partial |
+      skipped | applied | clean | snapshot | merged (drift and clean in mode:
+      check, applied in apply, snapshot in mode: snapshot, merged in mode:
+      merge; skipped only across a fleet). Exit 1 exactly when it is failed,
+      or drift in mode: check.
   skipped-sections:
     description: >-
-      Comma-separated sections skipped for missing permissions (deduped union
-      across targets in multi-repo mode).
+      Comma-separated sections skipped for missing permissions under
+      on-missing-permission: warn (deduped union across targets in multi-repo
+      mode); empty when none.
   repos-result:
     description: >-
-      Multi-repo mode (and the snapshot-dir form of mode: snapshot) only: JSON
-      map of owner/name to {result, source, skippedSections}. A redacted
-      private target is keyed by its "private repository #N" placeholder
-      instead of its slug. Empty in single-repo mode.
+      JSON map of owner/name to {result, source, skipped-sections} for every
+      target of a multi-repo run (repos, repos-dir, or the snapshot-dir form
+      of mode: snapshot). A redacted private target is keyed by its "private
+      repository #N" placeholder instead of its slug. The empty map {} for a
+      run over one repository or a merge.
 # END GENERATED: action-outputs
 
 runs:

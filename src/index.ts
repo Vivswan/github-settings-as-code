@@ -35,7 +35,6 @@ export {
 } from "./engine/layers.js";
 export {
   preflightProbe,
-  REPO_RESULTS,
   type RepoResult,
   type RepoRunOptions,
   type RepoRunResult,
@@ -44,12 +43,13 @@ export {
   skippedSectionKeys,
   type ValidatedSettings,
   validateSettingsDoc,
-  worstOf,
 } from "./engine/orchestrate.js";
+export { RUN_RESULTS, type RunOutcome, worstOf } from "./engine/outcome.js";
 export { SectionSelection } from "./engine/section-selection.js";
 export {
   type RenderableSnapshot,
   renderSnapshotYaml,
+  type SectionSnapshotOutcome,
   type SnapshotResult,
 } from "./engine/snapshot.js";
 export {
@@ -57,7 +57,6 @@ export {
   concludeRun,
   type FinishedMerge,
   failRun,
-  MERGE_RESULT,
   type RunFlowConfig,
 } from "./flows/deliver.js";
 export { executeRun, type RunDeps } from "./flows/execute.js";
@@ -119,10 +118,8 @@ export {
   concludeSnapshot,
   type FinishedSnapshot,
   runSnapshot,
-  SNAPSHOT_RESULTS,
   SNAPSHOT_SCHEMA_URL,
   type SnapshotConfig,
-  type SnapshotRunResult,
   type SnapshotTargetView,
 } from "./flows/snapshot.js";
 export {

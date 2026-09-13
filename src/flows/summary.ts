@@ -1,5 +1,6 @@
-import type { RepoResult, SectionOutcome } from "../engine/orchestrate.js";
-import type { SnapshotResult } from "../engine/snapshot.js";
+import type { SectionOutcome } from "../engine/orchestrate.js";
+import type { RunOutcome } from "../engine/outcome.js";
+import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
@@ -8,15 +9,13 @@ import type { SnapshotTargetView } from "./snapshot.js";
 type SummaryIo = Pick<Io, "summary">;
 
 const STATUS_ICON: Record<
-  | SectionOutcome["status"]
-  | RepoResult
-  | SnapshotResult["result"]
-  | SnapshotResult["outcomes"][number]["status"],
+  SectionOutcome["status"] | RunOutcome | SectionSnapshotOutcome["status"],
   string
 > = {
   applied: "white_check_mark",
   clean: "white_check_mark",
   snapshot: "white_check_mark",
+  merged: "white_check_mark",
   drift: "warning",
   partial: "warning",
   skipped: "fast_forward",
@@ -48,7 +47,7 @@ export function writeSummary(
   io: SummaryIo,
   view: PublicDetail,
   mode: string,
-  result: RepoResult,
+  result: RunOutcome,
 ): void {
   const lines = [`## github-settings-as-code (${mode})`, ""];
   if (view.note !== undefined) {

@@ -1,8 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { REPO_RESULTS, type RepoResult } from "../../src/engine/orchestrate.js";
-import { MERGE_RESULT } from "../../src/flows/deliver.js";
-import { SNAPSHOT_RESULTS } from "../../src/flows/snapshot.js";
+import { RUN_RESULTS, type RunOutcome } from "../../src/engine/outcome.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import {
   type SectionMeta,
@@ -229,37 +227,12 @@ export function renderCoverage(
   ].join("\n");
 }
 
-const RESULT_DISPLAY: Record<RepoResult, "any mode" | "multi-repo only"> = {
-  applied: "any mode",
-  partial: "any mode",
-  clean: "any mode",
-  drift: "any mode",
-  failed: "any mode",
-  skipped: "multi-repo only",
-};
+/** The prose after the enumeration; the region's body regex admits exactly this tail. */
+const RESULT_TAIL =
+  ", worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check";
 
-const WORST_OF = "; worst-of across targets in multi-repo mode";
-const CAN_ALSO_APPEAR = " can also appear";
-/** The merge- and snapshot-mode results, values outside RepoResult, close the enumeration. */
-const MERGE_ONLY = `; \`${MERGE_RESULT}\` in mode: merge`;
-const SNAPSHOT_ONLY = `; ${[...SNAPSHOT_RESULTS]
-  .reverse()
-  .map((value) => `\`${value}\``)
-  .join(" / ")} in mode: snapshot`;
-
-export function renderOutputsList(results: readonly RepoResult[]): string {
-  const ordered = (Object.keys(RESULT_DISPLAY) as RepoResult[]).filter((value) =>
-    results.includes(value),
-  );
-  const code = (value: RepoResult): string => `\`${value}\``;
-  const anyMode = ordered.filter((value) => RESULT_DISPLAY[value] === "any mode").map(code);
-  const multiOnly = ordered
-    .filter((value) => RESULT_DISPLAY[value] === "multi-repo only")
-    .map(code);
-  const lead = `${anyMode.join(" / ")}${WORST_OF}`;
-  const withMulti =
-    multiOnly.length === 0 ? lead : `${lead}, where ${multiOnly.join(" and ")}${CAN_ALSO_APPEAR}`;
-  return `${withMulti}${MERGE_ONLY}${SNAPSHOT_ONLY}`;
+export function renderOutputsList(results: readonly RunOutcome[]): string {
+  return `${results.map((value) => `\`${value}\``).join(" / ")}${RESULT_TAIL}`;
 }
 
 export type TaggedOperation = Pick<SectionOperation, "role" | "grade" | "permission"> & {
@@ -340,11 +313,9 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(WORST_OF)}(?:, where ` +
-        String.raw`\x60[a-z]+\x60(?: and ` +
-        String.raw`\x60[a-z]+\x60)*${escapeRe(CAN_ALSO_APPEAR)})?(?:${escapeRe(MERGE_ONLY)})?(?:${escapeRe(SNAPSHOT_ONLY)})?)?$`,
+      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(RESULT_TAIL)})?$`,
     ),
-    render: () => renderOutputsList(REPO_RESULTS),
+    render: () => renderOutputsList(RUN_RESULTS),
   };
 }
 

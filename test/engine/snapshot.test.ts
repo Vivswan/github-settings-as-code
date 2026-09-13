@@ -365,17 +365,20 @@ describe("snapshotRepository", () => {
     },
   );
 
-  test("a section whose snapshot throws fails alone; the document still carries the rest", async () => {
+  test("a section whose snapshot throws fails the run: its error is the outcome, and no document is handed out", async () => {
     const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(new Error("boom"));
     try {
-      const result = await snapshotRepository(registryFake(LIVE), opts(), captureIo().io);
-      expect(result.result).toBe("partial");
+      const { io, annotations } = captureIo();
+      const result = await snapshotRepository(registryFake(LIVE), opts(), io);
+      expect(result.result).toBe("failed");
+      expect(result.settings).toBeUndefined();
       expect(result.outcomes.find((o) => o.key === "labels")).toEqual({
         key: "labels",
         status: "failed",
         detail: ["labels: boom"],
       });
-      expect(result.settings?.actions_variables).toBeDefined();
+      expect(result.outcomes.find((o) => o.key === "actions_variables")?.status).toBe("snapshot");
+      expect(annotations).toContain("error: labels: boom");
     } finally {
       stubbed.mockRestore();
     }
@@ -457,8 +460,8 @@ describe("pages null body", () => {
       { ...opts(), sections: SectionSelection.of({ only: ["pages"] })._unsafeUnwrap() },
       captureIo().io,
     );
-    expect(result.result).toBe("partial");
-    expect(Object.keys(result.settings ?? {})).toEqual([]);
+    expect(result.result).toBe("failed");
+    expect(result.settings).toBeUndefined();
     expect(result.outcomes).toEqual([
       {
         key: "pages",
@@ -475,9 +478,11 @@ describe("pages null body", () => {
 
 describe("renderSnapshotYaml", () => {
   test("a message spanning several lines is commented line by line, so the file still parses", async () => {
-    const stubbed = spyOn(labelsSection, "snapshot").mockRejectedValue(
-      new Error("502 Bad Gateway\nupstream unavailable"),
-    );
+    // A note with a line break, on a section with nothing live: the header carries it, the document omits the section.
+    const stubbed = spyOn(labelsSection, "snapshot").mockResolvedValue({
+      value: undefined,
+      notes: ["502 Bad Gateway\nupstream unavailable"],
+    });
     try {
       const result = await snapshotRepository(
         registryFake(LIVE),
@@ -487,14 +492,15 @@ describe("renderSnapshotYaml", () => {
         },
         captureIo().io,
       );
-      expect(result.result).toBe("partial");
+      expect(result.result).toBe("snapshot");
       const rendered = renderSnapshotYaml(result as RenderableSnapshot, {
         schemaUrl: "https://example.test/settings.schema.json",
         timestamp: "2026-09-11T00:00:00Z",
       });
-      expect(rendered.split("\n").slice(2, 4)).toEqual([
+      expect(rendered.split("\n").slice(2, 5)).toEqual([
         "# labels: 502 Bad Gateway",
         "# labels: upstream unavailable",
+        "# labels: nothing exists on the repository, so the section is omitted",
       ]);
       expect(parseYaml(rendered)).toEqual({
         actions_variables: {

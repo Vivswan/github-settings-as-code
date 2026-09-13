@@ -98,17 +98,16 @@ An existing settings file is refused (init never replaces the file you author) u
 A document that would declare no section is never written: the refusal names each selected section and why it declares nothing.
 The notes print in the clear, as the file holds the same names: init has no `--private-repos`.
 
-With `--json`, stdout is one object. After a write:
+With `--json`, stdout is one object, the envelope every subcommand prints (`result` first, then the command's own fields). After a write:
 
 | Field | Holds |
 |---|---|
+| `result` | `snapshot`, or `partial` when a section was skipped |
 | `file`, `repository` | The written path and the `owner/name` it was read from |
-| `result` | `snapshot`, or `partial` when a section was skipped or failed |
-| `skippedSections` | Sections skipped under `--on-missing-permission warn`; the file omits them |
-| `failedSections` | Sections that failed on their own; the file omits them, the errors on stderr say why |
+| `skipped-sections` | Sections skipped under `--on-missing-permission warn`, as a list; the file omits them |
 | `grant` | One entry per declared section: its key and the grant line printed above |
 
-A refusal or a failure exits 1 with `{"result":"failed","problem":"<the line stderr carries>"}` instead.
+A refusal or a failure exits 1 with `{"result":"failed","file":"<the settings file>","problem":"<the line stderr carries>"}` instead; a section that fails on its own fails the whole snapshot, so no file is written.
 
 ### validate
 
@@ -117,6 +116,7 @@ gsac validate .github/settings.yml
 ```
 
 Exits 0 with the sections the file declares, or 1 with the validator's message on stderr. No token, no API call: this is the command to run in a pre-commit hook or a pull request check.
+With `--json`: `{"result":"valid","file":"<path>","sections":["labels","repository"]}`, or `{"result":"failed","file":"<path>","problem":"<the validator's line>"}`.
 
 ### permissions
 
@@ -125,6 +125,7 @@ gsac permissions .github/settings.yml
 ```
 
 One line per declared section: the grant its declaration names, the same words a permission denial would print.
+With `--json`: `{"result":"valid","file":"<path>","grant":{"labels":"<grant line>",...}}`, or the same failed envelope `validate` prints.
 
 ## Flags
 
@@ -145,19 +146,22 @@ Four flags are the command line's own, and `init` has one more, `--force` (repla
 
 ## Output and exit codes
 
-Log lines go to stdout, annotations to stderr as `level: message` (`notice`, `warning`, `error`), and the action's outputs close the run as `name=value` lines on stdout:
+Log lines go to stdout, annotations to stderr as `level: message` (`notice`, `warning`, `error`), and the action's three outputs close the run as `name=value` lines on stdout, in every mode:
 
 ```text
 result: clean
-skipped-sections=
 result=clean
+skipped-sections=
+repos-result={}
 ```
 
-With `--json` the outputs are one object instead, and stdout carries nothing else:
+With `--json` the outputs are one object instead, and stdout carries nothing else; `skipped-sections` is a list there and `repos-result` a map, never a string to parse again:
 
 ```text
-{"skipped-sections":"","result":"clean"}
+{"result":"clean","skipped-sections":[],"repos-result":{}}
 ```
+
+A run that fails before any target runs (a missing input, a value the mode refuses) prints the same object with `result: "failed"` and the stderr line as `problem`; a parser error or a crash prints `{"result":"failed","problem":"<the line>"}`. Under `--json`, stdout is always exactly one object.
 
 The exit codes are the action's:
 

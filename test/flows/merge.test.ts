@@ -34,7 +34,11 @@ describe("runMerge", () => {
       "repository:\n  has_wiki: false\n  has_issues: true\n",
     );
     expect(concludeMerge(collected.io, merged._unsafeUnwrap())).toBe(0);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "merged" });
+    expect(collected.outputs).toEqual({
+      result: "merged",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
   });
 
   test.each<[string, (dir: string) => string, number, string]>([

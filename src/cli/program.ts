@@ -16,6 +16,7 @@ import {
   type Io,
   type Mode,
   type MustBeNever,
+  type Problem,
   parseConfig,
   type RunConfig,
 } from "../index.js";
@@ -23,6 +24,7 @@ import {
   ARTIFACT_REFUSED,
   type CliHost,
   describeCliProblem,
+  failedEnvelope,
   permissionsFor,
   type Rendered,
   validateFile,
@@ -88,8 +90,12 @@ export interface ProgramOptions {
   readonly streams: MaskedStreams;
   /** Color the level labels and the permissions table; defaults to picocolors' detection. */
   readonly colors?: boolean;
-  /** Run a parsed config; tests capture the config here instead of running it. */
-  readonly execute?: (cfg: RunConfig, io: Io) => Promise<number>;
+  /** Run a parsed config, wording a fatal problem with `describe`; tests capture the config here instead of running it. */
+  readonly execute?: (
+    cfg: RunConfig,
+    io: Io,
+    describe: (problem: Problem) => string,
+  ) => Promise<number>;
   /** Run a parsed init config to its rendering; tests capture the config here instead of running it. */
   readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
 }
@@ -116,11 +122,11 @@ export function buildProgram(options: ProgramOptions): {
   const paint = pc.createColors(colors);
   const execute =
     options.execute ??
-    ((cfg, io) =>
+    ((cfg, io, describe) =>
       executeRun(cfg, {
         io,
         createClient: (token, io, apiVersion) => host.createClient(token, io, apiVersion),
-        describe: describeCliProblem,
+        describe,
       }));
   const executeInit = options.executeInit ?? ((cfg, io) => runInit(cfg, io, host, paint.bold));
   const envToken = host.env.GITHUB_TOKEN?.trim();
@@ -182,15 +188,21 @@ export function buildProgram(options: ProgramOptions): {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
       const { io, flush } = openIo(values);
       const read = argvReader(mode, values);
+      // The face words the fatal problem AND keeps the words: the envelope carries them beside the outputs.
+      let fatal: string | undefined;
+      const describe = (problem: Problem): string => {
+        fatal = describeCliProblem(problem);
+        return fatal;
+      };
       // Refused before parseConfig, which would otherwise ask for the channel's age key first.
       exitCode =
         read("private-report") === "artifact"
-          ? failRun(io, ARTIFACT_REFUSED, describeCliProblem)
+          ? failRun(io, ARTIFACT_REFUSED, describe)
           : await parseConfig(read, host.env).match(
-              (cfg) => execute(cfg, io),
-              async (problem) => failRun(io, problem, describeCliProblem),
+              (cfg) => execute(cfg, io, describe),
+              async (problem) => failRun(io, problem, describe),
             );
-      flush();
+      flush(fatal);
     });
   }
 
@@ -248,7 +260,10 @@ export function buildProgram(options: ProgramOptions): {
   return { program, exitCode: () => exitCode };
 }
 
-/** Run `argv` (the full process.argv shape) to its exit code; every line, a crash's included, is masked. */
+/**
+ * Run `argv` (the full process.argv shape) to its exit code; every line, a crash's included, is masked. Under --json a
+ * failure the parser or a crash ends in prints the same failed envelope a run prints, so stdout is always one object.
+ */
 export async function main(
   argv: readonly string[],
   options: Omit<ProgramOptions, "streams"> & { readonly streams: CliStreams },
@@ -258,10 +273,26 @@ export async function main(
     streams.mask(token);
   }
   const { program, exitCode } = buildProgram({ ...options, streams });
+  // The parser is the one reader of --json: its verdict stands even when the parse ends in an error, since commander
+  // records the options it saw before raising one (a `--summary --json` is a summary path, not the flag).
+  const failedJson = (message: string): void => {
+    if (program.opts<Globals>().json === true) {
+      streams.stdout.write(`${JSON.stringify(failedEnvelope(message))}\n`);
+    }
+  };
   try {
     await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError) {
+      // Commander already wrote its line (or the usage) to stderr; --help exits 0 and is no failure. A missing
+      // subcommand is the usage shown as an error, whose message is commander's "(outputHelp)" sentinel.
+      if (error.exitCode !== 0) {
+        failedJson(
+          error.code === "commander.help"
+            ? "no subcommand was given; the usage above lists them"
+            : error.message.replace(/^error: /, ""),
+        );
+      }
       return error.exitCode;
     }
     const verbose = program.opts<Globals>().verbose === true;
@@ -270,9 +301,9 @@ export async function main(
     const remedy = verbose
       ? "The stack above is the report: if it recurs, file a bug with it attached"
       : "Re-run with --verbose for the stack; if it recurs, file a bug with that output attached";
-    streams.stderr.write(
-      `error: github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}\n`,
-    );
+    const message = `github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}`;
+    streams.stderr.write(`error: ${message}\n`);
+    failedJson(message);
     return 1;
   }
   return exitCode();

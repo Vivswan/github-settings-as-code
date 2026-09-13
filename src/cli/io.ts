@@ -81,8 +81,11 @@ export interface CliIoOptions {
 
 export interface CliIo {
   readonly io: Io;
-  /** Print the collected outputs to stdout, in the form the json option picked. */
-  flush(): void;
+  /**
+   * Print the collected outputs to stdout, in the form the json option picked. `problem` is the fatal problem a run
+   * ended in, worded for the terminal; the envelope carries it beside the outputs, the line form already has it on stderr.
+   */
+  flush(problem?: string): void;
 }
 
 /** The consola type each annotation level logs as; consola gates them by level. */
@@ -101,6 +104,16 @@ const LABEL: Partial<Record<LogType, { label: string; paint: Paint }>> = {
   warn: { label: "warning", paint: (colors) => colors.yellow },
   error: { label: "error", paint: (colors) => colors.red },
   debug: { label: "debug", paint: (colors) => colors.dim },
+};
+
+/**
+ * How each output reads inside the --json envelope: the action's outputs are strings (a comma list, a JSON document),
+ * and a JSON envelope carries the value itself, never a string a reader would parse again.
+ */
+const JSON_OUTPUT: Record<OutputName, (value: string) => unknown> = {
+  result: (value) => value,
+  "skipped-sections": (value) => (value === "" ? [] : value.split(",")),
+  "repos-result": (value) => JSON.parse(value),
 };
 
 export function cliIo(options: CliIoOptions): CliIo {
@@ -136,9 +149,14 @@ export function cliIo(options: CliIoOptions): CliIo {
       mask: streams.mask,
       masked: streams.masked,
     },
-    flush: () => {
+    flush: (problem) => {
       if (options.json) {
-        streams.stdout.write(`${JSON.stringify(Object.fromEntries(outputs))}\n`);
+        const envelope = Object.fromEntries(
+          [...outputs].map(([name, value]) => [name, JSON_OUTPUT[name](value)]),
+        );
+        streams.stdout.write(
+          `${JSON.stringify(problem === undefined ? envelope : { ...envelope, problem })}\n`,
+        );
         return;
       }
       for (const [name, value] of outputs) {

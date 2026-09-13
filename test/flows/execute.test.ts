@@ -87,7 +87,11 @@ describe("executeRun", () => {
     expect(code).toBe(0);
     expect(d.opened()).toBe(0);
     expect(api.calls).toEqual([]);
-    expect(d.collected.outputs).toEqual({ "skipped-sections": "", result: "merged" });
+    expect(d.collected.outputs).toEqual({
+      result: "merged",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(d.collected.lines.slice(-2)).toEqual([
       { line: `merged 2 layer(s) into ${mergedFile}` },
       { line: "result: merged" },
@@ -101,7 +105,11 @@ describe("executeRun", () => {
     expect(await executeRun(single({ settingsFile }), d.run)).toBe(1);
     expect(d.opened()).toBe(1);
     expect(api.calls).toEqual([]);
-    expect(d.collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(d.collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(d.collected.lines).toEqual([
       { level: "error", line: "worded: settings-file-unreadable" },
       { line: "result: failed" },
@@ -117,7 +125,11 @@ describe("executeRun", () => {
     const without = deps(refused);
     expect(await executeRun(cfg, without.run)).toBe(1);
     expect(refused.calls).toEqual([]);
-    expect(without.collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(without.collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(without.collected.lines).toEqual([
       { level: "error", line: describeProblem({ code: "artifact-uploader-missing" }) },
       { line: "result: failed" },
@@ -133,7 +145,11 @@ describe("executeRun", () => {
     const with_ = deps(reached, { uploader });
     expect(await executeRun(cfg, with_.run)).toBe(0);
     expect(reached.calls.map((c) => `${c.method} ${c.path}`)).toContain("GET /repos/o/r");
-    expect(with_.collected.outputs).toEqual({ "skipped-sections": "", result: "clean" });
+    expect(with_.collected.outputs).toEqual({
+      result: "clean",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     // A target proven public gets no private report, so nothing was uploaded.
     expect(uploads).toEqual([]);
   });

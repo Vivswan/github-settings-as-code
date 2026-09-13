@@ -862,7 +862,7 @@ async function runMultiPredicted(
   }
 
   // Folded from repos-result, not the summary: a multi summary repeats section keys per target, which
-  // parseSummaryOutcomes would overwrite. A config-fatal run emits no repos-result by design.
+  // parseSummaryOutcomes would overwrite. A config-fatal run's repos-result is the empty map by design.
   if (Object.keys(report.reposResult).length > 0) {
     const folded = foldRepoResults(Object.values(report.reposResult), meta.mode === "check");
     if (report.outputs.result !== folded) {
@@ -963,7 +963,7 @@ async function runDiscoveryPredicted(
     }
     problems.push(...checkLeaks(report, forbidden));
   }
-  // Discovery is always apply mode; the kept-empty error and the discovery-fatal path emit no repos-result by design.
+  // Discovery is always apply mode; the kept-empty error and the discovery-fatal path leave repos-result the empty map by design.
   if (Object.keys(report.reposResult).length > 0) {
     const folded = foldRepoResults(Object.values(report.reposResult), false);
     if (report.outputs.result !== folded) {
@@ -1384,9 +1384,10 @@ async function fatalDiscoveryRun(
       `discovery-fatal: ${touched.length} target request(s) after the failed listing, e.g. ${touched[0]?.method} ${touched[0]?.pathname}`,
     );
   }
-  if (report.outputs["repos-result"] !== undefined) {
+  // A fatal problem concludes over one failed target, so the fleet map is the empty one: a row here means a target ran.
+  if (report.outputs["repos-result"] !== "{}") {
     problems.push(
-      `discovery-fatal: repos-result was emitted (${report.outputs["repos-result"]}), expected no output at all`,
+      `discovery-fatal: repos-result is ${report.outputs["repos-result"]}, expected the empty map {}`,
     );
   }
   return iterationResult(

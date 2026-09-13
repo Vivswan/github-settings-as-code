@@ -108,7 +108,7 @@ describe("action.yml renderers", () => {
         result: { description: "applied | partial | clean." },
         "repos-result": {
           description:
-            "Multi-repo mode only: JSON map of owner/name to {result, source, skippedSections}. Empty in single-repo mode.",
+            "JSON map of owner/name to {result, source, skipped-sections} for every fleet target. The empty map {} for one repository.",
         },
       }),
     ).toBe(
@@ -118,8 +118,8 @@ describe("action.yml renderers", () => {
         "      applied | partial | clean.",
         "  repos-result:",
         "    description: >-",
-        "      Multi-repo mode only: JSON map of owner/name to {result, source,",
-        "      skippedSections}. Empty in single-repo mode.",
+        "      JSON map of owner/name to {result, source, skipped-sections} for every",
+        "      fleet target. The empty map {} for one repository.",
       ].join("\n"),
     );
   });

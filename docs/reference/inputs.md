@@ -41,8 +41,10 @@ The discovery-only inputs apply to `repos: "*"`; the [multi-repo guide](../opera
 
 ## Outputs
 
-- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from REPO_RESULTS in src/engine/orchestrate.ts) -->`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot<!-- END GENERATED: outputs-list -->. The [snapshot guide](../operate/snapshot.md) has the snapshot values' exit-code table.
-- `skipped-sections`: the sections skipped for missing permissions under `on-missing-permission: warn`, comma-separated (a deduped union across targets in multi-repo mode).
-- `repos-result`: multi-repo mode only, a JSON map of `owner/name` to `{result, source, skippedSections}`. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
+- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from RUN_RESULTS in src/engine/outcome.ts) -->`failed` / `drift` / `partial` / `skipped` / `applied` / `clean` / `snapshot` / `merged`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check<!-- END GENERATED: outputs-list -->. The [snapshot guide](../operate/snapshot.md) says what each snapshot word means.
+- `skipped-sections`: the sections skipped for missing permissions under `on-missing-permission: warn`, comma-separated (a deduped union across targets in multi-repo mode); empty when none.
+- `repos-result`: a JSON map of `owner/name` to `{result, source, skipped-sections}`, one entry per target of a multi-repo run (`repos`, `repos-dir`, or the `snapshot-dir` form of `mode: snapshot`); the empty map `{}` for a run over one repository or a merge. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
+
+All three outputs are set on every run, whatever the mode and however it ended.
 
 A `check` run exits 1 on any drift, so a downstream step usually reads `result` only when the step runs with `continue-on-error: true` or through `if: always()`. [Check mode](../operate/check-mode.md) has the exit-code table.

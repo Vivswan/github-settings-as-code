@@ -1003,7 +1003,7 @@ describe("result folds (self-consistency mirrors)", () => {
     expect(foldSectionOutcomes(["applied", "failed", "drift"], false)).toBe("failed");
   });
 
-  test("foldRepoResults mirrors worstOf's REPO_RESULTS order", () => {
+  test("foldRepoResults mirrors worstOf's RUN_RESULTS order over the repo words", () => {
     expect(foldRepoResults(["applied", "skipped", "partial"], false)).toBe("partial");
     expect(foldRepoResults(["clean", "drift"], true)).toBe("drift");
     expect(foldRepoResults(["skipped", "failed"], false)).toBe("failed");

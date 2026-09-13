@@ -19,8 +19,7 @@ import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
-import type { MustBeNever } from "../types.js";
-import type { Exposure } from "./deliver.js";
+import { conclude, type Exposure } from "./deliver.js";
 import {
   DEFAULT_SETTINGS_FILE,
   openTarget,
@@ -37,25 +36,6 @@ import {
 } from "./redact.js";
 import { openSingleRepoChannel } from "./single.js";
 import { writeSnapshotDirSummary, writeSnapshotSummary } from "./summary.js";
-
-/**
- * The `result` output of a mode: snapshot run, worst first: `failed` when a
- * target failed (a denial under the fail policy, a value a section's own
- * schema rejects, an unwritable file), `partial` when a section was skipped
- * or failed without failing its target, `snapshot` when every target read
- * fully back. Not RepoResult values: a snapshot applies nothing, so they
- * never enter worstOf beside the per-repo values.
- */
-export const SNAPSHOT_RESULTS = [
-  "failed",
-  "partial",
-  "snapshot",
-] as const satisfies readonly SnapshotResult["result"][];
-
-export type SnapshotRunResult = (typeof SNAPSHOT_RESULTS)[number];
-
-/** Compile-time lockstep: an engine result value missing from SNAPSHOT_RESULTS fails here. */
-type _UnlistedSnapshotResult = MustBeNever<Exclude<SnapshotResult["result"], SnapshotRunResult>>;
 
 /**
  * The schema the written file's editor hint points at: the schema of this
@@ -88,7 +68,7 @@ export type SnapshotConfig =
 
 /** One snapshot target's end state before projection: the engine's outcomes plus where the file went. */
 interface SnapshotTargetResult {
-  result: SnapshotRunResult;
+  result: SnapshotResult["result"];
   outcomes: SnapshotResult["outcomes"];
   /** Human line heading the target's summary. */
   note: string;
@@ -101,7 +81,7 @@ export interface SnapshotTargetView {
   /** The public label: the slug, or its "private repository #N" placeholder. */
   display: string;
   source?: Target["source"];
-  result: SnapshotRunResult;
+  result: SnapshotResult["result"];
   outcomes: Array<{
     key: SectionKey;
     status: SnapshotResult["outcomes"][number]["status"];
@@ -446,50 +426,12 @@ async function snapshotDir(
   return { form: "dir", snapshotDir: cfg.snapshotDir, views };
 }
 
-/** The worst result across every target; a run without targets never reaches here. */
-function worstSnapshotResult(
-  views: ReadonlyArray<{ result: SnapshotRunResult }>,
-): SnapshotRunResult {
-  return SNAPSHOT_RESULTS.find((rank) => views.some((view) => view.result === rank)) ?? "snapshot";
-}
-
-/** A finished mode: snapshot run: the summary, the outputs, the result line, and the exit code. */
+/** A finished mode: snapshot run: the summary, then the outputs, the result line, and the exit code as every mode ends. */
 export function concludeSnapshot(io: Io, finished: FinishedSnapshot): number {
-  const views = finished.form === "file" ? [finished.view] : finished.views;
   if (finished.form === "file") {
     writeSnapshotSummary(io, finished.view);
-  } else {
-    writeSnapshotDirSummary(io, finished.views, finished.snapshotDir);
-    io.output(
-      "repos-result",
-      JSON.stringify(
-        Object.fromEntries(
-          finished.views.map((view) => [
-            view.display,
-            {
-              result: view.result,
-              source: view.source,
-              skippedSections: view.outcomes
-                .filter((o) => o.status === "skipped")
-                .map((o) => o.key),
-            },
-          ]),
-        ),
-      ),
-    );
+    return conclude(io, finished.view, false);
   }
-  io.output(
-    "skipped-sections",
-    [
-      ...new Set(
-        views.flatMap((view) =>
-          view.outcomes.filter((o) => o.status === "skipped").map((o) => o.key),
-        ),
-      ),
-    ].join(","),
-  );
-  const result = worstSnapshotResult(views);
-  io.output("result", result);
-  io.log(`result: ${result}`);
-  return result === "failed" ? 1 : 0;
+  writeSnapshotDirSummary(io, finished.views, finished.snapshotDir);
+  return conclude(io, finished.views, false);
 }

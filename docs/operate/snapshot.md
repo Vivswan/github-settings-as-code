@@ -208,7 +208,7 @@ Under both policies the error or the header line names the grant to add.
 | `result` | Exit | Meaning |
 |---|---|---|
 | `snapshot` | 0 | Every target read fully back and its file was written |
-| `partial` | 0 | A section was skipped under `on-missing-permission: warn`, or failed on its own; the file omits it, the header says why, and `skipped-sections` lists the skipped ones |
-| `failed` | 1 | A target failed: a denial on any read under `fail`, an unwritable path, or a value a section's own schema rejects (a bug, reported as such). No file is written for a failed target |
+| `partial` | 0 | A section was skipped under `on-missing-permission: warn`; the file omits it, the header says why, and `skipped-sections` lists it |
+| `failed` | 1 | A target failed: a denial on any read under `fail`, a section that failed on its own (an API error, a value its own schema rejects), or an unwritable path. No file is written for a failed target |
 
-In the `snapshot-dir` form the worst result across targets decides, and `repos-result` maps each target to its own.
+In the `snapshot-dir` form the worst result across targets decides, and `repos-result` maps each target to its own. The words and the exit rule are the ones every mode shares: [Inputs and outputs](../reference/inputs.md#outputs).
