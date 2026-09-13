@@ -7,10 +7,11 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  ORG_PROBE,
   type SectionMeta,
   type SectionModule,
   sectionGrant,
@@ -22,7 +23,6 @@ import {
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { ORG_PROBE, personalAccountNote } from "../shared/org-owner.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
@@ -86,18 +86,17 @@ function inheritedAccessReason(repo: string, source: string): string {
 /** The probe plan() and snapshot() share, under the media type LiveTeamRepo describes. */
 async function probeTeamRole(
   ctx: TeamsContext,
-  section: SectionMeta,
   slug: string,
 ): Promise<{ access: false } | { access: true; role: string | undefined }> {
-  const probe = await ctx.read.probe.probeAbsent({
+  const probe = await ctx.read.probe.probeAbsent(LiveTeamRepo, {
     params: { org: ctx.repo.owner, team_slug: slug },
     accept: "application/vnd.github.v3.repository+json",
+    describe: `team "${slug}"`,
   });
   if ("missing" in probe) {
     return { access: false };
   }
-  const live = parseLive(section, ENDPOINTS.probe, LiveTeamRepo, probe.data, `team "${slug}"`);
-  return { access: true, role: live?.role_name };
+  return { access: true, role: probe.data?.role_name };
 }
 
 /**
@@ -118,7 +117,7 @@ export const teamsSection = {
   key: "teams",
   undeclaredDefault: "keep",
   permission,
-  // Teams exist only under an organization owner; the org probe below implements the no-op this declares.
+  // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(TeamConfig)),
@@ -137,28 +136,14 @@ export const teamsSection = {
       (t) => t.name,
     );
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    // On a personal account the org endpoints 404; 403/5xx still classify through probeAbsent.
-    const personal = personalAccountNote(
-      this,
-      ctx.repo.owner,
-      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
-      "plan",
-    );
-    if (personal !== undefined) {
-      plan.notes.push(personal);
-      return plan;
-    }
     // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
     // below start from; a declared team's role still comes from the probe, which names a custom role.
-    const live = teamsBySlug(
-      this,
-      parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll()),
-    );
+    const live = teamsBySlug(this, await ctx.read.list.listAll(LiveTeam));
     const declaredSlugs = new Set(desired.map((team) => team.name.toLowerCase()));
     for (const team of desired) {
       const role = team.permission ?? DEFAULT_ROLE;
       const params = { org: ctx.repo.owner, team_slug: team.name };
-      const probe = await probeTeamRole(ctx, this, team.name);
+      const probe = await probeTeamRole(ctx, team.name);
       const wantRole = roleForPermission(role);
       let drift: string;
       if (!probe.access) {
@@ -234,19 +219,7 @@ export const teamsSection = {
    * still revokes under `_undeclared: delete`, so the note names what the file would have to declare).
    */
   async snapshot(ctx) {
-    const personal = personalAccountNote(
-      this,
-      ctx.repo.owner,
-      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
-      "snapshot",
-    );
-    if (personal !== undefined) {
-      return { value: undefined, notes: [personal] };
-    }
-    const teams = teamsBySlug(
-      this,
-      parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll()),
-    );
+    const teams = teamsBySlug(this, await ctx.read.list.listAll(LiveTeam));
     const notes: string[] = [];
     const entries: TeamConfig[] = [];
     for (const team of teams.values()) {
@@ -261,7 +234,7 @@ export const teamsSection = {
         );
         continue;
       }
-      const probe = await probeTeamRole(ctx, this, team.slug);
+      const probe = await probeTeamRole(ctx, team.slug);
       if (!probe.access) {
         // No write follows to surface a denial, so the note names both readings of the 404.
         notes.push(

@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import type { GitHubClient } from "../../src/github/api.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
@@ -11,6 +12,9 @@ import type { SectionModule } from "../../src/sections/contract/module.js";
 import type { ExecTools, PlannedOp } from "../../src/sections/contract/plan.js";
 import { MockApi } from "../mock-api.js";
 import { identityOf, provePlanIdempotent, requestOf } from "./plan-idempotence.js";
+
+/** The listed secret's identity, the one field the synthetic sections read. */
+const LiveName = z.looseObject({ name: z.string() });
 
 const LIST = {
   route: "GET /repos/{owner}/{repo}/actions/secrets",
@@ -33,6 +37,8 @@ const META = {
   permission: { repo: ["secrets"] },
   undeclaredDefault: "keep",
   shape: actionsSecretsSection.shape,
+  // A reading section must read back; these synthetic modules exercise plan() alone.
+  snapshot: async () => ({ value: undefined, notes: [] }),
 } as const;
 
 /** The declared entries, whichever form the knobbed section value takes. */
@@ -50,7 +56,7 @@ const sealed = {
   ...META,
   endpoints: SEALED_ENDPOINTS,
   async plan(ctx, desired) {
-    const live = (await ctx.read.list.listAllEnveloped("secrets")) as Array<{ name: string }>;
+    const live = await ctx.read.list.listAllEnveloped("secrets", LiveName);
     return {
       ops: entriesOf(desired).map((entry) => ({
         role: "put" as const,
@@ -74,7 +80,7 @@ const stuck = {
   ...META,
   endpoints: CONDITIONAL_ENDPOINTS,
   async plan(ctx, desired) {
-    const live = (await ctx.read.list.listAllEnveloped("secrets")) as Array<{ name: string }>;
+    const live = await ctx.read.list.listAllEnveloped("secrets", LiveName);
     return {
       ops: entriesOf(desired)
         .filter((entry) => !live.some((s) => s.name === entry.name))
@@ -190,7 +196,7 @@ describe("provePlanIdempotent", () => {
       ...META,
       endpoints: UNVERIFIABLE_ENDPOINTS,
       async plan(ctx, desired) {
-        const live = (await ctx.read.list.listAllEnveloped("secrets")) as Array<{ name: string }>;
+        const live = await ctx.read.list.listAllEnveloped("secrets", LiveName);
         return {
           ops: entriesOf(desired).map((entry) => {
             const exists = live.some((s) => s.name === entry.name);

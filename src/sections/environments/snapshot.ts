@@ -13,6 +13,7 @@ import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/s
 import { liveVariablesByKey } from "../shared/variables-engine.js";
 import { listBranchPolicies, policiesByName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
+import type { LiveEnvironmentBody } from "./index.js";
 import {
   listEnvironmentSecrets,
   listEnvironmentVariables,
@@ -81,7 +82,7 @@ export async function snapshotNested(
   ctx: SnapshotContext<typeof ENDPOINTS>,
   section: SectionMeta,
   envName: string,
-  liveEnv: Record<string, unknown>,
+  liveEnv: LiveEnvironmentBody,
 ): Promise<{ nested: NestedSnapshot; notes: string[] }> {
   const nested: NestedSnapshot = {};
   const notes: string[] = [];
@@ -89,7 +90,7 @@ export async function snapshotNested(
     ...liveVariablesByKey(
       section,
       "variable",
-      await listEnvironmentVariables(ctx, section, envName),
+      await listEnvironmentVariables(ctx, envName),
     ).values(),
   ];
   if (variables.length > 0) {
@@ -102,7 +103,7 @@ export async function snapshotNested(
     ...liveSecretsByKey(
       section,
       `${envName} environment secret`,
-      await listEnvironmentSecrets(ctx, section, envName),
+      await listEnvironmentSecrets(ctx, envName),
     ).keys(),
   ];
   if (secrets.length > 0) {
@@ -120,13 +121,12 @@ export async function snapshotNested(
       notes.push(unreadableSecretNote(`environments[${envName}].secrets[${name}]`, name, variable));
     }
   }
-  const flags = liveEnv.deployment_branch_policy as { custom_branch_policies?: unknown } | null;
-  if (flags?.custom_branch_policies === true) {
+  if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
     const policies = await readOrNote(
       ctx,
       notes,
       `environments[${envName}].deployment_branch_policies`,
-      () => listBranchPolicies(ctx, section, envName),
+      () => listBranchPolicies(ctx, envName),
     );
     if ("value" in policies && policies.value.length > 0) {
       const byName = policiesByName(section, policies.value, envName);
@@ -142,7 +142,7 @@ export async function snapshotNested(
     ctx,
     notes,
     `environments[${envName}].deployment_protection_rules`,
-    () => listProtectionRules(ctx, section, envName),
+    () => listProtectionRules(ctx, envName),
   );
   if ("value" in rules) {
     const enabled = [...enabledRulesBySlug(section, rules.value, envName).keys()];

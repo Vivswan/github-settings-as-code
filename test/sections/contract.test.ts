@@ -851,14 +851,14 @@ describe("planContext read port", () => {
     );
     const ctx = planContext(section, api, REPO) as unknown as {
       read: {
-        list: { call(): Promise<unknown> };
-        probe: { call(variables: Record<string, unknown>): Promise<unknown> };
+        list: { call(schema: z.ZodType): Promise<unknown> };
+        probe: { call(schema: z.ZodType, variables: Record<string, unknown>): Promise<unknown> };
       };
     };
     (endpoints.list as { route: string }).route = "DELETE /repos/{owner}/{repo}/labels";
     (graphql.probe as { kind: string }).kind = "write";
-    await ctx.read.list.call();
-    await ctx.read.probe.call({ owner: "o", repo: "r" });
+    await ctx.read.list.call(z.unknown());
+    await ctx.read.probe.call(z.unknown(), { owner: "o", repo: "r" });
     expect(api.calls.map((c) => `${c.method} ${c.path} ${c.graphqlKind ?? ""}`.trim())).toEqual([
       "GET /repos/o/r/labels",
       "GRAPHQL PortProbe read",
@@ -902,12 +902,12 @@ describe("planContext read port", () => {
     ctx.read.probe.listAll;
     // @ts-expect-error nor an enveloped list
     ctx.read.probe.listAllEnveloped;
-    expect(await ctx.read.probe.tryCall({ params: { branch: "main" } })).toEqual({
+    expect(await ctx.read.probe.tryCall(z.unknown(), { params: { branch: "main" } })).toEqual({
       error: { status: 500, message: "Internal Server Error", body: "" },
     });
     // The control: the same status on a plain read classifies through throwFor.
     expect(typeof ctx.read.plain.call).toBe("function");
-    await expect(ctx.read.plain.tryCall()).rejects.toThrow(
+    await expect(ctx.read.plain.tryCall(z.unknown())).rejects.toThrow(
       new Error(
         "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
       ),
@@ -974,18 +974,20 @@ describe("planContext read port", () => {
       },
     };
     // A plan() body holds no token, so it cannot spell the call; the ungated read beside them is the control.
-    // @ts-expect-error a request options object is not the token
-    const forgedRest: Parameters<typeof ctx.read.app.call>[0] = { params: { app_slug: "x" } };
-    // @ts-expect-error the variables are not the token either
-    const forgedGraphql: Parameters<typeof ctx.read.repo.call>[0] = { owner: "o", repo: "r" };
+    // @ts-expect-error a schema is not the token
+    const forgedRest: Parameters<typeof ctx.read.app.call>[0] = z.unknown();
+    // @ts-expect-error nor is one for a GraphQL read
+    const forgedGraphql: Parameters<typeof ctx.read.repo.call>[0] = z.unknown();
     expect([forgedRest, forgedGraphql].length).toBe(2);
-    expect(await ctx.read.app.call(exec, { params: { app_slug: "deploy-gate" } })).toEqual({
+    expect(
+      await ctx.read.app.call(exec, z.unknown(), { params: { app_slug: "deploy-gate" } }),
+    ).toEqual({
       node_id: "A_1",
     });
-    expect(await ctx.read.repo.call(exec, { owner: "o", repo: "r" })).toEqual({
+    expect(await ctx.read.repo.call(exec, z.unknown(), { owner: "o", repo: "r" })).toEqual({
       repository: { id: "R_1" },
     });
-    expect(await ctx.read.plain.call()).toEqual([]);
+    expect(await ctx.read.plain.call(z.unknown())).toEqual([]);
     expect(api.calls.map((c) => c.path)).toEqual([
       "/apps/deploy-gate",
       "GateProbe",
@@ -1283,11 +1285,11 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       readCtx.api,
       readCtx.repo,
     );
-    void (() => port.read.setup.call({ describe: widened.describe }));
+    void (() => port.read.setup.call(z.unknown(), { describe: widened.describe }));
     // @ts-expect-error the port admits no payload either
-    void (() => port.read.setup.call(widened));
+    void (() => port.read.setup.call(z.unknown(), widened));
     // @ts-expect-error the port admits no payload either
-    void (() => port.read.setup.tryCall(widened));
+    void (() => port.read.setup.tryCall(z.unknown(), widened));
     expect(widened.payload).toEqual({ token: "hunter2" });
   });
 });

@@ -6,6 +6,7 @@
 
 import { describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import {
   type RenderableSnapshot,
@@ -159,21 +160,19 @@ describe("snapshotRepository", () => {
       _undeclared: "keep",
       entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ACTIONS_DEPLOY_TOKEN" }],
     });
-    // Every registered section has exactly one outcome, unsupported ones with their reason.
+    // Every registered section has exactly one outcome; the one write-only section is unsupported with its reason.
     expect(result.outcomes.map((o) => o.key)).toEqual(SECTIONS.map((s) => s.key));
     expect(UNSUPPORTED).toEqual(["check_suite_preferences"]);
     expect(
       result.outcomes.filter((o) => o.status === "unsupported").map((o) => [o.key, o.detail]),
-    ).toEqual(
-      UNSUPPORTED.map((key) => [
-        key,
+    ).toEqual([
+      [
+        "check_suite_preferences",
         [
-          key === "check_suite_preferences"
-            ? "check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run"
-            : `${key}: snapshot is not implemented for this section yet`,
+          "check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
         ],
-      ]),
-    );
+      ],
+    ]);
     expect(result.outcomes.find((o) => o.key === "actions_secrets")).toEqual({
       key: "actions_secrets",
       status: "snapshot",
@@ -228,7 +227,7 @@ describe("snapshotRepository", () => {
     );
     expect(present.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [] }]);
     const empty = spyOn(pagesSection, "snapshot").mockImplementation(async (ctx) => {
-      await ctx.read.get.probeAbsent();
+      await ctx.read.get.probeAbsent(z.unknown());
       return { value: undefined, notes: [] };
     });
     try {
@@ -422,9 +421,9 @@ describe("snapshotRepository shape guard", () => {
       ["code_scanning_default_setup", "failed"],
     ]);
     expect(result.outcomes[1]?.detail).toEqual([
-      expect.stringMatching(
-        /^BUG: code_scanning_default_setup produced a snapshot its own schema rejects - .*code_scanning_default_setup: Invalid input: expected object, received null/,
-      ),
+      "code_scanning_default_setup: GET /repos/{owner}/{repo}/code-scanning/default-setup returned a body " +
+        "outside the documented shape - (body): Invalid input: expected object, received null. " +
+        'Check the "api-version" input against the GitHub REST docs for this endpoint',
     ]);
   });
 });

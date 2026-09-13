@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   missingDrift,
   type SectionMeta,
@@ -15,7 +15,8 @@ import {
 } from "../contract/module.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
+import type { EnvironmentRestOp, EnvironmentsRestContext } from "./endpoints.js";
+import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentBranchPolicyConfig } from "./schema.js";
 
@@ -99,18 +100,12 @@ function createPolicyOp(
  */
 export async function listBranchPolicies(
   ctx: EnvironmentsRestContext,
-  section: SectionMeta,
   envName: string,
 ): Promise<LiveBranchPolicy[]> {
-  return parseLive(
-    section,
-    ENDPOINTS.listPolicies,
-    z.array(LiveBranchPolicy),
-    await ctx.read.listPolicies.listAllEnveloped("branch_policies", {
-      params: { environment_name: envName },
-    }),
-    `environment "${envName}"`,
-  );
+  return ctx.read.listPolicies.listAllEnveloped("branch_policies", LiveBranchPolicy, {
+    params: { environment_name: envName },
+    describe: `environment "${envName}"`,
+  });
 }
 
 /** With custom_branch_policies off the pattern list 404s, so patterns already behind the flag reconcile on the next run. */
@@ -120,7 +115,7 @@ export async function planBranchPolicies(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly DeploymentBranchPolicyConfig[],
-  liveEnv: Record<string, unknown> | undefined,
+  liveEnv: LiveEnvironmentBody | undefined,
 ): Promise<NestedPlan> {
   // Two entries for one pattern could fight over its type on every run. The flag pairing is checked
   // in the zod shape (schema.ts), not here, so it fails before any section writes.
@@ -133,11 +128,8 @@ export async function planBranchPolicies(
   );
   const params = { environment_name: envName };
   const planned: NestedPlan = { ops: [], notes: [] };
-  const flags = liveEnv?.deployment_branch_policy as
-    | { custom_branch_policies?: unknown }
-    | null
-    | undefined;
-  const hidden = liveEnv !== undefined && flags?.custom_branch_policies !== true;
+  const hidden =
+    liveEnv !== undefined && liveEnv.deployment_branch_policy?.custom_branch_policies !== true;
   let live: LiveBranchPolicy[] = [];
   if (hidden) {
     // With no list read, preflight never probes listPolicies for this environment, so an
@@ -146,7 +138,7 @@ export async function planBranchPolicies(
       `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run`,
     );
   } else if (liveEnv !== undefined) {
-    live = await listBranchPolicies(ctx, section, envName);
+    live = await listBranchPolicies(ctx, envName);
   }
   const liveByName = policiesByName(section, live, envName);
   const declared = new Set(entries.map((pattern) => pattern.name));

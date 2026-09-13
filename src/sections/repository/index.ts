@@ -4,7 +4,6 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
-import { parseLive } from "../contract/live.js";
 import {
   cannotVerifyNote,
   loosen,
@@ -466,22 +465,41 @@ interface LiveRoutedState {
   values: Record<string, unknown>;
 }
 
+/**
+ * The features read: the Repository object with the routed fields at their wire types (the vocabulary
+ * itself is decoded by each routed key), or null when the token cannot see the repository.
+ */
+const LiveFeatures = z.looseObject({
+  repository: z
+    .looseObject({
+      id: z.string(),
+      hasSponsorshipsEnabled: z.boolean(),
+      issueCreationPolicy: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
+});
+
 /** The Repository object of a features read, with the node id the mutation addresses. */
-function repositoryNode(data: Record<string, unknown>): Record<string, unknown> & { id: string } {
-  const repository = (data as { repository?: Record<string, unknown> }).repository;
-  if (!repository || typeof repository.id !== "string") {
+function repositoryNode(
+  data: z.infer<typeof LiveFeatures>,
+): Record<string, unknown> & { id: string } {
+  const repository = data.repository;
+  if (repository === null || repository === undefined) {
     throw new Error(
       `repository: GRAPHQL ${FEATURES_QUERY.name} returned no repository object with an id, so the ${GRAPHQL_ROUTED_KEYS.map((entry) => entry.key).join("/")} state cannot be read. Check the token's repository access`,
     );
   }
-  return repository as Record<string, unknown> & { id: string };
+  return repository;
 }
 
 async function fetchRoutedState(
   ctx: RepositoryContext,
   routed: readonly RoutedKey[],
 ): Promise<LiveRoutedState> {
-  const repository = repositoryNode(await ctx.read.featuresQuery.call(repoVariables(ctx)));
+  const repository = repositoryNode(
+    await ctx.read.featuresQuery.call(LiveFeatures, repoVariables(ctx)),
+  );
   return { id: repository.id, values: decodeRoutedFields(repository, routed, FEATURES_QUERY.name) };
 }
 
@@ -528,7 +546,7 @@ export const repositorySection = {
       }
     }
 
-    const live = parseLive(this, ENDPOINTS.get, LiveRepository, await ctx.read.get.call());
+    const live = await ctx.read.get.call(LiveRepository);
     if (Object.keys(patch).length > 0) {
       // The PATCH is diff-gated and the fields pass through, so a declared key GitHub ignores would
       // re-PATCH on every apply without converging.
@@ -567,11 +585,8 @@ export const repositorySection = {
         continue;
       }
       const want = desired[toggle.key] === true;
-      const probe = await ctx.read[toggle.get].probeAbsent();
-      const live =
-        "missing" in probe
-          ? undefined
-          : parseLive(this, ENDPOINTS[toggle.get], toggle.live, probe.data);
+      const probe = await ctx.read[toggle.get].probeAbsent(toggle.live);
+      const live = "missing" in probe ? undefined : probe.data;
       const enabled = live === undefined ? false : toggle.isEnabled(live);
       if (enabled === want) {
         continue;
@@ -670,7 +685,7 @@ export const repositorySection = {
   // A null PATCH field is GitHub's "unset", so it is left out rather than declared as null.
   async snapshot(ctx) {
     const notes: string[] = [];
-    const live = parseLive(this, ENDPOINTS.get, LiveRepository, await ctx.read.get.call());
+    const live = await ctx.read.get.call(LiveRepository);
     const value: Record<string, unknown> = {};
     for (const field of SNAPSHOT_PATCH_FIELDS) {
       const read =
@@ -689,13 +704,12 @@ export const repositorySection = {
     }> = [];
     for (const toggle of READABLE_TOGGLES) {
       const read = await readOrNote(ctx, notes, `repository.${toggle.key}`, async () => {
-        const answer = await ctx.read[toggle.get].tryCall();
+        const answer = await ctx.read[toggle.get].tryCall(toggle.live);
         if ("error" in answer) {
           // The declared 422 ("not applicable") is answered only to a granted token.
           return { live: undefined, concealable: answer.error.status === 404 };
         }
-        const live = parseLive(this, ENDPOINTS[toggle.get], toggle.live, answer.data);
-        return { live, concealable: false };
+        return { live: answer.data, concealable: false };
       });
       if (!("denied" in read)) {
         probes.push({ toggle, ...read.value });
@@ -730,7 +744,7 @@ export const repositorySection = {
       ctx,
       notes,
       GRAPHQL_ROUTED_KEYS.map((entry) => `repository.${entry.key}`).join(" and "),
-      () => ctx.read.featuresQuery.call(repoVariables(ctx)),
+      () => ctx.read.featuresQuery.call(LiveFeatures, repoVariables(ctx)),
     );
     if (!("denied" in routed)) {
       const repository = repositoryNode(routed.value);

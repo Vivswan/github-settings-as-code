@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
@@ -81,12 +81,7 @@ export const workflowsSection = {
     );
     const present = workflowsByPath(
       this,
-      parseLive(
-        this,
-        ENDPOINTS.list,
-        z.array(LiveWorkflow),
-        await ctx.read.list.listAllEnveloped("workflows"),
-      ),
+      await ctx.read.list.listAllEnveloped("workflows", LiveWorkflow),
     );
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
@@ -129,12 +124,7 @@ export const workflowsSection = {
     const present = [
       ...workflowsByPath(
         this,
-        parseLive(
-          this,
-          ENDPOINTS.list,
-          z.array(LiveWorkflow),
-          await ctx.read.list.listAllEnveloped("workflows"),
-        ),
+        await ctx.read.list.listAllEnveloped("workflows", LiveWorkflow),
       ).values(),
     ];
     if (present.length === 0) {

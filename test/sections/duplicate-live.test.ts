@@ -12,7 +12,7 @@ import type { SectionModule } from "../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import type { LiveState } from "../e2e/mock/state.js";
+import { completeRule, type LiveState, ruleWireNode } from "../e2e/mock/state.js";
 import { type FragmentFake, registryFake } from "./fragment-fake.js";
 import { REPO } from "./section-run.js";
 import { STAMPS } from "./snapshot-rows/families.js";
@@ -68,6 +68,11 @@ const ENV_WITH_POLICIES = {
   protection_rules: [],
   deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
 };
+
+/** A GraphQL rule node as the selection returns it, over the mock's fresh-rule defaults (every twin off), so only the id and pattern matter. */
+function ruleNode(id: string, pattern: string): Record<string, unknown> {
+  return ruleWireNode(completeRule({ id, pattern }));
+}
 
 function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Seed[] {
   return [
@@ -266,10 +271,7 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
         data: {
           repository: {
             branchProtectionRules: {
-              nodes: [
-                { id: "BPR_1", pattern: "release/*" },
-                { id: "BPR_2", pattern: "release/*" },
-              ],
+              nodes: [ruleNode("BPR_1", "release/*"), ruleNode("BPR_2", "release/*")],
               pageInfo: { hasNextPage: false, endCursor: null },
             },
           },

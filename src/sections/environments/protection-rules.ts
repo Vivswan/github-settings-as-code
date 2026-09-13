@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   missingDrift,
   type SectionMeta,
@@ -8,7 +8,7 @@ import {
   undeclaredNote,
 } from "../contract/module.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
+import type { EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig } from "./schema.js";
 
@@ -51,22 +51,20 @@ function liveRuleId(rule: LiveProtectionRule, envName: string): string {
 /**
  * A single call(), NOT listAllEnveloped: this endpoint documents no page/per_page parameters, so
  * the page loop would append a query GitHub never specified. Both envelope keys are optional in the
- * spec, so an ABSENT list reads as empty, while a PRESENT off-shape value fails loudly in parseLive.
+ * spec, so an ABSENT list reads as empty, while a PRESENT off-shape value fails loudly at the port.
  */
+const LiveProtectionRules = z
+  .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
+  .nullable();
+
 export async function listProtectionRules(
   ctx: EnvironmentsRestContext,
-  section: SectionMeta,
   envName: string,
 ): Promise<LiveProtectionRule[]> {
-  const data = parseLive(
-    section,
-    ENDPOINTS.listProtectionRules,
-    z
-      .looseObject({ custom_deployment_protection_rules: z.array(LiveProtectionRule).optional() })
-      .nullable(),
-    await ctx.read.listProtectionRules.call({ params: { environment_name: envName } }),
-    `environment "${envName}"`,
-  );
+  const data = await ctx.read.listProtectionRules.call(LiveProtectionRules, {
+    params: { environment_name: envName },
+    describe: `environment "${envName}"`,
+  });
   return data?.custom_deployment_protection_rules ?? [];
 }
 
@@ -94,23 +92,18 @@ type LiveProtectionRuleApp = z.infer<typeof LiveProtectionRuleApp>;
 
 /**
  * The Apps available to an environment, by slug, under the duplicate-live guard. An App without a
- * slug or id could neither be offered in the unknown-slug error nor resolve a declared rule, so
- * parseLive rejects the whole listing.
+ * slug or id could neither be offered in the unknown-slug error nor resolve a declared rule, so the
+ * port rejects the whole listing.
  */
 async function listProtectionRuleApps(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
   envName: string,
 ): Promise<ReadonlyMap<string, LiveProtectionRuleApp>> {
-  const apps = parseLive(
-    section,
-    ENDPOINTS.listProtectionRuleApps,
-    z.array(LiveProtectionRuleApp),
-    await ctx.read.listProtectionRuleApps.listAllEnveloped(
-      "available_custom_deployment_protection_rule_integrations",
-      { params: { environment_name: envName } },
-    ),
-    `environment "${envName}"`,
+  const apps = await ctx.read.listProtectionRuleApps.listAllEnveloped(
+    "available_custom_deployment_protection_rule_integrations",
+    LiveProtectionRuleApp,
+    { params: { environment_name: envName }, describe: `environment "${envName}"` },
   );
   return liveByIdentity(
     section,
@@ -157,7 +150,7 @@ export async function planProtectionRules(
     `deployment protection rule App of the "${envName}" environment`,
   );
   const params = { environment_name: envName };
-  const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, section, envName);
+  const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, envName);
   const liveBySlug = enabledRulesBySlug(section, live, envName);
   const declared = new Set(entries.map((rule) => rule.app));
   const planned: NestedPlan = { ops: [], notes: [] };

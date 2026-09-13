@@ -7,10 +7,11 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  ORG_PROBE,
   type SectionMeta,
   type SectionModule,
   undeclaredDrift,
@@ -21,7 +22,6 @@ import {
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { ORG_PROBE, personalAccountNote } from "../shared/org-owner.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
@@ -132,8 +132,8 @@ export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
   permission,
-  // Custom properties exist only under an organization owner; the org probe in plan() implements
-  // the personal-account no-op this declares.
+  // Custom properties exist only under an organization owner; the registry's owner gate (contract/owner.ts)
+  // probes the `org` role and no-ops with a note on a personal account.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CustomPropertyConfig)),
@@ -158,18 +158,8 @@ export const customPropertiesSection = {
       rejectMalformedList(property);
     }
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    const personal = personalAccountNote(
-      this,
-      ctx.repo.owner,
-      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
-      "plan",
-    );
-    if (personal !== undefined) {
-      plan.notes.push(personal);
-      return plan;
-    }
     // Not paginated upstream: one GET carries every value.
-    const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
+    const live = await ctx.read.list.call(z.array(LiveProperty));
     const liveByName = propertiesByName(this, live);
     const declaredNames = new Set(desired.map((p) => p.property_name));
 
@@ -243,16 +233,7 @@ export const customPropertiesSection = {
   // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
   // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
-    const personal = personalAccountNote(
-      this,
-      ctx.repo.owner,
-      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
-      "snapshot",
-    );
-    if (personal !== undefined) {
-      return { value: undefined, notes: [personal] };
-    }
-    const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
+    const live = await ctx.read.list.call(z.array(LiveProperty));
     propertiesByName(this, live);
     const set = live.flatMap((property) => {
       if (property.value === null) {

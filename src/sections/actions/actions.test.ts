@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import {
@@ -60,7 +61,8 @@ function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: st
           : { data: body };
       }
       this.writes.push(`${method} ${path}`);
-      stored.set(path, payload);
+      // GitHub keeps the fields a partial PUT leaves out, so the stored body merges rather than replaces.
+      stored.set(path, { ...(stored.get(path) as object), ...(payload as object) });
       return { data: null };
     },
     async tryGraphql() {
@@ -78,7 +80,9 @@ describe("actions", () => {
     const api = new MockApi({
       [PERMISSIONS]: { data: { enabled: true, allowed_actions: "all" } },
       [SELECTED]: { error: { status: 409, message: "Conflict", body: "" } },
-      [WORKFLOW]: { data: { default_workflow_permissions: "write" } },
+      [WORKFLOW]: {
+        data: { default_workflow_permissions: "write", can_approve_pull_request_reviews: false },
+      },
       [ACCESS]: { data: { access_level: "none" } },
     });
     const result = await plan(api, {
@@ -150,7 +154,9 @@ describe("actions", () => {
   });
 
   test("any base-permissions key implies enabled: true in the PUT body", async () => {
-    const api = new MockApi({ [PERMISSIONS]: { data: {} } });
+    const api = new MockApi({
+      [PERMISSIONS]: { data: { enabled: false, allowed_actions: "none" } },
+    });
     const result = await plan(api, { allowed_actions: "all" });
     expect(result.ops[0]?.payload).toEqual({ allowed_actions: "all", enabled: true });
     const added = await plan(api, { some_added_key: "x" } as ActionsConfig);
@@ -247,6 +253,19 @@ describe("actions", () => {
     const result = await plan(api, { cache: { max_cache_size_gb: 25 } });
     expect(result.ops.map((op) => op.role)).toEqual(["putCacheStorage"]);
     expect(roles(api)).toEqual([CACHE_STORAGE]);
+  });
+
+  test("an unset limit answers {} (the spec marks the field optional): the declared value is drift, not a read failure", async () => {
+    const api = new MockApi({ [CACHE_RETENTION]: { data: {} } });
+    const result = await plan(api, { cache: { max_cache_retention_days: 3 } });
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "putCacheRetention",
+        [
+          "actions.cache.max_cache_retention_days: declared 3 but the API response has no such field (new or write-only field?)",
+        ],
+      ],
+    ]);
   });
 
   test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
@@ -482,7 +501,10 @@ describe("actions", () => {
   test("executing the plan converges: every routed PUT lands once, then nothing", async () => {
     const api = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
-      [`${BASE}/workflow`]: { default_workflow_permissions: "write" },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "write",
+        can_approve_pull_request_reviews: false,
+      },
       [`${BASE}/access`]: { access_level: "none" },
       [`${BASE}/artifact-and-log-retention`]: { days: 90 },
       "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 10 },
@@ -545,33 +567,36 @@ describe("actions", () => {
 
   test("a routed key's endpoint pair must share a name, and a scalar key must say how it becomes a body", () => {
     // Compile-time only: a GET paired with another key's PUT, or an enum-valued key PUT bare, never reaches the routing table.
-    const paired: ReturnType<typeof endpointRouted<"access_level", "Access">> = endpointRouted<
-      "access_level",
-      "Access"
-    >({
-      get: "getAccess",
-      put: "putAccess",
-      label: "actions.access",
-      applied: "applied",
-      body: (value) => ({ access_level: value }),
-      read: () => "none",
-    });
+    const live = z.looseObject({ access_level: z.string() });
+    type Live = z.infer<typeof live>;
+    const paired: ReturnType<typeof endpointRouted<"access_level", "Access", Live>> =
+      endpointRouted<"access_level", "Access", Live>({
+        get: "getAccess",
+        put: "putAccess",
+        label: "actions.access",
+        applied: "applied",
+        body: (value) => ({ access_level: value }),
+        live,
+        read: () => "none",
+      });
     expect(typeof paired.plan).toBe("function");
-    endpointRouted<"access_level", "Access">({
+    endpointRouted<"access_level", "Access", Live>({
       get: "getAccess",
       // @ts-expect-error the PUT must carry the GET's name
       put: "putRetention",
       label: "actions.access",
       applied: "applied",
       body: (value) => ({ access_level: value }),
+      live,
       read: () => "none",
     });
     // @ts-expect-error an enum-valued key cannot be PUT bare: body is required
-    endpointRouted<"access_level", "Access">({
+    endpointRouted<"access_level", "Access", Live>({
       get: "getAccess",
       put: "putAccess",
       label: "actions.access",
       applied: "applied",
+      live,
       read: () => "none",
     });
   });
@@ -654,6 +679,31 @@ describe("actions snapshot", () => {
     expect(api.writes).toEqual([]);
   });
 
+  test("an unset cache limit answering {} is left out of the cache key; the other limit still reads back", async () => {
+    const api = liveActions({
+      [BASE]: { enabled: true, allowed_actions: "all" },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+      },
+      [`${BASE}/access`]: { access_level: "none" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 90, maximum_allowed_days: 400 },
+      "/repos/o/r/actions/cache/retention-limit": {},
+      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 20 },
+      "/repos/o/r/actions/oidc/customization/sub": { use_default: true },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+      [`${BASE}/fork-pr-workflows-private-repos`]: {
+        run_workflows_from_fork_pull_requests: false,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    const read = await snapshot(api);
+    expect(read.notes).toEqual([]);
+    expect(read.value?.cache).toEqual({ max_cache_size_gb: 20 });
+  });
+
   test("under warn, a denied sub-read is a note naming its key with the read's own grant; the allowlist is skipped off the selected policy", async () => {
     const live = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
@@ -701,7 +751,10 @@ describe("actions snapshot", () => {
   test("under warn, a denied cache limit is noted by its own key while the readable sibling limit survives", async () => {
     const api = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
-      [`${BASE}/workflow`]: { default_workflow_permissions: "read" },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+      },
       [`${BASE}/access`]: { access_level: "none" },
       [`${BASE}/artifact-and-log-retention`]: { days: 90 },
       "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
@@ -737,7 +790,10 @@ describe("actions snapshot", () => {
     // Every key but the OIDC template reads back, so the one denial is the sub-read's alone.
     const api = liveActions({
       [BASE]: { enabled: true, allowed_actions: "all" },
-      [`${BASE}/workflow`]: { default_workflow_permissions: "read" },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+      },
       [`${BASE}/access`]: { access_level: "none" },
       [`${BASE}/artifact-and-log-retention`]: { days: 90 },
       "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },

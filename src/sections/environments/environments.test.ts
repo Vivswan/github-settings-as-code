@@ -1628,14 +1628,14 @@ describe("environments snapshot", () => {
       ],
       notes: [
         "environments[production].deployment_branch_policies: left out of the snapshot - the token was denied " +
-          "GET /repos/o/r/environments/production/deployment-branch-policies: 403 Resource not accessible by " +
-          'personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a ' +
-          "404 here can also mean the environment does not exist, or that its deployment_branch_policy does not " +
-          "set custom_branch_policies: true",
+          'GET /repos/o/r/environments/production/deployment-branch-policies (environment "production"): 403 ' +
+          'Resource not accessible by personal access token. To fix, grant "Actions" (read) under the PAT\'s ' +
+          "Repository permissions. Note: a 404 here can also mean the environment does not exist, or that its " +
+          "deployment_branch_policy does not set custom_branch_policies: true",
         "environments[production].deployment_protection_rules: left out of the snapshot - the token was denied " +
-          "GET /repos/o/r/environments/production/deployment_protection_rules: 403 Resource not accessible by " +
-          'personal access token. To fix, grant "Actions" (read) under the PAT\'s Repository permissions. Note: a ' +
-          "404 here can also mean the environment does not exist",
+          'GET /repos/o/r/environments/production/deployment_protection_rules (environment "production"): 403 ' +
+          'Resource not accessible by personal access token. To fix, grant "Actions" (read) under the PAT\'s ' +
+          "Repository permissions. Note: a 404 here can also mean the environment does not exist",
       ],
     });
     expect(inner.writes).toEqual([]);

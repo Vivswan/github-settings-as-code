@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
 import { loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
@@ -46,6 +45,12 @@ type PagesWirePayload = Omit<PagesSite, "source"> & { source?: PagesSourceWire }
  */
 type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
 
+/**
+ * The site body must be a mapping: PagesConfig accepts null (the declared "Pages off"), so a null 200
+ * would otherwise read back as a declaration that DISABLES the site.
+ */
+const LiveSite = z.looseObject({});
+
 export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
@@ -56,7 +61,7 @@ export const pagesSection = {
   shape: loosen(PagesConfig),
   async plan(ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    const probe = await ctx.read.get.probeAbsent();
+    const probe = await ctx.read.get.probeAbsent(LiveSite);
 
     if (desired === null) {
       if ("missing" in probe) {
@@ -131,13 +136,10 @@ export const pagesSection = {
   // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply); the
   // engine notes the 404's other reading (a token without the Pages grant).
   async snapshot(ctx) {
-    const probe = await ctx.read.get.probeAbsent();
+    const probe = await ctx.read.get.probeAbsent(LiveSite);
     if ("missing" in probe) {
       return { value: undefined, notes: [] };
     }
-    // A site body must be a mapping: PagesConfig accepts null (the declared "Pages off"), so a
-    // null 200 would otherwise read back as a declaration that DISABLES the site.
-    const site = parseLive(this, ENDPOINTS.get, z.looseObject({}), probe.data);
-    return { value: projectOntoSchema(PagesConfig, site), notes: [] };
+    return { value: projectOntoSchema(PagesConfig, probe.data), notes: [] };
   },
 } satisfies SectionModule<"pages", typeof ENDPOINTS>;

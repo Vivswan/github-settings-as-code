@@ -2,7 +2,6 @@ import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -145,23 +144,32 @@ type WriteRole = ActionsOp["role"];
 
 /**
  * Named once so a limit's GET and PUT cannot be paired across limits: both roles derive from N,
- * and both must be declared roles.
+ * and both must be declared roles. The GET body is the one numeric field the PUT takes back; the
+ * spec marks it optional (an unset limit answers `{}`), so an absent field is drift in plan and an
+ * omitted key in snapshot, never a read failure.
  */
 function cacheLimit<N extends string>(
   name: `getCache${N}` extends ReadRole ? (`putCache${N}` extends WriteRole ? N : never) : never,
+  field: CacheKey,
   label: string,
-): { get: `getCache${N}` & ReadRole; put: `putCache${N}` & WriteRole; label: string } {
+): {
+  get: `getCache${N}` & ReadRole;
+  put: `putCache${N}` & WriteRole;
+  live: z.ZodType<object>;
+  label: string;
+} {
   return {
     get: `getCache${name}` as `getCache${N}` & ReadRole,
     put: `putCache${name}` as `putCache${N}` & WriteRole,
+    live: z.looseObject({ [field]: z.number().optional() }),
     label,
   };
 }
 
 /** Each cache key is the whole body of its own single-field PUT. */
 const CACHE_ENDPOINT_BY_KEY = {
-  max_cache_retention_days: cacheLimit("Retention", "retention"),
-  max_cache_size_gb: cacheLimit("Storage", "storage"),
+  max_cache_retention_days: cacheLimit("Retention", "max_cache_retention_days", "retention"),
+  max_cache_size_gb: cacheLimit("Storage", "max_cache_size_gb", "storage"),
 } as const;
 
 /**
@@ -183,6 +191,21 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly string[])
 // GitHub may return include_claim_keys as null or omit it; the rest of the body rides into
 // subsetDiff as passthrough.
 const LiveOidcSub = z.looseObject({ include_claim_keys: z.array(z.string()).nullish() });
+
+/** The base permissions GET: the policy flag and the allowlist selector the file declares. */
+const LivePermissions = z.looseObject({
+  enabled: z.boolean(),
+  allowed_actions: z.string().optional(),
+});
+
+/** The workflow token GET; both fields are what the file declares. */
+const LiveWorkflowPermissions = z.looseObject({
+  default_workflow_permissions: z.string(),
+  can_approve_pull_request_reviews: z.boolean(),
+});
+
+/** The selected-actions allowlist: a mapping the file's own passthrough record compares against. */
+const LiveSelectedActions = z.looseObject({});
 
 /** The base-permissions keys as the primary read reports them; the allowlist read hangs off the policy. */
 type BasePermissions = Pick<ActionsConfig, "enabled" | "allowed_actions">;
@@ -212,7 +235,11 @@ interface RoutedDestination<K extends keyof ActionsConfig> {
 }
 
 /** `N` is inferred from the GET alone, so a PUT of another name does not compile. */
-export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
+export function endpointRouted<
+  K extends keyof ActionsConfig,
+  N extends string,
+  Live extends object,
+>(
   wiring: {
     get: `get${N}` & ReadRole;
     put: NoInfer<`put${N}`> & WriteRole;
@@ -221,8 +248,10 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
     /** The change line apply reports after the PUT lands. */
     applied: string;
     describe?: string;
+    /** The GET body, every field `read` consumes declared, so an off-shape answer fails the read. */
+    live: z.ZodType<Live>;
     /** The GET body as the settings file declares the key (the inverse of `body`). */
-    read: (live: unknown) => ActionsConfig[K];
+    read: (live: Live) => ActionsConfig[K];
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
     ? { body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }
     : { body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }),
@@ -232,7 +261,7 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
     ((declared: NonNullable<ActionsConfig[K]>) => declared as Record<string, unknown>);
   return {
     plan: async (ctx, _section, declared, plan) => {
-      const live = await ctx.read[wiring.get].call();
+      const live = await ctx.read[wiring.get].call(wiring.live);
       const payload = body(declared);
       const drift = subsetDiff(payload, live, wiring.label);
       if (hasDrift(drift)) {
@@ -245,7 +274,7 @@ export function endpointRouted<K extends keyof ActionsConfig, N extends string>(
         });
       }
     },
-    snapshot: async (ctx) => wiring.read(await ctx.read[wiring.get].call()),
+    snapshot: async (ctx) => wiring.read(await ctx.read[wiring.get].call(wiring.live)),
   };
 }
 
@@ -264,7 +293,7 @@ const KEY_DESTINATION = {
     plan: async (ctx, _section, declared, plan) => {
       // A 409 (policy not "selected") or 404 (no allowlist) is drift, not a failure; both are
       // declared statuses. The line promises only the allowlist: the policy is the base operation's own drift.
-      const probe = await ctx.read.getSelected.probeAbsent();
+      const probe = await ctx.read.getSelected.probeAbsent(LiveSelectedActions);
       const drift =
         "missing" in probe
           ? [
@@ -286,7 +315,7 @@ const KEY_DESTINATION = {
       if (base.allowed_actions !== "selected") {
         return undefined;
       }
-      const probe = await ctx.read.getSelected.probeAbsent();
+      const probe = await ctx.read.getSelected.probeAbsent(LiveSelectedActions);
       return "missing" in probe ? undefined : sliceOf("selected_actions")(probe.data);
     },
   },
@@ -298,7 +327,8 @@ const KEY_DESTINATION = {
     label: "actions.access",
     applied: "applied workflows access level",
     body: (value) => ({ access_level: value }),
-    read: (live) => sliceOf("access_level")((live as { access_level?: unknown }).access_level),
+    live: z.looseObject({ access_level: z.string() }),
+    read: (live) => sliceOf("access_level")(live.access_level),
   }),
   artifact_and_log_retention: endpointRouted({
     get: "getRetention",
@@ -306,6 +336,7 @@ const KEY_DESTINATION = {
     label: "actions.artifact_and_log_retention",
     applied: "applied artifact and log retention",
     describe: "setting the artifact and log retention window",
+    live: z.looseObject({ days: z.number() }),
     read: sliceOf("artifact_and_log_retention"),
   }),
   cache: {
@@ -315,7 +346,7 @@ const KEY_DESTINATION = {
         if (!(key in cache)) {
           continue;
         }
-        const live = await ctx.read[wiring.get].call();
+        const live = await ctx.read[wiring.get].call(wiring.live);
         const body = { [key]: cache[key] };
         const drift = subsetDiff(body, live, "actions.cache");
         if (hasDrift(drift)) {
@@ -335,7 +366,7 @@ const KEY_DESTINATION = {
       const limits: Record<string, unknown> = {};
       for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
         const read = await readOrNote(ctx, notes, `actions.cache.${key}`, () =>
-          ctx.read[wiring.get].call(),
+          ctx.read[wiring.get].call(wiring.live),
         );
         if (!("denied" in read)) {
           Object.assign(limits, read.value);
@@ -345,13 +376,8 @@ const KEY_DESTINATION = {
     },
   },
   oidc_customization_sub: {
-    plan: async (ctx, section, declared, plan) => {
-      const live = parseLive(
-        section,
-        ENDPOINTS.getOidcSub,
-        LiveOidcSub,
-        await ctx.read.getOidcSub.call(),
-      );
+    plan: async (ctx, _section, declared, plan) => {
+      const live = await ctx.read.getOidcSub.call(LiveOidcSub);
       const { include_claim_keys, ...comparable } = declared;
       const drift = subsetDiff(comparable, live, "actions.oidc_customization_sub");
       // GitHub ignores include_claim_keys when use_default is true, and an OMITTED list on a custom
@@ -380,10 +406,8 @@ const KEY_DESTINATION = {
         });
       }
     },
-    snapshot: async (ctx, section) =>
-      sliceOf("oidc_customization_sub")(
-        parseLive(section, ENDPOINTS.getOidcSub, LiveOidcSub, await ctx.read.getOidcSub.call()),
-      ),
+    snapshot: async (ctx) =>
+      sliceOf("oidc_customization_sub")(await ctx.read.getOidcSub.call(LiveOidcSub)),
   },
   fork_pr_contributor_approval: endpointRouted({
     get: "getForkPrApproval",
@@ -391,6 +415,7 @@ const KEY_DESTINATION = {
     label: "actions.fork_pr_contributor_approval",
     applied: "applied the fork PR contributor approval policy",
     describe: "setting the fork PR contributor approval policy",
+    live: z.looseObject({ approval_policy: z.string() }),
     read: sliceOf("fork_pr_contributor_approval"),
   }),
   fork_pr_workflows_private_repos: endpointRouted({
@@ -399,6 +424,12 @@ const KEY_DESTINATION = {
     label: "actions.fork_pr_workflows_private_repos",
     applied: "applied the private-repo fork PR workflow settings",
     describe: "setting the private-repo fork PR workflow settings",
+    live: z.looseObject({
+      run_workflows_from_fork_pull_requests: z.boolean(),
+      send_write_tokens_to_workflows: z.boolean(),
+      send_secrets_and_variables: z.boolean(),
+      require_approval_for_fork_pr_workflows: z.boolean(),
+    }),
     read: sliceOf("fork_pr_workflows_private_repos"),
   }),
 } satisfies { [K in keyof ActionsConfig]-?: "base" | "workflow" | RoutedDestination<K> };
@@ -505,7 +536,7 @@ export const actionsSection = {
     if (Object.keys(permissions).length > 0) {
       const drift = subsetDiff(
         permissions,
-        await ctx.read.getPermissions.call(),
+        await ctx.read.getPermissions.call(LivePermissions),
         "actions.permissions",
       );
       if (hasDrift(drift)) {
@@ -518,7 +549,11 @@ export const actionsSection = {
       }
     }
     if (Object.keys(workflow).length > 0) {
-      const drift = subsetDiff(workflow, await ctx.read.getWorkflow.call(), "actions.workflow");
+      const drift = subsetDiff(
+        workflow,
+        await ctx.read.getWorkflow.call(LiveWorkflowPermissions),
+        "actions.workflow",
+      );
       if (hasDrift(drift)) {
         plan.ops.push({
           role: "putWorkflow",
@@ -539,10 +574,13 @@ export const actionsSection = {
   // policies; every other key goes through readOrNote, so its denial is a note under warn only.
   async snapshot(ctx) {
     const notes: string[] = [];
-    const base = projectOntoSchema(ActionsConfig, await ctx.read.getPermissions.call());
+    const base = projectOntoSchema(
+      ActionsConfig,
+      await ctx.read.getPermissions.call(LivePermissions),
+    );
     const value: Record<string, unknown> = { ...base };
     const workflow = await readOrNote(ctx, notes, `actions.${[...WORKFLOW_KEYS].join("/")}`, () =>
-      ctx.read.getWorkflow.call(),
+      ctx.read.getWorkflow.call(LiveWorkflowPermissions),
     );
     if (!("denied" in workflow)) {
       Object.assign(value, projectOntoSchema(ActionsConfig, workflow.value));

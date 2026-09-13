@@ -26,13 +26,9 @@ export interface SecretEntry {
   value: string;
 }
 
-/** One live secret's identity, parsed by the scope's list against LIVE_SECRET_NAMES. */
-interface LiveSecretName {
-  name: string;
-}
-
-/** The list-body schema every family's list closure parses with. */
-export const LIVE_SECRET_NAMES = z.array(z.looseObject({ name: z.string() }));
+/** One live secret's identity, the item schema every family's list reads with. */
+export const LiveSecretName = z.looseObject({ name: z.string() });
+export type LiveSecretName = z.infer<typeof LiveSecretName>;
 
 /** The sealed PUT body; an alias (not an interface) so it is JSON-plain to the plan contract. */
 export type SealedSecretPayload = {

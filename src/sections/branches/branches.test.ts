@@ -10,7 +10,12 @@ import {
 } from "../../../src/sections/contract/plan.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import type { MustBeNever } from "../../../src/types.js";
-import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
+import {
+  buildState,
+  completeRule,
+  type LiveState,
+  ruleWireNode,
+} from "../../../test/e2e/mock/state.js";
 import type { Json } from "../../../test/e2e/mock/support.js";
 import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
@@ -143,18 +148,15 @@ function rulesData(nodes: unknown[]): { data: Record<string, unknown> } {
   };
 }
 
-/** One live rule node with GitHub's fresh-rule defaults for selected fields. */
+/** One live rule node over the mock's fresh-rule defaults (every twin off), the selected fields and allowance nodes over them. */
 function ruleNode(
   pattern: string,
   fields: Record<string, unknown> = {},
   actors: unknown[] = [],
 ): Record<string, unknown> {
   return {
-    id: `RULE:${pattern}`,
-    pattern,
-    requiresDeployments: false,
-    requiredDeploymentEnvironments: [],
-    bypassForcePushAllowances: { nodes: actors },
+    ...ruleWireNode(completeRule({ id: `RULE:${pattern}`, pattern })),
+    bypassForcePushAllowances: { nodes: actors, pageInfo: { hasNextPage: false } },
     ...fields,
   };
 }

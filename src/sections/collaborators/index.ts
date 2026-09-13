@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -96,18 +96,10 @@ async function readLiveAccess(
   inviteByLogin: Map<string, NamedInvitation>;
   emailInvitations: LiveInvitation[];
 }> {
-  const collaborators = parseLive(
-    section,
-    ENDPOINTS.list,
-    z.array(LiveCollaborator),
-    await ctx.read.list.listAll({ query: { affiliation: "direct" } }),
-  );
-  const allInvitations = parseLive(
-    section,
-    ENDPOINTS.listInvitations,
-    z.array(LiveInvitation),
-    await ctx.read.listInvitations.listAll(),
-  );
+  const collaborators = await ctx.read.list.listAll(LiveCollaborator, {
+    query: { affiliation: "direct" },
+  });
+  const allInvitations = await ctx.read.listInvitations.listAll(LiveInvitation);
   const invitations = allInvitations.filter(isNamedInvitation);
   return {
     collaborators,

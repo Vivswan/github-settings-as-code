@@ -28,8 +28,10 @@ import {
   type EndpointDict,
   freezeDeclarations,
   type GraphqlDict,
+  type ORG_PROBE,
   type SectionModule,
 } from "./contract/module.js";
+import { gatedByOwner } from "./contract/owner.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
@@ -139,6 +141,23 @@ type MisdeclaredSnapshotModules = {
 type _SnapshotModulesAreExact = MustBeNever<MisdeclaredSnapshotModules>;
 
 /**
+ * A module flagged `ownerSensitivity: "org"` without the owner probe under its `org` role fails here by
+ * name: the owner gate (contract/owner.ts) reads that role, so the flag alone would promise a no-op the
+ * gate cannot perform.
+ */
+type OwnerGatesWithoutProbe = {
+  [K in SectionKey]: SectionModules[K] extends { readonly ownerSensitivity: "org" }
+    ? SectionModules[K]["endpoints"] extends {
+        readonly org: { readonly route: typeof ORG_PROBE.route };
+      }
+      ? never
+      : K
+    : never;
+}[SectionKey];
+
+type _OwnerGatesDeclareTheProbe = MustBeNever<OwnerGatesWithoutProbe>;
+
+/**
  * Derived from each module's literal ENDPOINTS, so every consumer (the mock handler tables, dispatch,
  * fault directives) tracks the declarations by construction.
  */
@@ -199,14 +218,18 @@ function hasSnapshot<K extends SectionKey>(
 
 /**
  * The one door out of src/sections: the engine, the library, and the roster below all reach a module
- * through it, so the foreign-context refusal is applied here once and not in 26 handlers, and so is the
- * freeze (freezeDeclarations): the wrapper shares its declaration objects with the source module, so those
- * are deep-frozen in place, while only the wrapper object is shallow-frozen (a test can still stub the
- * source's handlers). The freeze lives here rather than in a definition helper because the modules arrive
- * by several routes (literal objects, listSection, the secrets, variables, and setup factories).
+ * through it, so the owner gate (contract/owner.ts) and the foreign-context refusal are applied here once
+ * and not in 26 handlers, and so is the freeze (freezeDeclarations): the wrapper shares its declaration
+ * objects with the source module, so those are deep-frozen in place, while only the wrapper object is
+ * shallow-frozen (a test can still stub the source's handlers). The freeze lives here rather than in a
+ * definition helper because the modules arrive by several routes (literal objects, listSection, the
+ * secrets, variables, and setup factories).
  */
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
-  SECTION_KEYS.map((key) => [key, freezeDeclarations(refusingForeignContexts(byKeyErased[key]))]),
+  SECTION_KEYS.map((key) => [
+    key,
+    freezeDeclarations(refusingForeignContexts(gatedByOwner(byKeyErased[key]))),
+  ]),
 ) as { [K in SectionKey]: SectionModule<K> };
 
 export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => guarded[key]);
