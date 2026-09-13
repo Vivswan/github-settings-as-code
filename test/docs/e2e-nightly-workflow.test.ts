@@ -88,7 +88,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(variable, "the issue field is not filled from a $VARIABLE").not.toBe("");
     expect(dispatch?.env?.[variable]).toBe(`\${{ ${output} }}`);
     // Gated on a non-empty number, so the dispatch never expands to a bare `issue=`.
-    expect(dispatch?.if).toContain(`${output} != ''`);
+    expect(dispatch?.if).toBe(`failure() && ${output} != ''`);
   });
 
   test("every workflow it dispatches declares every input it passes", () => {

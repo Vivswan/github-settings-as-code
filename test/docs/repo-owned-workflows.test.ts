@@ -16,11 +16,11 @@ const SCRIPTS = (
     scripts: Record<string, string>;
   }
 ).scripts;
-/** A bun invocation the shell would run: the word `bun` at a command position. */
-const RUNS_BUN = /(?:^|[\s;&|(])bun(?=\s|$)/m;
-/** A step that runs code from the checkout: a run step invoking bun, or any local action (its action.yml is PR-editable). */
+/** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs what it finds there. */
+const RUNS_CHECKOUT = /(?:^|[\s;&|(])(?:bun|bunx|node|npm|npx|pnpm|yarn|deno|tsx)(?=\s|$)/m;
+/** A step that runs code from the checkout: a run step invoking a runtime, or any local action (its action.yml is PR-editable). */
 const runsCheckoutCode = (step: Step) =>
-  RUNS_BUN.test(step.run ?? "") || (step.uses ?? "").startsWith("./");
+  RUNS_CHECKOUT.test(step.run ?? "") || (step.uses ?? "").startsWith("./");
 
 describe("the commit-back push jobs", () => {
   test.each(["auto-fix.yml", "auto-format.yml"])(
