@@ -12,7 +12,7 @@ import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -32,11 +32,10 @@ import { knobbed } from "./schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 import {
   LiveVariable,
+  liveVariablesByKey,
   planVariables,
-  rejectDuplicateVariableNames,
   type VariableEntry,
   type VariablesPlanScope,
-  variableKey,
 } from "./variables-engine.js";
 
 export type RepoVariablesKey = "actions_variables" | "agents_variables";
@@ -186,7 +185,6 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-    rejectDuplicateVariableNames(section, entries);
     // Built where the routes are known, so params typecheck ({name} on update/remove).
     type Op = PlannedOp<WideEndpoints>;
     const scope: VariablesPlanScope<
@@ -239,14 +237,9 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
-    liveByIdentity(
-      section,
-      noun,
-      live,
-      (variable) => variableKey(variable.name),
-      (variable) => variable.name,
+    const entries = [...liveVariablesByKey(section, noun, live).values()].map((variable) =>
+      projectOntoSchema(VARIABLES_ENTRIES[key], variable),
     );
-    const entries = live.map((variable) => projectOntoSchema(VARIABLES_ENTRIES[key], variable));
     return { value: knobbedSnapshot(section, entries), notes: [] };
   };
 

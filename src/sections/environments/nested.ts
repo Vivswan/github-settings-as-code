@@ -2,29 +2,15 @@ import { z } from "zod";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { parseLive } from "../contract/live.js";
 import { type EntryOf, type SectionMeta, undeclaredPolicy } from "../contract/module.js";
-import {
-  LIVE_SECRET_NAMES,
-  planSecrets,
-  rejectDuplicateSecretNames,
-  type SecretsPlanScope,
-} from "../shared/secrets-engine.js";
+import { LIVE_SECRET_NAMES, planSecrets, type SecretsPlanScope } from "../shared/secrets-engine.js";
 import {
   LiveVariable,
   planVariables,
-  rejectDuplicateVariableNames,
   type VariablesPlanScope,
 } from "../shared/variables-engine.js";
-import {
-  BRANCH_POLICIES_DEFAULT_POLICY,
-  planBranchPolicies,
-  validateBranchPolicies,
-} from "./branch-policies.js";
+import { BRANCH_POLICIES_DEFAULT_POLICY, planBranchPolicies } from "./branch-policies.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
-import {
-  PROTECTION_RULES_DEFAULT_POLICY,
-  planProtectionRules,
-  validateProtectionRules,
-} from "./protection-rules.js";
+import { PROTECTION_RULES_DEFAULT_POLICY, planProtectionRules } from "./protection-rules.js";
 import type {
   EnvironmentConfig,
   EnvironmentRoutedScalars,
@@ -71,6 +57,7 @@ export interface NestedPlan {
 /**
  * Function-valued properties, not method shorthand: method parameters check bivariantly,
  * properties strictly, so a planner paired with the wrong key's entry type is a compile error.
+ * Each planner guards its own declared list against duplicates before its first read.
  */
 interface NestedPlanner<K extends NestedKey> {
   /**
@@ -83,12 +70,6 @@ interface NestedPlanner<K extends NestedKey> {
    * so every entry plans as a create against an empty environment.
    */
   missingNote: (envName: string) => string;
-  /** Rejects misdeclared entries for every environment before anything is read or written. */
-  validate?: (
-    section: SectionMeta,
-    env: EnvironmentConfig,
-    entries: readonly NestedEntry<K>[],
-  ) => void;
   plan: (
     ctx: EnvironmentsRestContext,
     section: SectionMeta,
@@ -103,11 +84,6 @@ interface NestedPlanner<K extends NestedKey> {
   ) => Promise<NestedPlan>;
 }
 
-/** The resource noun a nested duplicate is reported under: `variable of the "prod" environment`. */
-function nestedWhat(noun: string, env: EnvironmentConfig): string {
-  return `${noun} of the "${env.name}" environment`;
-}
-
 const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
   variables: {
     // "delete" like the top-level actions_variables default: variables are
@@ -115,8 +91,6 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     defaultPolicy: "delete",
     missingNote: (envName) =>
       `environments[${envName}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
-    validate: (section, env, entries) =>
-      rejectDuplicateVariableNames(section, entries, nestedWhat("variable", env)),
     plan: planEnvironmentVariables,
   },
   secrets: {
@@ -125,22 +99,18 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     defaultPolicy: "keep",
     missingNote: (envName) =>
       `environments[${envName}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
-    validate: (section, env, entries) =>
-      rejectDuplicateSecretNames(section, entries, nestedWhat("secret", env)),
     plan: planEnvironmentSecrets,
   },
   deployment_branch_policies: {
     defaultPolicy: BRANCH_POLICIES_DEFAULT_POLICY,
     missingNote: (envName) =>
       `environments[${envName}].deployment_branch_policies: not verifiable while the environment is missing; apply will create the environment and reconcile the declared patterns`,
-    validate: validateBranchPolicies,
     plan: planBranchPolicies,
   },
   deployment_protection_rules: {
     defaultPolicy: PROTECTION_RULES_DEFAULT_POLICY,
     missingNote: (envName) =>
       `environments[${envName}].deployment_protection_rules: not verifiable while the environment is missing; apply will create the environment and reconcile the declared protection rules`,
-    validate: validateProtectionRules,
     plan: planProtectionRules,
   },
 };
@@ -164,17 +134,6 @@ function unwrapNested<K extends NestedKey>(
 /** The undeclared-entry policy one nested key's list carries when the declaration spells none. */
 export function nestedDefaultPolicy(key: NestedKey): UndeclaredPolicy {
   return NESTED_PLANNERS[key].defaultPolicy;
-}
-
-export function validateNested<K extends NestedKey>(
-  section: SectionMeta,
-  key: K,
-  env: EnvironmentConfig,
-): void {
-  const declared = env[key];
-  if (declared !== undefined) {
-    NESTED_PLANNERS[key].validate?.(section, env, unwrapNested(key, declared).entries);
-  }
 }
 
 export async function planNested<K extends NestedKey>(
@@ -257,7 +216,7 @@ export async function listEnvironmentVariables(
 /**
  * The words the two engines render one environment's nested lists with. A variable's kept note names
  * the environment (two environments holding the same undeclared name would otherwise emit one note
- * twice); a secret's noun already carries it.
+ * twice); a secret's noun already carries it. `what` names a duplicate declared pair's resource.
  */
 function nestedProse(envName: string, key: "variables" | "secrets", noun: string) {
   return {
@@ -265,6 +224,7 @@ function nestedProse(envName: string, key: "variables" | "secrets", noun: string
     noun,
     where: key === "variables" ? `environment "${envName}"` : "the environment",
     suffix: ` in environment "${envName}"`,
+    what: `${key === "variables" ? "variable" : "secret"} of the "${envName}" environment`,
   };
 }
 

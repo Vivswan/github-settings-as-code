@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -61,10 +61,14 @@ type TeamsContext = PlanContext<typeof ENDPOINTS>;
 const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish();
 
 /**
- * A listed team: the slug the probe and the grant address, and how its access was granted
- * (present only in a repository listing; absent reads as direct).
+ * A listed team: the slug the probe and the grant address, its id (which tells two same-fold slugs
+ * apart), and how its access was granted (present only in a repository listing; absent reads as direct).
  */
-const LiveTeam = z.looseObject({ slug: z.string(), access_source: z.string().optional() });
+const LiveTeam = z.looseObject({
+  id: z.number().optional(),
+  slug: z.string(),
+  access_source: z.string().optional(),
+});
 type LiveTeam = z.infer<typeof LiveTeam>;
 
 /** Access granted above the repository (the organization, the enterprise), which no repository call revokes. */
@@ -94,6 +98,20 @@ async function probeTeamRole(
   }
   const live = parseLive(section, ENDPOINTS.probe, LiveTeamRepo, probe.data, `team "${slug}"`);
   return { access: true, role: live?.role_name };
+}
+
+/**
+ * The listed teams by slug under the duplicate-live guard (slugs fold case-insensitively, as the
+ * declared entries do); plan() and snapshot() both index through it.
+ */
+function teamsBySlug(section: SectionMeta, live: readonly LiveTeam[]): Map<string, LiveTeam> {
+  return liveByIdentity(
+    section,
+    "team",
+    live,
+    (team) => team.slug.toLowerCase(),
+    (team) => liveIdentity(team.slug, { team_id: team.id }),
+  );
 }
 
 export const teamsSection = {
@@ -132,7 +150,10 @@ export const teamsSection = {
     }
     // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
     // below start from; a declared team's role still comes from the probe, which names a custom role.
-    const live = parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll());
+    const live = teamsBySlug(
+      this,
+      parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll()),
+    );
     const declaredSlugs = new Set(desired.map((team) => team.name.toLowerCase()));
     for (const team of desired) {
       const role = team.permission ?? DEFAULT_ROLE;
@@ -151,7 +172,7 @@ export const teamsSection = {
           `teams[${team.name}]`,
           JSON.stringify(wantRole),
           JSON.stringify(liveRole),
-          "apply will set the declared permission",
+          { remedy: "apply will set the declared permission" },
         );
       }
       plan.ops.push({
@@ -164,8 +185,8 @@ export const teamsSection = {
       });
     }
 
-    for (const team of live) {
-      if (declaredSlugs.has(team.slug.toLowerCase())) {
+    for (const [slugKey, team] of live) {
+      if (declaredSlugs.has(slugKey)) {
         continue;
       }
       const inherited = inheritedAccess(team);
@@ -222,10 +243,13 @@ export const teamsSection = {
     if (personal !== undefined) {
       return { value: undefined, notes: [personal] };
     }
-    const teams = parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll());
+    const teams = teamsBySlug(
+      this,
+      parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll()),
+    );
     const notes: string[] = [];
     const entries: TeamConfig[] = [];
-    for (const team of teams) {
+    for (const team of teams.values()) {
       const label = `teams[${team.slug}]`;
       const inherited = inheritedAccess(team);
       if (inherited !== undefined) {

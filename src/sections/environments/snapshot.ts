@@ -6,13 +6,12 @@
 
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
-import { liveByIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { secretKey } from "../shared/secrets-engine.js";
+import { liveSecretsByKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/snapshot-helpers.js";
-import { variableKey } from "../shared/variables-engine.js";
-import { listBranchPolicies, livePolicyName } from "./branch-policies.js";
+import { liveVariablesByKey } from "../shared/variables-engine.js";
+import { listBranchPolicies, policiesByName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import {
   listEnvironmentSecrets,
@@ -21,7 +20,7 @@ import {
   nestedDefaultPolicy,
 } from "./nested.js";
 import type { PinnedNames } from "./pins.js";
-import { listProtectionRules, liveRuleSlug } from "./protection-rules.js";
+import { enabledRulesBySlug, listProtectionRules } from "./protection-rules.js";
 import {
   DeploymentBranchPolicyConfig,
   type EnvironmentConfig,
@@ -86,34 +85,32 @@ export async function snapshotNested(
 ): Promise<{ nested: NestedSnapshot; notes: string[] }> {
   const nested: NestedSnapshot = {};
   const notes: string[] = [];
-  const variables = await listEnvironmentVariables(ctx, section, envName);
-  liveByIdentity(
-    section,
-    "variable",
-    variables,
-    (variable) => variableKey(variable.name),
-    (variable) => variable.name,
-  );
+  const variables = [
+    ...liveVariablesByKey(
+      section,
+      "variable",
+      await listEnvironmentVariables(ctx, section, envName),
+    ).values(),
+  ];
   if (variables.length > 0) {
     nested.variables = wrapped(
       "variables",
       variables.map((variable) => projectOntoSchema(EnvironmentVariableConfig, variable)),
     );
   }
-  const secrets = await listEnvironmentSecrets(ctx, section, envName);
-  liveByIdentity(
-    section,
-    `${envName} environment secret`,
-    secrets,
-    (secret) => secretKey(secret.name),
-    (secret) => secret.name,
-  );
+  const secrets = [
+    ...liveSecretsByKey(
+      section,
+      `${envName} environment secret`,
+      await listEnvironmentSecrets(ctx, section, envName),
+    ).keys(),
+  ];
   if (secrets.length > 0) {
-    // Names go through secretKey, the uppercase form GitHub stores and the planner compares by,
+    // The engine's index hands back the uppercase form GitHub stores and the planner compares by,
     // so a lowercase listing still mints a reference the settings-file grammar accepts.
-    const references = secrets.map(({ name }) => ({
-      name: secretKey(name),
-      ...snapshotSecretReference(secretStore(envName), secretKey(name)),
+    const references = secrets.map((name) => ({
+      name,
+      ...snapshotSecretReference(secretStore(envName), name),
     }));
     nested.secrets = wrapped(
       "secrets",
@@ -132,12 +129,12 @@ export async function snapshotNested(
       () => listBranchPolicies(ctx, section, envName),
     );
     if ("value" in policies && policies.value.length > 0) {
-      liveByIdentity(section, "deployment branch policy", policies.value, (policy) =>
-        livePolicyName(policy, envName),
-      );
+      const byName = policiesByName(section, policies.value, envName);
       nested.deployment_branch_policies = wrapped(
         "deployment_branch_policies",
-        policies.value.map((policy) => projectOntoSchema(DeploymentBranchPolicyConfig, policy)),
+        [...byName.values()].map((policy) =>
+          projectOntoSchema(DeploymentBranchPolicyConfig, policy),
+        ),
       );
     }
   }
@@ -148,14 +145,11 @@ export async function snapshotNested(
     () => listProtectionRules(ctx, section, envName),
   );
   if ("value" in rules) {
-    const enabled = rules.value.filter((rule) => rule.enabled !== false);
-    liveByIdentity(section, "deployment protection rule", enabled, (rule) =>
-      liveRuleSlug(rule, envName),
-    );
+    const enabled = [...enabledRulesBySlug(section, rules.value, envName).keys()];
     if (enabled.length > 0) {
       nested.deployment_protection_rules = wrapped(
         "deployment_protection_rules",
-        enabled.map((rule) => ({ app: liveRuleSlug(rule, envName) })),
+        enabled.map((app) => ({ app })),
       );
     }
   }

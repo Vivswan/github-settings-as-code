@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   missingDrift,
   type SectionMeta,
@@ -17,7 +17,7 @@ import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
-import type { DeploymentBranchPolicyConfig, EnvironmentConfig } from "./schema.js";
+import type { DeploymentBranchPolicyConfig } from "./schema.js";
 
 // "delete" like the nested variables list: patterns are readable, recreatable configuration.
 export const BRANCH_POLICIES_DEFAULT_POLICY: UndeclaredPolicy = "delete";
@@ -51,7 +51,7 @@ function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
   return String(policy.id);
 }
 
-export function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
+function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
   if (typeof policy.name !== "string") {
     throw new Error(
       `environments: the deployment branch-policy list for environment "${envName}" returned a policy without a name, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
@@ -61,20 +61,20 @@ export function livePolicyName(policy: LiveBranchPolicy, envName: string): strin
 }
 
 /**
- * Two entries for one pattern could fight over its type on every run. The flag pairing is checked in
- * the zod shape (schema.ts), not here, so it fails before any section writes.
+ * The live patterns by name under the duplicate-live guard; plan() and snapshot() both index through
+ * it, so neither can read two same-named patterns as one.
  */
-export function validateBranchPolicies(
+export function policiesByName(
   section: SectionMeta,
-  env: EnvironmentConfig,
-  entries: readonly DeploymentBranchPolicyConfig[],
-): void {
-  rejectDuplicates(
+  live: readonly LiveBranchPolicy[],
+  envName: string,
+): Map<string, LiveBranchPolicy> {
+  return liveByIdentity(
     section,
-    entries,
-    (pattern) => pattern.name,
-    (pattern) => pattern.name,
-    `deployment branch policy of the "${env.name}" environment`,
+    "deployment branch policy",
+    live,
+    (pattern) => livePolicyName(pattern, envName),
+    (pattern) => liveIdentity(livePolicyName(pattern, envName), { branch_policy_id: pattern.id }),
   );
 }
 
@@ -122,6 +122,15 @@ export async function planBranchPolicies(
   entries: readonly DeploymentBranchPolicyConfig[],
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<NestedPlan> {
+  // Two entries for one pattern could fight over its type on every run. The flag pairing is checked
+  // in the zod shape (schema.ts), not here, so it fails before any section writes.
+  rejectDuplicates(
+    section,
+    entries,
+    (pattern) => pattern.name,
+    (pattern) => pattern.name,
+    `deployment branch policy of the "${envName}" environment`,
+  );
   const params = { environment_name: envName };
   const planned: NestedPlan = { ops: [], notes: [] };
   const flags = liveEnv?.deployment_branch_policy as
@@ -139,9 +148,7 @@ export async function planBranchPolicies(
   } else if (liveEnv !== undefined) {
     live = await listBranchPolicies(ctx, section, envName);
   }
-  const liveByName = liveByIdentity(section, "deployment branch policy", live, (pattern) =>
-    livePolicyName(pattern, envName),
-  );
+  const liveByName = policiesByName(section, live, envName);
   const declared = new Set(entries.map((pattern) => pattern.name));
 
   for (const pattern of entries) {

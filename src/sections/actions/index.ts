@@ -3,7 +3,7 @@ import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
-import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
+import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
@@ -361,7 +361,12 @@ const KEY_DESTINATION = {
         const liveKeys = live.include_claim_keys ?? [];
         if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
           drift.push(
-            `actions.oidc_customization_sub.include_claim_keys: declared ${JSON.stringify(include_claim_keys)} != live ${JSON.stringify(liveKeys)} (claim-key order defines the subject format, so order counts); apply will set the declared value`,
+            valueDrift(
+              "actions.oidc_customization_sub.include_claim_keys",
+              JSON.stringify(include_claim_keys),
+              JSON.stringify(liveKeys),
+              { qualifier: "claim-key order defines the subject format, so order counts" },
+            ),
           );
         }
       }

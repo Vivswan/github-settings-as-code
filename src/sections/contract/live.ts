@@ -9,23 +9,50 @@ import { type EndpointDecl, endpointMethod, endpointPath } from "./endpoints.js"
 import type { SectionMeta } from "./module.js";
 import { collidingPairs } from "./requests.js";
 
-/** The plural of a section noun for a message ("custom property" -> "custom properties", "deploy key" -> "deploy keys"). */
+/** The plural of a section noun for a message ("custom property" -> "custom properties", "protected branch" -> "protected branches"). */
 export function plural(noun: string): string {
-  return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
+  if (/[^aeiou]y$/.test(noun)) {
+    return `${noun.slice(0, -1)}ies`;
+  }
+  return /(s|x|ch|sh)$/.test(noun) ? `${noun}es` : `${noun}s`;
+}
+
+/**
+ * The ONE rendering of a live item in a duplicate-identity message: the human key, then the server-side
+ * addressing values that tell two apart (`v1 (milestone number 1)`; a value equal to the key adds nothing,
+ * so a label's address IS its name). The brand is minted here alone, so every producer renders alike.
+ */
+declare const LIVE_IDENTITY: unique symbol;
+export type LiveIdentity = string & { readonly [LIVE_IDENTITY]: true };
+
+export function liveIdentity(
+  name: string,
+  address: Readonly<Record<string, string | number | undefined>> = {},
+): LiveIdentity {
+  const ids = Object.entries(address).filter(
+    (entry): entry is [string, string | number] =>
+      entry[1] !== undefined && String(entry[1]) !== name,
+  );
+  const rendered =
+    ids.length === 0
+      ? name
+      : `${name} (${ids.map(([param, value]) => `${param.replace(/_/g, " ")} ${value}`).join(", ")})`;
+  return rendered as LiveIdentity;
 }
 
 /**
  * Live items indexed by the identity the section manages them under. GitHub may hold two under one
  * (repeated deploy-key titles, repeated hook urls, two names one fold apart), which a single-slot map
  * would silently collapse into "the last one listed"; plan() and snapshot() both refuse that here, so
- * every section fails the same way and names the pairs.
+ * every section fails the same way and names the pairs through liveIdentity. Only the key is read,
+ * so a helper holding a PlanContext passes `{ key: ctx.section }`.
  */
 export function liveByIdentity<T, Key extends string>(
-  section: SectionMeta,
+  section: Pick<SectionMeta, "key">,
   noun: string,
   items: readonly T[],
   keyOf: (item: T) => Key,
-  describe: (item: T) => string = keyOf,
+  describe: (item: T) => LiveIdentity,
 ): Map<Key, T> {
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {

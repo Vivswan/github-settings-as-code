@@ -701,9 +701,17 @@ export function valueDrift(
   label: string,
   declared: string,
   live: string,
-  remedy = "apply will set the declared value",
+  opts: {
+    /** Qualifies the live value, in parentheses: a raw state behind the compared one, why order counts. */
+    qualifier?: string;
+    /** The apply clause; null when a generic line beside it already names the remedy (a recreate's field lines). */
+    remedy?: string | null;
+  } = {},
 ): string {
-  return `${label}: declared ${declared} != live ${live}; ${remedy}`;
+  const qualifier = opts.qualifier === undefined ? "" : ` (${opts.qualifier})`;
+  const remedy =
+    opts.remedy === null ? "" : `; ${opts.remedy ?? "apply will set the declared value"}`;
+  return `${label}: declared ${declared} != live ${live}${qualifier}${remedy}`;
 }
 
 /**

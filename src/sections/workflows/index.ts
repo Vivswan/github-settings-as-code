@@ -5,8 +5,8 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
-import { loosen, type SectionModule } from "../contract/module.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
@@ -17,6 +17,29 @@ const LiveWorkflow = z.looseObject({
   path: z.string(),
   state: z.string(),
 });
+type LiveWorkflow = z.infer<typeof LiveWorkflow>;
+
+/** A declared path as GitHub lists it: a bare file name lives under .github/workflows/. */
+function workflowPath(declared: string): string {
+  return declared.includes("/") ? declared : `.github/workflows/${declared}`;
+}
+
+/**
+ * The workflows that still have a file, by path, under the duplicate-live guard; plan() and snapshot()
+ * both index through it. A "deleted" workflow has no file behind it anymore, so it is absent.
+ */
+function workflowsByPath(
+  section: SectionMeta,
+  live: readonly LiveWorkflow[],
+): Map<string, LiveWorkflow> {
+  return liveByIdentity(
+    section,
+    "workflow",
+    live.filter((workflow) => workflow.state !== "deleted"),
+    (workflow) => workflow.path,
+    (workflow) => liveIdentity(workflow.path, { workflow_id: workflow.id }),
+  );
+}
 
 const permission: SectionPermission = { repo: ["actions"] };
 
@@ -53,23 +76,22 @@ export const workflowsSection = {
     rejectDuplicates(
       this,
       desired,
-      (w) => (w.path.includes("/") ? w.path : `.github/workflows/${w.path}`),
+      (w) => workflowPath(w.path),
       (w) => w.path,
     );
-    const live = parseLive(
+    const present = workflowsByPath(
       this,
-      ENDPOINTS.list,
-      z.array(LiveWorkflow),
-      await ctx.read.list.listAllEnveloped("workflows"),
+      parseLive(
+        this,
+        ENDPOINTS.list,
+        z.array(LiveWorkflow),
+        await ctx.read.list.listAllEnveloped("workflows"),
+      ),
     );
-    // A "deleted" workflow has no file behind it anymore; treat as absent.
-    const present = live.filter((w) => w.state !== "deleted");
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     for (const workflow of desired) {
-      const match = present.find(
-        (w) => w.path === workflow.path || w.path === `.github/workflows/${workflow.path}`,
-      );
+      const match = present.get(workflowPath(workflow.path));
       if (!match) {
         // No operation can create a workflow file.
         plan.drift.push(
@@ -82,12 +104,19 @@ export const workflowsSection = {
         continue;
       }
       const action = workflow.state === "active" ? "enable" : "disable";
-      const raw = match.state === liveState ? "" : ` (${match.state})`;
       plan.ops.push({
         role: action,
         params: { workflow_id: String(match.id) },
         drift: [
-          `workflows[${workflow.path}]: declared "${workflow.state}" != live "${liveState}"${raw}; apply will ${action} the workflow`,
+          valueDrift(
+            `workflows[${workflow.path}]`,
+            JSON.stringify(workflow.state),
+            JSON.stringify(liveState),
+            {
+              qualifier: match.state === liveState ? undefined : match.state,
+              remedy: `apply will ${action} the workflow`,
+            },
+          ),
         ],
         change: `${action}d workflow "${match.path}"`,
       });
@@ -97,13 +126,17 @@ export const workflowsSection = {
   // Every disabled_* live state reads back as "disabled", the effective state apply compares; a
   // "deleted" workflow has no file and would only plan as unfixable drift, so it is left out.
   async snapshot(ctx) {
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveWorkflow),
-      await ctx.read.list.listAllEnveloped("workflows"),
-    );
-    const present = live.filter((w) => w.state !== "deleted");
+    const present = [
+      ...workflowsByPath(
+        this,
+        parseLive(
+          this,
+          ENDPOINTS.list,
+          z.array(LiveWorkflow),
+          await ctx.read.list.listAllEnveloped("workflows"),
+        ),
+      ).values(),
+    ];
     if (present.length === 0) {
       return { value: undefined, notes: [] };
     }
