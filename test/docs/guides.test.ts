@@ -339,17 +339,16 @@ describe("docs/ guide pages", () => {
     { label: ".github/SECURITY.md", path: join(ROOT, ".github", "SECURITY.md") },
   ];
 
-  test("every guide page is linked from another scanned file", () => {
+  test("every guide page is linked from another scanned file", async () => {
     // A reader reaches a docs/ page only through a link, so a page nothing links to is dead weight nobody can find.
     const linked = new Set<string>();
     for (const file of linkScanFiles()) {
-      const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
-      for (const match of markdown.matchAll(/\]\(([^)]+)\)/g)) {
-        const path = (match[1] ?? "").split("#")[0] ?? "";
+      for (const destination of await linkDestinations(readFileSync(file.path, "utf8"))) {
+        const path = destination.split("#")[0] ?? "";
         if (path === "" || /^[a-z]+:/.test(path)) {
           continue;
         }
-        const resolved = join(file.path, "..", path);
+        const resolved = join(file.path, "..", decodeURIComponent(path));
         if (resolved !== file.path) {
           linked.add(resolved);
         }

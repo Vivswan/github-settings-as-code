@@ -9,7 +9,9 @@ import { REDACTED_DETAIL } from "../../src/flows/redact.js";
 import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
+import { ISSUE_REPORT_PERMISSION } from "../../src/report/issue-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
+import { RESOURCE_LABEL } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
@@ -184,6 +186,11 @@ describe("private repositories guide", () => {
     expect(section).toContain(REDACTED_DETAIL);
     expect(section).toContain(ARTIFACT_NAME);
     expect(section).toContain(ARTIFACT_FILE);
+  });
+
+  test("the issue-channel PAT advice names the resource the issue report declares", () => {
+    const labels = ISSUE_REPORT_PERMISSION.repo.map((resource) => `"${RESOURCE_LABEL[resource]}"`);
+    expect(section).toContain(`the PAT needs \`${labels.join(" or ")}\` (read and write)`);
   });
 
   test("the overall-result enumeration names exactly the per-target RUN_RESULTS words", () => {

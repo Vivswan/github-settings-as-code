@@ -15,6 +15,7 @@ import { readAction, type Step, type Workflow, workflowText } from "./workflow-l
 
 const COMPOSITE_DIR = ".github/actions/fetch-test-artifacts";
 const PATHS_TS = "test/e2e/openapi/paths.ts";
+const TRIM_TS = ".github/scripts/trim-openapi.ts";
 
 /** A fetched, gitignored test artifact the composite restores from its cache. */
 interface FetchedArtifact {
@@ -27,7 +28,14 @@ const FETCHED_ARTIFACTS: readonly FetchedArtifact[] = [
   {
     label: "trimmed OpenAPI spec",
     path: "test/e2e/openapi/github-openapi.trimmed.json",
-    hashInputs: () => [".github/scripts/trim-openapi.ts", PATHS_TS, ...routeDataImports()],
+    // The imports under src/ and test/ decide which paths and which API version are trimmed; the script's own lib/ helpers only carry the fetch.
+    hashInputs: () => [
+      TRIM_TS,
+      PATHS_TS,
+      ...[...relativeImportsOf(TRIM_TS), ...relativeImportsOf(PATHS_TS)].filter((file) =>
+        /^(?:src|test)\//.test(file),
+      ),
+    ],
   },
   {
     // The fetch script carries the pinned UPSTREAM_REF, the sole input that changes the output.
@@ -72,27 +80,27 @@ function hashFilesPatterns(key: string): string[] {
 }
 
 /**
- * The .ts files paths.ts imports route data from. Only single-line static imports are recognized; any other import-ish line fails, so an unsupported
+ * The repository .ts files `file` imports. Only single-line static imports are recognized; any other import-ish line fails, so an unsupported
  * form extends this parser instead of being skipped.
  */
-function routeDataImports(): string[] {
-  const source = readFileSync(join(ROOT, PATHS_TS), "utf8");
+function relativeImportsOf(file: string): string[] {
+  const source = readFileSync(join(ROOT, file), "utf8");
   const specifiers: string[] = [];
   for (const line of source.split("\n")) {
-    if (!/\bimport\b|\brequire\(/.test(line)) {
+    if (!/^\s*import[\s{"]|\brequire\(/.test(line)) {
       continue;
     }
     const match = line.match(/^import [^"]*from "([^"]+)";$/);
     expect(
       match,
-      `unrecognized import form in ${PATHS_TS}: "${line.trim()}" - teach routeDataImports() to parse it`,
+      `unrecognized import form in ${file}: "${line.trim()}" - teach relativeImportsOf() to parse it`,
     ).not.toBeNull();
     specifiers.push(match?.[1] ?? "");
   }
   return specifiers
     .filter((spec) => spec.startsWith("."))
     .map((spec) =>
-      relative(ROOT, resolve(ROOT, PATHS_TS, "..", spec))
+      relative(ROOT, resolve(ROOT, file, "..", spec))
         .split("\\")
         .join("/")
         .replace(/\.js$/, ".ts"),
@@ -128,8 +136,9 @@ describe("the fetch-test-artifacts cache keys", () => {
     cacheKeyOf(cacheStepFor(artifact.path), artifact.path);
 
   test("each key hashes every input its artifact depends on", () => {
-    // The route-data walk found paths.ts's own imports, so the coverage below is not vacuous.
+    // The import walk found the scripts' own imports, so the coverage below is not vacuous.
     expect(OPENAPI.hashInputs().length).toBeGreaterThan(2);
+    expect(OPENAPI.hashInputs()).toContain("src/github/api.ts");
     for (const artifact of FETCHED_ARTIFACTS) {
       expectKeyHashesInputs(keyOf(artifact), artifact);
     }

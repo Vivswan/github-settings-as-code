@@ -36,6 +36,8 @@ describe("the commit-back push jobs", () => {
       expect(step?.env?.HEAD_SHA).toBeDefined();
       expect(step?.run).toContain(`--force-with-lease="refs/heads/\${HEAD_REF}:\${HEAD_SHA}"`);
       expect(step?.run).not.toMatch(/\bgit push\b(?![^\n]*--force-with-lease)/);
+      // --force beside the lease defeats it (git overrides the stale check), and -f is its short form.
+      expect(step?.run).not.toMatch(/--force(?!-with-lease)|\s-f(?=\s)/);
     },
   );
 });
