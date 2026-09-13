@@ -52,6 +52,7 @@ export function canonicalPath(path: string): string {
 }
 
 const SEGMENT = sep === "\\" ? /[\\/]/ : sep;
+const TRAILING_SEPARATORS = sep === "\\" ? /[\\/]+$/ : /\/+$/;
 
 /** An entry's identity on its filesystem, the same under every name it has. */
 function entryId(stat: { dev: number | bigint; ino: number | bigint }): string {
@@ -169,12 +170,16 @@ function isSymlink(path: string): boolean {
 
 /**
  * The error is the filesystem's own reason; each caller names the input that chose the path. The staging file sits in
- * the destination's directory, spelled as the caller spelled it (dirname keeps a `link/..` segment for the OS to
- * resolve, the same way for both names; join would collapse it), under a short name of its own (the destination's
- * leaf may already be at NAME_MAX), and takes an existing regular destination's mode, so a replaced 0600 file stays 0600.
+ * the destination's directory, spelled as the caller spelled it up to the leaf (a `link/..` segment is the OS's to
+ * resolve, the same way for both names; a drive-relative `C:x` stays on that drive's current directory, which dirname
+ * or join would turn into the drive root), under a short name of its own (the destination's leaf may already be at
+ * NAME_MAX), and takes an existing regular destination's mode, so a replaced 0600 file stays 0600.
  */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  const staging = `${dirname(path)}${sep}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+  // Trailing separators first: basename ignores them, so slicing its length off `out.yml/` would leave `o`.
+  const spelled = path.replace(TRAILING_SEPARATORS, "");
+  const directory = spelled.slice(0, spelled.length - basename(spelled).length);
+  const staging = `${directory}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
   // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
   // another writer got there first with (`wx` fails on it, and that failure is the one reported).
   let created = false;
