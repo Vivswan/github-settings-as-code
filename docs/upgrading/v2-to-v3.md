@@ -121,6 +121,8 @@ For `@vivswan/github-settings-as-code` consumers. Every result word of every mod
 | `RepoResult` (still exported, the engine's per-repository subset), `SnapshotRunResult` | `RunOutcome` |
 | `worstOf(results, check)`, with `check` picking the floor of an empty list | `worstOf(results)`; an empty list throws, since every run concludes over at least one target |
 | `concludeSnapshot` set `repos-result` only in the dir form; `concludeMerge` set no `repos-result` | Every conclude sets the three outputs |
+| `FinishedSnapshot` carried `view` / `views`: each target already projected into a `SnapshotTargetView` | `FinishedSnapshot` carries `target` / `targets`: each a `TargetOutcome` whose `detail` is sealed for a hidden target; `concludeSnapshot` opens it through `publicDetail` / `toPublicView` |
+| `SnapshotTargetView` (snapshot's own public projection) | Removed; the public shape of every mode's target is `PublicTargetView`, which now carries the snapshot `file` |
 
 ## 10. One redacted label in every mode
 
