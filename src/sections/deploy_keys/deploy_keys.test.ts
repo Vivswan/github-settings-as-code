@@ -107,7 +107,8 @@ describe("deploy_keys conflicts", () => {
       },
     });
     await expect(plan(api, [{ title: "deploy-bot", key: BOT_KEY }])).rejects.toThrow(
-      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "deploy-bot (key id 11)" and "deploy-bot (key id 12)". This section manages one deploy key per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
+      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "deploy-bot (key id 11)" and "deploy-bot (key id 12)". ' +
+        "This section manages one deploy key per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
     );
     await expect(plan(api, [])).rejects.toThrow(/resolve to one identity/);
     expect(api.mutations()).toEqual([]);

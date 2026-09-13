@@ -75,8 +75,10 @@ type LiveRuleset = z.infer<typeof LiveRuleset>;
 function pairableRuleset(live: LiveRuleset): LiveRuleset {
   const repeated = repeatedRuleTypes(live.rules);
   if (repeated.length > 0) {
+    const types = repeated.map((type) => `"${type}"`).join(", ");
     throw new Error(
-      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the rule type${repeated.length === 1 ? "" : "s"} ${repeated.map((type) => `"${type}"`).join(", ")} more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run`,
+      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the rule type${repeated.length === 1 ? "" : "s"} ${types} more than once, ` +
+        "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
     );
   }
   return live;
