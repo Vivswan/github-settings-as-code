@@ -13,8 +13,6 @@ import {
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
 import type { GithubClient } from "../../src/github/api.js";
-import type { Io } from "../../src/io.js";
-import { maskRegistry } from "../../src/io.js";
 import {
   endpointPermission,
   type SectionMeta,
@@ -25,24 +23,10 @@ import { pagesSection } from "../../src/sections/pages/index.js";
 import { allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { matchEndpoint } from "../e2e/mock/dispatch.js";
 import type { LiveState } from "../e2e/mock/state.js";
+import { captureIo } from "../io/capture.js";
 import { registryFake } from "../sections/fragment-fake.js";
 import { REPO } from "../sections/section-run.js";
 import type { Row } from "../sections/snapshot-roundtrip.js";
-
-function captureIo(): { io: Io; annotations: string[] } {
-  const annotations: string[] = [];
-  return {
-    io: {
-      annotate: (level, message) => annotations.push(`${level}: ${message}`),
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry(() => {}),
-    },
-    annotations,
-  };
-}
 
 /** A client that answers `status` (the fine-grained denial is 404) to GETs whose path matches `denied`. */
 function denying(api: GithubClient, denied: RegExp, status: 403 | 404 = 404): GithubClient {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Io, type MaskPair, maskRegistry } from "../../src/io.js";
+import { captureIo } from "./capture.js";
 
 const channels: Omit<Io, keyof MaskPair> = {
   annotate: () => {},
@@ -30,10 +31,9 @@ describe("the Io mask pair", () => {
     forgedMasked.mask("o/private");
     expect(forgedMasked.masked().size).toBe(0);
 
-    const forwarded: string[] = [];
-    const io: Io = { ...channels, ...maskRegistry((value) => forwarded.push(value)) };
+    const { io, masks } = captureIo();
     io.mask("o/private");
-    expect(forwarded).toEqual(["o/private"]);
+    expect(masks).toEqual(["o/private"]);
     expect(io.masked().has("o/private")).toBe(true);
   });
 

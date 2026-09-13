@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
 import { type GithubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
-import { type Io, maskRegistry } from "../../../src/io.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
+import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
@@ -376,20 +376,10 @@ describe("actions_secrets execution", () => {
     const api = new MockApi({ [LIST]: listOf(), [PUBLIC_KEY]: KEY_ROUTE }).allowMutations(
       "PUT /repos/o/r/actions/secrets/DEPLOY_TOKEN",
     );
-    const masked: string[] = [];
     const mutationsAtMaskTime: number[] = [];
-    const logs: string[] = [];
-    const io: Io = {
-      annotate: (level, message) => logs.push(`${level}: ${message}`),
-      log: (line) => logs.push(line),
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry((value) => {
-        mutationsAtMaskTime.push(api.mutations().length);
-        masked.push(value);
-      }),
-    };
+    const { io, masks, logs, annotations } = captureIo(() =>
+      mutationsAtMaskTime.push(api.mutations().length),
+    );
     const validated = validateSettingsDoc(
       { actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }] },
       "settings.yml",
@@ -412,12 +402,12 @@ describe("actions_secrets execution", () => {
       io,
     );
     expect(result.result).toBe("applied");
-    expect(masked).toEqual(["s3cret-plaintext"]);
+    expect(masks).toEqual(["s3cret-plaintext"]);
     expect(mutationsAtMaskTime).toEqual([0]);
     expect(unsealSecretValue(sealedPayload(api.mutations()[0]).encrypted_value)).toBe(
       "s3cret-plaintext",
     );
-    expect(logs.join("\n")).not.toContain("s3cret-plaintext");
+    expect([...annotations, ...logs].join("\n")).not.toContain("s3cret-plaintext");
     expect(logs).toContain('actions_secrets: created secret "DEPLOY_TOKEN"');
   });
 });

@@ -19,36 +19,16 @@ import {
   redactedChannel,
   type TargetChannel,
 } from "../../src/flows/redact.js";
-import { type Io, maskRegistry } from "../../src/io.js";
+import type { Io } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import type { PrivateReportChannel } from "../../src/report/delivery.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
 
 const MARKER = "settings-as-code-report";
 const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
-
-/** Every channel of the port in one ordered event log, so a test pins the sequence, not one surface. */
-function eventIo(): { io: Io; events: string[]; outputs: Record<string, string> } {
-  const events: string[] = [];
-  const outputs: Record<string, string> = {};
-  return {
-    io: {
-      annotate: (level, message) => events.push(`${level}: ${message}`),
-      log: (line) => events.push(`log: ${line}`),
-      debug: () => {},
-      summary: (markdown) => events.push(`summary: ${markdown.split("\n")[0]}`),
-      output: (name, value) => {
-        outputs[name] = value;
-        events.push(`output ${name}=${value}`);
-      },
-      ...maskRegistry(() => {}),
-    },
-    events,
-    outputs,
-  };
-}
 
 /** A MockApi whose requests land in the same event log as the port's lines. */
 class TracingApi extends MockApi {
@@ -115,7 +95,7 @@ async function delivered(
   body: (delivery: Delivery, io: Io, events: string[]) => Promise<void>,
   uploader?: ArtifactUploader,
 ) {
-  const { io, events } = eventIo();
+  const { io, events } = captureIo();
   const api = new TracingApi(routes, events);
   await withDelivery({ api, cfg: config, io, uploader }, (delivery) => body(delivery, io, events));
   return { api, events };
@@ -148,7 +128,7 @@ describe("runOutcome", () => {
 
 describe("engineOutcome", () => {
   test("passes a run through, and turns a preflight denial into one channel line and a note", () => {
-    const { io, events } = eventIo();
+    const { io, events } = captureIo();
     const ran = { repo: "o/r", result: "applied" as const, outcomes: [], preflightDenied: [] };
     expect(engineOutcome(ran, io)).toEqual({ result: "applied", outcomes: [] });
     const denied = { ...ran, result: "failed" as const, preflightDenied: ["labels", "rulesets"] };
@@ -158,7 +138,7 @@ describe("engineOutcome", () => {
       note: "preflight denied 2 section(s); nothing was applied to this repository",
     });
     expect(events).toEqual([
-      "error: preflight failed: the token cannot access 2 section(s), so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections",
+      "annotate error: preflight failed: the token cannot access 2 section(s), so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections",
     ]);
   });
 });
@@ -205,7 +185,7 @@ describe("withDelivery", () => {
       expect(redacted.display).toBe("private repository #1");
       expect(isPrivate(redacted.detail)).toBe(true);
       expect(events).toEqual([
-        `error: private repository #1: failed - labels (403). ${REDACTED_NOTE}`,
+        `annotate error: private repository #1: failed - labels (403). ${REDACTED_NOTE}`,
       ]);
 
       events.length = 0;
@@ -221,7 +201,7 @@ describe("withDelivery", () => {
         detail: { slug: "o/pub", outcomes: FAILED_LABELS, note: undefined },
       });
       // The engine's own line already carried the slug; delivery adds nothing.
-      expect(events).toEqual(["error: o/pub: labels: 403 Forbidden"]);
+      expect(events).toEqual(["annotate error: o/pub: labels: 403 Forbidden"]);
     });
     expect(api.calls).toEqual([]);
   });
@@ -240,7 +220,7 @@ describe("withDelivery", () => {
           "api POST /repos/o/priv/labels",
           `api GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",
-          `warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
+          `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
         ]);
 
         events.length = 0;
@@ -255,7 +235,7 @@ describe("withDelivery", () => {
         );
         expect(events).toHaveLength(1);
         expect(events[0]).toStartWith(
-          "notice: private repository #2: visibility could not be verified",
+          "annotate notice: private repository #2: visibility could not be verified",
         );
         expect(events.join("\n")).not.toContain("o/maybe");
       },
@@ -300,8 +280,8 @@ describe("withDelivery", () => {
       uploader,
     );
     expect(events).toEqual([
-      `warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
-      `warning: private repository #2: drift - labels. ${REDACTED_NOTE}`,
+      `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
+      `annotate warning: private repository #2: drift - labels. ${REDACTED_NOTE}`,
       "upload settings-as-code-private-report",
     ]);
     expect(uploads).toHaveLength(1);
@@ -347,7 +327,7 @@ describe("concludeRun", () => {
   };
 
   test("single: the summary, the outputs, the result line, and the exit code, in that order", () => {
-    const { io, events, outputs } = eventIo();
+    const { io, events, outputs } = captureIo();
     const channel: TargetChannel = publicChannel(io, "o/r", false);
     const code = concludeRun(io, {
       kind: "single",
@@ -376,7 +356,7 @@ describe("concludeRun", () => {
   });
 
   test("multi: repos-result keys a redacted target by its placeholder, skipped sections dedupe across targets, worst-of decides", () => {
-    const { io, events, outputs } = eventIo();
+    const { io, events, outputs } = captureIo();
     const hidden = redactedChannel(io, "o/priv", "private repository #1");
     const shown = publicChannel(io, "o/pub", true);
     const code = concludeRun(io, {
@@ -422,11 +402,11 @@ describe("concludeRun", () => {
   });
 
   test("failRun: the problem's line, then the conclusion a failed target gets, with no summary", () => {
-    const { io, events, outputs } = eventIo();
+    const { io, events, outputs } = captureIo();
     expect(failRun(io, { code: "input-token-missing" })).toBe(1);
     expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
     expect(events).toEqual([
-      'error: cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
+      'annotate error: cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
       "output result=failed",
       "output skipped-sections=",
       "output repos-result={}",

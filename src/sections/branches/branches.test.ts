@@ -3,7 +3,6 @@ import { executePlan } from "../../../src/engine/execute.js";
 import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
 import type { GithubClient } from "../../../src/github/api.js";
-import { type Io, maskRegistry } from "../../../src/io.js";
 import {
   type PlannedOp,
   planContext,
@@ -13,6 +12,7 @@ import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import type { Json } from "../../../test/e2e/mock/support.js";
+import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -1753,15 +1753,7 @@ describe("branches snapshot", () => {
         'Repository with the given name (a 404 here can also mean the resource does not exist). To fix, grant "Administration" ' +
         "(read and write) under the PAT's Repository permissions",
     );
-    const annotations: string[] = [];
-    const io: Io = {
-      annotate: (level, message) => annotations.push(`${level}: ${message}`),
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry(() => {}),
-    };
+    const { io, annotations } = captureIo();
     const result = await snapshotRepository(
       api,
       {

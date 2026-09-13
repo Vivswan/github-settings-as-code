@@ -7,10 +7,11 @@ import {
 import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
 import { collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
-import { type Io, maskRegistry } from "../../src/io.js";
+import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
 
 /** The operator defaults under test: one fleet secret, applied whole to fileless targets. */
@@ -21,21 +22,6 @@ const FLEET_DEFAULTS = {
 /** The secret values of one document under the provenance multi.ts decides for its kind. */
 function valuesOf(doc: SettingsFile, source: SettingsSource) {
   return collectSecretValues(doc, SECTIONS, source);
-}
-
-function captureIo(): { io: Io; annotations: string[] } {
-  const annotations: string[] = [];
-  return {
-    io: {
-      annotate: (level, message) => annotations.push(`${level}: ${message}`),
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry(() => {}),
-    },
-    annotations,
-  };
 }
 
 /** The label collectSecretValues derives for the fleet secret entry. */
@@ -143,15 +129,7 @@ describe("secret provenance is one source per document", () => {
 describe("runForRepo provenance", () => {
   // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast.
   const validated = (doc: unknown): ValidatedSettings => {
-    const silent: Io = {
-      annotate: () => {},
-      log: () => {},
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry(() => {}),
-    };
-    const verdict = validateSettingsDoc(doc, "fixture", new Set(), silent);
+    const verdict = validateSettingsDoc(doc, "fixture", new Set(), silentIo());
     if (verdict.isErr()) {
       throw new Error(`fixture failed validation: ${describeProblem(verdict.error)}`);
     }
