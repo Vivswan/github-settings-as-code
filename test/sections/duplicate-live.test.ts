@@ -12,7 +12,7 @@ import type { SectionModule } from "../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import type { LiveState } from "../e2e/mock/state.js";
+import { completeRule, type LiveState, ruleWireNode } from "../e2e/mock/state.js";
 import { type FragmentFake, registryFake } from "./fragment-fake.js";
 import { REPO } from "./section-run.js";
 import { STAMPS } from "./snapshot-rows/families.js";
@@ -69,32 +69,9 @@ const ENV_WITH_POLICIES = {
   deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
 };
 
-/** A GraphQL rule node as the selection returns it: every twin off, so only the id and pattern matter. */
+/** A GraphQL rule node as the selection returns it, over the mock's fresh-rule defaults (every twin off), so only the id and pattern matter. */
 function ruleNode(id: string, pattern: string): Record<string, unknown> {
-  return {
-    id,
-    pattern,
-    isAdminEnforced: false,
-    requiresLinearHistory: false,
-    allowsForcePushes: false,
-    allowsDeletions: false,
-    blocksCreations: false,
-    requiresConversationResolution: false,
-    lockBranch: false,
-    lockAllowsFetchAndMerge: false,
-    requiresCommitSignatures: false,
-    requiresStatusChecks: false,
-    requiresStrictStatusChecks: false,
-    requiredStatusCheckContexts: [],
-    requiresApprovingReviews: false,
-    requiredApprovingReviewCount: null,
-    requiresCodeOwnerReviews: false,
-    dismissesStaleReviews: false,
-    requireLastPushApproval: false,
-    requiresDeployments: false,
-    requiredDeploymentEnvironments: [],
-    bypassForcePushAllowances: { nodes: [], pageInfo: { hasNextPage: false } },
-  };
+  return ruleWireNode(completeRule({ id, pattern }));
 }
 
 function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Seed[] {

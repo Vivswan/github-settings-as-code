@@ -637,13 +637,33 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   return Object.freeze(port) as BoundReads<E, G>;
 }
 
+/**
+ * The client each context was minted over. A gate composed at the registry door (owner.ts) reads it
+ * to share one probe across the sections of a run; the registry is private, so the port itself
+ * stays the only thing a section body can reach.
+ */
+const clients = new WeakMap<PlanContext, GitHubClient>();
+
+/** The client a context reads through; a context not minted by planContext() or snapshotContext() is a BUG. */
+export function clientOf(ctx: PlanContext): GitHubClient {
+  const api = clients.get(ctx);
+  if (api === undefined) {
+    throw new Error(
+      `BUG: the ${ctx.section} context was not minted by planContext() or snapshotContext(), so no client is bound to it`,
+    );
+  }
+  return api;
+}
+
 /** `K`, `E`, and `G` infer from the module, so a caller cannot ask for a port the section never declared. */
 export function planContext<K extends SectionKey, E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<K, E, G>,
   api: GitHubClient,
   repo: RepoRef,
 ): PlanContext<E, G, K> {
-  return { section: meta.key, repo, read: boundReads(meta, api, repo) };
+  const ctx: PlanContext<E, G, K> = { section: meta.key, repo, read: boundReads(meta, api, repo) };
+  clients.set(ctx, api);
+  return ctx;
 }
 
 export function snapshotContext<
@@ -656,5 +676,10 @@ export function snapshotContext<
   repo: RepoRef,
   onMissingPermission: OnMissingPermission,
 ): SnapshotContext<E, G, K> {
-  return { ...planContext(meta, api, repo), onMissingPermission: mintPolicy(onMissingPermission) };
+  const ctx: SnapshotContext<E, G, K> = {
+    ...planContext(meta, api, repo),
+    onMissingPermission: mintPolicy(onMissingPermission),
+  };
+  clients.set(ctx, api);
+  return ctx;
 }

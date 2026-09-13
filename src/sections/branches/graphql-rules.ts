@@ -280,7 +280,7 @@ export function hasRoutedGraphqlKeys(
  * A rule node as the selection returns it, every twin the translators read declared with the SDL's
  * nullability, so a value off the vocabulary fails the read instead of vanishing from the classic view.
  */
-const RuleNode = z.looseObject({
+export const RuleNode = z.looseObject({
   id: z.string(),
   pattern: z.string(),
   isAdminEnforced: z.boolean(),
@@ -323,7 +323,7 @@ const RuleNode = z.looseObject({
     pageInfo: z.looseObject({ hasNextPage: z.boolean() }),
   }),
 });
-type RuleNode = z.infer<typeof RuleNode>;
+export type RuleNode = z.infer<typeof RuleNode>;
 
 /** The node id a lookup selects; null when the token cannot see the object. */
 const NodeId = z.looseObject({ id: z.string() }).nullable().optional();
@@ -400,17 +400,10 @@ function indexRules(ctx: BranchesContext, rules: readonly RuleNode[]): Map<strin
   );
 }
 
-/** A rule as its classic view reads it: the twins by name, so the mock's projection and the parsed node both qualify. */
-type RuleFields = Record<string, unknown>;
-
-export function bypassActorStrings(node: RuleFields): string[] {
-  const allowances = (node.bypassForcePushAllowances as { nodes?: unknown } | undefined)?.nodes;
-  if (!Array.isArray(allowances)) {
-    return [];
-  }
+export function bypassActorStrings(node: RuleNode): string[] {
   const out: string[] = [];
-  for (const allowance of allowances) {
-    const actor = (allowance as { actor?: Record<string, unknown> } | null)?.actor;
+  for (const allowance of node.bypassForcePushAllowances.nodes ?? []) {
+    const actor = allowance?.actor;
     if (!actor) {
       continue;
     }
@@ -430,7 +423,7 @@ export function bypassActorStrings(node: RuleFields): string[] {
  * and "" as one empty value, so null stays for the clearer drift message. The e2e state test proves
  * the mock's REST-state projection round-trips through it.
  */
-export function classicViewOfRule(node: RuleFields): Record<string, unknown> {
+export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [classic, twin] of Object.entries(GRAPHQL_BOOLEAN_TWINS)) {
     out[classic] = node[twin];
@@ -439,9 +432,7 @@ export function classicViewOfRule(node: RuleFields): Record<string, unknown> {
     node.requiresStatusChecks === true
       ? {
           strict: node.requiresStrictStatusChecks,
-          contexts: Array.isArray(node.requiredStatusCheckContexts)
-            ? node.requiredStatusCheckContexts
-            : [],
+          contexts: node.requiredStatusCheckContexts ?? [],
         }
       : null;
   if (node.requiresApprovingReviews === true) {
@@ -456,11 +447,7 @@ export function classicViewOfRule(node: RuleFields): Record<string, unknown> {
   out.force_push_bypassers = [...bypassActorStrings(node)].sort();
   out.required_deployments =
     node.requiresDeployments === true
-      ? {
-          environments: Array.isArray(node.requiredDeploymentEnvironments)
-            ? node.requiredDeploymentEnvironments
-            : [],
-        }
+      ? { environments: node.requiredDeploymentEnvironments ?? [] }
       : null;
   return out;
 }
@@ -470,7 +457,7 @@ export function classicViewOfRule(node: RuleFields): Record<string, unknown> {
  * list and a requirement that is on. An omitted routed key leaves the live value untouched (unlike
  * the replacing PUT, which resets an omitted control), so the file pins what is set.
  */
-export function routedKeysSnapshot(node: RuleFields): Pick<BranchProtectionConfig, RoutedKey> {
+export function routedKeysSnapshot(node: RuleNode): Pick<BranchProtectionConfig, RoutedKey> {
   const view = classicViewOfRule(node);
   const out: Pick<BranchProtectionConfig, RoutedKey> = {};
   const actors = view.force_push_bypassers as string[];
@@ -488,7 +475,7 @@ export function routedKeysSnapshot(node: RuleFields): Pick<BranchProtectionConfi
  * dropped and a nested null (an unset review count) omitted, so the entry carries only keys the
  * wildcard shape accepts and the check reads clean against the same rule.
  */
-export function wildcardSnapshot(node: RuleFields): BranchProtectionConfig {
+export function wildcardSnapshot(node: RuleNode): BranchProtectionConfig {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(classicViewOfRule(node))) {
     if (value === false || value === null || (Array.isArray(value) && value.length === 0)) {

@@ -144,7 +144,9 @@ type WriteRole = ActionsOp["role"];
 
 /**
  * Named once so a limit's GET and PUT cannot be paired across limits: both roles derive from N,
- * and both must be declared roles. The GET body is the one numeric field the PUT takes back.
+ * and both must be declared roles. The GET body is the one numeric field the PUT takes back; the
+ * spec marks it optional (an unset limit answers `{}`), so an absent field is drift in plan and an
+ * omitted key in snapshot, never a read failure.
  */
 function cacheLimit<N extends string>(
   name: `getCache${N}` extends ReadRole ? (`putCache${N}` extends WriteRole ? N : never) : never,
@@ -159,7 +161,7 @@ function cacheLimit<N extends string>(
   return {
     get: `getCache${name}` as `getCache${N}` & ReadRole,
     put: `putCache${name}` as `putCache${N}` & WriteRole,
-    live: z.looseObject({ [field]: z.number() }),
+    live: z.looseObject({ [field]: z.number().optional() }),
     label,
   };
 }

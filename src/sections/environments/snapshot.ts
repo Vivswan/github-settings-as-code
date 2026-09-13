@@ -13,6 +13,7 @@ import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/s
 import { liveVariablesByKey } from "../shared/variables-engine.js";
 import { listBranchPolicies, policiesByName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
+import type { LiveEnvironmentBody } from "./index.js";
 import {
   listEnvironmentSecrets,
   listEnvironmentVariables,
@@ -81,7 +82,7 @@ export async function snapshotNested(
   ctx: SnapshotContext<typeof ENDPOINTS>,
   section: SectionMeta,
   envName: string,
-  liveEnv: Record<string, unknown>,
+  liveEnv: LiveEnvironmentBody,
 ): Promise<{ nested: NestedSnapshot; notes: string[] }> {
   const nested: NestedSnapshot = {};
   const notes: string[] = [];
@@ -120,8 +121,7 @@ export async function snapshotNested(
       notes.push(unreadableSecretNote(`environments[${envName}].secrets[${name}]`, name, variable));
     }
   }
-  const flags = liveEnv.deployment_branch_policy as { custom_branch_policies?: unknown } | null;
-  if (flags?.custom_branch_policies === true) {
+  if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
     const policies = await readOrNote(
       ctx,
       notes,

@@ -18,7 +18,6 @@ import {
   type EnvironmentsPlan,
   environmentNodeId,
   GRAPHQL_OPS,
-  nodeIdField,
   type PinDeclaration,
   planPinned,
   snapshotPins,
@@ -51,10 +50,7 @@ const LiveEnvironmentBody = z.looseObject({
     )
     .optional(),
   deployment_branch_policy: z
-    .looseObject({
-      protected_branches: z.boolean().optional(),
-      custom_branch_policies: z.boolean().optional(),
-    })
+    .looseObject({ custom_branch_policies: z.boolean().optional() })
     .nullable()
     .optional(),
 });
@@ -125,7 +121,7 @@ export const environmentsSection = {
           : subsetDiff(settings, flattenEnvironment(live), `environments[${name}]`);
       // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
       // body is validated only when a mutation needs it.
-      const probedNodeId = live === undefined ? undefined : { node_id: nodeIdField(live) };
+      const probedNodeId = live === undefined ? undefined : { node_id: live.node_id };
       let createdNodeId: string | undefined;
       const nodeId = (): string => {
         if (probedNodeId !== undefined) {

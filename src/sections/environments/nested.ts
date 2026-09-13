@@ -9,6 +9,7 @@ import {
 } from "../shared/variables-engine.js";
 import { BRANCH_POLICIES_DEFAULT_POLICY, planBranchPolicies } from "./branch-policies.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
+import type { LiveEnvironmentBody } from "./index.js";
 import { PROTECTION_RULES_DEFAULT_POLICY, planProtectionRules } from "./protection-rules.js";
 import type {
   EnvironmentConfig,
@@ -79,7 +80,7 @@ interface NestedPlanner<K extends NestedKey> {
      * undefined for an environment the plan creates: its sub-resources 404 until the PUT lands,
      * so the planner reads nothing and plans every entry as a create.
      */
-    liveEnv: Record<string, unknown> | undefined,
+    liveEnv: LiveEnvironmentBody | undefined,
   ) => Promise<NestedPlan>;
 }
 
@@ -141,7 +142,7 @@ export async function planNested<K extends NestedKey>(
   key: K,
   envName: string,
   nested: Pick<EnvironmentConfig, NestedKey>,
-  liveEnv: Record<string, unknown> | undefined,
+  liveEnv: LiveEnvironmentBody | undefined,
 ): Promise<NestedPlan> {
   const declared = nested[key];
   if (declared === undefined) {
@@ -230,7 +231,7 @@ async function planEnvironmentVariables(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentVariableConfig[],
-  liveEnv: Record<string, unknown> | undefined,
+  liveEnv: LiveEnvironmentBody | undefined,
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
   const scope: VariablesPlanScope<
@@ -294,7 +295,7 @@ async function planEnvironmentSecrets(
   envName: string,
   policy: UndeclaredPolicy,
   entries: readonly EnvironmentSecretConfig[],
-  liveEnv: Record<string, unknown> | undefined,
+  liveEnv: LiveEnvironmentBody | undefined,
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
   const scope: SecretsPlanScope<Op<"putSecret">, Op<"removeSecret">> = {

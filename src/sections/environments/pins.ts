@@ -262,7 +262,7 @@ export function environmentNodeId(name: string, body: unknown): string {
   return nodeId;
 }
 
-export function nodeIdField(body: unknown): unknown {
+function nodeIdField(body: unknown): unknown {
   return (body as { node_id?: unknown } | null | undefined)?.node_id;
 }
 

@@ -32,7 +32,7 @@ import {
   slicePage,
 } from "../../../test/e2e/mock/support.js";
 import { MISSING_BRANCH } from "./endpoints.js";
-import { classicViewOfRule } from "./graphql-rules.js";
+import { classicViewOfRule, RuleNode } from "./graphql-rules.js";
 
 /**
  * GitHub's fnmatch (Ruby's, FNM_PATHNAME) for classic rule patterns: `*` and `?` stop at a slash,
@@ -100,7 +100,8 @@ export function wildcardMatches(pattern: string, branch: string): boolean {
  * endpoint, so the flattener reads it like any other body.
  */
 function restViewOfRule(rule: Json): Json {
-  const view = classicViewOfRule(ruleWireNode(rule));
+  // The projection is parsed as the section parses a live node, so the mock cannot serve a shape the read refuses.
+  const view = classicViewOfRule(RuleNode.parse(ruleWireNode(rule)));
   const payload: Json = {};
   for (const [key, value] of Object.entries(view)) {
     if (key === "force_push_bypassers" || key === "required_deployments") {

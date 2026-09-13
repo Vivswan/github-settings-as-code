@@ -8,6 +8,7 @@ import { subsetDiff } from "../../../src/engine/diff.js";
 import {
   bypassActorStrings,
   classicViewOfRule,
+  RuleNode,
 } from "../../../src/sections/branches/graphql-rules.js";
 import { flattenProtection } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
@@ -277,7 +278,7 @@ describe("branch protection rule projections", () => {
       requiredDeploymentEnvironments: ["prod"],
     };
     const node = ruleFromProtection("main", protectionFromPut(payload), extras, "o/r");
-    const view = classicViewOfRule(node as Record<string, unknown>);
+    const view = classicViewOfRule(RuleNode.parse(node));
     expect(subsetDiff(payload, view, "protection")).toEqual([]);
     expect(view.force_push_bypassers).toEqual(["app/deploy-gate", "e2e-owner/platform", "octocat"]);
     expect(view.required_deployments).toEqual({ environments: ["prod"] });
@@ -292,11 +293,12 @@ describe("branch protection rule projections", () => {
       undefined,
       "o/r",
     );
-    expect(classicViewOfRule(node as Record<string, unknown>).required_signatures).toBe(true);
+    expect(classicViewOfRule(RuleNode.parse(node)).required_signatures).toBe(true);
   });
 
   test("a stored wildcard rule round-trips through ruleWireNode and the classic view", () => {
     const stored = completeRule({
+      id: "RULE:release/*",
       pattern: "release/*",
       isAdminEnforced: true,
       requiresStatusChecks: true,
@@ -304,7 +306,7 @@ describe("branch protection rule projections", () => {
       requiredStatusCheckContexts: ["ci"],
       bypassForcePushActors: ["octocat"],
     });
-    const view = classicViewOfRule(ruleWireNode(stored) as Record<string, unknown>);
+    const view = classicViewOfRule(RuleNode.parse(ruleWireNode(stored)));
     expect(view.enforce_admins).toBe(true);
     expect(view.required_status_checks).toEqual({ strict: true, contexts: ["ci"] });
     expect(view.force_push_bypassers).toEqual(["octocat"]);
@@ -313,7 +315,7 @@ describe("branch protection rule projections", () => {
 
   test("applyRuleInput decodes actor ids and mimics the environment silent drop", () => {
     const state = buildState({ environments: { prod: { name: "prod" } } }, "org");
-    const stored = completeRule({ pattern: "release/*" });
+    const stored = completeRule({ id: "RULE:release/*", pattern: "release/*" });
     const applied = applyRuleInput(
       stored,
       {
@@ -339,7 +341,7 @@ describe("branch protection rule projections", () => {
     // GitHub keeps only names of EXISTING environments and still succeeds; "ghost" must vanish so the
     // section's read-back check can catch it.
     expect(stored.requiredDeploymentEnvironments).toEqual(["prod"]);
-    expect(bypassActorStrings(ruleWireNode(stored) as Record<string, unknown>)).toEqual([
+    expect(bypassActorStrings(RuleNode.parse(ruleWireNode(stored)))).toEqual([
       "octocat",
       "e2e-owner/platform",
       "app/deploy-gate",
@@ -348,7 +350,7 @@ describe("branch protection rule projections", () => {
 
   test("applyRuleInput rejects an actor id the codec did not mint", () => {
     const state = buildState(undefined, "org");
-    const stored = completeRule({ pattern: "release/*" });
+    const stored = completeRule({ id: "RULE:release/*", pattern: "release/*" });
     const applied = applyRuleInput(stored, { bypassForcePushActorIds: ["MDQ6VXNlcjE="] }, state);
     expect(applied).toEqual({ bad: "MDQ6VXNlcjE=" });
   });

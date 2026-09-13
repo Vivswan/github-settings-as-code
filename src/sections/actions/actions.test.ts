@@ -255,6 +255,19 @@ describe("actions", () => {
     expect(roles(api)).toEqual([CACHE_STORAGE]);
   });
 
+  test("an unset limit answers {} (the spec marks the field optional): the declared value is drift, not a read failure", async () => {
+    const api = new MockApi({ [CACHE_RETENTION]: { data: {} } });
+    const result = await plan(api, { cache: { max_cache_retention_days: 3 } });
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "putCacheRetention",
+        [
+          "actions.cache.max_cache_retention_days: declared 3 but the API response has no such field (new or write-only field?)",
+        ],
+      ],
+    ]);
+  });
+
   test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
     // An `in`-based check would walk the prototype chain and let "constructor" silently no-op; an own "__proto__" key (JSON.parse creates one) is
     // unrecognized as well.
@@ -664,6 +677,31 @@ describe("actions snapshot", () => {
       notes: [],
     });
     expect(api.writes).toEqual([]);
+  });
+
+  test("an unset cache limit answering {} is left out of the cache key; the other limit still reads back", async () => {
+    const api = liveActions({
+      [BASE]: { enabled: true, allowed_actions: "all" },
+      [`${BASE}/workflow`]: {
+        default_workflow_permissions: "read",
+        can_approve_pull_request_reviews: false,
+      },
+      [`${BASE}/access`]: { access_level: "none" },
+      [`${BASE}/artifact-and-log-retention`]: { days: 90, maximum_allowed_days: 400 },
+      "/repos/o/r/actions/cache/retention-limit": {},
+      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 20 },
+      "/repos/o/r/actions/oidc/customization/sub": { use_default: true },
+      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+      [`${BASE}/fork-pr-workflows-private-repos`]: {
+        run_workflows_from_fork_pull_requests: false,
+        send_write_tokens_to_workflows: false,
+        send_secrets_and_variables: false,
+        require_approval_for_fork_pr_workflows: true,
+      },
+    });
+    const read = await snapshot(api);
+    expect(read.notes).toEqual([]);
+    expect(read.value?.cache).toEqual({ max_cache_size_gb: 20 });
   });
 
   test("under warn, a denied sub-read is a note naming its key with the read's own grant; the allowlist is skipped off the selected policy", async () => {
