@@ -117,7 +117,8 @@ describe("schema $schema hints", () => {
         if (!line.includes("yaml-language-server")) {
           continue;
         }
-        const url = line.match(/# yaml-language-server: \$schema=(\S+)/)?.[1];
+        // The language server reads the modeline only as a comment opening the line (indent aside, for the README's list nesting).
+        const url = line.match(/^\s*# yaml-language-server: \$schema=(\S+)/)?.[1];
         if (url === undefined) {
           problems.push(`${page.label}: unreadable modeline "${line.trim()}"`);
         } else if (url !== expectedHint) {

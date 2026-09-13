@@ -34,13 +34,15 @@ describe("the commit-back push jobs", () => {
       expect(pushes.length, `${file} has no git push step`).toBe(1);
       const [step] = pushes;
       expect(step?.env?.HEAD_SHA).toBeDefined();
-      // The command's words, line continuations joined; --force or -f beside the lease defeats it (git overrides the stale check).
+      // The command's words with continuations joined and shell quotes removed, as git receives them; --force or -f beside the lease
+      // defeats it (git overrides the stale check).
       const words = (step?.run ?? "")
         .replace(/\\\n/g, " ")
         .split("\n")
         .filter((line) => /\bgit push\b/.test(line))
-        .flatMap((line) => line.split(/[\s;&|()]+/));
-      expect(words).toContain(`--force-with-lease="refs/heads/\${HEAD_REF}:\${HEAD_SHA}"`);
+        .flatMap((line) => line.split(/[\s;&|()]+/))
+        .map((word) => word.replace(/["']/g, ""));
+      expect(words).toContain(`--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`);
       expect(words.filter((word) => word === "-f" || /^--force(?!-with-lease)/.test(word))).toEqual(
         [],
       );

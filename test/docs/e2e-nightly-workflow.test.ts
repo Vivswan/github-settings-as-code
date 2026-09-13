@@ -20,7 +20,6 @@ const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [
   ["nightly-fuzz.yml", "fuzz"],
 ];
 
-/** The job's fuzz-issue step in `mode`, or undefined. */
 const filerIn = (steps: Step[], mode: string) =>
   steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
 
@@ -40,7 +39,9 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     const dir = String(upload?.with?.path).replace(/\/$/, "");
     expect(dir).toBe(String(report?.with?.["artifacts-dir"]));
     // The runner joins the directory from ROOT and quoted segments; the workflow's path must be exactly those segments, in order.
-    const segments = dir.split("/").map((segment) => JSON.stringify(segment).replace(/\./g, "\\."));
+    const segments = dir
+      .split("/")
+      .map((segment) => JSON.stringify(segment).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     expect(RUNNER, `test/e2e/runner.ts never joins ${dir} under ROOT`).toMatch(
       new RegExp(`join\\(\\s*ROOT\\s*,\\s*${segments.join("\\s*,\\s*")}\\s*,\\s*\``),
     );
