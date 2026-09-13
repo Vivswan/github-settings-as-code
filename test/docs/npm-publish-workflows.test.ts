@@ -421,10 +421,10 @@ describe("the publish blocks under bash", () => {
     [
       "next: a publish verdict sets the version and publishes under next with the source as GITHUB_SHA",
       nextRun,
-      "publish 2.0.1-main.412.gb8df084",
+      "publish 2.0.1-main.446.20260913.gb8df084",
       {
         lines: [
-          "npm version 2.0.1-main.412.gb8df084 --no-git-tag-version (GITHUB_SHA=)",
+          "npm version 2.0.1-main.446.20260913.gb8df084 --no-git-tag-version (GITHUB_SHA=)",
           "npm pkg delete scripts.prepare (GITHUB_SHA=)",
           "npm publish --tag next (GITHUB_SHA=b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a)",
         ],
@@ -440,10 +440,10 @@ describe("the publish blocks under bash", () => {
     [
       "next: anything else fails the step",
       nextRun,
-      "2.0.1-main.412.gb8df084",
+      "2.0.1-main.446.20260913.gb8df084",
       {
         lines: [
-          "unexpected npm-verdict output: 2.0.1-main.412.gb8df084",
+          "unexpected npm-verdict output: 2.0.1-main.446.20260913.gb8df084",
           "::error::npm-verdict printed neither publish nor skip; see the line above.",
         ],
         status: 1,
