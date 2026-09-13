@@ -18,7 +18,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type PointerMove, PREPARATION_SCRIPTS } from "../../.github/scripts/release-pipeline.js";
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -167,6 +166,9 @@ export function manifestJson(
 ): string {
   return `${JSON.stringify({ name: "@scope/pkg", version, scripts }, null, 2)}\n`;
 }
+/** The six scripts pacote reads before it prepares a git dependency, spelled here so a name dropped from the
+ * pipeline's list would stay in a packaged manifest and fail the manifest assertion. */
+const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
 const FIXTURE_SCRIPTS = {
   ...Object.fromEntries(PREPARATION_SCRIPTS.map((name) => [name, `echo ${name}`])),
   test: "bun test",
@@ -184,11 +186,6 @@ function stripPrepare(cwd: string): void {
   }
   write(cwd, "package.json", `${JSON.stringify(pkg, null, 2)}\n`);
   git(cwd, "add", "package.json");
-}
-
-/** A planter strips the manifest as the pipeline does unless an explicit package.json says what the manifest is. */
-function shouldStripManifest(files: Record<string, unknown>): boolean {
-  return !("package.json" in files);
 }
 
 export function treePaths(cwd: string, sha: string): string[] {
@@ -315,15 +312,6 @@ export function originHolds(fx: Fixture, sha: string): boolean {
   }
 }
 
-/**
- * A verify checkout after main moved past the merge commit: a full clone without tags whose HEAD is the newer head,
- * so only the confirmation's own fetches supply the tags.
- */
-export function laterChecker(fx: Fixture, name: string): string {
-  pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
-  return clone(fx.root, fx.origin, name, { tags: false });
-}
-
 /** A depth-1 clone of origin's main: what a shallow checkout gives the pipeline. */
 export function shallowClone(fx: Fixture, name: string): string {
   const dir = join(fx.root, name);
@@ -382,7 +370,7 @@ export function plantCommitIn(
     }
     git(from, "add", "-f", file);
   }
-  if (shouldStripManifest(files)) {
+  if (!("package.json" in files)) {
     stripPrepare(from);
   }
   return git(
@@ -394,33 +382,12 @@ export function plantCommitIn(
   );
 }
 
-/** A package of `source` over `parent` with an EMPTY subtree at `empty/` beside the build outputs: invisible to a
- * path diff (no path lives in an empty tree), so only tree identity catches it. */
-function plantEmptySubtree(
-  fx: Fixture,
-  name: string,
-  source: string,
-  parent: string,
-  bundle: string,
-): { from: string; sha: string } {
-  const planted = plantCommit(fx, name, source, parent, builtFiles(bundle));
-  const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
-    cwd: planted.from,
-    input: "",
-    encoding: "utf8",
-  }).trim();
-  const entries = `${git(planted.from, "ls-tree", `${planted.sha}^{tree}`)}\n040000 tree ${emptyTree}\tempty\n`;
-  const tree = execFileSync("git", ["mktree"], {
-    cwd: planted.from,
-    input: entries,
-    encoding: "utf8",
-  }).trim();
-  const sha = git(planted.from, "commit-tree", tree, "-p", parent, "-m", "build: by hand");
-  return { from: planted.from, sha };
-}
+/** The refusal of a child that is not its source plus the build outputs alone, whatever deviates. */
+const NOT_A_PACKAGE =
+  /is not [0-9a-f]{40} plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, alone: its tree is [0-9a-f]{40}, the rebuilt one is [0-9a-f]{40} \(git diff [0-9a-f]{40} [0-9a-f]{40} lists what deviates\); /;
 
-/** A hand-planted commit under a packaged commit's name, and the refusal every path (a rerun, the major, verify)
- * answers with; the remedy tail differs per ref and is the caller's to check. */
+/** A hand-planted commit under a packaged commit's name, and the refusal every path (a rerun, the major) answers
+ * with; the remedy tail differs per ref and is the caller's to check. */
 export type PlantedPackage = (fx: Fixture) => { from: string; sha: string; error: RegExp };
 export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
   [
@@ -455,8 +422,7 @@ export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
         ...builtFiles("packaged-bundle-bytes-1\n"),
         "src/marker.ts": "export const marker = 666;\n",
       }),
-      error:
-        /is not [0-9a-f]{40} plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, alone: .*\(deviating paths: src\/marker\.ts\); /,
+      error: NOT_A_PACKAGE,
     }),
   ],
   [
@@ -466,15 +432,36 @@ export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
         ...builtFiles("packaged-bundle-bytes-1\n"),
         "package.json": manifestJson("2.1.0"),
       }),
-      error: /alone: .*\(deviating paths: package\.json\); /,
+      error: NOT_A_PACKAGE,
     }),
   ],
   [
     "a child carrying an empty subtree beyond the build outputs",
-    (fx) => ({
-      ...plantEmptySubtree(fx, "planter", fx.mergeSha, fx.mergeSha, "packaged-bundle-bytes-1\n"),
-      error: /alone: .*\(deviating paths: none a path diff can list, such as an empty subtree\); /,
-    }),
+    (fx) => {
+      // Invisible to a path diff (no path lives in an empty tree), so only tree identity catches it.
+      const planted = plantCommit(
+        fx,
+        "planter",
+        fx.mergeSha,
+        fx.mergeSha,
+        builtFiles("packaged-bundle-bytes-1\n"),
+      );
+      const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
+        cwd: planted.from,
+        input: "",
+        encoding: "utf8",
+      }).trim();
+      const tree = execFileSync("git", ["mktree"], {
+        cwd: planted.from,
+        input: `${git(planted.from, "ls-tree", `${planted.sha}^{tree}`)}\n040000 tree ${emptyTree}\tempty\n`,
+        encoding: "utf8",
+      }).trim();
+      return {
+        from: planted.from,
+        sha: git(planted.from, "commit-tree", tree, "-p", fx.mergeSha, "-m", "build: by hand"),
+        error: NOT_A_PACKAGE,
+      };
+    },
   ],
   [
     "a child without the library build",
@@ -500,38 +487,6 @@ export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
   ],
 ];
 
-/** The moves movePointer reports, as whole results. */
-export const movedTo = (ref: string, commit: string): PointerMove => ({
-  ref,
-  sha: commit,
-  changed: true,
-  reason: `${ref}: moved to ${commit}`,
-});
-export const alreadyAt = (ref: string, commit: string): PointerMove => ({
-  ref,
-  sha: commit,
-  changed: false,
-  reason: `${ref} already at ${commit}`,
-});
-export const alreadyPast = (
-  ref: string,
-  source: string,
-  at: string,
-  packaging: string,
-): PointerMove => ({
-  ref,
-  sha: at,
-  changed: false,
-  reason: `${ref} is already past ${source} (at ${at}, packaging ${packaging}); the newer run moved it`,
-});
-export const replaced = (ref: string, commit: string, old: string): PointerMove => ({
-  ref,
-  sha: commit,
-  changed: true,
-  replaced: old,
-  reason: `${ref}: moved to ${commit}, replacing ${old}, which was no package of a main commit (a hand push, or a commit of the retired build chain)`,
-});
-
 /** A packaged commit as another run would mint it for `source` with `bundle`: its child, the pipeline's tree. */
 export function rivalPackage(
   fx: Fixture,
@@ -551,31 +506,21 @@ export type PushPlan =
   /** Replay a remote a file:// origin cannot play: this stderr, this exit status. */
   | { fail: { stderr: string; status: number } };
 
-/** What the shim does to the pipeline's remote reads and writes. */
-export interface RemotePlans {
-  /** The n-th push's plan, or null to let it through. */
-  pushes?: (PushPlan | null)[];
-  /** Run this shell ONCE, right after the first ls-remote whose arguments include `naming`: a rival landing between
-   * that read and the write it informs. */
-  afterLsRemote?: { naming: string; script: string };
-}
-
-/** Run `body` with the shim playing `plans` against the pipeline's pushes, in order; the pushes it attempted, as logged. */
+/** Run `body` with the shim playing `plans` against the pipeline's pushes, in order, and `afterLsRemote`'s shell
+ * ONCE right after the first ls-remote whose arguments include `naming` (a rival landing between that read and the
+ * write it informs); the pushes the pipeline attempted, as logged. */
 export function withPushPlans(
   fx: Fixture,
   plans: (PushPlan | null)[],
   body: () => void,
+  afterLsRemote?: { naming: string; script: string },
 ): string[][] {
-  return withRemotePlans(fx, { pushes: plans }, body);
-}
-
-export function withRemotePlans(fx: Fixture, remote: RemotePlans, body: () => void): string[][] {
   const plansDir = mkdtempSync(join(fx.root, "push-plans-"));
-  if (remote.afterLsRemote !== undefined) {
-    writeFileSync(join(plansDir, "after-ls-remote.naming"), `${remote.afterLsRemote.naming}\n`);
-    writeFileSync(join(plansDir, "after-ls-remote.sh"), remote.afterLsRemote.script);
+  if (afterLsRemote !== undefined) {
+    writeFileSync(join(plansDir, "after-ls-remote.naming"), `${afterLsRemote.naming}\n`);
+    writeFileSync(join(plansDir, "after-ls-remote.sh"), afterLsRemote.script);
   }
-  for (const [index, plan] of (remote.pushes ?? []).entries()) {
+  for (const [index, plan] of plans.entries()) {
     if (plan === null) {
       continue;
     }

@@ -10,9 +10,9 @@
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone:
- * forward along main, under a compare-and-set on the value origin advertised, never back and never sideways. The
- * `build` branch that carried a chain of packaged commits before the tags is history: this script never reads it,
- * and the owner deletes it once every consumer has repinned.
+ * forward along main, under a compare-and-set on the value origin advertised, never back. The `build` branch that
+ * carried a chain of packaged commits before the tags is history: this script never reads it, and the owner
+ * deletes it once every consumer has repinned.
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off); one subcommand runs
  * per workflow step:
@@ -23,7 +23,6 @@
  *   npm-confirm next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
- *   verify                         update-release.yml      TAG, GITHUB_SHA
  *   anchor                         update-release-pr.yml   GITHUB_SHA
  *   boundary-check, anchor-check   checks.yml              (the checkout alone)
  *
@@ -45,7 +44,7 @@ const REQUIRED_BUILT_FILES = ["lib/index.js", "lib/pkg/index.js"] as const;
 const PACKAGED = "lib/index.js and lib/pkg/";
 const LATEST_REF = "refs/tags/latest";
 const BUILD_TAG_PREFIX = "refs/tags/build/";
-const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.([0-9a-f]{7})$/;
+const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;
 /** How many build tags stay; releases and latest keep their own commits. */
 export const KEPT_BUILD_TAGS = 10;
 /** Never --depth: a depth-limited fetch marks the commit it lands on shallow and cuts the parent link every package
@@ -111,15 +110,12 @@ function tryGit(cwd: string, ...args: string[]): string | null {
 
 /** A push as git ran it. A refusal is never read from git's words: the caller re-reads origin, and a ref that
  * moved since it was observed is a lost compare-and-set to retry, an unmoved one a refusal to throw. */
-function push(
-  cwd: string,
-  ...pushArgs: string[]
-): { landed: true } | { landed: false; error: Error } {
+function push(cwd: string, ...pushArgs: string[]): Error | null {
   try {
     execFileSync("git", ["push", ...pushArgs], { cwd, encoding: "utf8" });
-    return { landed: true };
+    return null;
   } catch (error) {
-    return { landed: false, error: gitFailure(["push", ...pushArgs], error) };
+    return gitFailure(["push", ...pushArgs], error);
   }
 }
 
@@ -166,15 +162,9 @@ function resolveCommit(cwd: string, name: string): string | null {
   return gitOrNo(cwd, "rev-parse", "--verify", "--quiet", `${name}^{commit}`);
 }
 
-/** Each of `files` as a non-empty REGULAR file: a symlink or a gitlink at that path has a size too, and no build. */
-function assertCarries(
-  cwd: string,
-  treeish: string,
-  files: readonly string[],
-  what: string,
-  remedy: string,
-): void {
-  for (const file of files) {
+/** The required build files as non-empty REGULAR files: a symlink or a gitlink at that path has a size too, and no build. */
+function assertCarries(cwd: string, treeish: string, what: string, remedy: string): void {
+  for (const file of REQUIRED_BUILT_FILES) {
     // ls-tree answers a missing path with empty output and exit 0; a failing call must propagate.
     const entry = git(cwd, "ls-tree", "-l", treeish, "--", file);
     const [mode = "", , , size] = entry.split(/\s+/);
@@ -188,14 +178,7 @@ function assertCarries(
 
 /** The scripts npm's git fetcher (pacote) takes as a signal to run `npm install --include=dev` and the prepare
  * lifecycle in a `github:` dependency's checkout; the packaged commit ships the build already. */
-export const PREPARATION_SCRIPTS = [
-  "prepare",
-  "prepack",
-  "build",
-  "preinstall",
-  "install",
-  "postinstall",
-];
+const PREPARATION_SCRIPTS = ["prepare", "prepack", "build", "preinstall", "install", "postinstall"];
 
 /** sourceSha's tree plus `addBuild`'s entries, with package.json's preparation scripts removed, assembled in a
  * private index so nothing else can enter and the checkout's own index stays untouched. */
@@ -245,7 +228,7 @@ function assertPackageOf(
   const parents = git(cwd, "log", "-1", "--format=%P", packaged).split(" ").filter(Boolean);
   if (parents.length !== 1 || parents[0] !== sourceSha) {
     throw new Error(
-      `${what} has ${parents.length === 0 ? "no parent" : `parent${parents.length > 1 ? "s" : ""} ${parents.join(", ")}`}, so it is no package of ${sourceSha} (a packaged commit is that commit's child); ${remedy}`,
+      `${what} has ${parents.length === 0 ? "no parent" : `parent ${parents.join(", ")}`}, so it is no package of ${sourceSha} (a packaged commit is that commit's child); ${remedy}`,
     );
   }
   const actual = git(cwd, "rev-parse", `${packaged}^{tree}`);
@@ -253,7 +236,7 @@ function assertPackageOf(
     return;
   }
   // Rebuilt from the source with the packaged commit's own build entries: tree identity, so an empty subtree a
-  // path diff cannot list still differs. The diff against the rebuilt tree names exactly what deviates.
+  // path diff cannot list still differs.
   const entries = git(cwd, "ls-tree", "-r", packaged, "--", ...PACKAGED_PATHS)
     .split("\n")
     .filter(Boolean);
@@ -265,14 +248,11 @@ function assertPackageOf(
     }
   });
   if (actual !== expected) {
-    const deviating = git(cwd, "diff", "--no-renames", "--name-only", expected, packaged)
-      .split("\n")
-      .filter(Boolean);
     throw new Error(
-      `${what} is not ${sourceSha} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, alone: its tree is ${actual}, the rebuilt one is ${expected} (deviating paths: ${deviating.length === 0 ? "none a path diff can list, such as an empty subtree" : deviating.join(", ")}); ${remedy}`,
+      `${what} is not ${sourceSha} plus ${PACKAGED}, minus ${MANIFEST}'s preparation scripts, alone: its tree is ${actual}, the rebuilt one is ${expected} (git diff ${expected} ${packaged} lists what deviates); ${remedy}`,
     );
   }
-  assertCarries(cwd, packaged, REQUIRED_BUILT_FILES, what, remedy);
+  assertCarries(cwd, packaged, what, remedy);
   if (built !== undefined) {
     throw new Error(
       `${what} packages ${sourceSha}, but its tree ${actual} is not the tree ${built} this checkout's build packages, so the two differ under ${PACKAGED}: either the commit was not built from this source or the build is not reproducible. Diff the two trees by hand; ${remedy}`,
@@ -287,22 +267,20 @@ function builtTree(cwd: string, sourceSha: string): string {
   if (head !== sourceSha) {
     throw new Error(`the checkout is at ${head}, not the source commit ${sourceSha} to package.`);
   }
-  for (const file of REQUIRED_BUILT_FILES) {
-    if (!existsSync(join(cwd, file))) {
-      throw new Error(`${file} is not built; run the build before packaging.`);
-    }
-  }
   const dirty = git(cwd, "status", "--porcelain").split("\n").filter(Boolean);
   if (dirty.length > 0) {
     throw new Error(
       `the worktree has pending changes beyond ${PACKAGED} (${dirty.join("; ")}); the build must be a build of ${sourceSha} alone - commit, stash, or clean them first.`,
     );
   }
-  // -f: main gitignores the build outputs
-  const tree = packagedTreeOf(cwd, sourceSha, (env) =>
-    gitWithEnv(cwd, env, "add", "-f", "--", ...PACKAGED_PATHS),
-  );
-  assertCarries(cwd, tree, REQUIRED_BUILT_FILES, tree, "run the build before packaging.");
+  // -f: main gitignores the build outputs; a path the build left out is reported by the carry check, not by git add.
+  const built = PACKAGED_PATHS.filter((path) => existsSync(join(cwd, path)));
+  const tree = packagedTreeOf(cwd, sourceSha, (env) => {
+    if (built.length > 0) {
+      gitWithEnv(cwd, env, "add", "-f", "--", ...built);
+    }
+  });
+  assertCarries(cwd, tree, `the build of ${sourceSha}`, "run the build before packaging.");
   return tree;
 }
 
@@ -312,7 +290,8 @@ function fetchMainHead(cwd: string): string {
   return git(cwd, "rev-parse", "FETCH_HEAD");
 }
 
-function assertOnMain(cwd: string, sourceSha: string, mainHead: string, refusal: string): void {
+function assertOnMain(cwd: string, sourceSha: string, refusal: string): void {
+  const mainHead = fetchMainHead(cwd);
   if (!isAncestor(cwd, sourceSha, mainHead)) {
     throw new Error(
       `${sourceSha} is not on origin's main (its head is ${mainHead}); refusing to ${refusal}.`,
@@ -346,29 +325,18 @@ function fetchObserved(cwd: string, ref: string, observedId: string): boolean {
     if (observeRemote(cwd, ref).id === observedId) {
       throw error;
     }
-    console.error(`${ref} changed while this run read it; reading it again`);
     return false;
   }
-  if (git(cwd, "rev-parse", ref) !== observedId) {
-    console.error(`${ref} moved while this run read it; reading it again`);
-    return false;
-  }
-  return true;
-}
-
-/** The tag a main commit's package lives under. Both parts are the commit's own, so every run for one commit names
- * one tag: a rerun finds it and verifies, and two runs racing for it create it once. */
-export function buildTagRef(cwd: string, sourceSha: string): string {
-  return `${BUILD_TAG_PREFIX}${mainPosition(cwd, sourceSha).count}.${sourceSha.slice(0, 7)}`;
+  return git(cwd, "rev-parse", ref) === observedId;
 }
 
 /** A packaged commit and the main commit it packages (its parent). */
-export interface Packaged {
+interface Packaged {
   commit: string;
   source: string;
 }
 
-export interface EnsuredTag extends Packaged {
+interface EnsuredTag extends Packaged {
   created: boolean;
   ref: string;
 }
@@ -395,14 +363,13 @@ function ensureTag(
       return { created: false, ref, commit: observed.peeled, source };
     }
     const commit = mint();
-    const pushed = push(cwd, "origin", `${commit}:${ref}`);
-    if (pushed.landed) {
+    const refused = push(cwd, "origin", `${commit}:${ref}`);
+    if (refused === null) {
       return { created: true, ref, commit, source };
     }
     if (observeRemote(cwd, ref).id === "") {
-      throw pushed.error;
+      throw refused;
     }
-    console.error(`${ref} was created by another run while this one packaged; verifying it`);
   }
   throw new Error(
     `${ref} kept changing under this run through ${PUSH_ATTEMPTS} reads; something keeps creating and deleting it - rerun this job once it settles.`,
@@ -412,9 +379,10 @@ function ensureTag(
 const BUILD_REMEDY =
   "no run replaces a packaged commit it did not mint; if the build is wrong, delete the tag by hand and rerun.";
 
-/** sourceSha's packaged commit under its build tag: this checkout's build `tree` as the source's child, minted once. */
+/** sourceSha's packaged commit under its build tag: this checkout's build `tree` as the source's child, minted once.
+ * Both parts of the name are the commit's own, so every run for one commit names one tag. */
 function ensurePackaged(cwd: string, sourceSha: string, tree: string, runUrl?: string): EnsuredTag {
-  const ref = buildTagRef(cwd, sourceSha);
+  const ref = `${BUILD_TAG_PREFIX}${mainPosition(cwd, sourceSha).count}.${sourceSha.slice(0, 7)}`;
   return ensureTag(
     cwd,
     ref,
@@ -435,45 +403,28 @@ function ensurePackaged(cwd: string, sourceSha: string, tree: string, runUrl?: s
   );
 }
 
-/**
- * The build tags beyond the `keep` newest by position, deleted in one push. Every name is held to main first (the
- * commit at that first-parent position starts with the sha7), or a hand-made `build/999999.deadbee` would sort
- * newest and push a genuine tag out of the window; main's head is read AFTER the tags, so a tag a newer commit's run
- * just minted has its commit on main. Two runs pruning at once commute: the server answers the deletion of a ref a
- * rival deleted first with a warning, not a refusal.
- */
+/** The build tags beyond the `keep` newest by position, deleted in one push. Two runs pruning at once commute: the
+ * server answers the deletion of a ref a rival deleted first with a warning, not a refusal. A ref under build/ this
+ * pipeline would not name stops the prune: sorted in, it could push a genuine tag out of the window. */
 export function pruneBuildTags(cwd: string, keep = KEPT_BUILD_TAGS): string[] {
-  const advertised = git(cwd, "ls-remote", "origin", `${BUILD_TAG_PREFIX}*`).split("\n");
-  const mainHead = fetchMainHead(cwd);
-  const headPosition = mainPosition(cwd, mainHead).count;
-  const tags: { ref: string; position: number }[] = [];
-  for (const line of advertised) {
-    const ref = line.split("\t")[1];
-    if (!ref || ref.endsWith("^{}")) {
-      continue;
-    }
-    const match = ref.match(BUILD_TAG);
-    const position = Number(match?.[1]);
-    const named =
-      match && position <= headPosition
-        ? git(cwd, "rev-parse", `${mainHead}~${headPosition - position}`)
-        : null;
-    if (named === null || !named.startsWith(match?.[2] ?? "")) {
-      throw new Error(
-        `origin holds ${ref}, which names no commit on main at that position (${named === null ? "beyond main's head" : `main holds ${named} there`}); a build tag this pipeline mints is build/<position>.<sha7> of a main commit - delete it by hand.`,
-      );
-    }
-    tags.push({ ref, position });
-  }
-  const refs = tags
+  const refs = git(cwd, "ls-remote", "origin", `${BUILD_TAG_PREFIX}*`)
+    .split("\n")
+    .map((line) => line.split("\t")[1] ?? "")
+    .filter((ref) => ref !== "" && !ref.endsWith("^{}"))
+    .map((ref) => {
+      const position = Number(ref.match(BUILD_TAG)?.[1]);
+      if (Number.isNaN(position)) {
+        throw new Error(
+          `origin holds ${ref}, which is not a build/<position>.<sha7> tag this pipeline names; delete it by hand.`,
+        );
+      }
+      return { ref, position };
+    })
     .sort((a, b) => b.position - a.position || a.ref.localeCompare(b.ref))
     .slice(keep)
     .map((tag) => tag.ref);
   if (refs.length > 0) {
-    const pushed = push(cwd, "origin", ...refs.map((ref) => `:${ref}`));
-    if (!pushed.landed) {
-      throw pushed.error;
-    }
+    git(cwd, "push", "origin", ...refs.map((ref) => `:${ref}`));
   }
   return refs;
 }
@@ -484,22 +435,16 @@ export interface PointerMove {
   sha: string;
   changed: boolean;
   reason: string;
-  /** Set when the value replaced was no package of a main commit: a hand push, or a commit of the retired chain. */
-  replaced?: string;
 }
 
 /**
- * The one way a pointer (latest, vX) moves: forward along main, never back, never sideways. A pointer's source is its
- * commit's parent when that parent is on main; the candidate's source is on main by its caller's check.
+ * The one way a pointer (latest, vX) moves: forward along main, never back. A pointer's source is its commit's
+ * parent when that parent is on main; the candidate's source is on main by its caller's check.
  *
- *   no pointer yet                                  -> created, under a lease on "absent"
- *   same commit                                     -> left, already there
- *   same source, same tree, another commit          -> left: the same package, minted twice
- *   same source, another tree                       -> refused: two builds of one main commit
- *   candidate's source descends from the pointer's  -> moved, under a lease on the value observed
- *   pointer's source descends from the candidate's  -> left: a rerun of an older commit's run
- *   pointer's source unknown (off main, a root)     -> moved and reported: a value this pipeline did not mint
- *   neither                                         -> refused: the candidate's source is off the pointer's line
+ *   pointer's source is the candidate's or descends from it  -> left: the same package (another commit of it too), or a rerun of an older commit's run
+ *   same source, another tree                                -> refused: two builds of one main commit
+ *   pointer's source unknown (off main, a root)              -> moved: a value this pipeline did not mint
+ *   otherwise                                                -> moved, under a lease on the value observed
  *
  * A value left in place must be a package of the commit it is read as packaging, or a hand-pushed bare child of a
  * newer commit would stand as "already past". Main's head is read AFTER the pointer on every pass: a pointer a rival
@@ -510,94 +455,59 @@ export function movePointer(cwd: string, ref: string, candidate: Packaged): Poin
   for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
     const observed = observeRemote(cwd, ref);
     const at = observed.peeled;
-    let replaced: string | undefined;
     if (observed.id !== "") {
-      if (at === candidate.commit) {
-        return { ref, sha: at, changed: false, reason: `${ref} already at ${at}` };
-      }
       if (!fetchObserved(cwd, ref, observed.id)) {
         continue;
       }
       const mainHead = fetchMainHead(cwd);
       const parents = git(cwd, "log", "-1", "--format=%P", at).split(" ").filter(Boolean);
-      const current =
-        parents.length === 1 && isAncestor(cwd, parents[0] ?? "", mainHead)
-          ? parents[0]
-          : undefined;
-      const kept = (reason: string): PointerMove => {
-        assertPackageOf(cwd, at, current ?? "", `${ref} (${at})`, "inspect it by hand.");
-        return { ref, sha: at, changed: false, reason };
-      };
-      if (current === undefined) {
-        replaced = at;
-      } else if (current === candidate.source) {
-        assertPackageOf(cwd, at, current, `${ref} (${at})`, "inspect it by hand.");
-        if (
-          git(cwd, "rev-parse", `${at}^{tree}`) !==
-          git(cwd, "rev-parse", `${candidate.commit}^{tree}`)
-        ) {
-          throw new Error(
-            `${ref} is at ${at}, another package of ${candidate.source} than ${candidate.commit} with another tree; two builds of one main commit exist - inspect both by hand.`,
-          );
+      const current = parents.length === 1 ? parents[0] : undefined;
+      // The unknown-source arm moves over the retired chain's tip on the first run after landing; it goes once that run is history.
+      if (current !== undefined && isAncestor(cwd, current, mainHead)) {
+        if (isAncestor(cwd, candidate.source, current)) {
+          assertPackageOf(cwd, at, current, `${ref} (${at})`, "inspect it by hand.");
+          if (
+            current === candidate.source &&
+            git(cwd, "rev-parse", `${at}^{tree}`) !==
+              git(cwd, "rev-parse", `${candidate.commit}^{tree}`)
+          ) {
+            throw new Error(
+              `${ref} is at ${at}, another package of ${candidate.source} than ${candidate.commit} with another tree; two builds of one main commit exist - inspect both by hand.`,
+            );
+          }
+          return {
+            ref,
+            sha: at,
+            changed: false,
+            reason: `${ref} already at ${at}, packaging ${current}, which is ${candidate.source} or past it`,
+          };
         }
-        return {
-          ref,
-          sha: at,
-          changed: false,
-          reason: `${ref} already at ${at}, another commit of the same package of ${candidate.source}`,
-        };
-      } else if (isAncestor(cwd, candidate.source, current)) {
-        return kept(
-          `${ref} is already past ${candidate.source} (at ${at}, packaging ${current}); the newer run moved it`,
-        );
-      } else if (!isAncestor(cwd, current, candidate.source)) {
-        throw new Error(
-          `${ref} is at ${at}, packaging ${current}, and ${candidate.source} is on neither side of it on main; refusing to move ${ref} off main's line - inspect it by hand.`,
-        );
       }
     }
-    const pushed = push(
+    const refused = push(
       cwd,
       `--force-with-lease=${ref}:${observed.id}`,
       "origin",
       `${candidate.commit}:${ref}`,
     );
-    if (pushed.landed) {
-      return replaced === undefined
-        ? {
-            ref,
-            sha: candidate.commit,
-            changed: true,
-            reason: `${ref}: moved to ${candidate.commit}`,
-          }
-        : {
-            ref,
-            sha: candidate.commit,
-            changed: true,
-            replaced,
-            reason: `${ref}: moved to ${candidate.commit}, replacing ${replaced}, which was no package of a main commit (a hand push, or a commit of the retired build chain)`,
-          };
+    if (refused === null) {
+      return {
+        ref,
+        sha: candidate.commit,
+        changed: true,
+        reason: `${ref}: moved to ${candidate.commit}${at === "" ? "" : ` from ${at}`}`,
+      };
     }
     if (observeRemote(cwd, ref).id === observed.id) {
-      throw pushed.error;
+      throw refused;
     }
-    console.error(`${ref} lease attempt ${attempt}/${PUSH_ATTEMPTS} overtaken; re-reading it`);
   }
   throw new Error(
     `could not move ${ref} after ${PUSH_ATTEMPTS} compare-and-swap attempts; something keeps moving it concurrently - rerun this job once it settles.`,
   );
 }
 
-/** A move as the workflow log shows it; a value replaced that this pipeline did not mint is a warning, printed on
- * stdout where the runner reads commands and nothing else of these subcommands prints. */
-function reportMove(move: PointerMove): void {
-  console.error(move.reason);
-  if (move.replaced !== undefined) {
-    console.log(`::warning::${move.reason}`);
-  }
-}
-
-export interface PackageCommitOptions {
+interface PackageCommitOptions {
   cwd: string;
   /** The green main commit this run judged; the checkout must be at it with the bundle built. */
   sourceSha: string;
@@ -605,11 +515,10 @@ export interface PackageCommitOptions {
   runUrl?: string;
 }
 
-export interface PackageCommitResult extends EnsuredTag {
+interface PackageCommitResult extends EnsuredTag {
   /** The build tags this run deleted, beyond the kept window. */
   pruned: string[];
   latest: PointerMove;
-  reason: string;
 }
 
 /** The green push's step: the commit's package under its build tag, the window pruned, latest moved forward. */
@@ -621,19 +530,13 @@ export function packageCommit(options: PackageCommitOptions): PackageCommitResul
     "the commit's position on main and whether latest's source lies on its history cannot be judged on a truncated one.",
   );
   const tree = builtTree(cwd, sourceSha);
-  assertOnMain(cwd, sourceSha, fetchMainHead(cwd), "package a commit main does not hold");
+  assertOnMain(cwd, sourceSha, "package a commit main does not hold");
   const packaged = ensurePackaged(cwd, sourceSha, tree, runUrl);
   const pruned = pruneBuildTags(cwd);
-  const latest = movePointer(cwd, LATEST_REF, packaged);
-  const minted = packaged.created
-    ? `${packaged.ref}: created at ${packaged.commit}`
-    : `${packaged.ref} already packages ${sourceSha} at ${packaged.commit}`;
-  const pruning =
-    pruned.length === 0 ? "no build tag beyond the window" : `pruned ${pruned.join(", ")}`;
-  return { ...packaged, pruned, latest, reason: `${minted}; ${pruning}; ${latest.reason}` };
+  return { ...packaged, pruned, latest: movePointer(cwd, LATEST_REF, packaged) };
 }
 
-export interface PackageOptions {
+interface PackageOptions {
   cwd: string;
   tag: string;
   /** The release's merge commit, resolved from the draft (not necessarily this run's own push); the tag's recorded source. */
@@ -642,7 +545,7 @@ export interface PackageOptions {
   runUrl?: string;
 }
 
-export interface PackagedRelease {
+interface PackagedRelease {
   created: boolean;
   packagedSha: string;
   /** The build tags this run deleted, beyond the kept window. */
@@ -679,12 +582,7 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
       `tag ${tag} does not match the manifest version ${JSON.stringify(manifest)} at ${sourceSha}; refusing to package a version this source did not release.`,
     );
   }
-  assertOnMain(
-    cwd,
-    sourceSha,
-    fetchMainHead(cwd),
-    "package, tag, or publish a commit main does not hold",
-  );
+  assertOnMain(cwd, sourceSha, "package, tag, or publish a commit main does not hold");
   const ref = `refs/tags/${tag}`;
   const tagged = ensureTag(
     cwd,
@@ -694,17 +592,21 @@ export function packageRelease(options: PackageOptions): PackagedRelease {
     (peeled) => assertPackageOf(cwd, peeled, sourceSha, `${ref} (${peeled})`, FROZEN, tree),
   );
   const pruned = pruneBuildTags(cwd);
-  const latest = movePointer(cwd, LATEST_REF, tagged);
-  return { created: tagged.created, packagedSha: tagged.commit, pruned, latest };
+  return {
+    created: tagged.created,
+    packagedSha: tagged.commit,
+    pruned,
+    latest: movePointer(cwd, LATEST_REF, tagged),
+  };
 }
 
-export interface RetagMajorOptions {
+interface RetagMajorOptions {
   cwd: string;
   tag: string;
   sourceSha: string;
 }
 
-export interface RetaggedMajor {
+interface RetaggedMajor {
   major: string;
   packagedSha: string;
   move: PointerMove;
@@ -723,57 +625,11 @@ export function retagMajor(options: RetagMajorOptions): RetaggedMajor {
   const ref = `refs/tags/${tag}`;
   git(cwd, "fetch", "--quiet", ...TAG_FETCH, "origin", `+${ref}:${ref}`);
   const packagedSha = git(cwd, "rev-parse", `${ref}^{}`);
-  assertOnMain(cwd, sourceSha, fetchMainHead(cwd), "bless a release main does not hold");
+  assertOnMain(cwd, sourceSha, "bless a release main does not hold");
   assertPackageOf(cwd, packagedSha, sourceSha, `${ref} (${packagedSha})`, FROZEN);
   const major = releaseMajor(tag);
   const move = movePointer(cwd, `refs/tags/${major}`, { commit: packagedSha, source: sourceSha });
   return { major, packagedSha, move };
-}
-
-export interface VerifyOptions {
-  cwd: string;
-  tag: string;
-  sourceSha: string;
-}
-
-/** Origin's version tag and major, read afresh (the + refspec overwrites whatever this clone held): both name one
- * packaged commit of the merge commit. */
-export function verifyPublishedRefs(options: VerifyOptions): {
-  major: string;
-  packagedSha: string;
-} {
-  const { cwd, tag, sourceSha } = options;
-  assertFullHistory(
-    cwd,
-    "verify",
-    "whether the release lies on main cannot be judged on a truncated one.",
-  );
-  const major = releaseMajor(tag);
-  git(
-    cwd,
-    "fetch",
-    "--quiet",
-    ...TAG_FETCH,
-    "origin",
-    `+refs/tags/${tag}:refs/tags/${tag}`,
-    `+refs/tags/${major}:refs/tags/${major}`,
-  );
-  const packagedSha = git(cwd, "rev-parse", `refs/tags/${tag}^{}`);
-  assertOnMain(cwd, sourceSha, fetchMainHead(cwd), "confirm a release main does not hold");
-  assertPackageOf(
-    cwd,
-    packagedSha,
-    sourceSha,
-    `origin's refs/tags/${tag} (${packagedSha})`,
-    FROZEN,
-  );
-  const majorSha = git(cwd, "rev-parse", `refs/tags/${major}^{}`);
-  if (majorSha !== packagedSha) {
-    throw new Error(
-      `origin's refs/tags/${major} points at ${majorSha}, not this release's packaged commit ${packagedSha}; if a newer release moved it during this run, this is stale-run noise - otherwise inspect both tags by hand.`,
-    );
-  }
-  return { major, packagedSha };
 }
 
 /** checks.yml's head_ref conditions spell this by hand; test/docs/checks-workflow.test.ts pins them to it. */
@@ -844,12 +700,12 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
     if (headNow !== sourceSha) {
       return { changed: false, reason: `main moved to ${headNow ?? "?"}; the newer run anchors` };
     }
-    const pushed = push(cwd, "origin", `HEAD:${branchRef}`);
-    if (pushed.landed) {
+    const refused = push(cwd, "origin", `HEAD:${branchRef}`);
+    if (refused === null) {
       return { changed: true, reason: `${RELEASE_PR_BRANCH}: anchored at ${sourceSha}` };
     }
     if ((git(cwd, "ls-remote", "origin", branchRef).split("\t")[0] ?? "") === observed) {
-      throw pushed.error;
+      throw refused;
     }
     // release-please force-pushed a refresh mid-anchor; reapply on it.
     console.error(
@@ -946,8 +802,6 @@ function manifestVersionAt(cwd: string, treeish: string): string {
   return String(manifest["."]);
 }
 
-/** Where a commit sits on main, read from a full checkout: the two identifiers that order its pre-release
- * version. Both are the commit's own, so every run for one commit mints one version string. */
 export interface MainPosition {
   /** Commits reachable from it along first parents: one more per merge to main, whatever a merged PR's branch held. */
   count: number;
@@ -994,11 +848,6 @@ export function prereleaseVersion(
       `the commit count ${JSON.stringify(position.count)} is not a positive integer; refusing to mint a pre-release version from it.`,
     );
   }
-  if (!/^\d{8}$/.test(position.date)) {
-    throw new Error(
-      `the commit date ${JSON.stringify(position.date)} is not YYYYMMDD; refusing to mint a pre-release version from it.`,
-    );
-  }
   if (!FULL_SHA.test(sourceSha)) {
     throw new Error(
       `the source ${JSON.stringify(sourceSha)} is not a full commit sha; refusing to mint a pre-release version from it.`,
@@ -1024,7 +873,6 @@ function assertCheckoutAt(cwd: string, sourceSha: string): void {
   }
 }
 
-/** prereleaseVersion for the checkout: the manifest is read at sourceSha, which HEAD must be. */
 export function prereleaseVersionOf(options: PrereleaseVersionOptions): string {
   const { cwd, sourceSha } = options;
   assertCheckoutAt(cwd, sourceSha);
@@ -1043,7 +891,6 @@ interface MintedVersion {
   sha7: string | null;
 }
 
-/** The two version shapes this pipeline mints, or null for anything else (a hand-published 2.0.1-beta.1). */
 function mintedVersion(version: string): MintedVersion | null {
   const match = version.match(
     /^(\d+)\.(\d+)\.(\d+)(?:-main\.(?:(?:0|[1-9]\d*)\.)+g([0-9a-f]{7}))?$/,
@@ -1066,18 +913,9 @@ function parseMinted(version: string): MintedVersion {
   return minted;
 }
 
-/** How npm orders two releases: by major, minor, patch. */
-export function releaseOrder(a: string, b: string): "newer" | "same" | "older" {
-  const left = parseMinted(a).release;
-  const right = parseMinted(b).release;
-  for (let i = 0; i < 3; i++) {
-    const l = left[i] ?? 0;
-    const r = right[i] ?? 0;
-    if (l !== r) {
-      return l > r ? "newer" : "older";
-    }
-  }
-  return "same";
+/** Whether release `a` sorts above `b`: by major, minor, patch. */
+function newerRelease(a: [number, number, number], b: [number, number, number]): boolean {
+  return a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
 }
 
 /** What the registry holds for the package: every published version, and where each dist-tag points. */
@@ -1086,10 +924,11 @@ export interface Packument {
   "dist-tags": Record<string, string>;
 }
 
-export type PublishVerdict = {
-  /** Published pre-releases the verdict set aside, one line each: a source the checkout cannot place. */
-  notices: string[];
-} & ({ publish: true; version: string } | { publish: false; version: string; reason: string });
+export type PublishVerdict =
+  | { publish: true; version: string }
+  | { publish: false; version: string; reason: string };
+/** The next channel's verdict also carries, one line each, the published pre-releases it set aside: a source the checkout cannot place. */
+export type NextVerdict = PublishVerdict & { notices: string[] };
 
 /** A published pre-release whose source is a strict descendant of this run's: newer on main, whatever its numbers say. */
 interface Descendant {
@@ -1100,7 +939,7 @@ interface Descendant {
 
 /** The published pre-releases placed against this run's source by ancestry: the descendants, the one furthest along
  * main, and a notice for each the checkout cannot place (a sha it lacks, or one off the source's line of main). */
-function placePublished(
+function descendantsOf(
   cwd: string,
   sourceSha: string,
   packument: Packument,
@@ -1143,7 +982,7 @@ export function nextPublishVerdict(
   sourceSha: string,
   version: string,
   packument: Packument | null,
-): PublishVerdict {
+): NextVerdict {
   if (packument === null) {
     return { publish: true, version, notices: [] };
   }
@@ -1155,7 +994,7 @@ export function nextPublishVerdict(
       notices: [],
     };
   }
-  const { newest: newer, notices } = placePublished(cwd, sourceSha, packument);
+  const { newest: newer, notices } = descendantsOf(cwd, sourceSha, packument);
   if (newer !== null) {
     return {
       publish: false,
@@ -1175,33 +1014,28 @@ export function nextPublishVerdict(
  */
 export function stablePublishVerdict(version: string, packument: Packument | null): PublishVerdict {
   if (packument === null) {
-    return { publish: true, version, notices: [] };
+    return { publish: true, version };
   }
   if (version in packument.versions) {
     return {
       publish: false,
       version,
       reason: `${version} is already on the registry`,
-      notices: [],
     };
   }
   const latest = packument["dist-tags"].latest;
   // Until the first release, latest names a pre-release: a packument always carries that key (npm/registry
   // REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it whatever
   // --tag asked for. A release must take latest over from it, so only a newer RELEASE holds one back.
-  if (
-    latest !== undefined &&
-    parseMinted(latest).sha7 === null &&
-    releaseOrder(version, latest) === "older"
-  ) {
+  const held = latest === undefined ? null : parseMinted(latest);
+  if (held?.sha7 === null && newerRelease(held.release, parseMinted(version).release)) {
     return {
       publish: false,
       version,
       reason: `the registry's latest is ${latest}, newer than ${version}, so this rerun of an older release publishes nothing (npm publish would move latest back)`,
-      notices: [],
     };
   }
-  return { publish: true, version, notices: [] };
+  return { publish: true, version };
 }
 
 /** The registry's record of `name`, or null while it has never been published; any other answer than 200 or 404 throws.
@@ -1269,10 +1103,9 @@ export type NpmVerdictOptions = {
   registry: string;
 } & ({ channel: "next" } | { channel: "stable"; tag: string });
 
-/** The publish decision for the checkout, against what the registry holds.
- * The version is settled before the registry is asked, so a checkout that
- * cannot name one stops without a request. */
-export async function npmVerdict(options: NpmVerdictOptions): Promise<PublishVerdict> {
+export async function npmVerdict(
+  options: NpmVerdictOptions,
+): Promise<NextVerdict | PublishVerdict> {
   const { cwd, sourceSha, registry } = options;
   let version: string;
   if (options.channel === "next") {
@@ -1335,7 +1168,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
       continue;
     }
     if (packument !== null && version in packument.versions) {
-      const { descendants, newest } = placePublished(cwd, sourceSha, packument);
+      const { descendants, newest } = descendantsOf(cwd, sourceSha, packument);
       const next = packument["dist-tags"].next;
       if (newest !== null && !descendants.some((descendant) => descendant.version === next)) {
         return {
@@ -1361,8 +1194,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
 }
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
-/** How long npm-confirm holds the publish lane for a publish the registry has not made readable: 15 reads, 20 s
- * apart (up to 280 s). Three of the first five publishes were still unreadable after 80 s. */
+/** 15 reads 20 s apart (up to 280 s): three of the first five publishes were still unreadable after 80 s. */
 const CONFIRM_READS = 15;
 const CONFIRM_PAUSE_MS = 20_000;
 
@@ -1385,21 +1217,13 @@ async function main(): Promise<void> {
         runUrl: process.env.RUN_URL,
       });
       console.error(
-        `${result.created ? "created" : "verified"} ${env("TAG")} on packaged commit ${result.packagedSha}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}`,
+        `${result.created ? "created" : "verified"} ${env("TAG")} on packaged commit ${result.packagedSha}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
       );
-      reportMove(result.latest);
       break;
     }
     case "retag-major": {
       const result = retagMajor({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
-      reportMove(result.move);
-      break;
-    }
-    case "verify": {
-      const result = verifyPublishedRefs({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
-      console.error(
-        `origin's ${env("TAG")} and ${result.major} both point at packaged commit ${result.packagedSha}, whose tree carries ${PACKAGED}`,
-      );
+      console.error(result.move.reason);
       break;
     }
     case "anchor": {
@@ -1423,13 +1247,11 @@ async function main(): Promise<void> {
         sourceSha: env("GITHUB_SHA"),
         runUrl: process.env.RUN_URL,
       });
-      console.error(result.reason);
-      if (result.latest.replaced !== undefined) {
-        console.log(`::warning::${result.latest.reason}`);
-      }
+      console.error(
+        `${result.ref}${result.created ? ": created at" : " already packages the commit at"} ${result.commit}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
+      );
       break;
     }
-    // The subcommands whose result is their stdout: the workflow captures it. Notices go to stderr, beside it.
     case "prerelease-version": {
       console.log(prereleaseVersionOf({ cwd, sourceSha: env("GITHUB_SHA") }));
       break;
@@ -1446,7 +1268,7 @@ async function main(): Promise<void> {
         registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
         ...(argument === "next" ? { channel: argument } : { channel: argument, tag: env("TAG") }),
       });
-      for (const notice of verdict.notices) {
+      for (const notice of "notices" in verdict ? verdict.notices : []) {
         console.error(notice);
       }
       console.log(verdict.publish ? `publish ${verdict.version}` : `skip ${verdict.reason}`);
@@ -1474,7 +1296,7 @@ async function main(): Promise<void> {
     }
     default:
       throw new Error(
-        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | verify | anchor | boundary-check | anchor-check | package-commit | prerelease-version | npm-verdict | npm-confirm`,
+        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | boundary-check | anchor-check | package-commit | prerelease-version | npm-verdict | npm-confirm`,
       );
   }
 }

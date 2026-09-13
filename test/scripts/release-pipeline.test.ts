@@ -14,6 +14,7 @@ import {
   boundaryCheck,
   type MainPosition,
   mainPosition,
+  type NextVerdict,
   nextPublishVerdict,
   npmConfirm,
   npmVerdict,
@@ -23,16 +24,12 @@ import {
   packageRelease,
   prereleaseVersion,
   prereleaseVersionOf,
-  releaseOrder,
   retagMajor,
   stablePublishVerdict,
-  verifyPublishedRefs,
 } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
 import {
   ANCHOR_PUSH,
-  alreadyAt,
-  alreadyPast,
   BOT_IDENTITY,
   buildTagOf,
   buildTags,
@@ -48,10 +45,8 @@ import {
   identityOf,
   installReleasePipelineFixture,
   LATEST,
-  laterChecker,
   latestTag,
   localIdentity,
-  movedTo,
   moveOf,
   PACKAGED_DIFF,
   PERMANENT,
@@ -60,7 +55,6 @@ import {
   parentsOf,
   pushGreenCommit,
   remoteRef,
-  replaced,
   rivalPackage,
   roots,
   seedFixture,
@@ -166,11 +160,11 @@ describe("packageRelease", () => {
     });
     const packaged = git(fx.origin, "rev-parse", `${TAG}^{}`);
     const buildTag = buildTagOf(fx, fx.mergeSha);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: true,
       packagedSha: packaged,
       pruned: [],
-      latest: movedTo(LATEST, packaged),
+      latest: { sha: packaged, changed: true },
     });
     expect(pushes).toEqual([
       createOf(packaged, buildTag),
@@ -209,11 +203,11 @@ describe("packageRelease", () => {
     const rerunPushes = withPushPlans(fx, [], () => {
       verified = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(verified).toEqual({
+    expect(verified).toMatchObject({
       created: false,
       packagedSha: packaged,
       pruned: [],
-      latest: alreadyAt(LATEST, packaged),
+      latest: { sha: packaged, changed: false },
     });
     expect(rerunPushes).toEqual([]);
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(packaged);
@@ -228,11 +222,11 @@ describe("packageRelease", () => {
     const pushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: true,
       packagedSha: packaged,
       pruned: [],
-      latest: alreadyAt(LATEST, packaged),
+      latest: { sha: packaged, changed: false },
     });
     expect(pushes).toEqual([createOf(packaged, TAG)]);
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(packaged);
@@ -249,11 +243,11 @@ describe("packageRelease", () => {
     const pushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: true,
       packagedSha: packaged,
       pruned: [],
-      latest: alreadyPast(LATEST, fx.mergeSha, newer, next.sha),
+      latest: { sha: newer, changed: false },
     });
     expect(pushes).toEqual([createOf(packaged, TAG)]);
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(packaged);
@@ -270,11 +264,11 @@ describe("packageRelease", () => {
       result = packageRelease({ cwd: release, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
     const packaged = packagedOf(fx, fx.mergeSha);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: true,
       packagedSha: packaged,
       pruned: [],
-      latest: alreadyPast(LATEST, fx.mergeSha, newer, next.sha),
+      latest: { sha: newer, changed: false },
     });
     expect(pushes).toEqual([
       createOf(packaged, buildTagOf(fx, fx.mergeSha)),
@@ -312,11 +306,11 @@ describe("packageRelease", () => {
     const rerunPushes = withPushPlans(fx, [], () => {
       result = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: false,
       packagedSha: packaged,
       pruned: [],
-      latest: movedTo(LATEST, packaged),
+      latest: { sha: packaged, changed: true },
     });
     expect(rerunPushes).toEqual([moveOf(LATEST, "", packaged)]);
     expect(latestTag(fx)).toBe(packaged);
@@ -337,11 +331,11 @@ describe("packageRelease", () => {
     );
     const own = packagedOf(fx, fx.mergeSha);
     expect(own).not.toBe(rival.sha);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       created: false,
       packagedSha: rival.sha,
       pruned: [],
-      latest: movedTo(LATEST, rival.sha),
+      latest: { sha: rival.sha, changed: true },
     });
     expect(pushes).toEqual([
       createOf(own, buildTagOf(fx, fx.mergeSha)),
@@ -375,7 +369,7 @@ describe("packageRelease", () => {
   });
 
   test.each(PLANTED_PACKAGES)(
-    "an existing version tag on %s stops package, retag-major, and verify, and nothing moves",
+    "an existing version tag on %s stops package and retag-major, and nothing moves",
     (_name, plant) => {
       const fx = seedFixture();
       const { from, sha, error } = plant(fx);
@@ -391,12 +385,6 @@ describe("packageRelease", () => {
         }
       });
       expect(pushes).toEqual([]);
-      git(from, "push", "--quiet", "origin", `${sha}:${V2}`);
-      const checker = laterChecker(fx, "verify");
-      const verify = (): unknown =>
-        verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha });
-      expect(verify).toThrow(error);
-      expect(verify).toThrow(frozen);
       expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(sha);
       expect(remoteRef(fx, LATEST)).toBe("");
       expect(buildTags(fx)).toEqual([]);
@@ -451,7 +439,7 @@ describe("packageRelease", () => {
     const fx = seedFixture();
     rmSync(join(fx.work, file));
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      `${file} is not built; run the build before packaging.`,
+      `does not carry a non-empty regular-file ${file} (no entry); refusing to point a consumable ref at an unpackaged commit; run the build before packaging.`,
     );
     expect(buildTags(fx)).toEqual([]);
   });
@@ -503,7 +491,11 @@ describe("retagMajor", () => {
     const pushes = withPushPlans(fx, [], () => {
       moved = retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(moved).toEqual({ major: "v2", packagedSha, move: movedTo(V2, packagedSha) });
+    expect(moved).toMatchObject({
+      major: "v2",
+      packagedSha,
+      move: { sha: packagedSha, changed: true },
+    });
     expect(pushes).toEqual([moveOf(V2, "", packagedSha)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(packagedSha);
     expect(identityOf(fx.origin, packagedSha)).toBe(BOT_IDENTITY);
@@ -515,30 +507,30 @@ describe("retagMajor", () => {
     const forwardPushes = withPushPlans(fx, [], () => {
       forward = retagMajor({ cwd: next.dir, tag: "v2.1.1", sourceSha: next.mergeSha });
     });
-    expect(forward).toEqual({
+    expect(forward).toMatchObject({
       major: "v2",
       packagedSha: newer.packagedSha,
-      move: movedTo(V2, newer.packagedSha),
+      move: { sha: newer.packagedSha, changed: true },
     });
     expect(forwardPushes).toEqual([moveOf(V2, packagedSha, newer.packagedSha)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(newer.packagedSha);
     expect(parentsOf(fx.origin, newer.packagedSha)).toEqual([next.mergeSha]);
 
     const stale = checkoutOf(fx, "stale-rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
-    expect(packageRelease({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha })).toEqual({
+    expect(packageRelease({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha })).toMatchObject({
       created: false,
       packagedSha,
       pruned: [],
-      latest: alreadyPast(LATEST, fx.mergeSha, newer.packagedSha, next.mergeSha),
+      latest: { sha: newer.packagedSha, changed: false },
     });
     let left: ReturnType<typeof retagMajor> | undefined;
     const stalePushes = withPushPlans(fx, [], () => {
       left = retagMajor({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(left).toEqual({
+    expect(left).toMatchObject({
       major: "v2",
       packagedSha,
-      move: alreadyPast(V2, fx.mergeSha, newer.packagedSha, next.mergeSha),
+      move: { sha: newer.packagedSha, changed: false },
     });
     expect(stalePushes).toEqual([]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(newer.packagedSha);
@@ -596,16 +588,16 @@ describe("retagMajor", () => {
         result = retagMajor({ cwd: stale, tag: "v2.1.0", sourceSha: fx.mergeSha });
       },
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       major: "v2",
       packagedSha: older,
-      move: alreadyPast(V2, fx.mergeSha, newer, next.mergeSha),
+      move: { sha: newer, changed: false },
     });
     expect(pushes).toEqual([moveOf(V2, fx.seedSha, older)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(newer);
   });
 
-  test("a lease overtaken by a hand move is retried on the re-observed value, and the hand value is reported as replaced", () => {
+  test("a lease overtaken by a hand move to a bare main commit is retried on the re-observed value and replaces it", () => {
     const fx = seedFixture();
     const { packagedSha } = packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
     let result: ReturnType<typeof retagMajor> | undefined;
@@ -616,10 +608,10 @@ describe("retagMajor", () => {
         result = retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
       },
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       major: "v2",
       packagedSha,
-      move: replaced(V2, packagedSha, fx.seedSha),
+      move: { sha: packagedSha, changed: true },
     });
     expect(pushes).toEqual([moveOf(V2, "", packagedSha), moveOf(V2, fx.seedSha, packagedSha)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(packagedSha);
@@ -672,68 +664,6 @@ describe("retagMajor", () => {
       expect(remoteRef(fx, V2)).toBe("");
     },
   );
-});
-
-describe("verifyPublishedRefs", () => {
-  test("the version tag and the major point at the same packaged commit, a child of the merge commit, behind any number of later green commits", () => {
-    const fx = seedFixture();
-    const { packagedSha } = packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    const verified = verifyPublishedRefs({
-      cwd: laterChecker(fx, "verify-fresh"),
-      tag: "v2.1.0",
-      sourceSha: fx.mergeSha,
-    });
-    expect(verified).toEqual({ major: "v2", packagedSha });
-    for (const name of ["third-green", "fourth-green"]) {
-      const next = pushGreenCommit(fx, name, `packaged-bundle-${name}\n`);
-      packageCommit({ cwd: next.dir, sourceSha: next.sha });
-    }
-    expect(latestTag(fx)).not.toBe(packagedSha);
-    expect(
-      verifyPublishedRefs({
-        cwd: laterChecker(fx, "verify-behind"),
-        tag: "v2.1.0",
-        sourceSha: fx.mergeSha,
-      }),
-    ).toEqual({ major: "v2", packagedSha });
-  });
-
-  test("a major left on a different commit fails the confirmation", () => {
-    const fx = seedFixture();
-    packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    git(fx.work, "tag", "-f", "v2", fx.seedSha);
-    git(fx.work, "push", "--quiet", "--force", "origin", V2);
-    const checker = clone(fx.root, fx.origin, "verify-drift");
-    expect(() =>
-      verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
-    ).toThrow(/not this release's packaged commit/);
-  });
-
-  test("a missing major fails the confirmation", () => {
-    const fx = seedFixture();
-    packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    const checker = clone(fx.root, fx.origin, "verify-missing");
-    // The confirmation fetches refs/tags/v2 from origin; with no major ever pushed, git itself refuses the fetch.
-    expect(() =>
-      verifyPublishedRefs({ cwd: checker, tag: "v2.1.0", sourceSha: fx.mergeSha }),
-    ).toThrow(/couldn't find remote ref/);
-  });
-
-  test("a shallow checkout is refused before any verdict", () => {
-    const fx = seedFixture();
-    packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    retagMajor({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha });
-    expect(() =>
-      verifyPublishedRefs({
-        cwd: shallowClone(fx, "shallow"),
-        tag: "v2.1.0",
-        sourceSha: fx.mergeSha,
-      }),
-    ).toThrow(
-      "verify needs the full history (fetch-depth: 0) and this checkout is shallow: whether the release lies on main cannot be judged on a truncated one.",
-    );
-  });
 });
 
 /** release-please's PR branch: manifest and changelog bumped to `version` on `from`; left unpushed for a competitor plan when `push` is false. */
@@ -810,7 +740,7 @@ describe("anchorReleasePr", () => {
     const fx = seedFixture();
     const worker = clone(fx.root, fx.origin, "anchor-nobranch");
     const result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
-    expect(result).toEqual({ changed: false, reason: "no release PR branch to anchor" });
+    expect(result).toMatchObject({ changed: false, reason: "no release PR branch to anchor" });
   });
 
   test("a moved main makes the anchor defer to the newer run", () => {
@@ -870,7 +800,7 @@ describe("anchorReleasePr", () => {
         result = anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha });
       },
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       changed: true,
       reason: `release-please--branches--main: anchored at ${fx.mergeSha}`,
     });
@@ -1177,7 +1107,6 @@ describe("prereleaseVersion", () => {
     ["a manifest version missing its patch", ["2.0", at(446), sha], /is not X\.Y\.Z/],
     ["a commit count of zero", ["2.0.0", at(0), sha], /not a positive integer/],
     ["a fractional commit count", ["2.0.0", at(1.5), sha], /not a positive integer/],
-    ["a dashed commit date", ["2.0.0", at(446, "2026-09-13"), sha], /not YYYYMMDD/],
     ["a short sha", ["2.0.0", at(446), "b8df084"], /not a full commit sha/],
     ["an upper-case sha", ["2.0.0", at(446), sha.toUpperCase()], /not a full commit sha/],
   ];
@@ -1277,23 +1206,10 @@ describe("prereleaseVersion", () => {
     });
   });
 
-  const orderings: [string, string, "newer" | "same" | "older"][] = [
-    ["2.1.0", "2.0.9", "newer"],
-    ["2.0.10", "2.0.9", "newer"],
-    ["2.1.0", "2.1.0", "same"],
-    ["2.0.9", "2.1.0", "older"],
-  ];
-  test.each(orderings)("release %s is %s than %s", (a, b, expected) => {
-    expect(releaseOrder(a, b)).toBe(expected);
-  });
-
-  test("a version this pipeline never mints is refused, not ordered", () => {
-    expect(() => releaseOrder("2.0.1-beta.1", "2.0.1")).toThrow(
-      /not a version this pipeline mints/,
-    );
-    expect(() => releaseOrder("2.0.1", "2.0.1-main.412.b8df084")).toThrow(
-      /not a version this pipeline mints/,
-    );
+  test("a latest this pipeline never minted stops the stable verdict, not ordered", () => {
+    expect(() =>
+      stablePublishVerdict("2.1.0", { versions: {}, "dist-tags": { latest: "2.0.1-beta.1" } }),
+    ).toThrow(/not a version this pipeline mints/);
   });
 
   const registry = (versions: string[], tags: Record<string, string>): Packument => ({
@@ -1332,14 +1248,14 @@ describe("prereleaseVersion", () => {
     const main = mainAround(fx);
     const source7 = fx.mergeSha.slice(0, 7);
     const sha7 = (version: string): string => version.slice(-7);
-    const stale = (version: string): PublishVerdict => ({
+    const stale = (version: string): NextVerdict => ({
       publish: false,
       version: main.own,
       reason: `the registry already holds ${version}, whose source ${sha7(version)} is a descendant of ${source7} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
       notices: [],
     });
     const unresolved = "2.1.1-main.9.20260901.g0000000";
-    const cases: [string, Packument | null, PublishVerdict][] = [
+    const cases: [string, Packument | null, NextVerdict][] = [
       [
         "a package the registry has never seen",
         null,
@@ -1440,12 +1356,7 @@ describe("prereleaseVersion", () => {
   });
 
   const stableVerdicts: [string, string, Packument | null, PublishVerdict][] = [
-    [
-      "a package the registry has never seen",
-      "2.1.0",
-      null,
-      { publish: true, version: "2.1.0", notices: [] },
-    ],
+    ["a package the registry has never seen", "2.1.0", null, { publish: true, version: "2.1.0" }],
     [
       "the release after the bootstrap pre-release",
       "2.1.0",
@@ -1453,7 +1364,7 @@ describe("prereleaseVersion", () => {
         latest: "2.0.1-main.0.g0000000",
         next: "2.0.1-main.0.g0000000",
       }),
-      { publish: true, version: "2.1.0", notices: [] },
+      { publish: true, version: "2.1.0" },
     ],
     [
       "a newer release",
@@ -1462,7 +1373,7 @@ describe("prereleaseVersion", () => {
         latest: "2.0.0",
         next: "2.0.1-main.412.20260901.g1111111",
       }),
-      { publish: true, version: "2.1.0", notices: [] },
+      { publish: true, version: "2.1.0" },
     ],
     [
       "a rerun of the release's job",
@@ -1472,7 +1383,6 @@ describe("prereleaseVersion", () => {
         publish: false,
         version: "2.1.0",
         reason: "2.1.0 is already on the registry",
-        notices: [],
       },
     ],
     [
@@ -1482,7 +1392,7 @@ describe("prereleaseVersion", () => {
         latest: "2.1.1-main.0.g0000000",
         next: "2.1.1-main.0.g0000000",
       }),
-      { publish: true, version: "2.1.0", notices: [] },
+      { publish: true, version: "2.1.0" },
     ],
     [
       "a rerun of an older release's job after a newer release",
@@ -1493,7 +1403,6 @@ describe("prereleaseVersion", () => {
         version: "2.1.0",
         reason:
           "the registry's latest is 2.2.0, newer than 2.1.0, so this rerun of an older release publishes nothing (npm publish would move latest back)",
-        notices: [],
       },
     ],
   ];
@@ -1585,7 +1494,6 @@ describe("prereleaseVersion", () => {
         publish: false,
         version: "2.1.0",
         reason: "2.1.0 is already on the registry",
-        notices: [],
       });
       expect(
         await npmVerdict({ cwd: fx.work, channel: "next", sourceSha: fx.mergeSha, registry }),

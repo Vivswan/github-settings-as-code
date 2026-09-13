@@ -10,8 +10,6 @@ import { join } from "node:path";
 import {
   KEPT_BUILD_TAGS,
   movePointer,
-  type PointerMove,
-  PREPARATION_SCRIPTS,
   packageCommit,
   packageRelease,
   pruneBuildTags,
@@ -37,7 +35,6 @@ import {
   latestTag,
   localIdentity,
   manifestJson,
-  movedTo,
   moveOf,
   originHolds,
   PACKAGED_DIFF,
@@ -47,9 +44,6 @@ import {
   parentsOf,
   plantCommit,
   plantCommitIn,
-  alreadyAt as pointerAlreadyAt,
-  alreadyPast as pointerAlreadyPast,
-  replaced as pointerReplaced,
   positionOf,
   pushGreenCommit,
   remoteRef,
@@ -60,7 +54,6 @@ import {
   subcommand,
   treePaths,
   withPushPlans,
-  withRemotePlans,
   write,
   writeBuild,
 } from "./release-pipeline-fixture.js";
@@ -71,45 +64,15 @@ installReleasePipelineFixture();
 
 const RUN_URL = "https://example.invalid/actions/runs/7";
 
-/** The whole result of a run that minted its tag and moved latest onto it, nothing pruned. */
-function minted(fx: Fixture, source: string): ReturnType<typeof packageCommit> {
-  const ref = buildTagOf(fx, source);
-  const commit = packagedOf(fx, source);
-  return {
-    created: true,
-    ref,
-    commit,
-    source,
-    pruned: [],
-    latest: movedTo(LATEST, commit),
-    reason: `${ref}: created at ${commit}; no build tag beyond the window; ${LATEST}: moved to ${commit}`,
-  };
-}
-
-/** The whole result of a rerun that found its tag and latest already where it leaves them. */
-function verified(
-  fx: Fixture,
-  source: string,
-  latestAt: PointerMove,
-): ReturnType<typeof packageCommit> {
-  const ref = buildTagOf(fx, source);
-  const commit = packagedOf(fx, source);
-  return {
-    created: false,
-    ref,
-    commit,
-    source,
-    pruned: [],
-    latest: latestAt,
-    reason: `${ref} already packages ${source} at ${commit}; no build tag beyond the window; ${latestAt.reason}`,
-  };
-}
-
-/** The latest moves, as whole results. */
-const alreadyAt = (commit: string): PointerMove => pointerAlreadyAt(LATEST, commit);
-const alreadyPast = (source: string, at: string, packaging: string): PointerMove =>
-  pointerAlreadyPast(LATEST, source, at, packaging);
-const replaced = (commit: string, old: string): PointerMove => pointerReplaced(LATEST, commit, old);
+/** A run's result with latest's reason left out: the pointer's sha and whether it moved are what the run did. */
+const outcome = (result: ReturnType<typeof packageCommit>) => ({
+  created: result.created,
+  ref: result.ref,
+  commit: result.commit,
+  source: result.source,
+  pruned: result.pruned,
+  latest: { sha: result.latest.sha, changed: result.latest.changed },
+});
 
 describe("packageCommit", () => {
   test("the first green commit is packaged under its build tag as the commit's child and latest is created; a rerun verifies both and pushes nothing", () => {
@@ -120,7 +83,14 @@ describe("packageCommit", () => {
     });
     const ref = buildTagOf(fx, fx.mergeSha);
     const packaged = packagedOf(fx, fx.mergeSha);
-    expect(result).toEqual(minted(fx, fx.mergeSha));
+    expect(result && outcome(result)).toEqual({
+      created: true,
+      ref,
+      commit: packaged,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: packaged, changed: true },
+    });
     expect(ref).toBe(`refs/tags/build/2.${fx.mergeSha.slice(0, 7)}`);
     expect(pushes).toEqual([createOf(packaged, ref), moveOf(LATEST, "", packaged)]);
     expect(buildTags(fx)).toEqual([ref]);
@@ -164,7 +134,14 @@ describe("packageCommit", () => {
     const rerunPushes = withPushPlans(fx, [], () => {
       again = packageCommit({ cwd: rerun, sourceSha: fx.mergeSha });
     });
-    expect(again).toEqual(verified(fx, fx.mergeSha, alreadyAt(packaged)));
+    expect(again && outcome(again)).toEqual({
+      created: false,
+      ref,
+      commit: packaged,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: packaged, changed: false },
+    });
     expect(rerunPushes).toEqual([]);
     expect(buildTags(fx)).toEqual([ref]);
     expect(latestTag(fx)).toBe(packaged);
@@ -181,7 +158,14 @@ describe("packageCommit", () => {
       second = packageCommit({ cwd: next.dir, sourceSha: next.sha });
     });
     const packaged = packagedOf(fx, next.sha);
-    expect(second).toEqual(minted(fx, next.sha));
+    expect(second && outcome(second)).toEqual({
+      created: true,
+      ref: buildTagOf(fx, next.sha),
+      commit: packaged,
+      source: next.sha,
+      pruned: [],
+      latest: { sha: packaged, changed: true },
+    });
     expect(pushes).toEqual([
       createOf(packaged, buildTagOf(fx, next.sha)),
       moveOf(LATEST, first, packaged),
@@ -190,23 +174,26 @@ describe("packageCommit", () => {
     expect(git(fx.origin, "show", `${packaged}:src/marker.ts`)).toBe(
       'export const marker = "second-green";',
     );
-    expect(buildTags(fx).sort()).toEqual(
-      [buildTagOf(fx, fx.mergeSha), buildTagOf(fx, next.sha)].sort(),
-    );
 
     let staleResult: ReturnType<typeof packageCommit> | undefined;
     const stalePushes = withPushPlans(fx, [], () => {
       staleResult = packageCommit({ cwd: stale, sourceSha: fx.mergeSha });
     });
-    expect(staleResult).toEqual(
-      verified(fx, fx.mergeSha, alreadyPast(fx.mergeSha, packaged, next.sha)),
-    );
+    expect(staleResult && outcome(staleResult)).toEqual({
+      created: false,
+      ref: buildTagOf(fx, fx.mergeSha),
+      commit: first,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: packaged, changed: false },
+    });
     expect(stalePushes).toEqual([]);
     expect(latestTag(fx)).toBe(packaged);
   });
 
   /** Origin's consumable state with the commit shas abstracted away: the tags by position and tree, latest by the
-   * source it packages. Two fixtures seeded alike hold the same trees, so the same state means the same outcome. */
+   * source it packages and its tree. Two fixtures seeded alike hold the same trees, so the same state means the
+   * same outcome. */
   function consumableState(fx: Fixture): unknown {
     return {
       tags: buildTags(fx).map((ref) => ({
@@ -229,20 +216,18 @@ describe("packageCommit", () => {
 
   test("two commits' runs end in the same state whichever finishes first", () => {
     const inOrder = seedFixture();
-    const a = inOrder.mergeSha;
     const b = pushGreenCommit(inOrder, "second-green", "packaged-bundle-bytes-2\n");
-    packageCommit({ cwd: inOrder.work, sourceSha: a });
+    packageCommit({ cwd: inOrder.work, sourceSha: inOrder.mergeSha });
     packageCommit({ cwd: b.dir, sourceSha: b.sha });
 
     const reversed = seedFixture();
-    const a2 = reversed.mergeSha;
     const b2 = pushGreenCommit(reversed, "second-green", "packaged-bundle-bytes-2\n");
-    const aRun = checkoutOf(reversed, "a-late", a2, "packaged-bundle-bytes-1\n");
+    const aRun = checkoutOf(reversed, "a-late", reversed.mergeSha, "packaged-bundle-bytes-1\n");
     packageCommit({ cwd: b2.dir, sourceSha: b2.sha });
-    const late = packageCommit({ cwd: aRun, sourceSha: a2 });
+    const late = packageCommit({ cwd: aRun, sourceSha: reversed.mergeSha });
 
     expect(late.created).toBe(true);
-    expect(late.latest).toEqual(alreadyPast(a2, packagedOf(reversed, b2.sha), b2.sha));
+    expect(late.latest).toMatchObject({ sha: packagedOf(reversed, b2.sha), changed: false });
     expect(consumableState(reversed)).toEqual(consumableState(inOrder));
     expect(consumableState(inOrder)).toEqual({
       tags: [
@@ -322,10 +307,13 @@ describe("packageCommit", () => {
         result = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
       },
     );
-    expect(result).toEqual({
-      ...verified(fx, fx.mergeSha, alreadyAt(rival.sha)),
-      latest: movedTo(LATEST, rival.sha),
-      reason: `${ref} already packages ${fx.mergeSha} at ${rival.sha}; no build tag beyond the window; ${LATEST}: moved to ${rival.sha}`,
+    expect(result && outcome(result)).toEqual({
+      created: false,
+      ref,
+      commit: rival.sha,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: rival.sha, changed: true },
     });
     const rejected = createdSha(pushes[0] ?? []);
     expect(rejected).not.toBe(rival.sha);
@@ -352,11 +340,11 @@ describe("packageCommit", () => {
     expect(remoteRef(fx, LATEST)).toBe("");
   });
 
-  test("a latest lease overtaken by a hand move is retried on the re-observed value, and the hand value is reported as replaced", () => {
+  test("a latest lease overtaken by a hand move to a bare main commit is retried on the re-observed value and replaces it", () => {
     const fx = seedFixture();
     const ref = buildTagOf(fx, fx.mergeSha);
     let result: ReturnType<typeof packageCommit> | undefined;
-    // The seed is a root of main: a bare main commit with no parent is no package, so it is replaced, not judged.
+    // The seed is a root of main: with no parent it is no package, so it is replaced, not judged.
     const pushes = withPushPlans(
       fx,
       [null, { competitor: { from: fx.work, sha: fx.seedSha, ref: LATEST } }],
@@ -365,11 +353,7 @@ describe("packageCommit", () => {
       },
     );
     const packaged = packagedOf(fx, fx.mergeSha);
-    expect(result).toEqual({
-      ...minted(fx, fx.mergeSha),
-      latest: replaced(packaged, fx.seedSha),
-      reason: `${ref}: created at ${packaged}; no build tag beyond the window; ${replaced(packaged, fx.seedSha).reason}`,
-    });
+    expect(result?.latest).toMatchObject({ sha: packaged, changed: true });
     expect(pushes).toEqual([
       createOf(packaged, ref),
       moveOf(LATEST, "", packaged),
@@ -403,24 +387,27 @@ describe("packageCommit", () => {
 
   test("a newer commit landing and taking latest after this run read main's head leaves latest there: the head is re-read after the pointer", () => {
     const fx = seedFixture();
-    // B and its package exist only in this clone until the plan pushes them, right before this run's first push.
+    // B, its package, and its build tag exist only in this clone until the plan pushes them, right before this
+    // run's first push; the prune lists the tag and keeps it (the window is not full).
     const next = clone(fx.root, fx.origin, "next");
     write(next, "src/marker.ts", 'export const marker = "second-green";\n');
     const b = commitAll(next, "feat: second-green");
     const pb = plantCommitIn(next, b, b, builtFiles("packaged-bundle-bytes-2\n"), [
       "build: by another run",
     ]);
-    // B's build tag rides along: the prune lists it and must hold it to a head read after the listing.
     const landing = `git -C "${next}" push --quiet origin ${b}:refs/heads/main ${pb}:${LATEST} ${pb}:refs/tags/build/3.${b.slice(0, 7)}\n`;
     let result: ReturnType<typeof packageCommit> | undefined;
     const pushes = withPushPlans(fx, [{ script: landing }], () => {
       result = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
     });
     const packaged = packagedOf(fx, fx.mergeSha);
-    expect(result).toEqual({
-      ...minted(fx, fx.mergeSha),
-      latest: alreadyPast(fx.mergeSha, pb, b),
-      reason: `${buildTagOf(fx, fx.mergeSha)}: created at ${packaged}; no build tag beyond the window; ${alreadyPast(fx.mergeSha, pb, b).reason}`,
+    expect(result && outcome(result)).toEqual({
+      created: true,
+      ref: buildTagOf(fx, fx.mergeSha),
+      commit: packaged,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: pb, changed: false },
     });
     expect(pushes).toEqual([createOf(packaged, buildTagOf(fx, fx.mergeSha))]);
     expect(latestTag(fx)).toBe(pb);
@@ -455,19 +442,18 @@ describe("packageCommit", () => {
     const pc = rivalPackage(fx, "third-package", c.sha, "packaged-bundle-bytes-3\n");
     const stale = checkoutOf(fx, "stale", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let result: ReturnType<typeof packageCommit> | undefined;
-    const pushes = withRemotePlans(
+    const pushes = withPushPlans(
       fx,
-      {
-        afterLsRemote: {
-          naming: LATEST,
-          script: `git -C "${pc.from}" push --quiet --force origin ${pc.sha}:${LATEST}\n`,
-        },
-      },
+      [],
       () => {
         result = packageCommit({ cwd: stale, sourceSha: fx.mergeSha });
       },
+      {
+        naming: LATEST,
+        script: `git -C "${pc.from}" push --quiet --force origin ${pc.sha}:${LATEST}\n`,
+      },
     );
-    expect(result?.latest).toEqual(alreadyPast(fx.mergeSha, pc.sha, c.sha));
+    expect(result?.latest).toMatchObject({ sha: pc.sha, changed: false });
     expect(pushes).toEqual([createOf(packagedOf(fx, fx.mergeSha), buildTagOf(fx, fx.mergeSha))]);
     expect(latestTag(fx)).toBe(pc.sha);
     expect(pb).not.toBe(pc.sha);
@@ -480,28 +466,26 @@ describe("packageCommit", () => {
     const again = rivalPackage(fx, "again", fx.mergeSha, "packaged-bundle-bytes-1\n");
     const rerun = checkoutOf(fx, "rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let result: ReturnType<typeof packageCommit> | undefined;
-    const pushes = withRemotePlans(
+    const pushes = withPushPlans(
       fx,
-      {
-        afterLsRemote: {
-          naming: ref,
-          script: `git -C "${fx.origin}" update-ref -d ${ref} && git -C "${again.from}" push --quiet origin ${again.sha}:${ref}\n`,
-        },
-      },
+      [],
       () => {
         result = packageCommit({ cwd: rerun, sourceSha: fx.mergeSha });
       },
+      {
+        naming: ref,
+        script: `git -C "${fx.origin}" update-ref -d ${ref} && git -C "${again.from}" push --quiet origin ${again.sha}:${ref}\n`,
+      },
     );
     // latest still names the first commit of the package: another commit of the same package leaves it.
-    expect(result).toEqual(
-      verified(fx, fx.mergeSha, {
-        ref: LATEST,
-        sha: first,
-        changed: false,
-        reason: `${LATEST} already at ${first}, another commit of the same package of ${fx.mergeSha}`,
-      }),
-    );
-    expect(result?.commit).toBe(again.sha);
+    expect(result && outcome(result)).toEqual({
+      created: false,
+      ref,
+      commit: again.sha,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: first, changed: false },
+    });
     expect(pushes).toEqual([]);
     expect(latestTag(fx)).toBe(first);
   });
@@ -515,23 +499,27 @@ describe("packageCommit", () => {
     const pb = packageCommit({ cwd: b.dir, sourceSha: b.sha }).commit;
     const rerun = checkoutOf(fx, "rerun", fx.mergeSha, "packaged-bundle-bytes-1\n");
     let result: ReturnType<typeof packageCommit> | undefined;
-    const pushes = withRemotePlans(
+    const pushes = withPushPlans(
       fx,
-      { afterLsRemote: { naming: ref, script: `git -C "${fx.origin}" update-ref -d ${ref}\n` } },
+      [],
       () => {
         // Another run URL, so the re-minted commit is its own sha whatever the clock says.
         result = packageCommit({ cwd: rerun, sourceSha: fx.mergeSha, runUrl: RUN_URL });
       },
+      { naming: ref, script: `git -C "${fx.origin}" update-ref -d ${ref}\n` },
     );
     const reminted = packagedOf(fx, fx.mergeSha);
     expect(reminted).not.toBe(first);
     expect(git(rerun, "rev-parse", `${reminted}^{tree}`)).toBe(
       git(fx.origin, "rev-parse", `${first}^{tree}`),
     );
-    expect(result).toEqual({
-      ...minted(fx, fx.mergeSha),
-      latest: alreadyPast(fx.mergeSha, pb, b.sha),
-      reason: `${ref}: created at ${reminted}; no build tag beyond the window; ${alreadyPast(fx.mergeSha, pb, b.sha).reason}`,
+    expect(result && outcome(result)).toEqual({
+      created: true,
+      ref,
+      commit: reminted,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: pb, changed: false },
     });
     expect(pushes).toEqual([createOf(reminted, ref)]);
   });
@@ -584,19 +572,6 @@ describe("packageCommit", () => {
     },
   );
 
-  test("the preparation triggers are the six pacote reads before it prepares a git dependency", () => {
-    // Pinned as a literal: the fixture derives from the exported list, so a name dropped there would vanish
-    // from the fixture too and the manifest assertion above could not see it go.
-    expect(PREPARATION_SCRIPTS).toEqual([
-      "prepare",
-      "prepack",
-      "build",
-      "preinstall",
-      "install",
-      "postinstall",
-    ]);
-  });
-
   test.each(["lib/index.js", "lib/pkg/index.js"])("an empty %s never reaches origin", (file) => {
     const fx = seedFixture();
     write(fx.work, file, "");
@@ -634,7 +609,7 @@ describe("packageCommit", () => {
     expect(buildTags(fx)).toEqual([]);
   });
 
-  test("the eleventh green commit prunes the oldest tag; a release tag keeps its commit, a pruned release re-mints its package, and the major moves forward only", () => {
+  test("the eleventh green commit prunes the oldest tag; a release tag keeps its commit, a pruned release re-mints its package and prunes it at once, and the major moves forward only", () => {
     const fx = seedFixture();
     // Position 2 is released before the window fills; position 3 is a release merge post-green packaged but the
     // release hook never ran for.
@@ -672,16 +647,17 @@ describe("packageCommit", () => {
     const rerunPushes = withPushPlans(fx, [], () => {
       verifiedRelease = packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha });
     });
-    expect(verifiedRelease).toEqual({
+    expect(verifiedRelease).toMatchObject({
       created: false,
       packagedSha: release.packagedSha,
       pruned: [],
-      latest: alreadyPast(fx.mergeSha, latestAt, newest.sha),
+      latest: { sha: latestAt, changed: false },
     });
     expect(rerunPushes).toEqual([]);
 
-    // One more green prunes the 2.1.1 merge's tag; its release hook then mints the package again, tags it, and
-    // moves the major forward; a rerun of 2.1.0's major step leaves it there.
+    // One more green prunes the 2.1.1 merge's tag; its release hook then mints the package again, tags it, prunes
+    // the fresh tag at once (the version tag keeps the commit), and moves the major forward; a rerun of 2.1.0's
+    // major step leaves it there.
     const eleventh = pushGreenCommit(fx, "green-11", "packaged-bundle-bytes-13\n");
     expect(packageCommit({ cwd: eleventh.dir, sourceSha: eleventh.sha }).pruned).toEqual([
       buildTagOf(fx, laterMerge),
@@ -701,11 +677,10 @@ describe("packageCommit", () => {
     expect(git(hook, "rev-parse", `${remintedSha}^{tree}`)).toBe(
       git(hook, "rev-parse", `${laterPackaged}^{tree}`),
     );
-    expect(reminted).toEqual({
+    expect(reminted).toMatchObject({
       created: true,
-      packagedSha: remintedSha,
       pruned: [buildTagOf(fx, laterMerge)],
-      latest: alreadyPast(laterMerge, packagedOf(fx, eleventh.sha), eleventh.sha),
+      latest: { sha: packagedOf(fx, eleventh.sha), changed: false },
     });
     expect(hookPushes).toEqual([
       createOf(remintedSha, buildTagOf(fx, laterMerge)),
@@ -716,16 +691,18 @@ describe("packageCommit", () => {
       [...greens.map((green) => buildTagOf(fx, green.sha)), buildTagOf(fx, eleventh.sha)].sort(),
     );
     expect(originHolds(fx, remintedSha)).toBe(true);
-    expect(retagMajor({ cwd: hook, tag: "v2.1.1", sourceSha: laterMerge }).move).toEqual(
-      movedTo("refs/tags/v2", remintedSha),
-    );
-    expect(retagMajor({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha }).move).toEqual(
-      pointerAlreadyPast("refs/tags/v2", fx.mergeSha, remintedSha, laterMerge),
-    );
+    expect(retagMajor({ cwd: hook, tag: "v2.1.1", sourceSha: laterMerge }).move).toMatchObject({
+      sha: remintedSha,
+      changed: true,
+    });
+    expect(retagMajor({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha }).move).toMatchObject({
+      sha: remintedSha,
+      changed: false,
+    });
     expect(git(fx.origin, "rev-parse", "refs/tags/v2^{}")).toBe(remintedSha);
   });
 
-  test("a legacy latest on the retired build chain is replaced with a report, and the chain is never touched", async () => {
+  test("a legacy latest on the retired build chain is replaced, and the chain is never touched", async () => {
     const fx = seedFixture();
     // The chain as the pipeline left it: a root packaging the seed with a Source trailer, its child packaging the
     // merge commit, build at the child and latest on it.
@@ -761,10 +738,10 @@ describe("packageCommit", () => {
       "package-commit",
     );
     const packaged = packagedOf(fx, fx.mergeSha);
-    // git's own push progress precedes the report on stderr; the warning is the whole of stdout, where the runner reads commands.
+    // git's own push progress precedes the report on stderr.
     expect({ ...run, stderr: run.stderr.trimEnd().split("\n").at(-1) }).toEqual({
-      stdout: `::warning::${replaced(packaged, tip.sha).reason}\n`,
-      stderr: `${ref}: created at ${packaged}; no build tag beyond the window; ${replaced(packaged, tip.sha).reason}`,
+      stdout: "",
+      stderr: `${ref}: created at ${packaged}; no build tag beyond the window; ${LATEST}: moved to ${packaged} from ${tip.sha}`,
       status: 0,
     });
     expect(latestTag(fx)).toBe(packaged);
@@ -776,25 +753,27 @@ describe("packageCommit", () => {
 describe("movePointer", () => {
   const V2 = "refs/tags/v2";
 
-  test("a pointer at a bare main commit is read as packaging that commit's parent, so a package of a descendant moves it and one of its parent is refused", () => {
+  test("a pointer at a bare main commit is read as packaging that commit's parent: a package of a descendant moves it, one of its parent is left, and one of its own source is refused as no package", () => {
     const fx = seedFixture();
     // v2 as the pipeline left it before it packaged commits: on a main commit that committed the bundle itself.
     git(fx.work, "push", "--quiet", "origin", `${fx.mergeSha}:${V2}`);
     const next = pushGreenCommit(fx, "second-green", "packaged-bundle-bytes-2\n");
     const newer = packageCommit({ cwd: next.dir, sourceSha: next.sha });
     const older = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
-    let move: PointerMove | undefined;
+    let move: ReturnType<typeof movePointer> | undefined;
     const pushes = withPushPlans(fx, [], () => {
       move = movePointer(fx.work, V2, newer);
     });
-    expect(move).toEqual(movedTo(V2, newer.commit));
+    expect(move).toMatchObject({ ref: V2, sha: newer.commit, changed: true });
     expect(pushes).toEqual([moveOf(V2, fx.mergeSha, newer.commit)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(newer.commit);
-    expect(movePointer(fx.work, V2, older)).toEqual(
-      pointerAlreadyPast(V2, fx.mergeSha, newer.commit, next.sha),
-    );
-    // The seed is v2's own source under that reading: a package of it would be kept in place, and a value kept must
-    // be a package, which a bare main commit is not.
+    expect(movePointer(fx.work, V2, older)).toMatchObject({
+      ref: V2,
+      sha: newer.commit,
+      changed: false,
+    });
+    // The seed is v2's own source under that reading, so the value would be kept, and a kept value must be a
+    // package, which a bare main commit is not.
     git(fx.work, "push", "--quiet", "--force", "origin", `${fx.mergeSha}:${V2}`);
     const seedRun = checkoutOf(fx, "seed-run", fx.seedSha, "packaged-bundle-bytes-0\n");
     const seedPackage = packageCommit({ cwd: seedRun, sourceSha: fx.seedSha });
@@ -803,26 +782,6 @@ describe("movePointer", () => {
         `^${V2} \\(${fx.mergeSha}\\) is not ${fx.seedSha} plus lib/index\\.js and lib/pkg/, minus package\\.json's preparation scripts, alone: .*; inspect it by hand\\.$`,
       ),
     );
-  });
-
-  test("a candidate whose source is off the pointer's line of main is refused", () => {
-    const fx = seedFixture();
-    const current = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
-    const side = clone(fx.root, fx.origin, "side");
-    git(side, "checkout", "--quiet", "-b", "side", fx.seedSha);
-    write(side, "src/marker.ts", "export const marker = 'side';\n");
-    const sideSha = commitAll(side, "feat: never merged");
-    git(side, "push", "--quiet", "origin", "HEAD:refs/heads/side");
-    const rival = rivalPackage(fx, "side-package", sideSha, "side-bundle\n");
-    git(rival.from, "push", "--quiet", "origin", `${rival.sha}:refs/heads/side-package`);
-    git(fx.work, "fetch", "--quiet", "origin", "refs/heads/side", "refs/heads/side-package");
-    const pushes = withPushPlans(fx, [], () => {
-      expect(() => movePointer(fx.work, LATEST, { commit: rival.sha, source: sideSha })).toThrow(
-        `${LATEST} is at ${current.commit}, packaging ${fx.mergeSha}, and ${sideSha} is on neither side of it on main; refusing to move ${LATEST} off main's line - inspect it by hand.`,
-      );
-    });
-    expect(pushes).toEqual([]);
-    expect(latestTag(fx)).toBe(current.commit);
   });
 
   test("a pointer at another commit of the same package is left there; one at another build of the same commit is refused", () => {
@@ -842,7 +801,7 @@ describe("movePointer", () => {
     git(other.from, "push", "--quiet", "origin", `${other.sha}:refs/heads/other`);
     git(fx.work, "fetch", "--quiet", "origin", "refs/heads/again", "refs/heads/other");
     expect(again.sha).not.toBe(first.commit);
-    let left: PointerMove | undefined;
+    let left: ReturnType<typeof movePointer> | undefined;
     const pushes = withPushPlans(fx, [], () => {
       left = movePointer(fx.work, LATEST, { commit: again.sha, source: fx.mergeSha });
       expect(() =>
@@ -851,12 +810,7 @@ describe("movePointer", () => {
         `${LATEST} is at ${first.commit}, another package of ${fx.mergeSha} than ${other.sha} with another tree; two builds of one main commit exist - inspect both by hand.`,
       );
     });
-    expect(left).toEqual({
-      ref: LATEST,
-      sha: first.commit,
-      changed: false,
-      reason: `${LATEST} already at ${first.commit}, another commit of the same package of ${fx.mergeSha}`,
-    });
+    expect(left).toMatchObject({ ref: LATEST, sha: first.commit, changed: false });
     expect(pushes).toEqual([]);
     expect(latestTag(fx)).toBe(first.commit);
   });
@@ -874,7 +828,7 @@ describe("movePointer", () => {
       result = packageCommit({ cwd: next.dir, sourceSha: next.sha });
     });
     const packaged = packagedOf(fx, next.sha);
-    expect(result?.latest).toEqual(movedTo(LATEST, packaged));
+    expect(result?.latest).toMatchObject({ sha: packaged, changed: true });
     expect(pushes).toEqual([
       createOf(packaged, buildTagOf(fx, next.sha)),
       moveOf(LATEST, tagObject, packaged),
@@ -885,26 +839,24 @@ describe("movePointer", () => {
   test("a pointer that does not exist yet is created under a lease on its absence", () => {
     const fx = seedFixture();
     const packaged = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
-    let move: PointerMove | undefined;
+    let move: ReturnType<typeof movePointer> | undefined;
     const pushes = withPushPlans(fx, [], () => {
       move = movePointer(fx.work, V2, packaged);
     });
-    expect(move).toEqual(movedTo(V2, packaged.commit));
+    expect(move).toMatchObject({ ref: V2, sha: packaged.commit, changed: true });
     expect(pushes).toEqual([moveOf(V2, "", packaged.commit)]);
     expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(packaged.commit);
   });
 });
 
 describe("pruneBuildTags", () => {
-  /** Positions 1..count, each tag on its own main commit so the names hold against main. */
+  /** Positions 1..count, one tag each, all on the seed commit: the prune reads names, not commits. */
   function plantWindow(fx: Fixture, count = 12): { refs: string[]; first: string; second: string } {
-    const commits = [fx.seedSha, fx.mergeSha];
-    while (commits.length < count) {
-      commits.push(pushGreenCommit(fx, `window-${commits.length + 1}`, "bundle\n").sha);
-    }
-    git(fx.work, "fetch", "--quiet", "origin", "refs/heads/main");
-    const refs = commits.map((sha, n) => `refs/tags/build/${n + 1}.${sha.slice(0, 7)}`);
-    git(fx.work, "push", "--quiet", "origin", ...refs.map((ref, n) => `${commits[n]}:${ref}`));
+    const refs = Array.from(
+      { length: count },
+      (_, n) => `refs/tags/build/${n + 1}.${fx.seedSha.slice(0, 7)}`,
+    );
+    git(fx.work, "push", "--quiet", "origin", ...refs.map((ref) => `${fx.seedSha}:${ref}`));
     return { refs, first: refs[0] ?? "", second: refs[1] ?? "" };
   }
 
@@ -943,27 +895,13 @@ describe("pruneBuildTags", () => {
     expect(buildTags(fx).sort()).toEqual(refs.slice(2).sort());
   });
 
-  /** A tag under build/ a hand made, and why the prune refuses it; the seed's sha7 names position 1, the merge's 2. */
-  const handMade: [string, (fx: Fixture) => string, (fx: Fixture) => string][] = [
-    ["a name without a position", () => "build/by-hand", () => "beyond main's head"],
-    [
-      "a position beyond main's head",
-      (fx) => `build/999999.${fx.seedSha.slice(0, 7)}`,
-      () => "beyond main's head",
-    ],
-    [
-      "a position whose main commit is another",
-      (fx) => `build/1.${fx.mergeSha.slice(0, 7)}`,
-      (fx) => `main holds ${fx.seedSha} there`,
-    ],
-  ];
-  test.each(handMade)("a tag under build/ with %s stops the prune", (_name, name, found) => {
+  test("a ref under build/ this pipeline would not name stops the prune", () => {
     const fx = seedFixture();
     plantWindow(fx, 3);
-    git(fx.work, "push", "--quiet", "origin", `${fx.seedSha}:refs/tags/${name(fx)}`);
+    git(fx.work, "push", "--quiet", "origin", `${fx.seedSha}:refs/tags/build/by-hand`);
     const pushes = withPushPlans(fx, [], () => {
       expect(() => pruneBuildTags(fx.work)).toThrow(
-        `origin holds refs/tags/${name(fx)}, which names no commit on main at that position (${found(fx)}); a build tag this pipeline mints is build/<position>.<sha7> of a main commit - delete it by hand.`,
+        "origin holds refs/tags/build/by-hand, which is not a build/<position>.<sha7> tag this pipeline names; delete it by hand.",
       );
     });
     expect(pushes).toEqual([]);

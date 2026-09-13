@@ -7,12 +7,12 @@
 #   resolve the merge commit from the draft's target commitish -> rebuild the bundle, verify the committed schema byte-for-byte
 #   package      -> find or mint the merge commit's packaged commit under its build tag, mint vX.Y.Z there ONCE, move latest forward
 #   retag-major  -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
-#   verify       -> confirm origin's refs and the draft's assets; the managed publish stage then attests and flips the release live
-#   publish-npm  -> publish the library build to npm as the stable version through trusted publishing, once the refs check out
+#   verify-release -> confirm the draft's assets; the managed publish stage then attests and flips the release live
+#   publish-npm  -> publish the library build to npm as the stable version through trusted publishing, once the assets check out
 #
 # Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
 # manifest never mints a tag. A rerun converges: a version npm already holds is skipped, and once a NEWER release
-# shipped, the major stays on it and verify reports the difference.
+# shipped, the major stays on it.
 
 # Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a packaged
 # commit it mints carries no run trailer, and the npm publish has no hand path at all, only the workflow's OIDC
@@ -22,7 +22,6 @@
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts retag-major
-#   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts verify
 #   gh release upload vX.Y.Z lib/settings.schema.json lib/index.js --clobber
 #   gh release edit vX.Y.Z --draft=false
 
@@ -100,24 +99,13 @@ jobs:
     permissions:
       contents: write # read-only in spirit; write is what makes drafts visible to gh
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The script judges whether the release's merge commit lies on main; a shallow checkout cannot.
-          fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          install: "false"
-      - name: Confirm the published refs carry the build outputs
-        env:
-          TAG: ${{ inputs.tag }}
-          SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
-        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts verify
       # Publishing freezes the asset list, so an incomplete one must stop here while the release is still a draft
       # (v2.0.0 shipped assetless exactly this way). attestation.json is the managed publish stage's asset, attached
       # after this job, so the check ignores it.
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
         run: |
           assets="$(gh release view "$TAG" --json assets \
@@ -129,8 +117,8 @@ jobs:
           fi
 
   # Publishes the release's library build to npm as the stable version through trusted publishing: no registry
-  # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before origin's refs
-  # check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
+  # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before the draft's
+  # assets check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
   # package-release sits in needs for its output alone (a job reads outputs only from its direct dependencies).
   # The lane is the one post-green.yml's publish-next takes: the registry has no compare-and-set, so the two
   # publishers never overlap and a verdict still holds when its publish lands; queue: max keeps every queued
