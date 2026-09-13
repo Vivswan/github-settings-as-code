@@ -943,7 +943,9 @@ describe("environments deployment protection rules apply mode", () => {
       apply(api, [{ name: "prod", deployment_protection_rules: [{ app: "region-guard" }] }]),
     ).rejects.toThrow(
       new Error(
-        'environments: GitHub holds protection-rule Apps that resolve to one identity: "region-guard (app id 3516)" and "region-guard (app id 9999)". This section manages one protection-rule App per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
+        "environments: GitHub holds protection-rule Apps that resolve to one identity: " +
+          '"region-guard (app id 3516)" and "region-guard (app id 9999)". This section manages one ' +
+          "protection-rule App per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
       ),
     );
     expect(api.calls.some((c) => c.method === "POST")).toBe(false);
