@@ -641,6 +641,57 @@ describe("the setup composite", () => {
 /** A job's run steps name lint:yaml, directly or through `bun run check`. */
 const RUNS_LINT_YAML = /\bbun run (?:check|lint:yaml)(?![\w:.-])/;
 
+/**
+ * The commit-back push jobs: the patch was cut on one head, so a head that moved before the push skips with a notice,
+ * and the push itself is leased to that head. Both workflows spell the guard the same way.
+ */
+const HEAD_MOVED_GUARD =
+  /^if \[ "\$\(git rev-parse HEAD\)" != "\$HEAD_SHA" \]; then\n {2}echo "::notice::head moved .*"\n {2}exit 0\nfi$/m;
+const LEASED_PUSH = /git push --force-with-lease="refs\/heads\/\$\{HEAD_REF\}:\$\{HEAD_SHA\}"/;
+const PUSH_JOBS: ReadonlyArray<[string, string, string]> = [
+  ["auto-fix.yml", "Commit and push the fix", `\${{ github.event.pull_request.head.sha }}`],
+  ["auto-format.yml", "Commit and push the formatting", `\${{ needs.format.outputs.head }}`],
+];
+
+describe("the commit-back push jobs", () => {
+  test.each(PUSH_JOBS)(
+    "%s: the push step skips on a moved head and leases the push to it",
+    (file, name, sha) => {
+      const step = readWorkflow(file).jobs.push?.steps?.find(
+        (candidate) => candidate.name === name,
+      );
+      expect(step, `${file} has no step named ${name}`).toBeDefined();
+      expect(step?.env?.HEAD_SHA).toBe(sha);
+      const run = step?.run ?? "";
+      expect(run, `${file}: no head-moved guard`).toMatch(HEAD_MOVED_GUARD);
+      expect(run, `${file}: the push is not leased to HEAD_SHA`).toMatch(LEASED_PUSH);
+      // The guard runs before anything is applied or pushed.
+      expect(run.search(HEAD_MOVED_GUARD)).toBeLessThan(run.indexOf("git apply"));
+    },
+  );
+
+  test.each([
+    [
+      "a guard that only warns",
+      'if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then\n  echo "::notice::head moved"\nfi',
+    ],
+    [
+      "a guard on the wrong variable",
+      'if [ "$(git rev-parse HEAD)" != "$BASE_SHA" ]; then\n  echo "::notice::head moved"\n  exit 0\nfi',
+    ],
+    ["no guard", 'git apply --index --binary "$RUNNER_TEMP/format/format.patch"'],
+  ])("%s fails the guard pin (negative control)", (_, run) => {
+    expect(run).not.toMatch(HEAD_MOVED_GUARD);
+  });
+
+  test("the format job hands its head to the push job (control)", () => {
+    const format = readWorkflow("auto-format.yml").jobs.format;
+    expect(format?.outputs?.head).toBe(`\${{ steps.format.outputs.head }}`);
+    const step = format?.steps?.find((candidate) => candidate.id === "format");
+    expect(step?.run).toContain('echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"');
+  });
+});
+
 /** `<workflow file>#<job id>` for every repo-owned job with a step matching `test`. */
 function jobsWhere(test: (step: Step) => boolean): string[] {
   return repoOwnedWorkflowFiles()

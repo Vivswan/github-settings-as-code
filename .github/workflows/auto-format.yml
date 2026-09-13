@@ -30,6 +30,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       changed: ${{ steps.format.outputs.changed }}
+      head: ${{ steps.format.outputs.head }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,6 +41,8 @@ jobs:
       - name: Format (biome) and stage the patch
         id: format
         run: |
+          # The patch belongs to this commit alone; the push job refuses any other head.
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           bun run lint:fix
           git add -A
           git diff --cached --binary > "$RUNNER_TEMP/format.patch"
@@ -84,12 +87,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ needs.format.outputs.head }}
         run: |
+          # The branch can move between the two jobs; the patch was cut on HEAD_SHA and formats that tree alone, so a
+          # newer head gets its own run (re-apply the label) instead of a commit formatting the old one.
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+            echo "::notice::head moved since the format; skipping the stale formatting push"
+            exit 0
+          fi
           git apply --index --binary "$RUNNER_TEMP/format/format.patch"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit --no-verify -m "style: apply automated formatting"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
+          # The lease pins the remote to the commit the patch was cut on, so a push that lands in between rejects this one.
+          git push --force-with-lease="refs/heads/${HEAD_REF}:${HEAD_SHA}" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"refs/heads/${HEAD_REF}"
       - name: Remove the fix-lint label
         if: always()
         env:
