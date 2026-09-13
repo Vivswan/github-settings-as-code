@@ -91,9 +91,6 @@ export type ListEndpoints = {
 /** The roles every list section declares, which the derived mock fragment serves. */
 export type ListRoleName = "list" | "create" | "update" | "remove";
 
-/** The optional item roles; a section on one writes its own mock fragment. */
-type ListItemRole = "get" | "updateConfig";
-
 type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) extends (
   member: infer I,
 ) => void
@@ -116,7 +113,7 @@ type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) &
       ? unknown
       : never
     : unknown) & {
-    readonly [R in Exclude<keyof Ends, ListRoleName | ListItemRole>]: never;
+    readonly [R in Exclude<keyof Ends, ListRoleName | "get" | "updateConfig">]: never;
   } & { readonly [R in keyof Ends & "update"]: UpdateDecl } & {
     readonly [R in keyof Ends & "updateConfig"]: UpdateDecl;
   } & { readonly [R in keyof Ends & "get"]: GetDecl };
@@ -135,10 +132,6 @@ type SecretPath<Ends> = Ends extends {
 
 export function updateRole(endpoints: ListEndpoints): UpdateDecl | undefined {
   return "update" in endpoints ? endpoints.update : undefined;
-}
-
-function getRole(endpoints: ListEndpoints): GetDecl | undefined {
-  return "get" in endpoints ? endpoints.get : undefined;
 }
 
 type RouteOf<Ends, R extends string> = Ends extends {
@@ -650,7 +643,7 @@ async function readItem(
   ctx: PlanContext<ListEndpoints>,
   item: object,
 ): Promise<object> {
-  const get = getRole(decl.endpoints);
+  const get = "get" in decl.endpoints ? decl.endpoints.get : undefined;
   if (get === undefined) {
     return item;
   }

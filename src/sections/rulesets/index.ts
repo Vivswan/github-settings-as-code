@@ -45,7 +45,9 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
 }
 
 /** The rule types a ruleset repeats; rules pair by type, so a repeat has no pairing. */
-function repeatedRuleTypes(rules: readonly { readonly type: unknown }[] | undefined): string[] {
+function repeatedRuleTypes(
+  rules: readonly { readonly type: unknown }[] | undefined,
+): string | undefined {
   const seen = new Set<string>();
   const repeated = new Set<string>();
   for (const rule of rules ?? []) {
@@ -55,7 +57,11 @@ function repeatedRuleTypes(rules: readonly { readonly type: unknown }[] | undefi
     }
     seen.add(type);
   }
-  return [...repeated];
+  if (repeated.size === 0) {
+    return undefined;
+  }
+  const types = [...repeated].map((type) => `"${type}"`).join(", ");
+  return `rule type${repeated.size === 1 ? "" : "s"} ${types}`;
 }
 
 /**
@@ -74,10 +80,9 @@ type LiveRuleset = z.infer<typeof LiveRuleset>;
 /** A live body repeating a rule type has no pairing either; GitHub keeps one rule per type, so this names a defect worth a look. */
 function pairableRuleset(live: LiveRuleset): LiveRuleset {
   const repeated = repeatedRuleTypes(live.rules);
-  if (repeated.length > 0) {
-    const types = repeated.map((type) => `"${type}"`).join(", ");
+  if (repeated !== undefined) {
     throw new Error(
-      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the rule type${repeated.length === 1 ? "" : "s"} ${types} more than once, ` +
+      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the ${repeated} more than once, ` +
         "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
     );
   }
@@ -138,10 +143,10 @@ export const rulesetsSection = listSection({
     declared: (writes) =>
       writes.flatMap((write) => {
         const repeated = repeatedRuleTypes(write.rules as { readonly type: unknown }[] | undefined);
-        return repeated.length === 0
+        return repeated === undefined
           ? []
           : [
-              `the ruleset "${write.name}" lists the rule type${repeated.length === 1 ? "" : "s"} ${repeated.map((type) => `"${type}"`).join(", ")} more than once, and GitHub keeps one rule per type - declare each type once`,
+              `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
             ];
       }),
   },

@@ -95,20 +95,6 @@ function undeclaredVariableDrift(
   });
 }
 
-function liveVariablesByKey(
-  section: SectionMeta,
-  scope: VariablesScopeProse,
-  live: readonly LiveVariable[],
-): Map<string, LiveVariable> {
-  return liveByIdentity(
-    section,
-    scope.noun,
-    live,
-    (variable) => variableKey(variable.name),
-    (variable) => variable.name,
-  );
-}
-
 export async function planVariables<
   Create extends AnyPlannedOp,
   Update extends AnyPlannedOp,
@@ -129,7 +115,13 @@ export async function planVariables<
   const { entries, policy, defaultPolicy } = opts;
   const plan: SectionPlan<Create | Update | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveVariablesByKey(section, scope, await scope.list());
+  const liveByKey = liveByIdentity(
+    section,
+    scope.noun,
+    await scope.list(),
+    (variable) => variableKey(variable.name),
+    (variable) => variable.name,
+  );
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
 
   for (const variable of entries) {
