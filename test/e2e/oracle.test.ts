@@ -15,6 +15,7 @@ import {
   judgePreflightAbort,
   KEYED_MERGE_SECTIONS,
   NO_READ_SECTIONS,
+  orgGateDenied,
   type PreflightAbort,
   predictDiscovery,
   predictMerge,
@@ -84,23 +85,72 @@ describe("sectionGrade", () => {
     ).toBe("read");
   });
 
-  test("teams: org_members is a read-gate, not a grade cap", () => {
-    expect(sectionGrade("teams", { administration: "write", org_members: "none" })).toBe("none");
-    expect(sectionGrade("teams", { administration: "write", org_members: "read" })).toBe("write");
+  test("teams: org_members shuts the org gate, never the repository grade", () => {
+    expect(sectionGrade("teams", { administration: "write", org_members: "none" })).toBe("write");
     expect(sectionGrade("teams", { administration: "read", org_members: "write" })).toBe("read");
-    expect(sectionGrade("teams", { administration: "write", org_members: "write" })).toBe("write");
+    expect(sectionGrade("teams", { administration: "none", org_members: "write" })).toBe("none");
+    expect(orgGateDenied("teams", { org_members: "none" })).toBe(true);
+    expect(orgGateDenied("teams", { org_members: "read" })).toBe(false);
+    expect(orgGateDenied("teams", {})).toBe(false);
+    // A section without an org permission has no org gate to shut.
+    expect(orgGateDenied("labels", { org_members: "none" })).toBe(false);
   });
 
   test("teams: the org gate reads org_members from orgMask, not the per-slug mask", () => {
-    // Nightly seed 28401742: the mock takes org_members for teams' org-scoped grant endpoint from the
-    // GLOBAL mask, so a per-slug org_members:none must NOT gate teams when the global mask (empty, so write) grants it.
-    expect(sectionGrade("teams", { administration: "write", org_members: "none" }, {})).toBe(
-      "write",
-    );
-    // The orgMask's own org_members:none does gate it, as on the single-repo path where orgMask === mask.
-    expect(sectionGrade("teams", { administration: "write" }, { org_members: "none" })).toBe(
-      "none",
-    );
+    // Nightly seed 28401742: the mock takes org_members for teams' org-scoped endpoints from the GLOBAL mask, so a
+    // per-slug org_members:none must NOT shut the gate when the global mask (empty, so write) grants it.
+    const teams = meta({
+      sections: ["teams"],
+      mask: { administration: "write", org_members: "none" },
+      mode: "check",
+    });
+    expect(predictSection("teams", { ...teams, orgMask: {} }).grades).toEqual(["write"]);
+    // The orgMask's own org_members:none does shut it, as on the single-repo path where orgMask === mask: the
+    // repository reads pass and the probes answer 404, so the section runs at none under the absent posture.
+    const shut = predictSection("teams", {
+      ...meta({ sections: ["teams"], mask: { administration: "write" }, mode: "check" }),
+      orgMask: { org_members: "none" },
+    });
+    expect(shut.grades).toEqual(["none"]);
+    expect([...shut.allowed].sort()).toEqual(["clean", "drift"]);
+    // With no repository grant the team list is denied first, under the section's own "denied" posture.
+    const noAdmin = predictSection("teams", {
+      ...meta({ sections: ["teams"], mask: { administration: "none" }, mode: "check" }),
+      orgMask: { org_members: "none" },
+    });
+    expect([...noAdmin.allowed]).toEqual(["failed"]);
+  });
+
+  test("teams: a shut org gate never arms the preflight barrier; a missing repository grant does", () => {
+    // The list read passes and the probes' 404 reads as no access, so preflight passes and the PUT is what fails:
+    // the section row is failed with preflightDenied empty, never a preflight abort.
+    const gateShut: ScenarioMeta = {
+      ...meta({
+        sections: ["teams"],
+        mask: { administration: "write" },
+        mode: "apply",
+        policy: "fail",
+      }),
+      orgMask: { org_members: "none" },
+    };
+    const shut = predictSection("teams", gateShut);
+    expect(shut.posture).toBe("absent");
+    expect(preflightDeniable(shut, gateShut)).toBe("no");
+    expect(predictOutcomes(gateShut).preflightAborts).toBe("no");
+    // Under the 403 style the probe's denial is a plain denial the engine sees, so preflight does abort.
+    expect(preflightDeniable(shut, { ...gateShut, denialStyle: 403 })).toBe("yes");
+    const noAdmin: ScenarioMeta = {
+      ...meta({
+        sections: ["teams"],
+        mask: { administration: "none" },
+        mode: "apply",
+        policy: "fail",
+      }),
+      orgMask: { org_members: "none" },
+    };
+    const denied = predictSection("teams", noAdmin);
+    expect(denied.posture).toBe("denied");
+    expect(preflightDeniable(denied, noAdmin)).toBe("yes");
   });
 });
 
@@ -458,6 +508,7 @@ describe("predictSection rules", () => {
       key: "labels",
       grades: [],
       allowed: new Set(["excluded"]),
+      posture: "denied",
       mayWrite: false,
     });
     const unrestricted = predictSection(
@@ -468,6 +519,7 @@ describe("predictSection rules", () => {
       key: "labels",
       grades: ["none"],
       allowed: new Set(["failed"]),
+      posture: "denied",
       mayWrite: false,
     });
   });
@@ -486,6 +538,7 @@ describe("predictSection rules", () => {
       key: "check_suite_preferences",
       grades: [],
       allowed: new Set(["excluded"]),
+      posture: "absent",
       mayWrite: false,
     });
   });
@@ -501,8 +554,20 @@ describe("predictSection rules", () => {
     });
     expect(predictOutcomes(excludedDenied)).toEqual({
       sections: [
-        { key: "labels", grades: [], allowed: new Set(["excluded"]), mayWrite: false },
-        { key: "pages", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+        {
+          key: "labels",
+          grades: [],
+          allowed: new Set(["excluded"]),
+          posture: "denied",
+          mayWrite: false,
+        },
+        {
+          key: "pages",
+          grades: ["write"],
+          allowed: new Set(["applied"]),
+          posture: "absent",
+          mayWrite: true,
+        },
       ],
       allowedExitCodes: new Set([0]),
       noWritesInCheck: false,
@@ -514,8 +579,20 @@ describe("predictSection rules", () => {
     // The control: the same meta with labels ACTIVE reaches the denied read, and the barrier aborts.
     expect(predictOutcomes({ ...excludedDenied, onlySections: undefined })).toEqual({
       sections: [
-        { key: "labels", grades: ["none"], allowed: new Set(["failed"]), mayWrite: false },
-        { key: "pages", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+        {
+          key: "labels",
+          grades: ["none"],
+          allowed: new Set(["failed"]),
+          posture: "denied",
+          mayWrite: false,
+        },
+        {
+          key: "pages",
+          grades: ["write"],
+          allowed: new Set(["applied"]),
+          posture: "absent",
+          mayWrite: true,
+        },
       ],
       allowedExitCodes: new Set([1]),
       noWritesInCheck: false,
@@ -557,6 +634,7 @@ describe("predictSection rules", () => {
       key: "teams",
       grades: ["write"],
       allowed: new Set(["applied"]),
+      posture: "denied",
       mayWrite: false,
     });
 
@@ -573,6 +651,7 @@ describe("predictSection rules", () => {
       key: "teams",
       grades: ["write"],
       allowed: new Set(["clean"]),
+      posture: "denied",
       mayWrite: false,
     });
   });
@@ -592,6 +671,7 @@ describe("predictSection rules", () => {
       key: "teams",
       grades: [],
       allowed: new Set(["excluded"]),
+      posture: "denied",
       mayWrite: false,
     });
   });
@@ -611,8 +691,20 @@ describe("predictOutcomes run level", () => {
     });
     expect(predictOutcomes(personal)).toEqual({
       sections: [
-        { key: "teams", grades: ["write"], allowed: new Set(["applied"]), mayWrite: false },
-        { key: "labels", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+        {
+          key: "teams",
+          grades: ["write"],
+          allowed: new Set(["applied"]),
+          posture: "denied",
+          mayWrite: false,
+        },
+        {
+          key: "labels",
+          grades: ["write"],
+          allowed: new Set(["applied"]),
+          posture: "denied",
+          mayWrite: true,
+        },
       ],
       allowedExitCodes: new Set([0]),
       noWritesInCheck: false,
@@ -625,8 +717,20 @@ describe("predictOutcomes run level", () => {
     // probe, and the barrier aborts the run.
     expect(predictOutcomes({ ...personal, ownerKind: "org" })).toEqual({
       sections: [
-        { key: "teams", grades: ["none"], allowed: new Set(["failed"]), mayWrite: false },
-        { key: "labels", grades: ["write"], allowed: new Set(["applied"]), mayWrite: true },
+        {
+          key: "teams",
+          grades: ["none"],
+          allowed: new Set(["failed"]),
+          posture: "absent",
+          mayWrite: false,
+        },
+        {
+          key: "labels",
+          grades: ["write"],
+          allowed: new Set(["applied"]),
+          posture: "denied",
+          mayWrite: true,
+        },
       ],
       allowedExitCodes: new Set([1]),
       noWritesInCheck: false,

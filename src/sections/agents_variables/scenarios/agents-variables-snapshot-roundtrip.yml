@@ -1,4 +1,4 @@
-name: agents_variables-snapshot-roundtrip
+name: agents-variables-snapshot-roundtrip
 description: "mode: snapshot reads the live agents_variables back into snapshot.yml and writes nothing to GitHub. The agents_variables read back as name and value, the timestamps dropped. The written file, fed back to a check run against the same state, reads clean."
 settings: {}
 live_state:

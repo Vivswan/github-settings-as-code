@@ -246,7 +246,7 @@ v2 refused to delete an undeclared ruleset whose list entry lacked `source_type`
 
 ## 16. Underscore keys are directives, never notes
 
-v2 dropped any unknown top-level key starting with `_` as a private note, while rejecting the same key inside a section's `{entries}` wrapper. v3 has one rule everywhere: the underscore belongs to the two directives, `_layering` and `_undeclared`, and any other underscore key fails validation before any section runs.
+v2 dropped any unknown top-level key starting with `_` as a private note, while rejecting the same key inside a section's `{entries}` wrapper. v3 has one rule everywhere: the underscore belongs to the two directives, `_layering` and `_undeclared`, and any other underscore key fails validation before any section runs. The one corner it does not reach: a `null`-valued underscore key inside a wrapper (`labels: {_notes: null, entries: []}`) is a merge marker the fold strips before it judges the layer, so a `mode: merge` run passes it silently.
 
 ```yaml settings
 # owner: platform-team, see runbook RB-112

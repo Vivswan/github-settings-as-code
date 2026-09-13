@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { ROOT } from "../root.js";
@@ -323,13 +324,19 @@ describe("scenario schema", () => {
 });
 
 describe("scenario corpus loader (collectYmlFiles)", () => {
-  test("every scenario file name is dashed lowercase, so a section key's underscore never leaks into the corpus", () => {
+  test("every scenario file name is dashed lowercase and names its scenario, so a section key's underscore never leaks into the corpus and --scenario <file stem> selects the file", () => {
     const files = scenarioRoots().flatMap((root) => collectYmlFiles(root));
     expect(files.length).toBeGreaterThan(0);
     const offenders = files.filter(
       (path) => !/^[a-z0-9]+(?:-[a-z0-9]+)*\.yml$/.test(basename(path)),
     );
     expect(offenders).toEqual([]);
+    const misnamed = files.filter(
+      (path) =>
+        (parseYaml(readFileSync(path, "utf8")) as { name?: unknown }).name !==
+        basename(path, ".yml"),
+    );
+    expect(misnamed).toEqual([]);
   });
 
   function withTempRoot(body: (root: string) => void): void {

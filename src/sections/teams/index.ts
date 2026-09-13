@@ -34,11 +34,14 @@ const ENDPOINTS = {
     route: "GET /orgs/{org}",
     statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
     permission: "none",
-    primaryRead: { notFound: "absent" },
   },
+  // GitHub gates the repository's team list at repository Administration (read) alone: the first read a fine-grained
+  // token can be denied, on a repository the org probe just proved exists, so its 404 is a denial.
   list: {
     route: "GET /repos/{owner}/{repo}/teams",
     statuses: { 200: "the teams with access to the repository" },
+    permission: { repo: ["administration"] },
+    primaryRead: { notFound: "denied" },
   },
   probe: {
     route: "GET /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}",
@@ -72,6 +75,11 @@ function inheritedAccess(team: LiveTeam): string | undefined {
   return team.access_source !== undefined && team.access_source !== "direct"
     ? team.access_source
     : undefined;
+}
+
+/** The note plan() and snapshot() open with for such access; `tail` says what each does about it. */
+function inheritedAccessNote(slug: string, repo: string, source: string, tail: string): string {
+  return `teams[${slug}]: access to ${repo} is granted at the ${source} level, not on the repository${tail}`;
 }
 
 /** The probe plan() and snapshot() share, under the media type LiveTeamRepo describes. */
@@ -169,7 +177,12 @@ export const teamsSection = {
         // Only a revocation would act on it, so only the policy that would revoke is told it cannot.
         if (policy === "delete") {
           plan.notes.push(
-            `teams[${team.slug}]: access to ${ctx.repo.slug} is granted at the ${inherited} level, not on the repository, so "_undeclared: delete" cannot revoke it; left untouched`,
+            inheritedAccessNote(
+              team.slug,
+              ctx.repo.slug,
+              inherited,
+              ', so "_undeclared: delete" cannot revoke it; left untouched',
+            ),
           );
         }
         continue;
@@ -203,9 +216,10 @@ export const teamsSection = {
   /**
    * The role comes from the probe, not the listing's `permission`:
    * the listing reports a custom role as its base role, role_name names it.
-   * Omitted with a note, each a no-op under the keep default and never revocable:
-   * non-direct access (declaring it would grant direct access), a probe 404 (no access, or a
-   * concealed denial), an unreadable role, a role no declaration plans as.
+   * Omitted with a note, each a no-op under the keep default: non-direct access (declaring it
+   * would grant direct access; plan() never revokes it either), a probe 404 (no access, or a
+   * concealed denial), an unreadable role, a role no declaration plans as (a direct team plan()
+   * still revokes under `_undeclared: delete`, so the note names what the file would have to declare).
    */
   async snapshot(ctx) {
     const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
@@ -220,7 +234,12 @@ export const teamsSection = {
       const inherited = inheritedAccess(team);
       if (inherited !== undefined) {
         notes.push(
-          `${label}: access to ${ctx.repo.slug} is granted at the ${inherited} level, not on the repository; not declared, since declaring it would grant direct access`,
+          inheritedAccessNote(
+            team.slug,
+            ctx.repo.slug,
+            inherited,
+            "; not declared, since declaring it would grant direct access",
+          ),
         );
         continue;
       }

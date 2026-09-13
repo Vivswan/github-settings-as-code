@@ -307,9 +307,10 @@ describe("section permissions", () => {
             )
           : value;
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
-      // The WHOLE declaration is compared, so a later EndpointDecl field cannot diverge uncovered.
+      // The WHOLE wire declaration is compared, so a later EndpointDecl field cannot diverge uncovered; only the
+      // 404 posture stays out, since it is the SECTION's (denialPosture reads it per section, never per route).
       // The effective permission rides along: two declarations can both omit an override while inheriting different section permissions.
-      const { route: _route, section, role: _role, ...rest } = endpoint;
+      const { route: _route, section, role: _role, primaryRead: _posture, ...rest } = endpoint;
       const projected = { ...rest, effective: rest.permission ?? sectionPermission.get(section) };
       const contract = JSON.stringify(canonical(projected));
       const group = byRoute.get(endpoint.route) ?? [];
@@ -473,6 +474,7 @@ describe("section endpoints", () => {
       "environments.listProtectionRules",
       "environments.removePolicy",
       "environments.removeProtectionRule",
+      "teams.list",
       "teams.org",
     ]);
   });

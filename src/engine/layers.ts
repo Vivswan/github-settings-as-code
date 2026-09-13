@@ -74,7 +74,7 @@ function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
 /**
  * The clone in progress of every node on the current descent: a node met again inside itself gets that clone, so a
  * cyclic document terminates. A node aliased twice WITHOUT enclosing itself is cloned per occurrence, in the position
- * each sits in (a wrapper shared between a private key and `rulesets` is data under one and a keyed list under the other).
+ * each sits in (a wrapper aliased under an open section and under `rulesets` is data under one and a keyed list under the other).
  */
 type Descent = WeakMap<object, unknown>;
 

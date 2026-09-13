@@ -51,7 +51,7 @@ A `check` run exits 1 on any drift, so a downstream step usually reads `result` 
 
 ## Environment variables
 
-Beside the inputs, a run reads these from its environment; the Actions runner sets the `GITHUB_*` ones, and the [command line](../start/cli.md) reads the same names.
+Beside the inputs, a run reads these from its environment. The Actions runner sets every `GITHUB_*` and `ACTIONS_*` name below except `GITHUB_TOKEN`, which a workflow exports itself; the [command line](../start/cli.md) reads `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_API_URL`, and `GSAC_RETRY_BASE_MS` under the same names.
 
 | Variable | Read for |
 |---|---|
@@ -59,4 +59,6 @@ Beside the inputs, a run reads these from its environment; the Actions runner se
 | `GITHUB_REPOSITORY` | The default `repository`, the owner of a bare `<name>.yml` under `repos-dir`, and the one target never redacted |
 | `GITHUB_SERVER_URL`, `GITHUB_RUN_ID` | The run link a private report carries |
 | `GITHUB_API_URL` | The REST base URL (GitHub Enterprise Server) |
-| `GSAC_RETRY_BASE_MS` | A test knob: the real milliseconds in one plugin second, for the retry backoff, the rate-limit `Retry-After` waits, and the write limiter's gap. Unset, a second is a second. Set it only to make a retry scenario finish in milliseconds against a mock; against GitHub a shortened wait earns the next secondary rate limit |
+| `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY` | Where the action writes its outputs and the step summary (the command line prints them instead) |
+| `ACTIONS_RUNTIME_TOKEN` | The artifact service's credential; `private-report: artifact` warns and uploads nothing without it (GitHub Enterprise Server) |
+| `GSAC_RETRY_BASE_MS` | A test knob: the real milliseconds in one retry-backoff second. Set, it also selects the immediate scheduler, so the rate-limit `Retry-After` waits and the write limiter's spacing are skipped rather than scaled. Unset, a second is a second and the waits are real. Set it only to make a retry scenario finish in milliseconds against a mock; against GitHub the skipped waits earn the next secondary rate limit |

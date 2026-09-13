@@ -960,7 +960,7 @@ export interface MultiScenarioMeta {
   selfSlug: string;
   /**
    * The GLOBAL token mask (scenario token_permissions), varied only on org_members. The idempotence eligibility
-   * predicate reads it: a globally denied org gate makes a declared teams section a denied-path section even when
+   * predicate reads it: a globally denied org gate answers a declared teams section no access and denies its grants even when
    * every per-target mask is empty.
    */
   globalMask: Partial<Record<MaskKey, MaskGrade>>;
@@ -1017,7 +1017,7 @@ export function genMultiScenario(
   const selfSlug = ADMIN_SLUG;
   // Varied ONLY on org_members: the mock grades org routes against the global mask and repo routes against the per-slug
   // overlay (mock/routes.ts), so any other global entry would have mock and oracle grading different masks. The
-  // idempotence force clears it: a globally denied teams section under fail policy would preflight-abort the fixpoint proof.
+  // idempotence force clears it: a globally denied org gate leaves a declared teams section granting on every apply, which is no fixpoint.
   const globalMaskRng = rng.fork("global-mask");
   const globalMask: Partial<Record<MaskKey, MaskGrade>> = {};
   if (globalMaskRng.bool(0.3) && force !== "idempotence-eligible") {

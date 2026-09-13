@@ -1,4 +1,4 @@
-name: actions_variables-snapshot-roundtrip
+name: actions-variables-snapshot-roundtrip
 description: "mode: snapshot reads the live actions_variables back into snapshot.yml and writes nothing to GitHub. The actions_variables read back as name and value, the timestamps dropped. The written file, fed back to a check run against the same state, reads clean."
 settings: {}
 live_state:

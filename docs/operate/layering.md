@@ -193,7 +193,7 @@ Reading it back:
 
 The merged file is exactly what apply runs, so it is worth knowing its shape:
 
-- Every list section that takes the `_undeclared` knob (the sixteen the [undeclared policy](../reference/undeclared-policy.md) lists) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. Other lists (`branches`, `environments`, and the nested per-environment lists) stay as written.
+- Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. Other lists (`branches`, `environments`, and the nested per-environment lists) stay as written.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
 - A `null` that met nothing below stays, keeping its engine meaning.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.

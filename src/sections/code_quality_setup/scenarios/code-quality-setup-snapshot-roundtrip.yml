@@ -1,4 +1,4 @@
-name: code_quality_setup-snapshot-roundtrip
+name: code-quality-setup-snapshot-roundtrip
 description: "mode: snapshot reads the live code_quality_setup back into snapshot.yml and writes nothing to GitHub. The not-configured default reads back with the null runner_type omitted (the slice takes no null there) and the nullable runner_label kept. The written file, fed back to a check run against the same state, reads clean."
 settings: {}
 live_state: {}
