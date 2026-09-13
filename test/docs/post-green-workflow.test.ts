@@ -1,4 +1,4 @@
-/** post-green.yml runs only from ci.yml's post-green slot, so neither the build branch nor npm is written from a
+/** post-green.yml runs only from ci.yml's post-green slot, so neither a build tag, latest, nor npm is written from a
  * commit the all-green gate has not judged. */
 
 import { describe, expect, test } from "bun:test";
@@ -69,7 +69,7 @@ const PUSH_PROBE = [
   "  exit 1",
   "else",
   '  echo "::warning::this run\'s token cannot push (the caller grants contents: read);" \\',
-  '    "the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \\',
+  '    "this commit was not packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself)." \\',
   '    "Raise the caller\'s ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \\',
   '    "with Contents (read and write) on this repository, to publish every green push to @latest."',
   '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
@@ -174,7 +174,7 @@ const CALLER_EXPECTED: CallerContract = {
           },
         },
         {
-          name: "Check the token can push to build",
+          name: "Check the token can push",
           id: "token",
           uses: undefined,
           if: undefined,
@@ -201,11 +201,11 @@ const CALLER_EXPECTED: CallerContract = {
           with: undefined,
         },
         {
-          name: "Append this commit's packaged commit to build and point latest at the newest main source",
+          name: "Package this commit under its build tag, prune the window, and point latest at the newest main source",
           id: undefined,
           uses: undefined,
           if: PROCEED,
-          run: 'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build',
+          run: 'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package-commit',
           env: {
             SOURCE_SHA: `\${{ inputs.sha }}`,
             RUN_URL: `\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}`,
@@ -335,7 +335,7 @@ function expectCallerContract(wf: Workflow): void {
   expect(callerContractOf(wf)).toEqual(CALLER_EXPECTED);
 }
 
-describe("post-green.yml publishes the build branch", () => {
+describe("post-green.yml packages the judged commit", () => {
   const wf = readWorkflow("post-green.yml");
 
   test("two self-contained jobs, each gated on its probe, with the judged sha as the only input", () => {
@@ -360,18 +360,18 @@ describe("post-green.yml publishes the build branch", () => {
       "jobs",
     ],
     [
-      "a build step that runs the append without the token gate",
+      "a build step that runs the packaging without the token gate",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.at(-1);
-        must(step, "append step").if = undefined;
+        must(step, "packaging step").if = undefined;
       },
       "jobs",
     ],
     [
-      "a build job whose append runs another subcommand",
+      "a build job whose packaging runs another subcommand",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.at(-1);
-        must(step, "append step").run =
+        must(step, "packaging step").run =
           'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package';
       },
       "jobs",
@@ -505,7 +505,7 @@ describe("post-green.yml publishes the build branch", () => {
       "jobs",
     ],
     [
-      "a shallow checkout, which advance-build refuses (fetch-depth gone)",
+      "a shallow checkout, which package-commit refuses (fetch-depth gone)",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.[0];
         delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
@@ -698,8 +698,8 @@ describe("the push probe under bash", () => {
     const probe = runProbe(run, "refused\n", 1, false);
     expect(probe.status).toBe(0);
     expect(probe.lines.filter((line) => line.startsWith("::"))).toEqual([
-      "::warning::this run's token cannot push (the caller grants contents: read); the build branch " +
-        "and the latest tag were not advanced here (the release hook advances them on each release). " +
+      "::warning::this run's token cannot push (the caller grants contents: read); this commit was not " +
+        "packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself). " +
         "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with " +
         "Contents (read and write) on this repository, to publish every green push to @latest.",
     ]);

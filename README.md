@@ -56,7 +56,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 | `@vX.Y.Z` or a commit SHA | One release, frozen by a ruleset | Byte-stable behavior |
 | `@latest` | The newest green `main` commit, packaged; breaking changes arrive here unannounced, ahead of any release | Trying unreleased fixes |
 
-- Every pin points at a packaged commit on the `build` branch: its source commit's tree without `.github/workflows/`, plus the built action. `main` is source-only and not runnable as an action. The tags up to v2.0.0 point at release commits on `main` from when `main` still committed the bundle.
+- Every pin points at a packaged commit: the child of one `main` commit, carrying its tree plus the built action. `main` is source-only and not runnable as an action. The tags up to v2.0.0 point at release commits on `main` from when `main` still committed the bundle.
 - v2 activates settings keys that were inert on v1: `actions.oidc_customization_sub`, `actions.fork_pr_contributor_approval`, `actions.fork_pr_workflows_private_repos`, and `branches[].protection.required_signatures`. Audit them before moving a `@v1` pin; a stale `required_signatures: false` would remove a hand-enabled requirement.
 - Only the latest release is supported; fixes are not backported (see [SECURITY.md](.github/SECURITY.md)). Each major has an [upgrade guide](docs/upgrading/README.md).
 

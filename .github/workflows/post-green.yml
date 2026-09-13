@@ -13,9 +13,10 @@ on:
         type: string
 
 jobs:
-  # No permissions key: the job inherits the caller's grant, which is enough because chain commits carry no .github/workflows/.
-  #   GITHUB_TOKEN at contents: write, or a PAT  -> pushes build and latest
-  #   a read ceiling and no PAT                  -> warns and skips; the release hook publishes the release's chain commit and latest itself
+  # No permissions key: the job inherits the caller's grant, which is enough because a packaged commit changes no
+  # workflow file against its parent (the main commit), the diff GitHub judges a token's workflows grant on.
+  #   GITHUB_TOKEN at contents: write, or a PAT  -> pushes the build tag and latest
+  #   a read ceiling and no PAT                  -> warns and skips; the release hook packages each release and moves latest itself
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -23,19 +24,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-          # The script judges whether build's recorded sources lie on this commit's history; a shallow checkout cannot.
+          # The script names the tag by this commit's position on main and judges latest's source against its history; a shallow checkout can do neither.
           fetch-depth: 0
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
       # A dry-run push asks origin for its receive-pack advertisement over the channel the real push uses, which a
-      # token without write access is refused; nothing is created. The target is a ref that never exists: HEAD is no
-      # descendant of build's tip, so a dry run against build itself would be rejected locally whatever the token.
+      # token without write access is refused; nothing is created. The target is a ref that never exists, so the dry
+      # run judges the token alone: against an existing tag git would refuse the non-fast-forward locally whatever the token.
       #
       # git's refusal is remote-supplied text, so it is printed inside a stop-commands fence keyed by a per-run token
       # and never inside a workflow command.
       #   the runner acts on any line whose first non-blank text is "::"  -> the fence disarms every such line
       #   only the fence's own token resumes command processing           -> the text can neither forge a command nor swallow the error after it
       #   awk, not sed                                                     -> ends the last line even when git did not, so the fence stays alone
-      - name: Check the token can push to build
+      - name: Check the token can push
         id: token
         env:
           PAT_SET: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
@@ -53,7 +54,7 @@ jobs:
             exit 1
           else
             echo "::warning::this run's token cannot push (the caller grants contents: read);" \
-              "the build branch and the latest tag were not advanced here (the release hook advances them on each release)." \
+              "this commit was not packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself)." \
               "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \
               "with Contents (read and write) on this repository, to publish every green push to @latest."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
@@ -66,12 +67,12 @@ jobs:
         run: |
           bun run build:bundle
           bun run build:lib
-      - name: Append this commit's packaged commit to build and point latest at the newest main source
+      - name: Package this commit under its build tag, prune the window, and point latest at the newest main source
         if: steps.token.outputs.proceed == 'true'
         env:
           SOURCE_SHA: ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts advance-build
+        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package-commit
 
   # No permissions key, like build: a job asking above the caller's ceiling fails the whole call, so the OIDC
   # grant arrives by inheritance from the id-token: write the managed ci.yml gives the post-green call.
@@ -167,7 +168,7 @@ jobs:
               exit 1 ;;
           esac
       # npm makes a publish readable asynchronously. This step holds the lane
-      # until the record shows the version (5 reads, 20 s apart), so the next
+      # until the record shows the version (15 reads, 20 s apart), so the next
       # holder's verdict sees it; a record that never shows it warns. It then
       # fails the job if the record holds a descendant's pre-release and next
       # names none: OIDC authenticates npm publish alone, not npm dist-tag add,

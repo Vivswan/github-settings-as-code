@@ -36,7 +36,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 ### Hard rules
 
 - Generated artifacts (`lib/settings.schema.json`, `src/upstream-gaps/index.ts`, the generated docs and `action.yml` regions) are regenerated, never hand-edited; `.github/scripts/generated.ts` lists them and `bun run build:check` fails on drift.
-- `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built, never committed on main; the packaged `build` branch carries them.
+- `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built, never committed on main; the packaged commits off main carry them.
 - Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`throwFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
@@ -52,5 +52,5 @@ Code is the source of truth: this section holds only the rules and the decisions
 ### Releases
 
 - The `release` job in ci.yml stays out of all-green's `needs`: it runs downstream of the gate so releases only happen on a green main.
-- Version tags live off main on the packaged `build` chain; main stays source-only and no tag ever lands on it. Topology: `.github/scripts/release-pipeline.ts`.
+- Every consumable ref points at a packaged commit off main, and a pointer only ever moves forward along main; main stays source-only and no tag ever lands on it. Topology and the rule: `.github/scripts/release-pipeline.ts`.
 - The npm package publishes from the release hooks through trusted publishing; docs/reference/library.md states the versioning rules.
