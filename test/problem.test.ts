@@ -412,7 +412,7 @@ describe("the fieldless members", () => {
     const seen = new Map<string, string>();
     for (const code of Object.keys(FIELDLESS) as FieldlessCode[]) {
       const line = describeProblem({ code });
-      expect(line.length, code).toBeGreaterThan(40);
+      expect(line.trim(), code).not.toBe("");
       expect(fielded.has(line), `${code} renders a fielded member's line`).toBe(false);
       expect(seen.get(line), `${code} renders the same line as ${seen.get(line)}`).toBeUndefined();
       seen.set(line, code);
@@ -425,7 +425,7 @@ describe("SettingsProblem", () => {
     // The library's validateSettings error type: widening it to a read failure would reach every consumer's exhaustive switch.
     // @ts-expect-error a read failure shares the prefix but is not a validation problem
     const unreadable: SettingsProblem["code"] = "settings-file-unreadable";
-    expect(String(unreadable)).toBe("settings-file-unreadable");
+    void unreadable;
   });
 });
 

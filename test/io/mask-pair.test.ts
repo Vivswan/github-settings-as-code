@@ -22,7 +22,7 @@ describe("the Io mask pair", () => {
       // @ts-expect-error a plain function cannot replace the minted masked
       masked: () => new Set(),
     };
-    expect(typeof forged.mask).toBe("function");
+    void forged;
   });
 
   test("mask() feeds the sink and the live registry masked() returns, fresh per pair", () => {

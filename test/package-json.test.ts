@@ -77,8 +77,20 @@ describe("package.json as the npm manifest", () => {
       "./package.json",
     ]);
     expect(built.filter((module) => !targets.includes(module))).toEqual([]);
-    // The bin NAMES are public too: the library page's CLI section names every bin entry, and both must run the one CLI build.
+    // The KEYS are public too: the library page's entry table names every import path and its trailing sentence the two paths that ride along.
     const page = readFileSync(join(ROOT, "docs/reference/library.md"), "utf8");
+    const entries = page.match(/^## The two entries\n([\s\S]*?)^## /m)?.[1] ?? "";
+    const importPaths = [
+      ...entries.matchAll(/^\| `@vivswan\/github-settings-as-code(\/[^`]+)?` \|/gm),
+    ].map((match) => `.${match[1] ?? ""}`);
+    const rideAlong = entries.match(/Two more paths ride along: (.+)$/m)?.[1] ?? "";
+    const documentedPaths = [
+      ...importPaths,
+      ...[...rideAlong.matchAll(/`(\.\/[^`]+)`/g)].map((match) => match[1] ?? ""),
+    ].sort();
+    expect(documentedPaths).not.toEqual([]);
+    expect(Object.keys(pkg.exports).sort()).toEqual(documentedPaths);
+    // The bin NAMES likewise: the CLI section names every bin entry, and both must run the one CLI build.
     const sentence =
       page.match(/The package's `bin` entries, (.+?), run the same flows/)?.[1] ?? "";
     const documentedBins = [...sentence.matchAll(/`([^`]+)`/g)]
@@ -86,7 +98,18 @@ describe("package.json as the npm manifest", () => {
       .sort();
     expect(documentedBins).not.toEqual([]);
     expect(Object.keys(pkg.bin).sort()).toEqual(documentedBins);
-    expect(new Set(Object.values(pkg.bin)).size).toBe(1);
+    // The bins run the CLI entry and each module export its namesake entry, so a swapped target cannot pass as "some built module".
+    expect(new Set(Object.values(pkg.bin))).toEqual(new Set([`${build.outDir}/cli.js`]));
+    for (const [key, entry] of Object.entries(pkg.exports)) {
+      if (typeof entry === "string") {
+        // The two file subpaths serve the file they are named after, so the schema key cannot serve the manifest.
+        expect(entry, key).toEndWith(key.slice(1));
+      } else {
+        expect(entry.default, key).toBe(
+          `./${build.outDir}/${key === "." ? "index" : key.slice(2)}.js`,
+        );
+      }
+    }
     const declarations: string[] = [];
     for (const entry of Object.values(pkg.exports)) {
       if (typeof entry !== "string") {
