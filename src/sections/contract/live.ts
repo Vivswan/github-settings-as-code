@@ -9,6 +9,11 @@ import { type EndpointDecl, endpointMethod, endpointPath } from "./endpoints.js"
 import type { SectionMeta } from "./module.js";
 import { collidingPairs } from "./requests.js";
 
+/** The plural of a section noun for a message ("custom property" -> "custom properties", "deploy key" -> "deploy keys"). */
+export function plural(noun: string): string {
+  return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
+}
+
 /**
  * Live items indexed by the identity the section manages them under. GitHub may hold two under one
  * (repeated deploy-key titles, repeated hook urls, two names one fold apart), which a single-slot map
@@ -25,7 +30,7 @@ export function liveByIdentity<T, Key extends string>(
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {
     throw new Error(
-      `${section.key}: GitHub holds ${noun}s that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again`,
+      `${section.key}: GitHub holds ${plural(noun)} that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again`,
     );
   }
   return new Map(items.map((item) => [keyOf(item), item]));

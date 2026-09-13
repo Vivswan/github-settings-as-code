@@ -214,7 +214,9 @@ describe("webhooks plan", () => {
       [
         "updateConfig",
         { hook_id: "3" },
-        ['webhooks[https://x.test/h].config.content_type: "form" != "json"'],
+        [
+          'webhooks[https://x.test/h].config.content_type: declared "form" != live "json"; apply will set the declared value',
+        ],
         'updated webhook "https://x.test/h" config',
       ],
       [
@@ -293,7 +295,7 @@ describe("webhooks plan", () => {
       [LIST]: { data: [liveHook(11, "https://dup.test/h"), liveHook(12, "https://dup.test/h")] },
     });
     const refusal =
-      'webhooks: GitHub holds webhooks that resolve to one identity: "https://dup.test/h" and "https://dup.test/h". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again';
+      'webhooks: GitHub holds webhooks that resolve to one identity: "https://dup.test/h (hook id 11)" and "https://dup.test/h (hook id 12)". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again';
     await expect(
       plan(api, [
         { config: { url: "https://new.test/h" } },

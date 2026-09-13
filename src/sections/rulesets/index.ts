@@ -44,6 +44,20 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   return copy;
 }
 
+/** The rule types a ruleset repeats; rules pair by type, so a repeat has no pairing. */
+function repeatedRuleTypes(rules: readonly { readonly type: unknown }[] | undefined): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const rule of rules ?? []) {
+    const type = String(rule.type);
+    if (seen.has(type)) {
+      repeated.add(type);
+    }
+    seen.add(type);
+  }
+  return [...repeated];
+}
+
 /**
  * A summary or a full body: the list and the per-item GET share these fields. The API type leaves
  * `source_type` optional; a body without it reads as repository-owned, the only kind the repository
@@ -53,7 +67,20 @@ const LiveRuleset = z.looseObject({
   id: z.number(),
   name: z.string(),
   source_type: z.string().optional(),
+  rules: z.array(z.looseObject({ type: z.string() })).optional(),
 });
+type LiveRuleset = z.infer<typeof LiveRuleset>;
+
+/** A live body repeating a rule type has no pairing either; GitHub keeps one rule per type, so this names a defect worth a look. */
+function pairableRuleset(live: LiveRuleset): LiveRuleset {
+  const repeated = repeatedRuleTypes(live.rules);
+  if (repeated.length > 0) {
+    throw new Error(
+      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the rule type${repeated.length === 1 ? "" : "s"} ${repeated.map((type) => `"${type}"`).join(", ")} more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run`,
+    );
+  }
+  return live;
+}
 
 // Rules pass through verbatim, so a typo'd rules[].type reaches GitHub unchanged and comes back as
 // a 422; the valid types live in the endpoint docs, not here, so they cannot go stale.
@@ -100,9 +127,21 @@ export const rulesetsSection = listSection({
     // The full ruleset is the wire body (a partial PUT narrows a ruleset). The slice types rule
     // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
     toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
-    fromLive: (live) => live,
+    fromLive: (live) => pairableRuleset(live),
     // Rules pair by type, as the layered merge does; every other list pairs by shape.
     matchBy: { rules: "type" },
+  },
+  // GitHub keeps one rule per type, and the comparison pairs rules by it, so a repeated type is a settings-file mistake.
+  conflicts: {
+    declared: (writes) =>
+      writes.flatMap((write) => {
+        const repeated = repeatedRuleTypes(write.rules as { readonly type: unknown }[] | undefined);
+        return repeated.length === 0
+          ? []
+          : [
+              `the ruleset "${write.name}" lists the rule type${repeated.length === 1 ? "" : "s"} ${repeated.map((type) => `"${type}"`).join(", ")} more than once, and GitHub keeps one rule per type - declare each type once`,
+            ];
+      }),
   },
   // Only a ruleset the API marks repository-owned is this section's; an inherited one is managed where it is defined.
   foreign: (live) =>

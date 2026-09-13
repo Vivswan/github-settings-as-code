@@ -228,8 +228,9 @@ Anything that greps the check output for these lines needs the new spelling:
 ## 14. Webhooks manage web hooks only
 
 - A legacy service hook (`name` other than `web`) or a hook without a `config.url` is outside the section: plan neither matches, notes, nor deletes it (v2 deleted one under `_undeclared: delete`); snapshot leaves it out with a note.
-- The create body carries `name` only when the file declares it; GitHub defaults a new hook to `web`.
+- No write carries `name`: GitHub defaults a new hook to `web`, the one value the slice admits, and the update endpoint takes no name.
 - A declared `insecure_ssl: 0` is written as GitHub stores it, the string `"0"`.
+- A snapshot writes a hook's `config` keys in the order GitHub lists them, the `$SECRET_WEBHOOK_<id>` reference last.
 
 ## 15. A ruleset without `source_type` is repository-owned
 

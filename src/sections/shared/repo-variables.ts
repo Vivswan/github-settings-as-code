@@ -12,7 +12,7 @@ import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -242,6 +242,13 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
+    liveByIdentity(
+      section,
+      noun,
+      live,
+      (variable) => variableKey(variable.name),
+      (variable) => variable.name,
+    );
     const entries = live.map((variable) => projectOntoSchema(VARIABLES_ENTRIES[key], variable));
     return { value: knobbedSnapshot(section, entries), notes: [] };
   };

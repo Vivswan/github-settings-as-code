@@ -48,7 +48,7 @@ describe("teams", () => {
           payload: { permission: "push" },
           describe: 'granting team "platform" access',
           drift: [
-            'teams[platform]: live role "read" != declared "write"; apply will set the declared permission',
+            'teams[platform]: declared "write" != live "read"; apply will set the declared permission',
           ],
           change: 'granted team "platform" push',
         },
@@ -79,7 +79,7 @@ describe("teams", () => {
     });
     const result = await plan(api, [{ name: "platform", permission: "pull" }]);
     expect(result.ops.map((op) => op.drift)).toEqual([
-      ['teams[platform]: live role "" != declared "read"; apply will set the declared permission'],
+      ['teams[platform]: declared "read" != live ""; apply will set the declared permission'],
     ]);
   });
 

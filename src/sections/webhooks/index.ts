@@ -83,9 +83,10 @@ export const webhooksSection = listSection({
   mapping: "config",
   secrets: ["config.secret"],
   lens: {
-    // `name` rides only when declared: GitHub defaults a new hook to "web", the one value the slice
-    // admits. The config's catchall is unknown passthrough; the factory proves the body plain at the payload.
-    toWrite: (hook) =>
+    // `name` never rides a write: "web" is the one value the slice admits and GitHub's default on
+    // create, and the update endpoint takes no name. The config's catchall is unknown passthrough;
+    // the factory proves the body plain at the payload.
+    toWrite: ({ name: _name, ...hook }) =>
       ({
         ...hook,
         config: normalizedConfig(hook.config),

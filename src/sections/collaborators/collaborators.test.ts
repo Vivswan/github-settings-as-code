@@ -45,7 +45,7 @@ describe("collaborators", () => {
           payload: { permission: "push" },
           describe: 'updating collaborator "alice"',
           drift: [
-            'collaborators[alice]: live role "read" != declared "write"; apply will set the declared permission',
+            'collaborators[alice]: declared "write" != live "read"; apply will set the declared permission',
           ],
           change: 'updated collaborator "alice" (push)',
         },
@@ -132,7 +132,7 @@ describe("collaborators", () => {
           payload: { permissions: "write" },
           describe: 'updating the pending invitation for "alice"',
           drift: [
-            'collaborators[alice]: pending invitation permission "read" != declared "write"; apply will update the invitation',
+            'collaborators[alice] (pending invitation): declared "write" != live "read"; apply will update the invitation',
           ],
           change: 'updated pending invitation for "alice" (push)',
         },

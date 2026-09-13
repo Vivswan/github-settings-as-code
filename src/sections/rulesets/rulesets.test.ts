@@ -395,6 +395,32 @@ describe("rulesets", () => {
     expect(api.calls).toHaveLength(0);
   });
 
+  test("a repeated rule type is a settings-file error before any read, and a live body repeating one fails loudly naming the ruleset", async () => {
+    // Rules pair by type, so a repeat has no pairing; the settings-file case names the fix, the live case the defect.
+    const api = writable({
+      [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
+      "GET /repos/o/r/rulesets/9": {
+        data: {
+          id: 9,
+          name: "main",
+          target: "branch",
+          enforcement: "active",
+          rules: [{ type: "deletion" }, { type: "deletion" }],
+        },
+      },
+    });
+    await expect(
+      plan(api, [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }]),
+    ).rejects.toThrow(
+      'rulesets: the settings file declares conflicting rulesets: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once. Fix the settings file, then re-run',
+    );
+    expect(api.calls).toHaveLength(0);
+    await expect(plan(api, [{ name: "main", rules: [{ type: "deletion" }] }])).rejects.toThrow(
+      'rulesets: GitHub returned the ruleset "main" (id 9) with the rule type "deletion" more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run',
+    );
+    expect(api.mutations()).toEqual([]);
+  });
+
   test("wrapped _undeclared:delete plans the DELETE after the declared upserts", async () => {
     const api = writable({
       [listRoute]: {
@@ -625,7 +651,7 @@ describe("rulesets snapshot", () => {
       served(2, "main", { target: "tag", enforcement: "active" }),
     ]);
     await expect(snapshot(api)).rejects.toThrow(
-      'rulesets: GitHub holds rulesets that resolve to one identity: "main" and "main". This section manages one ruleset per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
+      'rulesets: GitHub holds rulesets that resolve to one identity: "main (ruleset id 1)" and "main (ruleset id 2)". This section manages one ruleset per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
     );
   });
 

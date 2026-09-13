@@ -6,10 +6,12 @@
 
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import { liveByIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
 import { secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
+import { variableKey } from "../shared/variables-engine.js";
 import { listBranchPolicies } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import {
@@ -85,6 +87,13 @@ export async function snapshotNested(
   const nested: NestedSnapshot = {};
   const notes: string[] = [];
   const variables = await listEnvironmentVariables(ctx, section, envName);
+  liveByIdentity(
+    section,
+    "variable",
+    variables,
+    (variable) => variableKey(variable.name),
+    (variable) => variable.name,
+  );
   if (variables.length > 0) {
     nested.variables = wrapped(
       "variables",
@@ -92,6 +101,13 @@ export async function snapshotNested(
     );
   }
   const secrets = await listEnvironmentSecrets(ctx, section, envName);
+  liveByIdentity(
+    section,
+    `${envName} environment secret`,
+    secrets,
+    (secret) => secretKey(secret.name),
+    (secret) => secret.name,
+  );
   if (secrets.length > 0) {
     // Names go through secretKey, the uppercase form GitHub stores and the planner compares by,
     // so a lowercase listing still mints a reference the settings-file grammar accepts.
@@ -118,6 +134,13 @@ export async function snapshotNested(
       () => listBranchPolicies(ctx, section, envName),
     );
     if ("value" in policies && policies.value.length > 0) {
+      liveByIdentity(
+        section,
+        "deployment branch policy",
+        policies.value,
+        (policy) => String(policy.name),
+        (policy) => String(policy.name),
+      );
       nested.deployment_branch_policies = wrapped(
         "deployment_branch_policies",
         policies.value.map((policy) => projectOntoSchema(DeploymentBranchPolicyConfig, policy)),
@@ -132,6 +155,13 @@ export async function snapshotNested(
   );
   if ("value" in rules) {
     const enabled = rules.value.filter((rule) => rule.enabled !== false);
+    liveByIdentity(
+      section,
+      "deployment protection rule",
+      enabled,
+      (rule) => liveRuleSlug(rule, envName),
+      (rule) => liveRuleSlug(rule, envName),
+    );
     if (enabled.length > 0) {
       nested.deployment_protection_rules = wrapped(
         "deployment_protection_rules",

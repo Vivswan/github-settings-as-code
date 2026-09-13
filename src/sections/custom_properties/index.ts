@@ -245,6 +245,13 @@ export const customPropertiesSection = {
       };
     }
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
+    liveByIdentity(
+      this,
+      "custom property",
+      live,
+      (p) => p.property_name,
+      (p) => p.property_name,
+    );
     const set = live.flatMap((property) => {
       if (property.value === null) {
         return [];

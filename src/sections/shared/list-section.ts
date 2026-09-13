@@ -11,7 +11,7 @@ import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
@@ -516,6 +516,18 @@ function nameOf(record: Fields, field: string): string {
   return value;
 }
 
+/**
+ * A live item named for a message about two of them: the name, then the address when it says more
+ * (`v1 (milestone number 1)`; a label's address IS its name, so nothing is added).
+ */
+function addressed(decl: ErasedDecl<string>, item: object, name: string): string {
+  const params = Object.entries(decl.address(item)).filter(([, value]) => value !== name);
+  if (params.length === 0) {
+    return name;
+  }
+  return `${name} (${params.map(([param, value]) => `${param.replace(/_/g, " ")} ${value}`).join(", ")})`;
+}
+
 // --- Secret fields ----------------------------------------------------------
 
 /** The secret paths of `decl` a write declares (holds a string at). */
@@ -573,15 +585,14 @@ function renderEntryDelta(
   ) {
     return `${sectionKey}[${names.live}]: should be named "${names.want}" per the settings file; ${remedies.rename}`;
   }
-  const [step, ...rest] = delta.path;
   if (
     delta.kind === "mismatch" &&
-    rest.length === 0 &&
-    typeof step === "string" &&
+    delta.path.length > 0 &&
+    delta.path.every((step) => typeof step === "string") &&
     (typeof delta.desired !== "object" || delta.desired === null)
   ) {
     return valueDrift(
-      `${label}.${step}`,
+      `${label}.${delta.path.join(".")}`,
       JSON.stringify(delta.desired),
       JSON.stringify(delta.live),
       remedies.value,
@@ -728,7 +739,7 @@ async function planList<Key extends string>(
   const declaredConflicts = decl.conflicts?.declared?.(writes.map((w) => w.write)) ?? [];
   if (declaredConflicts.length > 0) {
     throw new Error(
-      `${key}: the settings file declares conflicting ${noun}s: ${declaredConflicts.join("; ")}. Fix the settings file, then re-run`,
+      `${key}: the settings file declares conflicting ${plural(noun)}: ${declaredConflicts.join("; ")}. Fix the settings file, then re-run`,
     );
   }
 
@@ -745,7 +756,7 @@ async function planList<Key extends string>(
     ) ?? [];
   if (liveConflicts.length > 0) {
     throw new Error(
-      `${key}: the settings file conflicts with the live ${noun}s: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
+      `${key}: the settings file conflicts with the live ${plural(noun)}: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
     );
   }
   const liveByKey = liveByIdentity(
@@ -753,7 +764,7 @@ async function planList<Key extends string>(
     noun,
     liveItems,
     (item) => item.key,
-    (item) => item.name,
+    (item) => addressed(decl, item.item, item.name),
   );
   const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
 
@@ -765,7 +776,7 @@ async function planList<Key extends string>(
     });
     if (matches.length > 1) {
       throw new Error(
-        `${key}: the entry "${name}" matches ${matches.length} separate live ${noun}s (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
+        `${key}: the entry "${name}" matches ${matches.length} separate live ${plural(noun)} (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
       );
     }
     const existing = matches[0];
@@ -812,7 +823,7 @@ async function planList<Key extends string>(
           params: decl.address(existing.item),
           describe: `deleting ${noun} "${name}" before recreating it`,
           drift: [
-            `${label}: live settings differ from the settings file, and ${noun}s cannot be edited; apply will delete and recreate it`,
+            `${label}: live settings differ from the settings file, and ${plural(noun)} cannot be edited; apply will delete and recreate it`,
           ],
           change: `deleted ${noun} "${name}" to recreate it with the declared settings`,
         },
@@ -951,7 +962,7 @@ async function snapshotList(
     noun,
     items,
     (item) => item.key,
-    (item) => item.name,
+    (item) => addressed(decl, item.item, item.name),
   );
   const entries: object[] = [];
   for (const { item, name } of items) {
@@ -1018,7 +1029,9 @@ function checkDecl(decl: ErasedDecl<string>): void {
     }
     if (head !== mapping) {
       throw new Error(
-        `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
+        mapping === undefined
+          ? `BUG: ${key} declares the dotted secret field "${field}" without a mapping (an updateConfig role) to carry it under the unverifiable facet`
+          : `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
       );
     }
     if (!("updateConfig" in endpoints) || endpoints.updateConfig.unverifiable !== true) {

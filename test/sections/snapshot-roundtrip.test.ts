@@ -12,8 +12,10 @@ import { join } from "node:path";
 import type { GitHubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
+import { actionsVariablesSection } from "../../src/sections/actions_variables/index.js";
 import { snapshotContext } from "../../src/sections/contract/plan.js";
 import { deployKeysSection } from "../../src/sections/deploy_keys/index.js";
+import { environmentsSection } from "../../src/sections/environments/index.js";
 import { interactionLimitsSection } from "../../src/sections/interaction_limits/index.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { milestonesSection } from "../../src/sections/milestones/index.js";
@@ -100,7 +102,7 @@ describe("snapshot round trip", () => {
     await expect(
       deployKeysSection.snapshot(snapshotContext(deployKeysSection, keys, REPO, "fail")),
     ).rejects.toThrow(
-      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "ci" and "ci". ' +
+      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "ci (key id 90000000)" and "ci (key id 90000001)". ' +
         "This section manages one deploy key per identity, so it cannot tell them apart; " +
         "delete all but one of each on GitHub, then run again",
     );
@@ -130,7 +132,7 @@ describe("snapshot round trip", () => {
       webhooksSection.snapshot(snapshotContext(webhooksSection, hooks, REPO, "fail")),
     ).rejects.toThrow(
       "webhooks: GitHub holds webhooks that resolve to one identity: " +
-        '"https://ci.example.com/hook" and "https://ci.example.com/hook". ' +
+        '"https://ci.example.com/hook (hook id 1)" and "https://ci.example.com/hook (hook id 2)". ' +
         "This section manages one webhook per identity, so it cannot tell them apart; " +
         "delete all but one of each on GitHub, then run again",
     );
@@ -160,9 +162,41 @@ describe("snapshot round trip", () => {
     await expect(
       milestonesSection.snapshot(snapshotContext(milestonesSection, api, REPO, "fail")),
     ).rejects.toThrow(
-      'milestones: GitHub holds milestones that resolve to one identity: "v1" and ' +
-        '"v1". This section manages one milestone per identity, so it ' +
+      'milestones: GitHub holds milestones that resolve to one identity: "v1 (milestone number 1)" and ' +
+        '"v1 (milestone number 2)". This section manages one milestone per identity, so it ' +
         "cannot tell them apart; delete all but one of each on GitHub, then run again",
+    );
+  });
+
+  test("the bespoke snapshots refuse a live pair one fold apart too, so a snapshot never writes a file its own plan refuses", async () => {
+    const variables = registryFake({
+      actions_variables: [
+        { name: "FOO", value: "1", ...STAMPS },
+        { name: "foo", value: "2", ...STAMPS },
+      ],
+    });
+    await expect(
+      actionsVariablesSection.snapshot(
+        snapshotContext(actionsVariablesSection, variables, REPO, "fail"),
+      ),
+    ).rejects.toThrow(
+      'actions_variables: GitHub holds Actions variables that resolve to one identity: "FOO" and "foo". This section manages one Actions variable per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
+    );
+    const nested = registryFake({
+      environments: {
+        prod: { name: "prod", protection_rules: [], deployment_branch_policy: null },
+      },
+      environment_variables: {
+        prod: [
+          { name: "FOO", value: "1", ...STAMPS },
+          { name: "foo", value: "2", ...STAMPS },
+        ],
+      },
+    });
+    await expect(
+      environmentsSection.snapshot(snapshotContext(environmentsSection, nested, REPO, "fail")),
+    ).rejects.toThrow(
+      /environments: GitHub holds variables that resolve to one identity: "FOO" and "foo"/,
     );
   });
 

@@ -276,6 +276,13 @@ export const secretScanningPatternsSection = {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
+    liveByIdentity(
+      this,
+      "secret scanning custom pattern",
+      live,
+      (p) => p.name,
+      (p) => p.name,
+    );
     const entries = live.map((pattern) => projectOntoSchema(SecretScanningPatternConfig, pattern));
     return { value: knobbedSnapshot(this, entries), notes: [] };
   },

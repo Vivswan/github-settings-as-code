@@ -11,6 +11,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
+  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
@@ -91,13 +92,15 @@ function declaredPermission(label: string, role: string): string {
   return permission;
 }
 
-/** Both pools in one read, so plan() and snapshot() see the same live access. */
+/** Both pools in one read, each indexed under the guard, so plan() and snapshot() see the same live access. */
 async function readLiveAccess(
   ctx: CollaboratorsContext,
   section: SectionMeta,
 ): Promise<{
   collaborators: LiveCollaborator[];
+  liveByLogin: Map<string, LiveCollaborator>;
   invitations: NamedInvitation[];
+  inviteByLogin: Map<string, NamedInvitation>;
   emailInvitations: LiveInvitation[];
 }> {
   const collaborators = parseLive(
@@ -112,9 +115,24 @@ async function readLiveAccess(
     z.array(LiveInvitation),
     await ctx.read.listInvitations.listAll(),
   );
+  const invitations = allInvitations.filter(isNamedInvitation);
   return {
     collaborators,
-    invitations: allInvitations.filter(isNamedInvitation),
+    liveByLogin: liveByIdentity(
+      section,
+      "collaborator",
+      collaborators,
+      (c) => c.login.toLowerCase(),
+      (c) => c.login,
+    ),
+    invitations,
+    inviteByLogin: liveByIdentity(
+      section,
+      "pending invitation",
+      invitations,
+      (invitation) => invitation.invitee.login.toLowerCase(),
+      (invitation) => invitation.invitee.login,
+    ),
     emailInvitations: allInvitations.filter((invitation) => !isNamedInvitation(invitation)),
   };
 }
@@ -150,21 +168,13 @@ export const collaboratorsSection = {
     // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
     // undeclared in the other pool; email invitations (null invitee, which no username can declare)
     // split into their own pool.
-    const { collaborators: live, invitations, emailInvitations } = await readLiveAccess(ctx, this);
-    const liveByLogin = liveByIdentity(
-      this,
-      "collaborator",
-      live,
-      (c) => c.login.toLowerCase(),
-      (c) => c.login,
-    );
-    const inviteByLogin = liveByIdentity(
-      this,
-      "pending invitation",
+    const {
+      collaborators: live,
+      liveByLogin,
       invitations,
-      (invitation) => invitation.invitee.login.toLowerCase(),
-      (invitation) => invitation.invitee.login,
-    );
+      inviteByLogin,
+      emailInvitations,
+    } = await readLiveAccess(ctx, this);
     const declaredKeys = new Set<string>();
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
 
@@ -185,7 +195,12 @@ export const collaboratorsSection = {
             payload: { permission: wantPermission },
             describe: `updating collaborator "${username}"`,
             drift: [
-              `${label}: live role "${existing.role_name}" != declared "${wantRole}"; apply will set the declared permission`,
+              valueDrift(
+                label,
+                JSON.stringify(wantRole),
+                JSON.stringify(existing.role_name),
+                "apply will set the declared permission",
+              ),
             ],
             change: `updated collaborator "${username}" (${wantPermission})`,
           });
@@ -210,7 +225,12 @@ export const collaboratorsSection = {
             payload: { permissions: wantRole },
             describe: `updating the pending invitation for "${username}"`,
             drift: [
-              `${label}: pending invitation permission "${invitation.permissions}" != declared "${wantRole}"; apply will update the invitation`,
+              valueDrift(
+                `${label} (pending invitation)`,
+                JSON.stringify(wantRole),
+                JSON.stringify(invitation.permissions),
+                "apply will update the invitation",
+              ),
             ],
             change: `updated pending invitation for "${username}" (${wantPermission})`,
           });

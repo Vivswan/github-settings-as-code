@@ -3,7 +3,13 @@
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
-import { loosen, type SectionMeta, type SectionModule, sectionGrant } from "../contract/module.js";
+import {
+  loosen,
+  type SectionMeta,
+  type SectionModule,
+  sectionGrant,
+  valueDrift,
+} from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
@@ -110,7 +116,12 @@ export const teamsSection = {
         if (liveRole === wantRole) {
           continue;
         }
-        drift = `teams[${team.name}]: live role "${liveRole}" != declared "${wantRole}"; apply will set the declared permission`;
+        drift = valueDrift(
+          `teams[${team.name}]`,
+          JSON.stringify(wantRole),
+          JSON.stringify(liveRole),
+          "apply will set the declared permission",
+        );
       }
       plan.ops.push({
         role: "grant",
