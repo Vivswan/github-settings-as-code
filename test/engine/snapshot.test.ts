@@ -210,7 +210,7 @@ describe("snapshotRepository", () => {
     expect(result.result).toBe("snapshot");
     // The org probe is public and DID answer 404: a 404 there has one reading, so no such note.
     const personal =
-      'custom_properties: owner "o" is a personal account, and custom properties require an organization-owned repository; nothing to snapshot';
+      'custom_properties: owner "o" is a personal account, not an organization, so this section does not apply';
     expect(result.outcomes).toEqual([
       { key: "pages", status: "snapshot", detail: [note, NOTHING] },
       { key: "custom_properties", status: "snapshot", detail: [personal, NOTHING] },

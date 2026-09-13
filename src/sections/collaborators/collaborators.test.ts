@@ -359,9 +359,9 @@ describe("collaborators", () => {
           ],
         },
         notes: [
-          "collaborators[O]: the repository owner's access is implicit and never managed, so it is not declared",
-          "collaborators[erin]: the pending invitation has expired, so it is not declared; apply cancels it - add the entry to re-invite them",
-          "invitation 9 was sent by email, so no username can declare it; not declared, and apply leaves it untouched",
+          "collaborators[O]: left out of the snapshot - the repository owner's access is implicit and never managed",
+          "collaborators[erin]: left out of the snapshot - the pending invitation has expired; apply cancels it - add the entry to re-invite them",
+          "collaborators[invitation 9]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched",
         ],
       });
       expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST, INVITATIONS]);
@@ -380,9 +380,9 @@ describe("collaborators", () => {
       expect(await snapshot(api)).toEqual({
         value: undefined,
         notes: [
-          "collaborators[o]: the repository owner's access is implicit and never managed, so it is not declared",
-          "collaborators[erin]: the pending invitation has expired, so it is not declared; nothing else is declared, so the section is omitted and apply leaves it - declare the entry to re-invite them",
-          "invitation 9 was sent by email, so no username can declare it; not declared, and apply leaves it untouched",
+          "collaborators[o]: left out of the snapshot - the repository owner's access is implicit and never managed",
+          "collaborators[erin]: left out of the snapshot - the pending invitation has expired; nothing else is declared, so the section is omitted and apply leaves it - declare the entry to re-invite them",
+          "collaborators[invitation 9]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched",
         ],
       });
     });

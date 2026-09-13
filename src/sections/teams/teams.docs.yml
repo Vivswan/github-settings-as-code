@@ -19,7 +19,7 @@ coverage:
       revocation (the probe reads the inherited role as converged): declare the parent too, or keep.
       Snapshot lists the same teams and reads each team's role through the same probe, so a custom
       role reads back by name, and writes the wrapped form with the keep default spelled out;
-      noted, not declared: access granted at the organization or enterprise level, a probe 404 (no
+      left out with a note: access granted at the organization or enterprise level, a probe 404 (no
       access, or a fine-grained token missing the grant; the note names both), a role the probe
       does not report, and a role no declaration plans as (a custom role named "push" or "pull").
       A personal account snapshots nothing.

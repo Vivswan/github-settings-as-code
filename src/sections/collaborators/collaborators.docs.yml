@@ -21,7 +21,7 @@ coverage:
       Snapshot reads the direct collaborators and the pending username invitations back as entries
       under the delete default, each role through the inverse mapping (write -> push, read -> pull,
       custom role names verbatim); the repository owner, email invitations, and expired invitations
-      are noted, not declared, and a live role no declaration plans as (a custom role named "push"
+      are left out with a note, and a live role no declaration plans as (a custom role named "push"
       or "pull") fails the collaborators section; the snapshot is written as partial without it.
 schema:
   SettingsFile.collaborators: >-

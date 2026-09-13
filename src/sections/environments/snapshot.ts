@@ -10,7 +10,7 @@ import { liveByIdentity } from "../contract/live.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
 import { secretKey } from "../shared/secrets-engine.js";
-import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
+import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/snapshot-helpers.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { listBranchPolicies, livePolicyName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
@@ -120,9 +120,7 @@ export async function snapshotNested(
       references.map(({ name, reference }) => ({ name, value: reference })),
     );
     for (const { name, variable } of references) {
-      notes.push(
-        `environments[${envName}].secrets[${name}]: value of ${name} is not readable; export it into the environment as ${variable} before apply`,
-      );
+      notes.push(unreadableSecretNote(`environments[${envName}].secrets[${name}]`, name, variable));
     }
   }
   const flags = liveEnv.deployment_branch_policy as { custom_branch_policies?: unknown } | null;

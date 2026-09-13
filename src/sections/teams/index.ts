@@ -1,7 +1,8 @@
 /**
  * `teams:` section: team repository access. Organization repos only, so a personal account no-ops with a note. An
  * undeclared team keeps its access by default (a team is often granted by the org, for reasons outside one
- * repository's file); `_undeclared: delete` revokes the direct grants the file does not name.
+ * repository's file); `_undeclared: delete` revokes the direct grants the file does not name. Bespoke, not on
+ * listSection: the live list carries no role, so each team's access is a separate probe.
  */
 
 import { z } from "zod";
@@ -21,20 +22,16 @@ import {
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { DEFAULT_ROLE, permissionForRole, roleForPermission } from "../shared/roles.js";
+import { ORG_PROBE, personalAccountNote } from "../shared/org-owner.js";
+import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot } from "../shared/snapshot-helpers.js";
+import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { TeamConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
 const ENDPOINTS = {
-  // GET /orgs/{org} is public, so no token permission; its 404 is the personal-account no-op.
-  org: {
-    route: "GET /orgs/{org}",
-    statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
-    permission: "none",
-  },
+  org: ORG_PROBE,
   // GitHub gates the repository's team list at repository Administration (read) alone: the first read a fine-grained
   // token can be denied, on a repository the org probe just proved exists, so its 404 is a denial.
   list: {
@@ -77,9 +74,9 @@ function inheritedAccess(team: LiveTeam): string | undefined {
     : undefined;
 }
 
-/** The note plan() and snapshot() open with for such access; `tail` says what each does about it. */
-function inheritedAccessNote(slug: string, repo: string, source: string, tail: string): string {
-  return `teams[${slug}]: access to ${repo} is granted at the ${source} level, not on the repository${tail}`;
+/** Why plan() and snapshot() leave such access alone; each says what it does about it. */
+function inheritedAccessReason(repo: string, source: string): string {
+  return `access to ${repo} is granted at the ${source} level, not on the repository`;
 }
 
 /** The probe plan() and snapshot() share, under the media type LiveTeamRepo describes. */
@@ -97,10 +94,6 @@ async function probeTeamRole(
   }
   const live = parseLive(section, ENDPOINTS.probe, LiveTeamRepo, probe.data, `team "${slug}"`);
   return { access: true, role: live?.role_name };
-}
-
-function personalAccountNote(owner: string): string {
-  return `teams: owner "${owner}" is a personal account, not an organization, so team access does not apply`;
 }
 
 export const teamsSection = {
@@ -127,11 +120,14 @@ export const teamsSection = {
     );
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // On a personal account the org endpoints 404; 403/5xx still classify through probeAbsent.
-    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
-    if ("missing" in orgProbe) {
-      plan.notes.push(
-        `${personalAccountNote(ctx.repo.owner)}; section skipped - remove the teams section from the settings file to silence this note`,
-      );
+    const personal = personalAccountNote(
+      this,
+      ctx.repo.owner,
+      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
+      "plan",
+    );
+    if (personal !== undefined) {
+      plan.notes.push(personal);
       return plan;
     }
     // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
@@ -177,12 +173,7 @@ export const teamsSection = {
         // Only a revocation would act on it, so only the policy that would revoke is told it cannot.
         if (policy === "delete") {
           plan.notes.push(
-            inheritedAccessNote(
-              team.slug,
-              ctx.repo.slug,
-              inherited,
-              ', so "_undeclared: delete" cannot revoke it; left untouched',
-            ),
+            `teams[${team.slug}]: ${inheritedAccessReason(ctx.repo.slug, inherited)}, so "_undeclared: delete" cannot revoke it; left untouched`,
           );
         }
         continue;
@@ -222,9 +213,14 @@ export const teamsSection = {
    * still revokes under `_undeclared: delete`, so the note names what the file would have to declare).
    */
   async snapshot(ctx) {
-    const orgProbe = await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } });
-    if ("missing" in orgProbe) {
-      return { value: undefined, notes: [personalAccountNote(ctx.repo.owner)] };
+    const personal = personalAccountNote(
+      this,
+      ctx.repo.owner,
+      await ctx.read.org.probeAbsent({ params: { org: ctx.repo.owner } }),
+      "snapshot",
+    );
+    if (personal !== undefined) {
+      return { value: undefined, notes: [personal] };
     }
     const teams = parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll());
     const notes: string[] = [];
@@ -234,11 +230,9 @@ export const teamsSection = {
       const inherited = inheritedAccess(team);
       if (inherited !== undefined) {
         notes.push(
-          inheritedAccessNote(
-            team.slug,
-            ctx.repo.slug,
-            inherited,
-            "; not declared, since declaring it would grant direct access",
+          leftOutOfSnapshot(
+            label,
+            `${inheritedAccessReason(ctx.repo.slug, inherited)}, and declaring it would grant direct access`,
           ),
         );
         continue;
@@ -247,23 +241,26 @@ export const teamsSection = {
       if (!probe.access) {
         // No write follows to surface a denial, so the note names both readings of the 404.
         notes.push(
-          `${label}: listed with access to ${ctx.repo.slug}, but the access probe answered 404, ` +
-            "read here as no access; not declared. A fine-grained token missing the grant gets the " +
-            `same answer; if the team does have access, ${sectionGrant(this)}, then snapshot again`,
+          leftOutOfSnapshot(
+            label,
+            `listed with access to ${ctx.repo.slug}, but the access probe answered 404, read here as no access. ` +
+              "A fine-grained token missing the grant gets the same answer; if the team does have access, " +
+              `${sectionGrant(this)}, then snapshot again`,
+          ),
         );
         continue;
       }
       if (probe.role === undefined) {
         notes.push(
-          `${label}: has access to ${ctx.repo.slug}, but GitHub reported no role for it; not declared - add the entry with the intended permission`,
+          leftOutOfSnapshot(
+            label,
+            `has access to ${ctx.repo.slug}, but GitHub reported no role for it; add the entry with the intended permission`,
+          ),
         );
         continue;
       }
-      const permission = permissionForRole(probe.role);
+      const permission = readBackPermission(this, label, probe.role, notes);
       if (permission === undefined) {
-        notes.push(
-          `${label}: the live role "${probe.role}" has no declaration that plans as itself ("${probe.role}" in a settings file means the "${roleForPermission(probe.role)}" role); not declared`,
-        );
         continue;
       }
       entries.push({ name: team.slug, permission });

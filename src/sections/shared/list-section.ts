@@ -20,6 +20,7 @@ import {
   type GraphqlDict,
   type KeyedListLayering,
   loosen,
+  missingDrift,
   type SectionMeta,
   type SectionSnapshot,
   secretValuesOf,
@@ -41,7 +42,12 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
-import { knobbedSnapshot, leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
+import {
+  knobbedSnapshot,
+  leftOutOfSnapshot,
+  projectOntoSchema,
+  unreadableSecretNote,
+} from "./snapshot-helpers.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
@@ -772,7 +778,7 @@ async function planList<Key extends string>(
             : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
         describe: `creating ${noun} "${name}"`,
         drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
-          `${label}: missing - declared in the settings file but not on the repo; apply will create it`,
+          missingDrift(label),
         ]),
         change: `created ${noun} "${name}"`,
       });
@@ -961,7 +967,7 @@ async function snapshotList(
       const id = Object.values(decl.address(item)).join("_");
       const { variable, reference } = snapshotSecretReference(noun, id);
       notes.push(
-        `${label}.${field}: value of the ${noun} ${leafOf(field)} is not readable; export it into the environment as ${variable} before apply`,
+        unreadableSecretNote(`${label}.${field}`, `the ${noun} ${leafOf(field)}`, variable),
       );
       entry = withValueAt(entry, pathOf(field), reference);
     }

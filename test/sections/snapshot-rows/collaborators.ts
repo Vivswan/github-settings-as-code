@@ -25,8 +25,8 @@ export const row: Row = {
       ],
     },
     notes: [
-      "collaborators[O]: the repository owner's access is implicit and never managed, so it is not declared",
-      "invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched",
+      "collaborators[O]: left out of the snapshot - the repository owner's access is implicit and never managed",
+      "collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched",
     ],
   },
 };

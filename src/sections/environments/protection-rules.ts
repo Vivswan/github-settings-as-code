@@ -1,7 +1,12 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { liveByIdentity, parseLive } from "../contract/live.js";
-import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
+import {
+  missingDrift,
+  type SectionMeta,
+  undeclaredDrift,
+  undeclaredNote,
+} from "../contract/module.js";
 import type { ExecTools } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
@@ -171,7 +176,10 @@ export async function planProtectionRules(
         return { integration_id: integrationId };
       },
       drift: [
-        `environments[${envName}].deployment_protection_rules[${rule.app}]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment`,
+        missingDrift(`environments[${envName}].deployment_protection_rules[${rule.app}]`, {
+          where: "enabled on the environment",
+          action: "enable it if the App is available to this environment",
+        }),
       ],
       change: `enabled deployment protection rule "${rule.app}" in environment "${envName}"`,
       describe: `enabling deployment protection rule "${rule.app}" in environment "${envName}"`,

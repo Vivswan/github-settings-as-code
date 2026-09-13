@@ -13,6 +13,7 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
+  cannotVerifyNote,
   loosen,
   requirePlainMapping,
   type SectionMeta,
@@ -26,7 +27,7 @@ import {
   plainData,
   type SectionPlan,
 } from "../contract/plan.js";
-import { projectOntoSchema } from "../shared/snapshot-helpers.js";
+import { leftOutOfSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -269,7 +270,11 @@ export const interactionLimitsSection = {
       }
       if (desired.expiry !== undefined) {
         plan.notes.push(
-          `interaction_limits.expiry: GitHub reports only the computed expires_at, so the declared duration cannot be verified; apply re-arms it on every run`,
+          cannotVerifyNote("interaction_limits.expiry", {
+            why: "GitHub reports only the computed expires_at",
+            what: "the declared duration",
+            reasserts: "re-arms it",
+          }),
         );
       }
       // The PUT is alwaysRewrite: a matching live limit still re-arms (its expiry is ticking), so
@@ -380,7 +385,10 @@ export const interactionLimitsSection = {
       );
     } else if (live.kind === "inherited") {
       notes.push(
-        `interaction_limits: the live "${live.limit}" limit is set at the ${live.origin} level, not on the repository, so it is not part of the repository's snapshot`,
+        leftOutOfSnapshot(
+          "interaction_limits",
+          `the live "${live.limit}" limit is set at the ${live.origin} level, not on the repository`,
+        ),
       );
     }
     const cap = await ctx.read.capGet.tryCall({

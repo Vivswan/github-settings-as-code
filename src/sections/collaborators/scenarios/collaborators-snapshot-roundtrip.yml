@@ -42,8 +42,8 @@ expect:
         - username: bob
           permission: pull
   summary_contains:
-    - "collaborators[e2e-owner]: the repository owner's access is implicit and never managed, so it is not declared"
-    - "invitation 502 was sent by email, so no username can declare it; not declared, and apply leaves it untouched"
+    - "collaborators[e2e-owner]: left out of the snapshot - the repository owner's access is implicit and never managed"
+    - "collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched"
   never:
     - POST /
     - PATCH /

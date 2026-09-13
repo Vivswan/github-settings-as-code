@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { parseLive } from "../contract/live.js";
-import { type DeclaredSecretValue, loosen, type SectionModule } from "../contract/module.js";
+import {
+  type DeclaredSecretValue,
+  loosen,
+  missingDrift,
+  type SectionModule,
+} from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
@@ -86,9 +91,7 @@ export const environmentsSection = {
       const live = "missing" in probe ? undefined : ((probe.data ?? {}) as Record<string, unknown>);
       const drift =
         live === undefined
-          ? [
-              `environments[${name}]: missing - declared in the settings file but not on the repo; apply will create it`,
-            ]
+          ? [missingDrift(`environments[${name}]`)]
           : subsetDiff(settings, flattenEnvironment(live), `environments[${name}]`);
       // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
       // body is validated only when a mutation needs it.

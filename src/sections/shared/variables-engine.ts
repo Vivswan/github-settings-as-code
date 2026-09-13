@@ -9,6 +9,7 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
 import { liveByIdentity } from "../contract/live.js";
 import {
+  missingDrift,
   type SectionMeta,
   undeclaredDrift,
   undeclaredNote,
@@ -159,9 +160,7 @@ export async function planVariables<
       plan.ops.push(
         scope.create({
           payload: plainData({ name: variable.name, value: variable.value, ...extraKeys }),
-          drift: [
-            `${label}: missing - declared in the settings file but not on ${scope.where ?? "the repo"}; apply will create it`,
-          ],
+          drift: [missingDrift(label, { where: `on ${scope.where ?? "the repo"}` })],
           change: `created ${scope.noun} "${variable.name}"${suffix}`,
           describe: `creating ${scope.noun} "${variable.name}"${suffix}`,
         }),

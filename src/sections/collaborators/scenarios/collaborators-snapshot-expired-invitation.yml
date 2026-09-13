@@ -31,7 +31,7 @@ expect:
         - username: alice
           permission: push
   summary_contains:
-    - "collaborators[dave]: the pending invitation has expired, so it is not declared; apply cancels it - add the entry to re-invite them"
+    - "collaborators[dave]: left out of the snapshot - the pending invitation has expired; apply cancels it - add the entry to re-invite them"
   never:
     - POST /
     - PATCH /

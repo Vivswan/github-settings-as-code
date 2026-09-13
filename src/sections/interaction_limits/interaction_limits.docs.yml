@@ -27,7 +27,7 @@ coverage:
       the undeclared logins and then PUTs only the missing ones ({users: [logins]}, compared
       case-insensitively; removals go first because the list holds at most 100 users, which also
       caps the declaration), never a wholesale replace; a declared empty list removes everyone.
-      Snapshot reads back the repository-level limit (an inherited one is noted, not declared, and
+      Snapshot reads back the repository-level limit (an inherited one is left out with a note, and
       the expiry duration is not readable), the cap when the feature exists and is enabled, and the
       bypass list when it has members.
 schema:

@@ -732,3 +732,15 @@ export function undeclaredDrift(
   const keep = opts.keep ?? "it";
   return `${opts.label}: undeclared - ${state}${knob}, so apply will ${opts.action}; add ${add} to the settings file to keep ${keep}`;
 }
+
+/**
+ * The drift line for a declared resource the live side lacks. `where` completes "but not ..." when "on the
+ * repo" understates it ("on the environment", "enabled on the environment"); `action` when apply does more
+ * than create it.
+ */
+export function missingDrift(
+  label: string,
+  opts: { where?: string; action?: string } = {},
+): string {
+  return `${label}: missing - declared in the settings file but not ${opts.where ?? "on the repo"}; apply will ${opts.action ?? "create it"}`;
+}

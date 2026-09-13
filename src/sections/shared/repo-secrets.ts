@@ -42,7 +42,7 @@ import {
   type SecretsPlanScope,
   secretKey,
 } from "./secrets-engine.js";
-import { knobbedSnapshot } from "./snapshot-helpers.js";
+import { knobbedSnapshot, unreadableSecretNote } from "./snapshot-helpers.js";
 
 export type RepoSecretsKey =
   | "actions_secrets"
@@ -288,9 +288,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       ...snapshotSecretReference(pathSegment, secretKey(name)),
     }));
     const entries = references.map(({ name, reference }) => ({ name, value: reference }));
-    const notes = references.map(
-      ({ name, variable }) =>
-        `${key}[${name}]: value of ${name} is not readable; export it into the environment as ${variable} before apply`,
+    const notes = references.map(({ name, variable }) =>
+      unreadableSecretNote(`${key}[${name}]`, name, variable),
     );
     return { value: knobbedSnapshot(section, entries), notes };
   };

@@ -158,3 +158,11 @@ export function knobbedSnapshot<E>(
 ): UndeclaredPolicyList<E> {
   return { _undeclared: defaultUndeclaredPolicy(section), entries };
 }
+
+/**
+ * The ONE wording for a secret a snapshot declares as a `$NAME` reference because GitHub never reveals
+ * its value: `what` names it ("DEPLOY_TOKEN", "the webhook secret").
+ */
+export function unreadableSecretNote(label: string, what: string, variable: string): string {
+  return `${label}: value of ${what} is not readable; export it into the environment as ${variable} before apply`;
+}

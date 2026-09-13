@@ -11,6 +11,7 @@ import { liveByIdentity } from "../contract/live.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
+  missingDrift,
   type SectionMeta,
   secretValuesOf,
   undeclaredDrift,
@@ -279,9 +280,7 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
         },
         drift: exists
           ? []
-          : [
-              `${scope.label}[${name}]: missing - declared in the settings file but not on ${scope.where ?? "the repo"}; apply will create it`,
-            ],
+          : [missingDrift(`${scope.label}[${name}]`, { where: `on ${scope.where ?? "the repo"}` })],
         change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
       }),
     );

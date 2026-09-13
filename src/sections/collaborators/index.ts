@@ -1,4 +1,8 @@
-/** `collaborators:` section: direct collaborators by username plus their pending invitations; the owner is never removed. */
+/**
+ * `collaborators:` section: direct collaborators by username plus their pending invitations; the owner is
+ * never removed. Bespoke, not on listSection: one declared username resolves against two live pools (the
+ * collaborator list and the pending invitations), each with its own writes.
+ */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -19,11 +23,11 @@ import { rejectDuplicates } from "../contract/requests.js";
 import {
   DEFAULT_ROLE,
   INVITATION_ROLES,
-  permissionForRole,
+  readBackPermission,
   roleForPermission,
 } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot } from "../shared/snapshot-helpers.js";
+import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -80,17 +84,6 @@ const ENDPOINTS = {
 } as const satisfies Record<string, EndpointDecl>;
 
 type CollaboratorsContext = PlanContext<typeof ENDPOINTS>;
-
-/** The permission a live role declares as; a role no declaration plans as fails loudly. */
-function declaredPermission(label: string, role: string): string {
-  const permission = permissionForRole(role);
-  if (permission === undefined) {
-    throw new Error(
-      `${label}: the live role "${role}" has no declaration that plans as itself ("${role}" in a settings file means the "${roleForPermission(role)}" role), so it cannot be read back`,
-    );
-  }
-  return permission;
-}
 
 /** Both pools in one read, each indexed under the guard, so plan() and snapshot() see the same live access. */
 async function readLiveAccess(
@@ -353,7 +346,7 @@ export const collaboratorsSection = {
       const label = `collaborators[${collaborator.login}]`;
       if (isOwner(ctx, collaborator.login)) {
         notes.push(
-          `${label}: the repository owner's access is implicit and never managed, so it is not declared`,
+          leftOutOfSnapshot(label, "the repository owner's access is implicit and never managed"),
         );
         continue;
       }
@@ -362,10 +355,11 @@ export const collaboratorsSection = {
           `${label}: GitHub reported no role_name for this collaborator, so their permission cannot be read back`,
         );
       }
-      entries.push({
-        username: collaborator.login,
-        permission: declaredPermission(label, collaborator.role_name),
-      });
+      // The section deletes undeclared access, so readBackPermission throws rather than notes here.
+      const permission = readBackPermission(this, label, collaborator.role_name, notes);
+      if (permission !== undefined) {
+        entries.push({ username: collaborator.login, permission });
+      }
     }
     for (const invitation of invitations) {
       const login = invitation.invitee.login;
@@ -379,10 +373,10 @@ export const collaboratorsSection = {
           `${label}: GitHub reported no permissions on the pending invitation, so it cannot be read back`,
         );
       }
-      entries.push({
-        username: login,
-        permission: declaredPermission(label, invitation.permissions),
-      });
+      const permission = readBackPermission(this, label, invitation.permissions, notes);
+      if (permission !== undefined) {
+        entries.push({ username: login, permission });
+      }
     }
     // With nothing to declare the section is omitted, so apply never reaches the expired ones.
     const outcome =
@@ -390,10 +384,15 @@ export const collaboratorsSection = {
         ? "apply cancels it - add the entry to re-invite them"
         : "nothing else is declared, so the section is omitted and apply leaves it - declare the entry to re-invite them";
     for (const label of expired) {
-      notes.push(`${label}: the pending invitation has expired, so it is not declared; ${outcome}`);
+      notes.push(leftOutOfSnapshot(label, `the pending invitation has expired; ${outcome}`));
     }
     for (const invitation of emailInvitations) {
-      notes.push(emailInvitationNote(invitation, "not declared, and apply leaves it untouched"));
+      notes.push(
+        leftOutOfSnapshot(
+          `collaborators[invitation ${invitation.id}]`,
+          "sent by email, so no username can declare it; apply leaves it untouched",
+        ),
+      );
     }
     if (entries.length === 0) {
       return { value: undefined, notes };
