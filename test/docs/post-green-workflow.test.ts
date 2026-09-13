@@ -2,7 +2,7 @@
  * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs and publish
  * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: every hook is
  * reachable through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its
- * steps consume and nothing granted goes unconsumed; a hook job's own condition is the fork guard or nothing; post-green's judged sha
+ * steps consume; a hook job's own condition is the fork guard or nothing; post-green's judged sha
  * reaches every checkout and packaging step; every output a step writes is read by a later step, and every gate reads an output an
  * earlier step writes, back to the probe. The push probe also runs under bash against a stubbed git, since no pin shows what a branch
  * does.
@@ -170,9 +170,12 @@ const effectiveGrant = (job: Job, workflow: Workflow, caller: Job): Record<strin
   job.permissions ?? workflow.permissions ?? caller.permissions ?? {};
 
 /** Every hook job whose steps consume a grant its effective permissions do not hold. */
-function grantProblems(hooks: LocalCall[]): string[] {
+function grantProblems(
+  hooks: LocalCall[],
+  read: (file: string) => Workflow = readWorkflow,
+): string[] {
   return hooks.flatMap(({ file, job: caller }) => {
-    const workflow = readWorkflow(file);
+    const workflow = read(file);
     return Object.entries(workflow.jobs).flatMap(([id, job]) => {
       const granted = effectiveGrant(job, workflow, caller);
       return (job.steps ?? [])
@@ -224,17 +227,13 @@ describe("the hooks' grants", () => {
   });
 
   test("an anchor job narrowed to read while its subcommand pushes fails (negative control)", () => {
-    const workflow = readWorkflow("update-release-pr.yml");
-    const anchor = must(workflow.jobs.anchor, "anchor job");
-    anchor.permissions = { contents: "read" };
-    const caller = must(
-      HOOKS.find((hook) => hook.file === "update-release-pr.yml"),
-      "caller",
-    ).job;
-    const unmet = (anchor.steps ?? [])
-      .flatMap(consumedGrants)
-      .filter(([scope]) => effectiveGrant(anchor, workflow, caller)[scope] !== "write");
-    expect(unmet.map(([scope]) => scope)).toEqual(["contents"]);
+    const narrowed = readWorkflow("update-release-pr.yml");
+    must(narrowed.jobs.anchor, "anchor job").permissions = { contents: "read" };
+    const read = (file: string) =>
+      file === "update-release-pr.yml" ? narrowed : readWorkflow(file);
+    expect(grantProblems(HOOKS, read).join("\n")).toMatch(
+      /update-release-pr\.yml#anchor: .* needs contents: write/,
+    );
   });
 });
 
@@ -248,11 +247,19 @@ function hookFor(claim: string): { file: string; workflow: Workflow } {
   return { file: hook.file, workflow: readWorkflow(hook.file) };
 }
 
-/** Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named). */
+/** A step gate that reads a verdict (`steps.<id>.outputs.<x> == 'true'`); every other condition can skip the step on the caller's own event. */
+const VERDICT_GATE = /^steps\.[\w-]+\.outputs\.[\w-]+ == 'true'$/;
+
+/**
+ * Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named) on every run its job takes: the
+ * step carries no condition, or a verdict gate the wiring relation ties to a probe.
+ */
 const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
   Object.values(workflow.jobs).some((job) =>
-    (job.steps ?? []).some((step) =>
-      new RegExp(`release-pipeline\\.ts ${subcommand}(?![\\w-])`).test(step.run ?? ""),
+    (job.steps ?? []).some(
+      (step) =>
+        new RegExp(`release-pipeline\\.ts ${subcommand}(?![\\w-])`).test(step.run ?? "") &&
+        (step.if === undefined || VERDICT_GATE.test(condition(step.if))),
     ),
   );
 
@@ -295,6 +302,14 @@ describe("the library page's publishing claims", () => {
     expect(runsSubcommand(workflow, "package-commit")).toBe(false);
     expect(runsSubcommand(workflow, "npm-verdict next")).toBe(true);
     expect(runsSubcommand(workflow, "npm-verdict stable")).toBe(false);
+    // A publish step conditioned on the caller's event skips on the push that calls it, so the channel's claim fails.
+    const conditioned = readWorkflow("update-release.yml");
+    for (const job of Object.values(conditioned.jobs)) {
+      for (const step of job.steps ?? []) {
+        if (/npm-verdict stable/.test(step.run ?? "")) step.if = "github.event_name == 'release'";
+      }
+    }
+    expect(runsSubcommand(conditioned, "npm-verdict stable")).toBe(false);
     expect(
       claimProblems(
         page.replace(
@@ -349,6 +364,12 @@ function wiringProblems(workflow: Workflow): string[] {
     const probe = steps.findIndex(isProbe);
     const label = (step: Step) => `"${step.name ?? step.uses ?? "unnamed step"}"`;
     const problems: string[] = [];
+    if (probe >= 0 && steps[probe]?.if !== undefined) {
+      // A probe that skips writes no verdict, and every gate on it reads empty: the whole job stands down quietly.
+      problems.push(
+        `${id}: the probe ${label(steps[probe] as Step)} runs under a condition of its own`,
+      );
+    }
     steps.forEach((step, index) => {
       if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
         problems.push(`${id}: ${label(step)} runs whatever the probe found`);
@@ -424,6 +445,13 @@ describe("post-green.yml", () => {
       "the confirmation step gone, leaving the publish output unread",
       (w) => must(w.jobs["publish-next"], "publish-next").steps?.pop(),
       /writes published, which no later step reads/,
+    ],
+    [
+      "a probe under a condition of its own",
+      (w) => {
+        must(must(w.jobs.build, "build").steps?.[1], "probe").if = "github.event_name == 'release'";
+      },
+      /the probe "Check the token can push" runs under a condition of its own/,
     ],
     [
       "the publish output no longer written",

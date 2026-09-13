@@ -126,6 +126,9 @@ function publisherProblems(next: RunJob, stableWorkflow: Workflow): string[] {
   for (const value of [...runnerInputs(next), ...runnerInputs(stable)]) {
     if (/secrets\.|NODE_AUTH_TOKEN|NPM_TOKEN/.test(value))
       problems.push(`a token reaches npm: ${value}`);
+    // npm reads its config from the environment too, so a stray NPM_CONFIG_* can move the dist-tag or the registry.
+    if (/^npm_config_/i.test(value))
+      problems.push(`npm is configured through the environment: ${value}`);
   }
   for (const [label, a, b] of sharedSteps(next, stable)) {
     if (JSON.stringify(body(a)) !== JSON.stringify(body(b)))
@@ -186,6 +189,13 @@ describe("the npm publish jobs", () => {
         must(w.jobs[STABLE_JOB], "stable").env = { NODE_AUTH_TOKEN: `\${{ github.token }}` };
       },
       /a token reaches npm: NODE_AUTH_TOKEN/,
+    ],
+    [
+      "npm's dist-tag set through the job's environment",
+      (_n, w) => {
+        must(w.jobs[STABLE_JOB], "stable").env = { NPM_CONFIG_TAG: "next" };
+      },
+      /npm is configured through the environment: NPM_CONFIG_TAG/,
     ],
     [
       "a floor guard fixed in one job only",
