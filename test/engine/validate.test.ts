@@ -241,7 +241,7 @@ describe("a long problem list is cut, and the remainder is counted", () => {
   ])(
     "%s: N problems render the first five and count the rest, the noun agreeing with the count; five render whole",
     (_arm, docOf, [one, many]) => {
-      const tail = new RegExp(`\\.\\.\\.and (\\d+) more (${one}|${many})\\b`);
+      const tail = new RegExp(`\\.\\.\\.and (\\d+) more (${one}|${many}) `);
       /** The count and the noun of the remainder line after `n` hidden problems, or the whole line when it has neither. */
       const remainder = (n: number): [number, string] | string => {
         const line = (issuesOf(docOf(SHOWN + n)) ?? [])[SHOWN] ?? "";
