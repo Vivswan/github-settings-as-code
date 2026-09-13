@@ -10,7 +10,6 @@
  * central warnings may name slugs the operator wrote into the workflow or the admin repo.
  */
 
-import { readFileSync } from "node:fs";
 import { type Err, err, ok, type ResultAsync, safeTry } from "neverthrow";
 import { resolveCentralTargets } from "../discovery/central.js";
 import { type DiscoveryFilters, discoverRepos, formatSkipNotice } from "../discovery/discover.js";
@@ -38,7 +37,6 @@ import {
   failedTarget,
   type OpenedTarget,
   type RunFlowConfig,
-  requireUploader,
   type TargetResult,
   targetFailure,
   withDelivery,
@@ -138,18 +136,11 @@ async function processTarget(ctx: {
     return run(defaults, "operator");
   }
 
-  const parsed = parseSettingsDoc(read.raw);
-  if (parsed.isErr()) {
-    return fail(
-      `cannot parse ${read.sourceLabel}: ${parsed.error.reason}. Fix the YAML in that file`,
-    );
-  }
-
   // validateSettingsDoc names sourceLabel (the slug for remote targets) in its own warnings, so they go through the unprefixed sink.
   const validated = validateSettingsDoc(
-    parsed.value,
+    read.doc,
     read.sourceLabel,
-    cfg.sections.only,
+    cfg.sections,
     channel.unprefixed,
   );
   if (validated.isErr()) {
@@ -186,19 +177,15 @@ async function readTargetSettings(
   api: GitHubClient,
   target: Target,
 ): Promise<
-  | { raw: string; sourceLabel: string; source: SettingsSource }
+  | { doc: unknown; sourceLabel: string; source: SettingsSource }
   | { missing: true }
   | { error: string }
 > {
   if (target.source === "central") {
-    const sourceLabel = target.filePath;
-    try {
-      return { raw: readFileSync(target.filePath, "utf8"), sourceLabel, source: "operator" };
-    } catch (error) {
-      return {
-        error: `cannot read settings from ${sourceLabel}: ${String(error)}. Fix the file, or delete it to stop managing this repository`,
-      };
-    }
+    return readSettingsFile(target.filePath, "central-file").match(
+      (doc) => ({ doc, sourceLabel: target.filePath, source: "operator" }),
+      (problem) => ({ error: describeProblem(problem) }),
+    );
   }
   const sourceLabel = `${target.slug}:${DEFAULT_SETTINGS_FILE}`;
   const file = await getRepoFile(api, target.slug, DEFAULT_SETTINGS_FILE);
@@ -217,7 +204,12 @@ async function readTargetSettings(
         : `reading ${sourceLabel} failed: ${file.error.status} ${file.error.message}. ${RERUN_ADVICE}`,
     };
   }
-  return { raw: file.content, sourceLabel, source: "target" };
+  return parseSettingsDoc(file.content).match(
+    (doc) => ({ doc, sourceLabel, source: "target" }),
+    (parse) => ({
+      error: `cannot parse ${sourceLabel}: ${parse.reason}. Fix the YAML in that file`,
+    }),
+  );
 }
 
 /** The fleet a run acts on, with the redaction decision every target reports under. */
@@ -389,14 +381,12 @@ export function runMulti(
   uploader?: ArtifactUploader,
 ): ResultAsync<TargetOutcome[], Problem> {
   return safeTry(async function* () {
-    yield* requireUploader(cfg, uploader);
-
     // The defaults document is read before the fleet is resolved: nothing about
     // a target has been emitted yet, so its failure names only the local file.
     let defaults: ValidatedSettings | null = null;
     if (cfg.defaultsFile) {
       const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
-      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections.only, io);
+      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections, io);
     }
 
     const { targets, plan, visibilityOf } = yield* resolveTargets(api, cfg, io);

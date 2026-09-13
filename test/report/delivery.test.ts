@@ -6,6 +6,7 @@ import {
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runOutcome } from "../../src/flows/deliver.js";
 import { redactedChannel } from "../../src/flows/redact.js";
 import { type Io, silentIo } from "../../src/io.js";
@@ -213,7 +214,7 @@ describe("the artifact channel", () => {
     await channel?.flush();
     expect(annotations).toEqual([
       "warning: could not upload the private report artifact: Unable to get the " +
-        "ACTIONS_RUNTIME_TOKEN env variable. Re-run the workflow, or set private-report: none if " +
+        "ACTIONS_RUNTIME_TOKEN env variable. Re-run, or set private-report: none if " +
         "it persists",
     ]);
   });
@@ -222,7 +223,7 @@ describe("the artifact channel", () => {
 describe("applyMarkerInjection", () => {
   // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast into the injection.
   const validated = (doc: SettingsFile): ValidatedSettings => {
-    const verdict = validateSettingsDoc(doc, "test fixture", new Set(), silentIo());
+    const verdict = validateSettingsDoc(doc, "test fixture", SectionSelection.ALL, silentIo());
     if (verdict.isErr()) {
       throw new Error(`test fixture failed validation: ${describeProblem(verdict.error)}`);
     }

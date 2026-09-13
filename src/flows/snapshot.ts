@@ -9,8 +9,7 @@
  * lands on disk while nothing about it is printed.
  */
 
-import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
@@ -34,6 +33,7 @@ import {
   type TargetOutcome,
   toPublicView,
 } from "./redact.js";
+import { canonicalPath, writeReplacing } from "./settings-write.js";
 import { openSingleRepoChannel } from "./single.js";
 import { writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
@@ -74,36 +74,6 @@ export type SnapshotConfig =
 export type FinishedSnapshot =
   | { form: "file"; target: Omit<TargetOutcome, "source"> }
   | { form: "dir"; snapshotDir: string; targets: TargetOutcome[] };
-
-/**
- * `path` as the filesystem names it: the real path of what exists, the rest
- * as spelled. Built one segment at a time, so ".." steps out of a symlink's
- * TARGET as the write will: handed "link/../x" whole, bun's realpath collapses
- * the ".." lexically before following the link and names a different file
- * than the one the write reaches. Every step retries realpath, since
- * "missing/../link" is back on existing ground after the "..".
- */
-function canonicalPath(path: string): string {
-  // The platform reads the root (a drive-relative "C:x" resolves on that drive); the walk reads the rest.
-  const { root } = parse(path);
-  let real = realOrSpelled(root === "" ? process.cwd() : resolve(root));
-  for (const part of path.slice(root.length).split(sep === "\\" ? /[\\/]/ : sep)) {
-    if (part === "" || part === ".") {
-      continue;
-    }
-    real = part === ".." ? dirname(real) : realOrSpelled(join(real, part));
-  }
-  return real;
-}
-
-/** `path`'s real path when it exists, else `path` itself. */
-function realOrSpelled(path: string): string {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    return path;
-  }
-}
 
 /** Whether `path` is `dir` itself or lies under it; both already named the same way. */
 function isWithin(path: string, dir: string): boolean {
@@ -195,15 +165,14 @@ async function snapshotTarget(ctx: {
       note: "the snapshot failed, so no file was written",
     };
   }
-  try {
-    writeReplacing(
-      path,
-      renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
-    );
-  } catch (error) {
+  const written = writeReplacing(
+    path,
+    renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
+  );
+  if (written.isErr()) {
     channel.io.annotate(
       "error",
-      `cannot write the snapshot to ${path}: ${String(error)}. Check that the "${ctx.pathInput}" input names a writable path`,
+      `cannot write the snapshot to ${path}: ${written.error}. Check that the "${ctx.pathInput}" input names a writable path`,
     );
     return {
       result: "failed",
@@ -218,29 +187,6 @@ async function snapshotTarget(ctx: {
     note: `written to ${path}`,
     file: path,
   };
-}
-
-/**
- * Write `text` to `path` through a sibling staging file renamed into place, so
- * a write that fails partway (disk full, an interrupted run) leaves the
- * previous snapshot at `path` intact instead of a truncated one; the rename is
- * atomic on POSIX and a single replace call on Windows. A leftover staging
- * file or link is unlinked first, never written through.
- */
-function writeReplacing(path: string, text: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const staging = `${path}.tmp`;
-  try {
-    rmSync(staging, { force: true });
-    writeFileSync(staging, text, { flag: "wx" });
-    renameSync(staging, path);
-  } catch (error) {
-    // The write's error is the one reported: a directory at the staging path fails both the write and this rm.
-    try {
-      rmSync(staging, { force: true });
-    } catch {}
-    throw error;
-  }
 }
 
 /**

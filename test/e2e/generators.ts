@@ -8,6 +8,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import {
   SECTION_KEYS,
@@ -1515,7 +1516,10 @@ function markerNullsDropped(doc: Json): Json {
  * through the action's own validator.
  */
 function standaloneValid(doc: Json): boolean {
-  return !("error" in validateSettingsDoc(markerNullsDropped(doc), "layer", new Set(), silentIo()));
+  return !(
+    "error" in
+    validateSettingsDoc(markerNullsDropped(doc), "layer", SectionSelection.ALL, silentIo())
+  );
 }
 
 /** The runner's file name for layer `index` of `count`: settings.yml is always the top. */

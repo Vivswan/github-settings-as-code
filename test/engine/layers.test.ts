@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -985,7 +986,7 @@ describe("stripNulls", () => {
     const upper = deepFreeze({ rulesets: [{ name: "main", bypass_actors: null }] });
     // Widened so the whole verdict can be pinned by value; the brand is opaque to toEqual.
     const validate = (doc: unknown): unknown =>
-      validateSettingsDoc(doc, "repo", new Set(), silentIo());
+      validateSettingsDoc(doc, "repo", SectionSelection.ALL, silentIo());
     expect(validate(upper)).toEqual(
       err({
         code: "settings-malformed-sections",

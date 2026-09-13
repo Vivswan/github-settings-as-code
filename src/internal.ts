@@ -45,6 +45,7 @@ export {
   SNAPSHOT_ONLY_INPUTS,
   SNAPSHOT_REJECTED_INPUTS,
   type SnapshotFileConfig,
+  snapshotFileDestination,
 } from "./flows/inputs.js";
 export { foldLayers } from "./flows/layers.js";
 export { renderMergedYaml } from "./flows/library.js";
@@ -63,6 +64,7 @@ export {
   publicDetail,
   toPublicView,
 } from "./flows/redact.js";
+export { writeReplacing } from "./flows/settings-write.js";
 export { SNAPSHOT_SCHEMA_URL } from "./flows/snapshot.js";
 export {
   SECRET_RESPONSE_WITHHELD,

@@ -87,7 +87,7 @@ describe("deliverArtifactReport", () => {
     expect(await deliverArtifactReport(uploader, "doc", recipient)).toEqual({
       warning:
         "could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN " +
-        "env variable. Re-run the workflow, or set private-report: none if it persists",
+        "env variable. Re-run, or set private-report: none if it persists",
     });
   });
 
@@ -97,7 +97,7 @@ describe("deliverArtifactReport", () => {
     // The middle of the warning is the age library's own wording, so only our prefix and advice are pinned.
     expect(result).toEqual({
       warning: expect.stringMatching(
-        /^could not upload the private report artifact: .+\. Re-run the workflow, or set private-report: none if it persists$/,
+        /^could not upload the private report artifact: .+\. Re-run, or set private-report: none if it persists$/,
       ),
     });
     expect(uploads).toEqual([]);

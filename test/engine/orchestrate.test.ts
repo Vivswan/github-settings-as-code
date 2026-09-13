@@ -24,7 +24,7 @@ import { MockApi } from "../mock-api.js";
 
 /** Brand fixtures through the REAL boundary: an invalid fixture fails here instead of riding a cast into runForRepo. */
 function validated(doc: SettingsFile): ValidatedSettings {
-  return validateSettingsDoc(doc, "test fixture", new Set(), silentIo()).match(
+  return validateSettingsDoc(doc, "test fixture", SectionSelection.ALL, silentIo()).match(
     (settings) => settings,
     (problem) => {
       throw new Error(`test fixture failed validation: ${describeProblem(problem)}`);
@@ -199,7 +199,7 @@ describe("runForRepo", () => {
     const polluted = JSON.parse(
       '{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}',
     );
-    expect(validateSettingsDoc(polluted, "s.yml", new Set(), captureIo().io)).toEqual(
+    expect(validateSettingsDoc(polluted, "s.yml", SectionSelection.ALL, captureIo().io)).toEqual(
       err({
         code: "settings-malformed-sections",
         source: "s.yml",
@@ -330,7 +330,7 @@ describe("runForRepo secret references", () => {
 describe("validateSettingsDoc", () => {
   test("unknown top-level keys are a problem naming the source and the known sections", () => {
     const { io } = captureIo();
-    expect(validateSettingsDoc({ labls: [] }, "repos/x.yml", new Set(), io)).toEqual(
+    expect(validateSettingsDoc({ labls: [] }, "repos/x.yml", SectionSelection.ALL, io)).toEqual(
       err({
         code: "settings-unknown-sections",
         source: "repos/x.yml",
@@ -348,12 +348,24 @@ describe("validateSettingsDoc", () => {
       source: "f.yml",
       unknown: ["_notes", "_layerin"],
     });
-    expect(validateSettingsDoc(doc, "f.yml", new Set(), io)).toEqual(refused);
+    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io)).toEqual(refused);
     // Outside a `sections` allowlist an unknown SECTION only warns; the underscore rule has no such downgrade.
-    expect(validateSettingsDoc(doc, "f.yml", new Set(["repository"]), io)).toEqual(refused);
+    expect(
+      validateSettingsDoc(
+        doc,
+        "f.yml",
+        SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
+        io,
+      ),
+    ).toEqual(refused);
     expect(annotations).toEqual([]);
     expect(
-      validateSettingsDoc({ _layering: "replace", repository: {} }, "f.yml", new Set(), io).isOk(),
+      validateSettingsDoc(
+        { _layering: "replace", repository: {} },
+        "f.yml",
+        SectionSelection.ALL,
+        io,
+      ).isOk(),
     ).toBe(true);
   });
 
@@ -364,7 +376,7 @@ describe("validateSettingsDoc", () => {
     ["a number", 7, "number"],
   ])("a non-mapping document (%s) is rejected with its shape", (_what, doc, shape) => {
     const { io } = captureIo();
-    expect(validateSettingsDoc(doc, "f.yml", new Set(), io)).toEqual(
+    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io)).toEqual(
       err({ code: "settings-not-mapping", source: "f.yml", shape }),
     );
   });
@@ -373,15 +385,20 @@ describe("validateSettingsDoc", () => {
     // parse("!!timestamp ...") returns a Date, an object with no keys; branding it valid would turn the whole document into a silent green no-op.
     const { io } = captureIo();
     const tagged = err({ code: "settings-not-plain-mapping" as const, source: "f.yml" });
-    expect(validateSettingsDoc(new Date(0), "f.yml", new Set(), io)).toEqual(tagged);
-    expect(validateSettingsDoc(new Set(["a"]), "f.yml", new Set(), io)).toEqual(tagged);
+    expect(validateSettingsDoc(new Date(0), "f.yml", SectionSelection.ALL, io)).toEqual(tagged);
+    expect(validateSettingsDoc(new Set(["a"]), "f.yml", SectionSelection.ALL, io)).toEqual(tagged);
   });
 
   test("a valid document comes back branded, ready for runForRepo", () => {
     const { io } = captureIo();
     const doc = { repository: { has_wiki: false } };
     // The brand is compile-time only; the value is zod's parsed copy.
-    const branded: unknown = validateSettingsDoc(doc, "s.yml", new Set(), io)._unsafeUnwrap();
+    const branded: unknown = validateSettingsDoc(
+      doc,
+      "s.yml",
+      SectionSelection.ALL,
+      io,
+    )._unsafeUnwrap();
     expect(branded).toEqual(doc);
     expect(branded).not.toBe(doc);
   });

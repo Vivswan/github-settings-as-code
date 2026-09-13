@@ -58,7 +58,7 @@ export async function deliverArtifactReport(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return {
-      warning: `could not upload the private report artifact: ${reason}. Re-run the workflow, or set private-report: none if it persists`,
+      warning: `could not upload the private report artifact: ${reason}. Re-run, or set private-report: none if it persists`,
     };
   }
 }

@@ -3,7 +3,6 @@ import { err, ok } from "neverthrow";
 import {
   collectingIo,
   parseRepoSlug,
-  runMulti,
   runSingle,
   SectionSelection,
   type SingleConfig,
@@ -42,41 +41,6 @@ describe("runSingle", () => {
       }),
     );
     expect(collected.lines).toEqual([]);
-  });
-
-  test("the artifact channel without an uploader is fatal before any API call", async () => {
-    const api = new MockApi({});
-    const fatal = err({ code: "artifact-uploader-missing" as const });
-    expect(
-      await runSingle(
-        api,
-        cfg({ privateRepos: "redact", privateReport: "artifact", reportPublicKey: "age1x" }),
-        collectingIo().io,
-      ),
-    ).toEqual(fatal);
-    expect(
-      await runMulti(
-        api,
-        {
-          ...cfg({ privateRepos: "redact", privateReport: "artifact", reportPublicKey: "age1x" }),
-          reposDir: "",
-          reposInput: "o/a",
-          defaultsFile: "",
-          adminOwner: "o",
-          discoveryFilters: {
-            visibility: "all",
-            archived: "skip",
-            forks: "include",
-            affiliation: ["owner"],
-            topics: [],
-            exclude: [],
-          },
-          discoveryFiltersSet: [],
-        },
-        collectingIo().io,
-      ),
-    ).toEqual(fatal);
-    expect(api.calls).toEqual([]);
   });
 
   test("an unreadable settings file is fatal, carrying the path under the settings-file role", async () => {

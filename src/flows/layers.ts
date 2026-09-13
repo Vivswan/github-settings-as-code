@@ -9,10 +9,11 @@ import {
   stripNulls,
 } from "../engine/layers.js";
 import { type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
+import { SectionSelection } from "../engine/section-selection.js";
 import type { Io } from "../io.js";
 import { isPlainObject } from "../plain-data.js";
 import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
-import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
+import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
 import { readSettingsFile } from "./settings-read.js";
 
 export function readLayerFiles(
@@ -59,7 +60,7 @@ function standaloneView(doc: unknown): unknown {
  * A merge has no `sections` allowlist: the merged document is applied later by a step whose allowlist this run cannot
  * know, so an unknown top-level section is an error naming the layer, as in an apply.
  */
-const NO_ALLOWLIST: ReadonlySet<SectionKey> = new Set();
+const EVERY_SECTION = SectionSelection.ALL;
 
 /** A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into a valid one. */
 export function foldLayers(
@@ -73,12 +74,12 @@ export function foldLayers(
 > {
   return Result.combine(
     layers.map((layer) =>
-      validateSettingsDoc(standaloneView(layer.doc), layer.name, NO_ALLOWLIST, io),
+      validateSettingsDoc(standaloneView(layer.doc), layer.name, EVERY_SECTION, io),
     ),
   )
     .andThen(() => mergeLayers(layers, { layering }))
     .andThen((merged) =>
-      validateSettingsDoc(merged.settings, sourceLabel, NO_ALLOWLIST, io).map((settings) => ({
+      validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, io).map((settings) => ({
         settings,
         notices: merged.notices,
       })),

@@ -8,11 +8,11 @@
  * Problem.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { existsSync } from "node:fs";
+import { err, type Result, ResultAsync } from "neverthrow";
 import {
   type ConfigEnv,
+  describeProblem,
   type InputReader,
   type Io,
   type Problem,
@@ -21,14 +21,8 @@ import {
   type SnapshotReport,
   snapshotRepository,
 } from "../index.js";
-import { DEFAULT_SETTINGS_FILE, parseSnapshotFileConfig, skippedSectionKeys } from "../internal.js";
-import {
-  type CliHost,
-  describeCliProblem,
-  failedEnvelope,
-  grantTable,
-  type Rendered,
-} from "./commands.js";
+import { parseSnapshotFileConfig, skippedSectionKeys, writeReplacing } from "../internal.js";
+import { type CliHost, failedEnvelope, grantTable, type Rendered } from "./commands.js";
 
 export interface InitConfig {
   readonly kind: "init";
@@ -46,7 +40,6 @@ export interface InitConfig {
 /** The library's problems plus the ones only init raises; describeInitProblem words every one. */
 export type InitProblem =
   | Problem
-  | { readonly code: "init-settings-file-is-list"; readonly value: string }
   | { readonly code: "init-settings-file-exists"; readonly settingsFile: string }
   | {
       readonly code: "init-settings-file-unwritable";
@@ -66,31 +59,19 @@ export type InitProblem =
       readonly reasons: ReadonlyArray<readonly [label: string, keys: readonly string[]]>;
     };
 
-/** The separators every mode reads as a list, which one path can therefore never contain. */
-const LIST_SEPARATOR = /[\n,]/;
-
-/** The file init writes: the one named, else the one apply and check read. Known before any parsing, so a failure names it. */
-export function initSettingsFile(read: InputReader): string {
-  return read("settings-file") || DEFAULT_SETTINGS_FILE;
-}
-
-/** The init flags are the snapshot inputs of one repository, so every problem is the snapshot subcommand's. */
+/** The init flags are the snapshot inputs of one repository with settings-file as the destination, so every problem is the library's. */
 export function parseInitConfig(
   read: InputReader,
   force: boolean,
   env: ConfigEnv,
 ): Result<InitConfig, InitProblem> {
-  const settingsFile = initSettingsFile(read);
-  if (LIST_SEPARATOR.test(settingsFile)) {
-    return err({ code: "init-settings-file-is-list", value: settingsFile });
-  }
-  return parseSnapshotFileConfig(read, env, settingsFile).map(
+  return parseSnapshotFileConfig(read, env, "settings-file").map(
     (cfg): InitConfig => ({
       kind: "init",
       token: cfg.token,
       apiVersion: cfg.apiVersion,
       repo: cfg.repo,
-      settingsFile,
+      settingsFile: cfg.snapshotFile,
       sections: cfg.sections,
       onMissingPermission: cfg.onMissingPermission,
       force,
@@ -98,11 +79,9 @@ export function parseInitConfig(
   );
 }
 
-/** The wording for every problem init can end in: its own here, the library's through the CLI's rewording. */
+/** The wording for every problem init can end in: its own here, the library's through the one renderer. */
 function describeInitProblem(problem: InitProblem): string {
   switch (problem.code) {
-    case "init-settings-file-is-list":
-      return `the --settings-file value "${problem.value}" contains a comma or a newline, which check and apply read as a list separator. Name one path without them`;
     case "init-settings-file-exists":
       return `${problem.settingsFile} already exists: init writes the starting settings file and does not replace the one you author. Pass --force to replace it, or --settings-file <path> to write elsewhere`;
     case "init-settings-file-unwritable":
@@ -117,7 +96,7 @@ function describeInitProblem(problem: InitProblem): string {
       return `the snapshot of ${problem.repository} declares no section (${why}), so ${problem.settingsFile} was not written. Choose sections init can read back, or drop --sections to read every section`;
     }
     default:
-      return describeCliProblem(problem);
+      return describeProblem(problem);
   }
 }
 
@@ -129,17 +108,13 @@ export function failInit(io: Io, problem: InitProblem, file?: string): Rendered 
 }
 
 function writeSettingsFile(cfg: InitConfig, yaml: string): Result<void, InitProblem> {
-  try {
-    mkdirSync(dirname(cfg.settingsFile), { recursive: true });
-    writeFileSync(cfg.settingsFile, yaml);
-    return ok();
-  } catch (error) {
-    return err({
+  return writeReplacing(cfg.settingsFile, yaml).mapErr(
+    (reason): InitProblem => ({
       code: "init-settings-file-unwritable",
       settingsFile: cfg.settingsFile,
-      reason: String(error),
-    });
-  }
+      reason,
+    }),
+  );
 }
 
 /** The outcome keys in one status, for the lines that name them. */

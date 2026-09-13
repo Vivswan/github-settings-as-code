@@ -128,7 +128,7 @@ describe("check and apply", () => {
     expect(result.code).toBe(1);
     expect(api.calls).toHaveLength(0);
     expect(result.stderr).toBe(
-      'error: cannot target a repository: "not-a-slug" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)\n',
+      'error: cannot target a repository: "not-a-slug" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it\n',
     );
     expect(result.stdout).toBe(
       "result: failed\nresult=failed\nskipped-sections=\nrepos-result={}\n",
@@ -139,17 +139,19 @@ describe("check and apply", () => {
     [
       "no token",
       ["check", "--repository", "o/r"],
-      "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN",
+      'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
     ],
     [
       "no repository outside Actions",
       ["check", "--token", TOKEN],
-      'cannot target a repository: "" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)',
+      'cannot target a repository: "" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it',
     ],
     [
       "the artifact channel",
       ["check", ...target, "--private-report", "artifact"],
-      'the "private-report" input is "artifact", which is not a supported private-report channel from the command line (the artifact upload needs the Actions runner). Set it to "none" (default), "issue", "issue-on-failure"',
+      "private-report: artifact uploads the reports as a workflow artifact, which only the GitHub " +
+        "Actions runner can do, and this run has no artifact upload (the command line, or a library " +
+        'caller without an uploader). Set private-report to "issue", "issue-on-failure", or "none"',
     ],
   ])("%s fails with a remedy a terminal can follow", async (_case, args, message) => {
     const api = new MockApi({});

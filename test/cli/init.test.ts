@@ -105,25 +105,25 @@ describe("init: argv -> config", () => {
       "no token",
       ["--repository", "o/r"],
       {},
-      "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN",
+      'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
     ],
     [
       "no repository outside Actions",
       [],
       { GITHUB_TOKEN: TOKEN },
-      'cannot target a repository: "" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)',
+      'cannot target a repository: "" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it',
     ],
     [
       "a settings file spelled as a list",
       ["--repository", "o/r", "--settings-file", "a.yml,b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the --settings-file value "a.yml,b.yml" contains a comma or a newline, which check and apply read as a list separator. Name one path without them',
+      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
     ],
     [
       "a repeated settings file",
       ["--repository", "o/r", "--settings-file", "a.yml", "--settings-file", "b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the --settings-file value "a.yml\nb.yml" contains a comma or a newline, which check and apply read as a list separator. Name one path without them',
+      'the "settings-file" input is "a.yml\nb.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
     ],
   ])(
     "%s is refused before any config exists, with a remedy a terminal can follow",
@@ -428,7 +428,7 @@ describe("init: an existing settings file", () => {
         new MockApi({}),
       );
       const problem =
-        "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN";
+        'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN';
       expect(result).toEqual({
         code: 1,
         stdout: `${JSON.stringify({ result: "failed", file, problem })}\n`,

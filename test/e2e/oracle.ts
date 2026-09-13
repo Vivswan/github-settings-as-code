@@ -6,6 +6,7 @@
 
 import type { OptOutNotice } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import {
@@ -1033,7 +1034,7 @@ export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
   const folded = foldMergeLayers(meta.layers, meta.layering);
   // Whether the fold is a valid document is the validator's question, the same one the run asks:
   // cross-field rules the published schema cannot spell, so the generator cannot avoid them by construction.
-  const validated = validateSettingsDoc(folded.merged, "merged", new Set(), silentIo());
+  const validated = validateSettingsDoc(folded.merged, "merged", SectionSelection.ALL, silentIo());
   if (validated.isErr()) {
     return { kind: "invalid", error: describeProblem(validated.error) };
   }

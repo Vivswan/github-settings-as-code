@@ -1,5 +1,5 @@
 /**
- * One run executor behind the action and the CLI: a parsed RunConfig runs to its exit code, with the outputs and the
+ * One run executor behind the action and the CLI: a parsed RunConfig runs to its end, with the outputs and the
  * summary through `deps.io`. The two faces differ only in what they hand in, so the arm dispatch cannot drift.
  */
 
@@ -19,30 +19,43 @@ export interface RunDeps {
   readonly io: Io;
   /** Opens the client a config's token authorizes; a merge never asks for one. */
   readonly createClient: (token: string, io: Io, apiVersion: string) => GitHubClient;
-  /** The artifact channel's uploader: only the Actions runner has one, and without it that channel fails before any API call. */
+  /** The artifact channel's uploader; parseConfig refuses that channel for a face that declares no upload capability. */
   readonly uploader?: ArtifactUploader;
-  /** Words a fatal problem for the face; the action's wording unless the face words a remedy differently. */
-  readonly describe?: (problem: Problem) => string;
 }
 
-export function executeRun(cfg: RunConfig, deps: RunDeps): Promise<number> {
+/**
+ * How a run ended: its exit code, and the problem it ended in when it never reached a target (the outputs and the
+ * error line are already through `deps.io`; the command line's --json envelope carries the problem's text beside them).
+ */
+export interface RunEnd {
+  readonly exitCode: number;
+  readonly fatal?: Problem;
+}
+
+export function executeRun(cfg: RunConfig, deps: RunDeps): Promise<RunEnd> {
   const { io } = deps;
-  const fail = (problem: Problem): number => failRun(io, problem, deps.describe);
+  const fail = (problem: Problem): RunEnd => ({ exitCode: failRun(io, problem), fatal: problem });
+  const end = (exitCode: number): RunEnd => ({ exitCode });
   if (cfg.kind === "merge") {
-    return Promise.resolve(runMerge(cfg, io).match((merged) => concludeMerge(io, merged), fail));
+    return Promise.resolve(
+      runMerge(cfg, io).match((merged) => end(concludeMerge(io, merged)), fail),
+    );
   }
   const api = deps.createClient(cfg.token, io, cfg.apiVersion);
   switch (cfg.kind) {
     case "snapshot":
-      return runSnapshot(api, cfg, io).match((finished) => concludeSnapshot(io, finished), fail);
+      return runSnapshot(api, cfg, io).match(
+        (finished) => end(concludeSnapshot(io, finished)),
+        fail,
+      );
     case "multi":
       return runMulti(api, cfg, io, deps.uploader).match(
-        (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),
+        (targets) => end(concludeRun(io, { kind: "multi", mode: cfg.mode, targets })),
         fail,
       );
     case "single":
       return runSingle(api, cfg, io, deps.uploader).match(
-        (target) => concludeRun(io, { kind: "single", mode: cfg.mode, target }),
+        (target) => end(concludeRun(io, { kind: "single", mode: cfg.mode, target })),
         fail,
       );
   }

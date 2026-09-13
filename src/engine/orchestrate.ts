@@ -96,7 +96,7 @@ export function skippedSectionKeys(
 export function validateSettingsDoc(
   settings: unknown,
   sourceLabel: string,
-  onlySections: ReadonlySet<SectionKey>,
+  sections: SectionSelection,
   io: Io,
 ): Result<ValidatedSettings, SettingsProblem> {
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
@@ -114,7 +114,7 @@ export function validateSettingsDoc(
   }
   const knownSections = new Set<string>(SECTION_KEYS);
   const directives = new Set<string>(DOCUMENT_DIRECTIVE_KEYS);
-  const allowed: ReadonlySet<string> = onlySections;
+  const allowed: ReadonlySet<string> = sections.only;
   // A misspelled section silently doing nothing would break the loud-failure promise, and so would a misspelled
   // directive: `_layerin: replace` dropped as a private note would merge a layer the author meant to replace.
   const strangers = Object.keys(settings).filter(
@@ -130,7 +130,7 @@ export function validateSettingsDoc(
   }
   const unknownKeys = strangers.filter((key) => !key.startsWith("_"));
   if (unknownKeys.length > 0) {
-    if (onlySections.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
+    if (allowed.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
       return err({
         code: "settings-unknown-sections",
         source: sourceLabel,

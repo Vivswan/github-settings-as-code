@@ -33,7 +33,7 @@ describe("the action's uploader without a runtime token", () => {
           "could not upload the private report artifact: the artifact service is unavailable: no " +
           "ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or " +
           "self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside " +
-          "Actions). Re-run the workflow, or set private-report: none if it persists",
+          "Actions). Re-run, or set private-report: none if it persists",
       });
       expect(uploadSpy).toHaveBeenCalledTimes(0);
     } finally {

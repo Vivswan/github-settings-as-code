@@ -65,7 +65,7 @@ export function validateSettings(
   return validateSettingsDoc(
     doc,
     options.source ?? UNNAMED_SOURCE,
-    (options.sections ?? SectionSelection.ALL).only,
+    options.sections ?? SectionSelection.ALL,
     out.io,
   ).map((settings) => ({ settings, log: out.log() }));
 }

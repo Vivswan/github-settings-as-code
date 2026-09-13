@@ -812,7 +812,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(thrown.message).toBe(
       "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
         "response arrived (details withheld: the request carried a secret field). Check network " +
-        "connectivity from the runner to https://api.test, then re-run the workflow",
+        "connectivity from the runner to https://api.test, then re-run",
     );
   });
 
@@ -827,7 +827,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       thrown = error as Error;
     }
     expect(thrown?.message).toBe(
-      "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run the workflow",
+      "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
     );
   });
 
@@ -876,7 +876,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
         (error: unknown) => String(error),
       );
     expect(thrown).toBe(
-      `Error: POST ${path} failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run the workflow`,
+      `Error: POST ${path} failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run`,
     );
   });
 

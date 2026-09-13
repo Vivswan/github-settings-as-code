@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty-one breaks (the ninth is for library consumers, the last for anyone pinning a sha). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-three breaks (the ninth and twenty-third are for library consumers, the twenty-first for anyone pinning a sha). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -29,6 +29,8 @@ Twenty-one breaks (the ninth is for library consumers, the last for anyone pinni
 | The sealing key is read at apply time | Check mode read `GET .../secrets/public-key` and failed on a malformed key | The first sealed PUT reads it at apply | Check mode issues one request fewer per secret family; a malformed key fails at apply; [section 19](#19-the-sealing-key-is-read-at-apply-time) |
 | Environment secrets and variables plan through the shared engines | Their own wording | The engines' wording | Only a grep over the output notices; [section 20](#20-environment-secrets-and-variables-plan-through-the-shared-engines) |
 | The `build` branch retires | Every green push appended a packaged commit to the `build` branch; `latest` and the release tags pointed into it | One packaged commit per `main` commit under the tag `build/<position>.<sha7>`, the ten newest kept; `latest`, `@v3`, and `vX.Y.Z` point at them; the branch is deleted once every consumer has repinned | A sha pin into the branch stops resolving when the branch goes; a pin taken from a build tag goes when ten newer commits have been packaged; [section 21](#21-the-build-branch-retires) says what to pin instead |
+| One wording for every face | The command line reworded two remedies and refused `private-report: artifact` on its own; other remedies said "re-run the workflow" | One problem renderer; remedies name the input and its flag; `parseConfig` refuses the artifact channel for a face without an upload (`input-artifact-unsupported`) | No error. A step or script matching an error line by its old text stops matching; [section 22](#22-one-wording-for-every-face) |
+| Library: one owner per refusal, one selection type | `parseConfig(read, env)`; `executeRun` returned a number and took `describe`; `artifact-uploader-missing`; `validateSettings` took a `Set` | `parseConfig(read, env, capabilities)`; `executeRun` returns `{exitCode, fatal?}`; `input-artifact-unsupported`; `SectionSelection` everywhere; `writeReplacing`, `snapshotFileDestination`, the `central-file` role | The call fails to compile, naming the missing argument or member; [section 23](#23-library-one-owner-per-refusal-one-selection-type) |
 
 ## 1. The defaults-file fallback
 
@@ -300,7 +302,6 @@ Their lines are the engines' lines now:
 | The secrets cannot-verify note | once per environment that exists | once per environment with declared secrets, the missing environment included, under the `environments[prod].secrets` label |
 
 Repository variable operations (`actions_variables`, `agents_variables`) gain a describe line in failure prose (`creating Actions variable "X"`); nothing else moves.
-
 ## 21. The build branch retires
 
 Nothing lands on the `build` branch any more, and the owner deletes it once the migration is complete: the first `build/<position>.<sha7>` tags exist, `latest` points at a tagged packaged commit, and every known consumer of a sha on the branch has repinned to a release tag, `@v3`, or an npm version. Its ruleset is declared disabled in `.github/settings.local.yml` (the apply leaves an undeclared ruleset alone, so dropping the entry would keep the deletion rule live); after `git push origin --delete build` the owner removes that entry. Repin now: a `Vivswan/github-settings-as-code@<sha>` pin into the branch stops resolving when it goes.
@@ -313,6 +314,34 @@ Every green push to `main` now mints one packaged commit, the main commit's chil
 | A release tag or its commit sha (`git rev-parse v3.0.0`) | Permanent | Nothing |
 | A sha from the `build` branch | Until the owner deletes the branch | Repin to `@v3` or a release tag's commit now |
 | A sha from a `build/*` tag | Until ten newer commits are packaged (the next merge, for an old tag) | Pin the release tag's commit or an npm version instead |
+
+## 22. One wording for every face
+
+The action and the command line print the same line for the same problem; the remedy names the input and, where one exists, its flag.
+
+| Problem | v2 (action) | v2 (command line) | v3 (both) |
+|---|---|---|---|
+| No token | `Set the "token" input on the action step (or export GITHUB_TOKEN)` | `Pass --token, or export GITHUB_TOKEN` | `Set the "token" input (--token on the command line), or export GITHUB_TOKEN` |
+| No repository | `Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"` | `Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)` | `Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it` |
+| Unknown section in `sections` | `Fix the name in the workflow's input list` | same | `Fix the section name` |
+| A transient API failure | `... re-run the workflow, and retry later if it persists` | same | `... re-run, and retry later if it persists` (the report channels say `Re-run, or set private-report: none if it persists`) |
+| `private-report: artifact` off the runner | accepted at the parse (the action has the upload; a library caller without an uploader failed later with `artifact-uploader-missing`) | `the "private-report" input is "artifact", which is not a supported private-report channel from the command line ...` | `private-report: artifact uploads the reports as a workflow artifact, which only the GitHub Actions runner can do, and this run has no artifact upload ... Set private-report to "issue", "issue-on-failure", or "none"` |
+| `gsac init --settings-file a,b` | `the --settings-file value "a,b" contains a comma or a newline, which check and apply read as a list separator ...` | | `the "settings-file" input is "a,b", which contains a list separator: init writes exactly one settings file ... Name one file` |
+| An unreadable `repos-dir` file | `cannot read settings from <path>: ... Fix the file, or delete it to stop managing this repository` | | `cannot read the central settings file <path>: ... Fix the file, or delete it to stop managing this repository` (a YAML syntax error in it reads the same way, where v2 said `cannot parse`) |
+
+## 23. Library: one owner per refusal, one selection type
+
+For `@vivswan/github-settings-as-code` consumers.
+
+| v2 | v3 |
+|---|---|
+| `parseConfig(read, env)`; the command line refused `private-report: artifact` before calling it, and the flows checked for the uploader again (`artifact-uploader-missing`) | `parseConfig(read, env, { artifactUpload })`: the one refusal, `input-artifact-unsupported`; `runSingle` and `runMulti` no longer check |
+| `executeRun(cfg, deps): Promise<number>`, with `deps.describe` rewording a fatal problem | `executeRun(cfg, deps): Promise<RunEnd>`, `{ exitCode, fatal? }`; `failRun(io, problem)` takes no wording hook |
+| `validateSettingsDoc(doc, source, onlySections: ReadonlySet<SectionKey>, io)`; `validateSettings(doc, { sections?: ReadonlySet<SectionKey> })` | Both take a `SectionSelection` (`SectionSelection.ALL` for no allowlist) |
+| `parseSnapshotFileConfig(read, env, snapshotFile)` | `parseSnapshotFileConfig(read, env, "settings-file")` reads the destination itself; `snapshotFileDestination(read, "settings-file")` names it before parsing |
+| Every flow wrote its file in place with its own try/catch | `writeReplacing(path, text): Result<void, string>` stages and renames, for the snapshot, the merged file, and init alike |
+| `SettingsFileRole`: `settings-file`, `defaults-file`, `layer` | plus `central-file`, the repos-dir file a multi-repo target is read from |
+
 
 ## Order of operations
 

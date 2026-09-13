@@ -406,7 +406,7 @@ describe("concludeRun", () => {
     expect(failRun(io, { code: "input-token-missing" })).toBe(1);
     expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
     expect(events).toEqual([
-      'annotate error: cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
+      'annotate error: cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
       "output result=failed",
       "output skipped-sections=",
       "output repos-result={}",

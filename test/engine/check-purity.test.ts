@@ -209,7 +209,12 @@ describe("check-mode purity", () => {
   test("every registered section stays read-only in check mode, even on its drift paths", async () => {
     const api = new MockApi(ROUTES);
     // Brand the fixture document through the REAL boundary: an invalid fixture fails loudly here instead of riding a cast into runForRepo.
-    const verdict = validateSettingsDoc(FIXTURES, "purity fixtures", new Set(), silentIo());
+    const verdict = validateSettingsDoc(
+      FIXTURES,
+      "purity fixtures",
+      SectionSelection.ALL,
+      silentIo(),
+    );
     if (verdict.isErr()) {
       throw new Error(`purity fixtures failed validation: ${describeProblem(verdict.error)}`);
     }

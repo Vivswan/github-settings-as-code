@@ -4,6 +4,7 @@ import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
+import { SectionSelection } from "../../engine/section-selection.js";
 import { silentIo } from "../../io.js";
 import { describeProblem } from "../../problem.js";
 import { type PlainData, planContext, type SectionPlan } from "../contract/plan.js";
@@ -268,7 +269,7 @@ describe("secret_scanning_custom_patterns", () => {
     // "" cannot mean "clear it": the PATCH updates provided fields only.
     for (const key of ["start_delimiter", "end_delimiter"] as const) {
       const doc = { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: "" }] };
-      const invalid = validateSettingsDoc(doc, "test doc", new Set(), silentIo());
+      const invalid = validateSettingsDoc(doc, "test doc", SectionSelection.ALL, silentIo());
       expect(invalid.match(() => "", describeProblem)).toContain(
         "cannot be cleared with an empty string",
       );
@@ -339,7 +340,7 @@ describe("secret_scanning_custom_patterns closed surface", () => {
       const error = validateSettingsDoc(
         { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: true }] },
         "settings.yml",
-        new Set(),
+        SectionSelection.ALL,
         silentIo(),
       );
       expect(error.isErr(), `a declared "${key}" must be rejected`).toBe(true);

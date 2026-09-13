@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { describeOptOut } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
@@ -50,7 +51,7 @@ describe("three-way drift detection", () => {
             `${key} seed ${i}: published schema rejected the doc: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        const verdict = validateSettingsDoc(doc, "fuzz", new Set(), silentIo());
+        const verdict = validateSettingsDoc(doc, "fuzz", SectionSelection.ALL, silentIo());
         if ("error" in verdict) {
           offenders.push(
             `${key} seed ${i}: validateSettingsDoc rejected the doc: ${verdict.error}`,
@@ -447,7 +448,7 @@ describe("genInvalidSettings", () => {
     for (const { name, build } of INVALID_SETTINGS_CASES) {
       for (let i = 0; i < 25; i++) {
         const { doc, offendingToken } = build(new Rng(i * 13 + 1));
-        const verdict = validateSettingsDoc(doc, "settings.yml", new Set(), silentIo());
+        const verdict = validateSettingsDoc(doc, "settings.yml", SectionSelection.ALL, silentIo());
         if (verdict.isOk()) {
           throw new Error(`case "${name}" produced a doc the validator accepts`);
         }
@@ -1080,7 +1081,12 @@ describe("genMergeScenario", () => {
         continue;
       }
       merged++;
-      const verdict = validateSettingsDoc(prediction.merged, "merged", new Set(), silentIo());
+      const verdict = validateSettingsDoc(
+        prediction.merged,
+        "merged",
+        SectionSelection.ALL,
+        silentIo(),
+      );
       expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
       expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
       // The directives address the fold; none may reach the written document.

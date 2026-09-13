@@ -18,7 +18,6 @@ import {
   engineOutcome,
   failedTarget,
   type RunFlowConfig,
-  requireUploader,
   withDelivery,
 } from "./deliver.js";
 import {
@@ -72,9 +71,8 @@ export function runSingle(
   io: Io,
   uploader?: ArtifactUploader,
 ): ResultAsync<SingleOutcome, Problem> {
-  return requireUploader(cfg, uploader)
-    .andThen(() => readSettingsFile(cfg.settingsFile, "settings-file"))
-    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.sections.only, io))
+  return readSettingsFile(cfg.settingsFile, "settings-file")
+    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.sections, io))
     .asyncAndThen((settings) =>
       ResultAsync.fromSafePromise(runTarget(api, cfg, io, settings, uploader)),
     );

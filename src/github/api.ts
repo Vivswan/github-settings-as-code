@@ -358,7 +358,7 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
  */
 export function transportFailure(label: string, reason: string, target: string): Error {
   return new Error(
-    `${label} failed: ${reason}. Check network connectivity from the runner to ${target}, then re-run the workflow`,
+    `${label} failed: ${reason}. Check network connectivity from the runner to ${target}, then re-run`,
   );
 }
 
@@ -634,7 +634,7 @@ export class GitHubApi implements GitHubClient {
       // The GraphQL contract makes errors, when present, a NON-EMPTY list; a malformed value must not read as "no errors"
       // and turn a partial response into a success. The body is never quoted.
       throw new Error(
-        `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
+        `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
       );
     }
     const errors = Array.isArray(body.errors) ? body.errors : [];
@@ -645,7 +645,7 @@ export class GitHubApi implements GitHubClient {
     if (typeof data !== "object" || data === null || Array.isArray(data)) {
       // A 200 with neither errors nor a data map is outside the GraphQL contract; the body is not quoted, since it could carry private live state.
       throw new Error(
-        `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run the workflow, and retry later if it persists`,
+        `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
       );
     }
     return { data: data as Record<string, unknown> };

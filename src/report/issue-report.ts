@@ -64,7 +64,7 @@ export type IssueDelivery = { url: string } | { skipped: true } | { warning: str
 function deliveryWarning(error: ApiError): { warning: string } {
   const advice = isPermissionError(error)
     ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
-    : "Re-run the workflow, or set private-report: none if it persists";
+    : "Re-run, or set private-report: none if it persists";
   return { warning: `could not deliver the private report (HTTP ${error.status}). ${advice}` };
 }
 
@@ -306,7 +306,7 @@ export async function deliverIssueReport(
     // A throw is a network-level failure whose message embeds the request path (the private slug), so nothing from it may escape.
     return {
       warning:
-        "could not deliver the private report: the request failed before an HTTP response arrived. Re-run the workflow, or set private-report: none if it persists",
+        "could not deliver the private report: the request failed before an HTTP response arrived. Re-run, or set private-report: none if it persists",
     };
   }
 }

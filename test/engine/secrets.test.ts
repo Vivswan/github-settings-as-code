@@ -129,7 +129,7 @@ describe("secret provenance is one source per document", () => {
 describe("runForRepo provenance", () => {
   // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast.
   const validated = (doc: unknown): ValidatedSettings => {
-    const verdict = validateSettingsDoc(doc, "fixture", new Set(), silentIo());
+    const verdict = validateSettingsDoc(doc, "fixture", SectionSelection.ALL, silentIo());
     if (verdict.isErr()) {
       throw new Error(`fixture failed validation: ${describeProblem(verdict.error)}`);
     }
