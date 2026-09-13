@@ -1,6 +1,8 @@
 /**
  * The CLI's output boundary and its Io. No runner masks for a terminal, so
- * every writer, the parser included, goes through maskedStreams().
+ * every writer, the parser included, goes through maskedStreams(). Under a
+ * GitHub Actions runner the same Io speaks the runner's commands and files
+ * beside that redaction, so a gsac step and the action step read alike.
  */
 
 import { appendFileSync } from "node:fs";
@@ -21,6 +23,7 @@ import {
   type OutputName,
   redactRanges,
 } from "../index.js";
+import { type ActionsRunner, outputRecord, workflowCommand } from "./actions.js";
 
 export interface CliStreams {
   readonly stdout: Writable;
@@ -31,20 +34,34 @@ export interface CliStreams {
 export interface MaskedStreams extends CliStreams, MaskPair {
   /** `text` with every masked value replaced, for the writes that bypass the streams. */
   redact(text: string): string;
+  /** The runner this boundary reports to; none for a terminal. */
+  readonly runner: RunnerChannel | undefined;
 }
 
-/** A stream that redacts each chunk before handing it to `target`. */
+/** The runner's face on the boundary: its files, and its commands on stdout. */
+interface RunnerChannel extends ActionsRunner {
+  /** `::name::message` with the message redacted and the command name left whole. */
+  command(name: AnnotationLevel, message: string): void;
+}
+
+/** A chunk that is already final, a workflow command: its name must survive a masked value spelled like it. */
+class Verbatim {
+  constructor(readonly text: string) {}
+}
+
+/** A stream that redacts each chunk before handing it to `target`; one queue, so no chunk overtakes another. */
 class RedactingStream extends Writable {
   constructor(
     private readonly target: Writable,
     private readonly redact: (text: string) => string,
   ) {
-    super({ decodeStrings: false });
+    super({ objectMode: true });
   }
 
   override _write(chunk: unknown, _encoding: BufferEncoding, callback: () => void): void {
+    const text = chunk instanceof Verbatim ? chunk.text : this.redact(String(chunk));
     // A full target holds the next chunk until it drains, so backpressure reaches the writer.
-    if (this.target.write(this.redact(String(chunk)))) {
+    if (this.target.write(text)) {
       callback();
     } else {
       this.target.once("drain", callback);
@@ -55,15 +72,32 @@ class RedactingStream extends Writable {
 /**
  * Every write to the returned streams is redacted; register a value before
  * anything can print it. One registry serves the parser, the Io, and the
- * file-only commands alike, so no writer can bypass it.
+ * file-only commands alike, so no writer can bypass it. The runner's commands
+ * are the two writes redaction never touches whole: the add-mask command must
+ * carry the value, and a masked value spelled like a command name ("error")
+ * must not turn any command into `::***::`.
  */
-export function maskedStreams(streams: CliStreams): MaskedStreams {
-  const registry = maskRegistry(() => {});
+export function maskedStreams(streams: CliStreams, runner?: ActionsRunner): MaskedStreams {
+  const registry = maskRegistry(
+    runner === undefined ? () => {} : (value) => command(workflowCommand("add-mask", value)),
+  );
   const redact = (text: string): string => redactRanges(text, registry.masked());
+  const stdout = new RedactingStream(streams.stdout, redact);
+  /** A finished command line, queued behind the redacted writes before it. */
+  function command(line: string): void {
+    stdout.write(new Verbatim(line));
+  }
   return {
-    stdout: new RedactingStream(streams.stdout, redact),
+    stdout,
     stderr: new RedactingStream(streams.stderr, redact),
     redact,
+    runner:
+      runner === undefined
+        ? undefined
+        : {
+            ...runner,
+            command: (name, message) => command(workflowCommand(name, redact(message))),
+          },
     ...registry,
   };
 }
@@ -74,7 +108,7 @@ export interface CliIoOptions {
   readonly json: boolean;
   /** Show the debug trace. */
   readonly verbose: boolean;
-  /** The file summary blocks are appended to; none drops them. */
+  /** The file summary blocks are appended to; none falls back to the runner's step summary, or drops them. */
   readonly summaryFile?: string;
   readonly colors: boolean;
 }
@@ -132,19 +166,28 @@ export function cliIo(options: CliIoOptions): CliIo {
   // lines within a second into "(repeated N times)", losing drift lines.
   const consola = createConsola({ level, reporters: [reporter], throttle: 0 });
   const logStream = options.json ? streams.stderr : streams.stdout;
+  const { runner } = streams;
+  const summaryFile = options.summaryFile ?? runner?.summaryFile;
   const outputs = new Map<OutputName, string>();
+  const annotate: Io["annotate"] =
+    runner === undefined
+      ? (level, message) => consola[CONSOLA_TYPE[level]](message)
+      : (level, message) => runner.command(level, message);
   return {
     io: {
-      annotate: (annotation, message) => consola[CONSOLA_TYPE[annotation]](message),
+      annotate,
       log: (line) => logStream.write(`${line}\n`),
       debug: (line) => consola.debug(line),
       summary: (markdown) => {
-        if (options.summaryFile !== undefined) {
-          appendFileSync(options.summaryFile, `${streams.redact(markdown)}\n`);
+        if (summaryFile !== undefined) {
+          appendFileSync(summaryFile, `${streams.redact(markdown)}\n`);
         }
       },
       output: (name, value) => {
         outputs.set(name, value);
+        if (runner?.outputFile !== undefined) {
+          appendFileSync(runner.outputFile, outputRecord(name, streams.redact(value)));
+        }
       },
       mask: streams.mask,
       masked: streams.masked,

@@ -46,7 +46,7 @@ describe("the redacting stream under backpressure", () => {
     // (the first in flight, the second queued) and has acknowledged nothing; a
     // wrapper that acknowledges at once would hold nothing and have fired both.
     expect(target.chunks).toEqual(["one ***\n"]);
-    expect(streams.stdout.writableLength).toBe("one secret\n".length + "two\n".length);
+    expect(streams.stdout.writableLength).toBe(2);
     expect(acknowledged).toBe(0);
     target.release();
     await new Promise((resolve) => setImmediate(resolve));
@@ -55,5 +55,25 @@ describe("the redacting stream under backpressure", () => {
     target.release();
     await new Promise((resolve) => setImmediate(resolve));
     expect(acknowledged).toBe(2);
+  });
+
+  test("a runner's command queues behind the log lines written before it, its name untouched by redaction", async () => {
+    const target = stalledTarget();
+    const streams = maskedStreams(
+      { stdout: target.stream, stderr: new Writable({ write: (_c, _e, cb) => cb() }) },
+      { outputFile: undefined, summaryFile: undefined },
+    );
+    streams.stdout.write("one\n");
+    streams.stdout.write("two\n");
+    streams.mask("error");
+    streams.runner?.command("error", "an error");
+    // A command written straight to the target would land now, ahead of "two".
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(target.chunks).toEqual(["one\n"]);
+    for (let i = 0; i < 3; i++) {
+      target.release();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(target.chunks).toEqual(["one\n", "two\n", "::add-mask::error\n", "::error::an ***\n"]);
   });
 });
