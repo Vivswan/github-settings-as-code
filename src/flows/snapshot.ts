@@ -198,9 +198,12 @@ async function snapshotTarget(ctx: {
  * directory that leads into the other, or an owner spelled ".github". Two
  * targets can land on ONE file the same way (a link `out/bob -> out/alice`
  * with targets alice/r and bob/r), so every landing is claimed in `claimed`
- * for the run and a second claim is refused. The claim is the file the RENAME
- * reaches: the directory as the filesystem names it plus the leaf as spelled,
- * since the rename replaces a link at the leaf rather than following it. The
+ * for the run and a second claim is refused. Two names are claimed per file:
+ * the referent as the filesystem names it now, and the file the RENAME
+ * reaches (the directory as the filesystem names it plus the leaf as spelled,
+ * since the rename replaces a link at the leaf rather than following it). The
+ * first catches a leaf spelled in another case on a case-insensitive
+ * filesystem once the file exists; the second, a leaf that was a link. The
  * refusal names the earlier target through `display`, so a redacted one stays
  * sealed, and never the landing, whose spelling is the operator's.
  */
@@ -228,14 +231,19 @@ function snapshotFilePath(
       error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
     };
   }
-  const written = join(canonicalPath(dirname(path)), basename(path));
-  const earlier = claimed.get(written);
+  const names = [landing, join(canonicalPath(dirname(path)), basename(path))];
+  const earlier = names.map((name) => claimed.get(name)).find((slug) => slug !== undefined);
   if (earlier !== undefined) {
     return {
-      error: `cannot write the snapshot to ${path}: the filesystem carries it to the file this run already claimed for ${display(earlier)}. Remove the link under the "snapshot-dir" input that folds the two owners together, so each target has a file of its own`,
+      error:
+        `cannot write the snapshot to ${path}: the filesystem carries it to the file this run already claimed for ` +
+        `${display(earlier)}. Remove the link under the "snapshot-dir" input that folds the two owners together, so ` +
+        "each target has a file of its own",
     };
   }
-  claimed.set(written, repo.slug);
+  for (const name of names) {
+    claimed.set(name, repo.slug);
+  }
   return { path };
 }
 

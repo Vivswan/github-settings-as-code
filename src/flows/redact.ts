@@ -151,7 +151,6 @@ export function emitRedactedResult(
   }
 }
 
-/** A result the switch above does not name fails to compile here, so a new one cannot fall through silently. */
 function unreachable(result: never): never {
   throw new Error(`BUG: emitRedactedResult has no arm for the run result ${String(result)}`);
 }

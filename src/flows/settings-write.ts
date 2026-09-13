@@ -8,7 +8,15 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, parse, resolve, sep } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 
@@ -48,16 +56,25 @@ function realOrSpelled(path: string): string {
 /** The error is the filesystem's own reason; each caller names the input that chose the path. */
 export function writeReplacing(path: string, text: string): Result<void, string> {
   const staging = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  // Set once the exclusive create succeeded: only a staging file THIS write made is removed on failure, never one
+  // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
   // another writer got there first with (`wx` fails on it, and that failure is the one reported).
   let created = false;
+  let fd: number | undefined;
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(staging, text, { flag: "wx" });
+    fd = openSync(staging, "wx");
     created = true;
+    writeFileSync(fd, text);
+    closeSync(fd);
+    fd = undefined;
     renameSync(staging, path);
     return ok();
   } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
     if (created) {
       try {
         rmSync(staging, { force: true });

@@ -849,6 +849,43 @@ describe("runSnapshot, dir form", () => {
       expect(readFileSync(join(dir, "old", "r.yml"), "utf8")).toBe("labels: []\n");
     }));
 
+  test("two targets whose leaves differ only in case are one file on a case-insensitive filesystem: the second is refused", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // Slugs dedupe case-insensitively, so the alias needs two owners folded by a link and leaves spelled apart:
+      // alice/R writes alice/R.yml, bob/r reaches the same directory through the link with the leaf r.yml. The
+      // filesystem's own name for that path (realpath, on-disk case) is the first's file, so the referent claim
+      // catches what the leaf key cannot.
+      writeFileSync(join(dir, "Probe"), "");
+      const caseInsensitive = existsSync(join(dir, "probe"));
+      const api = new MockApi({
+        "GET /repos/alice/R": { data: { private: false } },
+        "GET /repos/bob/r": { data: { private: false } },
+        ...labelsRoute("alice/R", [BUG]),
+        ...labelsRoute("bob/r", [DOCS]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "alice/R,bob/r" });
+      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+      symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(caseInsensitive ? 1 : 0);
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "R.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+      if (caseInsensitive) {
+        expect(collected.lines[1]).toEqual({
+          level: "error",
+          line: expect.stringMatching(
+            /^bob\/r: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for alice\/R\. /,
+          ),
+        });
+        expect(readdirSync(join(cfg.snapshotDir, "alice"))).toEqual(["R.yml"]);
+      } else {
+        expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "r.yml"), "utf8"))).toEqual(
+          doc(DOCS),
+        );
+      }
+    }));
+
   test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       const api = new MockApi({
