@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Ten breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Fifteen breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -18,6 +18,11 @@ Ten breaks (the ninth is for library consumers). One is silent (the fallback), s
 | A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
 | Library: a documented public entry, an internal one, and the v3 names | One entry, 192 names; `GithubApi`, `RepoRunReport`, `validateSettings` returning `warnings` | `.` holds the 118 documented names, `./internal` the rest; `GitHubApi`, `CheckReport`, every report carries `log` | The old import fails to compile, naming the missing export; every rename is in [section 9](#9-library-the-public-entry-and-the-v3-names) |
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
+| Two live items under one identity fail the section | The last one listed won silently in most sections | Every list section refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
+| The webhook snapshot placeholder | `$WEBHOOK_SECRET_<id>` | `$SECRET_WEBHOOK_<id>` | No error: an old reference keeps resolving from its old export; a new snapshot writes the new name, so move both together; [section 12](#12-the-webhook-snapshot-placeholder-leads-with-secret_) |
+| One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each on the converted sites | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
+| Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
+| A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
 
 ## 1. The defaults-file fallback
 
@@ -184,10 +189,63 @@ The `artifact` report channel heads that run's report `<!-- private repository #
 
 Snapshot targets ride the same seal now: a private target's notes, file path, and section detail close sealed exactly as a multi-repo apply target's do, and a private target that fails gets the same one-line annotation (`private repository #N: failed - <sections>`) a fleet target gets. The [private repositories guide](../operate/private-repositories.md#one-seal-every-mode) owns the rule.
 
+## 11. Two live items under one identity fail the section
+
+v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed). v3 refuses every list section the same way, whether or not the settings file declares the pair:
+
+```text
+webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook (hook id 11)" and "https://ci.example.com/hook (hook id 12)". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again
+```
+
+Snapshot says the same. Delete the duplicates on GitHub, then re-run.
+
+## 12. The webhook snapshot placeholder leads with SECRET_
+
+```yaml settings
+webhooks:
+  entries:
+    - config:
+        url: https://ci.example.com/hook
+        secret: $SECRET_WEBHOOK_601   # v2 wrote $WEBHOOK_SECRET_601
+```
+
+Every snapshot secret now leads with `SECRET_`, the store name second. A file holding the old reference keeps working with its old export; to move, change the reference in the file and the exported variable together (`WEBHOOK_SECRET_601` becomes `SECRET_WEBHOOK_601` in both), or re-snapshot and export the new name.
+
+## 13. One wording per concept in drift lines and notes
+
+Anything that greps the check output for these lines needs the new spelling. Two templates reach only the sites this release converts:
+
+- the cannot-verify line: the webhook secret and the write-only `check_suite_preferences` note;
+- the left-out line: rulesets, webhooks, and the secondary snapshot reads (actions, environments, repository) a denied grant skips under `on-missing-permission: warn`; a denied primary read still says `skipped`.
+
+The other cannot-verify and omission notes (interaction_limits, teams, collaborators) keep their v2 line until a later release.
+
+| Line | v2 | v3 |
+|---|---|---|
+| A webhook's label | `webhooks["https://ci.example.com/hook"].active` | `webhooks[https://ci.example.com/hook].active` |
+| A field mismatch (milestones, rulesets, collaborators, teams, every list section) | `milestones[v1].state: "closed" != "open"` and `teams[platform]: live role "read" != declared "write"` | `milestones[v1].state: declared "closed" != live "open"; apply will set the declared value` |
+| A webhook's events | `... declared [...] != live [...] (compared order-insensitively)` | one line per element: `webhooks[<url>].events: missing "release"` |
+| A value check mode cannot compare | `... so the declared value cannot be verified; apply re-sends it on every run so rotations propagate` | `<label>: <why>, so check mode cannot verify <what>; apply <re-sends it> on every run` |
+| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` | `<label>: left out of the snapshot - <reason>` |
+| A ruleset update's change line | `updated ruleset "main" (id 42)` | `updated ruleset "main"` |
+| A milestone delete's change line | `DELETED undeclared milestone "v0.9" (detached from every issue that carried it)` | `DELETED undeclared milestone "v0.9"` (the drift line beside it still names the detaching) |
+
+## 14. Webhooks manage web hooks only
+
+- A legacy service hook (`name` other than `web`) or a hook without a `config.url` is outside the section: plan neither matches, notes, nor deletes it (v2 deleted one under `_undeclared: delete`); snapshot leaves it out with a note.
+- No write carries `name`: GitHub defaults a new hook to `web`, the one value the slice admits, and the update endpoint takes no name.
+- A declared `insecure_ssl: 0` is written as GitHub stores it, the string `"0"`.
+- A snapshot writes a hook's `config` keys in the order GitHub lists them, the `$SECRET_WEBHOOK_<id>` reference last.
+
+## 15. A ruleset without `source_type` is repository-owned
+
+v2 refused to delete an undeclared ruleset whose list entry lacked `source_type`, with a note. v3 reads a missing `source_type` as `Repository`, the only kind the repository endpoints can write, so `_undeclared: delete` deletes it.
+
 ## Order of operations
 
 1. Rename any settings file whose path contains a comma, and rename `undeclared` to `_undeclared` in every settings file; the v2 line accepts the old spelling only, so do both together with the pin move.
 2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
-3. Move the pin to `@v3` with `mode: check`.
-4. Read the fallback notices and the drift; add merge steps where a target needs the old overlay behavior.
-5. Switch back to apply.
+3. Where a snapshot wrote a `$WEBHOOK_SECRET_<id>` reference, change the reference and its exported variable to `SECRET_WEBHOOK_<id>` together, or re-snapshot.
+4. Move the pin to `@v3` with `mode: check`.
+5. Read the fallback notices and the drift; add merge steps where a target needs the old overlay behavior; delete duplicated live items the sections now refuse.
+6. Switch back to apply.

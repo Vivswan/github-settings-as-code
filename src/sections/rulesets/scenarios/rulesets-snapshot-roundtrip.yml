@@ -94,7 +94,7 @@ expect:
             - type: non_fast_forward
           bypass_actors: []
   stdout_contains:
-    - "rulesets[org-baseline]: inherited from the organization"
+    - "rulesets[org-baseline]: left out of the snapshot - inherited from the organization"
   never:
     - POST /
     - PATCH /

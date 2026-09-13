@@ -1,26 +1,11 @@
-/** `rulesets:` section: upsert by name with a full-payload PUT, because a partial PUT silently narrows a ruleset. */
+/**
+ * `rulesets:` section: upsert by name with a full-payload PUT, because a partial PUT silently narrows a
+ * ruleset. The list carries summaries, so each matched ruleset is read whole before the comparison.
+ */
 
 import { z } from "zod";
-import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
-import {
-  defaultUndeclaredPolicy,
-  loosen,
-  type SectionModule,
-  undeclaredDrift,
-  undeclaredNote,
-  undeclaredPolicy,
-} from "../contract/module.js";
-import type { SectionPermission } from "../contract/permissions.js";
-import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
-import { knobbed } from "../shared/schema-helpers.js";
-import {
-  knobbedSnapshot,
-  projectOntoSchema,
-  rejectLiveDuplicates,
-} from "../shared/snapshot-helpers.js";
+import { exactName, type ListWrite, listSection } from "../shared/list-section.js";
 import { RulesetConfig } from "./schema.js";
 
 /**
@@ -59,43 +44,49 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   return copy;
 }
 
-const LiveRulesetSummary = z.looseObject({
+/** The rule types a ruleset repeats; rules pair by type, so a repeat has no pairing. */
+function repeatedRuleTypes(
+  rules: readonly { readonly type: unknown }[] | undefined,
+): string | undefined {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const rule of rules ?? []) {
+    const type = String(rule.type);
+    if (seen.has(type)) {
+      repeated.add(type);
+    }
+    seen.add(type);
+  }
+  if (repeated.size === 0) {
+    return undefined;
+  }
+  const types = [...repeated].map((type) => `"${type}"`).join(", ");
+  return `rule type${repeated.size === 1 ? "" : "s"} ${types}`;
+}
+
+/**
+ * A summary or a full body: the list and the per-item GET share these fields. The API type leaves
+ * `source_type` optional; a body without it reads as repository-owned, the only kind the repository
+ * endpoints can write anyway.
+ */
+const LiveRuleset = z.looseObject({
   id: z.number(),
   name: z.string(),
   source_type: z.string().optional(),
+  rules: z.array(z.looseObject({ type: z.string() })).optional(),
 });
+type LiveRuleset = z.infer<typeof LiveRuleset>;
 
-type LiveRulesetSummary = z.infer<typeof LiveRulesetSummary>;
-
-const permission: SectionPermission = { repo: ["administration"] };
-
-/**
- * A summary this section may manage: one no other source explicitly owns (source_type is optional in
- * the API type). Deletion is gated harder in plan(): only an explicit "Repository" is ever deleted,
- * since a missing field is not proof.
- */
-function notInherited(summary: LiveRulesetSummary): boolean {
-  return (summary.source_type ?? "Repository") === "Repository";
-}
-
-const BYPASS_HIDDEN =
-  "bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset)";
-
-/** GitHub omits the bypass_actors KEY (never `[]`) from a GET the token lacks write access for. */
-function bypassActorsVisible(live: unknown): boolean {
-  return typeof live === "object" && live !== null && Object.hasOwn(live, "bypass_actors");
-}
-
-/**
- * The declared ruleset minus a bypass_actors list the token cannot observe, so it reads as neither
- * drift nor a phantom key. Returns the input itself when nothing is hidden, so the caller can tell.
- */
-function observableRuleset(ruleset: RulesetConfig, live: unknown): RulesetConfig {
-  if (!Object.hasOwn(ruleset, "bypass_actors") || bypassActorsVisible(live)) {
-    return ruleset;
+/** A live body repeating a rule type has no pairing either; GitHub keeps one rule per type, so this names a defect worth a look. */
+function pairableRuleset(live: LiveRuleset): LiveRuleset {
+  const repeated = repeatedRuleTypes(live.rules);
+  if (repeated !== undefined) {
+    throw new Error(
+      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the ${repeated} more than once, ` +
+        "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
+    );
   }
-  const { bypass_actors: _hidden, ...visible } = ruleset;
-  return visible;
+  return live;
 }
 
 // Rules pass through verbatim, so a typo'd rules[].type reaches GitHub unchanged and comes back as
@@ -129,15 +120,57 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-export const rulesetsSection = {
+export const rulesetsSection = listSection({
   key: "rulesets",
+  permission: { repo: ["administration"] },
   undeclaredDefault: "keep",
-  permission,
+  noun: "ruleset",
+  entry: RulesetConfig,
+  live: LiveRuleset,
   endpoints: ENDPOINTS,
-  shape: loosen(knobbed(RulesetConfig)),
+  identity: { field: "name", fold: exactName },
+  address: (live) => ({ ruleset_id: String(live.id) }),
+  lens: {
+    // The full ruleset is the wire body (a partial PUT narrows a ruleset). The slice types rule
+    // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
+    toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
+    fromLive: (live) => pairableRuleset(live),
+    // Rules pair by type, as the layered merge does; every other list pairs by shape.
+    matchBy: { rules: "type" },
+  },
+  // GitHub keeps one rule per type, and the comparison pairs rules by it, so a repeated type is a settings-file mistake.
+  conflicts: {
+    declared: (writes) =>
+      writes.flatMap((write) => {
+        const repeated = repeatedRuleTypes(write.rules as { readonly type: unknown }[] | undefined);
+        return repeated === undefined
+          ? []
+          : [
+              `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
+            ];
+      }),
+  },
+  // Only a ruleset the API marks repository-owned is this section's; an inherited one is managed where it is defined.
+  foreign: (live) =>
+    live.source_type === undefined || live.source_type === "Repository"
+      ? null
+      : {
+          name: live.name,
+          reason: `inherited from the ${live.source_type.toLowerCase()} (source_type "${live.source_type}"); manage it where it is defined`,
+        },
+  // GitHub omits the bypass_actors KEY (never `[]`) from a GET the token lacks write access for.
+  concealed: (live) =>
+    Object.hasOwn(live, "bypass_actors")
+      ? []
+      : [
+          {
+            field: "bypass_actors",
+            reason: "GitHub returns it only to a token with write access to the ruleset",
+            remedy: "grant Administration write",
+          },
+        ],
+  prose: { undeclaredAction: "DELETE it" },
   layering: {
-    keys: (entry) => (typeof entry.name === "string" ? [entry.name] : null),
-    keyField: "name",
     combine: "merge",
     nested: {
       rules: {
@@ -147,142 +180,4 @@ export const rulesetsSection = {
       },
     },
   },
-  async plan(ctx, declared) {
-    const { policy, entries } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    const desired = entries.map(normalizeRuleset);
-    // Two entries with the same name would fight each other (create twice, then trade updates) on every run.
-    rejectDuplicates(
-      this,
-      desired,
-      (r) => r.name,
-      (r) => r.name,
-    );
-    const summaries = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveRulesetSummary),
-      await ctx.read.list.listAll(),
-    );
-    const repoRulesets = summaries.filter(notInherited);
-    const idByName = new Map(repoRulesets.map((r) => [r.name, r.id]));
-
-    const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    for (const ruleset of desired) {
-      // The full ruleset is the wire body (a partial PUT narrows a ruleset).
-      const payload = plainData(ruleset);
-      const id = idByName.get(ruleset.name);
-      if (id === undefined) {
-        plan.ops.push({
-          role: "create",
-          payload,
-          describe: `creating ruleset "${ruleset.name}"`,
-          drift: [
-            `rulesets[${ruleset.name}]: missing - declared in the settings file but not on the repo; apply will create it`,
-          ],
-          change: `created ruleset "${ruleset.name}"`,
-        });
-        continue;
-      }
-      const live = await ctx.read.get.call({ params: { ruleset_id: String(id) } });
-      const compared = observableRuleset(ruleset, live);
-      if (compared !== ruleset) {
-        plan.notes.push(
-          `rulesets[${ruleset.name}]: ${BYPASS_HIDDEN}, so drift on it cannot be judged here; grant Administration write to check it`,
-        );
-      }
-      const drift = subsetDiff(compared, live, `rulesets[${ruleset.name}]`);
-      if (!hasDrift(drift)) {
-        continue;
-      }
-      const phantom = phantomKeys(compared, live);
-      if (phantom.length > 0) {
-        plan.notes.push(
-          phantomNote(`rulesets[${ruleset.name}]`, phantom, "ruleset", "this update will re-run"),
-        );
-      }
-      plan.ops.push({
-        role: "update",
-        params: { ruleset_id: String(id) },
-        payload,
-        describe: `updating ruleset "${ruleset.name}"`,
-        drift,
-        change: `updated ruleset "${ruleset.name}" (id ${id})`,
-      });
-    }
-
-    const declaredNames = new Set(desired.map((r) => r.name));
-    for (const live of repoRulesets) {
-      if (declaredNames.has(live.name)) {
-        continue;
-      }
-      if (policy === "delete") {
-        if (live.source_type !== "Repository") {
-          plan.notes.push(
-            `ruleset "${live.name}" is undeclared, but the list response does not mark it ` +
-              `source_type "Repository"; NOT deleting - only rulesets the API explicitly marks ` +
-              `repository-owned are deleted; add it to the settings file to manage it, or delete ` +
-              `it in GitHub if it should not exist`,
-          );
-          continue;
-        }
-        plan.ops.push({
-          role: "remove",
-          params: { ruleset_id: String(live.id) },
-          describe: `deleting undeclared ruleset "${live.name}"`,
-          drift: [
-            undeclaredDrift(defaultUndeclaredPolicy(this), {
-              label: `rulesets[${live.name}]`,
-              action: "DELETE it",
-            }),
-          ],
-          change: `DELETED undeclared ruleset "${live.name}"`,
-        });
-        continue;
-      }
-      plan.notes.push(undeclaredNote({ subject: `ruleset "${live.name}"`, action: "DELETE it" }));
-    }
-    return plan;
-  },
-  // A GET without the bypass_actors key means the token cannot see them; an entry without the
-  // key would erase them on the next full-payload PUT, so the ruleset stays undeclared (kept).
-  async snapshot(ctx) {
-    const summaries = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveRulesetSummary),
-      await ctx.read.list.listAll(),
-    );
-    const notes = summaries
-      .filter((summary) => !notInherited(summary))
-      .map(
-        (summary) =>
-          `rulesets[${summary.name}]: inherited from the ${String(summary.source_type).toLowerCase()} (source_type "${summary.source_type}"), so it is not part of the repository's snapshot; manage it where it is defined`,
-      );
-    const manageable = summaries.filter(notInherited);
-    // plan() upserts by name, so two live rulesets under one name have no declarable form.
-    rejectLiveDuplicates(
-      this,
-      "ruleset",
-      manageable,
-      (summary) => summary.name,
-      (summary) => `${summary.name} (id ${summary.id})`,
-    );
-    const entries: RulesetConfig[] = [];
-    for (const summary of manageable) {
-      const live = await ctx.read.get.call({ params: { ruleset_id: String(summary.id) } });
-      if (!bypassActorsVisible(live)) {
-        notes.push(
-          `rulesets[${summary.name}]: ${BYPASS_HIDDEN}, and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); grant Administration write to read it back`,
-        );
-        continue;
-      }
-      entries.push(projectOntoSchema(RulesetConfig, live));
-    }
-    // Manageable rulesets that were all left out still exist: an empty keep wrapper says so, where
-    // `undefined` would render as "nothing exists on the repository".
-    if (manageable.length === 0) {
-      return { value: undefined, notes };
-    }
-    return { value: knobbedSnapshot(this, entries), notes };
-  },
-} satisfies SectionModule<"rulesets", typeof ENDPOINTS>;
+});

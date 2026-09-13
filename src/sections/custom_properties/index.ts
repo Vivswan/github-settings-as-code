@@ -6,10 +6,11 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  type SectionMeta,
   type SectionModule,
   undeclaredDrift,
   undeclaredNote,
@@ -110,6 +111,13 @@ const LiveProperty = z.looseObject({
   value: z.union([z.string(), z.array(z.string()), z.null()]),
 });
 
+function propertiesByName(
+  section: SectionMeta,
+  live: readonly z.infer<typeof LiveProperty>[],
+): Map<string, z.infer<typeof LiveProperty>> {
+  return liveByIdentity(section, "custom property", live, (p) => p.property_name);
+}
+
 interface PendingUpdate {
   readonly property_name: string;
   readonly value: WireValue;
@@ -156,7 +164,7 @@ export const customPropertiesSection = {
     }
     // Not paginated upstream: one GET carries every value.
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
-    const liveByName = new Map(live.map((p) => [p.property_name, p.value]));
+    const liveByName = propertiesByName(this, live);
     const declaredNames = new Set(desired.map((p) => p.property_name));
 
     // A live null and an absent live entry both mean "unset".
@@ -164,7 +172,7 @@ export const customPropertiesSection = {
     for (const property of desired) {
       const name = property.property_name;
       const wanted = normalizeValue(property.value);
-      const current = liveByName.get(name) ?? null;
+      const current = liveByName.get(name)?.value ?? null;
       if (sameValue(wanted, current)) {
         continue;
       }
@@ -239,6 +247,7 @@ export const customPropertiesSection = {
       };
     }
     const live = parseLive(this, ENDPOINTS.list, z.array(LiveProperty), await ctx.read.list.call());
+    propertiesByName(this, live);
     const set = live.flatMap((property) => {
       if (property.value === null) {
         return [];

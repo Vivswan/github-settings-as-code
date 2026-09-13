@@ -18,8 +18,11 @@ import {
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
 import { DEPLOY_KEYS_MOCK } from "../../../src/sections/deploy_keys/mock.js";
 import { LABELS_MOCK } from "../../../src/sections/labels/mock.js";
+import { MILESTONES_MOCK } from "../../../src/sections/milestones/mock.js";
+import { RULESETS_MOCK } from "../../../src/sections/rulesets/mock.js";
 import type { ListSectionKey } from "../../../src/sections/shared/list-section.js";
 import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/shared/roles.js";
+import { WEBHOOKS_MOCK } from "../../../src/sections/webhooks/mock.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
@@ -446,6 +449,9 @@ export const LIST_MOCKS = {
   labels: LABELS_MOCK,
   autolinks: AUTOLINKS_MOCK,
   deploy_keys: DEPLOY_KEYS_MOCK,
+  milestones: MILESTONES_MOCK,
+  rulesets: RULESETS_MOCK,
+  webhooks: WEBHOOKS_MOCK,
 } as const satisfies Partial<Record<ListSectionKey, ListMockSpec>>;
 
 function completeListItem(spec: ListMockSpec, seed: Json, id: number, slug: string): Json {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import type { ExecTools } from "../contract/plan.js";
 import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
@@ -141,16 +141,15 @@ export async function planProtectionRules(
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
   const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, section, envName);
-  const liveBySlug = new Map<string, LiveProtectionRule>();
-  for (const rule of live) {
-    // The map holds gates that are ON: a disabled declared rule must be re-enabled rather than read
-    // as clean, and a disabled undeclared rule is no active gate, so neither the keep-note nor the
-    // disable applies to it.
-    if (rule.enabled === false) {
-      continue;
-    }
-    liveBySlug.set(liveRuleSlug(rule, envName), rule);
-  }
+  // The index holds gates that are ON: a disabled declared rule must be re-enabled rather than read
+  // as clean, and a disabled undeclared rule is no active gate, so neither the keep-note nor the
+  // disable applies to it.
+  const liveBySlug = liveByIdentity(
+    section,
+    "deployment protection rule",
+    live.filter((rule) => rule.enabled !== false),
+    (rule) => liveRuleSlug(rule, envName),
+  );
   const declared = new Set(entries.map((rule) => rule.app));
   const planned: NestedPlan = { ops: [], notes: [] };
 

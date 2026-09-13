@@ -223,7 +223,12 @@ describe("section permissions", () => {
         keyField: "name",
         keysOfPlain: ["Bug"],
         keysOfRenaming: ["Bug"],
-        identity: undefined,
+        identity: {
+          field: "name",
+          foldOfBug: "Bug",
+          aliasesOfPlain: undefined,
+          aliasesOfRenaming: undefined,
+        },
       },
     ]);
   });

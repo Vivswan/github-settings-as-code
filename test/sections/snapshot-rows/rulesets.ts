@@ -55,8 +55,7 @@ export const row: Row = {
       ],
     },
     notes: [
-      'rulesets[org-baseline]: inherited from the organization (source_type "Organization"), ' +
-        "so it is not part of the repository's snapshot; manage it where it is defined",
+      'rulesets[org-baseline]: left out of the snapshot - inherited from the organization (source_type "Organization"); manage it where it is defined',
     ],
   },
 };

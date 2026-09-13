@@ -9,10 +9,11 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
+  type SectionMeta,
   type SectionModule,
   undeclaredDrift,
   undeclaredNote,
@@ -132,6 +133,13 @@ function matches(declaredValue: string | string[], liveValue: unknown): boolean 
   return JSON.stringify(liveComparable) === JSON.stringify(declaredValue);
 }
 
+function patternsByName<T extends { name: string }>(
+  section: SectionMeta,
+  live: readonly T[],
+): Map<string, T> {
+  return liveByIdentity(section, "secret scanning custom pattern", live, (p) => p.name);
+}
+
 const key = "secret_scanning_custom_patterns";
 
 export const secretScanningPatternsSection = {
@@ -168,7 +176,7 @@ export const secretScanningPatternsSection = {
       z.array(LivePatternEntry),
       await ctx.read.list.listAll(),
     ).map(liveFrom);
-    const liveByName = new Map(live.map((p) => [p.name, p]));
+    const liveByName = patternsByName(this, live);
     const declaredNames = new Set(desired.map((p) => p.name));
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
@@ -270,6 +278,7 @@ export const secretScanningPatternsSection = {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
+    patternsByName(this, live);
     const entries = live.map((pattern) => projectOntoSchema(SecretScanningPatternConfig, pattern));
     return { value: knobbedSnapshot(this, entries), notes: [] };
   },

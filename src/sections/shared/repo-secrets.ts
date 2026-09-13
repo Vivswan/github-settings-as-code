@@ -14,7 +14,7 @@ import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -273,6 +273,13 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
+    liveByIdentity(
+      section,
+      noun,
+      live,
+      (item) => secretKey(item.name),
+      (item) => item.name,
+    );
     const references = live.map(({ name }) => ({
       name: secretKey(name),
       ...snapshotSecretReference(pathSegment, secretKey(name)),

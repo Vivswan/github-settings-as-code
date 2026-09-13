@@ -48,7 +48,7 @@ export interface MintedSecretReference {
  * the same grammar and reserved-prefix rule the settings file enforces, so a snapshot can never
  * emit a reference an apply would refuse. `label` names the secret for the BUG prose.
  */
-export function mintSecretReference(variable: string, label: string): MintedSecretReference {
+function mintSecretReference(variable: string, label: string): MintedSecretReference {
   const reference = `$${variable}`;
   const checked = validateSecretRef(reference, "operator", label);
   if (!checked.ok) {

@@ -1,14 +1,15 @@
 /** Existence reconciliation over route-free scopes: values are never read back, and every declared secret is re-sealed on each apply. */
 
 import { z } from "zod";
-import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import type { UndeclaredPolicy } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
+import { liveByIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
   type SectionMeta,
+  secretValuesOf,
   undeclaredDrift,
   undeclaredNote,
-  undeclaredPolicy,
 } from "../contract/module.js";
 import type { ExecTools, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
@@ -89,19 +90,8 @@ export function secretKey(name: string): string {
  * from shape validation, never a TypeError here.
  */
 export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
-  const container = declared as SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
-  const isWrapper =
-    typeof container === "object" &&
-    container !== null &&
-    !Array.isArray(container) &&
-    Array.isArray((container as UndeclaredPolicyList<SecretEntry>).entries);
-  if (!Array.isArray(container) && !isWrapper) {
-    return [];
-  }
-  // "keep" is a placeholder: only the entries are read.
-  const { entries } = undeclaredPolicy(container, "keep");
-  return entries.flatMap((entry) => {
-    if (typeof entry !== "object" || entry === null || typeof entry.value !== "string") {
+  return secretValuesOf(declared, (entry) => {
+    if (typeof entry.value !== "string") {
       return [];
     }
     const label =
@@ -218,12 +208,19 @@ function undeclaredSecretDrift(
 }
 
 /** Uppercase key -> the name as listed (normalizing keeps a differently-cased mock harmless). */
-function liveSecretsByKey(live: readonly LiveSecretName[]): Map<string, string> {
-  const liveByKey = new Map<string, string>();
-  for (const item of live) {
-    liveByKey.set(secretKey(item.name), item.name);
-  }
-  return liveByKey;
+function liveSecretsByKey(
+  section: SectionMeta,
+  scope: SecretsScopeProse,
+  live: readonly LiveSecretName[],
+): Map<string, string> {
+  const byKey = liveByIdentity(
+    section,
+    scope.noun,
+    live,
+    (item) => secretKey(item.name),
+    (item) => item.name,
+  );
+  return new Map([...byKey].map(([key, item]) => [key, item.name]));
 }
 
 export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPlannedOp>(
@@ -242,7 +239,7 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   const { entries, policy, defaultPolicy } = opts;
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveSecretsByKey(await scope.list());
+  const liveByKey = liveSecretsByKey(section, scope, await scope.list());
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
   if (entries.length > 0) {

@@ -114,30 +114,18 @@ export const deployKeysSection = listSection({
             ];
       });
     },
-    // GitHub does not enforce title uniqueness either, and replacing one of N same-titled keys is a guess.
     live: (writes, live) =>
       writes.flatMap((write) => {
-        const sameTitle = live.filter((key) => key.title === write.title);
         const holder = live.find((key) => key.title !== write.title && key.key === write.key);
-        return [
-          ...(sameTitle.length > 1
-            ? [
-                `the declared title "${write.title}" matches ${sameTitle.length} live deploy ` +
-                  `keys (ids ${sameTitle.map((key) => String(key.id)).join(", ")}), and this ` +
-                  `section manages at most one key per title - delete the duplicates on GitHub ` +
-                  `so exactly one remains`,
-              ]
-            : []),
-          ...(holder === undefined
-            ? []
-            : [
-                `the entry "${write.title}" declares key material that live key ` +
-                  `"${holder.title}" (id ${String(holder.id)}) already holds, and GitHub ` +
-                  `attaches a public key to one repository once, so writing it would be rejected ` +
-                  `- delete or rename the live key on GitHub, or declare the entry under its ` +
-                  `live title "${holder.title}"`,
-              ]),
-        ];
+        return holder === undefined
+          ? []
+          : [
+              `the entry "${write.title}" declares key material that live key ` +
+                `"${holder.title}" (id ${String(holder.id)}) already holds, and GitHub ` +
+                `attaches a public key to one repository once, so writing it would be rejected ` +
+                `- delete or rename the live key on GitHub, or declare the entry under its ` +
+                `live title "${holder.title}"`,
+            ];
       }),
   },
   prose: { undeclaredAction: "DELETE it" },

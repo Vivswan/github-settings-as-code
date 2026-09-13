@@ -14,7 +14,7 @@ description: >-
   is keyed by its slug; the resolved secret still reaches no surface.
 settings: {}
 env:
-  WEBHOOK_SECRET_701: vault-hook-secret-canary-2b7e
+  SECRET_WEBHOOK_701: vault-hook-secret-canary-2b7e
 repos:
   e2e-owner/svc-open:
     live_state:
@@ -49,7 +49,7 @@ repos:
                 url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
                 content_type: json
                 insecure_ssl: "0"
-                secret: $WEBHOOK_SECRET_701
+                secret: $SECRET_WEBHOOK_701
               events:
                 - push
               active: true
@@ -68,7 +68,7 @@ expect:
     - "| e2e-owner/svc-vault | remote | :white_check_mark: snapshot | snapshots/e2e-owner/svc-vault.yml |"
     - "### e2e-owner/svc-vault (snapshot)"
     - "hooks.internal.example/LEAKME-vault-endpoint-9f3a"
-    - "export a value as WEBHOOK_SECRET_701 into the environment before apply"
+    - "export it into the environment as SECRET_WEBHOOK_701 before apply"
   stdout_contains:
     - "e2e-owner/svc-vault: snapshot written to snapshots/e2e-owner/svc-vault.yml"
     - "hooks.internal.example/LEAKME-vault-endpoint-9f3a"

@@ -1,16 +1,19 @@
 /**
  * The list-section factory: upsert-by-natural-key plus keep-or-delete-undeclared as ONE declaration
- * (slice, roles, identity, address, lens, prose) from which plan(), the loose shape, the mock's
- * transformers, and the fuzz witness derive. Two prose hooks only: a section needing more stays bespoke.
+ * (slice, roles, identity, address, lens, prose) from which plan(), snapshot(), the loose shape, the
+ * mock's transformers, and the fuzz witness derive. Prose enters through the two undeclared hooks and
+ * the reasons `concealed` and `foreign` return; a section needing more stays bespoke.
  */
 
 import { z } from "zod";
 import { type Delta, deltas, phantomNote, renderDelta } from "../../engine/diff.js";
+import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive, plural } from "../contract/live.js";
 import {
+  cannotVerifyNote,
   type DeclaredSecretValue,
   defaultUndeclaredPolicy,
   type EntryOf,
@@ -19,12 +22,14 @@ import {
   loosen,
   type SectionMeta,
   type SectionSnapshot,
+  secretValuesOf,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
+  type ExecTools,
   hasDrift,
   type PlainData,
   type PlanContext,
@@ -32,10 +37,11 @@ import {
   plainData,
   type SectionPlan,
   type SnapshotContext,
+  type Unverifiable,
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
-import { knobbedSnapshot, projectOntoSchema, rejectLiveDuplicates } from "./snapshot-helpers.js";
+import { knobbedSnapshot, leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
@@ -56,9 +62,17 @@ type UpdateDecl = EndpointDecl & {
 
 type RemoveDecl = EndpointDecl & { readonly route: Extract<Route, `DELETE ${string}`> };
 
+/** The full body of one item, for a list that carries only a summary; never the primary read. */
+type GetDecl = EndpointDecl & {
+  readonly route: Extract<Route, `GET ${string}`>;
+  readonly primaryRead?: never;
+};
+
 /**
  * `update` exists only when GitHub can edit the resource; without it a drifted item is deleted and
- * recreated. A type alias, so it keeps EndpointDict's index signature.
+ * recreated. `updateConfig` sets one nested mapping field by field where the general update would
+ * replace it whole (a webhook's config); `get` reads an item's full body when the list carries only a
+ * summary (a ruleset). A type alias, so it keeps EndpointDict's index signature.
  */
 export type ListEndpoints = {
   readonly list: EndpointDecl & {
@@ -69,8 +83,12 @@ export type ListEndpoints = {
 } & (
   | { readonly remove: RemoveDecl }
   | { readonly update: UpdateDecl; readonly remove: RemoveDecl }
-);
+  | { readonly update: UpdateDecl; readonly remove: RemoveDecl; readonly updateConfig: UpdateDecl }
+) &
+  // biome-ignore lint/complexity/noBannedTypes: `{}` is the "no get role" arm; an optional key would admit undefined into the dictionary
+  ({} | { readonly get: GetDecl });
 
+/** The roles every list section declares, which the derived mock fragment serves. */
 export type ListRoleName = "list" | "create" | "update" | "remove";
 
 type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) extends (
@@ -84,53 +102,96 @@ type IsUnion<T> = [T] extends [UnionToIntersection<T>] ? false : true;
 /**
  * Pins a dictionary to the factory's roles at the declaration. An intersection, so the index signature stays.
  *
- *   a union of dictionaries    -> refused (a union hides its members' roles from keyof)
- *   a fifth role               -> never
- *   `update` not PATCH or PUT  -> refused (a DELETE would pass the immutable arm's structural match)
+ *   a union of dictionaries          -> refused (a union hides its members' roles from keyof)
+ *   a seventh role                   -> never
+ *   `update` not PATCH or PUT        -> refused (a DELETE would pass the immutable arm's structural match)
+ *   `updateConfig` without `update`  -> refused (the general update carries the fields outside the mapping)
  */
-type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) & {
-  readonly [R in Exclude<keyof Ends, ListRoleName>]: never;
-} & { readonly [R in keyof Ends & "update"]: UpdateDecl };
+type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) &
+  ("updateConfig" extends keyof Ends
+    ? "update" extends keyof Ends
+      ? unknown
+      : never
+    : unknown) & {
+    readonly [R in Exclude<keyof Ends, ListRoleName | "get" | "updateConfig">]: never;
+  } & { readonly [R in keyof Ends & "update"]: UpdateDecl } & {
+    readonly [R in keyof Ends & "updateConfig"]: UpdateDecl;
+  } & { readonly [R in keyof Ends & "get"]: GetDecl };
+
+/**
+ * The write fields a `secrets` declaration may name: a dotted path under `mapping`, admitted only where
+ * both carriers (`create` and `updateConfig`) declare `unverifiable: true`, since the value is re-sent on
+ * every run; an immutable resource admits none.
+ */
+type SecretPath<Ends> = Ends extends {
+  readonly create: { readonly unverifiable: true };
+  readonly updateConfig: { readonly unverifiable: true };
+}
+  ? `${string}.${string}`
+  : never;
 
 export function updateRole(endpoints: ListEndpoints): UpdateDecl | undefined {
   return "update" in endpoints ? endpoints.update : undefined;
 }
 
-type SameParams<A extends string, B extends string> = [PathParams<A>] extends [PathParams<B>]
-  ? [PathParams<B>] extends [PathParams<A>]
-    ? Readonly<Record<PathParams<A>, string>>
-    : never
+type RouteOf<Ends, R extends string> = Ends extends {
+  readonly [P in R]: { readonly route: infer U extends string };
+}
+  ? U
+  : never;
+
+/** Every route addressing ONE live item; they all read the same params off `address`. */
+type ItemRoutes<Ends> =
+  | RouteOf<Ends, "remove">
+  | RouteOf<Ends, "update">
+  | RouteOf<Ends, "updateConfig">
+  | RouteOf<Ends, "get">;
+
+type SameParamsAs<R extends string, P extends string> = R extends string
+  ? [PathParams<R>] extends [P]
+    ? [P] extends [PathParams<R>]
+      ? true
+      : false
+    : false
   : never;
 
 /**
- * One address serves update and remove, so when both exist they must spell the SAME params; a dictionary
- * whose item routes disagree collapses to never.
+ * One address serves every item route, so they must spell the SAME params; a dictionary whose item
+ * routes disagree collapses to never.
  */
-type Address<Ends extends ListEndpoints> = Ends extends {
-  readonly update: { readonly route: infer U extends string };
-}
-  ? SameParams<U, Ends["remove"]["route"]>
-  : Readonly<Record<PathParams<Ends["remove"]["route"]>, string>>;
+type Address<Ends extends ListEndpoints> =
+  false extends SameParamsAs<ItemRoutes<Ends>, PathParams<ItemRoutes<Ends>>>
+    ? never
+    : Readonly<Record<PathParams<ItemRoutes<Ends>>, string>>;
+
+/**
+ * The identity field's home in a write: a top-level key, or a dotted path into a nested mapping (a
+ * webhook's config.url), each nested level keeping the write's own index signature for its siblings.
+ */
+type Carrier<F extends string, Siblings> = F extends `${infer Head}.${infer Rest}`
+  ? { readonly [P in Head]: Carrier<Rest, Siblings> & Siblings }
+  : { readonly [P in F]: string };
 
 /**
  * Declared fields only: an omitted optional stays OUT (never undefined), so it is neither written nor compared.
  * A section narrows it to pin a folded field's brand on its lens (labels' HexColor).
  */
-export type ListWrite<F extends string> = { readonly [P in F]: string } & {
+export type ListWrite<F extends string> = Carrier<F, { readonly [key: string]: PlainData }> & {
   readonly [key: string]: PlainData;
 };
 
 /** A live item in the same terms, each field normalized as GitHub stores it. */
-export type ListComparable<F extends string> = { readonly [P in F]: string } & Readonly<
-  Record<string, unknown>
->;
+export type ListComparable<F extends string> = Carrier<F, Readonly<Record<string, unknown>>> &
+  Readonly<Record<string, unknown>>;
 
 /** The fold of a section GitHub matches exactly: the key IS the name. */
 export function exactName(name: string): string {
   return name;
 }
 
-type NoteWording = Pick<Parameters<typeof undeclaredNote>[0], "state" | "add" | "manage">;
+/** The keep-note wording; `action` overrides `undeclaredAction` for the note alone (a milestone's closing hint). */
+type NoteWording = Pick<Parameters<typeof undeclaredNote>[0], "state" | "add" | "manage"> &
+  Partial<Pick<Parameters<typeof undeclaredNote>[0], "action">>;
 
 type DriftWording = Pick<Parameters<typeof undeclaredDrift>[1], "state" | "add" | "keep">;
 
@@ -143,10 +204,60 @@ interface Listing {
 }
 
 /**
+ * A declared field GitHub omits from a live item the token lacks access for (a ruleset's bypass_actors
+ * under a read grant): plan() compares around it and notes it, snapshot() leaves the item out.
+ */
+interface ConcealedField {
+  readonly field: string;
+  /** Why GitHub withholds it ("GitHub returns it only to a token with write access to the ruleset"). */
+  readonly reason: string;
+  /** The grant that lifts it, as an imperative clause ("grant Administration write"). */
+  readonly remedy: string;
+}
+
+/** With an `updateConfig` role, the entry field holding the mapping that endpoint sets field by field. */
+type MappingFacet<K extends ListSectionKey, Ends> = Ends extends {
+  readonly updateConfig: EndpointDecl;
+}
+  ? { readonly mapping: keyof Entry<K> & string }
+  : { readonly mapping?: never };
+
+interface Identity<K extends ListSectionKey, F extends string, Key extends string> {
+  /** The write field naming the resource, as the live item carries it ("name", "title", "config.url"). */
+  readonly field: F;
+  /** Folds a name to the key GitHub matches it by; `exactName` when GitHub matches exactly. */
+  readonly fold: (name: string) => Key;
+  /**
+   * Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this
+   * entry's, renamed by the update, not undeclared.
+   */
+  readonly aliases?: (entry: Entry<K>) => readonly string[];
+}
+
+/**
+ * The update body's key for the name when GitHub renames through another one (labels' `new_name`);
+ * omitted, the name travels under `field`. Only a top-level identity field renames.
+ *
+ *   entry declares a value under it  -> it is renaming: that value is the name it writes (the lens puts it under `field`)
+ *   the entry's `field`              -> its current name
+ */
+type RenameFacet<F extends string> = F extends `${string}.${string}`
+  ? { readonly renameKey?: never }
+  : { readonly renameKey?: string };
+
+/**
  * `Key` is the fold's output: the planner keys every live-versus-declared lookup by it, so an unfolded
  * name cannot be looked up, and a section's brand (labels' NameKey) survives to `decl`.
  */
-export interface ListSectionDecl<
+export type ListSectionDecl<
+  K extends ListSectionKey,
+  Ends extends ListEndpoints,
+  Live extends object,
+  F extends string,
+  Key extends string,
+> = ListSectionDeclFields<K, Ends, Live, F, Key> & MappingFacet<K, Ends>;
+
+interface ListSectionDeclFields<
   K extends ListSectionKey,
   Ends extends ListEndpoints,
   Live extends object,
@@ -160,30 +271,12 @@ export interface ListSectionDecl<
   readonly noun: string;
   /** The entry config slice (src/sections/<key>/schema.ts); the loose shape derives from it. */
   readonly entry: z.ZodType<Entry<K>>;
-  /** The fields of a live list item the section reads; extras ride along for the comparison. */
+  /** The fields of a live item the section reads (a list item, and the `get` body when the role exists); extras ride along. */
   readonly live: z.ZodType<Live>;
   readonly endpoints: Ends & OnlyListRoles<Ends>;
   readonly listing?: Listing;
-  readonly identity: {
-    /** The write field naming the resource, as the live item carries it ("name", "title"). */
-    readonly field: F;
-    /** Folds a name to the key GitHub matches it by; `exactName` when GitHub matches exactly. */
-    readonly fold: (name: string) => Key;
-    /**
-     * Names an entry also answers to (a label's pre-rename `name`), so a live item under one is this
-     * entry's, renamed by the update, not undeclared.
-     */
-    readonly aliases?: (entry: Entry<K>) => readonly string[];
-    /**
-     * The update body's key for the name when GitHub renames through another one (labels' `new_name`);
-     * omitted, the name travels under `field`.
-     *
-     *   entry declares a value under it  -> it is renaming: that value is the name it writes (the lens puts it under `field`)
-     *   the entry's `field`              -> its current name
-     */
-    readonly renameKey?: string;
-  };
-  /** The path params addressing one live item for update and remove; unrepresentable when the two routes disagree. */
+  readonly identity: Identity<K, F, Key> & RenameFacet<F>;
+  /** The path params addressing one live item for every item role; unrepresentable when the routes disagree. */
   readonly address: [Address<Ends>] extends [never] ? never : (live: Live) => Address<Ends>;
   readonly lens: {
     /** The entry in wire terms: the create body, and what a converged live item reads back as. */
@@ -219,19 +312,32 @@ export interface ListSectionDecl<
       live: readonly ListComparable<F>[],
     ) => readonly string[];
   };
+  /**
+   * The reason a live item is outside what the section manages (an inherited ruleset, a legacy
+   * service hook), or null when it is the section's own: plan() neither matches nor removes it,
+   * snapshot() leaves it out under `name` with the reason.
+   */
+  readonly foreign?: (live: Live) => { readonly name: string; readonly reason: string } | null;
+  /** Read off the full body (the `get` role's when it exists); see ConcealedField. */
+  readonly concealed?: (live: Live) => readonly ConcealedField[];
+  /**
+   * Write fields (dotted paths) holding a `$NAME` reference to a value GitHub never echoes back (a
+   * webhook's config.secret): left out of the comparison, resolved when the write executes, re-sent
+   * on every run under an unverifiable facet, and read back by a snapshot as a per-item reference.
+   * SecretPath admits a path only where its carriers declare the facet; checkDecl holds a dotted path to `mapping`.
+   */
+  readonly secrets?: readonly SecretPath<Ends>[];
   readonly prose: {
     /** What apply does to an undeclared live resource, as the note and drift spell it ("DELETE it"). */
     readonly undeclaredAction: string;
     readonly undeclaredNote?: NoteWording;
     readonly undeclaredDrift?: DriftWording;
   };
-  /** The designated secret-field values of one entry, for the engine's up-front resolution. */
-  readonly secretValues?: (entry: Entry<K>) => readonly DeclaredSecretValue[];
   /**
    * Omitted, the list always replaces. The pairing itself is derived from `identity`, the very claims the
    * planner's duplicate check reads, so the merge and the planner cannot disagree about which entries are one.
    */
-  readonly layering?: Pick<KeyedListLayering, "combine">;
+  readonly layering?: Pick<KeyedListLayering, "combine" | "nested">;
 }
 
 /** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
@@ -281,6 +387,7 @@ interface ErasedDecl<Key extends string> {
     readonly fromLive: (live: object) => ListComparable<string>;
     readonly matchBy: Readonly<Record<string, string>>;
   };
+  readonly mapping?: string;
   readonly recreate?: (live: object, write: ListWrite<string>) => ListWrite<string>;
   readonly conflicts?: {
     readonly declared?: (writes: readonly ListWrite<string>[]) => readonly string[];
@@ -289,11 +396,22 @@ interface ErasedDecl<Key extends string> {
       live: readonly ListComparable<string>[],
     ) => readonly string[];
   };
-  readonly prose: ListSectionDecl<ListSectionKey, ListEndpoints, object, string, Key>["prose"];
-  readonly secretValues?: (entry: object) => readonly DeclaredSecretValue[];
+  readonly foreign?: (live: object) => { readonly name: string; readonly reason: string } | null;
+  readonly concealed?: (live: object) => readonly ConcealedField[];
+  readonly secrets?: readonly string[];
+  readonly prose: ListSectionDeclFields<
+    ListSectionKey,
+    ListEndpoints,
+    object,
+    string,
+    Key
+  >["prose"];
 }
 
 type ErasedDeclared = readonly object[] | UndeclaredPolicyList<object>;
+
+/** A write or comparable seen as plain fields. */
+type Fields = Readonly<Record<string, unknown>>;
 
 /** A recreate names its remedy once on the generic line, so its field lines carry none. */
 interface Remedies {
@@ -314,6 +432,46 @@ const RECREATE_REMEDIES: Remedies = {
   phantom: "this delete-and-recreate will repeat",
 };
 
+// --- Dotted paths into a write ----------------------------------------------
+
+function pathOf(field: string): string[] {
+  return field.split(".");
+}
+
+function valueAt(record: unknown, path: readonly string[]): unknown {
+  let node: unknown = record;
+  for (const step of path) {
+    if (typeof node !== "object" || node === null || !Object.hasOwn(node, step)) {
+      return undefined;
+    }
+    node = (node as Fields)[step];
+  }
+  return node;
+}
+
+/** A copy with the value at `path` replaced (present) or removed (undefined); a missing parent is left alone. */
+function withValueAt<T extends Fields>(record: T, path: readonly string[], value: unknown): T {
+  const [step, ...rest] = path;
+  if (step === undefined || !Object.hasOwn(record, step)) {
+    return record;
+  }
+  if (rest.length === 0) {
+    const { [step]: _replaced, ...others } = record;
+    return (value === undefined ? others : { ...others, [step]: value }) as T;
+  }
+  const child = record[step];
+  if (typeof child !== "object" || child === null || Array.isArray(child)) {
+    return record;
+  }
+  return { ...record, [step]: withValueAt(child as Fields, rest, value) };
+}
+
+function withoutPaths<T extends Fields>(record: T, paths: readonly string[]): T {
+  return paths.reduce((out, field) => withValueAt(out, pathOf(field), undefined), record);
+}
+
+// --- Identity ---------------------------------------------------------------
+
 /**
  * The ONE derivation behind the planner's duplicate check and the layered merge's pairing. Total over raw
  * records because the merge reads layers before validation: null when a claimed name is not a string,
@@ -321,11 +479,11 @@ const RECREATE_REMEDIES: Remedies = {
  */
 function identityClaims<Key extends string>(
   identity: ErasedDecl<Key>["identity"],
-  entry: Readonly<Record<string, unknown>>,
+  entry: Fields,
 ): readonly Key[] | null {
   const { field, renameKey, fold } = identity;
   const written = renameKey === undefined ? undefined : entry[renameKey];
-  const names = [written ?? entry[field], ...(identity.aliases?.(entry) ?? [])];
+  const names = [written ?? valueAt(entry, pathOf(field)), ...(identity.aliases?.(entry) ?? [])];
   if (!names.every((name): name is string => typeof name === "string")) {
     return null;
   }
@@ -333,8 +491,8 @@ function identityClaims<Key extends string>(
 }
 
 /** The erased view lost the declaration's string typing, so the check happens once here. */
-function nameOf(record: Readonly<Record<string, unknown>>, field: string): string {
-  const value = record[field];
+function nameOf(record: Fields, field: string): string {
+  const value = valueAt(record, pathOf(field));
   if (typeof value !== "string") {
     throw new Error(
       `BUG: the identity field "${field}" is not a string in ${JSON.stringify(record)}; the lens must carry it verbatim`,
@@ -343,9 +501,58 @@ function nameOf(record: Readonly<Record<string, unknown>>, field: string): strin
   return value;
 }
 
-function missingLine(label: string): string {
-  return `${label}: missing - declared in the settings file but not on the repo; apply will create it`;
+/**
+ * A live item named for a message about two of them: the name, then the address when it says more
+ * (`v1 (milestone number 1)`; a label's address IS its name, so nothing is added).
+ */
+function addressed(decl: ErasedDecl<string>, item: object, name: string): string {
+  const params = Object.entries(decl.address(item)).filter(([, value]) => value !== name);
+  if (params.length === 0) {
+    return name;
+  }
+  return `${name} (${params.map(([param, value]) => `${param.replace(/_/g, " ")} ${value}`).join(", ")})`;
 }
+
+// --- Secret fields ----------------------------------------------------------
+
+/** The secret paths of `decl` a write declares (holds a string at). */
+function declaredSecrets(decl: ErasedDecl<string>, write: Fields): string[] {
+  return (decl.secrets ?? []).filter((field) => typeof valueAt(write, pathOf(field)) === "string");
+}
+
+/** The write with every declared secret reference resolved, for the request body. */
+function resolvedWrite(exec: ExecTools, write: Fields, fields: readonly string[]): PlainData {
+  const resolved = fields.reduce(
+    (out: Fields, field) =>
+      withValueAt(out, pathOf(field), exec.resolveSecret(String(valueAt(out, pathOf(field))))),
+    write as Fields,
+  );
+  return plainData(resolved);
+}
+
+function leafOf(field: string): string {
+  const path = pathOf(field);
+  return path[path.length - 1] ?? field;
+}
+
+/** The unverifiable facet an op re-sending secret fields carries, one clause per field. */
+function secretFacet(decl: ErasedDecl<string>, label: string, fields: readonly string[]): string {
+  return fields
+    .map((field) =>
+      cannotVerifyNote(`${label}.${field}`, {
+        why: `GitHub never reveals a ${decl.noun} ${leafOf(field)}`,
+        what: "the declared value",
+        reasserts: "re-sends it",
+      }),
+    )
+    .join("; ");
+}
+
+function facetOr(facet: string | null, lines: readonly string[]): Unverifiable | readonly string[] {
+  return facet === null ? lines : { unverifiable: facet, lines };
+}
+
+// --- Rendering --------------------------------------------------------------
 
 function renderEntryDelta(
   sectionKey: string,
@@ -355,26 +562,35 @@ function renderEntryDelta(
   remedies: Remedies,
 ): string {
   const label = `${sectionKey}[${names.want}]`;
-  const [step, ...rest] = delta.path;
-  if (delta.kind === "mismatch" && rest.length === 0 && typeof step === "string") {
-    if (step === field) {
-      return `${sectionKey}[${names.live}]: should be named "${names.want}" per the settings file; ${remedies.rename}`;
-    }
-    if (typeof delta.desired !== "object" || delta.desired === null) {
-      return `${label}.${step}: declared ${JSON.stringify(delta.desired)} != live ${JSON.stringify(delta.live)}${remedies.value}`;
-    }
+  const path = pathOf(field);
+  if (
+    delta.kind === "mismatch" &&
+    delta.path.length === path.length &&
+    delta.path.every((step, index) => step === path[index])
+  ) {
+    return `${sectionKey}[${names.live}]: should be named "${names.want}" per the settings file; ${remedies.rename}`;
+  }
+  if (
+    delta.kind === "mismatch" &&
+    delta.path.length > 0 &&
+    delta.path.every((step) => typeof step === "string") &&
+    (typeof delta.desired !== "object" || delta.desired === null)
+  ) {
+    return `${label}.${delta.path.join(".")}: declared ${JSON.stringify(delta.desired)} != live ${JSON.stringify(delta.live)}${remedies.value}`;
   }
   return renderDelta(label, delta);
 }
 
-function updateBody(decl: ErasedDecl<string>, write: ListWrite<string>): PlainData {
+function updateBody(decl: ErasedDecl<string>, write: Fields): Fields {
   const { renameKey, field } = decl.identity;
   if (renameKey === undefined) {
-    return plainData(write);
+    return write;
   }
   const { [field]: _name, ...rest } = write;
-  return plainData({ [renameKey]: nameOf(write, field), ...rest });
+  return { [renameKey]: nameOf(write, field), ...rest };
 }
+
+// --- Reads ------------------------------------------------------------------
 
 async function readList(
   decl: ErasedDecl<string>,
@@ -386,13 +602,95 @@ async function readList(
     : ctx.read.list.listAll({ query });
 }
 
+interface LiveItems {
+  readonly managed: object[];
+  readonly foreign: { readonly name: string; readonly reason: string }[];
+}
+
+/** The parsed list split by `foreign`, in live order on both sides. */
+async function readLive(
+  decl: ErasedDecl<string>,
+  section: SectionMeta<ListSectionKey>,
+  ctx: PlanContext<ListEndpoints>,
+): Promise<LiveItems> {
+  const live = parseLive(
+    section,
+    decl.endpoints.list,
+    z.array(decl.live),
+    await readList(decl, ctx),
+  );
+  const out: LiveItems = { managed: [], foreign: [] };
+  for (const item of live) {
+    const foreign = decl.foreign?.(item) ?? null;
+    if (foreign === null) {
+      out.managed.push(item);
+    } else {
+      out.foreign.push(foreign);
+    }
+  }
+  return out;
+}
+
+/** The read port of the optional `get` role; the erased dictionary cannot type it, so the shape is spelled here. */
+interface ItemReadPort {
+  call(opts: { params: Readonly<Record<string, string>> }): Promise<unknown>;
+}
+
+/** The item's full body when the dictionary declares a `get`, the list item otherwise. */
+async function readItem(
+  decl: ErasedDecl<string>,
+  section: SectionMeta<ListSectionKey>,
+  ctx: PlanContext<ListEndpoints>,
+  item: object,
+): Promise<object> {
+  const get = "get" in decl.endpoints ? decl.endpoints.get : undefined;
+  if (get === undefined) {
+    return item;
+  }
+  const port = (ctx.read as unknown as { readonly get: ItemReadPort }).get;
+  return parseLive(section, get, decl.live, await port.call({ params: decl.address(item) }));
+}
+
+// --- Plan -------------------------------------------------------------------
+
+/** A live item with the comparison it takes part in, less what neither side can show. */
+interface Comparison {
+  readonly write: Fields;
+  readonly live: Fields;
+  readonly notes: string[];
+}
+
+function comparison(
+  decl: ErasedDecl<string>,
+  label: string,
+  write: ListWrite<string>,
+  body: object,
+  comparable: ListComparable<string>,
+): Comparison {
+  const notes: string[] = [];
+  const hidden = (decl.concealed?.(body) ?? []).filter(
+    (field) => valueAt(write, pathOf(field.field)) !== undefined,
+  );
+  for (const { field, reason, remedy } of hidden) {
+    notes.push(
+      `${label}: ${field} is not visible to this token (${reason}), so drift on it cannot be judged here; ${remedy} to check it`,
+    );
+  }
+  const dropped = [...(decl.secrets ?? []), ...hidden.map((field) => field.field)];
+  return {
+    write: withoutPaths(write as Fields, dropped),
+    live: withoutPaths(comparable as Fields, dropped),
+    notes,
+  };
+}
+
 async function planList<Key extends string>(
   decl: ErasedDecl<Key>,
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
   declared: ErasedDeclared,
 ): Promise<SectionPlan> {
-  const { key, noun, identity, lens, prose, endpoints } = decl;
+  const { key, noun, identity, lens, prose, endpoints, mapping } = decl;
   const { fold } = identity;
   const update = updateRole(endpoints);
   const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
@@ -402,7 +700,7 @@ async function planList<Key extends string>(
   const writes = entries.map((entry) => {
     const write = lens.toWrite(entry);
     const name = nameOf(write, identity.field);
-    const claims = identityClaims(identity, entry as Readonly<Record<string, unknown>>);
+    const claims = identityClaims(identity, entry as Fields);
     if (claims === null) {
       throw new Error(
         `BUG: the validated ${noun} entry ${JSON.stringify(entry)} claims a non-string name; the slice must type the identity fields as strings`,
@@ -421,16 +719,24 @@ async function planList<Key extends string>(
   const declaredConflicts = decl.conflicts?.declared?.(writes.map((w) => w.write)) ?? [];
   if (declaredConflicts.length > 0) {
     throw new Error(
-      `${key}: the settings file declares conflicting ${noun}s: ${declaredConflicts.join("; ")}. Fix the settings file, then re-run`,
+      `${key}: the settings file declares conflicting ${plural(noun)}: ${declaredConflicts.join("; ")}. Fix the settings file, then re-run`,
     );
   }
 
-  const live = parseLive(section, endpoints.list, z.array(decl.live), await readList(decl, ctx));
-  const liveItems = live.map((item) => {
+  const live = await readLive(decl, section, ctx);
+  const liveItems = live.managed.map((item) => {
     const comparable = lens.fromLive(item);
     const name = nameOf(comparable, identity.field);
     return { item, comparable, name, key: fold(name) };
   });
+  // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
+  const liveByKey = liveByIdentity(
+    section,
+    noun,
+    liveItems,
+    (item) => item.key,
+    (item) => addressed(decl, item.item, item.name),
+  );
   const liveConflicts =
     decl.conflicts?.live?.(
       writes.map((w) => w.write),
@@ -438,43 +744,46 @@ async function planList<Key extends string>(
     ) ?? [];
   if (liveConflicts.length > 0) {
     throw new Error(
-      `${key}: the settings file conflicts with the live ${noun}s: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
+      `${key}: the settings file conflicts with the live ${plural(noun)}: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
     );
-  }
-  // GitHub may hold two items one fold apart (deploy keys repeat titles), which a single-slot map would hide.
-  const liveByKey = new Map<Key, (typeof liveItems)[number][]>();
-  for (const item of liveItems) {
-    liveByKey.set(item.key, [...(liveByKey.get(item.key) ?? []), item]);
   }
   const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
 
   const plan: SectionPlan = { ops: [], notes: [], drift: [] };
   for (const { write, name, claims } of writes) {
-    const matches = [...new Set(claims.flatMap((claim) => liveByKey.get(claim) ?? []))];
+    const matches = claims.flatMap((claim) => {
+      const match = liveByKey.get(claim);
+      return match === undefined ? [] : [match];
+    });
     if (matches.length > 1) {
       throw new Error(
-        `${key}: the entry "${name}" matches ${matches.length} separate live ${noun}s (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
+        `${key}: the entry "${name}" matches ${matches.length} separate live ${plural(noun)} (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
       );
     }
     const existing = matches[0];
     const label = `${key}[${name}]`;
+    const secrets = declaredSecrets(decl, write);
     if (existing === undefined) {
       plan.ops.push({
         role: "create",
-        payload: plainData(write),
+        payload:
+          secrets.length === 0
+            ? plainData(write)
+            : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
         describe: `creating ${noun} "${name}"`,
-        drift: [missingLine(label)],
+        drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
+          `${label}: missing - declared in the settings file but not on the repo; apply will create it`,
+        ]),
         change: `created ${noun} "${name}"`,
       });
       continue;
     }
-    const found = deltas(write, existing.comparable, { matchBy: lens.matchBy });
-    const drift = found.map((delta) =>
-      renderEntryDelta(key, identity.field, { want: name, live: existing.name }, delta, remedies),
-    );
-    if (!hasDrift(drift)) {
-      continue;
-    }
+    const body = await readItem(decl, section, ctx, existing.item);
+    const compared = comparison(decl, label, write, body, lens.fromLive(body));
+    plan.notes.push(...compared.notes);
+    const found = deltas(compared.write, compared.live, { matchBy: lens.matchBy });
+    const render = (delta: Delta): string =>
+      renderEntryDelta(key, identity.field, { want: name, live: existing.name }, delta, remedies);
     const phantom = found.flatMap((delta) =>
       delta.kind === "phantom" && delta.path.length === 1 && typeof delta.path[0] === "string"
         ? [delta.path[0]]
@@ -484,6 +793,10 @@ async function planList<Key extends string>(
       plan.notes.push(phantomNote(label, phantom, noun, remedies.phantom));
     }
     if (update === undefined) {
+      const drift = found.map(render);
+      if (!hasDrift(drift)) {
+        continue;
+      }
       // The differing fields ride on the recreate; the generic line alone would leave the reader guessing which field forces the replace.
       plan.ops.push(
         {
@@ -491,7 +804,7 @@ async function planList<Key extends string>(
           params: decl.address(existing.item),
           describe: `deleting ${noun} "${name}" before recreating it`,
           drift: [
-            `${label}: live settings differ from the settings file, and ${noun}s cannot be edited; apply will delete and recreate it`,
+            `${label}: live settings differ from the settings file, and ${plural(noun)} cannot be edited; apply will delete and recreate it`,
           ],
           change: `deleted ${noun} "${name}" to recreate it with the declared settings`,
         },
@@ -505,12 +818,61 @@ async function planList<Key extends string>(
       );
       continue;
     }
+    const params = decl.address(existing.item);
+    // The mapping's deltas go through updateConfig, which sets named fields only; the general update never carries the mapping.
+    const inMapping = (field: string): boolean =>
+      mapping !== undefined && pathOf(field)[0] === mapping;
+    const mappingDrift = found
+      .filter((delta) => mapping !== undefined && delta.path[0] === mapping)
+      .map(render);
+    const mappingSecrets = secrets.filter(inMapping);
+    if (mapping !== undefined && (hasDrift(mappingDrift) || mappingSecrets.length > 0)) {
+      const config = write[mapping] as ListWrite<string>;
+      plan.ops.push({
+        role: "updateConfig",
+        params,
+        payload:
+          mappingSecrets.length === 0
+            ? plainData(config)
+            : (exec: ExecTools) =>
+                resolvedWrite(
+                  exec,
+                  config,
+                  mappingSecrets.map((field) => pathOf(field).slice(1).join(".")),
+                ),
+        describe: `updating ${noun} "${name}" ${mapping}`,
+        drift: facetOr(
+          mappingSecrets.length === 0 ? null : secretFacet(decl, label, mappingSecrets),
+          mappingDrift,
+        ),
+        change:
+          mappingSecrets.length === 0
+            ? `updated ${noun} "${name}" ${mapping}`
+            : `updated ${noun} "${name}" ${mapping} (the declared ${mappingSecrets.map(leafOf).join(" and ")} is re-sent every run)`,
+      });
+    }
+    const generalDrift = found
+      .filter((delta) => mapping === undefined || delta.path[0] !== mapping)
+      .map(render);
+    const generalSecrets = secrets.filter((field) => !inMapping(field));
+    if (!hasDrift(generalDrift) && generalSecrets.length === 0) {
+      continue;
+    }
+    const general =
+      mapping === undefined ? (write as Fields) : withoutPaths(write as Fields, [mapping]);
     plan.ops.push({
       role: "update",
-      params: decl.address(existing.item),
-      payload: updateBody(decl, write),
+      params,
+      payload:
+        generalSecrets.length === 0
+          ? plainData(updateBody(decl, general))
+          : (exec: ExecTools) =>
+              resolvedWrite(exec, updateBody(decl, general) as ListWrite<string>, generalSecrets),
       describe: `updating ${noun} "${name}"`,
-      drift,
+      drift: facetOr(
+        generalSecrets.length === 0 ? null : secretFacet(decl, label, generalSecrets),
+        generalDrift,
+      ),
       change: `updated ${noun} "${name}"`,
     });
   }
@@ -546,44 +908,105 @@ async function planList<Key extends string>(
   return plan;
 }
 
+// --- Snapshot ---------------------------------------------------------------
+
 /**
  * Items are normalized as GitHub stores them before the projection onto the entry slice, so the
- * read-back compares equal to the declaration that produced it.
+ * read-back compares equal to the declaration that produced it. An item a concealed field hides from
+ * the token is left out (an entry without the field would clear it on the next update), and a secret
+ * field reads back as a `$NAME` reference keyed by the item's address, so a reordering never rebinds it.
  */
 async function snapshotList(
   decl: ErasedDecl<string>,
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
 ): Promise<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }> {
-  const live = parseLive(
-    section,
-    decl.endpoints.list,
-    z.array(decl.live),
-    await readList(decl, ctx),
+  const { key, noun, identity, lens } = decl;
+  const live = await readLive(decl, section, ctx);
+  const notes = live.foreign.map(({ name, reason }) =>
+    leftOutOfSnapshot(`${key}[${name}]`, reason),
   );
-  if (live.length === 0) {
-    return { value: undefined, notes: [] };
+  if (live.managed.length === 0) {
+    return { value: undefined, notes };
   }
-  const comparable = live.map((item) => decl.lens.fromLive(item));
-  const nameOfItem = (item: ListComparable<string>): string => nameOf(item, decl.identity.field);
-  rejectLiveDuplicates(
+  const items = live.managed.map((item) => {
+    const name = nameOf(lens.fromLive(item), identity.field);
+    return { item, name, key: identity.fold(name) };
+  });
+  liveByIdentity(
     section,
-    decl.noun,
-    comparable,
-    (item) => decl.identity.fold(nameOfItem(item)),
-    nameOfItem,
+    noun,
+    items,
+    (item) => item.key,
+    (item) => addressed(decl, item.item, item.name),
   );
-  const entries = comparable.map((item) => projectOntoSchema(decl.entry, item));
-  return { value: knobbedSnapshot(section, entries), notes: [] };
+  const entries: object[] = [];
+  for (const { item, name } of items) {
+    const label = `${key}[${name}]`;
+    const body = await readItem(decl, section, ctx, item);
+    const hidden = decl.concealed?.(body) ?? [];
+    if (hidden.length > 0) {
+      for (const { field, reason, remedy } of hidden) {
+        notes.push(
+          leftOutOfSnapshot(
+            label,
+            `${field} is not visible to this token (${reason}), and an entry without it would clear it on the next update; ${remedy} to read it back`,
+          ),
+        );
+      }
+      continue;
+    }
+    let entry = projectOntoSchema(decl.entry, lens.fromLive(body)) as Fields;
+    for (const field of declaredSecrets(decl, entry)) {
+      const id = Object.values(decl.address(item)).join("_");
+      const { variable, reference } = snapshotSecretReference(noun, id);
+      notes.push(
+        `${label}.${field}: value of the ${noun} ${leafOf(field)} is not readable; export it into the environment as ${variable} before apply`,
+      );
+      entry = withValueAt(entry, pathOf(field), reference);
+    }
+    entries.push(entry);
+  }
+  return { value: knobbedSnapshot(section, entries), notes };
 }
 
-function secretValuesOf(decl: ErasedDecl<string>, declared: ErasedDeclared): DeclaredSecretValue[] {
-  const extract = decl.secretValues;
-  if (extract === undefined) {
-    return [];
+// --- Module -----------------------------------------------------------------
+
+function secretValuesFor(decl: ErasedDecl<string>, declared: unknown): DeclaredSecretValue[] {
+  const fields = decl.secrets ?? [];
+  return secretValuesOf(declared, (entry) =>
+    fields.flatMap((field) => {
+      const value = valueAt(entry, pathOf(field));
+      if (typeof value !== "string") {
+        return [];
+      }
+      const name = valueAt(entry, pathOf(decl.identity.field));
+      const label =
+        typeof name === "string" && name !== ""
+          ? `the ${decl.noun} "${name}" ${field}`
+          : `a ${decl.noun} entry's ${field}`;
+      return [{ label, value }];
+    }),
+  );
+}
+
+/**
+ * The declaration fact the types cannot spell, since no type says "under this key": a secret path must sit
+ * under `mapping`, the field the `updateConfig` role writes.
+ */
+function checkDecl(decl: ErasedDecl<string>): void {
+  const { key, mapping, secrets } = decl;
+  for (const field of secrets ?? []) {
+    const [head, ...rest] = pathOf(field);
+    if (rest.length > 0 && head === mapping) {
+      continue;
+    }
+    throw new Error(
+      mapping === undefined
+        ? `BUG: ${key} declares the secret field "${field}" without a mapping (an updateConfig role) to carry it under the unverifiable facet`
+        : `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
+    );
   }
-  // "keep" is a placeholder: only the entries are read.
-  return undeclaredPolicy(declared, "keep").entries.flatMap((entry) => [...extract(entry)]);
 }
 
 /**
@@ -598,18 +1021,16 @@ export function listSection<
   Key extends string,
 >(decl: ListSectionDecl<K, Ends, Live, F, Key>): ListSectionModule<K, Ends, Live, F, Key> {
   const erased = decl as unknown as ErasedDecl<Key>;
+  checkDecl(erased);
   const section: ListSectionModule<K, Ends, Live, F, Key> = {
     key: decl.key,
     permission: decl.permission,
     undeclaredDefault: decl.undeclaredDefault,
     endpoints: decl.endpoints,
     shape: loosen(knobbed(decl.entry)),
-    ...(decl.secretValues === undefined
+    ...(decl.secrets === undefined
       ? {}
-      : {
-          secretValues: (declared: Declared<K>) =>
-            secretValuesOf(erased, declared as unknown as ErasedDeclared),
-        }),
+      : { secretValues: (declared: Declared<K>) => secretValuesFor(erased, declared) }),
     ...(decl.layering === undefined
       ? {}
       : {
@@ -617,6 +1038,7 @@ export function listSection<
             keys: (entry) => identityClaims(erased.identity, entry),
             keyField: decl.identity.field,
             combine: decl.layering.combine,
+            ...(decl.layering.nested === undefined ? {} : { nested: decl.layering.nested }),
           },
         }),
     plan: (ctx, desired) =>

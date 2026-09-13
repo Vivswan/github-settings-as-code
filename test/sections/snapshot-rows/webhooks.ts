@@ -1,6 +1,8 @@
 import { webhooksSection } from "../../../src/sections/webhooks/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
+// The service hook is outside the section and noted; the set secret reads back as a reference keyed
+// by the hook's id, so a reordering never rebinds it.
 export const row: Row = {
   section: webhooksSection,
   live: {
@@ -29,7 +31,7 @@ export const row: Row = {
             url: "https://ci.example.com/hook",
             content_type: "json",
             insecure_ssl: "0",
-            secret: "$WEBHOOK_SECRET_601",
+            secret: "$SECRET_WEBHOOK_601",
           },
           events: ["push", "pull_request"],
           active: true,
@@ -43,8 +45,8 @@ export const row: Row = {
       ],
     },
     notes: [
-      'webhooks["https://hooks.slack.example/T0/B0"]: a "slack" service hook is not a web hook this section manages, so it is left out of the snapshot',
-      'webhooks["https://ci.example.com/hook"].config.secret: the webhook secret is not readable; export a value as WEBHOOK_SECRET_601 into the environment before apply',
+      'webhooks[https://hooks.slack.example/T0/B0]: left out of the snapshot - a "slack" service hook is not a web hook this section manages',
+      "webhooks[https://ci.example.com/hook].config.secret: value of the webhook secret is not readable; export it into the environment as SECRET_WEBHOOK_601 before apply",
     ],
   },
 };

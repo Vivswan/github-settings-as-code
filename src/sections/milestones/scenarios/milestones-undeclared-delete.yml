@@ -27,7 +27,7 @@ expect:
     - "POST /repos/{repo}/milestones"
     - "DELETE /repos/{repo}/milestones/1"
   stdout_contains:
-    - "DELETED undeclared milestone \"v0.9\" (detached from every issue that carried it)"
+    - "DELETED undeclared milestone \"v0.9\""
   summary_contains:
-    - "detached from every issue"
+    - "DELETED undeclared milestone"
   fixpoint: converges

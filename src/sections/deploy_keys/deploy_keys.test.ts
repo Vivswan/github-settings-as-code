@@ -100,14 +100,27 @@ describe("deploy_keys conflicts", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("a declared title matching SEVERAL live keys fails loudly naming their ids: GitHub does not enforce title uniqueness", async () => {
+  test("two live keys under one title fail loudly, declared or not: GitHub does not enforce title uniqueness", async () => {
     const api = new MockApi({
       [LIST]: {
         data: [liveKey(11, "deploy-bot", BOT_KEY), liveKey(12, "deploy-bot", MIRROR_KEY)],
       },
     });
     await expect(plan(api, [{ title: "deploy-bot", key: BOT_KEY }])).rejects.toThrow(
-      /the declared title "deploy-bot" matches 2 live deploy keys \(ids 11, 12\), and this section manages at most one key per title/,
+      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "deploy-bot (key id 11)" and "deploy-bot (key id 12)". ' +
+        "This section manages one deploy key per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
+    );
+    await expect(plan(api, [])).rejects.toThrow(/resolve to one identity/);
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("the guard runs before the section's live conflicts: a duplicated title wins over a colliding holder's material", async () => {
+    const api = new MockApi({
+      [LIST]: { data: [liveKey(7, "dup", BOT_KEY), liveKey(8, "dup", MIRROR_KEY)] },
+    });
+    await expect(plan(api, [{ title: "other", key: BOT_KEY }])).rejects.toThrow(
+      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "dup (key id 7)" and "dup (key id 8)". ' +
+        "This section manages one deploy key per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
     );
     expect(api.mutations()).toEqual([]);
   });

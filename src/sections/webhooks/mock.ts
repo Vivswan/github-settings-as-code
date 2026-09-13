@@ -5,6 +5,7 @@
  *   config.secret on any read or write echo -> "********"
  */
 
+import type { ListMockSpec } from "../../../test/e2e/mock/list-fragment.js";
 import { completeHook } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
@@ -17,6 +18,18 @@ import {
   slicePage,
   storedHookConfig,
 } from "../../../test/e2e/mock/support.js";
+
+/**
+ * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS). A hook's server
+ * fields are minted by completeHook, which buildState runs over every seed and the create handler
+ * below runs over every body, so this spec adds only the id it is handed.
+ */
+export const WEBHOOKS_MOCK: ListMockSpec = {
+  collection: (state) => state.hooks,
+  defaults: {},
+  owned: (id) => ({ id }),
+  unique: "identity",
+};
 
 export const webhooksMockHandlers: SectionRestHandlers<"webhooks"> = {
   "webhooks.list": ({ state, query }) => ok(slicePage(state.hooks.map(maskHookSecret), query)),

@@ -74,7 +74,7 @@ GitHub never returns a secret's value, so the file cannot hold one. The snapshot
 |---|---|---|
 | A repository Actions secret named `DEPLOY_TOKEN` | `value: $SECRET_ACTIONS_DEPLOY_TOKEN` | `SECRET_ACTIONS_DEPLOY_TOKEN` |
 | The same name in another store (`dependabot_secrets`, `codespaces_secrets`, `agents_secrets`) | `$SECRET_DEPENDABOT_DEPLOY_TOKEN`, `$SECRET_CODESPACES_DEPLOY_TOKEN`, `$SECRET_AGENTS_DEPLOY_TOKEN` | One variable per store, so two stores holding the same name never share a value by accident |
-| A webhook's `config.secret`, one per hook | `secret: $WEBHOOK_SECRET_601` | `WEBHOOK_SECRET_<id>`, the hook's own id, so the reference survives a reordering |
+| A webhook's `config.secret`, one per hook | `secret: $SECRET_WEBHOOK_601` | `SECRET_WEBHOOK_<id>`, the hook's own id, so the reference survives a reordering |
 | An environment secret named `DEPLOY_TOKEN` in the `production` environment | `value: $SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN` | `SECRET_ENVIRONMENT_<ENV>_<NAME>`, the environment name uppercased with every other character folded to `_`, so same-named secrets in two environments get two variables; two names the fold collapses (`prod-eu`, `prod_eu`) share one, and a header line names the entries to edit |
 
 Wire them the way the [secrets guide](../reference/secrets-and-vaults.md) describes: an `env:` block on the apply step, fed from GitHub Secrets or a vault action. A reference that is not exported fails the run that reads the file, naming the variable.
@@ -122,7 +122,7 @@ A snapshot is written so that applying it changes nothing and checking it reads 
 | Exception | Why | What the file holds |
 |---|---|---|
 | Secret values | GitHub returns names only | A `$NAME` reference and a note per secret |
-| `webhooks[].config.secret` | GitHub echoes `********` | A `$WEBHOOK_SECRET_N` reference and a note per hook |
+| `webhooks[].config.secret` | GitHub echoes `********` | A `$SECRET_WEBHOOK_<id>` reference and a note per hook |
 | `interaction_limits.expiry` | GitHub reports only the computed `expires_at` | No `expiry` key; apply re-arms the limit with GitHub's default unless you declare one |
 | `check_suite_preferences` | GitHub exposes no read endpoint | Nothing; the header says so |
 | `repository.name` | The repository's identity: a reused file would rename its target | Nothing |
