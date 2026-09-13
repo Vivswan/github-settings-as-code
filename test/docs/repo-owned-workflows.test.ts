@@ -526,7 +526,7 @@ describe("action pins across the repo-owned files", () => {
   });
 });
 
-/** A composite step as the pin reads it: every field the runner acts on, so a masked failure or a new gate shows. */
+/** A composite step as the pin reads it: the fields that decide what runs and whether a failure counts. */
 interface StepShape {
   uses: string | undefined;
   with: Record<string, unknown> | undefined;
@@ -550,7 +550,7 @@ function shapeOf(steps: Step[]): StepShape[] {
 /** The composite's three steps: none may mask its failure, since a job relies on each one it asks for. */
 const SETUP_SHAPE: StepShape[] = [
   {
-    uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/) as unknown as string,
+    uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
     with: { "bun-version-file": ".bun-version" },
     if: undefined,
     shell: undefined,
