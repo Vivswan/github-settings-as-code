@@ -52,7 +52,7 @@ function recordingIo(): { io: Io; annotations: string[] } {
 function sealed(slug: string, outcomes: SectionOutcome[]): Private<RedactedDetail> {
   const channel = redactedChannel(silentIo(), slug, "private repository #1");
   channel.io.log(`engine line for ${slug}`);
-  const detail = channel.close(outcomes);
+  const detail = channel.close({ outcomes });
   if (!isPrivate(detail)) {
     throw new Error("a redacted channel must close sealed");
   }

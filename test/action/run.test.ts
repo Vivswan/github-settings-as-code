@@ -490,7 +490,7 @@ describe("run in multi-repo mode (env glue)", () => {
         const decrypter = new Decrypter();
         decrypter.addIdentity(identity);
         body = await decrypter.decrypt(uploads[0] as Uint8Array, "text");
-        expect(body).toStartWith("<!-- private repository -->");
+        expect(body).toStartWith("<!-- private repository #1 -->");
       } else {
         expect(uploads).toEqual([]);
         const patch = api.calls.find((c) => c.method === "PATCH");
@@ -524,7 +524,7 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
     const withheld = captured.find((line) => line.includes("visibility could not be verified"));
-    expect(withheld).toStartWith("notice: private repository: ");
+    expect(withheld).toStartWith("notice: private repository #1: ");
     expect(captured.join("\n").replace("mask: o/maybe", "")).not.toContain("o/maybe");
   });
 });

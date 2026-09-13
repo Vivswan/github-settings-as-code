@@ -95,7 +95,7 @@ describe("check and apply", () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toStartWith(
-      "warning: private repository: drift - repository. details hidden",
+      "warning: private repository #1: drift - repository. details hidden",
     );
     expect(result.stderr).not.toContain("has_wiki");
   });

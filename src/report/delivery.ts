@@ -5,13 +5,15 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
+import type { SectionOutcome, ValidatedSettings } from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
+import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { GithubClient } from "../github/api.js";
 import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
 import { describeProblem } from "../problem.js";
+import type { SectionKey } from "../schema.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
 import { composeReport } from "./composer.js";
 import {
@@ -40,14 +42,26 @@ export function isIssueChannel(channel: PrivateReportChannel): channel is IssueC
 }
 
 /**
- * One target's rich end state: slug, section outcomes with live detail, and
- * the note for a skip or failure that produced no outcomes. Open in the clear;
- * sealed with the transcript when redacted.
+ * A section row as every mode closes it: the key and status are closed values, the detail lines are live, and an
+ * apply or check row carries the HTTP code of its failure or skip.
+ */
+export interface ClosedOutcome {
+  key: SectionKey;
+  status: SectionOutcome["status"] | SectionSnapshotOutcome["status"];
+  detail: string[];
+  httpStatus?: number;
+}
+
+/**
+ * One target's rich end state, whatever the mode: slug, section outcomes with live detail, the note for a skip or
+ * failure that produced no outcomes, and the snapshot file the target wrote (its path names the slug). Open in the
+ * clear; sealed with the transcript when redacted.
  */
 export interface TargetDetail {
   slug: string;
-  outcomes: RepoRunResult["outcomes"];
+  outcomes: ClosedOutcome[];
   note?: string;
+  file?: string;
 }
 
 export interface RedactedDetail extends TargetDetail {

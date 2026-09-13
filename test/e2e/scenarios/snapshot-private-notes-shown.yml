@@ -1,0 +1,80 @@
+# The control for snapshot-private-notes-redacted: the SAME fleet, the same
+# private webhook, under private-repos: show. Nothing is sealed, so the note
+# naming the hook's URL and the secret variable lands in the step summary and
+# the log, and the target is keyed by its slug. That is the needle the redacted
+# scenario proves absent, shown live on the surface its sweep watches; the
+# sweep's own detection of a planted leak is pinned in test/e2e/runner.test.ts.
+# The env value (the resolved secret) still reaches no surface: the
+# every-scenario sweep hunts it here too, so `show` reveals the target, never
+# a secret.
+name: snapshot-private-notes-shown
+description: >-
+  The control for the redacted scenario: under private-repos: show, the private target's snapshot
+  notes (a webhook URL and the secret variable to export) are printed in the clear and the target
+  is keyed by its slug; the resolved secret still reaches no surface.
+settings: {}
+env:
+  WEBHOOK_SECRET_701: vault-hook-secret-canary-2b7e
+repos:
+  e2e-owner/svc-open:
+    live_state:
+      hooks:
+        - id: 702
+          config:
+            url: https://ci.example.com/hook
+            content_type: json
+            insecure_ssl: "0"
+    expect:
+      result: snapshot
+  e2e-owner/svc-vault:
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      hooks:
+        - id: 701
+          config:
+            url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
+            content_type: json
+            insecure_ssl: "0"
+            secret: the-live-vault-secret
+    expect:
+      result: snapshot
+      snapshot:
+        webhooks:
+          _undeclared: keep
+          entries:
+            - name: web
+              config:
+                url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
+                content_type: json
+                insecure_ssl: "0"
+                secret: $WEBHOOK_SECRET_701
+              events:
+                - push
+              active: true
+inputs:
+  mode: snapshot
+  snapshot_dir: snapshots
+  sections: webhooks
+  private_repos: show
+expect:
+  exit_code: 0
+  result: snapshot
+  repos_result:
+    e2e-owner/svc-open: snapshot
+    e2e-owner/svc-vault: snapshot
+  summary_contains:
+    - "| e2e-owner/svc-vault | remote | :white_check_mark: snapshot | snapshots/e2e-owner/svc-vault.yml |"
+    - "### e2e-owner/svc-vault (snapshot)"
+    - "hooks.internal.example/LEAKME-vault-endpoint-9f3a"
+    - "export a value as WEBHOOK_SECRET_701 into the environment before apply"
+  stdout_contains:
+    - "e2e-owner/svc-vault: snapshot written to snapshots/e2e-owner/svc-vault.yml"
+    - "hooks.internal.example/LEAKME-vault-endpoint-9f3a"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

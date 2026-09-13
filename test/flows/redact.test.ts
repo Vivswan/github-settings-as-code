@@ -5,8 +5,10 @@ import {
   emitRedactedResult,
   openTargetChannel,
   planRedaction,
+  privatePlaceholder,
   publicChannel,
   publicDetail,
+  REDACTED_DETAIL,
   REDACTED_NOTE,
   redactedChannel,
   toPublicView,
@@ -21,6 +23,12 @@ function privateSet(...slugs: string[]): (slug: string) => boolean {
 }
 
 describe("planRedaction", () => {
+  test("the plan's placeholders are the one mint every mode labels a hidden target with", () => {
+    const plan = planRedaction("redact", ["o/priv"], [], privateSet("o/priv"), "admin/repo");
+    expect(privatePlaceholder(1)).toBe("private repository #1");
+    expect(plan.display("o/priv")).toBe(privatePlaceholder(1));
+  });
+
   test("numbers redacted targets 1-based in target order, keyed lowercase", () => {
     const plan = planRedaction(
       "redact",
@@ -148,7 +156,7 @@ describe("target channels", () => {
       "o/pub: changed",
       "warning: ignoring unknown section in o/pub:.github/settings.yml",
     ]);
-    const detail = channel.close(outcomes, "n");
+    const detail = channel.close({ outcomes, note: "n" });
     expect(isPrivate(detail)).toBe(false);
     expect(detail).toEqual({ slug: "o/pub", outcomes, note: "n" });
     expect(channel.display).toBe("o/pub");
@@ -162,7 +170,7 @@ describe("target channels", () => {
     channel.io.log("changed SECRET");
     channel.io.mask("o/priv");
     expect(emitted).toEqual(["mask o/priv"]);
-    const detail = channel.close(outcomes);
+    const detail = channel.close({ outcomes });
     // A line written after the close never reaches the sealed transcript.
     channel.io.log("late SECRET");
     expect(detail).toEqual(
@@ -190,8 +198,8 @@ describe("target channels", () => {
     expect(emitted).toEqual(["o/pub: visible"]);
     expect(pub.display).toBe("o/pub");
     expect(priv.display).toBe("private repository #1");
-    expect(isPrivate(pub.close([]))).toBe(false);
-    expect(isPrivate(priv.close([]))).toBe(true);
+    expect(isPrivate(pub.close({ outcomes: [] }))).toBe(false);
+    expect(isPrivate(priv.close({ outcomes: [] }))).toBe(true);
   });
 });
 
@@ -205,7 +213,7 @@ describe("attempt", () => {
     const channel = redactedChannel(io, "o/priv", "private repository #1");
     expect(await attempt(channel, crash, failed)).toEqual({ result: "failed", message: violation });
     expect(emitted).toEqual([]);
-    expect(channel.close([])).toEqual(
+    expect(channel.close({ outcomes: [] })).toEqual(
       markPrivate({
         slug: "o/priv",
         outcomes: [],
@@ -273,6 +281,31 @@ describe("public projections", () => {
       ],
       note: REDACTED_NOTE,
     });
+  });
+
+  test("a snapshot target's file path names the slug: hidden under the seal, passed through in the clear, absent when nothing was written", () => {
+    const rows = [
+      { key: "labels" as const, status: "snapshot" as const, detail: ["labels[hush]"] },
+    ];
+    const { io } = recordingIo();
+    const hidden = redactedChannel(io, "o/priv", privatePlaceholder(1));
+    expect(
+      publicDetail(hidden.close({ outcomes: rows, note: "written", file: "out/o/priv.yml" })),
+    ).toEqual({
+      outcomes: [{ key: "labels", status: "snapshot", detail: [REDACTED_DETAIL] }],
+      note: REDACTED_NOTE,
+      file: REDACTED_DETAIL,
+    });
+    const shown = publicChannel(io, "o/pub", true);
+    expect(
+      publicDetail(shown.close({ outcomes: rows, note: "written", file: "out/o/pub.yml" })),
+    ).toEqual({
+      outcomes: rows,
+      note: "written",
+      file: "out/o/pub.yml",
+    });
+    expect(publicDetail(hidden.close({ outcomes: [], note: "failed" }))).not.toHaveProperty("file");
+    expect(publicDetail(shown.close({ outcomes: [], note: "failed" }))).not.toHaveProperty("file");
   });
 
   test.each([

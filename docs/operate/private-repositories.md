@@ -24,6 +24,24 @@ The decision comes down to the policy and what the visibility probe finds:
 
 Redaction hides values, not the shape of the outcome. The public surfaces still carry the safe skeleton of each target. The step summary shows, per target, the overall result (`failed`, `drift`, `partial`, `skipped`, `applied`, `clean`, `snapshot`), each section's key and status, and the HTTP status code on a failed or skipped section; the `repos-result` output carries `{result, source, skipped-sections}` per target, keyed by the placeholder. These are closed enumerations and numeric codes, safe to show, and enough to tell whether the fleet is healthy and which section broke. What they never carry is the slug, a live setting, a desired setting, or an API error message.
 
+## One seal, every mode
+
+Every target ends the same way, whichever mode ran it: its lines and its end state go through one channel, which closes open for a shown target and sealed for a hidden one. Only the seal's projections open it, and they render the public view alone. No mode has a redaction path of its own.
+
+| Mode | What the seal holds | What the public view shows |
+|---|---|---|
+| `repository:` apply or check (one target) | the slug, section detail, the transcript | `private repository #1`, section statuses, the one-line result |
+| `repos` / `repos-dir` apply or check | the same, per target | `private repository #N` in target order |
+| `snapshot-file` (one target) | the slug, the notes (a secret's name, a webhook's URL), the file path, the transcript | `private repository #1`, section statuses; the document reaches only the file |
+| `snapshot-dir` | the same, per target | `private repository #N`; the File column reads `hidden (private repository)` |
+
+Two consequences of the shared path:
+
+- The label is `private repository #N` in every mode. A run over one repository is a fleet of one, so its label is `#1`, in the log line, the withheld-report notice, and the `artifact` report heading alike.
+- A hidden target that fails, drifts, or is skipped gets one closed-value annotation (`private repository #N: failed - labels (403). details hidden: ...`), in snapshot mode too. A healthy hidden target says nothing.
+
+The sealed transcript is what a private report mirrors. Snapshot mode rejects `private-report`, so its sealed transcript is never delivered anywhere: the written file is the private record, and the [snapshot guide](snapshot.md#many-repositories) says what to do with it on a public admin repository.
+
 ## Seeing the full detail
 
 Three ways to read the unredacted detail, in rough order of convenience.

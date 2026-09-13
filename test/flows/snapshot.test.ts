@@ -25,6 +25,7 @@ import { parse as parseYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { failRun } from "../../src/flows/deliver.js";
+import { REDACTED_NOTE } from "../../src/flows/redact.js";
 import {
   concludeSnapshot,
   runSnapshot,
@@ -32,6 +33,7 @@ import {
   type SnapshotConfig,
 } from "../../src/flows/snapshot.js";
 import { collectingIo, type Io } from "../../src/io.js";
+import { isPrivate, markPrivate } from "../../src/private.js";
 import type { SectionKey } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 
@@ -170,6 +172,48 @@ describe("runSnapshot, file form", () => {
         "| labels | :white_check_mark: snapshot | - |",
       ].join("\n"),
     ]);
+  });
+
+  test("a private target other than the run's own closes through the fleet's seal: the summary hides the note, the log says nothing", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+      ...labelsRoute("o/r", [BUG]),
+    });
+    const cfg = fileCfg({ privateRepos: "redact", selfSlug: "admin/fleet" });
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(0);
+    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+    expect([...collected.io.masked()]).toEqual(["o/r"]);
+    expect(collected.lines).toEqual([{ line: "result: snapshot" }]);
+    expect(collected.summary).toEqual([
+      [
+        "## github-settings-as-code (snapshot)",
+        "",
+        `:white_check_mark: snapshot - ${REDACTED_NOTE}`,
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | :white_check_mark: snapshot | hidden (private repository) |",
+      ].join("\n"),
+    ]);
+    expect(collected.summary[0]).not.toContain(cfg.snapshotFile);
+  });
+
+  test("a private target that fails gets the fleet's one closed-value line, numbered as a fleet of one", async () => {
+    // No labels route: the read answers 404, the denial that fails the target under the fail policy.
+    const api = new MockApi({
+      "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+    });
+    const cfg = fileCfg({ privateRepos: "redact", selfSlug: "admin/fleet" });
+    const collected = collectingIo();
+    expect(await run(api, cfg, collected.io)).toBe(1);
+    expect(existsSync(cfg.snapshotFile)).toBe(false);
+    expect(collected.lines).toEqual([
+      { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+      { line: "result: failed" },
+    ]);
+    expect(collected.summary[0]).toContain("| labels | :x: failed | hidden (private repository) |");
+    expect(collected.summary[0]).not.toContain("/repos/o/r/labels");
   });
 
   test("a denied section is skipped under warn: partial, the file omits it, the header and the outputs say so", async () => {
@@ -853,6 +897,61 @@ describe("runSnapshot, dir form", () => {
     expect(collected.summary[0]).toContain(
       "| labels | :white_check_mark: snapshot | hidden (private repository) |",
     );
+  });
+
+  test("a redacted target that fails closes sealed with its transcript and speaks the fleet's one closed-value line", async () => {
+    // No labels route for o/p: the read answers 404, the denial that fails the target under the fail policy.
+    const api = new MockApi({
+      "GET /repos/o/a": { data: { private: false } },
+      "GET /repos/o/p": { data: { private: true, visibility: "private" } },
+      ...labelsRoute("o/a", [BUG]),
+    });
+    const cfg = dirCfg({ reposInput: "o/a,o/p" });
+    const collected = collectingIo();
+    const finished = (await runSnapshot(api, cfg, collected.io))._unsafeUnwrap();
+    const hidden = finished.form === "dir" ? finished.targets[1] : undefined;
+    expect(hidden?.display).toBe("private repository #1");
+    expect(isPrivate(hidden?.detail)).toBe(true);
+    // The engine's denial line was captured, not emitted: it travels sealed beside the outcome and the note.
+    expect(hidden?.detail).toEqual(
+      markPrivate({
+        slug: "o/p",
+        outcomes: [
+          {
+            key: "labels",
+            status: "failed",
+            detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/p\/labels/)],
+          },
+        ],
+        note: "the snapshot failed, so no file was written",
+        file: undefined,
+        transcript: [
+          {
+            level: "error",
+            line: expect.stringMatching(
+              /^labels: not snapshotted - the token was denied GET \/repos\/o\/p\/labels/,
+            ),
+          },
+        ],
+      }),
+    );
+    expect(concludeSnapshot(collected.io, finished)).toBe(1);
+    expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
+    expect(collected.lines).toEqual([
+      { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
+      { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+      { line: "result: failed" },
+    ]);
+    // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
+    expect(collected.summary[0]).toContain("| private repository #1 | remote | :x: failed | - |");
+    expect(collected.summary[0]).toContain("| labels | :x: failed | hidden (private repository) |");
+    const publicText = [
+      ...collected.lines.map((entry) => entry.line),
+      ...collected.summary,
+      ...Object.values(collected.outputs),
+    ].join("\n");
+    expect(publicText).not.toContain("/repos/o/p/labels");
+    expect(publicText).not.toContain("o/p.yml");
   });
 
   test("a name that would leave the directory fails its target alone; the rest of the fleet is written", async () => {

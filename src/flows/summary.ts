@@ -4,7 +4,6 @@ import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
-import type { SnapshotTargetView } from "./snapshot.js";
 
 type SummaryIo = Pick<Io, "summary">;
 
@@ -97,22 +96,10 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
   io.summary(lines.join("\n"));
 }
 
-/** The single-repo mode: snapshot summary: the result and where the file went, then the section table. */
-export function writeSnapshotSummary(io: SummaryIo, view: SnapshotTargetView): void {
-  const lines = [
-    "## github-settings-as-code (snapshot)",
-    "",
-    `:${STATUS_ICON[view.result]}: ${view.result} - ${markdownCell(view.note)}`,
-    "",
-    ...outcomeRows(view.outcomes),
-  ];
-  io.summary(lines.join("\n"));
-}
-
 /** The snapshot-dir summary: the fleet rollup with each target's file, then one section table per target. */
 export function writeSnapshotDirSummary(
   io: SummaryIo,
-  views: readonly SnapshotTargetView[],
+  views: readonly PublicTargetView[],
   snapshotDir: string,
 ): void {
   const written = views.filter((view) => view.file !== undefined).length;
@@ -130,17 +117,14 @@ export function writeSnapshotDirSummary(
   ];
   for (const view of views) {
     lines.push(
-      `| ${markdownCell(view.display)} | ${view.source ?? "-"} | :${STATUS_ICON[view.result]}: ${view.result} | ${markdownCell(view.file ?? "-")} |`,
+      `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} | ${markdownCell(view.file ?? "-")} |`,
     );
   }
   for (const view of views) {
-    lines.push(
-      "",
-      `### ${markdownCell(view.display)} (${view.result})`,
-      "",
-      markdownCell(view.note),
-      "",
-    );
+    lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
+    if (view.note) {
+      lines.push(markdownCell(view.note), "");
+    }
     if (view.outcomes.length > 0) {
       lines.push(...outcomeRows(view.outcomes));
     }

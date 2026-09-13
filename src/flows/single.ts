@@ -23,6 +23,7 @@ import {
 } from "./deliver.js";
 import {
   attempt,
+  privatePlaceholder,
   publicChannel,
   redactedChannel,
   type TargetChannel,
@@ -57,7 +58,8 @@ export async function openSingleRepoChannel(
   }
   io.mask(cfg.repo.slug);
   return {
-    channel: redactedChannel(io, cfg.repo.slug, "private repository"),
+    // A run over one target is a fleet of one, so its placeholder is the fleet's first.
+    channel: redactedChannel(io, cfg.repo.slug, privatePlaceholder(1)),
     exposure: { kind: "redacted", visibility },
   };
 }

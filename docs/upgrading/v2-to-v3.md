@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Nine breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Ten breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -17,6 +17,7 @@ Nine breaks (the ninth is for library consumers). One is silent (the fallback), 
 | One `--json` envelope on the command line | `validate` printed `{file, valid, sections}`, `permissions` a bare grant map, `init` `skippedSections` | Every subcommand prints `{result, ...}`; `permissions` puts its grants under `grant`, lists are lists | A `jq` filter on the old keys reads `null`; [section 7](#7-one---json-envelope) |
 | A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
 | Library: one `RUN_RESULTS` | `REPO_RESULTS`, `SNAPSHOT_RESULTS`, `MERGE_RESULT`, `SnapshotRunResult`; `worstOf(results, check)` | `RUN_RESULTS`, `RunOutcome`; `worstOf(results)` | The import fails to compile, naming the missing export; [section 9](#9-library-one-run_results) |
+| One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
 
 ## 1. The defaults-file fallback
 
@@ -120,6 +121,21 @@ For `@vivswan/github-settings-as-code` consumers. Every result word of every mod
 | `RepoResult` (still exported, the engine's per-repository subset), `SnapshotRunResult` | `RunOutcome` |
 | `worstOf(results, check)`, with `check` picking the floor of an empty list | `worstOf(results)`; an empty list throws, since every run concludes over at least one target |
 | `concludeSnapshot` set `repos-result` only in the dir form; `concludeMerge` set no `repos-result` | Every conclude sets the three outputs |
+| `FinishedSnapshot` carried `view` / `views`: each target already projected into a `SnapshotTargetView` | `FinishedSnapshot` carries `target` / `targets`: each a `TargetOutcome` whose `detail` is sealed for a hidden target; `concludeSnapshot` opens it through `publicDetail` / `toPublicView` |
+| `SnapshotTargetView` (snapshot's own public projection) | Removed; the public shape of every mode's target is `PublicTargetView`, which now carries the snapshot `file` |
+
+## 10. One redacted label in every mode
+
+Every hidden target is labelled `private repository #N`, numbered in target order, whatever the mode. A run over one repository (`repository:` with `private-repos: redact`, or `snapshot-file`) is a fleet of one, so its label is `private repository #1`:
+
+```text
+v2: warning: private repository: drift - repository. details hidden: ...
+v3: warning: private repository #1: drift - repository. details hidden: ...
+```
+
+The `artifact` report channel heads that run's report `<!-- private repository #1 -->` for the same reason. A filter matching the bare label needs the `#1`.
+
+Snapshot targets ride the same seal now: a private target's notes, file path, and section detail close sealed exactly as a multi-repo apply target's do, and a private target that fails gets the same one-line annotation (`private repository #N: failed - <sections>`) a fleet target gets. The [private repositories guide](../operate/private-repositories.md#one-seal-every-mode) owns the rule.
 
 ## Order of operations
 

@@ -21,6 +21,7 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
     "isPrivateVisibility",
     "openTargetChannel",
     "planRedaction",
+    "privatePlaceholder",
     "publicChannel",
     "publicDetail",
     "redactedChannel",
