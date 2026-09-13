@@ -10,14 +10,17 @@
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
+  fchmodSync,
+  lstatSync,
   mkdirSync,
   openSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, parse, resolve, sep } from "node:path";
+import { basename, dirname, join, parse, resolve, sep } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 
 /**
@@ -53,17 +56,66 @@ function realOrSpelled(path: string): string {
   }
 }
 
-/** The error is the filesystem's own reason; each caller names the input that chose the path. */
+/** The bits a replaced regular file keeps; a link at `path` is stat-followed, since the write replaces the link with a regular file of its referent's mode. */
+function regularFileMode(path: string): number | undefined {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() ? stat.mode & 0o7777 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The name the write reaches: the directory as the filesystem names it plus the leaf as spelled, since a rename
+ * replaces a link at the leaf rather than following it.
+ */
+export function renameTarget(path: string): string {
+  return join(canonicalPath(dirname(path)), basename(path));
+}
+
+/**
+ * Every name a write to `path` lands on, for a flow comparing its destination against its inputs: the rename target,
+ * and, when the leaf is not a link (a link is replaced, its referent untouched), the referent as the filesystem names
+ * it now, which on a case-insensitive filesystem is the existing file's own spelling.
+ */
+export function landingNames(path: string): string[] {
+  const names = [renameTarget(path)];
+  if (!isSymlink(path)) {
+    names.push(canonicalPath(path));
+  }
+  return [...new Set(names)];
+}
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The error is the filesystem's own reason; each caller names the input that chose the path. The staging file sits in
+ * the destination's directory, spelled as the caller spelled it (a `link/..` segment is the OS's to resolve, the same
+ * way for both names), under a short name of its own (the destination's leaf may already be at NAME_MAX), and takes
+ * an existing regular destination's mode, so a replaced 0600 file stays 0600.
+ */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  const staging = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const directory = path.slice(0, path.length - basename(path).length);
+  const staging = `${directory}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
   // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
   // another writer got there first with (`wx` fails on it, and that failure is the one reported).
   let created = false;
   let fd: number | undefined;
   try {
     mkdirSync(dirname(path), { recursive: true });
+    const mode = regularFileMode(path);
     fd = openSync(staging, "wx");
     created = true;
+    if (mode !== undefined) {
+      fchmodSync(fd, mode);
+    }
     writeFileSync(fd, text);
     closeSync(fd);
     fd = undefined;

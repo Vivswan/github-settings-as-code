@@ -9,7 +9,7 @@
  * lands on disk while nothing about it is printed.
  */
 
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
@@ -33,7 +33,7 @@ import {
   type TargetOutcome,
   toPublicView,
 } from "./redact.js";
-import { canonicalPath, writeReplacing } from "./settings-write.js";
+import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./settings-write.js";
 import { openSingleRepoChannel } from "./single.js";
 import { writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
@@ -197,15 +197,10 @@ async function snapshotTarget(ctx: {
  * authored ground in a way the two inputs cannot show: a link under either
  * directory that leads into the other, or an owner spelled ".github". Two
  * targets can land on ONE file the same way (a link `out/bob -> out/alice`
- * with targets alice/r and bob/r), so every landing is claimed in `claimed`
- * for the run and a second claim is refused. Two names are claimed per file:
- * the referent as the filesystem names it now, and the file the RENAME
- * reaches (the directory as the filesystem names it plus the leaf as spelled,
- * since the rename replaces a link at the leaf rather than following it). The
- * first catches a leaf spelled in another case on a case-insensitive
- * filesystem once the file exists; the second, a leaf that was a link. The
- * refusal names the earlier target through `display`, so a redacted one stays
- * sealed, and never the landing, whose spelling is the operator's.
+ * with targets alice/r and bob/r), so every file this run writes is claimed
+ * in `claimed` and a second target reaching it is refused. The refusal names
+ * the earlier target through `display`, so a redacted one stays sealed, and
+ * never the landing, whose spelling is the operator's.
  */
 function snapshotFilePath(
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
@@ -231,8 +226,13 @@ function snapshotFilePath(
       error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
     };
   }
-  const names = [landing, join(canonicalPath(dirname(path)), basename(path))];
-  const earlier = names.map((name) => claimed.get(name)).find((slug) => slug !== undefined);
+  // The claim is the file the rename reaches; a later target is refused when any of its landing names is claimed
+  // (its own rename target for a leaf that was a link, its referent for a leaf spelled in another case on a
+  // case-insensitive filesystem once the first file exists).
+  const written = renameTarget(path);
+  const earlier = landingNames(path)
+    .map((name) => claimed.get(name))
+    .find((slug) => slug !== undefined);
   if (earlier !== undefined) {
     return {
       error:
@@ -241,9 +241,7 @@ function snapshotFilePath(
         "each target has a file of its own",
     };
   }
-  for (const name of names) {
-    claimed.set(name, repo.slug);
-  }
+  claimed.set(written, repo.slug);
   return { path };
 }
 

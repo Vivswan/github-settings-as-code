@@ -10,7 +10,7 @@ import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { renderMergedYaml } from "./library.js";
-import { canonicalPath, writeReplacing } from "./settings-write.js";
+import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./settings-write.js";
 
 export interface MergeConfig {
   settingsFiles: string[];
@@ -21,13 +21,19 @@ export interface MergeConfig {
 const MERGED_LABEL = "the merged settings document";
 
 /**
- * Paths are compared as the filesystem names them, so "./a.yml", "a.yml", and a spelling through a symlinked directory
- * (macOS's /tmp for /private/tmp) all collide. Guarded beside the write: the next run would fold the merged document
- * as if it were a layer.
+ * The destination's landing names (the rename target, and the referent unless the leaf is a link) against every
+ * name a layer is read or written through (its rename target AND its referent, since the fold reads a link's referent
+ * and the write may replace the link itself). So "./a.yml", "a.yml", a spelling through a symlinked directory (macOS's
+ * /tmp for /private/tmp), a case alias of an existing layer, a layer that IS the link at the destination, and a layer
+ * READ through a link to the destination (`alias.yml -> repo.yml` folded into `repo.yml`) all collide, while
+ * `out.yml -> layer.yml` with `layer.yml` as the layer does not: the write replaces the link and leaves the layer
+ * intact. Guarded beside the write: the next run would fold the merged document as if it were a layer.
  */
 function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
-  const landing = canonicalPath(cfg.mergedFile);
-  const index = cfg.settingsFiles.findIndex((layer) => canonicalPath(layer) === landing);
+  const landings = new Set(landingNames(cfg.mergedFile));
+  const index = cfg.settingsFiles.findIndex((layer) =>
+    [renameTarget(layer), canonicalPath(layer)].some((name) => landings.has(name)),
+  );
   const layer = cfg.settingsFiles[index];
   return layer === undefined
     ? ok()
