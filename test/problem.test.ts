@@ -178,7 +178,14 @@ const SPECIMENS = {
   ],
   "settings-unknown-sections": [
     { code: "settings-unknown-sections", source: "f.yml", unknown: ["labls"], known: SECTION_KEYS },
-    `unknown top-level section(s) in f.yml: labls (known: ${KNOWN}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`,
+    `unknown top-level section(s) in f.yml: labls (known: ${KNOWN}). Fix the typo, or set the "sections" input to limit processing`,
+  ],
+  "settings-unknown-directives": [
+    { code: "settings-unknown-directives", source: "f.yml", unknown: ["_notes", "_layerin"] },
+    "unknown underscore key(s) in f.yml: _notes, _layerin. The underscore marks this action's " +
+      "directives, \"_layering\" (a file's top level or a list section's {entries} wrapper) and " +
+      '"_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, ' +
+      "or keep the note as a YAML comment",
   ],
   "settings-malformed-sections": [
     {
@@ -426,6 +433,7 @@ describe("SettingsProblem", () => {
       "settings-not-mapping",
       "settings-not-plain-mapping",
       "settings-unknown-sections",
+      "settings-unknown-directives",
       "settings-malformed-sections",
     ];
     // @ts-expect-error a read failure shares the prefix but is not a validation problem

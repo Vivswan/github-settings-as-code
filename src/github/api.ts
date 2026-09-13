@@ -273,9 +273,9 @@ function isHttpError(error: unknown): error is OctokitHttpError {
   );
 }
 
-/** RETRY_BASE_MS is the one knob the e2e runner sets: millisecond plugin units and the immediate scheduler for the spawned bundle. */
+/** GSAC_RETRY_BASE_MS is the one knob the e2e runner sets: millisecond plugin units and the immediate scheduler for the spawned bundle. */
 function envRetryBaseMs(): number | undefined {
-  const value = Number(process.env.RETRY_BASE_MS ?? "");
+  const value = Number(process.env.GSAC_RETRY_BASE_MS ?? "");
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
@@ -386,10 +386,10 @@ export interface GitHubApiOptions {
   apiVersion?: string;
   /**
    * Real milliseconds in one plugin second: Retry-After units, the retry backoff step, and the write limiter's gap.
-   * Undefined reads RETRY_BASE_MS once; the plugin topology is the same at every value.
+   * Undefined reads GSAC_RETRY_BASE_MS once; the plugin topology is the same at every value.
    */
   retryBaseMs?: number;
-  /** The limiter the throttling plugin paces through; TIMERS_SCHEDULER unless RETRY_BASE_MS selects the immediate one. */
+  /** The limiter the throttling plugin paces through; TIMERS_SCHEDULER unless GSAC_RETRY_BASE_MS selects the immediate one. */
   scheduler?: Scheduler;
   /** Passed to octokit verbatim; octokit-core's own agent string when omitted. */
   userAgent?: string;

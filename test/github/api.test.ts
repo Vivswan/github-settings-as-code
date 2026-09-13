@@ -120,13 +120,13 @@ describe("retry and throttling", () => {
   }, 20_000); // Two fixed-backoff retries (~1s + ~4s) before the final failure.
 });
 
-describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plugin topology", () => {
-  const saved = process.env.RETRY_BASE_MS;
+describe("GSAC_RETRY_BASE_MS: millisecond units and the immediate scheduler, same plugin topology", () => {
+  const saved = process.env.GSAC_RETRY_BASE_MS;
   afterEach(() => {
     if (saved === undefined) {
-      delete process.env.RETRY_BASE_MS;
+      delete process.env.GSAC_RETRY_BASE_MS;
     } else {
-      process.env.RETRY_BASE_MS = saved;
+      process.env.GSAC_RETRY_BASE_MS = saved;
     }
   });
 
@@ -168,7 +168,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
     new GitHubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
 
   test("many writes complete without the write limiter's ~1s spacing", async () => {
-    process.env.RETRY_BASE_MS = "1";
+    process.env.GSAC_RETRY_BASE_MS = "1";
     stubFetch([() => new Response(null, { status: 204 })]);
     const client = envKnobClient(traceIo().io);
     const started = Date.now();
@@ -190,7 +190,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
     // The retry plugin never sees a 429 (doNotRetry) and would ignore Retry-After if it did; only the throttling plugin's callback writes this
     // trace line, so the line pins which plugin owned the recovery. No Bottleneck group serving a request pins that the knob selected the
     // immediate scheduler, with no clock involved (the retry plugin schedules through a bare Bottleneck of its own, never a group).
-    process.env.RETRY_BASE_MS = "50";
+    process.env.GSAC_RETRY_BASE_MS = "50";
     const state = stubFetch([secondaryLimit("60"), okJson]);
     const trace = traceIo();
     const timers = spyOn(TIMERS_SCHEDULER.Group.prototype, "key");
@@ -268,7 +268,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
   });
 
   test("a 429 whose Retry-After exceeds the wait cap fails at once instead of being retried blind", async () => {
-    process.env.RETRY_BASE_MS = "1";
+    process.env.GSAC_RETRY_BASE_MS = "1";
     const state = stubFetch([secondaryLimit(String(MAX_RETRY_WAIT_S + 1)), okJson]);
     const result = await envKnobClient(traceIo().io).tryRequest("GET", "/rl");
     expect(state.calls).toBe(1);

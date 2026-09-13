@@ -78,11 +78,10 @@ function repoMaskKeys(permission: SectionPermission): MaskKey[] {
   return [...permission.repo];
 }
 
-/** The grade a mask GRANTS a section, before its read gating folds it (effectiveGrades). */
+/** The grade a mask GRANTS a section's repository reads and writes, before its read gating folds it (effectiveGrades). */
 export function sectionGrade(
   key: SectionKey,
   mask: Partial<Record<MaskKey, MaskGrade>>,
-  orgMask: Partial<Record<MaskKey, MaskGrade>> = mask,
 ): MaskGrade {
   const permission = PERMISSION_BY_KEY[key];
   let repoGrade: MaskGrade = "none";
@@ -92,16 +91,23 @@ export function sectionGrade(
       repoGrade = grade;
     }
   }
-  if (permission.org !== "members") {
-    return repoGrade;
-  }
-  // org_members gates only the organization PROBE (a read); team writes go through administration,
-  // so capping by org_members would wrongly downgrade an administration-write + members-read token.
-  // The mock takes org_members for teams' /orgs/ endpoints from the GLOBAL mask, not the per-slug
-  // overlay (the rest of the mask stays per slug), so the gate reads orgMask (equal to mask outside
-  // multi-repo mode).
-  const orgGrade = orgMask.org_members ?? "write";
-  return orgGrade === "none" ? "none" : repoGrade;
+  return repoGrade;
+}
+
+/**
+ * Whether the org gate denies a section's org-scoped requests: org_members gates teams' per-team access probes and
+ * its grants, never the repository's team list (GitHub grades that at repository Administration alone, and the
+ * section declares it so). A denied probe answers 404 under fine_grained, which the section reads as "no access",
+ * so the reads go through and only the writes are denied: the ABSENT posture at grade none, whatever the
+ * section's own posture says. The mock takes org_members for teams' /orgs/ endpoints from the GLOBAL mask, not
+ * the per-slug overlay (the rest of the mask stays per slug), so the gate reads orgMask (equal to mask outside
+ * multi-repo mode).
+ */
+export function orgGateDenied(
+  key: SectionKey,
+  orgMask: Partial<Record<MaskKey, MaskGrade>>,
+): boolean {
+  return PERMISSION_BY_KEY[key].org === "members" && (orgMask.org_members ?? "write") === "none";
 }
 
 /**
@@ -124,6 +130,12 @@ export interface SectionPrediction {
    * writeGranted) is vacuous for it and no consumer recognizes "excluded" by hand.
    */
   grades: readonly MaskGrade[];
+  /**
+   * What a fine-grained 404 on the first read denied at these grades means: the section's own
+   * posture, or "absent" when only the org gate is shut (the repository read passes and the
+   * org-gated probe's 404 reads as a missing grant). The preflight fold reads it.
+   */
+  posture: DenialPosture;
   /** The outcomes the section is allowed to report; the runner must see one. */
   allowed: Set<Outcome>;
   /** False folds the section into writeDeniedSections, whose writes the fuzz asserts never mutate state. */
@@ -151,7 +163,13 @@ export function predictSectionAt(
     meta.onlySections.length > 0 &&
     !meta.onlySections.includes(key)
   ) {
-    return { key, grades: [], allowed: new Set(["excluded"]), mayWrite: false };
+    return {
+      key,
+      grades: [],
+      posture: DENIAL_POSTURE[key],
+      allowed: new Set(["excluded"]),
+      mayWrite: false,
+    };
   }
   // The org probe is declared permission "none", so no mask key gates it and its 404 is met before
   // any gated read; by sectionGrade's convention an ungated resource grades write.
@@ -159,21 +177,30 @@ export function predictSectionAt(
     return {
       key,
       grades: ["write"],
+      posture: DENIAL_POSTURE[key],
       allowed: new Set([meta.mode === "check" ? "clean" : "applied"]),
       mayWrite: false,
     };
   }
-  const grant = sectionGrade(key, meta.mask, meta.orgMask ?? meta.mask);
+  const grant = sectionGrade(key, meta.mask);
   const grades = effectiveGrades(grant, gating);
   const deniedAtGatedRead = gating === "mixed" && grant === "read";
-  const arms = grades.flatMap((grade) =>
-    grade === "none" && deniedAtGatedRead
-      ? DENIAL_POSTURES.map((posture) => predictAtGrade(key, meta, grade, posture))
-      : [predictAtGrade(key, meta, grade, DENIAL_POSTURE[key])],
-  );
+  // The repository grant holds but the org gate is shut: the repository reads pass and the org-gated probes are
+  // denied, so the section runs at grade none under the absent posture (orgGateDenied). With no repository grant
+  // the gated repository read is denied first, under the section's own posture.
+  const orgDenied = orgGateDenied(key, meta.orgMask ?? meta.mask) && grant !== "none";
+  const posture: DenialPosture = orgDenied ? "absent" : DENIAL_POSTURE[key];
+  const arms = orgDenied
+    ? [predictAtGrade(key, meta, "none", posture)]
+    : grades.flatMap((grade) =>
+        grade === "none" && deniedAtGatedRead
+          ? DENIAL_POSTURES.map((candidate) => predictAtGrade(key, meta, grade, candidate))
+          : [predictAtGrade(key, meta, grade, posture)],
+      );
   return {
     key,
-    grades,
+    grades: orgDenied ? ["none"] : grades,
+    posture,
     allowed: new Set(arms.flatMap((arm) => [...arm.allowed])),
     mayWrite: arms.some((arm) => arm.mayWrite),
   };
@@ -356,8 +383,7 @@ export function preflightDeniable(section: SectionPrediction, meta: ScenarioMeta
   if (section.grades.length > 1) {
     return "possible";
   }
-  const posture = DENIAL_POSTURE[section.key];
-  return meta.denialStyle === 403 || posture === "denied" ? "yes" : "no";
+  return meta.denialStyle === 403 || section.posture === "denied" ? "yes" : "no";
 }
 
 export function predictOutcomes(meta: ScenarioMeta): RunPrediction {

@@ -60,6 +60,7 @@ describe("published schema wrapper strictness", () => {
       "UndeclaredPolicyList<MilestoneConfig>",
       "UndeclaredPolicyList<RulesetConfig>",
       "UndeclaredPolicyList<SecretScanningPatternConfig>",
+      "UndeclaredPolicyList<TeamConfig>",
       "UndeclaredPolicyList<WebhookConfig>",
     ]);
     for (const name of wrapperNames) {

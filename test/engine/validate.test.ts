@@ -65,7 +65,7 @@ describe("section shape validation", () => {
 
   test("only the declared known sections make up the parsed document", () => {
     const verdict = validateSectionShapes(
-      { _notes: "private", pages: { source: { branch: "main" } } },
+      { _layering: "replace", pages: { source: { branch: "main" } } },
       "f.yml",
     );
     expect(verdict).toEqual(ok({ pages: { source: { branch: "main" } } }));
@@ -168,6 +168,30 @@ describe("the wrapped undeclared-policy form", () => {
     ]);
     expect(issuesOf({ milestones: { _undeclared: "detele", entries: [] } })).toEqual([
       'milestones._undeclared: Invalid option: expected one of "keep"|"delete"',
+    ]);
+  });
+
+  test("an unknown underscore key on a wrapper names the two directives, on a top-level and a nested wrapper alike", () => {
+    const line =
+      'the wrapper\'s directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - ' +
+      "there are no private-note keys. Remove the key, or keep the note as a YAML comment";
+    expect(issuesOf({ labels: { _notes: "private", entries: [{ name: "bug" }] } })).toEqual([
+      `labels: Unrecognized key: "_notes"; ${line}`,
+    ]);
+    expect(
+      issuesOf({
+        environments: [{ name: "prod", variables: { _layering: "merge", entries: [] } }],
+      }),
+    ).toEqual([`environments[0].variables: Unrecognized key: "_layering"; ${line}`]);
+    // Beside a plain typo the clause names the underscore key it is about; the typo stays on zod's own line.
+    expect(issuesOf({ labels: { _notes: "x", entires: [], entries: [] } })).toEqual([
+      `labels: Unrecognized keys: "_notes", "entires"; "_notes": ${line}`,
+    ]);
+    // Beside the pre-v3 policy key both clauses appear, so one run names every fix.
+    expect(issuesOf({ labels: { undeclared: "keep", _owner: "note", entries: [] } })).toEqual([
+      'labels: Unrecognized keys: "undeclared", "_owner"; the wrapper\'s policy key "undeclared" was renamed ' +
+        'to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or ' +
+        `_undeclared: delete; "_owner": ${line}`,
     ]);
   });
 

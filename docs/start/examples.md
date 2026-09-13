@@ -282,13 +282,12 @@ branches:
 
 In a `mode: merge` fold, a `null` over a key a lower layer declared removes that key from the merged document instead; the [layering guide](../operate/layering.md) has the rules. A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above. A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
 
-## Private notes
+## Notes in the file
 
-Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). Top-level keys starting with an underscore are the escape hatch: they are ignored, which makes them usable as private notes. The one exception is `_layering`, a merge-time directive the [layering guide](../operate/layering.md) owns.
+Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). An underscore key is not an escape hatch: the underscore marks this action's two directives, `_layering` and `_undeclared` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
 
 ```yaml settings
-_owner: platform-team, see runbook RB-112
-
+# owner: platform-team, see runbook RB-112
 labels:
   - name: bug
     color: "d73a4a"

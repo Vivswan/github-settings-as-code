@@ -426,7 +426,7 @@ function childEnv(
     GITHUB_STEP_SUMMARY: join(dir, SUMMARY_FILE),
     RUNNER_DEBUG: "1",
     // A test knob: millisecond plugin units and the immediate scheduler, so retry scenarios run in milliseconds instead of seconds.
-    RETRY_BASE_MS: "1",
+    GSAC_RETRY_BASE_MS: "1",
   };
   // settings-file is a single-repo input the action rejects beside the multi-repo inputs and in
   // snapshot mode. A merge lists every layer file below settings.yml, lowest first; a snapshot names

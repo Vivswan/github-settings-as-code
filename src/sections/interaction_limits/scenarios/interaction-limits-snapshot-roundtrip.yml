@@ -1,4 +1,4 @@
-name: interaction_limits-snapshot-roundtrip
+name: interaction-limits-snapshot-roundtrip
 description: "mode: snapshot reads the live interaction_limits back into snapshot.yml and writes nothing to GitHub. The live limit, the pull-request creation cap, and its bypass list read back; the expiry cannot (GitHub reports only the computed expires_at), which the header notes. The written file, fed back to a check run against the same state, reads clean."
 settings: {}
 live_state:

@@ -1274,11 +1274,18 @@
           ]
         },
         "teams": {
-          "description": "Org team access to the repo; skipped on personal accounts.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/TeamConfig"
-          }
+          "description": "Org team access to the repo; skipped on personal accounts. Undeclared teams are kept by default and noted; the wrapped form can set `_undeclared: delete` to revoke their direct access (a grant made at the organization level is never touched). A declared child team can hold its access through an undeclared parent's grant, which `delete` revokes: declare the parent too, or keep.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/TeamConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/UndeclaredPolicyList%3CTeamConfig%3E"
+            }
+          ]
         },
         "milestones": {
           "description": "Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set `_undeclared: delete`, which detaches deleted milestones from their issues).",
@@ -1970,6 +1977,39 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecretScanningPatternConfig"
+          }
+        },
+        "_layering": {
+          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "type": "string",
+          "enum": [
+            "merge",
+            "replace"
+          ]
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "UndeclaredPolicyList<TeamConfig>": {
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "type": "object",
+      "properties": {
+        "_undeclared": {
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
+        },
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TeamConfig"
           }
         },
         "_layering": {

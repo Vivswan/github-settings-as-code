@@ -748,7 +748,7 @@ describe("run in mode: merge", () => {
         expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
         expect(existsSync(mergedFile)).toBe(false);
         expect(captured).toEqual([
-          `error: unknown top-level section(s) in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`,
+          `error: unknown top-level section(s) in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or set the "sections" input to limit processing`,
           "result: failed",
         ]);
       }),
@@ -777,10 +777,10 @@ describe("run in mode: merge", () => {
 
   test("a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer", () =>
     withTempDir("merge-mode-", async (dir) => {
-      // A self-referencing anchor under a private key parses to a cyclic object; standalone validation ignores the key, so the engine's boundary is
-      // what refuses the layer.
+      // A self-referencing anchor under an open section parses to a cyclic object; the standalone validation passes the unknown nested key through, so the
+      // engine's boundary is what refuses the layer.
       const top = join(dir, "top.yml");
-      writeFileSync(top, ["_notes: &loop", "  self: *loop", "labels: []", ""].join("\n"));
+      writeFileSync(top, ["repository: &loop", "  self: *loop", "labels: []", ""].join("\n"));
       const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
       expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
       expect(existsSync(mergedFile)).toBe(false);

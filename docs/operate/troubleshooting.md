@@ -50,10 +50,10 @@ What you see: the run fails during validation, naming the unknown keys and listi
 
 What it means: a misspelled section that silently did nothing would break the loud-failure promise, so unknown top-level keys are hard errors (see [Forward compatibility](../reference/forward-compatibility.md)).
 
-What to do: the message names all three options. Fix the typo. Or, for a deliberate private key, prefix it with an underscore, which the validator skips:
+What to do: the message names both options. Fix the typo, keeping any note as a YAML comment (an underscore key is not a private note: `_owner_notes: ...` fails with its own error naming the two directives the underscore is reserved for):
 
 ```yaml settings
-_owner_notes: contact the platform team before editing this file
+# owner notes: contact the platform team before editing this file
 labels:
   - name: bug
     color: d73a4a

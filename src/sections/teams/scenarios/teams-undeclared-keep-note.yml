@@ -1,0 +1,29 @@
+name: teams-undeclared-keep-note
+description: >-
+  The section's keep default: a team with direct access the settings file does
+  not name is KEPT and surfaced as a note naming the "_undeclared: delete" knob
+  that would revoke it. Apply grants nothing (the declared team is converged),
+  stays green, and a check rerun converges, since the kept team is a note, not
+  drift.
+settings:
+  teams:
+    - name: platform
+      permission: push
+owner_kind: org
+live_state:
+  teams:
+    platform:
+      role_name: write
+    legacy:
+      role_name: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    teams: applied
+  never:
+    - "DELETE /orgs/e2e-owner/teams/"
+    - "PUT /orgs/e2e-owner/teams/"
+  stdout_contains:
+    - "team \"legacy\" has access but is not declared in the settings file; kept under \"_undeclared: keep\""
+  fixpoint: converges

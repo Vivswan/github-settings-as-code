@@ -1,4 +1,4 @@
-name: code_scanning_default_setup-snapshot-roundtrip
+name: code-scanning-default-setup-snapshot-roundtrip
 description: "mode: snapshot reads the live code_scanning_default_setup back into snapshot.yml and writes nothing to GitHub. A configured default setup reads back as its declarable fields; updated_at and the schedule fall away. The written file, fed back to a check run against the same state, reads clean."
 settings: {}
 live_state:

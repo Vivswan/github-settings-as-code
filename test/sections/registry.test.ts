@@ -135,6 +135,7 @@ describe("section permissions", () => {
       codespaces_secrets: "keep",
       agents_secrets: "keep",
       collaborators: "delete",
+      teams: "keep",
       milestones: "keep",
       actions_variables: "delete",
       agents_variables: "delete",
@@ -168,7 +169,10 @@ describe("section permissions", () => {
     }).toEqual({
       topLevel: Object.fromEntries(UNDECLARED_POLICY_SECTIONS.map((key) => [key, true])),
       nested: Object.keys(nested)
-        .map((list) => [`0.${list}`, 'Unrecognized key: "_layering"'])
+        .map((list) => [
+          `0.${list}`,
+          'Unrecognized key: "_layering"; the wrapper\'s directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment',
+        ])
         .sort(),
     });
   });
@@ -303,9 +307,10 @@ describe("section permissions", () => {
             )
           : value;
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
-      // The WHOLE declaration is compared, so a later EndpointDecl field cannot diverge uncovered.
+      // The WHOLE wire declaration is compared, so a later EndpointDecl field cannot diverge uncovered; only the
+      // 404 posture stays out, since it is the SECTION's (denialPosture reads it per section, never per route).
       // The effective permission rides along: two declarations can both omit an override while inheriting different section permissions.
-      const { route: _route, section, role: _role, ...rest } = endpoint;
+      const { route: _route, section, role: _role, primaryRead: _posture, ...rest } = endpoint;
       const projected = { ...rest, effective: rest.permission ?? sectionPermission.get(section) };
       const contract = JSON.stringify(canonical(projected));
       const group = byRoute.get(endpoint.route) ?? [];
@@ -469,6 +474,7 @@ describe("section endpoints", () => {
       "environments.listProtectionRules",
       "environments.removePolicy",
       "environments.removeProtectionRule",
+      "teams.list",
       "teams.org",
     ]);
   });
@@ -752,6 +758,7 @@ describe("allEndpoints", () => {
       "teams.list",
       "teams.org",
       "teams.probe",
+      "teams.revoke",
       "webhooks.create",
       "webhooks.list",
       "webhooks.remove",

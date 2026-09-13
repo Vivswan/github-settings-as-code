@@ -915,7 +915,7 @@ describe("stripNulls", () => {
     ["before", (shared: unknown) => ({ _template: shared, rulesets: shared })],
     ["after", (shared: unknown) => ({ rulesets: shared, _template: shared })],
   ])(
-    "a wrapper aliased under a private key %s the section is stripped by the position it sits in, not the one first met",
+    "a wrapper aliased under a non-section key %s the section is stripped by the position it sits in, not the one first met",
     (_order, compose) => {
       const shared = { entries: [{ name: "main", bypass_actors: null }] };
       expect(stripNulls(deepFreeze(compose(shared)))).toEqual({

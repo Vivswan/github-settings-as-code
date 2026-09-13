@@ -131,6 +131,8 @@ const ROUTES = {
     data: [{ id: 7, invitee: { login: "carol" }, permissions: "read", expired: false }],
   },
   "GET /orgs/o": { data: { login: "o" } },
+  // No team holds access, so the declared one is existence drift and the undeclared walk has nothing to note.
+  "GET /repos/o/r/teams?per_page=100&page=1": { data: [] },
   "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
     data: [{ number: 1, title: "old", description: null, state: "open" }],
   },

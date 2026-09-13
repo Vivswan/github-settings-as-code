@@ -29,7 +29,7 @@ import { PagesConfig } from "../src/sections/pages/schema.js";
 import { RepositoryConfig } from "../src/sections/repository/schema.js";
 import { RulesetConfig } from "../src/sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "../src/sections/secret_scanning_custom_patterns/schema.js";
-import { TeamsConfig } from "../src/sections/teams/schema.js";
+import { TeamConfig } from "../src/sections/teams/schema.js";
 import { WebhookConfig } from "../src/sections/webhooks/schema.js";
 import { WorkflowsConfig } from "../src/sections/workflows/schema.js";
 
@@ -68,7 +68,7 @@ const EXPECTED: Record<
   code_scanning_default_setup: { kind: "slice", slice: CodeScanningDefaultSetupConfig },
   code_quality_setup: { kind: "slice", slice: CodeQualitySetupConfig },
   collaborators: { kind: "knob", entry: CollaboratorConfig },
-  teams: { kind: "slice", slice: TeamsConfig },
+  teams: { kind: "knob", entry: TeamConfig },
   milestones: { kind: "knob", entry: MilestoneConfig },
   interaction_limits: { kind: "slice", slice: InteractionLimitsConfig },
   actions_variables: { kind: "knob", entry: ActionsVariableConfig },

@@ -1,7 +1,7 @@
 # A 429_then_200 fault answers the real secondary-rate-limit wire shape (the
 # "secondary rate limit" message body plus a small positive Retry-After) on the
 # labels list read once; the throttling plugin honors the Retry-After (in
-# milliseconds under RETRY_BASE_MS=1, which the runner sets) and the retry
+# milliseconds under GSAC_RETRY_BASE_MS=1, which the runner sets) and the retry
 # succeeds, so the section proceeds and applies normally - proving the client
 # recovers from a transient 429. The same plugin's recognition of this exact
 # shape is pinned at the unit level in server.test.ts.

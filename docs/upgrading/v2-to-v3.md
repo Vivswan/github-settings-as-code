@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifteen breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Eighteen breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -23,6 +23,9 @@ Fifteen breaks (the ninth is for library consumers). One is silent (the fallback
 | One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each on the converted sites | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
 | A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
+| Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Only `_layering` and `_undeclared` exist; any other underscore key fails validation, on a wrapper and at the top level alike | Validation fails before any section runs, naming the two directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
+| `teams` takes the `_undeclared` knob | A plain array; an undeclared team was never listed or touched | `teams: {_undeclared: keep, entries: [...]}` accepted, default `keep`; `delete` revokes undeclared direct grants | No error. Every run now lists the repository's teams and notes each undeclared one; snapshots write the wrapper form; [section 17](#17-teams-takes-the-_undeclared-knob) |
+| `GSAC_RETRY_BASE_MS` | `RETRY_BASE_MS`, undocumented | `GSAC_RETRY_BASE_MS`, in the inputs reference | No error: an unknown environment variable is ignored, so a harness setting the old name waits real seconds; [section 18](#18-gsac_retry_base_ms) |
 
 ## 1. The defaults-file fallback
 
@@ -54,7 +57,7 @@ The old spelling fails validation before any section runs, so a check run finds 
 .github/settings.yml has malformed section entries: labels: Unrecognized key: "undeclared"; the wrapper's policy key "undeclared" was renamed to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete. Fix these values in the settings file (only the named keys are validated; extra fields pass through, except in closed sections and strict nested objects like actions.cache, which reject unrecognized keys)
 ```
 
-The underscore marks the action's directives: `_undeclared` (live axis) and `_layering` (merge time). Other underscore keys at the top level stay private notes. The [undeclared policy](../reference/undeclared-policy.md) page owns the knob.
+The underscore marks the action's directives: `_undeclared` (live axis) and `_layering` (merge time), and nothing else ([section 16](#16-underscore-keys-are-directives-never-notes)). The [undeclared policy](../reference/undeclared-policy.md) page owns the knob.
 
 ## 3. Layering only in mode: merge
 
@@ -241,9 +244,42 @@ The other cannot-verify and omission notes (interaction_limits, teams, collabora
 
 v2 refused to delete an undeclared ruleset whose list entry lacked `source_type`, with a note. v3 reads a missing `source_type` as `Repository`, the only kind the repository endpoints can write, so `_undeclared: delete` deletes it.
 
+## 16. Underscore keys are directives, never notes
+
+v2 dropped any unknown top-level key starting with `_` as a private note, while rejecting the same key inside a section's `{entries}` wrapper. v3 has one rule everywhere: the underscore belongs to the two directives, `_layering` and `_undeclared`, and any other underscore key fails validation before any section runs. The one corner it does not reach: a `null`-valued underscore key inside a wrapper (`labels: {_notes: null, entries: []}`) is a merge marker the fold strips before it judges the layer, so a `mode: merge` run passes it silently.
+
+```yaml settings
+# owner: platform-team, see runbook RB-112
+labels:
+  - name: bug
+    color: "d73a4a"
+```
+
+A v2 file with `_owner: platform-team` at its top level now fails with:
+
+```text
+unknown underscore key(s) in .github/settings.yml: _owner. The underscore marks this action's directives, "_layering" (a file's top level or a list section's {entries} wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or keep the note as a YAML comment
+```
+
+A `sections` allowlist does not soften it (an unknown plain section outside the allowlist still only warns). The reason is the loud-failure promise: a misspelled `_layerin: replace` dropped as a note would merge a layer its author meant to replace. Move each note into a YAML comment; the [layering guide](../operate/layering.md#three-knobs) states the rule beside the two directives.
+
+## 17. teams takes the _undeclared knob
+
+`teams` joins the sections that take the `{_undeclared, entries}` wrapper, with the default `keep`: a team with direct access that the file does not name is left alone, as before. What changes:
+
+- Every apply and check now lists the repository's teams (`GET /repos/{owner}/{repo}/teams`; the same Administration grant) and prints one note per undeclared direct team, naming the knob.
+- `_undeclared: delete` revokes the direct grants the file does not name (`DELETE /orgs/{org}/teams/{slug}/repos/{owner}/{repo}`). Access granted at the organization or enterprise level is never touched; under `delete` it is noted as beyond the repository's reach.
+- `mode: snapshot` and `gsac init` write the wrapper form with `_undeclared: keep` spelled out, as the other knobbed sections do.
+
+The plain array form keeps working, and the [undeclared policy](../reference/undeclared-policy.md) page lists the default beside the others.
+
+## 18. GSAC_RETRY_BASE_MS
+
+The one environment variable of the tool's own, the retry-timing test knob, is `GSAC_RETRY_BASE_MS`; v2 read it as `RETRY_BASE_MS`, undocumented. An environment variable has no channel for a loud error, so the old name is simply ignored: a harness that set `RETRY_BASE_MS=1` to speed a mock run up now waits real seconds until it is renamed. The [inputs reference](../reference/inputs.md#environment-variables) lists it with the other variables a run reads.
+
 ## Order of operations
 
-1. Rename any settings file whose path contains a comma, and rename `undeclared` to `_undeclared` in every settings file; the v2 line accepts the old spelling only, so do both together with the pin move.
+1. Rename any settings file whose path contains a comma, rename `undeclared` to `_undeclared` in every settings file, and move every other underscore key into a YAML comment; the v2 line accepts the old spellings only, so do all three together with the pin move.
 2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
 3. Where a snapshot wrote a `$WEBHOOK_SECRET_<id>` reference, change the reference and its exported variable to `SECRET_WEBHOOK_<id>` together, or re-snapshot.
 4. Move the pin to `@v3` with `mode: check`.
