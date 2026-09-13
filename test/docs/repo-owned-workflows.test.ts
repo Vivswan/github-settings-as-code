@@ -15,6 +15,7 @@ import {
   isManaged,
   type Job,
   ROOT,
+  readAction,
   readWorkflow,
   repoOwnedWorkflowFiles,
   SETUP_USES,
@@ -188,6 +189,50 @@ describe("the commit-back push jobs", () => {
     expect(run.search(PATH_CHECK)).toBeLessThan(run.indexOf("git commit"));
     expect(run).toContain("M) ;;");
     expect(run).toContain(".github/workflows/*)");
+  });
+});
+
+/** The setup composite's steps as the runner acts on them: what runs, under which gate, and whether a failure counts. */
+const SETUP_SHAPE = [
+  {
+    uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
+    with: { "bun-version-file": ".bun-version" },
+  },
+  {
+    if: "inputs.install != 'false'",
+    shell: "bash",
+    run: "bun install --frozen-lockfile --ignore-scripts",
+  },
+  { if: "inputs.yamllint == 'true'", shell: "bash", run: "pipx install yamllint==1.38.0" },
+].map((step) => ({
+  uses: undefined,
+  with: undefined,
+  if: undefined,
+  shell: undefined,
+  run: undefined,
+  "continue-on-error": undefined,
+  ...step,
+}));
+
+describe("the setup composite", () => {
+  const shapeOf = (steps: Step[]) =>
+    steps.map(({ uses, with: inputs, if: gate, shell, run, "continue-on-error": masked }) => ({
+      uses,
+      with: inputs,
+      if: gate,
+      shell,
+      run,
+      "continue-on-error": masked,
+    }));
+
+  test("runs the pinned bun, the gated install, and the gated yamllint, none allowed to fail", () => {
+    const steps = readAction(".github/actions/setup").runs.steps ?? [];
+    expect(shapeOf(steps)).toEqual(SETUP_SHAPE);
+    // Control: a masked install inside the composite, which no caller-side pin can see, fails the shape.
+    const masked = steps.map((step) =>
+      step.run?.startsWith("bun install") ? { ...step, "continue-on-error": true } : step,
+    );
+    expect(shapeOf(masked)).not.toEqual(SETUP_SHAPE);
   });
 });
 
