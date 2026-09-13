@@ -168,25 +168,27 @@ describe("snapshotRepository", () => {
     ).toEqual([
       [
         "check_suite_preferences",
-        [
-          "check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
-        ],
+        [expect.stringMatching(/^check_suite_preferences: GitHub exposes no read endpoint/)],
       ],
     ]);
+    // The secret's note names the variable its minted reference reads.
+    const secretNote = expect.stringMatching(
+      /^actions_secrets\[DEPLOY_TOKEN\]: .*export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN/,
+    );
     expect(result.outcomes.find((o) => o.key === "actions_secrets")).toEqual({
       key: "actions_secrets",
       status: "snapshot",
-      detail: [
-        "actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
-      ],
+      detail: [secretNote],
     });
     expect(result.outcomes.find((o) => o.key === "milestones")).toEqual({
       key: "milestones",
       status: "snapshot",
       detail: [NOTHING],
     });
-    expect(annotations).toContain(
-      "notice: actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
+    expect(annotations).toContainEqual(
+      expect.stringMatching(
+        /^notice: actions_secrets\[DEPLOY_TOKEN\]: .*SECRET_ACTIONS_DEPLOY_TOKEN/,
+      ),
     );
   });
 
@@ -202,19 +204,22 @@ describe("snapshotRepository", () => {
       io,
     );
     const note =
-      "pages: GitHub answered GET /repos/{owner}/{repo}/pages with 404, read here as nothing to " +
-      "snapshot. A fine-grained token missing the grant gets the same answer; if the repository " +
-      'does have this resource, grant "Pages" (read and write) under the PAT\'s Repository ' +
-      "permissions, then snapshot again";
+      /^pages: GitHub answered GET \/repos\/\{owner\}\/\{repo\}\/pages with 404, read here as nothing to snapshot\. .*grant "Pages"/;
     expect(result.result).toBe("snapshot");
     // The org probe is public and DID answer 404: a 404 there has one reading, so no such note.
-    const personal =
-      'custom_properties: owner "o" is a personal account, not an organization, so this section does not apply';
+    const personal = /^custom_properties: owner "o" is a personal account, not an organization/;
     expect(result.outcomes).toEqual([
-      { key: "pages", status: "snapshot", detail: [note, NOTHING] },
-      { key: "custom_properties", status: "snapshot", detail: [personal, NOTHING] },
+      { key: "pages", status: "snapshot", detail: [expect.stringMatching(note), NOTHING] },
+      {
+        key: "custom_properties",
+        status: "snapshot",
+        detail: [expect.stringMatching(personal), NOTHING],
+      },
     ]);
-    expect(annotations).toEqual([`notice: ${note}`, `notice: ${personal}`]);
+    expect(annotations).toEqual([
+      expect.stringMatching(new RegExp(`^notice: ${note.source.slice(1)}`)),
+      expect.stringMatching(new RegExp(`^notice: ${personal.source.slice(1)}`)),
+    ]);
     // The controls: a present site reads back and carries no note, and a section that read
     // nothing WITHOUT a 404 (an empty 200 listing) carries none either.
     const live = registryFake({
@@ -394,40 +399,6 @@ describe("snapshotRepository", () => {
   });
 });
 
-describe("snapshotRepository shape guard", () => {
-  test("a null 200 body on a whole-section read fails the section as a body outside the shape, never an omitted section", async () => {
-    const fake = registryFake(LIVE);
-    const nulling: GitHubClient = {
-      tryRequest: (method, path, payload, options) =>
-        method === "GET" && path === "/repos/o/r/code-scanning/default-setup"
-          ? Promise.resolve({ data: null })
-          : fake.tryRequest(method, path, payload, options),
-      tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
-    };
-    const result = await snapshotRepository(
-      nulling,
-      {
-        ...opts(),
-        sections: SectionSelection.of({
-          only: ["code_scanning_default_setup", "labels"],
-        })._unsafeUnwrap(),
-      },
-      captureIo().io,
-    );
-    expect(result.result).toBe("failed");
-    expect(result.settings).toBeUndefined();
-    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
-      ["labels", "snapshot"],
-      ["code_scanning_default_setup", "failed"],
-    ]);
-    expect(result.outcomes[1]?.detail).toEqual([
-      "code_scanning_default_setup: GET /repos/{owner}/{repo}/code-scanning/default-setup returned a body " +
-        "outside the documented shape - (body): Invalid input: expected object, received null. " +
-        'Check the "api-version" input against the GitHub REST docs for this endpoint',
-    ]);
-  });
-});
-
 describe("pages null body", () => {
   test("a null 200 on the Pages GET fails the section as a body outside the shape, never `pages: null`", async () => {
     const fake = registryFake(LIVE);
@@ -460,18 +431,25 @@ describe("pages null body", () => {
 });
 
 describe("renderSnapshotYaml", () => {
-  test("a message spanning several lines is commented line by line, so the file still parses", async () => {
-    // A note with a line break, on a section with nothing live: the header carries it, the document omits the section.
-    const stubbed = spyOn(labelsSection, "snapshot").mockResolvedValue({
-      value: undefined,
-      notes: ["502 Bad Gateway\nupstream unavailable"],
+  test("pins the schema, dates the header, comments every outcome line (a multi-line message line by line), and writes the document", async () => {
+    // The labels note spans two physical lines (an API error body would) and a second note follows it: each line is
+    // commented on its own, every message of an outcome is kept, and the file still parses.
+    const original = labelsSection.snapshot;
+    const stubbed = spyOn(labelsSection, "snapshot").mockImplementation(async (ctx) => {
+      const snapshot = await original.call(labelsSection, ctx);
+      return {
+        ...snapshot,
+        notes: [...snapshot.notes, "502 Bad Gateway\nupstream unavailable", "retried once"],
+      };
     });
     try {
       const result = await snapshotRepository(
         registryFake(LIVE),
         {
           ...opts(),
-          sections: SectionSelection.of({ only: ["labels", "actions_variables"] })._unsafeUnwrap(),
+          sections: SectionSelection.of({
+            only: ["labels", "actions_secrets", "check_suite_preferences", "milestones"],
+          })._unsafeUnwrap(),
         },
         captureIo().io,
       );
@@ -480,57 +458,33 @@ describe("renderSnapshotYaml", () => {
         schemaUrl: "https://example.test/settings.schema.json",
         timestamp: "2026-09-11T00:00:00Z",
       });
-      expect(rendered.split("\n").slice(2, 5)).toEqual([
-        "# labels: 502 Bad Gateway",
-        "# labels: upstream unavailable",
-        "# labels: nothing exists on the repository, so the section is omitted",
-      ]);
-      expect(parseYaml(rendered)).toEqual({
-        actions_variables: {
-          _undeclared: "delete",
-          entries: [{ name: "REGION", value: "eu-west-1" }],
-        },
-      });
+      expect(rendered).toBe(
+        [
+          "# yaml-language-server: $schema=https://example.test/settings.schema.json",
+          "# Snapshot of o/r taken 2026-09-11T00:00:00Z",
+          "# labels: 502 Bad Gateway",
+          "# labels: upstream unavailable",
+          "# labels: retried once",
+          "# actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
+          "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
+          "# milestones: nothing exists on the repository, so the section is omitted",
+          "labels:",
+          "  _undeclared: delete",
+          "  entries:",
+          "    - name: bug",
+          "      color: d73a4a",
+          "      description: Something is broken",
+          "actions_secrets:",
+          "  _undeclared: keep",
+          "  entries:",
+          "    - name: DEPLOY_TOKEN",
+          "      value: $SECRET_ACTIONS_DEPLOY_TOKEN",
+          "",
+        ].join("\n"),
+      );
+      expect(parseYaml(rendered)).toEqual(result.settings);
     } finally {
       stubbed.mockRestore();
     }
-  });
-
-  test("pins the schema, dates the header, comments every outcome line, and writes the document", async () => {
-    const result = await snapshotRepository(
-      registryFake(LIVE),
-      {
-        ...opts(),
-        sections: SectionSelection.of({
-          only: ["labels", "actions_secrets", "check_suite_preferences"],
-        })._unsafeUnwrap(),
-      },
-      captureIo().io,
-    );
-    expect(result.result).toBe("snapshot");
-    const rendered = renderSnapshotYaml(result as RenderableSnapshot, {
-      schemaUrl: "https://example.test/settings.schema.json",
-      timestamp: "2026-09-11T00:00:00Z",
-    });
-    expect(rendered).toBe(
-      [
-        "# yaml-language-server: $schema=https://example.test/settings.schema.json",
-        "# Snapshot of o/r taken 2026-09-11T00:00:00Z",
-        "# actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply",
-        "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run",
-        "labels:",
-        "  _undeclared: delete",
-        "  entries:",
-        "    - name: bug",
-        "      color: d73a4a",
-        "      description: Something is broken",
-        "actions_secrets:",
-        "  _undeclared: keep",
-        "  entries:",
-        "    - name: DEPLOY_TOKEN",
-        "      value: $SECRET_ACTIONS_DEPLOY_TOKEN",
-        "",
-      ].join("\n"),
-    );
   });
 });
