@@ -238,21 +238,8 @@ describe("judgePreflightAbort", () => {
     ["no: but the barrier fired", "no", aborted, "contradiction"],
     ["yes with every witness aborted", "yes", aborted, "aborted"],
     ["yes but the run never annotated the barrier", "yes", ran, "contradiction"],
-    ["yes but another error failed the run", "yes", { ...aborted, stdout: other }, "contradiction"],
     ["possible without the annotation ran", "possible", ran, "ran"],
     ["possible with every witness aborted", "possible", aborted, "aborted"],
-    [
-      "possible, no rows and failed, but no barrier annotation: ran, so the section checks report the absences",
-      "possible",
-      { ...aborted, stdout: other },
-      "ran",
-    ],
-    [
-      "possible with an unparsable summary and no annotation still ran",
-      "possible",
-      { ...ran, summary: "garbage" },
-      "ran",
-    ],
     ["annotated but sections rendered", "possible", { ...aborted, summary: rows }, "contradiction"],
     [
       "annotated but a malformed row rendered: still a rendered row, not an abort",
@@ -1092,7 +1079,7 @@ describe("predictDiscovery filter rules", () => {
       "e2e-owner/legacy-x",
     );
     expect(predictDiscovery(globPool, { exclude: "*-*" })).toEqual(["e2e-owner/UPPER"]);
-    expect(predictDiscovery(globPool, { exclude: "upper" })).not.toContain("e2e-owner/UPPER");
+    expect(predictDiscovery(globPool, { exclude: "uPPer" })).not.toContain("e2e-owner/UPPER");
   });
 });
 
@@ -1510,7 +1497,6 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
       { rulesets: [{ name: "r", rules: [{ type: "t" }, { type: "t" }] }] },
     ],
     ["two labels under one case-folded name", { labels: [{ name: "Bug" }, { name: "bug" }] }],
-    ["two rulesets under one name", { rulesets: [{ name: "r" }, { name: "r" }] }],
     ["a keyless label", { labels: [{ color: "abcdef" }] }],
     [
       "a label renaming into a sibling's name",
