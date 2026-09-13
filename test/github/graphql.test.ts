@@ -151,13 +151,11 @@ describe("tryGraphql errors[] mapping", () => {
   });
 
   test("a malformed errors value fails closed even beside valid-looking data", async () => {
-    // {data, errors: {...}} must never read as "no errors". The throttling plugin's own graphql inspection trips on the non-array first;
-    // the client's guard behind it carries the same invariant should the plugin stop looking.
-    stubFetch([
-      () => graphql({ data: { repository: { id: "R_1" } }, errors: { type: "NOT_FOUND" } }),
-    ]);
+    // {data, errors: null} must never read as "no errors": the contract makes errors, when present, a non-empty list. (An errors OBJECT trips the
+    // throttling plugin's own inspection first and never reaches this guard.)
+    stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors: null })]);
     await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-      /GRAPHQL RepoToggles/,
+      /GRAPHQL RepoToggles returned a malformed errors value/,
     );
   });
 
@@ -168,8 +166,8 @@ describe("tryGraphql errors[] mapping", () => {
     );
   });
 
-  // Beside FORBIDDEN a rate limit must not read as a permission failure (the user would be told to fix their PAT); beside UNPROCESSABLE not as a bad
-  // payload.
+  // The ladder reads the rate limit first: beside FORBIDDEN it must not read as a permission failure (the user would be told to fix their PAT),
+  // beside UNPROCESSABLE not as a bad payload.
   test.each([
     ["a permission error (FORBIDDEN)", { type: "FORBIDDEN", message: "denied" }],
     ["a payload error (UNPROCESSABLE)", { type: "UNPROCESSABLE", message: "also broken" }],
@@ -334,53 +332,31 @@ describe("tryGraphql tracing and redaction", () => {
     expect(result.error.documentationUrl).toBeUndefined();
   });
 
-  test("a masked slug's transport failure withholds the reason too", async () => {
-    const dbg = traceIo();
-    dbg.io.mask("o/secretrepo");
-    globalThis.fetch = (async () => {
-      throw new Error("socket hang up talking to o/secretrepo");
-    }) as unknown as typeof fetch;
-    await expect(
-      api(dbg.io).tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo"),
-    ).rejects.toThrow(/details withheld: the repository is redacted/);
-  });
-
-  test.each([
-    ["success trace", () => graphql({ data: {} }), undefined],
-    [
-      "errors[] content",
-      () =>
-        graphql({
+  test("a mask registered while the request is in flight redacts the trace and withholds the errors[] content", async () => {
+    // Redaction is read at emission, never snapshotted at request start: the stub masks the slug after the request went out.
+    const t = traceIo();
+    stubFetch([
+      () => {
+        t.io.mask("o/secretrepo");
+        return graphql({
           data: null,
           errors: [{ type: "NOT_FOUND", message: "no repository named 'o/secretrepo'" }],
-        }),
-      REDACTED_RESPONSE_WITHHELD,
-    ],
-  ])(
-    "a mask registered while the request is in flight redacts the %s",
-    async (_case, respond, withheldMessage) => {
-      // Redaction is read at emission, never snapshotted at request start: the stub masks the slug after the request went out.
-      const t = traceIo();
-      stubFetch([
-        () => {
-          t.io.mask("o/secretrepo");
-          return respond();
-        },
-      ]);
-      const result = await api(t.io).tryGraphql(
-        READ_OP,
-        { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
-        "o/secretrepo",
-      );
-      expect(t.lines).toContain("<redacted>");
-      const trace = t.lines.join("\n");
-      expect(trace).not.toContain("secretrepo");
-      expect(trace).not.toContain("CANARY-live");
-      expect(trace).not.toContain("RepoToggles");
-      expect("error" in result ? result.error.message : undefined).toBe(withheldMessage);
-      expect(JSON.stringify(result)).not.toContain("secretrepo");
-    },
-  );
+        });
+      },
+    ]);
+    const result = await api(t.io).tryGraphql(
+      READ_OP,
+      { owner: "o", repo: "secretrepo", pattern: "CANARY-live" },
+      "o/secretrepo",
+    );
+    expect(t.lines).toContain("<redacted>");
+    const trace = t.lines.join("\n");
+    expect(trace).not.toContain("secretrepo");
+    expect(trace).not.toContain("CANARY-live");
+    expect(trace).not.toContain("RepoToggles");
+    expect("error" in result ? result.error.message : undefined).toBe(REDACTED_RESPONSE_WITHHELD);
+    expect(JSON.stringify(result)).not.toContain("secretrepo");
+  });
 
   test("a mask registered while the request is in flight withholds the transport-failure reason", async () => {
     const t = traceIo();

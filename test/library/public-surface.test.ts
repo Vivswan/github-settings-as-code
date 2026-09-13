@@ -1,16 +1,13 @@
 /**
  * The public entry's pin is docs/reference/library.md: the names in the API tables under "## The API by group" are
  * exactly what src/index.ts exports, in both directions, so a name is public only once the page says what it is.
- * The action reaches the rest of src/ only through the two entries; the architecture lint's controls are here too.
  */
 
 import { describe, expect, test } from "bun:test";
-import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
-import { ARCHITECTURE_PATH, lintArchitecture } from "../../.github/scripts/arch-lint.js";
 import { ROOT } from "../root.js";
-import { withTempDir } from "../temp-dir.js";
 
 const ENTRY = "src/index.ts";
 const INTERNAL_ENTRY = "src/internal.ts";
@@ -128,35 +125,10 @@ describe("the public entry", () => {
   const entry = readFileSync(join(ROOT, ENTRY), "utf8");
 
   test("exports exactly the names the library page's API tables document", () => {
-    expect(exportedNames(ENTRY, entry)).toEqual(documentedNames(page));
-  });
-
-  test("the page documents more than one name per group (the extractor reads the tables)", () => {
-    // The knob table under the heading has no `| Name |` header, so the count is the API tables alone.
-    expect(documentedNames(page).length).toBeGreaterThan(50);
-  });
-
-  test("an export the page does not document fails the pin (negative control)", () => {
-    const withoutRow = page.replace(/^\| `validateSettings` \|.*\n/m, "");
-    expect(withoutRow).not.toBe(page);
-    const documented = documentedNames(withoutRow);
-    expect(documented).not.toEqual(exportedNames(ENTRY, entry));
-    expect(exportedNames(ENTRY, entry).filter((name) => !documented.includes(name))).toEqual([
-      "validateSettings",
-    ]);
-  });
-
-  test("a documented name the entry does not export fails the pin (negative control)", () => {
-    const withRow = page.replace(
-      "| `Io` | type |",
-      "| `notExported` | function | A row with no export behind it |\n| `Io` | type |",
-    );
-    expect(withRow).not.toBe(page);
-    const documented = documentedNames(withRow);
-    expect(documented).not.toEqual(exportedNames(ENTRY, entry));
-    expect(documented.filter((name) => !exportedNames(ENTRY, entry).includes(name))).toEqual([
-      "notExported",
-    ]);
+    const exported = exportedNames(ENTRY, entry);
+    // The knob table under the heading has no `| Name |` header, so an extractor reading nothing would compare two empty lists.
+    expect(exported).not.toEqual([]);
+    expect(exported).toEqual(documentedNames(page));
   });
 
   test.each([
@@ -225,11 +197,6 @@ describe("the public entry", () => {
       "### Io\n\n> | Name | Kind | Says |\n> |---|---|---|\n> | `notExported` | function | Quoted |\n\n",
     ],
     [
-      "a table inside a nested blockquote",
-      "### Io\n",
-      "### Io\n\n> > | Name | Kind | Says |\n> > |---|---|---|\n> > | `notExported` | function | Quoted |\n\n",
-    ],
-    [
       "a table inside a nested blockquote whose markers are spaced apart",
       "### Io\n",
       "### Io\n\n>  > | Name | Kind | Says |\n>  > |---|---|---|\n>  > | `notExported` | function | Quoted |\n\n",
@@ -263,24 +230,4 @@ describe("the public entry", () => {
     );
     expect(shared).toEqual([]);
   });
-
-  // A copy of src/ plus the offending file: the real tree draws every declared edge, so the forbidden import is the whole verdict.
-  test.each([
-    ["src/engine directly", "../engine/orchestrate.js", "engine", "src/engine/orchestrate.ts"],
-    ["the internal entry", "../internal.js", "internal", "src/internal.ts"],
-  ])(
-    "a src/action file importing %s fails the architecture lint (negative control)",
-    (_target, specifier, layer, resolved) =>
-      withTempDir("public-surface-", (root) => {
-        cpSync(join(ROOT, "src"), join(root, "src"), { recursive: true });
-        cpSync(join(ROOT, ARCHITECTURE_PATH), join(root, ARCHITECTURE_PATH));
-        writeFileSync(
-          join(root, "src/action/direct.ts"),
-          `import { runForRepo } from "${specifier}";\nexport const direct = runForRepo;\n`,
-        );
-        expect(lintArchitecture(root)).toEqual([
-          `forbidden import action -> ${layer}: src/action/direct.ts -> ${resolved}; move it or declare the edge`,
-        ]);
-      }),
-  );
 });

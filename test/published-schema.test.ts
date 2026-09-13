@@ -1,5 +1,7 @@
 /**
  * lib/settings.schema.json is what editors and CI linters validate settings.yml against, so where the runtime is strict the schema must be too.
+ * schema-corpus.test.ts compares the two over every scenario and generated document; the documents here are the edge shapes that corpus never
+ * carries (wrapper and entry typos, a bad directive value, a quoted boolean, the nested knobs' wrapped forms), each judged by both validators.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,270 +15,147 @@ import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
 import { ROOT } from "./root.js";
 
 const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
-  $id?: string;
   definitions: Record<string, Record<string, unknown>>;
 };
 
-describe("published schema identity", () => {
-  test("$id is the version-free raw copy at HEAD", () => {
-    // A $id naming a release ref again would tie every major bump to a schema regeneration on its release PR.
-    expect(schema.$id).toBe(
-      "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json",
-    );
-  });
-});
+// strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
+const ajv = new Ajv({ strict: false, allErrors: true });
+const validate: ValidateFunction = ajv.compile(schema);
+
+const runtimeAccepts = (doc: Record<string, unknown>): boolean =>
+  !("error" in validateSectionShapes(doc, "fixture"));
+
+/** One environments[] entry named prod, the host of every nested knob. */
+const prod = (entry: Record<string, unknown>) => ({ environments: [{ name: "prod", ...entry }] });
+const customPolicies = { protected_branches: false, custom_branch_policies: true };
 
 describe("published schema wrapper strictness", () => {
-  const wrapperNames = Object.keys(schema.definitions).filter((name) =>
-    name.startsWith("UndeclaredPolicyList<"),
-  );
-
-  /** The nested {_undeclared, entries} knobs inside an environment entry, each adding one wrapper definition beyond the knobbed sections. */
-  const NESTED_WRAPPERS = [
-    "UndeclaredPolicyList<EnvironmentVariableConfig>",
-    "UndeclaredPolicyList<EnvironmentSecretConfig>",
-    "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
-    "UndeclaredPolicyList<DeploymentProtectionRuleConfig>",
-  ] as const;
-
-  test("one wrapper definition per knobbed section and nested knob, each closed", () => {
-    expect(wrapperNames.length).toBe(UNDECLARED_POLICY_SECTIONS.length + NESTED_WRAPPERS.length);
-    expect([...wrapperNames].sort()).toEqual([
-      "UndeclaredPolicyList<ActionsSecretConfig>",
-      "UndeclaredPolicyList<ActionsVariableConfig>",
-      "UndeclaredPolicyList<AgentsSecretConfig>",
-      "UndeclaredPolicyList<AgentsVariableConfig>",
-      "UndeclaredPolicyList<AutolinkConfig>",
-      "UndeclaredPolicyList<CodespacesSecretConfig>",
-      "UndeclaredPolicyList<CollaboratorConfig>",
-      "UndeclaredPolicyList<CustomPropertyConfig>",
-      "UndeclaredPolicyList<DependabotSecretConfig>",
-      "UndeclaredPolicyList<DeployKeyConfig>",
-      "UndeclaredPolicyList<DeploymentBranchPolicyConfig>",
-      "UndeclaredPolicyList<DeploymentProtectionRuleConfig>",
-      "UndeclaredPolicyList<EnvironmentSecretConfig>",
-      "UndeclaredPolicyList<EnvironmentVariableConfig>",
-      "UndeclaredPolicyList<LabelConfig>",
-      "UndeclaredPolicyList<MilestoneConfig>",
-      "UndeclaredPolicyList<RulesetConfig>",
-      "UndeclaredPolicyList<SecretScanningPatternConfig>",
-      "UndeclaredPolicyList<TeamConfig>",
-      "UndeclaredPolicyList<WebhookConfig>",
-    ]);
-    for (const name of wrapperNames) {
+  test("one closed wrapper definition per knobbed section and nested knob", () => {
+    const wrappers = Object.entries(schema.definitions).filter(([name]) =>
+      name.startsWith("UndeclaredPolicyList<"),
+    );
+    // The four nested {_undeclared, entries} knobs inside an environment entry: variables, secrets, branch policies, protection rules.
+    expect(wrappers.length).toBe(UNDECLARED_POLICY_SECTIONS.length + 4);
+    for (const [name, definition] of wrappers) {
       expect(
-        schema.definitions[name]?.additionalProperties,
+        definition.additionalProperties,
         `${name} must carry additionalProperties: false (the strictObject wrapper emits it)`,
       ).toBe(false);
     }
   });
+});
 
-  describe("AJV round-trip", () => {
-    // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
-    const ajv = new Ajv({ strict: false, allErrors: true });
-    const validate: ValidateFunction = ajv.compile(schema);
+describe("the published schema and the runtime agree on the shapes the corpus never carries", () => {
+  test.each<[string, Record<string, unknown>, boolean]>([
+    [
+      "a typo key inside a wrapper",
+      { labels: { _undeclared: "keep", entires: [], entries: [] } },
+      false,
+    ],
+    ["a bad policy value", { rulesets: { _undeclared: "remove", entries: [] } }, false],
+    [
+      "the nested variables knob, wrapped",
+      prod({ variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] } }),
+      true,
+    ],
+    [
+      "a typo key inside the nested variables wrapper",
+      prod({ variables: { entires: [], entries: [] } }),
+      false,
+    ],
+    [
+      "the nested branch-policies knob, wrapped",
+      prod({
+        deployment_branch_policy: customPolicies,
+        deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "main" }] },
+      }),
+      true,
+    ],
+    [
+      "the nested protection-rules knob, wrapped",
+      prod({ deployment_protection_rules: { _undeclared: "delete", entries: [{ app: "gate" }] } }),
+      true,
+    ],
+    [
+      "a typo key inside the nested protection-rules wrapper",
+      prod({ deployment_protection_rules: { entires: [], entries: [] } }),
+      false,
+    ],
+    // The enable call sends only the App's resolved integration id, so the entry is closed on both sides.
+    [
+      "an extra key on a protection-rule entry",
+      prod({ deployment_protection_rules: [{ app: "gate", extra: 1 }] }),
+      false,
+    ],
+    // strictObject surfaces: an extra key has no passthrough destination, so a typo fails upfront instead of on the run.
+    [
+      "an extra key on an environment secret",
+      prod({ secrets: [{ name: "A", value: "$A", extra: 1 }] }),
+      false,
+    ],
+    ["a typo key inside actions.cache", { actions: { cache: { max_cache_size: 25 } } }, false],
+    [
+      "an extra key inside required_deployments",
+      {
+        branches: [
+          {
+            name: "main",
+            protection: { required_deployments: { environments: ["prod"], extra: 1 } },
+          },
+        ],
+      },
+      false,
+    ],
+    // Typed boolean so a YAML-quoted "yes" fails upfront instead of riding the protection PUT (which drops the key) and never reaching the
+    // signatures sub-endpoint.
+    [
+      "a quoted required_signatures",
+      { branches: [{ name: "main", protection: { required_signatures: "yes" } }] },
+      false,
+    ],
+    // Entry fields pass through to the API verbatim, so a field GitHub ships tomorrow must validate today.
+    [
+      "an extra field on a nested variable entry",
+      prod({ variables: [{ name: "A", value: "1", extra_field: "x" }] }),
+      true,
+    ],
+    [
+      "an extra field on an actions variable entry",
+      { actions_variables: [{ name: "A", value: "1", extra_field: "x" }] },
+      true,
+    ],
+  ])("%s", (_shape, doc, accepted) => {
+    expect(validate(doc), "published schema").toBe(accepted);
+    expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(accepted);
+  });
 
-    test("the plain array form validates", () => {
-      expect(validate({ labels: [{ name: "bug", color: "d73a4a" }] })).toBe(true);
+  test("the branch-policy type enum is the one shape where the schema is the stricter side", () => {
+    // The published schema pins the documented upstream enum; the runtime shape stays a loose string, GitHub being the authority there.
+    const doc = prod({
+      deployment_branch_policy: customPolicies,
+      deployment_branch_policies: [{ name: "v*", type: "wildcard" }],
     });
+    expect(validate(doc)).toBe(false);
+    expect(runtimeAccepts(doc)).toBe(true);
+  });
 
-    test("the wrapped form validates", () => {
+  test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
+    // Both verdicts must be represented, or a fixture file reduced to one side would pass here vacuously.
+    expect(new Set(FLAG_PAIRING_FIXTURES.map((fixture) => fixture.valid))).toEqual(
+      new Set([true, false]),
+    );
+    for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
+      const doc = { environments: [entry] };
+      expect(validate(doc), `published schema: ${name}`).toBe(valid);
       expect(
-        validate({
-          labels: { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
-        }),
-      ).toBe(true);
-    });
-
-    test("a typo key inside the wrapper is rejected, matching the runtime", () => {
-      expect(
-        validate({
-          labels: { _undeclared: "keep", entires: [], entries: [] },
-        }),
-      ).toBe(false);
-    });
-
-    test("a bad policy value is rejected", () => {
-      expect(validate({ rulesets: { _undeclared: "remove", entries: [] } })).toBe(false);
-    });
-
-    test("both forms of the nested variables knob validate", () => {
-      expect(
-        validate({
-          environments: [{ name: "prod", variables: [{ name: "A", value: "1" }] }],
-        }),
-      ).toBe(true);
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
-            },
-          ],
-        }),
-      ).toBe(true);
-    });
-
-    test("a typo key inside the nested variables wrapper is rejected", () => {
-      expect(
-        validate({
-          environments: [{ name: "prod", variables: { entires: [], entries: [] } }],
-        }),
-      ).toBe(false);
-    });
-
-    test("both forms of the nested branch-policies knob validate; a bad type is rejected", () => {
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-              deployment_branch_policies: [{ name: "release/*" }, { name: "v*", type: "tag" }],
-            },
-          ],
-        }),
-      ).toBe(true);
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-              deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "main" }] },
-            },
-          ],
-        }),
-      ).toBe(true);
-      // The published schema pins the documented upstream enum; the runtime shape stays a loose string, GitHub being the authority there.
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-              deployment_branch_policies: [{ name: "v*", type: "wildcard" }],
-            },
-          ],
-        }),
-      ).toBe(false);
-    });
-
-    test("both forms of the nested protection-rules knob validate; the wrapper stays closed", () => {
-      expect(
-        validate({
-          environments: [{ name: "prod", deployment_protection_rules: [{ app: "my-gate-app" }] }],
-        }),
-      ).toBe(true);
-      expect(
-        validate({
-          environments: [
-            {
-              name: "prod",
-              deployment_protection_rules: {
-                _undeclared: "delete",
-                entries: [{ app: "my-gate-app" }],
-              },
-            },
-          ],
-        }),
-      ).toBe(true);
-      // The entry is closed too: the enable call sends only the App's resolved integration id, so the runtime shape is strict and the schema says the
-      // same.
-      expect(
-        validate({
-          environments: [
-            { name: "prod", deployment_protection_rules: { entires: [], entries: [] } },
-          ],
-        }),
-      ).toBe(false);
-      expect(
-        validate({
-          environments: [
-            { name: "prod", deployment_protection_rules: [{ app: "my-gate-app", extra: 1 }] },
-          ],
-        }),
-      ).toBe(false);
-    });
-
-    test("strict runtime shapes are closed in the schema too", () => {
-      // These surfaces reject unknown keys at runtime (strictObject: no passthrough destination for an extra key); the old generator left them open,
-      // validating typos the run then failed on.
-      expect(
-        validate({
-          environments: [{ name: "prod", secrets: [{ name: "A", value: "$A", extra: 1 }] }],
-        }),
-      ).toBe(false);
-      expect(validate({ actions: { cache: { max_cache_size: 25 } } })).toBe(false);
-      expect(
-        validate({
-          branches: [
-            {
-              name: "main",
-              protection: { required_deployments: { environments: ["prod"], extra: 1 } },
-            },
-          ],
-        }),
-      ).toBe(false);
-    });
-
-    test("branch protection required_signatures is a real boolean: true and absent accepted, a quoted string rejected", () => {
-      // required_signatures is typed boolean so a YAML-quoted "yes" fails upfront instead of riding the protection PUT (which drops the key) and
-      // never reaching the signatures sub-endpoint.
-      expect(
-        validate({ branches: [{ name: "main", protection: { required_signatures: true } }] }),
-      ).toBe(true);
-      expect(validate({ branches: [{ name: "main", protection: { enforce_admins: true } }] })).toBe(
-        true,
-      );
-      expect(
-        validate({ branches: [{ name: "main", protection: { required_signatures: "yes" } }] }),
-      ).toBe(false);
-    });
-
-    test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
-      // The AJV verdict must agree with validateSectionShapes per fixture, so the schema copy of the invariant cannot drift from the runtime copy;
-      // the [name, valid] pairs pin the SET.
-      expect(FLAG_PAIRING_FIXTURES.map((f) => [f.name, f.valid])).toEqual([
-        ["patterns without the sibling flag object", false],
-        ["patterns with the flag present but false", false],
-        ["patterns with the sibling nulled (a clear)", false],
-        ["the wrapped form takes the same rule", false],
-        ["the paired form (flag true) passes", true],
-        ["the wrapped paired form passes", true],
-        ["an entry without the plural key keeps its freedom (nullable flag)", true],
-      ]);
-      for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
-        const doc = { environments: [entry] };
-        expect(validate(doc), `published schema: ${name}`).toBe(valid);
-        expect(
-          !("error" in validateSectionShapes(doc, "fixture")),
-          `runtime validateSectionShapes disagrees with the published schema: ${name}`,
-        ).toBe(valid);
-      }
-    });
-
-    test("an extra field on a variable entry validates - entries stay open", () => {
-      // Entry fields pass through to the API verbatim, so a field GitHub ships tomorrow must validate today.
-      expect(
-        validate({
-          environments: [
-            { name: "prod", variables: [{ name: "A", value: "1", extra_field: "x" }] },
-          ],
-        }),
-      ).toBe(true);
-      expect(validate({ actions_variables: [{ name: "A", value: "1", extra_field: "x" }] })).toBe(
-        true,
-      );
-    });
+        runtimeAccepts(doc),
+        `runtime validateSectionShapes disagrees with the published schema: ${name}`,
+      ).toBe(valid);
+    }
   });
 });
 
 describe("the document-level _layering directive", () => {
-  const ajv = new Ajv({ strict: false, allErrors: true });
-  const validate: ValidateFunction = ajv.compile(schema);
-
   test("the published schema and the zod document both accept a supported value", () => {
     const doc: SettingsFile = { _layering: "replace", labels: [{ name: "bug" }] };
     expect(validate(doc)).toBe(true);

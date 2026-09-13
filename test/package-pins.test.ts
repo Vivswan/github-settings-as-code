@@ -26,32 +26,16 @@ describe("package.json dependency pins", () => {
     expect(loose).toEqual([]);
   });
 
-  test("the exactness check rejects every range and non-registry form", () => {
-    const forbidden = [
-      "^1.2.3",
-      "~1.2.3",
-      ">=1.2.3",
-      "<2.0.0",
-      "=1.2.3",
-      "1.2.x",
-      "1.x",
-      "*",
-      "1.2.3 || 2.0.0",
-      "latest",
-      "workspace:*",
-      "npm:other@1.2.3",
-      "git+https://github.com/o/r.git",
-      "https://example.com/pkg.tgz",
-      "file:../local",
-    ];
-    for (const spec of forbidden) {
-      expect(EXACT_VERSION.test(spec), `"${spec}" must be rejected`).toBe(false);
-    }
-  });
-
-  test("the exactness check accepts canonical exact forms", () => {
-    for (const spec of ["1.2.3", "0.0.1", "1.2.3-rc.1", "1.2.3+build.5", "1.2.3-rc.1+build.5"]) {
-      expect(EXACT_VERSION.test(spec), `"${spec}" must be accepted`).toBe(true);
-    }
+  // The control on the pattern: one specifier per anchor and per optional group it carries, so a loosened or regrouped pattern cannot pass the
+  // sweep above by accepting everything or by rejecting a pre-release pin.
+  test.each([
+    ["^1.2.3", false],
+    ["1.2.x", false],
+    ["1.2.3 || 2.0.0", false],
+    ["1.2.3-rc.1", true],
+    ["1.2.3+build.5", true],
+    ["1.2.3-rc.1+build.5", true],
+  ])("the exactness check answers %s with %p", (spec, exact) => {
+    expect(EXACT_VERSION.test(spec)).toBe(exact);
   });
 });

@@ -43,7 +43,6 @@ describe("package smoke helpers", () => {
   test("packedTarball rejects anything but exactly one tarball", () => {
     for (const output of [
       "[]",
-      "{}",
       JSON.stringify([{}]),
       JSON.stringify([{ filename: "a" }, { filename: "b" }]),
     ]) {

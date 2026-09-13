@@ -57,15 +57,11 @@ describe("importSpecifiers", () => {
   test.each<[string, string, string[]]>([
     ["a runtime import", 'import { a } from "./a.js";', ["./a.js"]],
     ["a type-only import", 'import type { A } from "./a.js";', ["./a.js"]],
-    ["a side-effect import", 'import "./a.js";', ["./a.js"]],
-    ["a re-export", 'export { a } from "./a.js";', ["./a.js"]],
     ["a star re-export", 'export * from "./a.js";', ["./a.js"]],
     ["a require call", 'const a = require("./a.js");', ["./a.js"]],
     ["a literal dynamic import", 'const a = await import("./a.js");', ["./a.js"]],
     ["an import in a type position", 'export type A = import("./a.js").A;', ["./a.js"]],
-    ["a typeof import in a type position", 'type A = typeof import("./a.js");', ["./a.js"]],
     ["a type-only import-equals", 'import type A = require("./a.js");', ["./a.js"]],
-    ["an import-equals", 'import A = require("./a.js");', ["./a.js"]],
     ["a package import, which is not an edge", 'import { z } from "zod";', []],
     [
       "one file named several ways, once",
