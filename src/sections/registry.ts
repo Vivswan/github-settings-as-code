@@ -73,13 +73,14 @@ type SectionModules = typeof byKey;
 
 /** Read off the handler signature, not the module's own declarations, so the two can be compared. */
 type PlanTypedOver<M> = M extends {
-  plan: (ctx: PlanContext<infer E, infer G>, desired: infer D) => unknown;
+  plan: (ctx: PlanContext<infer E, infer G, infer K>, desired: infer D) => unknown;
 }
-  ? { endpoints: E; graphql: G; desired: D }
+  ? { key: K; endpoints: E; graphql: G; desired: D }
   : never;
 
 /** The GraphQL arm defaults to GraphqlDict when the module declares none, which is what `SectionModule<"key", typeof ENDPOINTS>` supplies. */
 type ExpectedPlanDeclarations<K extends SectionKey, M> = {
+  key: K;
   endpoints: M extends { endpoints: infer E extends EndpointDict } ? E : never;
   graphql: M extends { graphql: infer G extends GraphqlDict } ? G : GraphqlDict;
   desired: Exclude<SettingsFile[K], undefined>;
@@ -101,16 +102,16 @@ type MisdeclaredPlanModules = {
 }[SectionKey];
 
 /**
- * A plan typed over anything but its own literal dictionaries and declared value fails here naming
- * itself, instead of losing role checking silently.
+ * A plan typed over anything but its own key, literal dictionaries, and declared value fails here
+ * naming itself, instead of losing role checking silently.
  */
 type _PlanModulesAreExact = MustBeNever<MisdeclaredPlanModules>;
 
-/** The dictionaries a module's snapshot() was TYPED over, or "absent" when it declares none. */
+/** The key and dictionaries a module's snapshot() was TYPED over, or "absent" when it declares none. */
 type SnapshotTypedOver<M> = M extends {
-  snapshot: (ctx: SnapshotContext<infer E, infer G>) => unknown;
+  snapshot: (ctx: SnapshotContext<infer E, infer G, infer K>) => unknown;
 }
-  ? { endpoints: E; graphql: G }
+  ? { key: K; endpoints: E; graphql: G }
   : "absent";
 
 /**
@@ -152,7 +153,53 @@ export type SectionGraphqlKey<K extends SectionKey = SectionKey> = {
  */
 const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 
-export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => byKeyErased[key]);
+/**
+ * The runtime twin of PlanContext's key brand, for a JavaScript consumer and the erased roster (SECTIONS
+ * is homogeneous, so the brand cannot tell two of its members apart): a handler given another section's
+ * context would otherwise fail on its first read with an undefined port. A rejection, not a throw, so
+ * the handler's promise contract holds for a consumer's `.catch()`. Each arm calls the module's own
+ * property at call time: handlers read `this`, and a test stubs the module while the engine holds this.
+ */
+function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
+  const refusal = (ctx: PlanContext, handler: "plan" | "snapshot"): Error | null =>
+    ctx.section === module.key
+      ? null
+      : new Error(
+          `${module.key}.${handler}() was given the context built for section "${ctx.section}"; build it from this module: ` +
+            `${handler}Context(sectionModule("${module.key}"), api, repo${handler === "plan" ? "" : ", onMissingPermission"})`,
+        );
+  return {
+    ...module,
+    plan: (ctx, desired) => {
+      const error = refusal(ctx, "plan");
+      return error === null ? module.plan(ctx, desired) : Promise.reject(error);
+    },
+    ...(hasSnapshot(module)
+      ? {
+          snapshot: (ctx: SnapshotContext<EndpointDict, GraphqlDict, K>) => {
+            const error = refusal(ctx, "snapshot");
+            return error === null ? module.snapshot(ctx) : Promise.reject(error);
+          },
+        }
+      : {}),
+  };
+}
+
+function hasSnapshot<K extends SectionKey>(
+  module: SectionModule<K>,
+): module is SectionModule<K> & { snapshot: NonNullable<SectionModule<K>["snapshot"]> } {
+  return module.snapshot !== undefined;
+}
+
+/**
+ * The one door out of src/sections: the engine, the library, and the roster below all reach a module
+ * through it, so the foreign-context refusal is applied here once and not in 26 handlers.
+ */
+const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
+  SECTION_KEYS.map((key) => [key, refusingForeignContexts(byKeyErased[key])]),
+) as { [K in SectionKey]: SectionModule<K> };
+
+export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => guarded[key]);
 
 export function sectionShape(key: SectionKey): z.ZodType {
   return byKey[key].shape;
@@ -160,7 +207,7 @@ export function sectionShape(key: SectionKey): z.ZodType {
 
 /** The section module for a key (validate.ts reads shape + closedSurface). */
 export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
-  return byKeyErased[key];
+  return guarded[key];
 }
 
 export type TaggedEndpoint = DeepReadonly<

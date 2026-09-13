@@ -257,14 +257,32 @@ type PlanReadPort<E extends EndpointDecl> = E extends { readonly advisory: true 
       ? Pick<BoundRead<E>, "probeAbsent" | "tryCall">
       : BoundRead<E>;
 
+/**
+ * `K` is the section the context was built for: a module's plan() takes PlanContext<_, _, K> over its own
+ * key, so labels' plan() cannot be handed branches' context once both are erased to EndpointDict
+ * (sectionModule() returns the erased module). The registry refuses the same mismatch at runtime.
+ */
 export interface PlanContext<
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
+  K extends SectionKey = SectionKey,
 > {
+  readonly section: K;
   /** The target repository, parsed once at the boundary (see RepoRef). */
   readonly repo: RepoRef;
   readonly read: BoundReads<E, G>;
 }
+
+/**
+ * A plan handler with its context's key brand erased: a shared handler serving several sections is
+ * compared to each branded per-key signature through this (repo-secrets, repo-variables, setup-section).
+ */
+export type KeyErasedPlan<P> = P extends (
+  ctx: PlanContext<infer E, infer G, infer _K>,
+  declared: infer D,
+) => infer R
+  ? (ctx: PlanContext<E, G>, declared: D) => R
+  : never;
 
 /** The run's on-missing-permission input: how a read the token is denied classifies. */
 export type MissingPermissionPolicy = "fail" | "warn";
@@ -296,7 +314,8 @@ export class DenialPolicy {
 export interface SnapshotContext<
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
-> extends PlanContext<E, G> {
+  K extends SectionKey = SectionKey,
+> extends PlanContext<E, G, K> {
   readonly onMissingPermission: DenialPolicy;
 }
 
@@ -526,20 +545,24 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   return Object.freeze(port) as BoundReads<E, G>;
 }
 
-/** `E` and `G` infer from the module, so a caller cannot ask for a port the section never declared. */
-export function planContext<E extends EndpointDict, G extends GraphqlDict>(
-  meta: SectionMeta<SectionKey, E, G>,
+/** `K`, `E`, and `G` infer from the module, so a caller cannot ask for a port the section never declared. */
+export function planContext<K extends SectionKey, E extends EndpointDict, G extends GraphqlDict>(
+  meta: SectionMeta<K, E, G>,
   api: GithubClient,
   repo: RepoRef,
-): PlanContext<E, G> {
-  return { repo, read: boundReads(meta, api, repo) };
+): PlanContext<E, G, K> {
+  return { section: meta.key, repo, read: boundReads(meta, api, repo) };
 }
 
-export function snapshotContext<E extends EndpointDict, G extends GraphqlDict>(
-  meta: SectionMeta<SectionKey, E, G>,
+export function snapshotContext<
+  K extends SectionKey,
+  E extends EndpointDict,
+  G extends GraphqlDict,
+>(
+  meta: SectionMeta<K, E, G>,
   api: GithubClient,
   repo: RepoRef,
   onMissingPermission: MissingPermissionPolicy,
-): SnapshotContext<E, G> {
+): SnapshotContext<E, G, K> {
   return { ...planContext(meta, api, repo), onMissingPermission: mintPolicy(onMissingPermission) };
 }

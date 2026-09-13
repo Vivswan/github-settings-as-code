@@ -51,11 +51,37 @@ deepStrictEqual(schema.$id, ${JSON.stringify(SCHEMA_ID)});
 console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
 `;
 
-/** The consumer compiled against index.d.ts: a value and a type from the entry, both used. */
-const TS_CONSUMER = `import { SECTION_KEYS, type SectionKey, validateSettings } from "${PACKAGE}";
+/**
+ * The consumer compiled against index.d.ts, no client behind it. The expect-error lines are the
+ * controls that the bundle keeps DenialPolicy nominal (the literal is its public shape, so only the
+ * private member rejects it) and keeps the context branded with its section's key.
+ */
+const TS_CONSUMER = `import {
+  type GithubClient,
+  planContext,
+  type RepoRef,
+  SECTION_KEYS,
+  type SectionKey,
+  type SectionPlan,
+  type SectionSnapshot,
+  sectionModule,
+  type SnapshotContext,
+  snapshotContext,
+  validateSettings,
+} from "${PACKAGE}";
 const first: SectionKey | undefined = SECTION_KEYS[0];
 const result = validateSettings({ labels: [] });
 export const ok: boolean = result.isOk() && first === "repository";
+declare const client: GithubClient;
+declare const repo: RepoRef;
+const labels = sectionModule("labels");
+const snapshotCtx = snapshotContext(labels, client, repo, "warn");
+export const direct = (): Promise<[SectionPlan, SectionSnapshot<"labels"> | undefined]> =>
+  Promise.all([labels.plan(planContext(labels, client, repo), []), labels.snapshot?.(snapshotCtx)]);
+// @ts-expect-error only snapshotContext() mints a DenialPolicy
+export const forged: SnapshotContext = { ...snapshotCtx, onMissingPermission: { notesDenials: true } };
+// @ts-expect-error a context built for branches is not labels' context
+export const foreign = () => labels.plan(planContext(sectionModule("branches"), client, repo), []);
 `;
 
 /** The settings file the installed CLI validates: one section, valid as written. */

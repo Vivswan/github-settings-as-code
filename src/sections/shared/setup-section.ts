@@ -12,10 +12,16 @@ import { CodeQualitySetupConfig } from "../code_quality_setup/schema.js";
 import { CodeScanningDefaultSetupConfig } from "../code_scanning_default_setup/schema.js";
 import { expand } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
-import { loosen, requirePlainMapping, type SectionSnapshot } from "../contract/module.js";
+import {
+  type GraphqlDict,
+  loosen,
+  requirePlainMapping,
+  type SectionSnapshot,
+} from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
+  type KeyErasedPlan,
   type PlanContext,
   type PlannedOp,
   plainData,
@@ -72,7 +78,7 @@ type SetupDeclared<K extends SetupKey> = Exclude<SettingsFile[K], undefined>;
  */
 type SetupPlan<K extends SetupKey> = {
   [F in SetupKey]: (
-    ctx: PlanContext<SetupEndpoints<F>>,
+    ctx: PlanContext<SetupEndpoints<F>, GraphqlDict, F>,
     declared: SetupDeclared<F>,
   ) => Promise<SectionPlan<PlannedOp<SetupEndpoints<F>>>>;
 }[K];
@@ -88,7 +94,7 @@ type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fals
 
 type _SharedPlanIsEverySetupPlan = MustBeNever<
   {
-    [K in SetupKey]: Invariant<SharedPlan, SetupPlan<K>> extends true ? never : K;
+    [K in SetupKey]: Invariant<SharedPlan, KeyErasedPlan<SetupPlan<K>>> extends true ? never : K;
   }[SetupKey]
 >;
 
@@ -106,7 +112,9 @@ export interface SetupSectionModule<K extends SetupKey> {
   readonly endpoints: SetupEndpoints<K>;
   readonly shape: z.ZodType;
   readonly plan: SetupPlan<K>;
-  readonly snapshot: (ctx: SnapshotContext<SetupEndpoints<K>>) => Promise<SectionSnapshot<K>>;
+  readonly snapshot: (
+    ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
+  ) => Promise<SectionSnapshot<K>>;
 }
 
 /** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
@@ -175,8 +183,10 @@ export function setupSection<K extends SetupKey>(setup: {
   // the snapshot is that body on the slice's keys; the PATCH takes the same keys back verbatim.
   // SETUPS pairs the slice with its key, so its projection IS the section's declared type; the
   // casts are the wide-port and per-key boundaries.
-  const snapshot = async (ctx: SnapshotContext<SetupEndpoints<K>>): Promise<SectionSnapshot<K>> => {
-    const live = await (ctx as SnapshotContext<WideEndpoints>).read.get.call();
+  const snapshot = async (
+    ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
+  ): Promise<SectionSnapshot<K>> => {
+    const live = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call();
     return { value: projectOntoSchema(slice as z.ZodType, live) as SetupDeclared<K>, notes: [] };
   };
 
