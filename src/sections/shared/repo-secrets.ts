@@ -14,7 +14,7 @@ import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -36,11 +36,10 @@ import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   LIVE_SECRET_NAMES,
   listSecretValues,
+  liveSecretsByKey,
   planSecrets,
-  rejectDuplicateSecretNames,
   type SecretEntry,
   type SecretsPlanScope,
-  secretKey,
 } from "./secrets-engine.js";
 import { knobbedSnapshot, unreadableSecretNote } from "./snapshot-helpers.js";
 
@@ -228,7 +227,6 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-    rejectDuplicateSecretNames(section, entries);
     // Built where the routes are known, so params typecheck.
     type Op = PlannedOp<WideEndpoints>;
     type Described<R extends Op["role"]> = Extract<Op, { role: R }> & { readonly describe: string };
@@ -264,8 +262,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   };
 
   // GitHub lists names only, so each entry carries the per-store reference the operator must
-  // export before an apply, and a note says so per secret. Names are read through secretKey, the
-  // uppercase form GitHub stores and the planner compares by, so the reference grammar holds.
+  // export before an apply, and a note says so per secret. The engine's index hands back the
+  // uppercase keys GitHub stores and the planner compares by, so the reference grammar holds.
   const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
     const live = parseLive(
       section,
@@ -276,16 +274,9 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }
-    liveByIdentity(
-      section,
-      noun,
-      live,
-      (item) => secretKey(item.name),
-      (item) => item.name,
-    );
-    const references = live.map(({ name }) => ({
-      name: secretKey(name),
-      ...snapshotSecretReference(pathSegment, secretKey(name)),
+    const references = [...liveSecretsByKey(section, noun, live).keys()].map((name) => ({
+      name,
+      ...snapshotSecretReference(pathSegment, name),
     }));
     const entries = references.map(({ name, reference }) => ({ name, value: reference }));
     const notes = references.map(({ name, variable }) =>

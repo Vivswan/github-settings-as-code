@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
   loosen,
@@ -13,7 +13,7 @@ import { rejectDuplicates } from "../contract/requests.js";
 import { listSecretValues } from "../shared/secrets-engine.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS } from "./endpoints.js";
-import { NESTED_KEYS, planNested, splitEntry, validateNested } from "./nested.js";
+import { NESTED_KEYS, planNested, splitEntry } from "./nested.js";
 import {
   type EnvironmentsPlan,
   environmentNodeId,
@@ -26,8 +26,8 @@ import {
 import { EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
 import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
-/** One item of the environment listing: the GET body plan() probes by name, so the name is pinned. */
-const LiveEnvironment = z.looseObject({ name: z.string() });
+/** One item of the environment listing: the GET body plan() probes by name, so the name is pinned; the id tells two same-fold names apart. */
+const LiveEnvironment = z.looseObject({ id: z.number().optional(), name: z.string() });
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -73,13 +73,6 @@ export const environmentsSection = {
       (env) => env.name.toLowerCase(),
       (env) => env.name,
     );
-    // Every nested list is validated before the first read: apply must never start on a document
-    // one entry invalidates.
-    for (const env of desired) {
-      for (const key of NESTED_KEYS) {
-        validateNested(this, key, env);
-      }
-    }
     const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
     /** Each entry's declared pin state, in file order (order IS the pin order). */
     const pins: PinDeclaration[] = [];
@@ -152,6 +145,14 @@ export const environmentsSection = {
     if (listed.length === 0) {
       return { value: undefined, notes: [] };
     }
+    // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
+    liveByIdentity(
+      this,
+      "environment",
+      listed,
+      (live) => live.name.toLowerCase(),
+      (live) => liveIdentity(live.name, { environment_id: live.id }),
+    );
     const notes: string[] = [];
     const entries: EnvironmentConfig[] = [];
     for (const live of listed) {

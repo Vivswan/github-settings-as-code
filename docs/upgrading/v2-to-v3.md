@@ -18,7 +18,7 @@ Twenty-four breaks (the ninth, the twenty-third, and the last are for library co
 | A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
 | Library: a documented public entry, an internal one, and the v3 names | One entry, 192 names; `GithubApi`, `RepoRunReport`, `validateSettings` returning `warnings` | `.` holds the 118 documented names, `./internal` the rest; `GitHubApi`, `CheckReport`, every report carries `log` | The old import fails to compile, naming the missing export; every rename is in [section 9](#9-library-the-public-entry-and-the-v3-names) |
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
-| Two live items under one identity fail the section | The last one listed won silently in most sections | Every list section refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
+| Two live items under one identity fail the section | The last one listed won silently in most sections | Every live list refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
 | The webhook snapshot placeholder | `$WEBHOOK_SECRET_<id>` | `$SECRET_WEBHOOK_<id>` | No error: an old reference keeps resolving from its old export; a new snapshot writes the new name, so move both together; [section 12](#12-the-webhook-snapshot-placeholder-leads-with-secret_) |
 | One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
@@ -200,13 +200,13 @@ Snapshot targets ride the same seal now: a private target's notes, file path, an
 
 ## 11. Two live items under one identity fail the section
 
-v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed). v3 refuses every list section the same way, whether or not the settings file declares the pair:
+v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed; workflows matched the first; teams acted on both). v3 refuses every live list the same way, whether or not the settings file declares the pair: the list sections, the nested environment lists, and the seven reads that had no guard before (the teams listing, the workflows listing, the environment listing, the pinned environments, the protected-branch listing, the GraphQL protection rules, and the protection-rule Apps an environment can enable). Each pair is named the same way, the key first and the server id beside it when one exists:
 
 ```text
 webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook (hook id 11)" and "https://ci.example.com/hook (hook id 12)". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again
 ```
 
-Snapshot says the same. Delete the duplicates on GitHub, then re-run.
+Snapshot says the same. Delete the duplicates on GitHub, then re-run. The protection-rule Apps list is the one read whose refusal can follow a write: for an environment the run creates, GitHub serves the list only once the environment's PUT has landed, so that refusal lands after it; for an existing environment it lands at plan, before any write.
 
 ## 12. The webhook snapshot placeholder leads with SECRET_
 

@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -112,7 +112,13 @@ function propertiesByName(
   section: SectionMeta,
   live: readonly z.infer<typeof LiveProperty>[],
 ): Map<string, z.infer<typeof LiveProperty>> {
-  return liveByIdentity(section, "custom property", live, (p) => p.property_name);
+  return liveByIdentity(
+    section,
+    "custom property",
+    live,
+    (p) => p.property_name,
+    (p) => liveIdentity(p.property_name),
+  );
 }
 
 interface PendingUpdate {

@@ -105,15 +105,15 @@ export const ENDPOINTS = {
     permission: { repo: ["actions"] },
     denialHint: PROTECTION_RULES_DENIAL_HINT,
   },
-  // Read inside the enabling POST's payload thunk (protection-rules.ts), once per environment
-  // that has a missing rule, so check mode never issues it.
+  // Read at plan for an environment that exists, so an unlisted or duplicated App fails before any
+  // write; for an environment the run creates the list 404s until its PUT lands, so the enabling
+  // POST's payload thunk reads it then (protection-rules.ts).
   listProtectionRuleApps: {
     route:
       "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/apps",
     statuses: { 200: "the protection-rule Apps available to this environment" },
     permission: { repo: ["administration"] },
     denialHint: PROTECTION_RULES_DENIAL_HINT,
-    phase: "execution",
   },
   createProtectionRule: {
     route: "POST /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules",

@@ -4,6 +4,7 @@ import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { ExecTools, Late, PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import { type BranchConfig, type BranchProtectionConfig, parseBypassActor } from "./schema.js";
@@ -303,7 +304,7 @@ export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
     // The declared NOT_FOUND: the denial surfaces at the first write instead of here.
     return null;
   }
-  return indexRules(read.items);
+  return indexRules(ctx, read.items);
 }
 
 /** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
@@ -314,28 +315,35 @@ export async function fetchRulesForSnapshot(ctx: BranchesContext): Promise<Map<s
       "BUG: branches: the snapshot rules query declares no tolerated outcome, yet its read returned an error instead of throwing",
     );
   }
-  return indexRules(read.items);
+  return indexRules(ctx, read.items);
 }
 
-function indexRules(items: readonly unknown[]): Map<string, RuleNode> {
-  const byPattern = new Map<string, RuleNode>();
-  for (const node of items) {
-    if (typeof node === "object" && node !== null) {
-      const rule = node as RuleNode;
-      // The nested allowance connection is read in one 100-node page; a rule beyond that would
-      // silently truncate, so check would report phantom drift against the truncated list.
-      const allowances = rule.bypassForcePushAllowances as
-        | { pageInfo?: { hasNextPage?: unknown } }
-        | undefined;
-      if (allowances?.pageInfo?.hasNextPage === true) {
-        throw new Error(
-          `branches: the live protection rule "${String(rule.pattern)}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
-        );
-      }
-      byPattern.set(String(rule.pattern), rule);
+/** The rules by pattern under the duplicate-live guard: GitHub matches a pattern exactly, so the fold is the pattern itself. */
+function indexRules(ctx: BranchesContext, items: readonly unknown[]): Map<string, RuleNode> {
+  const rules = items.flatMap((node) => {
+    if (typeof node !== "object" || node === null) {
+      return [];
     }
-  }
-  return byPattern;
+    const rule = node as RuleNode;
+    // The nested allowance connection is read in one 100-node page; a rule beyond that would
+    // silently truncate, so check would report phantom drift against the truncated list.
+    const allowances = rule.bypassForcePushAllowances as
+      | { pageInfo?: { hasNextPage?: unknown } }
+      | undefined;
+    if (allowances?.pageInfo?.hasNextPage === true) {
+      throw new Error(
+        `branches: the live protection rule "${String(rule.pattern)}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
+      );
+    }
+    return [rule];
+  });
+  return liveByIdentity(
+    { key: ctx.section },
+    "protection rule",
+    rules,
+    (rule) => String(rule.pattern),
+    (rule) => liveIdentity(String(rule.pattern), { rule_id: String(rule.id) }),
+  );
 }
 
 export function bypassActorStrings(node: RuleNode): string[] {

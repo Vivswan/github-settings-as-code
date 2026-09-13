@@ -5,6 +5,7 @@
 
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
@@ -130,7 +131,7 @@ async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
   if ("error" in listed) {
     return [];
   }
-  return rankPins(listed.items);
+  return rankPins(ctx, listed.items);
 }
 
 /** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
@@ -141,11 +142,20 @@ export async function snapshotPins(ctx: EnvironmentsPlanContext): Promise<Pinned
       "BUG: environments: the snapshot pins query declares no tolerated outcome, yet its read returned an error instead of throwing",
     );
   }
-  return rankPins(listed.items).map((pin) => pin.name);
+  return rankPins(ctx, listed.items).map((pin) => pin.name);
 }
 
-function rankPins(nodes: readonly unknown[]): LivePin[] {
-  return nodes.map(livePin).sort((a, b) => a.position - b.position);
+/** The pins in rank order, under the duplicate-live guard (one pin per environment, names folded as pinKey folds them). */
+function rankPins(ctx: EnvironmentsPlanContext, nodes: readonly unknown[]): LivePin[] {
+  const pins = nodes.map(livePin).sort((a, b) => a.position - b.position);
+  liveByIdentity(
+    { key: ctx.section },
+    "pinned environment",
+    pins,
+    (pin) => pinKey(pin.name),
+    (pin) => liveIdentity(pin.name, { position: pin.position }),
+  );
+  return pins;
 }
 
 /** Environment names are case-insensitive on GitHub. */

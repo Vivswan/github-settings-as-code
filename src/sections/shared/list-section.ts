@@ -11,7 +11,7 @@ import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import { liveByIdentity, parseLive, plural } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
@@ -27,6 +27,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
+  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -421,19 +422,19 @@ type Fields = Readonly<Record<string, unknown>>;
 
 /** A recreate names its remedy once on the generic line, so its field lines carry none. */
 interface Remedies {
-  readonly value: string;
+  readonly value: string | null;
   readonly rename: string;
   readonly phantom: string;
 }
 
 const UPDATE_REMEDIES: Remedies = {
-  value: "; apply will set the declared value",
+  value: "apply will set the declared value",
   rename: "apply will rename it",
   phantom: "this update will re-run",
 };
 
 const RECREATE_REMEDIES: Remedies = {
-  value: "",
+  value: null,
   rename: "apply will delete and recreate it",
   phantom: "this delete-and-recreate will repeat",
 };
@@ -507,18 +508,6 @@ function nameOf(record: Fields, field: string): string {
   return value;
 }
 
-/**
- * A live item named for a message about two of them: the name, then the address when it says more
- * (`v1 (milestone number 1)`; a label's address IS its name, so nothing is added).
- */
-function addressed(decl: ErasedDecl<string>, item: object, name: string): string {
-  const params = Object.entries(decl.address(item)).filter(([, value]) => value !== name);
-  if (params.length === 0) {
-    return name;
-  }
-  return `${name} (${params.map(([param, value]) => `${param.replace(/_/g, " ")} ${value}`).join(", ")})`;
-}
-
 // --- Secret fields ----------------------------------------------------------
 
 /** The secret paths of `decl` a write declares (holds a string at). */
@@ -582,7 +571,12 @@ function renderEntryDelta(
     delta.path.every((step) => typeof step === "string") &&
     (typeof delta.desired !== "object" || delta.desired === null)
   ) {
-    return `${label}.${delta.path.join(".")}: declared ${JSON.stringify(delta.desired)} != live ${JSON.stringify(delta.live)}${remedies.value}`;
+    return valueDrift(
+      `${label}.${delta.path.join(".")}`,
+      JSON.stringify(delta.desired),
+      JSON.stringify(delta.live),
+      { remedy: remedies.value },
+    );
   }
   return renderDelta(label, delta);
 }
@@ -741,7 +735,7 @@ async function planList<Key extends string>(
     noun,
     liveItems,
     (item) => item.key,
-    (item) => addressed(decl, item.item, item.name),
+    (item) => liveIdentity(item.name, decl.address(item.item)),
   );
   const liveConflicts =
     decl.conflicts?.live?.(
@@ -944,7 +938,7 @@ async function snapshotList(
     noun,
     items,
     (item) => item.key,
-    (item) => addressed(decl, item.item, item.name),
+    (item) => liveIdentity(item.name, decl.address(item.item)),
   );
   const entries: object[] = [];
   for (const { item, name } of items) {

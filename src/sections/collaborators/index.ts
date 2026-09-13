@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -116,7 +116,7 @@ async function readLiveAccess(
       "collaborator",
       collaborators,
       (c) => c.login.toLowerCase(),
-      (c) => c.login,
+      (c) => liveIdentity(c.login),
     ),
     invitations,
     inviteByLogin: liveByIdentity(
@@ -124,7 +124,7 @@ async function readLiveAccess(
       "pending invitation",
       invitations,
       (invitation) => invitation.invitee.login.toLowerCase(),
-      (invitation) => invitation.invitee.login,
+      (invitation) => liveIdentity(invitation.invitee.login, { invitation_id: invitation.id }),
     ),
     emailInvitations: allInvitations.filter((invitation) => !isNamedInvitation(invitation)),
   };
@@ -184,12 +184,9 @@ export const collaboratorsSection = {
             payload: { permission: wantPermission },
             describe: `updating collaborator "${username}"`,
             drift: [
-              valueDrift(
-                label,
-                JSON.stringify(wantRole),
-                JSON.stringify(existing.role_name),
-                "apply will set the declared permission",
-              ),
+              valueDrift(label, JSON.stringify(wantRole), JSON.stringify(existing.role_name), {
+                remedy: "apply will set the declared permission",
+              }),
             ],
             change: `updated collaborator "${username}" (${wantPermission})`,
           });
@@ -218,7 +215,7 @@ export const collaboratorsSection = {
                 `${label} (pending invitation)`,
                 JSON.stringify(wantRole),
                 JSON.stringify(invitation.permissions),
-                "apply will update the invitation",
+                { remedy: "apply will update the invitation" },
               ),
             ],
             change: `updated pending invitation for "${username}" (${wantPermission})`,

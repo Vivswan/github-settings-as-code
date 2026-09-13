@@ -7,7 +7,7 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
-import { liveByIdentity } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
@@ -52,6 +52,8 @@ export interface SecretsScopeProse {
   where?: string;
   /** Appended to change and describe lines (` in environment "prod"`). */
   suffix?: string;
+  /** What two declared entries under one name are reported as naming, when `<section> entry` understates it (`secret of the "prod" environment`). */
+  what?: string;
 }
 
 /** The payload thunk resolves and seals only when executed, so the plan carries the `$NAME` reference and nothing derived from a value. */
@@ -114,7 +116,8 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
 
 /**
  * GitHub folds two names equal uppercased into one secret, so the last write would silently win on
- * every run. `what` names the resource when "<section> entry" understates it (a nested scope's).
+ * every run. planSecrets runs it before its read, so no scope can skip it; `what` names the resource
+ * when "<section> entry" understates it (a nested scope's).
  */
 export function rejectDuplicateSecretNames(
   section: SectionMeta,
@@ -222,18 +225,22 @@ function undeclaredSecretDrift(
   });
 }
 
-/** Uppercase key -> the name as listed (normalizing keeps a differently-cased mock harmless). */
-function liveSecretsByKey(
+/**
+ * Uppercase key -> the name as listed (normalizing keeps a differently-cased mock harmless), under the
+ * duplicate-live guard: plan() and every snapshot over a secrets list index through it, so none can
+ * read a pair GitHub folds into one secret as two.
+ */
+export function liveSecretsByKey(
   section: SectionMeta,
-  scope: SecretsPlanScope<AnyPlannedOp, AnyPlannedOp>,
+  noun: string,
   live: readonly LiveSecretName[],
 ): Map<string, string> {
   const byKey = liveByIdentity(
     section,
-    scope.noun,
+    noun,
     live,
     (item) => secretKey(item.name),
-    (item) => item.name,
+    (item) => liveIdentity(item.name),
   );
   return new Map([...byKey].map(([key, item]) => [key, item.name]));
 }
@@ -255,7 +262,8 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   const suffix = scope.suffix ?? "";
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveSecretsByKey(section, scope, await scope.list());
+  rejectDuplicateSecretNames(section, entries, scope.what);
+  const liveByKey = liveSecretsByKey(section, scope.noun, await scope.list());
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
   // Read once per scope, by the first payload thunk that runs; the token it demands is the one the thunk received.

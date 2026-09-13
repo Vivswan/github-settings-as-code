@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
@@ -289,6 +289,14 @@ export const branchesSection = {
       ENDPOINTS.listProtected,
       z.array(LiveBranchSummary),
       await ctx.read.listProtected.listAll({ query: { protected: "true" } }),
+    );
+    // Git refnames are exact, so the fold is the name itself.
+    liveByIdentity(
+      this,
+      "protected branch",
+      listed,
+      (branch) => branch.name,
+      (branch) => liveIdentity(branch.name),
     );
     const rules = await fetchRulesForSnapshot(ctx);
     const entries: BranchConfig[] = [];

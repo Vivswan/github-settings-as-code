@@ -101,7 +101,7 @@ describe("environments plan", () => {
       'updated variable "UPD" in environment "prod"',
       'DELETED undeclared variable "GONE" in environment "prod"',
     ]);
-    // The strip builds a fresh object, so the duplicate pre-pass (which reads env.variables across all entries) never sees a mutated declaration.
+    // The strip builds a fresh object, so the declaration the caller holds is never mutated.
     expect(declared[0]?.variables).toEqual([
       { name: "NEW", value: "v1" },
       { name: "UPD", value: "v2" },
@@ -168,15 +168,14 @@ describe("environments plan", () => {
     ctx.read.probe.call;
     // @ts-expect-error nor a list
     ctx.read.probe.listAll;
-    // The sealing key and the Apps listing are execution-phase reads, so a plan() body cannot spell either call: the token comes first, and
-    // only a thunk holds one.
+    // The sealing key is an execution-phase read, so a plan() body cannot spell the call: the token comes first, and only a thunk holds one.
+    // The Apps listing is a plan read (an existing environment resolves its missing rules before any write), so its envelope key comes first.
     const options = { params: { environment_name: "prod" } };
     // @ts-expect-error a request options object is not the token
     const forgedKey: Parameters<typeof ctx.read.secretsPublicKey.call>[0] = options;
-    // @ts-expect-error nor is the envelope key
-    const forgedApps: Parameters<typeof ctx.read.listProtectionRuleApps.listAllEnveloped>[0] =
+    const appsEnvelope: Parameters<typeof ctx.read.listProtectionRuleApps.listAllEnveloped>[0] =
       "available_custom_deployment_protection_rule_integrations";
-    expect([Object.keys(forgedKey), String(forgedApps)]).toEqual([
+    expect([Object.keys(forgedKey), appsEnvelope]).toEqual([
       ["params"],
       "available_custom_deployment_protection_rule_integrations",
     ]);
@@ -279,7 +278,7 @@ describe("environments variables case-insensitive matching", () => {
     expect(patch?.payload).toEqual({ value: "new" });
   });
 
-  test("two declared names that collapse case-insensitively are rejected before any request", async () => {
+  test("two declared names that collapse case-insensitively are rejected before any write", async () => {
     const api = new MockApi({});
     await expect(
       plan(api, [
@@ -294,7 +293,8 @@ describe("environments variables case-insensitive matching", () => {
     ).rejects.toThrow(
       'environments: the settings file declares entries that name the same variable of the "prod" environment: "Region" and "REGION". Keep exactly one entry per resource',
     );
-    expect(api.calls).toEqual([]);
+    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
+    expect(api.mutations()).toEqual([]);
   });
 });
 
@@ -584,7 +584,8 @@ describe("environments nested secrets validation and shape", () => {
         },
       ]),
     ).rejects.toThrow(/the same secret of the "prod" environment: "token" and "TOKEN"/);
-    expect(api.calls).toEqual([]);
+    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
+    expect(api.mutations()).toEqual([]);
   });
 
   test("secret entries are strict; the singular entry-level `secret` key is rejected by name", () => {
@@ -811,7 +812,8 @@ describe("environments deployment branch policies validation and shape", () => {
     ).rejects.toThrow(
       'environments: the settings file declares entries that name the same deployment branch policy of the "prod" environment: "release/*" and "release/*". Keep exactly one entry per resource',
     );
-    expect(api.calls).toEqual([]);
+    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
+    expect(api.mutations()).toEqual([]);
   });
 
   test("both declared forms parse; entries stay loose and the wrapper strict", () => {
@@ -876,7 +878,7 @@ function ruleAppsBody(apps: Array<{ id: number; slug: string }>) {
 }
 
 describe("environments deployment protection rules apply mode", () => {
-  test("enables a missing rule via ONE apps fetch after the PUT, keeps an undeclared one by default", async () => {
+  test("enables a missing rule via ONE apps fetch at plan, keeps an undeclared one by default", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
       "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
@@ -894,13 +896,16 @@ describe("environments deployment protection rules apply mode", () => {
       },
     ];
     await plan(api, declared);
-    expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
+    // The Apps list resolves the missing slug at plan, ahead of any write.
+    expect(api.calls.filter((c) => c.path.includes("/apps"))).toHaveLength(1);
+    expect(api.mutations()).toEqual([]);
     const result = await apply(api, declared);
     expect(api.calls.find((c) => c.method === "PUT")?.payload).toEqual({ wait_timer: 5 });
     const order = api.calls.map((c) => `${c.method} ${c.path}`);
-    expect(order.filter((c) => c.includes("/apps"))).toHaveLength(1);
+    // One fetch per plan (the apply above re-plans); the executing POST reuses its plan's resolution.
+    expect(order.filter((c) => c.includes("/apps"))).toHaveLength(2);
     expect(order.indexOf("PUT /repos/o/r/environments/prod")).toBeLessThan(
-      order.indexOf(RULE_APPS_LIST),
+      order.indexOf(RULE_CREATE),
     );
     const posts = api.calls.filter((c) => c.method === "POST");
     expect(posts).toHaveLength(1);
@@ -925,6 +930,29 @@ describe("environments deployment protection rules apply mode", () => {
     ]);
     expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
     expect(result.changes).toEqual([]);
+  });
+
+  test("two available Apps under one slug fail the plan of an existing environment before any write, naming both", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveEnv("prod"),
+      [RULES_LIST]: rulesBody([]),
+      [RULE_APPS_LIST]: ruleAppsBody([
+        { id: 3516, slug: "region-guard" },
+        { id: 9999, slug: "region-guard" },
+      ]),
+    }).allowMutations(RULE_CREATE, "PUT /repos/o/r/environments/prod");
+    await expect(
+      apply(api, [
+        { name: "prod", wait_timer: 5, deployment_protection_rules: [{ app: "region-guard" }] },
+      ]),
+    ).rejects.toThrow(
+      new Error(
+        "environments: GitHub holds protection-rule Apps that resolve to one identity: " +
+          '"region-guard (app id 3516)" and "region-guard (app id 9999)". This section manages one ' +
+          "protection-rule App per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
+      ),
+    );
+    expect(api.mutations()).toEqual([]);
   });
 
   test("the wrapped _undeclared:delete form DISABLES a live undeclared rule by id", async () => {
@@ -1078,6 +1106,7 @@ describe("environments deployment protection rules check mode", () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
       [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
+      [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
     });
     const kept = await check(api, [
       { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
@@ -1086,7 +1115,8 @@ describe("environments deployment protection rules check mode", () => {
       "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment",
     ]);
     expect(kept.notes.join("\n")).toContain('deployment protection rule "change-window"');
-    expect(api.calls.some((c) => c.path.includes("/apps"))).toBe(false);
+    // The missing rule resolves its App at plan, so check reads the listing once and writes nothing.
+    expect(api.calls.filter((c) => c.path.includes("/apps"))).toHaveLength(1);
     expect(api.mutations()).toEqual([]);
 
     const api2 = new MockApi({
@@ -1169,7 +1199,8 @@ describe("environments deployment protection rules validation and shape", () => 
     ).rejects.toThrow(
       'environments: the settings file declares entries that name the same deployment protection rule App of the "prod" environment: "deploy-gate" and "deploy-gate". Keep exactly one entry per resource',
     );
-    expect(api.calls).toEqual([]);
+    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
+    expect(api.mutations()).toEqual([]);
   });
 
   test("both declared forms parse; entries are STRICT (the POST carries only the resolved id)", () => {

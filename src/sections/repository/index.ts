@@ -583,14 +583,11 @@ export const repositorySection = {
       plan.ops.push({
         role,
         drift: [
-          valueDrift(
-            `repository.${toggle.key}`,
-            String(want),
-            String(enabled),
-            enforced
+          valueDrift(`repository.${toggle.key}`, String(want), String(enabled), {
+            remedy: enforced
               ? `the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
               : undefined,
-          ),
+          }),
         ],
         tolerate: {
           outcome: (error) => ({ note: toggleTolerated(this, toggle, role, error.status) }),

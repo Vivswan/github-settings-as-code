@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -136,11 +136,17 @@ function matches(declaredValue: string | string[], liveValue: unknown): boolean 
   return JSON.stringify(liveComparable) === JSON.stringify(declaredValue);
 }
 
-function patternsByName<T extends { name: string }>(
+function patternsByName<T extends { id: number; name: string }>(
   section: SectionMeta,
   live: readonly T[],
 ): Map<string, T> {
-  return liveByIdentity(section, "secret scanning custom pattern", live, (p) => p.name);
+  return liveByIdentity(
+    section,
+    "secret scanning custom pattern",
+    live,
+    (p) => p.name,
+    (p) => liveIdentity(p.name, { pattern_id: p.id }),
+  );
 }
 
 const key = "secret_scanning_custom_patterns";
