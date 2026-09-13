@@ -6,14 +6,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ARTIFACTS_DIR } from "../e2e/constants.js";
 import { ROOT } from "../root.js";
 import { readWorkflow, type Step } from "./workflow-loader.js";
 
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
-/** The harness writes every failure's replay bundle under one directory, spelled as path segments where the dump happens. */
-const RUNNER = readFileSync(join(ROOT, "test", "e2e", "runner.ts"), "utf8");
 
 const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [
   ["e2e-nightly.yml", "nightly"],
@@ -52,13 +50,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(report?.with?.["artifact-name"]).toBe(name);
     const dir = String(upload?.with?.path).replace(/\/$/, "");
     expect(report?.with?.["artifacts-dir"]).toBe(dir);
-    // The runner joins the directory from ROOT and quoted segments; the workflow's path must be exactly those segments, in order.
-    const segments = dir
-      .split("/")
-      .map((segment) => JSON.stringify(segment).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    expect(RUNNER, `test/e2e/runner.ts never joins ${dir} under ROOT`).toMatch(
-      new RegExp(`join\\(\\s*ROOT\\s*,\\s*${segments.join("\\s*,\\s*")}\\s*,\\s*\``),
-    );
+    expect(join(ROOT, dir)).toBe(ARTIFACTS_DIR);
   });
 
   test("on success, the resolve step closes the label the report step files under", () => {

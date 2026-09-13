@@ -30,7 +30,13 @@ import {
   type Invocation,
   type RerunCapture,
 } from "./apply-idempotence-proof.js";
-import { E2E_TOKEN, layerFile, ADMIN_SLUG as REPO_SLUG, RUNNER_ROOT_FILES } from "./constants.js";
+import {
+  ARTIFACTS_DIR,
+  E2E_TOKEN,
+  layerFile,
+  ADMIN_SLUG as REPO_SLUG,
+  RUNNER_ROOT_FILES,
+} from "./constants.js";
 import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 import { type LoggedRequest, renderRequest } from "./mock/contract.js";
 import { isWriteRequest } from "./mock/dispatch.js";
@@ -1009,10 +1015,7 @@ function dumpArtifacts(
   failures: readonly string[] = report.failures,
 ): string {
   const dir = join(
-    ROOT,
-    "test",
-    "e2e",
-    ".artifacts",
+    ARTIFACTS_DIR,
     `${artifactName(scenario.name, "scenario")}-${process.pid}-${artifactCounter++}`,
   );
   dumpInvocation(dir, report, requests);
