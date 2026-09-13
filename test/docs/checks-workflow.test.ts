@@ -69,13 +69,22 @@ function cacheKeyOf(step: Step, path: string): string {
   return key as string;
 }
 
-/** The quoted file patterns of the key's hashFiles(...) call inside a `${{ }}` expression; outside one the call is literal text and the key a constant. */
+/**
+ * The quoted file patterns of the key's hashFiles(...) call. The call must BE the `${{ }}` expression, bare or as the one argument of a
+ * literal format(): any other expression around it (`false && hashFiles(...) || 'v1'`) can leave the key constant while the call still
+ * reads as present, and outside `${{ }}` the call is literal text.
+ */
 function hashFilesPatterns(key: string): string[] {
-  const expressions = [...key.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1] ?? "");
+  const HASH_CALL = String.raw`hashFiles\(([^)]*)\)`;
+  const WHOLE = new RegExp(
+    String.raw`^\s*(?:${HASH_CALL}|format\(\s*'[^']*\{0\}[^']*'\s*,\s*${HASH_CALL}\s*\))\s*$`,
+  );
   const match =
-    expressions.map((expression) => expression.match(/\bhashFiles\(([^)]*)\)/)).find((m) => m) ??
-    null;
-  expect(match, `cache key has no hashFiles expression: ${key}`).not.toBeNull();
+    [...key.matchAll(/\$\{\{([\s\S]*?)\}\}/g)]
+      .map((m) => (m[1] ?? "").match(WHOLE))
+      .map((m) => (m ? [m[0], m[1] ?? m[2] ?? ""] : null))
+      .find((m) => m) ?? null;
+  expect(match, `cache key has no expression that is a hashFiles call: ${key}`).not.toBeNull();
   return (match?.[1] ?? "")
     .split(",")
     .map((arg) => arg.trim().replace(/^'|'$/g, ""))
@@ -165,11 +174,16 @@ describe("the fetch-test-artifacts cache keys", () => {
       keyed("hashFiles('package.json')"),
       /fetch-graphql-schema\.ts changes the GraphQL schema but its cache key does not hash it/,
     ],
-    ["a key without hashFiles", "graphql-schema-v1", /cache key has no hashFiles expression/],
+    ["a key without hashFiles", "graphql-schema-v1", /no expression that is a hashFiles call/],
     [
       "a hashFiles call outside the expression delimiters",
       "graphql-schema-hashFiles('.github/scripts/fetch-graphql-schema.ts')",
-      /cache key has no hashFiles expression/,
+      /no expression that is a hashFiles call/,
+    ],
+    [
+      "a hashFiles call short-circuited inside the expression",
+      keyed("false && hashFiles('.github/scripts/fetch-graphql-schema.ts') || 'v1'"),
+      /no expression that is a hashFiles call/,
     ],
   ])("%s fails the guard (negative control)", (_, key, message) => {
     expect(() => expectKeyHashesInputs(key, GRAPHQL)).toThrow(message);
