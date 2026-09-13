@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { GraphqlOp } from "../../src/github/api.js";
 import {
-  GithubApi,
+  GitHubApi,
   isPermissionError,
   isRateLimitError,
   REDACTED_RESPONSE_WITHHELD,
@@ -469,7 +469,7 @@ describe("tryGraphql tracing and redaction", () => {
       globalThis.fetch = (async () => {
         throw new Error("socket hang up");
       }) as unknown as typeof fetch;
-      const client = new GithubApi({
+      const client = new GitHubApi({
         token: "t",
         io: traceIo().io,
         baseUrl: "https://api.test",

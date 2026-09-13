@@ -22,7 +22,7 @@ flowchart TD
   repo["src/engine/orchestrate.ts<br>runForRepo()"]
   sections["src/sections/registry.ts<br>SECTIONS"]
   plan["each section plans<br>src/sections/contract/plan.ts planContext() SectionPlan<br>src/engine/diff.ts deltas()"]
-  api["src/github/api.ts<br>GithubClient"]
+  api["src/github/api.ts<br>GitHubClient"]
   drift["check: the plan's drift lines<br>src/sections/contract/plan.ts planDrift() planCheckNotes()"]
   exec["apply: the plan's writes<br>src/engine/execute.ts executePlan()"]
   report["src/flows/deliver.ts<br>concludeRun()"]
@@ -232,6 +232,7 @@ graph TD
   action["src/action/"]
   cli["src/cli.ts<br>src/cli/"]
   library["src/index.ts"]
+  internal["src/internal.ts"]
   flows["src/flows/"]
   engine["src/engine/"]
   sections["src/sections/"]
@@ -248,6 +249,7 @@ graph TD
   main --> action
   action --> library
   cli --> library
+  cli --> internal
   library --> discovery
   library --> engine
   library --> flows
@@ -257,7 +259,15 @@ graph TD
   library --> report
   library --> schema
   library --> sections
-  library --> types
+  internal --> discovery
+  internal --> engine
+  internal --> flows
+  internal --> github
+  internal --> problem
+  internal --> report
+  internal --> schema
+  internal --> sections
+  internal --> types
   flows --> discovery
   flows --> engine
   flows --> github

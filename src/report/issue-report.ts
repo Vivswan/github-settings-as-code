@@ -11,7 +11,7 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { ApiError, GithubClient } from "../github/api.js";
+import type { ApiError, GitHubClient } from "../github/api.js";
 import { isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import type { SettingsFile } from "../schema.js";
@@ -135,7 +135,7 @@ function pickReportIssue(candidates: ReportIssue[]): ReportIssue | null {
  * seen; `lookup` names the query in the malformed warning without exposing the expanded path.
  */
 async function findReportIssue(
-  api: GithubClient,
+  api: GitHubClient,
   ref: { repo: RepoRef },
   query: Readonly<Record<string, string>>,
   lookup: string,
@@ -162,7 +162,7 @@ async function findReportIssue(
  * creator-scoped scan under it would miss the issue and open a second one. The sort is GitHub's default, spelled out
  * so the scan walks the same end of the list as the label lookup.
  */
-function fallbackScan(api: GithubClient, ref: { repo: RepoRef }) {
+function fallbackScan(api: GitHubClient, ref: { repo: RepoRef }) {
   return findReportIssue(
     api,
     ref,
@@ -176,7 +176,7 @@ function fallbackScan(api: GithubClient, ref: { repo: RepoRef }) {
  * this path never creates. The cost: a human-stripped marker leaves a stale open issue until the next needs-attention run.
  */
 async function closeIfOpen(
-  api: GithubClient,
+  api: GitHubClient,
   ref: { repo: RepoRef },
   body: string,
 ): Promise<IssueDelivery> {
@@ -205,7 +205,7 @@ async function closeIfOpen(
 }
 
 async function deliver(
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
   body: string,
   needsAttention: boolean,
@@ -294,7 +294,7 @@ async function deliver(
  * run closes it, or under `on-failure` closes only a still-open one.
  */
 export async function deliverIssueReport(
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
   body: string,
   needsAttention: boolean,

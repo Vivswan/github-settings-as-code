@@ -64,13 +64,13 @@ export interface GraphqlOp {
  * `carriesSecret` marks a request whose payload or variables hold a resolved secret. The engine sets it from the act of
  * resolving (engine/execute.ts) and withholds the request's error on its own side of this port whatever the client
  * answers (sections/contract/requests.ts), so a caller-supplied client cannot leak an echoed value into an outcome or
- * a report; GithubApi honors the mark too, beside its field-name scan, for its direct callers.
+ * a report; GitHubApi honors the mark too, beside its field-name scan, for its direct callers.
  */
 export interface RequestMark {
   carriesSecret?: boolean;
 }
 
-export interface GithubClient {
+export interface GitHubClient {
   /**
    * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
    * visibility probe, which must not leak the slug before it knows whether the repository is private.
@@ -354,7 +354,7 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
 /**
  * `reason` is the transport error's own message, or a withholding constant REPLACING it: some transport failures quote
  * request details in free text, where neither a field name nor the output mask finds a secret or a redacted slug. The
- * one renderer behind GithubApi's transport failures and the contract layer's (sections/contract/requests.ts).
+ * one renderer behind GitHubApi's transport failures and the contract layer's (sections/contract/requests.ts).
  */
 export function transportFailure(label: string, reason: string, target: string): Error {
   return new Error(
@@ -378,7 +378,7 @@ const MARKED_PAYLOAD_TRACE = "<withheld: the request carried a resolved secret>"
 const REDACTED_TRANSPORT_WITHHELD =
   "the transport failed before an HTTP response arrived (details withheld: the repository is redacted)";
 
-export interface GithubApiOptions {
+export interface GitHubApiOptions {
   token: string;
   /** Trace sink for redacted request lines; defaults to a silent trace with nothing masked. */
   io?: TraceIo;
@@ -397,13 +397,13 @@ export interface GithubApiOptions {
 
 const SILENT_TRACE: TraceIo = { debug() {}, masked: maskRegistry(() => {}).masked };
 
-/** The Octokit instance is built here and never injected: a consumer needing control over transport or plugins implements GithubClient directly. */
-export class GithubApi implements GithubClient {
+/** The Octokit instance is built here and never injected: a consumer needing control over transport or plugins implements GitHubClient directly. */
+export class GitHubApi implements GitHubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
   private readonly trace: TraceRedaction;
   private readonly baseUrl: string;
   private readonly apiVersion: string;
-  constructor(options: GithubApiOptions) {
+  constructor(options: GitHubApiOptions) {
     this.baseUrl = options.baseUrl ?? process.env.GITHUB_API_URL ?? "https://api.github.com";
     this.apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
     this.trace = new TraceRedaction(options.io ?? SILENT_TRACE);

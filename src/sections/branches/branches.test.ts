@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import {
   type PlannedOp,
   planContext,
@@ -37,7 +37,7 @@ import type { BranchProtectionConfig } from "./schema.js";
 
 type Desired = Parameters<typeof branchesSection.plan>[1];
 
-const plan = (api: GithubClient, desired: Desired) =>
+const plan = (api: GitHubClient, desired: Desired) =>
   branchesSection.plan(planContext(branchesSection, api, REPO), desired);
 
 /** The tools no branches plan ever needs: the section declares no secret values. */
@@ -59,7 +59,7 @@ interface Recorded {
  * fragment, so a plan over executed state sees the converged repository;
  * GraphQL errors fold to the ApiError shape the real client produces.
  */
-function liveRepo(live: LiveState): GithubClient & { writes: Recorded[] } {
+function liveRepo(live: LiveState): GitHubClient & { writes: Recorded[] } {
   const state = buildState(live, "org");
   const endpoints = allEndpoints([branchesSection]);
   const graphqlOps = allGraphqlOps([branchesSection]);

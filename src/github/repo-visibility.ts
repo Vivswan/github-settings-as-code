@@ -3,13 +3,13 @@
  * nor private, resolve to "unknown", which the caller redacts.
  */
 
-import type { GithubClient } from "./api.js";
+import type { GitHubClient } from "./api.js";
 
 /** A repository's visibility as the probe established it; "unknown" means it could not. */
 export type RepoVisibility = "public" | "private" | "internal" | "unknown";
 
 export function createVisibilityResolver(
-  api: GithubClient,
+  api: GitHubClient,
 ): (slug: string) => Promise<RepoVisibility> {
   const cache = new Map<string, Promise<RepoVisibility>>();
   return (slug) => {
@@ -23,8 +23,8 @@ export function createVisibilityResolver(
   };
 }
 
-async function probe(api: GithubClient, slug: string): Promise<RepoVisibility> {
-  let result: Awaited<ReturnType<GithubClient["tryRequest"]>>;
+async function probe(api: GitHubClient, slug: string): Promise<RepoVisibility> {
+  let result: Awaited<ReturnType<GitHubClient["tryRequest"]>>;
   try {
     // The probe decides redaction, so its own trace (and any throttle-callback trace) must fail closed before the answer
     // is known: redactTrace holds the slug redacted for the request's duration.

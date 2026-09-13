@@ -5,7 +5,7 @@
 
 import { Writable } from "node:stream";
 import { main } from "../../src/cli/program.js";
-import type { ConfigEnv, GithubClient } from "../../src/index.js";
+import type { ConfigEnv, GitHubClient } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 
 export interface MemoryStream {
@@ -27,7 +27,7 @@ export function memoryStream(): MemoryStream {
 /** Run `args` (after the program name) through main() against `api`, capturing what it printed. */
 export async function runCli(
   args: readonly string[],
-  api: GithubClient = new MockApi({}),
+  api: GitHubClient = new MockApi({}),
   env: ConfigEnv = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const stdout = memoryStream();

@@ -8,7 +8,7 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { SectionOutcome, ValidatedSettings } from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
@@ -144,7 +144,7 @@ export interface ReportChannel {
  * a caller that skipped that check, an invariant violation and not a run outcome.
  */
 export function openReportChannel(
-  api: GithubClient,
+  api: GitHubClient,
   channel: PrivateReportChannel,
   meta: ReportRunMeta,
   reportPublicKey: string,
@@ -182,7 +182,7 @@ function composeTargetReport(meta: ReportRunMeta, target: ReportTarget): string 
 }
 
 function issueChannel(
-  api: GithubClient,
+  api: GitHubClient,
   meta: ReportRunMeta,
   mode: IssueReportMode,
   io: Io,

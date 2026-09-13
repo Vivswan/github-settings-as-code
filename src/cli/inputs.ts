@@ -8,18 +8,18 @@
  */
 
 import { InvalidArgumentError, Option } from "commander";
+import type { InputReader } from "../index.js";
 import {
   INPUT_DECLS,
   type InputDecl,
   type InputName,
-  type InputReader,
   MERGE_INPUTS,
   MERGE_ONLY_INPUTS,
   MODES,
   type Mode,
   SNAPSHOT_INPUTS,
   SNAPSHOT_ONLY_INPUTS,
-} from "../index.js";
+} from "../internal.js";
 
 /** Declaration order is the help order, as on the inputs reference page. */
 const INPUT_NAMES = Object.keys(INPUT_DECLS) as InputName[];

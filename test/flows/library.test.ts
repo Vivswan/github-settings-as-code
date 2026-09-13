@@ -2,23 +2,26 @@ import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { parse as parseYamlDoc, stringify as stringifyYaml } from "yaml";
 import {
+  type ApplyReport,
   applyRepository,
   checkRepository,
   collectingIo,
   describeProblem,
-  type GithubClient,
+  type GitHubClient,
+  mergeSettings,
   parseRepoSlug,
-  type RepoRunReport,
-  renderMergedYaml,
-  SECRET_RESPONSE_WITHHELD,
-  SECRET_TRANSPORT_WITHHELD,
   SectionSelection,
-  SNAPSHOT_SCHEMA_URL,
   snapshotRepositories,
   snapshotRepository,
   type ValidatedSettings,
   validateSettings,
 } from "../../src/index.js";
+import {
+  renderMergedYaml,
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
+  SNAPSHOT_SCHEMA_URL,
+} from "../../src/internal.js";
 import { MockApi } from "../mock-api.js";
 
 const repo = parseRepoSlug("o/r")._unsafeUnwrap();
@@ -37,7 +40,7 @@ const settings = branded({ repository: { has_wiki: false } });
 describe("validateSettings", () => {
   test("a valid document comes back branded with no warnings", () => {
     expect(validateSettings({ repository: { has_wiki: false } })).toEqual(
-      ok({ settings, warnings: [] }),
+      ok({ settings, log: [] }),
     );
   });
 
@@ -45,13 +48,19 @@ describe("validateSettings", () => {
     expect(
       validateSettings(
         { repository: { has_wiki: false }, typo: 1 },
-        { source: "fleet.yml", sections: new Set(["repository"]) },
+        {
+          source: "fleet.yml",
+          sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
+        },
       ),
     ).toEqual(
       ok({
         settings,
-        warnings: [
-          'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+        log: [
+          {
+            level: "warning",
+            line: 'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+          },
         ],
       }),
     );
@@ -67,12 +76,7 @@ describe("validateSettings", () => {
 describe("checkRepository and applyRepository", () => {
   test("check diffs without writing and returns the lines it printed", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
-    const result = await checkRepository(api, {
-      repo,
-      settings,
-      onMissingPermission: "fail",
-      sections: SectionSelection.ALL,
-    });
+    const result = await checkRepository(api, repo, settings);
     expect(api.mutations()).toEqual([]);
     expect(result).toEqual({
       repo: "o/r",
@@ -90,16 +94,7 @@ describe("checkRepository and applyRepository", () => {
       "PATCH /repos/o/r",
     );
     const collected = collectingIo();
-    const result = await applyRepository(
-      api,
-      {
-        repo,
-        settings,
-        onMissingPermission: "fail",
-        sections: SectionSelection.ALL,
-      },
-      collected.io,
-    );
+    const result = await applyRepository(api, repo, settings, { io: collected.io });
     expect(api.mutations()).toEqual([
       { method: "PATCH", path: "/repos/o/r", payload: { has_wiki: false } },
     ]);
@@ -132,7 +127,7 @@ describe("a caller-supplied client that echoes a secret", () => {
   ) => {
     const reads = new MockApi({ "GET /repos/o/r/hooks?per_page=100&page=1": { data: [] } });
     const marks: Array<true | undefined> = [];
-    const client: GithubClient = {
+    const client: GitHubClient = {
       tryRequest: (method, path, payload, options) => {
         if (method !== "POST") {
           return reads.tryRequest(method, path, payload, options);
@@ -144,7 +139,7 @@ describe("a caller-supplied client that echoes a secret", () => {
     };
     return { client, marks };
   };
-  const failed = (detail: string): RepoRunReport => ({
+  const failed = (detail: string): ApplyReport => ({
     repo: "o/r",
     result: "failed",
     outcomes: [{ key: "webhooks", status: "failed", detail: [detail] }],
@@ -188,11 +183,8 @@ describe("a caller-supplied client that echoes a secret", () => {
   ])("apply withholds the failure when the client $answer", async ({ create, detail }) => {
     const { client, marks } = echoing(create);
     // "warn" is the policy under which a misread denial would turn the failure into a skipped section.
-    const result = await applyRepository(client, {
-      repo,
-      settings: hooks,
+    const result = await applyRepository(client, repo, hooks, {
       onMissingPermission: "warn",
-      sections: SectionSelection.ALL,
       secretEnv: { WEBHOOK_SECRET: plaintext },
     });
     expect(marks).toEqual([true]);
@@ -211,7 +203,7 @@ describe("the section selection a library call runs under", () => {
       only: ["repository"],
       required: ["labels"],
     }).match(
-      (sections) => checkRepository(api, { repo, settings, onMissingPermission: "fail", sections }),
+      (sections) => checkRepository(api, repo, settings, { sections }),
       (problem) => problem,
     );
     expect(outcome).toEqual({ code: "required-sections-excluded", excluded: ["labels"] });
@@ -317,5 +309,50 @@ describe("snapshotRepository and snapshotRepositories", () => {
       ["o/a", "failed", true],
       ["o/b", "snapshot", false],
     ]);
+  });
+});
+
+describe("mergeSettings", () => {
+  const fleet = {
+    name: "fleet.yml",
+    doc: { repository: { has_wiki: true }, labels: [{ name: "bug", color: "d73a4a" }] },
+  };
+  const team = { name: "team.yml", doc: { repository: { has_wiki: false, has_issues: true } } };
+
+  test("folds the layers as mode: merge does and renders the file the merged-file gets", () => {
+    const report = mergeSettings([fleet, team])._unsafeUnwrap();
+    expect(report.settings).toEqual(
+      branded({
+        repository: { has_wiki: false, has_issues: true },
+        labels: { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a" }] },
+      }),
+    );
+    expect(report.yaml).toBe(renderMergedYaml(report.settings));
+    expect(report.notices).toEqual([]);
+    expect(report.log).toEqual([]);
+  });
+
+  test("a null over a declared section is a notice, and an invalid layer is the problem naming that layer", () => {
+    const optOut = mergeSettings([
+      fleet,
+      { name: "repo.yml", doc: { labels: null } },
+    ])._unsafeUnwrap();
+    expect(optOut.notices).toEqual([{ layer: "repo.yml", path: "labels" }]);
+    expect("labels" in optOut.settings).toBe(false);
+    expect(mergeSettings([fleet, { name: "bad.yml", doc: [1] }])).toEqual(
+      err({ code: "settings-not-mapping", source: "bad.yml", shape: "list" }),
+    );
+  });
+});
+
+describe("the io knob", () => {
+  test("a caller-supplied Io receives the warnings and the report's log stays empty", () => {
+    const collected = collectingIo();
+    const report = validateSettings(
+      { repository: { has_wiki: false }, typo: 1 },
+      { sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(), io: collected.io },
+    )._unsafeUnwrap();
+    expect(report.log).toEqual([]);
+    expect(collected.lines.map((entry) => entry.level)).toEqual(["warning"]);
   });
 });

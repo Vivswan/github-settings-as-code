@@ -34,9 +34,10 @@ describe("package.json as the npm manifest", () => {
     });
   });
 
-  test("exports the library build, the schema, and its own manifest, and both bin names run the CLI build", () => {
+  test("exports the two library entries, the schema, and its own manifest, and both bin names run the CLI build", () => {
     expect(pkg.exports).toEqual({
       ".": { types: "./lib/pkg/index.d.ts", default: "./lib/pkg/index.js" },
+      "./internal": { types: "./lib/pkg/internal.d.ts", default: "./lib/pkg/internal.js" },
       "./settings.schema.json": "./lib/settings.schema.json",
       "./package.json": "./package.json",
     });

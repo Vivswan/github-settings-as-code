@@ -8,6 +8,7 @@ layers:
   action: [src/action/]
   cli: [src/cli.ts, src/cli/]
   library: [src/index.ts]
+  internal: [src/internal.ts]
   flows: [src/flows/]
   engine: [src/engine/]
   sections: [src/sections/]
@@ -29,12 +30,14 @@ exclude:
   - "src/**/*.d.ts"
 
 # from -> the layers it may import; a layer absent here imports nothing outside itself.
-# The action and the CLI are consumers of the library: their one edge is src/index.ts.
+# The action and the CLI are consumers of the two entries: src/index.ts (the documented library) and src/internal.ts
+# (the rest; the action draws only the first).
 edges:
   main: [action]
   action: [library]
-  cli: [library]
-  library: [discovery, engine, flows, github, io, problem, report, schema, sections, types]
+  cli: [library, internal]
+  library: [discovery, engine, flows, github, io, problem, report, schema, sections]
+  internal: [discovery, engine, flows, github, problem, report, schema, sections, types]
   flows: [discovery, engine, github, io, plain-data, private, problem, report, schema, types]
   engine: [discovery, github, io, plain-data, problem, schema, sections, types]
   sections: [discovery, engine, github, schema, types, upstream-gaps]

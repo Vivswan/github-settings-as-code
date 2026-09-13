@@ -14,7 +14,7 @@ import {
 import { type RunOutcome, worstOf } from "../engine/outcome.js";
 import type { SectionSelection } from "../engine/section-selection.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { isPrivate, type Private } from "../private.js";
@@ -161,7 +161,7 @@ export async function closeTarget(
 
 /** The delivery is flushed even when `body` throws: the artifact channel uploads every accumulated report as ONE document there. */
 export async function withDelivery<T>(
-  run: { api: GithubClient; cfg: DeliveryConfig; io: Io; uploader?: ArtifactUploader },
+  run: { api: GitHubClient; cfg: DeliveryConfig; io: Io; uploader?: ArtifactUploader },
   body: (delivery: Delivery) => Promise<T>,
 ): Promise<T> {
   const { api, cfg, io, uploader } = run;

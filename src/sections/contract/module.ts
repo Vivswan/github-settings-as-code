@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
-import type { GithubClient } from "../../github/api.js";
+import type { GitHubClient } from "../../github/api.js";
 import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type {
   DeepReadonly,
@@ -21,7 +21,7 @@ import { grantFor, type SectionPermission } from "./permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
 
 interface SectionContextBase {
-  api: GithubClient;
+  api: GitHubClient;
   /** The target repository, parsed once at the boundary (see RepoRef). */
   repo: RepoRef;
 }

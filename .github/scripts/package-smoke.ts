@@ -1,9 +1,9 @@
 /**
  * The package smoke, the gate behind the npm library build: build lib/pkg/,
  * judge the package shape (publint, attw), pack a tarball, install it into a
- * fresh consumer project, import it under Node (the entry and the schema
+ * fresh consumer project, import it under Node (both entries and the schema
  * subpath), and compile a TypeScript consumer against the bundled index.d.ts
- * with skipLibCheck off - a declaration that leaks a devDependency type, or a
+ * and internal.d.ts with skipLibCheck off - a declaration that leaks a devDependency type, or a
  * type the emitter could not name, fails here instead of on a consumer's
  * machine. The installed bin is run under Node too: its help must name every
  * subcommand, and `validate` must accept a small settings file.
@@ -42,22 +42,24 @@ const SCHEMA_ID =
  */
 const NODE_CONSUMER = `import { deepStrictEqual } from "node:assert/strict";
 import { SECTION_KEYS, validateSettings } from "${PACKAGE}";
+import { INPUT_DECLS } from "${PACKAGE}/internal";
 import schema from "${PACKAGE}/settings.schema.json" with { type: "json" };
 const result = validateSettings({ labels: [] });
 if (result.isErr()) throw new Error("validateSettings rejected an empty labels list: " + result.error.code);
-deepStrictEqual(result.value, { settings: { labels: [] }, warnings: [] });
+deepStrictEqual(result.value, { settings: { labels: [] }, log: [] });
 deepStrictEqual([...SECTION_KEYS], ${JSON.stringify(SECTION_KEYS)});
 deepStrictEqual(schema.$id, ${JSON.stringify(SCHEMA_ID)});
-console.log("imported " + SECTION_KEYS.length + " section keys and the schema");
+deepStrictEqual(INPUT_DECLS["on-missing-permission"].default, "fail");
+console.log("imported " + SECTION_KEYS.length + " section keys, the internal entry, and the schema");
 `;
 
 /**
- * The consumer compiled against index.d.ts, no client behind it. The expect-error lines are the
+ * The consumer compiled against index.d.ts and internal.d.ts, no client behind it. The expect-error lines are the
  * controls that the bundle keeps DenialPolicy nominal (the literal is its public shape, so only the
  * private member rejects it) and keeps the context branded with its section's key.
  */
 const TS_CONSUMER = `import {
-  type GithubClient,
+  type GitHubClient,
   planContext,
   type RepoRef,
   SECTION_KEYS,
@@ -69,10 +71,13 @@ const TS_CONSUMER = `import {
   snapshotContext,
   validateSettings,
 } from "${PACKAGE}";
+import { type InputName, INPUT_DECLS } from "${PACKAGE}/internal";
 const first: SectionKey | undefined = SECTION_KEYS[0];
+export const policy: InputName = "on-missing-permission";
+export const policyDefault: string = INPUT_DECLS["on-missing-permission"].default;
 const result = validateSettings({ labels: [] });
 export const ok: boolean = result.isOk() && first === "repository";
-declare const client: GithubClient;
+declare const client: GitHubClient;
 declare const repo: RepoRef;
 const labels = sectionModule("labels");
 const snapshotCtx = snapshotContext(labels, client, repo, "warn");

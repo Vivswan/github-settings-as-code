@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
@@ -25,11 +25,11 @@ function listRoute(variables: Array<{ name: string; value: string }>) {
   };
 }
 
-const plan = (api: GithubClient, declared: Declared) =>
+const plan = (api: GitHubClient, declared: Declared) =>
   actionsVariablesSection.plan(planContext(actionsVariablesSection, api, REPO), declared);
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
-async function apply(api: GithubClient, declared: Declared) {
+async function apply(api: GitHubClient, declared: Declared) {
   const planned = await plan(api, declared);
   const execution = await executePlan(planned, actionsVariablesSection, api, REPO, {
     resolveSecret: () => {
@@ -45,7 +45,7 @@ async function apply(api: GithubClient, declared: Declared) {
 /** A stateful fake: the list reflects every write, so a re-plan sees converged state. */
 function liveRepo(
   variables: Array<{ name: string; value: string }>,
-): GithubClient & { writes: string[] } {
+): GitHubClient & { writes: string[] } {
   return {
     writes: [],
     async tryRequest(method, path, payload) {

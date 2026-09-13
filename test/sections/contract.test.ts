@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import {
-  type GithubClient,
+  type GitHubClient,
   SECRET_RESPONSE_WITHHELD,
   SECRET_TRANSPORT_WITHHELD,
 } from "../../src/github/api.js";
@@ -1160,13 +1160,13 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
   });
   // What a caller's own client may hand back for a rejected secret: the value, verbatim, in the message.
   const echo = "Validation Failed: token hunter2 is too weak";
-  const answering = (status: number, message = echo): GithubClient => ({
+  const answering = (status: number, message = echo): GitHubClient => ({
     tryRequest: async () => ({ error: { status, message, body: message } }),
     tryGraphql: async () => ({
       error: { status, message, body: message, graphqlTypes: ["UNPROCESSABLE"] },
     }),
   });
-  const throwing: GithubClient = {
+  const throwing: GitHubClient = {
     tryRequest: async () => {
       throw new Error(echo);
     },
@@ -1174,13 +1174,13 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       throw new Error(echo);
     },
   };
-  const rest = (api: GithubClient, carriesSecret: boolean) =>
+  const rest = (api: GitHubClient, carriesSecret: boolean) =>
     callDeclared({ ...ctx, api, resolveSecret: () => "" }, actionsSection, endpoint, {
       payload: { token: "hunter2" },
       carriesSecret,
       describe: "arming the setup",
     });
-  const graphql = (api: GithubClient, carriesSecret: boolean) =>
+  const graphql = (api: GitHubClient, carriesSecret: boolean) =>
     callGraphql(
       { ...ctx, api, resolveSecret: () => "" },
       actionsSection,

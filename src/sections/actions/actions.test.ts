@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import {
   driftOf,
-  type MissingPermissionPolicy,
+  type OnMissingPermission,
   type PlannedOp,
   planContext,
   snapshotContext,
@@ -41,7 +41,7 @@ const FORK_PRIVATE = `GET ${BASE}/fork-pr-workflows-private-repos`;
  * PUT last stored, and the selected-actions GET answers 409 while the stored
  * policy is not "selected", as GitHub does.
  */
-function liveActions(seed: Record<string, unknown>): GithubClient & { writes: string[] } {
+function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: string[] } {
   const stored = new Map(Object.entries(seed));
   return {
     writes: [],
@@ -588,7 +588,7 @@ describe("actions", () => {
 });
 
 describe("actions snapshot", () => {
-  const snapshot = (api: GithubClient, policy: MissingPermissionPolicy = "fail") =>
+  const snapshot = (api: GitHubClient, policy: OnMissingPermission = "fail") =>
     actionsSection.snapshot(snapshotContext(actionsSection, api, REPO, policy));
   /** The note a sub-read the fake has no body for produces: its 404 classifies as a denial. */
   const leftOut = (key: string, path: string, grant = sectionGrant(actionsSection)) =>
@@ -663,7 +663,7 @@ describe("actions snapshot", () => {
       [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "all_external_contributors" },
     });
     const requested: string[] = [];
-    const api: GithubClient = {
+    const api: GitHubClient = {
       tryRequest: (method, path, payload) => {
         requested.push(`${method} ${path}`);
         return live.tryRequest(method, path, payload);

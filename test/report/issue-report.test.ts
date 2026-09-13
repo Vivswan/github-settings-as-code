@@ -351,7 +351,7 @@ describe("deliverIssueReport", () => {
   });
 
   test("a throwing transport never escapes; the warning stays slug-free", async () => {
-    // MockApi throws on unrouted mutations, standing in for a network-level failure (GithubApi throws those with the path in the message).
+    // MockApi throws on unrouted mutations, standing in for a network-level failure (GitHubApi throws those with the path in the message).
     const api = new MockApi({});
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({

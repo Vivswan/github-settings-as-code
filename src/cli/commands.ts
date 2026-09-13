@@ -6,10 +6,8 @@
 
 import {
   describeProblem,
-  type GithubClient,
-  INPUT_DECLS,
+  type GitHubClient,
   type Io,
-  PRIVATE_REPORT_CHANNELS,
   type Problem,
   type RunOutcome,
   readSettingsFile,
@@ -19,11 +17,12 @@ import {
   type ValidatedSettings,
   validateSettings,
 } from "../index.js";
+import { INPUT_DECLS, PRIVATE_REPORT_CHANNELS } from "../internal.js";
 
 /** What the CLI needs from its process: the environment and a client factory tests can stub. */
 export interface CliHost {
   readonly env: Readonly<Record<string, string | undefined>>;
-  createClient(token: string, io: Io, apiVersion: string): GithubClient;
+  createClient(token: string, io: Io, apiVersion: string): GitHubClient;
 }
 
 /**
@@ -57,13 +56,8 @@ function declaredSections(settings: ValidatedSettings): SectionModule[] {
 /** Read and validate one settings file; the warnings go to `io`, the problem is the error. */
 function readValidated(file: string, io: Io) {
   return readSettingsFile(file, "settings-file")
-    .andThen((doc) => validateSettings(doc, { source: file }))
-    .map(({ settings, warnings }) => {
-      for (const warning of warnings) {
-        io.annotate("warning", warning);
-      }
-      return settings;
-    });
+    .andThen((doc) => validateSettings(doc, { source: file, io }))
+    .map(({ settings }) => settings);
 }
 
 /** `validate <file>`: the schema verdict alone, no token and no API call. */

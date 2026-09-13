@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import {
-  type MissingPermissionPolicy,
+  type OnMissingPermission,
   type PlannedOp,
   planContext,
   snapshotContext,
@@ -25,11 +25,11 @@ const TOOLS = { resolveSecret: () => "" };
 
 type Desired = Parameters<typeof repositorySection.plan>[1];
 
-const plan = (api: GithubClient, desired: Desired) =>
+const plan = (api: GitHubClient, desired: Desired) =>
   repositorySection.plan(planContext(repositorySection, api, REPO), desired);
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
-async function apply(api: GithubClient, desired: Desired) {
+async function apply(api: GitHubClient, desired: Desired) {
   return executePlan(await plan(api, desired), repositorySection, api, REPO, TOOLS);
 }
 
@@ -72,7 +72,7 @@ function liveRepo(seed: {
   repo?: Record<string, unknown>;
   toggles?: Record<string, boolean>;
   features?: { hasSponsorshipsEnabled: boolean; issueCreationPolicy: string };
-}): GithubClient & { writes: string[] } {
+}): GitHubClient & { writes: string[] } {
   const repo: Record<string, unknown> = { topics: [], ...seed.repo };
   const toggles: Record<string, boolean> = { ...seed.toggles };
   const feature = seed.features ?? { hasSponsorshipsEnabled: false, issueCreationPolicy: "ALL" };
@@ -797,7 +797,7 @@ describe("repository GraphQL-routed keys", () => {
 });
 
 describe("repository snapshot", () => {
-  const snapshot = (api: GithubClient, policy: MissingPermissionPolicy = "fail") =>
+  const snapshot = (api: GitHubClient, policy: OnMissingPermission = "fail") =>
     repositorySection.snapshot(snapshotContext(repositorySection, api, REPO, policy));
   const LFS_NOTE =
     "repository.enable_git_lfs: GitHub exposes no endpoint to read Git LFS back, so the snapshot leaves it out; declare it yourself to manage it";
