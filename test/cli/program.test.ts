@@ -428,6 +428,7 @@ describe("the --json failure envelope", () => {
         "--json",
       ],
     ],
+    ["a missing required input", ["merge", "--settings-file", SINGLE, "--json"]],
     ["a parser error", ["validate", "--json"]],
     // The duplicate is refused at the second --token, before the parser reaches --json.
     [

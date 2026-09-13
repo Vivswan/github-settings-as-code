@@ -109,6 +109,7 @@ describe("runOutcome", () => {
     [["clean", "drift"], false, "drift", 0],
     [["clean", "drift"], true, "drift", 1],
     [["applied", "failed", "drift"], false, "failed", 1],
+    [["clean", "failed"], true, "failed", 1],
   ])("%j in check=%p -> %s exits %i", (results, check, result, exitCode) => {
     const conclusion = runOutcome(
       results.map((r) => ({ result: r })),
