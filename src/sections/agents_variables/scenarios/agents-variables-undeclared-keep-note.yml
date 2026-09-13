@@ -34,5 +34,6 @@ expect:
     - "POST /repos/{repo}/agents/variables"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
+    - 'or set "_undeclared: delete" to have apply'
     - RETIRED_FLAG
   fixpoint: converges

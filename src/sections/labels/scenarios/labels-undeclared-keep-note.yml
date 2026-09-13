@@ -33,5 +33,6 @@ expect:
     - "POST /repos/{repo}/labels"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
+    - 'or set "_undeclared: delete" to have apply'
     - wontfix
   fixpoint: converges

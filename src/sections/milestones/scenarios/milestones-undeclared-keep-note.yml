@@ -29,4 +29,5 @@ expect:
   stdout_contains:
     - "created milestone \"v1.0\""
     - "v0.9"
+    - 'or set "_undeclared: delete" to have apply'
   fixpoint: converges

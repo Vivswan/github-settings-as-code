@@ -15,12 +15,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { planningReads, type SectionModule } from "../../src/sections/contract/module.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 const POLICY_SECTIONS: ReadonlySet<string> = new Set(UNDECLARED_POLICY_SECTIONS);
 
@@ -37,21 +38,53 @@ function standardSet(section: SectionModule): string[] {
   ];
 }
 
+/** The stems of the set `dir` lacks, so the failure names the files to write. */
+function missingScenarios(section: SectionModule, dir: string): string[] {
+  return standardSet(section).filter((stem) => !existsSync(join(dir, `${stem}.yml`)));
+}
+
 describe("the standard scenario set", () => {
   test.each(SECTIONS.map((section) => [section.key, section] as const))(
     "%s ships every scenario its contract implies",
     (key, section) => {
       const dir = join(ROOT, "src", "sections", key, "scenarios");
-      const missing = standardSet(section).filter((stem) => !existsSync(join(dir, `${stem}.yml`)));
-      expect(missing, `missing under ${dir}`).toEqual([]);
+      expect(missingScenarios(section, dir), `missing under ${dir}`).toEqual([]);
     },
   );
 
-  test("the set is derived from the contract, so the write-only section demands no drift or read-back scenario", () => {
-    const writeOnly = SECTIONS.filter((section) => planningReads(section).length === 0);
-    expect(writeOnly.map((section) => section.key)).toEqual(["check_suite_preferences"]);
+  test("the set is derived from the contract: a write-only section (no planning read, no snapshot) demands the convergence proof alone", () => {
+    const writeOnly = SECTIONS.filter(
+      (section) => planningReads(section).length === 0 && section.snapshot === undefined,
+    );
+    // At least one such section exists, or the branch below is never exercised.
+    expect(writeOnly.length).toBeGreaterThan(0);
     for (const section of writeOnly) {
       expect(standardSet(section)).toEqual([`${section.key.replaceAll("_", "-")}-apply-converges`]);
     }
   });
+
+  test("the negative control: a directory lacking one file of the set fails naming that stem", () =>
+    withTempDir("scenario-set-", (dir) => {
+      const labels = SECTIONS.find((section) => section.key === "labels");
+      if (labels === undefined) {
+        throw new Error("the labels section is registered");
+      }
+      const set = standardSet(labels);
+      expect(set).toEqual([
+        "labels-apply-converges",
+        "labels-check-drift",
+        "labels-snapshot-roundtrip",
+        "labels-undeclared-delete",
+        "labels-undeclared-keep-note",
+      ]);
+      for (const stem of set) {
+        if (stem !== "labels-undeclared-keep-note") {
+          writeFileSync(join(dir, `${stem}.yml`), `name: ${stem}\n`);
+        }
+      }
+      expect(missingScenarios(labels, dir)).toEqual(["labels-undeclared-keep-note"]);
+      // A file under the old name does not satisfy the set.
+      writeFileSync(join(dir, "labels-undeclared-keep.yml"), "name: labels-undeclared-keep\n");
+      expect(missingScenarios(labels, dir)).toEqual(["labels-undeclared-keep-note"]);
+    }));
 });
