@@ -44,4 +44,4 @@ expect:
     - "POST /repos/{repo}/environments/production/variables"
     - "PATCH /repos/{repo}/environments/production/variables/LOG_LEVEL"
     - "DELETE /repos/{repo}/environments/production/variables/LEGACY"
-  converges: true
+  fixpoint: converges

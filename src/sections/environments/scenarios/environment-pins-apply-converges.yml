@@ -46,4 +46,4 @@ expect:
     - 'unpinned environment "sandbox"'
     - 'pinned environment "api"'
     - 'moved pinned environment "api" to position 1'
-  converges: true
+  fixpoint: converges

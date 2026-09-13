@@ -23,4 +23,4 @@ expect:
   never:
     - "GRAPHQL "
     - "POST /graphql"
-  converges: true
+  fixpoint: converges

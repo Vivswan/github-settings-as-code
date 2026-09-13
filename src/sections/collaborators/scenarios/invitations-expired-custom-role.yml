@@ -26,4 +26,4 @@ expect:
     - "PUT /repos/{repo}/collaborators/e2e-custom"
   stdout_contains:
     - "re-invited collaborator \"e2e-custom\" (security-team)"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

@@ -24,4 +24,4 @@ expect:
     - "PUT /repos/{repo}/collaborators/e2e-expired"
   stdout_contains:
     - "re-invited collaborator \"e2e-expired\" (push)"
-  converges: true
+  fixpoint: converges

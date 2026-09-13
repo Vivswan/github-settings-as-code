@@ -27,4 +27,4 @@ expect:
     environments: applied
   mutations:
     - "PUT /repos/{repo}/environments/production"
-  converges: true
+  fixpoint: converges

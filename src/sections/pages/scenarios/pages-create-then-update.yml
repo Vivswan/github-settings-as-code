@@ -23,4 +23,4 @@ expect:
   stdout_contains:
     - "enabled GitHub Pages"
     - "applied remaining Pages configuration"
-  converges: true
+  fixpoint: converges

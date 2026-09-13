@@ -20,4 +20,4 @@ expect:
     actions: applied
   mutations:
     - "PUT /repos/{repo}/actions/permissions/artifact-and-log-retention"
-  converges: true
+  fixpoint: converges

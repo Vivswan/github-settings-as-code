@@ -31,4 +31,4 @@ expect:
   stdout_contains:
     - "updated pending invitation for \"e2e-pending\" (admin)"
     - "CANCELLED undeclared invitation for \"e2e-uninvited\""
-  apply_idempotent: true
+  fixpoint: apply_idempotent

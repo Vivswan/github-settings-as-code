@@ -31,4 +31,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/branches/main/protection"
     - "GRAPHQL UpdateBranchProtectionRule"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

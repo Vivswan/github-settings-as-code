@@ -33,4 +33,4 @@ expect:
   stdout_contains:
     - "kept under \"_undeclared: keep\""
     - RETIRED_FLAG
-  converges: true
+  fixpoint: converges

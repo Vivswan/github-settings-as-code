@@ -25,4 +25,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/automated-security-fixes"
     - "PUT /repos/{repo}/private-vulnerability-reporting"
-  converges: true
+  fixpoint: converges

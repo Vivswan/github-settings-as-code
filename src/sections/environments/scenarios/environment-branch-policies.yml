@@ -46,4 +46,4 @@ expect:
     - "DELETE /repos/{repo}/environments/production/deployment-branch-policies/4002"
   requests_contain:
     - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment-branch-policies"
-  converges: true
+  fixpoint: converges

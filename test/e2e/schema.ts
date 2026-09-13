@@ -12,6 +12,7 @@ import { FILTER_INPUTS } from "../../src/flows/inputs.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";
+import { renamedKeyError } from "../../src/sections/shared/renamed-key.js";
 import type { MustBeNever } from "../../src/types.js";
 import { LAYER_FILE_PREFIX, RUNNER_ROOT_FILES } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
@@ -113,155 +114,134 @@ const InputsSchema = z
 /** A settings file body: any YAML mapping (validated for real by the action). */
 const SettingsSchema = z.record(z.string(), z.unknown());
 
+/**
+ * The two booleans `fixpoint` replaced. A scenario still carrying one fails naming the rewrite instead
+ * of reading as a bare unknown key: `converges: true` -> `fixpoint: converges`, `apply_idempotent: true`
+ * -> `fixpoint: apply_idempotent`.
+ */
+const fixpointKeyErrors = (["converges", "apply_idempotent"] as const).map((old) =>
+  renamedKeyError("expect", old, "fixpoint", `- write fixpoint: ${old} and rewrite the scenario`),
+);
+const fixpointKeyError = (issue: z.core.$ZodRawIssue): string | undefined =>
+  fixpointKeyErrors.map((toMessage) => toMessage(issue)).find((message) => message !== undefined);
+
 const ExpectSchema = z
-  .object({
-    /**
-     * A non-empty array lists every ALLOWED code: the fuzz oracle predicts a set of legal exits, since
-     * per-section outcome classes can land on either side of the worst-of fold. Curated scenarios keep the number.
-     */
-    exit_code: z.union([z.number().int(), z.array(z.number().int()).min(1)]),
-    /** The `result` output ("clean", "drift", "applied", "failed", ...). */
-    result: z.string().optional(),
-    /**
-     * The `skipped-sections` output as a set, whatever the comma-joined order. A section skipped under
-     * on-missing-permission: warn must surface here, not only in the summary table.
-     */
-    skipped_sections: z.array(z.string()).optional(),
-    /** Per-section outcome parsed from the step-summary table. */
-    outcomes: z.record(z.string(), z.string()).optional(),
-    /**
-     * Ordered "METHOD /path" prefixes the write log must contain as a subsequence; `{repo}` expands to
-     * the scenario's owner/name. A GraphQL operation is spelled "GRAPHQL <opName>", and a GraphQL READ
-     * never appears in the write log despite its POST.
-     */
-    mutations: z.array(z.string()).optional(),
-    /**
-     * Prefixes of "METHOD /path?query" (or "GRAPHQL <opName>") that must NEVER appear in the request log; a pattern
-     * with a query forbids one lookup on a path that other lookups share.
-     */
-    never: z.array(z.string()).optional(),
-    summary_contains: z.array(z.string()).optional(),
-    /** Substrings the publicly-readable step summary must NOT contain: a redacted target's slug and private live values. */
-    summary_lacks: z.array(z.string()).optional(),
-    stdout_contains: z.array(z.string()).optional(),
-    /**
-     * Substrings stdout must NOT contain, matched AFTER the runner strips the `::add-mask::` lines
-     * core.setSecret emits: those legitimately carry the raw slug so the real runner can mask it.
-     */
-    stdout_lacks: z.array(z.string()).optional(),
-    /**
-     * Substrings that must appear on NO public surface: the step summary, stdout and stderr (mask
-     * lines stripped), and every output value, through the same checkLeaks primitive the fuzzer
-     * applies. Reserve summary_lacks and stdout_lacks for a string allowed on one surface but not another.
-     */
-    leaks_nowhere: z.array(z.string()).optional(),
-    /**
-     * The private-report issue channel's delivery to one target repo, read off the recorded issue writes for
-     * that slug; the only place the private slug and sentinel may legitimately appear. A created issue must
-     * always carry the marker label; that is asserted without a field.
-     *   body_contains   -> the delivered body: the create, or the PATCH on a reuse run
-     *   body_lacks      -> absent from EVERY accepted body, not only the last; resolved secrets need no entry, the runner sweeps them
-     *   lookup_by_label -> the issues list GET used the labels=<marker> filter
-     *   labels          -> the LAST write that set them; a reattached marker must not clobber human labels
-     *   created_count   -> report issues POSTed for the slug; 0 on the denied or reuse path
-     */
-    issue_report: z
-      .object({
-        slug: z.string(),
-        title: z.string().optional(),
-        body_contains: z.array(z.string()).optional(),
-        body_lacks: z.array(z.string()).optional(),
-        state: z.enum(["open", "closed"]).optional(),
-        created_count: z.number().int().optional(),
-        lookup_by_label: z.boolean().optional(),
-        labels: z.array(z.string()).optional(),
-      })
-      .strict()
-      .optional(),
-    /** Requests of any method the log must contain, as substrings of "METHOD path": a `page=2` read proves pagination ran. */
-    requests_contain: z.array(z.string()).optional(),
-    /**
-     * When true, the mock must have received ZERO requests: the failure under test (a settings_raw
-     * parse failure, read from the local filesystem) fires before any API contact.
-     */
-    zero_requests: z.boolean().optional(),
-    /** Rerun in check mode against the SAME mutated mock, expecting exit 0 and zero writes (the convergence proof). */
-    converges: z.boolean().optional(),
-    /**
-     * Re-run APPLY against the SAME mutated mock and prove it a fixpoint (assertApplyIdempotent), ending
-     * in a converging check; subsumes `converges`. Apply mode without the issue report channel.
-     */
-    apply_idempotent: z.boolean().optional(),
-    /**
-     * The canonical spelling the transform below emits, accepted on input so a dumped artifact
-     * scenario.yml (stringified AFTER the transform) reparses. Set this or one legacy boolean, never both.
-     */
-    fixpoint: z.enum(["converges", "apply_idempotent"]).optional(),
-    /** Multi-repo: the per-target rollup from the `repos-result` output, "owner/name" -> result string. */
-    repos_result: z.record(z.string(), z.string()).optional(),
-    /**
-     * mode: merge only: the EXACT document the run must write to merged-file, compared whole after a
-     * YAML parse. A merge never runs the engine, so it cannot combine with a fixpoint re-run proof.
-     */
-    merged: SettingsSchema.optional(),
-    /**
-     * mode: snapshot, file form only: the EXACT document the run must write to
-     * snapshot_file, compared whole after a YAML parse (so the comment header
-     * is ignored). A dir-form target pins its file under `repos.<slug>.expect.snapshot`.
-     */
-    snapshot: SettingsSchema.optional(),
-    /**
-     * mode: snapshot, either form. When true, the runner re-runs the bundle in
-     * CHECK mode against the SAME seeded state (the allowlist and the denial
-     * policy carried over) once per written document: the file form as the
-     * settings file, the dir form's files each as a one-file repos-dir. Every
-     * check must exit 0 with `result: clean` and zero writes: the round trip.
-     */
-    snapshot_converges: z.boolean().optional(),
-  })
-  .strict()
-  // apply_idempotent's final check-mode run IS the convergence proof, so arming both would rerun it.
-  .refine((expected) => !(expected.converges && expected.apply_idempotent), {
-    message: "apply_idempotent subsumes converges; set only one",
-  })
-  .refine(
-    (expected) =>
-      expected.merged === undefined ||
-      (expected.converges === undefined &&
-        expected.apply_idempotent === undefined &&
-        expected.fixpoint === undefined),
-    { message: "merged pins a mode: merge run, which has no fixpoint re-run to prove" },
+  .strictObject(
+    {
+      /**
+       * A non-empty array lists every ALLOWED code: the fuzz oracle predicts a set of legal exits, since
+       * per-section outcome classes can land on either side of the worst-of fold. Curated scenarios keep the number.
+       */
+      exit_code: z.union([z.number().int(), z.array(z.number().int()).min(1)]),
+      /** The `result` output ("clean", "drift", "applied", "failed", ...). */
+      result: z.string().optional(),
+      /**
+       * The `skipped-sections` output as a set, whatever the comma-joined order. A section skipped under
+       * on-missing-permission: warn must surface here, not only in the summary table.
+       */
+      skipped_sections: z.array(z.string()).optional(),
+      /** Per-section outcome parsed from the step-summary table. */
+      outcomes: z.record(z.string(), z.string()).optional(),
+      /**
+       * Ordered "METHOD /path" prefixes the write log must contain as a subsequence; `{repo}` expands to
+       * the scenario's owner/name. A GraphQL operation is spelled "GRAPHQL <opName>", and a GraphQL READ
+       * never appears in the write log despite its POST.
+       */
+      mutations: z.array(z.string()).optional(),
+      /**
+       * Prefixes of "METHOD /path?query" (or "GRAPHQL <opName>") that must NEVER appear in the request log; a pattern
+       * with a query forbids one lookup on a path that other lookups share.
+       */
+      never: z.array(z.string()).optional(),
+      summary_contains: z.array(z.string()).optional(),
+      /** Substrings the publicly-readable step summary must NOT contain: a redacted target's slug and private live values. */
+      summary_lacks: z.array(z.string()).optional(),
+      stdout_contains: z.array(z.string()).optional(),
+      /**
+       * Substrings stdout must NOT contain, matched AFTER the runner strips the `::add-mask::` lines
+       * core.setSecret emits: those legitimately carry the raw slug so the real runner can mask it.
+       */
+      stdout_lacks: z.array(z.string()).optional(),
+      /**
+       * Substrings that must appear on NO public surface: the step summary, stdout and stderr (mask
+       * lines stripped), and every output value, through the same checkLeaks primitive the fuzzer
+       * applies. Reserve summary_lacks and stdout_lacks for a string allowed on one surface but not another.
+       */
+      leaks_nowhere: z.array(z.string()).optional(),
+      /**
+       * The private-report issue channel's delivery to one target repo, read off the recorded issue writes for
+       * that slug; the only place the private slug and sentinel may legitimately appear. A created issue must
+       * always carry the marker label; that is asserted without a field.
+       *   body_contains   -> the delivered body: the create, or the PATCH on a reuse run
+       *   body_lacks      -> absent from EVERY accepted body, not only the last; resolved secrets need no entry, the runner sweeps them
+       *   lookup_by_label -> the issues list GET used the labels=<marker> filter
+       *   labels          -> the LAST write that set them; a reattached marker must not clobber human labels
+       *   created_count   -> report issues POSTed for the slug; 0 on the denied or reuse path
+       */
+      issue_report: z
+        .object({
+          slug: z.string(),
+          title: z.string().optional(),
+          body_contains: z.array(z.string()).optional(),
+          body_lacks: z.array(z.string()).optional(),
+          state: z.enum(["open", "closed"]).optional(),
+          created_count: z.number().int().optional(),
+          lookup_by_label: z.boolean().optional(),
+          labels: z.array(z.string()).optional(),
+        })
+        .strict()
+        .optional(),
+      /** Requests of any method the log must contain, as substrings of "METHOD path": a `page=2` read proves pagination ran. */
+      requests_contain: z.array(z.string()).optional(),
+      /**
+       * When true, the mock must have received ZERO requests: the failure under test (a settings_raw
+       * parse failure, read from the local filesystem) fires before any API contact.
+       */
+      zero_requests: z.boolean().optional(),
+      /**
+       * The re-run proof against the SAME mutated mock, one enum so the runner branches once:
+       *   converges         -> rerun in check mode, expecting exit 0 and zero writes
+       *   apply_idempotent  -> rerun APPLY and prove it a fixpoint (assertApplyIdempotent), ending in a
+       *                        converging check, so it subsumes `converges`; apply mode without the issue report channel
+       */
+      fixpoint: z.enum(["converges", "apply_idempotent"]).optional(),
+      /** Multi-repo: the per-target rollup from the `repos-result` output, "owner/name" -> result string. */
+      repos_result: z.record(z.string(), z.string()).optional(),
+      /**
+       * mode: merge only: the EXACT document the run must write to merged-file, compared whole after a
+       * YAML parse. A merge never runs the engine, so it cannot combine with a fixpoint re-run proof.
+       */
+      merged: SettingsSchema.optional(),
+      /**
+       * mode: snapshot, file form only: the EXACT document the run must write to
+       * snapshot_file, compared whole after a YAML parse (so the comment header
+       * is ignored). A dir-form target pins its file under `repos.<slug>.expect.snapshot`.
+       */
+      snapshot: SettingsSchema.optional(),
+      /**
+       * mode: snapshot, either form. When true, the runner re-runs the bundle in
+       * CHECK mode against the SAME seeded state (the allowlist and the denial
+       * policy carried over) once per written document: the file form as the
+       * settings file, the dir form's files each as a one-file repos-dir. Every
+       * check must exit 0 with `result: clean` and zero writes: the round trip.
+       */
+      snapshot_converges: z.boolean().optional(),
+    },
+    { error: fixpointKeyError },
   )
-  .refine(
-    (expected) =>
-      expected.fixpoint === undefined ||
-      (expected.converges === undefined && expected.apply_idempotent === undefined),
-    { message: "set fixpoint or a legacy converges/apply_idempotent boolean, not both" },
-  )
+  .refine((expected) => expected.merged === undefined || expected.fixpoint === undefined, {
+    message: "merged pins a mode: merge run, which has no fixpoint re-run to prove",
+  })
   // A snapshot applies nothing, so the apply-mode fixpoint proofs have no run to re-run.
   .refine(
     (expected) =>
       (expected.snapshot === undefined && expected.snapshot_converges === undefined) ||
-      (expected.converges === undefined &&
-        expected.apply_idempotent === undefined &&
-        expected.fixpoint === undefined),
+      expected.fixpoint === undefined,
     {
       message:
         "snapshot and snapshot_converges pin a mode: snapshot run, which has no apply-mode fixpoint",
     },
-  )
-  // The two YAML booleans collapse into one armed proof, so consumers branch on a single enum instead
-  // of two booleans whose exclusivity would otherwise live in a comment.
-  .transform(({ converges, apply_idempotent, fixpoint, ...rest }) => ({
-    ...rest,
-    fixpoint:
-      fixpoint ??
-      (apply_idempotent
-        ? ("apply_idempotent" as const)
-        : converges
-          ? ("converges" as const)
-          : undefined),
-  }));
+  );
 
 /**
  * The mock's starting state, keyed by ./mock/state.ts's LIVE_STATE_KEYS so a typo'd family name fails
@@ -433,7 +413,7 @@ const ScenarioSchema = z
   })
   // A merge runs no engine: a fixpoint re-run would be a check against nothing.
   .refine((s) => s.inputs?.mode !== "merge" || s.expect.fixpoint === undefined, {
-    message: "a mode: merge scenario cannot arm converges or apply_idempotent",
+    message: "a mode: merge scenario cannot arm a fixpoint proof",
   })
   // The snapshot destinations and their pins describe a mode: snapshot run and
   // nothing else; anywhere else they would be dead configuration.
@@ -466,7 +446,7 @@ const ScenarioSchema = z
   )
   // A snapshot never runs the engine's apply path, so a fixpoint proof has no run to re-run.
   .refine((s) => s.inputs?.mode !== "snapshot" || s.expect.fixpoint === undefined, {
-    message: "a mode: snapshot scenario cannot arm converges or apply_idempotent",
+    message: "a mode: snapshot scenario cannot arm a fixpoint proof",
   });
 
 export type MaskKey = z.infer<typeof MaskKeySchema>;
@@ -479,10 +459,7 @@ export const GRADE_RANK: Record<MaskGrade, number> = { none: 0, read: 1, write: 
 export type PermissionMask = z.infer<typeof TokenPermissionsSchema>;
 export type DenialStyle = z.infer<typeof DenialStyleSchema>;
 export type OwnerKind = z.infer<typeof OwnerKindSchema>;
-/** The transform always emits `fixpoint`; a hand-built expectation (the fuzz cores) may omit it. */
-export type Expect = Omit<z.infer<typeof ExpectSchema>, "fixpoint"> & {
-  fixpoint?: "converges" | "apply_idempotent";
-};
+export type Expect = z.infer<typeof ExpectSchema>;
 /**
  * The zod refines prove the `settings`/`settings_raw` exclusivity at the parse boundary; the
  * `?: never` halves carry it into the type, so a generator setting both fails to compile instead of

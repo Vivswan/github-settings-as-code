@@ -16,4 +16,4 @@ expect:
     - "PUT /repos/{repo}/immutable-releases"
   summary_contains:
     - immutable releases
-  converges: true
+  fixpoint: converges

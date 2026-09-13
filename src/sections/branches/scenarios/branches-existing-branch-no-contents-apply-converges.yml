@@ -29,4 +29,4 @@ expect:
     - 'applied protection to "main"'
   summary_lacks:
     - "the branch does not exist on the repo"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

@@ -23,4 +23,4 @@ expect:
     - "POST /repos/{repo}/pages"
   stdout_contains:
     - "disabled GitHub Pages"
-  converges: true
+  fixpoint: converges

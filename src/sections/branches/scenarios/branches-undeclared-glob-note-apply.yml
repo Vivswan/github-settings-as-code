@@ -32,4 +32,4 @@ expect:
     - "PUT /repos/{repo}/branches/main/protection"
     - "GRAPHQL UpdateBranchProtectionRule"
     - "GRAPHQL DeleteBranchProtectionRule"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

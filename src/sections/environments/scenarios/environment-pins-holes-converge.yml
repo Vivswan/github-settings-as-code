@@ -52,4 +52,4 @@ expect:
     - 'unpinned environment "beta"'
     - 'pinned environment "delta"'
     - 'pinned environment "epsilon"'
-  converges: true
+  fixpoint: converges

@@ -30,4 +30,4 @@ expect:
     - "POST /repos/{repo}/environments/production/variables"
   never:
     - "GRAPHQL"
-  converges: true
+  fixpoint: converges

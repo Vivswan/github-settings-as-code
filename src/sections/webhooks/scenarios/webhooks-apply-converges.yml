@@ -51,4 +51,4 @@ expect:
   stdout_contains:
     - 'DELETED undeclared webhook "https://stray.example.com/hook"'
     - the declared secret is re-sent every run
-  apply_idempotent: true
+  fixpoint: apply_idempotent

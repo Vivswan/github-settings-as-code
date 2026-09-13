@@ -41,4 +41,4 @@ expect:
   stdout_contains:
     - "kept under \"_undeclared: keep\""
     - LEGACY
-  converges: true
+  fixpoint: converges

@@ -122,4 +122,4 @@ expect:
     - "PUT /repos/{repo}/interaction-limits/pulls/bypass-list"
   stdout_contains:
     - "added [fresh-user]"
-  converges: true
+  fixpoint: converges

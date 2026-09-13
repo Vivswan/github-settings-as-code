@@ -22,4 +22,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/actions/cache/retention-limit"
     - "PUT /repos/{repo}/actions/cache/storage-limit"
-  converges: true
+  fixpoint: converges

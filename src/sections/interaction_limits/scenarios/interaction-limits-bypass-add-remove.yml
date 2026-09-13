@@ -26,4 +26,4 @@ expect:
   stdout_contains:
     - "removed [goner]"
     - "added [newcomer]"
-  converges: true
+  fixpoint: converges

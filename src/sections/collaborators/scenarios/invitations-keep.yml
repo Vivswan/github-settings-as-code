@@ -35,4 +35,4 @@ expect:
   stdout_contains:
     - "invitation for \"e2e-uninvited\" is pending but not declared"
     - "invitation 603 was sent by email"
-  converges: true
+  fixpoint: converges

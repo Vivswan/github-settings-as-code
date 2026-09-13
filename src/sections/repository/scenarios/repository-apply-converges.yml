@@ -22,4 +22,4 @@ expect:
     - PATCH /repos/{repo}
     - PUT /repos/{repo}/topics
     - PUT /repos/{repo}/vulnerability-alerts
-  converges: true
+  fixpoint: converges

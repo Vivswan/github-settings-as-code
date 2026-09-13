@@ -21,4 +21,4 @@ expect:
     - "GRAPHQL UpdateRepositoryFeatures"
   never:
     - "PATCH /repos/{repo}"
-  converges: true
+  fixpoint: converges

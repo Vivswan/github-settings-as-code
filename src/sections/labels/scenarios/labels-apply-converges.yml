@@ -32,4 +32,4 @@ expect:
     - DELETE /repos/{repo}/labels/wontfix
   requests_contain:
     - GET /repos/e2e-owner/e2e-repo/labels
-  converges: true
+  fixpoint: converges

@@ -69,4 +69,4 @@ expect:
     - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules/apps"
   stdout_contains:
     - 'deployment protection rule "change-window" is enabled on environment "production" but is not declared'
-  converges: true
+  fixpoint: converges

@@ -37,4 +37,4 @@ expect:
     - "DELETE /repos/{repo}/branches/sig-on/protection/required_signatures"
     - "PUT /repos/{repo}/branches/sig-off/protection"
     - "POST /repos/{repo}/branches/sig-off/protection/required_signatures"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

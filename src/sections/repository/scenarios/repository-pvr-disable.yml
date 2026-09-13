@@ -22,4 +22,4 @@ expect:
     - DELETE /repos/{repo}/private-vulnerability-reporting
   summary_contains:
     - private vulnerability reporting
-  converges: true
+  fixpoint: converges
