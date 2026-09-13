@@ -43,9 +43,14 @@ describe("the commit-back push jobs", () => {
         .flatMap((line) => line.split(/[\s;&|()]+/))
         .map((word) => word.replace(/["']/g, ""));
       expect(words).toContain(`--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`);
-      expect(words.filter((word) => word === "-f" || /^--force(?!-with-lease)/.test(word))).toEqual(
-        [],
+      // A forced update hides as a bundled short option (-vf) or a +refspec as readily as a bare --force.
+      const forced = words.filter(
+        (word) =>
+          /^-[a-z]*f[a-z]*$/i.test(word) ||
+          /^--force(?!-with-lease)/.test(word) ||
+          word.startsWith("+"),
       );
+      expect(forced).toEqual([]);
     },
   );
 });
