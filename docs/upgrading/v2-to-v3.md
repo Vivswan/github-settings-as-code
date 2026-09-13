@@ -303,7 +303,7 @@ Repository variable operations (`actions_variables`, `agents_variables`) gain a 
 
 ## 21. The build branch retires
 
-Nothing lands on the `build` branch any more, and the owner deletes it once the migration is complete: the first `build/<position>.<sha7>` tags exist, `latest` points at a tagged packaged commit, and every known consumer of a sha on the branch has repinned to a release tag, `@v3`, or an npm version. Repin now: a `Vivswan/github-settings-as-code@<sha>` pin into the branch stops resolving when it goes.
+Nothing lands on the `build` branch any more, and the owner deletes it once the migration is complete: the first `build/<position>.<sha7>` tags exist, `latest` points at a tagged packaged commit, and every known consumer of a sha on the branch has repinned to a release tag, `@v3`, or an npm version. Its ruleset is declared disabled in `.github/settings.local.yml` (the apply leaves an undeclared ruleset alone, so dropping the entry would keep the deletion rule live); after `git push origin --delete build` the owner removes that entry. Repin now: a `Vivswan/github-settings-as-code@<sha>` pin into the branch stops resolving when it goes.
 
 Every green push to `main` now mints one packaged commit, the main commit's child carrying the built action and library, under the tag `build/<position>.<sha7>` (the position is the commit's first-parent count on `main`). Each green push then prunes those tags to the ten newest: a tag goes once ten newer commits have been packaged, and GitHub may then collect its commit.
 

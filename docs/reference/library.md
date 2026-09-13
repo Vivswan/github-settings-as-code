@@ -18,7 +18,7 @@ npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packag
 
 `bun add` takes the same three forms. A pre-release version looks like `2.0.1-main.446.20260913.g95d081d`; the [Versioning](#versioning) section says how the three relate.
 
-The `github:` form installs a packaged commit: the child of one `main` commit, carrying that commit's tree plus `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built by the workflow run named in its message.
+The `github:` form installs a packaged commit: the child of one `main` commit, carrying that commit's tree plus `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built from that commit; a package CI minted names its workflow run in its message, one minted by hand in the release recovery does not.
 
 - Its `package.json` carries none of the scripts npm's git fetcher takes as a reason to install devDependencies and run a prepare step (`prepare`, `prepack`, `build`, the install hooks), so nothing is built or installed on your side.
 - Every green push to `main` mints one under the tag `build/<position>.<sha7>` and then prunes the tags to the ten newest: once ten newer commits have been packaged, a tag is deleted and GitHub may collect its commit, so a pin taken from an old tag can go on the next merge. A durable pin names a release tag's commit (`git rev-parse v2.1.0`) or an npm version.

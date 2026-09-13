@@ -18,7 +18,7 @@ This action holds a repository-admin token and writes repository settings, so th
 
 What a `uses:` pin points at:
 
-- The `vX.Y.Z` tags, the moving major, and `latest` point at packaged commits: each the child of its source commit on `main`, carrying that tree plus the bundle and library built from it by the workflow run named in its message. `main` carries no executable bundle.
+- The `vX.Y.Z` tags, the moving major, and `latest` point at packaged commits: each the child of its source commit on `main`, carrying that tree plus the bundle and library built from it, by the workflow run its message names when CI minted it (a package minted by hand in the release recovery names none; see below). `main` carries no executable bundle.
 - The tags up to v2.0.0 point at release commits on `main` from when `main` still committed the bundle. Nothing re-verifies them; the release-tags ruleset is what keeps them where they are.
 - The release-tags ruleset freezes version tags for everything except deliberate repository-admin repair. The release workflow never moves a version tag; a rerun verifies the existing one byte-for-byte.
 - npm publishes through trusted publishing (OIDC) from `ci.yml`. The package disallows tokens, so no registry token exists anywhere.
