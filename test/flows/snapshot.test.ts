@@ -10,9 +10,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -39,6 +39,11 @@ import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
 const repo = parseRepoSlug("o/r")._unsafeUnwrap();
+
+/** `text` as a regex source matching itself literally. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Run a snapshot the way the action does: the finished run concludes, a problem fails the run. */
 async function run(api: MockApi, cfg: SnapshotConfig, io: Io): Promise<number> {
@@ -321,59 +326,29 @@ describe("runSnapshot writes through a staging file", () => {
     line: `cannot write the snapshot to ${path}: ${os}. Check that the "${input}" input names a writable path`,
   });
 
-  test("a staging write that fails leaves the previous snapshot intact and reports the write's error", () =>
+  test("the user's own `<snapshot-file>.tmp` sibling is never touched: the write stages under a name of its own", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       const api = new MockApi(labelsRoute("o/r", [BUG]));
       const cfg = fileCfg(dir);
-      const staging = `${cfg.snapshotFile}.tmp`;
+      const sibling = `${cfg.snapshotFile}.tmp`;
       mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
       writeFileSync(cfg.snapshotFile, "labels: []\n");
-      // A directory at the staging path fails the run before the rename; the run must not remove it either.
-      mkdirSync(staging);
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(1);
-      expect(collected.outputs).toEqual({
-        result: "failed",
-        "skipped-sections": "",
-        "repos-result": "{}",
-      });
-      expect(collected.lines).toEqual([
-        unwritable(
-          cfg.snapshotFile,
-          "snapshot-file",
-          `SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${staging}`,
-        ),
-        { line: "result: failed" },
-      ]);
-      expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
-      rmSync(staging, { recursive: true });
-      expect(await run(api, cfg, collectingIo().io)).toBe(0);
-      expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-      expect(existsSync(staging)).toBe(false);
-    }));
-
-  test("a leftover link at the staging path is unlinked, never written through: the destination becomes a regular file", () =>
-    withTempDir("snapshot-flow-", async (dir) => {
-      const api = new MockApi(labelsRoute("o/r", [BUG]));
-      const cfg = fileCfg(dir);
-      const staging = `${cfg.snapshotFile}.tmp`;
-      mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
-      writeFileSync(cfg.snapshotFile, "labels: []\n");
-      symlinkSync("snapshot.yml", staging);
+      // A directory with content at the `.tmp` sibling: a writer staging THERE would remove it or fail on it.
+      mkdirSync(sibling);
+      writeFileSync(join(sibling, "keep"), "user data\n");
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
-      expect(collected.outputs).toEqual({
-        result: "snapshot",
-        "skipped-sections": "",
-        "repos-result": "{}",
-      });
       expect(collected.lines).toEqual([
         { line: `snapshot written to ${cfg.snapshotFile}` },
         { line: "result: snapshot" },
       ]);
-      expect(lstatSync(cfg.snapshotFile).isSymbolicLink()).toBe(false);
       expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-      expect(existsSync(staging)).toBe(false);
+      expect(readFileSync(join(sibling, "keep"), "utf8")).toBe("user data\n");
+      // No staging file of the run's own is left beside the destination.
+      expect(readdirSync(dirname(cfg.snapshotFile)).sort()).toEqual([
+        basename(cfg.snapshotFile),
+        basename(sibling),
+      ]);
     }));
 
   test("a rename that fails removes the staging file, fails only that target, and leaves the destination as it was", () =>
@@ -403,17 +378,24 @@ describe("runSnapshot writes through a staging file", () => {
       const { level, line } = unwritable(
         fileA,
         "snapshot-dir",
-        `Error: EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
+        `Error: EISDIR: illegal operation on a directory, rename '${fileA}.<staging>' -> '${fileA}'`,
       );
+      // The staging name carries the pid and random bytes, so the line is matched with that piece wild.
+      const [head = "", tail = ""] = line.split("<staging>");
       expect(collected.lines).toEqual([
-        { level, line: `o/a: ${line}` },
+        {
+          level,
+          line: expect.stringMatching(
+            new RegExp(`^o/a: ${escapeRegExp(head)}\\d+\\.[0-9a-f]{8}\\.tmp${escapeRegExp(tail)}$`),
+          ),
+        },
         { line: `o/b: snapshot written to ${fileB}` },
         { line: "result: failed" },
       ]);
-      expect(existsSync(`${fileA}.tmp`)).toBe(false);
+      // No staging file of the run's own is left beside either destination.
+      expect(readdirSync(join(cfg.snapshotDir, "o")).sort()).toEqual(["a.yml", "b.yml"]);
       expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
       expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
-      expect(existsSync(`${fileB}.tmp`)).toBe(false);
       expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
         "## github-settings-as-code (snapshot, 2 repositories)",
         "",

@@ -200,8 +200,6 @@ export type Problem =
       /** The colliding layer's position in the settings-file list, from 0. */
       readonly index: number;
       readonly layer: string;
-      /** True when the layer is the write's staging sibling (`<merged-file>.tmp`), not the destination itself. */
-      readonly staging: boolean;
     }
   | { readonly code: "merged-file-unwritable"; readonly path: string; readonly reason: string }
   | {
@@ -510,15 +508,12 @@ export function describeProblem(problem: Problem): string {
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
     case "merged-file-is-layer":
-      return problem.staging
-        ? `the "merged-file" input "${problem.mergedFile}" is written through its staging sibling ` +
-            `"${problem.layer}", which is layer ${problem.index + 1} of the "settings-file" list: the ` +
-            "write would replace that layer before the merged document lands. Write the merged " +
-            'document to a path whose ".tmp" sibling is not a layer'
-        : `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the ` +
-            `"settings-file" list ("${problem.layer}"): the merge would overwrite that layer with the ` +
-            "folded document, and the next run would fold the merged document as a layer. Write the " +
-            "merged document to a path outside the layer list";
+      return (
+        `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the ` +
+        `"settings-file" list ("${problem.layer}"): the merge would overwrite that layer with the ` +
+        "folded document, and the next run would fold the merged document as a layer. Write the " +
+        "merged document to a path outside the layer list"
+      );
     case "merged-file-unwritable":
       return `cannot write the merged document to ${problem.path}: ${problem.reason}. Check that the "merged-file" input names a writable path`;
     case "snapshot-file-is-settings-file":

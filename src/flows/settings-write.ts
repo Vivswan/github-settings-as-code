@@ -2,9 +2,11 @@
  * The one place a run writes a settings document (a snapshot, the merged file, init's starting file): staged beside
  * the destination and renamed into place, so a write that fails partway (disk full, an interrupted run) leaves the
  * previous file intact instead of a truncated one. The rename is atomic on POSIX and a single replace call on
- * Windows. A leftover staging file or link is unlinked first, never written through.
+ * Windows. The staging name is unique to the write (pid and random bytes), so no file of the user's is ever unlinked
+ * or written through: an existing path there fails the write instead.
  */
 
+import { randomBytes } from "node:crypto";
 import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, resolve, sep } from "node:path";
 import { err, ok, type Result } from "neverthrow";
@@ -42,22 +44,16 @@ function realOrSpelled(path: string): string {
   }
 }
 
-/** The sibling a write is staged in before the rename; a flow that takes input paths guards them against it too. */
-export function stagingPath(path: string): string {
-  return `${path}.tmp`;
-}
-
 /** The error is the filesystem's own reason; each caller names the input that chose the path. */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  const staging = stagingPath(path);
+  const staging = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   try {
     mkdirSync(dirname(path), { recursive: true });
-    rmSync(staging, { force: true });
     writeFileSync(staging, text, { flag: "wx" });
     renameSync(staging, path);
     return ok();
   } catch (error) {
-    // The write's error is the one reported: a directory at the staging path fails both the write and this rm.
+    // Only this write's own staging file is removed, and the write's error is the one reported.
     try {
       rmSync(staging, { force: true });
     } catch {}

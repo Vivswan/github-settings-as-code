@@ -10,7 +10,7 @@ import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { renderMergedYaml } from "./library.js";
-import { canonicalPath, stagingPath, writeReplacing } from "./settings-write.js";
+import { canonicalPath, writeReplacing } from "./settings-write.js";
 
 export interface MergeConfig {
   settingsFiles: string[];
@@ -22,29 +22,16 @@ const MERGED_LABEL = "the merged settings document";
 
 /**
  * Paths are compared as the filesystem names them, so "./a.yml", "a.yml", and a spelling through a symlinked directory
- * (macOS's /tmp for /private/tmp) all collide. Guarded beside the write, for the destination (the next run would fold
- * the merged document as if it were a layer) and for its staging sibling (the write would unlink the layer before the
- * fold's result even landed).
+ * (macOS's /tmp for /private/tmp) all collide. Guarded beside the write: the next run would fold the merged document
+ * as if it were a layer.
  */
 function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
-  for (const [path, staging] of [
-    [cfg.mergedFile, false],
-    [stagingPath(cfg.mergedFile), true],
-  ] as const) {
-    const landing = canonicalPath(path);
-    const index = cfg.settingsFiles.findIndex((layer) => canonicalPath(layer) === landing);
-    const layer = cfg.settingsFiles[index];
-    if (layer !== undefined) {
-      return err({
-        code: "merged-file-is-layer",
-        mergedFile: cfg.mergedFile,
-        index,
-        layer,
-        staging,
-      });
-    }
-  }
-  return ok();
+  const landing = canonicalPath(cfg.mergedFile);
+  const index = cfg.settingsFiles.findIndex((layer) => canonicalPath(layer) === landing);
+  const layer = cfg.settingsFiles[index];
+  return layer === undefined
+    ? ok()
+    : err({ code: "merged-file-is-layer", mergedFile: cfg.mergedFile, index, layer });
 }
 
 export function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge, Problem> {

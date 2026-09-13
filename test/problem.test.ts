@@ -252,13 +252,7 @@ const SPECIMENS = {
     'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
   ],
   "merged-file-is-layer": [
-    {
-      code: "merged-file-is-layer",
-      mergedFile: "./repo.yml",
-      index: 1,
-      layer: "repo.yml",
-      staging: false,
-    },
+    { code: "merged-file-is-layer", mergedFile: "./repo.yml", index: 1, layer: "repo.yml" },
     'the "merged-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
       "the merge would overwrite that layer with the folded document, and the next run would fold " +
       "the merged document as a layer. Write the merged document to a path outside the layer list",
@@ -401,19 +395,6 @@ describe("describeProblem", () => {
       "init's settings-file spelled as a list",
       { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "init" },
       'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
-    ],
-    [
-      "a layer sitting on the merged file's staging sibling",
-      {
-        code: "merged-file-is-layer",
-        mergedFile: "merged.yml",
-        index: 1,
-        layer: "merged.yml.tmp",
-        staging: true,
-      },
-      'the "merged-file" input "merged.yml" is written through its staging sibling "merged.yml.tmp", ' +
-        'which is layer 2 of the "settings-file" list: the write would replace that layer before the ' +
-        'merged document lands. Write the merged document to a path whose ".tmp" sibling is not a layer',
     ],
     [
       "no targets with nothing filtered",

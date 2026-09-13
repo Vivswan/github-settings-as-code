@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
 import { collectingIo, concludeMerge, type MergeConfig, runMerge } from "../../src/index.js";
@@ -53,7 +53,6 @@ describe("runMerge", () => {
             mergedFile: target,
             index,
             layer: join(dir, layer),
-            staging: false,
           }),
         );
         expect(collected.lines).toEqual([]);
@@ -62,48 +61,24 @@ describe("runMerge", () => {
       }),
   );
 
-  test.each<[string, (dir: string) => { layer: string; mergedFile: string }]>([
-    [
-      "as spelled",
-      (d) => ({ layer: join(d, "merged.yml.tmp"), mergedFile: join(d, "merged.yml") }),
-    ],
-    // The same directory under two names: a lexical comparison sees two paths, the filesystem one.
-    [
-      "through a symlinked directory",
-      (d) => ({
-        layer: join(d, "real", "merged.yml.tmp"),
-        mergedFile: join(d, "link", "merged.yml"),
-      }),
-    ],
-  ])(
-    "a layer sitting on the merged file's staging sibling (%s) is refused before the write unlinks it",
-    (_case, paths) =>
-      withTempDir("run-merge-", (dir) => {
-        // The write stages at <merged-file>.tmp and unlinks whatever is there first; a layer at that path would be gone
-        // before the fold's result landed.
-        writeFileSync(join(dir, "fleet.yml"), FLEET);
-        mkdirSync(join(dir, "real"));
-        symlinkSync(join(dir, "real"), join(dir, "link"));
-        const { layer: staged, mergedFile } = paths(dir);
-        writeFileSync(staged, REPO);
-        const collected = collectingIo();
-        expect(
-          runMerge(
-            { settingsFiles: [join(dir, "fleet.yml"), staged], mergedFile, layering: "merge" },
-            collected.io,
-          ),
-        ).toEqual(
-          err({
-            code: "merged-file-is-layer" as const,
-            mergedFile,
-            index: 1,
-            layer: staged,
-            staging: true,
-          }),
-        );
-        expect(collected.lines).toEqual([]);
-        expect(readFileSync(staged, "utf8")).toBe(REPO);
-        expect(existsSync(mergedFile)).toBe(false);
-      }),
-  );
+  test("a sibling file beside the merged file is never touched, whether a layer or the user's own", () =>
+    withTempDir("run-merge-", (dir) => {
+      // The write stages under a name unique to the run, so a `<merged-file>.tmp` the user owns, or one that IS a
+      // layer, survives the write untouched.
+      writeFileSync(join(dir, "fleet.yml"), FLEET);
+      const owned = join(dir, "merged.yml.tmp");
+      writeFileSync(owned, REPO);
+      const mergedFile = join(dir, "merged.yml");
+      const collected = collectingIo();
+      const merged = runMerge(
+        { settingsFiles: [join(dir, "fleet.yml"), owned], mergedFile, layering: "merge" },
+        collected.io,
+      );
+      expect(merged).toEqual(ok({ layers: [join(dir, "fleet.yml"), owned], mergedFile }));
+      expect(readFileSync(owned, "utf8")).toBe(REPO);
+      expect(readFileSync(mergedFile, "utf8")).toBe(
+        "repository:\n  has_wiki: false\n  has_issues: true\n",
+      );
+      expect(readdirSync(dir).sort()).toEqual(["fleet.yml", "merged.yml", "merged.yml.tmp"]);
+    }));
 });
