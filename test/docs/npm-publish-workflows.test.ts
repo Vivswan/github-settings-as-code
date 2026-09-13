@@ -106,6 +106,22 @@ function sharedSteps(next: RunJob, stable: RunJob): Array<[string, Step, Step]> 
 /** A step stripped of what legitimately differs between the two publishers: its gate and its id. */
 const body = ({ if: _gate, id: _id, ...rest }: Step): Omit<Step, "if" | "id"> => rest;
 
+/** A step gate that reads a verdict an earlier step wrote; every other condition can skip the step on the caller's own event. */
+const VERDICT_GATE = /^steps\.[\w-]+\.outputs\.[\w-]+ == 'true'$/;
+
+/**
+ * The steps of a publisher that run under a condition of their own: in the pre-release job (which opens with a probe) anything but a
+ * verdict gate, in the stable job (which has none) anything at all. A skipped build publishes a source-only tarball; a skipped guard
+ * publishes through an npm that cannot.
+ */
+function conditionedSteps(job: RunJob, probed: boolean): string[] {
+  return job.steps.flatMap((step) =>
+    step.if !== undefined && !(probed && VERDICT_GATE.test(condition(step.if)))
+      ? [step.name ?? step.uses ?? "unnamed step"]
+      : [],
+  );
+}
+
 /** Every way the two publishers break their shared contract; the assertions and the negative controls read this one list. */
 function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): string[] {
   const next = runJob(nextWorkflow.jobs[NEXT_JOB], `${NEXT_JOB} job`);
@@ -117,6 +133,9 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
     [STABLE_JOB, stable],
   ] as const) {
     if (condition(job.if) !== guard) problems.push(`${label} is not guarded to ${guard}`);
+    for (const name of conditionedSteps(job, job === next)) {
+      problems.push(`${label}: "${name}" runs under a condition of its own`);
+    }
   }
   if (JSON.stringify(next.concurrency) !== JSON.stringify(stable.concurrency)) {
     problems.push("the publishers take different lanes");
@@ -233,6 +252,22 @@ describe("the npm publish jobs", () => {
         w.env = { NODE_AUTH_TOKEN: `\${{ github.token }}` };
       },
       /a token reaches npm: NODE_AUTH_TOKEN/,
+    ],
+    [
+      "a stable library build under a condition of its own",
+      (_n, w) => {
+        stepNamed(runJob(w.jobs[STABLE_JOB], "stable"), "Build the library").if =
+          "github.event_name == 'release'";
+      },
+      /publish-npm: "Build the library" runs under a condition of its own/,
+    ],
+    [
+      "a pre-release step gated on the caller's event instead of the probe",
+      (w) => {
+        stepNamed(runJob(w.jobs[NEXT_JOB], "next"), "Build the library").if =
+          "github.event_name == 'push'";
+      },
+      /publish-next: "Build the library" runs under a condition of its own/,
     ],
     [
       "a library build moved after the stable publish",
