@@ -11,39 +11,34 @@ const channels: Omit<Io, keyof MaskPair> = {
 };
 
 describe("the Io mask pair", () => {
-  test("a plain function is not a mask member, even replacing one minted member after a spread", () => {
-    // Each literal is the divergence the brand forbids: a mask that forwards nothing into masked() would let trace redaction see an empty registry
-    // while the runner masks the value.
-    const forgedMask: Io = {
+  test("a plain function cannot replace either minted member, even after a spread of a real pair", () => {
+    // The two expect-error lines are the controls; the literal itself asserts nothing at runtime. Each replacement is the divergence the
+    // brand forbids: a mask that forwards nothing into masked() would let trace redaction see an empty registry while the runner masks the value.
+    const forged: Io = {
       ...channels,
       ...maskRegistry(() => {}),
       // @ts-expect-error a plain function cannot replace the minted mask
       mask: () => {},
-    };
-    forgedMask.mask("o/private");
-    expect(forgedMask.masked().size).toBe(0);
-    const forgedMasked: Io = {
-      ...channels,
-      ...maskRegistry(() => {}),
       // @ts-expect-error a plain function cannot replace the minted masked
       masked: () => new Set(),
     };
-    forgedMasked.mask("o/private");
-    expect(forgedMasked.masked().size).toBe(0);
+    expect(typeof forged.mask).toBe("function");
+  });
 
+  test("mask() feeds the sink and the live registry masked() returns, fresh per pair", () => {
+    const sunk: string[] = [];
+    const pair = maskRegistry((value) => sunk.push(value));
+    const seen = pair.masked();
+    pair.mask("first");
+    pair.mask("second");
+    expect(sunk).toEqual(["first", "second"]);
+    expect([...seen]).toEqual(["first", "second"]);
+    // Two registries never share state: a fresh pair starts empty.
+    expect(maskRegistry(() => {}).masked().size).toBe(0);
+    // The test fake's pair is one registry too: a masked value reaches both its list and its live set.
     const { io, masks } = captureIo();
     io.mask("o/private");
     expect(masks).toEqual(["o/private"]);
     expect(io.masked().has("o/private")).toBe(true);
-  });
-
-  test("masked() is the live registry mask() writes, not a snapshot", () => {
-    const pair = maskRegistry(() => {});
-    const seen = pair.masked();
-    pair.mask("first");
-    pair.mask("second");
-    expect([...seen]).toEqual(["first", "second"]);
-    // Two registries never share state: a fresh pair starts empty.
-    expect(maskRegistry(() => {}).masked().size).toBe(0);
   });
 });
