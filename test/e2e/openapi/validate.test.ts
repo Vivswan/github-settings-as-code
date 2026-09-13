@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
@@ -8,6 +6,7 @@ import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
   OpenApiValidator,
   pathMatches,
+  readSpecText,
   sharedValidator,
   toJsonSchema,
   validateExchange,
@@ -308,9 +307,7 @@ describe("OpenApiValidator against the fetched spec", () => {
     // The per_page cap is not machine-readable: it lives in the description prose. GitHub CLAMPS an
     // oversized per_page and the page loop stops on a short page, so an undeclared sub-100 cap
     // silently truncates after page one (the variables family is capped at 30).
-    const spec = JSON.parse(
-      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
-    ) as {
+    const spec = JSON.parse(readSpecText()) as {
       paths?: Record<
         string,
         Record<string, { parameters?: unknown[] }> & { parameters?: unknown[] }
@@ -755,11 +752,7 @@ describe("mock rule-type catalog lockstep", () => {
     // accepted bodies against the SPEC's enums. Drift either falsely 422s a real new type or lets
     // the mock accept a type the validator flags; pinned equal, a spec refresh is the one update point.
     const { RULESET_RULE_TYPES } = await import("../mock/support.js");
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const spec = JSON.parse(
-      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
-    );
+    const spec = JSON.parse(readSpecText());
     const operations = [
       spec.paths["/repos/{owner}/{repo}/rulesets"].post,
       spec.paths["/repos/{owner}/{repo}/rulesets/{ruleset_id}"].put,
@@ -793,11 +786,7 @@ describe("invitation role vocabulary lockstep", () => {
     // The collaborators handler gates PATCH-vs-note on this set and the mock clamps stored invitation
     // permissions into it, so a spec refresh that moves the enum must land here too.
     const { INVITATION_ROLES } = await import("../../../src/sections/shared/roles.js");
-    const { readFileSync } = await import("node:fs");
-    const { join } = await import("node:path");
-    const spec = JSON.parse(
-      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
-    );
+    const spec = JSON.parse(readSpecText());
     const getEnum = spec.paths["/repos/{owner}/{repo}/invitations"].get.responses["200"].content[
       "application/json"
     ].schema.items.properties.permissions.enum as string[];

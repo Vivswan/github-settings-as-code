@@ -1,12 +1,12 @@
 /**
  * Trims the published GitHub OpenAPI description to exactly the paths the action can reach and writes it to disk.
- * This script is the ONLY thing that touches the network; the output is a fetched, gitignored artifact (~2MB).
+ * This script is the ONLY thing that touches the network; the output is a fetched, gitignored artifact (~4MB).
  *   test/e2e/openapi/validate.ts  -> loads it from disk
- *   local dev                     -> runs this once
- *   CI                            -> restores it from cache, re-fetches on a miss
- *   UPSTREAM_REF                  -> PINNED to a commit SHA, so two runs months apart produce byte-identical output from the same USED_PATHS
- *
- * Run: `bun .github/scripts/trim-openapi.ts`; re-run when USED_PATHS changes or after bumping UPSTREAM_REF.
+ *   test, test:e2e, fuzz scripts  -> run this with --when-stale first: a fetch only when the file is absent, cut
+ *                                    from another ref, or holding other paths, so a fresh checkout fetches once
+ *   CI                            -> restores it from cache, re-fetches on a miss, then runs the same bun run test
+ *   UPSTREAM_REF                  -> PINNED to a commit SHA, so two runs months apart produce byte-identical output
+ *                                    from the same USED_PATHS; the output records SPEC_URL under "x-source-url"
  */
 
 import { renameSync, writeFileSync } from "node:fs";
@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { DEFAULT_API_VERSION } from "../../src/github/api.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
 import { fetchTextWithRetry } from "./lib/fetch-retry.js";
+import { readArtifact, SOURCE_KEY, specStaleness, whenStale } from "./lib/fetched-artifact.js";
 
 const UPSTREAM_REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
 
@@ -116,12 +117,21 @@ function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; miss
     openapi: doc.openapi,
     info: doc.info,
     ...(doc.servers ? { servers: doc.servers } : {}),
+    [SOURCE_KEY]: SPEC_URL,
     paths,
   };
   return { trimmed, kept, missing };
 }
 
 async function main(): Promise<number> {
+  if (whenStale(process.argv)) {
+    const reason = specStaleness(readArtifact(OUT_PATH), SPEC_URL, USED_PATHS);
+    if (reason === null) {
+      console.log(`${OUT_PATH} is current (trimmed from ${SPEC_URL}); not fetching`);
+      return 0;
+    }
+    console.log(`regenerating ${OUT_PATH}: ${reason}`);
+  }
   console.log(`fetching ${SPEC_URL}`);
   const doc = await fetchSpec(SPEC_URL);
   // An UNDOCUMENTED_PATHS entry exists precisely BECAUSE the descriptor lacks it, so the moment upstream documents
