@@ -1,12 +1,14 @@
 /**
  * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs and publish
- * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: a hook is
- * reachable through workflow_call alone and every ci.yml job that calls one sits downstream of all-green; a job's effective grant covers
- * what its steps consume; post-green's judged sha reaches every checkout and packaging step; every step after a probe runs on a verdict
- * an earlier step wrote. The push probe also runs under bash against a stubbed git, since no pin shows what a branch does.
+ * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: every hook is
+ * reachable through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its
+ * steps consume and nothing granted goes unconsumed; a hook job's own condition is the fork guard or nothing; post-green's judged sha
+ * reaches every checkout and packaging step; every output a step writes is read by a later step, and every gate reads an output an
+ * earlier step writes, back to the probe. The push probe also runs under bash against a stubbed git, since no pin shows what a branch
+ * does.
  *
- * The static guards catch ACCIDENTAL drift: a trigger, grant, or gate added or dropped in plain YAML. Deliberately hiding one behind
- * other syntax is out of scope.
+ * The static guards catch ACCIDENTAL drift: a trigger, grant, gate, or step added or dropped in plain YAML. Deliberately hiding one
+ * behind other syntax is out of scope.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -14,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ROOT } from "../root.js";
 import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
 
 const CI = readWorkflow("ci.yml");
@@ -49,39 +52,66 @@ function downstreamOf(jobs: Record<string, Job>, gate: string): Set<string> {
   return downstream;
 }
 
+interface LocalCall {
+  caller: string;
+  job: Job;
+  file: string;
+}
+
 /** ci.yml's calls of this repository's own workflows: the calling job and the callee file. */
-const localCalls = (ci: Workflow): Array<{ caller: string; job: Job; file: string }> =>
+const localCalls = (ci: Workflow): LocalCall[] =>
   Object.entries(ci.jobs).flatMap(([caller, job]) =>
     (job.uses ?? "").startsWith(CALLER_PREFIX)
       ? [{ caller, job, file: (job.uses ?? "").slice(CALLER_PREFIX.length) }]
       : [],
   );
 
-/** The hooks: callees of ci.yml jobs downstream of all-green, with the caller that reaches each. */
-const postGateHooks = (ci: Workflow) => {
-  const gated = downstreamOf(ci.jobs, "all-green");
-  return localCalls(ci).filter(({ caller }) => gated.has(caller));
-};
+/**
+ * The hooks: every local call whose caller the gate does not itself judge (the judged call is what all-green needs). Each must sit
+ * downstream of the gate; `misplaced` names the ones that do not.
+ */
+function postGateHooks(ci: Workflow): { hooks: LocalCall[]; misplaced: string[] } {
+  const judged = new Set(needsOf(ci.jobs["all-green"]));
+  const downstream = downstreamOf(ci.jobs, "all-green");
+  const hooks = localCalls(ci).filter(({ caller }) => !judged.has(caller));
+  return {
+    hooks,
+    misplaced: hooks.filter(({ caller }) => !downstream.has(caller)).map(({ caller }) => caller),
+  };
+}
+
+const { hooks: HOOKS } = postGateHooks(CI);
+
+/** The `owner/name` the manifest's repository URL names: the one repository whose CI is the publisher. */
+function manifestSlug(): string {
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+    repository: { url: string };
+  };
+  return must(
+    pkg.repository.url.match(/^git\+https:\/\/github\.com\/([^/]+\/[^/]+)\.git$/)?.[1],
+    "owner/name in package.json's repository.url",
+  );
+}
 
 describe("the hooks ci.yml calls after the gate", () => {
-  const hooks = postGateHooks(CI);
-
-  test("every post-gate hook is reachable through workflow_call alone, and its caller sits downstream of all-green", () => {
-    // Non-vacuity: the packaging and release hooks are called this way today.
-    expect(hooks.map((hook) => hook.file).sort()).toContain("post-green.yml");
-    expect(hooks.length).toBeGreaterThan(1);
-    for (const { file } of hooks) {
+  test("every hook is reachable through workflow_call alone, and its caller sits downstream of all-green", () => {
+    const { misplaced } = postGateHooks(CI);
+    // Non-vacuity: the packaging hook and the two release hooks are called this way today.
+    expect(HOOKS.map((hook) => hook.file)).toContain("post-green.yml");
+    expect(HOOKS.length).toBeGreaterThan(2);
+    expect(misplaced, "hook callers that all-green does not gate").toEqual([]);
+    for (const { file } of HOOKS) {
       expect(
         Object.keys(readWorkflow(file).on),
         `${file} is reachable outside ci.yml's gate`,
       ).toEqual(["workflow_call"]);
     }
-    // The pre-gate call (checks.yml) is not a hook: it is what the gate judges.
+    // The judged call (checks.yml) is not a hook: it is what the gate waits for.
     expect(localCalls(CI).map((call) => call.file)).toContain("checks.yml");
-    expect(hooks.map((hook) => hook.file)).not.toContain("checks.yml");
+    expect(HOOKS.map((hook) => hook.file)).not.toContain("checks.yml");
   });
 
-  test.each(hooks.map((hook) => [hook.file, hook.job] as const))(
+  test.each(HOOKS.map((hook) => [hook.file, hook.job] as const))(
     "%s: ci.yml passes exactly the inputs it declares",
     (file, job) => {
       const declared = Object.keys(readWorkflow(file).on.workflow_call?.inputs ?? {}).sort();
@@ -89,23 +119,42 @@ describe("the hooks ci.yml calls after the gate", () => {
     },
   );
 
-  test("a hook that grew a dispatch trigger fails, and a caller moved ahead of the gate stops counting as a hook (negative controls)", () => {
+  test.each(HOOKS.map((hook) => [hook.file] as const))(
+    "%s: a job's own condition is the fork guard or nothing, so no job skips a green push quietly",
+    (file) => {
+      const guard = `github.repository == '${manifestSlug()}'`;
+      for (const [id, job] of Object.entries(readWorkflow(file).jobs)) {
+        if (job.if !== undefined) {
+          expect(condition(job.if), `${file}#${id} carries a condition of its own`).toBe(guard);
+        }
+      }
+    },
+  );
+
+  test("a hook that grew a dispatch trigger, and a release hook moved ahead of the gate, both fail (negative controls)", () => {
     const dispatchable = structuredClone(readWorkflow("post-green.yml"));
     dispatchable.on.workflow_dispatch = null;
     expect(Object.keys(dispatchable.on)).not.toEqual(["workflow_call"]);
     const ci = structuredClone(CI);
-    must(ci.jobs["post-green"], "post-green caller").needs = ["ci"];
-    expect(postGateHooks(ci).map((hook) => hook.file)).not.toContain("post-green.yml");
+    must(ci.jobs["update-release"], "update-release caller").needs = ["ci"];
+    expect(postGateHooks(ci).misplaced).toEqual(["update-release"]);
   });
 });
 
-/** The grant a step's commands consume: a push or a release write needs contents: write, an OIDC-authenticated publish id-token: write. */
+/**
+ * The grant a step's commands consume: a push, a release read or write (drafts are visible to a write grant alone), or a pipeline
+ * subcommand that pushes needs contents: write; an OIDC-authenticated publish needs id-token: write.
+ */
 function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   const run = step.run ?? "";
   const label = step.name ?? "unnamed step";
   const grants: Array<[string, string]> = [];
-  if (/\bgit\s+push\b|\bgh\s+release\s+(?:upload|edit|create)\b/.test(run)) {
-    grants.push(["contents", `"${label}" pushes or writes a release`]);
+  if (
+    /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b|release-pipeline\.ts (?:package|package-commit|retag-major|anchor)\b/.test(
+      run,
+    )
+  ) {
+    grants.push(["contents", `"${label}" pushes or touches a release`]);
   }
   if (/\bnpm\s+publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)) {
     grants.push(["id-token", `"${label}" publishes through OIDC`]);
@@ -113,98 +162,247 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   return grants;
 }
 
-/** A called job's grant: its own permissions block, else the caller's (GitHub inherits the caller's when the job declares none). */
-const effectiveGrant = (job: Job, caller: Job): Record<string, string> =>
-  job.permissions ?? caller.permissions ?? {};
+/**
+ * A called job's grant: its own permissions block, else its workflow's, else the caller's (GitHub applies the nearest block; a called
+ * job with none inherits the caller's).
+ */
+const effectiveGrant = (job: Job, workflow: Workflow, caller: Job): Record<string, string> =>
+  job.permissions ?? workflow.permissions ?? caller.permissions ?? {};
+
+/** Every hook job whose steps consume a grant its effective permissions do not hold. */
+function grantProblems(hooks: LocalCall[]): string[] {
+  return hooks.flatMap(({ file, job: caller }) => {
+    const workflow = readWorkflow(file);
+    return Object.entries(workflow.jobs).flatMap(([id, job]) => {
+      const granted = effectiveGrant(job, workflow, caller);
+      return (job.steps ?? [])
+        .flatMap(consumedGrants)
+        .filter(([scope]) => granted[scope] !== "write")
+        .map(([scope, why]) => `${file}#${id}: ${why}, so it needs ${scope}: write`);
+    });
+  });
+}
 
 describe("the hooks' grants", () => {
   test("every job's effective grant covers what its steps consume", () => {
     // A missing grant is quiet here: the push probe warns and skips, the OIDC probe warns and skips, and the job stays green.
-    const consumers = postGateHooks(CI).flatMap(({ file, job: caller }) =>
-      Object.entries(readWorkflow(file).jobs).flatMap(([id, job]) =>
-        (job.steps ?? []).flatMap((step) =>
-          consumedGrants(step).map(([scope, why]) => ({
-            where: `${file}#${id}`,
-            granted: effectiveGrant(job, caller)[scope],
-            scope,
-            why,
-          })),
-        ),
+    const consumers = HOOKS.flatMap(({ file }) =>
+      Object.values(readWorkflow(file).jobs).flatMap((job) =>
+        (job.steps ?? []).flatMap(consumedGrants),
       ),
     );
-    // The packaging job pushes and both publishers mint OIDC tokens today.
-    expect(consumers.length).toBeGreaterThan(2);
-    for (const { where, granted, scope, why } of consumers) {
-      expect(granted, `${where}: ${why}, so it needs ${scope}: write`).toBe("write");
-    }
+    expect(consumers.length).toBeGreaterThan(4);
+    expect(grantProblems(HOOKS)).toEqual([]);
   });
 
-  test("a publisher whose own ceiling drops the OIDC grant fails, whatever the caller grants (negative control)", () => {
-    const caller: Job = { permissions: { contents: "write", "id-token": "write" } };
-    const job: Job = { permissions: { contents: "read" } };
-    expect(effectiveGrant(job, caller)["id-token"]).toBeUndefined();
-    expect(consumedGrants({ run: "npm publish --tag next" })).toEqual([
-      ["id-token", '"unnamed step" publishes through OIDC'],
+  test.each<[string, (hooks: LocalCall[]) => LocalCall[], RegExp]>([
+    [
+      "a caller ceiling below what the build job pushes with",
+      (hooks) =>
+        hooks.map((hook) =>
+          hook.file === "post-green.yml"
+            ? {
+                ...hook,
+                job: { ...hook.job, permissions: { contents: "read", "id-token": "write" } },
+              }
+            : hook,
+        ),
+      /post-green\.yml#build: .* needs contents: write/,
+    ],
+    [
+      "a caller that grants no OIDC token",
+      (hooks) =>
+        hooks.map((hook) =>
+          hook.file === "post-green.yml"
+            ? { ...hook, job: { ...hook.job, permissions: { contents: "write" } } }
+            : hook,
+        ),
+      /post-green\.yml#publish-next: .* needs id-token: write/,
+    ],
+  ])("%s fails the grant relation (negative control)", (_case, mutate, message) => {
+    expect(grantProblems(mutate(structuredClone(HOOKS))).join("\n")).toMatch(message);
+  });
+
+  test("an anchor job narrowed to read while its subcommand pushes fails (negative control)", () => {
+    const workflow = readWorkflow("update-release-pr.yml");
+    const anchor = must(workflow.jobs.anchor, "anchor job");
+    anchor.permissions = { contents: "read" };
+    const caller = must(
+      HOOKS.find((hook) => hook.file === "update-release-pr.yml"),
+      "caller",
+    ).job;
+    const unmet = (anchor.steps ?? [])
+      .flatMap(consumedGrants)
+      .filter(([scope]) => effectiveGrant(anchor, workflow, caller)[scope] !== "write");
+    expect(unmet.map(([scope]) => scope)).toEqual(["contents"]);
+  });
+});
+
+/** The hook a library-page claim about "every green push" or "every release cut" points at, by its ci.yml caller's condition. */
+function hookFor(claim: string): { file: string; workflow: Workflow } {
+  const release = /release cut/i.test(claim);
+  const hook = must(
+    HOOKS.find(({ job }) => /release_created == 'true'/.test(condition(job.if)) === release),
+    `a hook whose caller runs on ${release ? "a release cut" : "a green push"}`,
+  );
+  return { file: hook.file, workflow: readWorkflow(hook.file) };
+}
+
+/** Whether some step of the workflow runs the pipeline subcommand (with its argument, when one is named). */
+const runsSubcommand = (workflow: Workflow, subcommand: string): boolean =>
+  Object.values(workflow.jobs).some((job) =>
+    (job.steps ?? []).some((step) =>
+      new RegExp(`release-pipeline\\.ts ${subcommand}(?![\\w-])`).test(step.run ?? ""),
+    ),
+  );
+
+/** The library page's claims about what publishes when, against the steps the hooks run. */
+function claimProblems(page: string): string[] {
+  const problems: string[] = [];
+  const rows = [...page.matchAll(/^\| `(next|latest)` \| ([^|]+) \|/gm)];
+  if (rows.length !== 2)
+    problems.push("the dist-tag table no longer has a next row and a latest row");
+  for (const [, tag = "", publishesOn = ""] of rows) {
+    const channel = tag === "latest" ? "stable" : tag;
+    const { file, workflow } = hookFor(publishesOn);
+    if (!runsSubcommand(workflow, `npm-verdict ${channel}`)) {
+      problems.push(
+        `the page says ${tag} publishes on "${publishesOn.trim()}", but ${file} runs no npm-verdict ${channel}`,
+      );
+    }
+  }
+  const build = page.match(/^- Every green push to `main` mints one under the tag `build\//m);
+  if (!build) problems.push("the page no longer claims every green push mints a build tag");
+  else if (!runsSubcommand(hookFor("green push").workflow, "package-commit")) {
+    problems.push(
+      "the page says every green push mints a build tag, but the green-push hook runs no package-commit",
+    );
+  }
+  return problems;
+}
+
+describe("the library page's publishing claims", () => {
+  const page = readFileSync(join(ROOT, "docs", "reference", "library.md"), "utf8");
+
+  test("each channel the page says publishes on a green push or a release cut is published by that hook", () => {
+    expect(claimProblems(page)).toEqual([]);
+  });
+
+  test("a packaging step gone, or a channel's verdict gone, fails the claim (negative control)", () => {
+    const { workflow } = hookFor("green push");
+    const build = must(workflow.jobs.build, "build job");
+    build.steps = build.steps?.filter((step) => !/package-commit/.test(step.run ?? ""));
+    expect(runsSubcommand(workflow, "package-commit")).toBe(false);
+    expect(runsSubcommand(workflow, "npm-verdict next")).toBe(true);
+    expect(runsSubcommand(workflow, "npm-verdict stable")).toBe(false);
+    expect(
+      claimProblems(
+        page.replace(
+          "| `latest` | Every release cut |",
+          "| `latest` | Every green push to `main` |",
+        ),
+      ),
+    ).toEqual([
+      'the page says latest publishes on "Every green push to `main`", but post-green.yml runs no npm-verdict stable',
     ]);
   });
 });
 
-/** The probe steps: each writes a `proceed=` verdict to GITHUB_OUTPUT for the steps after it to read. */
-const isProbe = (step: Step) =>
-  /echo "proceed=(?:true|false)" >> "\$GITHUB_OUTPUT"/.test(step.run ?? "");
+/** Every `<name>` a step writes to GITHUB_OUTPUT. */
+const outputsWritten = (step: Step): string[] =>
+  [...(step.run ?? "").matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map(
+    (m) => m[1] ?? "",
+  );
+
+/** Every `steps.<id>.outputs.<name>` a step reads, in its condition, env, with, or script. */
+const outputsRead = (step: Step): Array<[id: string, name: string]> =>
+  [
+    step.if ?? "",
+    step.run ?? "",
+    ...Object.values(step.env ?? {}),
+    ...Object.values(step.with ?? {}).map(String),
+  ].flatMap((text) =>
+    [...text.matchAll(/\bsteps\.([\w-]+)\.outputs\.([\w-]+)/g)].map(
+      (m) => [m[1] ?? "", m[2] ?? ""] as [string, string],
+    ),
+  );
+
+/** The probe steps: each writes a `proceed=` verdict for the steps after it to read. */
+const isProbe = (step: Step) => outputsWritten(step).includes("proceed");
 
 /**
- * Whether the step at `index` runs on a verdict: its condition is `steps.<id>.outputs.<name> == 'true'` where `<id>` names an
- * earlier step that is the probe itself or is gated the same way (a chain back to the probe).
+ * Whether the step at `index` runs on a verdict: its condition is `steps.<id>.outputs.<name> == 'true'` where an earlier step `<id>`
+ * writes `<name>` and is the probe itself or is gated the same way (a chain back to the probe).
  */
 function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
-  const match = condition(steps[index]?.if).match(/^steps\.([\w-]+)\.outputs\.[\w-]+ == 'true'$/);
+  const match = condition(steps[index]?.if).match(/^steps\.([\w-]+)\.outputs\.([\w-]+) == 'true'$/);
   if (!match) return false;
   const source = steps.findIndex((step, at) => at < index && step.id === match[1]);
-  if (source < 0) return false;
+  if (source < 0 || !outputsWritten(steps[source] as Step).includes(match[2] ?? "")) return false;
   return source === probe || gatedOnProbe(steps, source, probe);
 }
 
-/** The job ids whose steps after a probe are not gated on it, with the offending step names. */
-function ungatedAfterProbe(workflow: Workflow): string[] {
+/** Every wiring fault in a job's outputs: a step after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads. */
+function wiringProblems(workflow: Workflow): string[] {
   return Object.entries(workflow.jobs).flatMap(([id, job]) => {
     const steps = job.steps ?? [];
     const probe = steps.findIndex(isProbe);
-    if (probe < 0) return [];
-    return steps.flatMap((step, index) =>
-      index > probe && !gatedOnProbe(steps, index, probe)
-        ? [`${id}: "${step.name ?? step.uses ?? "unnamed step"}" runs whatever the probe found`]
-        : [],
-    );
+    const label = (step: Step) => `"${step.name ?? step.uses ?? "unnamed step"}"`;
+    const problems: string[] = [];
+    steps.forEach((step, index) => {
+      if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
+        problems.push(`${id}: ${label(step)} runs whatever the probe found`);
+      }
+      for (const [source, name] of outputsRead(step)) {
+        const writer = steps.findIndex((s, at) => at < index && s.id === source);
+        if (writer < 0 || !outputsWritten(steps[writer] as Step).includes(name)) {
+          problems.push(
+            `${id}: ${label(step)} reads steps.${source}.outputs.${name}, which no earlier step writes`,
+          );
+        }
+      }
+      if (step.id !== undefined) {
+        for (const name of outputsWritten(step)) {
+          const read = steps
+            .slice(index + 1)
+            .some((later) => outputsRead(later).some(([s, n]) => s === step.id && n === name));
+          if (!read)
+            problems.push(`${id}: ${label(step)} writes ${name}, which no later step reads`);
+        }
+      }
+    });
+    return problems;
   });
 }
 
 describe("post-green.yml", () => {
   const workflow = readWorkflow("post-green.yml");
   const caller = must(
-    localCalls(CI).find((call) => call.file === "post-green.yml"),
+    HOOKS.find((call) => call.file === "post-green.yml"),
     "post-green caller",
   ).job;
 
-  test("every step after a probe runs on the probe's verdict", () => {
+  test("every step after a probe runs on its verdict, every read names a written output, every output is read", () => {
     const probes = Object.values(workflow.jobs).filter((job) => (job.steps ?? []).some(isProbe));
     // Both jobs open with a probe today; a job without one is not judged here.
     expect(probes.length).toBe(Object.keys(workflow.jobs).length);
-    expect(ungatedAfterProbe(workflow)).toEqual([]);
+    expect(wiringProblems(workflow)).toEqual([]);
   });
 
-  test.each<[string, (w: Workflow) => void]>([
+  test.each<[string, (w: Workflow) => void, RegExp]>([
     [
       "the packaging step without its gate",
       (w) => delete must(must(w.jobs.build, "build").steps?.at(-1), "step").if,
+      /runs whatever the probe found/,
     ],
     [
       "the confirmation gated on a step that is not gated itself",
       (w) => {
         const steps = must(must(w.jobs["publish-next"], "publish-next").steps, "steps");
         must(steps.at(-1), "confirm").if = "steps.oidc-copy.outputs.proceed == 'true'";
-        steps.splice(1, 0, { id: "oidc-copy", run: "echo" });
+        steps.splice(1, 0, { id: "oidc-copy", run: 'echo "proceed=true" >> "$GITHUB_OUTPUT"' });
       },
+      /runs whatever the probe found/,
     ],
     [
       "a gate that is not an equality on true",
@@ -212,11 +410,33 @@ describe("post-green.yml", () => {
         must(must(w.jobs.build, "build").steps?.at(-1), "step").if =
           "always() || steps.token.outputs.proceed == 'true'";
       },
+      /runs whatever the probe found/,
     ],
-  ])("%s fails the gate relation (negative control)", (_case, mutate) => {
+    [
+      "a gate on an output the probe never writes",
+      (w) => {
+        must(must(w.jobs.build, "build").steps?.at(-1), "step").if =
+          "steps.token.outputs.published == 'true'";
+      },
+      /reads steps\.token\.outputs\.published, which no earlier step writes/,
+    ],
+    [
+      "the confirmation step gone, leaving the publish output unread",
+      (w) => must(w.jobs["publish-next"], "publish-next").steps?.pop(),
+      /writes published, which no later step reads/,
+    ],
+    [
+      "the publish output no longer written",
+      (w) => {
+        const step = must(must(w.jobs["publish-next"], "publish-next").steps?.at(-2), "publish");
+        step.run = step.run?.replace(/\n\s*echo "published=true" >> "\$GITHUB_OUTPUT"/, "");
+      },
+      /reads steps\.publish\.outputs\.published, which no earlier step writes/,
+    ],
+  ])("%s fails the wiring relation (negative control)", (_case, mutate, message) => {
     const drifted = structuredClone(workflow);
     mutate(drifted);
-    expect(ungatedAfterProbe(drifted)).not.toEqual([]);
+    expect(wiringProblems(drifted).join("\n")).toMatch(message);
   });
 
   test("the judged sha the caller passes is the ref every checkout takes and the source every packaging step names", () => {
@@ -238,6 +458,28 @@ describe("post-green.yml", () => {
         `"${step.name}" packages something other than the judged sha`,
       ).toBe(judged);
     }
+  });
+
+  test("the probe tells a rejected PAT from a read ceiling by the same secret the checkout falls back from", () => {
+    const steps = must(workflow.jobs.build, "build job").steps ?? [];
+    const checkout = must(
+      steps.find((step) => (step.uses ?? "").startsWith("actions/checkout@")),
+      "checkout",
+    );
+    const secret = must(
+      String(checkout.with?.token).match(
+        /^\$\{\{\s*secrets\.(\w+)\s*\|\|\s*github\.token\s*\}\}$/,
+      )?.[1],
+      "a `secrets.X || github.token` checkout token",
+    );
+    const probe = must(steps.find(isProbe), "probe step");
+    const flag = Object.entries(probe.env ?? {}).find(([, value]) =>
+      value.includes(`secrets.${secret}`),
+    );
+    expect(flag, `the probe's env does not read secrets.${secret}`).toBeDefined();
+    expect(condition(flag?.[1])).toBe(`secrets.${secret} != ''`);
+    // The script branches on that variable, so the env name and the script agree.
+    expect(probe.run).toContain(`"$${flag?.[0]}" = "true"`);
   });
 });
 
@@ -304,14 +546,13 @@ describe("the push probe under bash", () => {
   const run = must(must(steps.find(isProbe), "probe step").run, "probe run");
 
   /**
-   * The fenced block: git's stderr, indented, between a stop-commands line keyed by a fresh 32-hex token and its own resume line, then one
-   * static error. The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks the
-   * lines as quoted text in the log.
+   * The fenced block: git's stderr, indented, between a stop-commands line keyed by a 32-hex token and its own resume line, then one
+   * static error. The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks
+   * the lines as quoted text in the log. Returns the token.
    */
-  function expectFenced(lines: string[], inner: string[]): void {
+  function expectFenced(lines: string[], inner: string[]): string {
     const [open, header, ...rest] = lines;
-    const token = open?.match(FENCE_OPEN)?.[1];
-    expect(token).toBeDefined();
+    const token = must(open?.match(FENCE_OPEN)?.[1], "a stop-commands line with a 32-hex token");
     expect(header).toBe("probe stderr:");
     expect(rest.slice(0, inner.length)).toEqual(inner);
     expect(rest[inner.length]).toBe(`::${token}::`);
@@ -321,14 +562,17 @@ describe("the push probe under bash", () => {
     for (const line of inner) {
       expect(line.startsWith("  ")).toBe(true);
     }
+    return token;
   }
 
-  test("a stderr that does not end in a newline still closes the fence on a line of its own", () => {
+  test("a stderr that does not end in a newline still closes the fence on a line of its own, under a token fresh per run", () => {
     const probe = runProbe(run, "refused", 1, true);
     expect(probe.status).toBe(1);
-    expectFenced(probe.lines, ["  refused"]);
+    const token = expectFenced(probe.lines, ["  refused"]);
     expect(probe.probeErrLeft).toBe(false);
     expect(probe.output).toBe("");
+    // A fixed token is one remote text could name to resume command processing.
+    expect(expectFenced(runProbe(run, "refused", 1, true).lines, ["  refused"])).not.toBe(token);
   });
 
   test("a stderr carrying workflow-command text is confined to indented lines inside the fence", () => {

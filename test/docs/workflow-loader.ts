@@ -34,6 +34,7 @@ export interface Job {
   "timeout-minutes"?: number;
   permissions?: Record<string, string>;
   concurrency?: Concurrency;
+  env?: Record<string, string>;
   steps?: Step[];
   uses?: string;
   with?: Record<string, unknown>;

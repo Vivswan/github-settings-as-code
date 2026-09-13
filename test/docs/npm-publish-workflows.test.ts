@@ -15,7 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT } from "../root.js";
-import { type Job, readWorkflow, type Step } from "./workflow-loader.js";
+import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
 
 /** A job that runs steps (the publishers are never reusable-workflow calls). */
 type RunJob = Job & { steps: Step[] };
@@ -37,12 +37,16 @@ const condition = (raw: unknown): string =>
     .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
     .trim();
 
-/** Every string a step hands the runner beyond its script: env values, with values, the gate. */
-function stepInputs(step: Step): string[] {
+/** Every name and value a job hands the runner beyond its scripts: its env, each step's env, with, and gate. */
+function runnerInputs(job: RunJob): string[] {
   return [
-    ...Object.values(step.env ?? {}),
-    ...Object.values(step.with ?? {}).map(String),
-    step.if ?? "",
+    ...Object.entries(job.env ?? {}).flat(),
+    ...job.steps.flatMap((step) => [
+      ...Object.entries(step.env ?? {}).flat(),
+      ...Object.keys(step.with ?? {}),
+      ...Object.values(step.with ?? {}).map(String),
+      step.if ?? "",
+    ]),
   ];
 }
 
@@ -58,6 +62,7 @@ const setupNode = (job: RunJob): Step =>
   );
 
 const STABLE_FILE = "update-release.yml";
+const STABLE_JOB = "publish-npm";
 const publishers = () => ({
   next: runJob(readWorkflow("post-green.yml").jobs["publish-next"], "publish-next job"),
   stableWorkflow: readWorkflow(STABLE_FILE),
@@ -95,91 +100,113 @@ function sharedSteps(next: RunJob, stable: RunJob): Array<[string, Step, Step]> 
 /** A step stripped of what legitimately differs between the two publishers: its gate and its id. */
 const body = ({ if: _gate, id: _id, ...rest }: Step): Omit<Step, "if" | "id"> => rest;
 
-/** The guard both publishers must carry. */
-const forkGuard = () => `github.repository == '${manifestSlug()}'`;
+/** Every way the two publishers break their shared contract; the assertions and the negative controls read this one list. */
+function publisherProblems(next: RunJob, stableWorkflow: Workflow): string[] {
+  const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
+  const problems: string[] = [];
+  const guard = `github.repository == '${manifestSlug()}'`;
+  for (const [label, job] of [
+    ["publish-next", next],
+    [STABLE_JOB, stable],
+  ] as const) {
+    if (condition(job.if) !== guard) problems.push(`${label} is not guarded to ${guard}`);
+  }
+  if (JSON.stringify(next.concurrency) !== JSON.stringify(stable.concurrency)) {
+    problems.push("the publishers take different lanes");
+  }
+  if (typeof next.concurrency?.group !== "string" || next.concurrency.group.includes("${{")) {
+    problems.push("the lane's group is not one literal");
+  }
+  const others = Object.keys(stableWorkflow.jobs)
+    .filter((id) => id !== STABLE_JOB)
+    .sort();
+  if (JSON.stringify([stable.needs ?? []].flat().sort()) !== JSON.stringify(others)) {
+    problems.push(`${STABLE_JOB} does not run after every other job (${others.join(", ")})`);
+  }
+  for (const value of [...runnerInputs(next), ...runnerInputs(stable)]) {
+    if (/secrets\.|NODE_AUTH_TOKEN|NPM_TOKEN/.test(value))
+      problems.push(`a token reaches npm: ${value}`);
+  }
+  for (const [label, a, b] of sharedSteps(next, stable)) {
+    if (JSON.stringify(body(a)) !== JSON.stringify(body(b)))
+      problems.push(`"${label}" diverged between the publishers`);
+  }
+  const registry = setupNode(next).with?.["registry-url"];
+  if (typeof registry !== "string" || setupNode(stable).with?.["registry-url"] !== registry) {
+    problems.push("the publishers name different registries");
+  }
+  return problems;
+}
 
 describe("the npm publish jobs", () => {
   const { next, stableWorkflow } = publishers();
-  const stable = runJob(stableWorkflow.jobs["publish-npm"], "publish-npm job");
+  const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
 
-  test("both run only in the repository the manifest names: a fork has no trusted publisher", () => {
-    expect(condition(next.if)).toBe(forkGuard());
-    expect(condition(stable.if)).toBe(forkGuard());
-  });
-
-  test("both take the one lane: the registry has no compare-and-set, so a verdict must still hold when its publish lands", () => {
-    expect(next.concurrency).toEqual(stable.concurrency);
-    expect(typeof next.concurrency?.group).toBe("string");
-    expect(next.concurrency?.group).not.toContain("${{");
-  });
-
-  test("the stable publish runs after every other job of its workflow, so nothing reaches the registry before the draft's assets check out", () => {
-    const others = Object.keys(stableWorkflow.jobs)
-      .filter((id) => id !== "publish-npm")
-      .sort();
-    expect(others.length).toBeGreaterThan(1);
-    expect([stable.needs ?? []].flat().sort()).toEqual(others);
-  });
-
-  test("neither hands npm a registry token, as the library page promises", () => {
+  test("both are guarded to the manifest's repository, take one lane, hand npm no token, share their steps' text, and name one registry; the stable one runs last", () => {
+    // The library page's promise is the second artifact of the token relation.
     const page = readFileSync(join(ROOT, "docs", "reference", "library.md"), "utf8");
     expect(page).toContain("no registry token exists anywhere");
-    const tokens = [...next.steps, ...stable.steps]
-      .flatMap(stepInputs)
-      .filter((value) => /secrets\.|NODE_AUTH_TOKEN|NPM_TOKEN/.test(value));
-    expect(tokens).toEqual([]);
+    // Non-vacuity: the setup composite, setup-node, the floor guard, and the library build are shared today, and the stable
+    // workflow has jobs for the publish to wait on.
+    expect(sharedSteps(next, stable).length).toBeGreaterThan(3);
+    expect(Object.keys(stableWorkflow.jobs).length).toBeGreaterThan(2);
+    expect(publisherProblems(next, stableWorkflow)).toEqual([]);
   });
 
-  test("the steps the two publishers share are the same text, so a fix reaches both", () => {
-    const shared = sharedSteps(next, stable);
-    // The setup composite, setup-node, the floor guard, and the library build are shared today.
-    expect(shared.length).toBeGreaterThan(3);
-    for (const [label, a, b] of shared) {
-      expect(body(a), `"${label}" diverged between the publishers`).toEqual(body(b));
-    }
-  });
-
-  test("both publish to one registry, the one setup-node writes into .npmrc", () => {
-    const registry = setupNode(next).with?.["registry-url"];
-    expect(typeof registry).toBe("string");
-    expect(setupNode(stable).with?.["registry-url"]).toBe(registry);
-  });
-
-  /** Each mutation, then whether the relation it targets still holds; the control passes when it does not. */
-  test.each<[string, (next: RunJob, stable: RunJob) => boolean]>([
+  test.each<[string, (next: RunJob, stableWorkflow: Workflow) => void, RegExp]>([
     [
       "a stable publish open to forks",
-      (_n, s) => {
-        delete s.if;
-        return condition(s.if) === forkGuard();
-      },
+      (_n, w) => delete must(w.jobs[STABLE_JOB], "stable").if,
+      /publish-npm is not guarded/,
     ],
     [
       "a pre-release publish on a lane of its own",
-      (n, s) => {
+      (n) => {
         n.concurrency = { ...n.concurrency, group: "publish-next" };
-        return JSON.stringify(n.concurrency) === JSON.stringify(s.concurrency);
       },
+      /different lanes/,
+    ],
+    [
+      "a stable publish ahead of the asset verification",
+      (_n, w) => {
+        must(w.jobs[STABLE_JOB], "stable").needs = ["package-release"];
+      },
+      /does not run after every other job/,
     ],
     [
       "a token handed to setup-node",
       (n) => {
         setupNode(n).env = { NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}` };
-        return n.steps.flatMap(stepInputs).every((value) => !/secrets\./.test(value));
       },
+      /a token reaches npm: NODE_AUTH_TOKEN/,
+    ],
+    [
+      "a token in the job's own env under an innocent value",
+      (_n, w) => {
+        must(w.jobs[STABLE_JOB], "stable").env = { NODE_AUTH_TOKEN: `\${{ github.token }}` };
+      },
+      /a token reaches npm: NODE_AUTH_TOKEN/,
     ],
     [
       "a floor guard fixed in one job only",
-      (n, s) => {
+      (n) => {
         const guard = stepNamed(n, "Require an npm that publishes through OIDC");
         guard.run = guard.run?.replace("11.5.1", "11.6.0");
-        return sharedSteps(n, s).every(
-          ([, a, b]) => JSON.stringify(body(a)) === JSON.stringify(body(b)),
-        );
       },
+      /"Require an npm that publishes through OIDC" diverged/,
     ],
-  ])("%s fails its relation (negative control)", (_case, mutateAndHolds) => {
-    expect(mutateAndHolds(structuredClone(next), structuredClone(stable))).toBe(false);
+    [
+      "a setup-node without the registry the trusted publisher is configured on",
+      (_n, w) => {
+        delete setupNode(runJob(w.jobs[STABLE_JOB], "stable")).with?.["registry-url"];
+      },
+      /different registries|diverged/,
+    ],
+  ])("%s fails its relation (negative control)", (_case, mutate, message) => {
+    const driftedNext = structuredClone(next);
+    const driftedWorkflow = structuredClone(stableWorkflow);
+    mutate(driftedNext, driftedWorkflow);
+    expect(publisherProblems(driftedNext, driftedWorkflow).join("\n")).toMatch(message);
   });
 });
 
@@ -240,12 +267,23 @@ describe("the OIDC probe under bash", () => {
 });
 
 describe("the npm floor guard under bash", () => {
-  const stable = runJob(readWorkflow(STABLE_FILE).jobs["publish-npm"], "publish-npm job");
+  const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);
   const run = must(
     stepNamed(stable, "Require an npm that publishes through OIDC").run,
     "guard run",
   );
+  /** Trusted publishing exists from this npm on (npm's changelog for 11.5.1); the script must hold that floor or a newer one. */
+  const OIDC_NPM = "11.5.1";
   const floor = must(run.match(/^floor=(\S+)$/m)?.[1], "floor= line in the guard");
+
+  test("the script's floor is not below the npm that introduced trusted publishing", () => {
+    const [scriptFloor] = [floor, OIDC_NPM].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+    expect(scriptFloor, `floor=${floor} admits an npm that cannot publish through OIDC`).toBe(
+      OIDC_NPM,
+    );
+  });
 
   /** An npm stub reporting `before` until `npm install -g` runs, then `after`. */
   const stubNpm =
@@ -272,8 +310,8 @@ describe("the npm floor guard under bash", () => {
     ["at the floor", floor, floor, { lines: [], status: 0 }],
     ["above it", "99.0.0", "99.0.0", { lines: [], status: 0 }],
     [
-      "below it, upgraded past it",
-      "1.0.0",
+      "just below the OIDC floor, upgraded past it",
+      "11.4.2",
       "99.0.0",
       { lines: ["installed install -g npm@latest"], status: 0 },
     ],
@@ -298,7 +336,7 @@ describe("the npm floor guard under bash", () => {
 
 describe("the publish blocks under bash", () => {
   const { next } = publishers();
-  const stable = runJob(readWorkflow(STABLE_FILE).jobs["publish-npm"], "publish-npm job");
+  const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);
   const nextRun = must(
     stepNamed(next, "Publish the pre-release under the next dist-tag").run,
     "next publish run",
@@ -316,9 +354,9 @@ describe("the publish blocks under bash", () => {
     };
   const source = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
 
-  const cases: [string, string, string, { lines: string[]; status: number }][] = [
+  const cases: [string, string, string, { lines: string[]; status: number; output: string }][] = [
     [
-      "next: a publish verdict sets the version and publishes under next with the source as GITHUB_SHA",
+      "next: a publish verdict sets the version, publishes under next with the source as GITHUB_SHA, and reports the publish for the confirmation",
       nextRun,
       "publish 2.0.1-main.446.20260913.gb8df084",
       {
@@ -328,13 +366,14 @@ describe("the publish blocks under bash", () => {
           "npm publish --tag next (GITHUB_SHA=b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a)",
         ],
         status: 0,
+        output: "published=true\n",
       },
     ],
     [
-      "next: a skip verdict calls npm not at all and reports why",
+      "next: a skip verdict calls npm not at all, reports why, and leaves the confirmation ungated",
       nextRun,
       "skip the registry's next is newer",
-      { lines: ["::notice::the registry's next is newer"], status: 0 },
+      { lines: ["::notice::the registry's next is newer"], status: 0, output: "" },
     ],
     [
       "next: anything else fails the step",
@@ -346,6 +385,7 @@ describe("the publish blocks under bash", () => {
           "::error::npm-verdict printed neither publish nor skip; see the line above.",
         ],
         status: 1,
+        output: "",
       },
     ],
     [
@@ -358,17 +398,17 @@ describe("the publish blocks under bash", () => {
           "npm publish (GITHUB_SHA=b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a)",
         ],
         status: 0,
+        output: "",
       },
     ],
     [
       "stable: a skip verdict calls npm not at all and warns",
       stableRun,
       "skip 2.1.0 is already on the registry",
-      { lines: ["::warning::2.1.0 is already on the registry"], status: 0 },
+      { lines: ["::warning::2.1.0 is already on the registry"], status: 0, output: "" },
     ],
   ];
   test.each(cases)("%s", (_name, run, verdict, expected) => {
-    const step = runStep(run, { SOURCE_SHA: source, TAG: "v2.1.0" }, stubs(verdict));
-    expect({ lines: step.lines, status: step.status }).toEqual(expected);
+    expect(runStep(run, { SOURCE_SHA: source, TAG: "v2.1.0" }, stubs(verdict))).toEqual(expected);
   });
 });
