@@ -92,14 +92,18 @@ function relativeImportsOf(file: string): string[] {
   const source = readFileSync(join(ROOT, file), "utf8");
   const specifiers: string[] = [];
   for (const line of source.split("\n")) {
-    const calls = [...line.matchAll(/\b(?:import|require)\s*\(([^)]*)\)/g)];
-    if (calls.length === 0 && !/^\s*import[\s{"]/.test(line)) {
+    const openers = [...line.matchAll(/\b(?:import|require)\s*\(/g)].length;
+    if (openers === 0 && !/^\s*import[\s{"]/.test(line)) {
       continue;
     }
-    // Every call on the line is read; one whose argument is not a quoted literal is the unsupported form.
+    // Every call on the line is read and must close on it with a quoted literal; a call left open (a multiline argument) or a
+    // non-literal argument is the unsupported form.
+    const calls = [...line.matchAll(/\b(?:import|require)\s*\(([^)]*)\)/g)];
     const found =
-      calls.length > 0
-        ? calls.map((call) => (call[1] ?? "").trim().match(/^(["'])([^"']+)\1$/)?.[2] ?? null)
+      openers > 0
+        ? calls.length === openers
+          ? calls.map((call) => (call[1] ?? "").trim().match(/^(["'])([^"']+)\1$/)?.[2] ?? null)
+          : [null]
         : [line.match(/^import [^"]*from "([^"]+)";$/)?.[1] ?? null];
     expect(
       found.every((spec) => spec !== null),
