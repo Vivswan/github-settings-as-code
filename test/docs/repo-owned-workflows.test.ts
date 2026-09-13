@@ -31,47 +31,31 @@ describe("the commit-back push jobs", () => {
       const push = readWorkflow(file).jobs.push;
       expect(push?.permissions?.contents).toBe("write");
       expect((push?.steps ?? []).filter(runsCheckoutCode)).toEqual([]);
-      // A plain --force would overwrite a commit that landed after the patch was cut; the lease names the sha the job verified.
-      // Every push line of the job is judged (a second, unleased push beside the leased one is a write the lease does not cover),
-      // as words with continuations joined and shell quotes removed, as git receives them.
-      const pushLines = (push?.steps ?? []).flatMap((step) =>
-        (step.run ?? "")
-          .replace(/\\\n/g, " ")
-          .split("\n")
-          .filter((line) => /\bgit\s+push\b/.test(line))
-          .map((line) => ({
+      // The lease names the sha the job verified and guards one ref, so a push under the write token is exactly: that lease as its only
+      // option, one https remote, and that ref as its only destination. Every push command of every step is judged.
+      const pushes = (push?.steps ?? []).flatMap((step) =>
+        [...(step.run ?? "").replace(/\\\n/g, " ").matchAll(/\bgit\s+push\b[^;&|()\n]*/g)].map(
+          (m) => ({
             step,
-            // The command from `git` to the next shell separator; quotes removed and `${NAME}` written `$NAME`: the words as git
-            // receives them, whichever spelling the script used.
-            words: (line.match(/\bgit\s+push\b[^;&|()]*/)?.[0] ?? "")
+            words: m[0]
               .split(/\s+/)
+              .slice(2)
               .map((w) => w.replace(/["']/g, "").replace(/\$\{(\w+)\}/g, "$$$1")),
-          })),
+          }),
+        ),
       );
-      expect(pushLines.length, `${file} has no git push`).toBeGreaterThan(0);
-      for (const { step, words } of pushLines) {
+      expect(pushes.length, `${file} has no git push`).toBeGreaterThan(0);
+      for (const { step, words } of pushes) {
         expect(
           step.env?.HEAD_SHA,
           `${file}: a push step without HEAD_SHA in its env`,
         ).toBeDefined();
-        // Git honors the first lease word, so an earlier, looser lease would override this one; exactly one, and it is this one.
-        expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
+        expect(words.filter((word) => word.startsWith("-"))).toEqual([
           "--force-with-lease=refs/heads/$HEAD_REF:$HEAD_SHA",
         ]);
-        // The lease guards one ref, so the push may write only that ref: after the options, the operands are the remote and the one refspec.
-        const operands = words
-          .slice(words.indexOf("push") + 1)
-          .filter((word) => !word.startsWith("-"));
-        expect(operands.slice(1)).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
+        const operands = words.filter((word) => !word.startsWith("-"));
         expect(operands[0], "the remote is not a URL").toMatch(/^https:\/\//);
-        // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
-        const forced = words.filter(
-          (word) =>
-            /^-[^-]*f/.test(word) ||
-            /^--(?:no-)?force(?!-with-lease=|-if-includes$)/.test(word) ||
-            word.startsWith("+"),
-        );
-        expect(forced).toEqual([]);
+        expect(operands.slice(1)).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
       }
     },
   );
