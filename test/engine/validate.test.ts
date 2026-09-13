@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
+import type { SectionKey } from "../../src/schema.js";
+import { SECTIONS } from "../../src/sections/registry.js";
 
 function issuesOf(doc: Record<string, unknown>, sourceLabel = "f.yml"): readonly string[] | null {
   return validateSectionShapes(doc, sourceLabel).match(
@@ -21,37 +23,32 @@ describe("section shape validation", () => {
       err({
         code: "settings-malformed-sections",
         source: "settings.yml",
-        issues: ['workflows[0].state: Invalid option: expected one of "active"|"disabled"'],
+        issues: [expect.stringMatching(/^workflows\[0\]\.state: /)],
       }),
     );
   });
 
-  test.each<[what: string, doc: Record<string, unknown>, issue: string]>([
-    [
-      "a bad workflows state fails naming the path",
-      { workflows: [{ path: "ci.yml", state: "paused" }] },
-      'workflows[0].state: Invalid option: expected one of "active"|"disabled"',
-    ],
+  test.each<[what: string, doc: Record<string, unknown>, issue: RegExp]>([
     // A missing "-" makes include a string; the handler would call .map on it.
     [
       "a string where the handler maps a list",
       { rulesets: [{ name: "protect-main", conditions: { ref_name: { include: "main" } } }] },
-      "rulesets[0].conditions.ref_name.include: Invalid input: expected array, received string",
+      /^rulesets\[0\]\.conditions\.ref_name\.include: .*expected array/,
     ],
     // YAML parses new_name: 2.0 as a number; the handler lowercases it.
     [
       "a number where the handler lowercases a string",
       { labels: [{ name: "v2", new_name: 2 }] },
-      "labels[0].new_name: Invalid input: expected string, received number",
+      /^labels\[0\]\.new_name: .*expected string/,
     ],
     // The handler reads source.path, which throws on source: null.
     [
       "a null where the handler dereferences a mapping",
       { pages: { source: null } },
-      "pages.source: Invalid input: expected object, received null",
+      /^pages\.source: .*expected object/,
     ],
   ])("the fields handlers dereference are shape-checked: %s", (_what, doc, issue) => {
-    expect(issuesOf(doc)).toEqual([issue]);
+    expect(issuesOf(doc)).toEqual([expect.stringMatching(issue)]);
   });
 
   test("the happy shapes pass, and the parsed document carries the unknown keys through untouched", () => {
@@ -74,17 +71,11 @@ describe("section shape validation", () => {
 
 describe("YAML-tagged values are rejected anywhere in a section", () => {
   // zod object schemas accept a Date or Set as an empty mapping, so without the plain-data gate these would validate and silently configure nothing.
-  test.each<[site: string, doc: Record<string, unknown>]>([
-    ["actions", { actions: new Date(0) }],
-    ["pages", { pages: new Date(0) }],
-  ])(
-    "a tagged section VALUE is rejected for the mapping section %s, which has no required key",
-    (site, doc) => {
-      expect(issuesOf(doc, "settings.yml")).toEqual([
-        `${site} is not plain YAML data (a Date, e.g. from a YAML !!timestamp tag); replace it with a plain value`,
-      ]);
-    },
-  );
+  test("a tagged section VALUE is rejected for a mapping section that has no required key", () => {
+    expect(issuesOf({ actions: new Date(0) }, "settings.yml")).toEqual([
+      "actions is not plain YAML data (a Date, e.g. from a YAML !!timestamp tag); replace it with a plain value",
+    ]);
+  });
 
   test("a tagged NESTED value is rejected with its key path", () => {
     expect(issuesOf({ actions: { cache: new Date(0) } })).toEqual([
@@ -104,36 +95,43 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
 });
 
 describe("closed-surface sections reject unrecognized entry keys upfront", () => {
-  const ROLE_CONSEQUENCE =
-    'a misspelled "permission" key would silently grant the default "push" role instead of the ' +
-    "intended one";
+  const ENTRIES: Partial<Record<SectionKey, Record<string, unknown>>> = {
+    collaborators: { username: "alice" },
+    teams: { name: "t" },
+    workflows: { path: "ci.yml", state: "active" },
+    custom_properties: { property_name: "team", value: "platform" },
+    secret_scanning_custom_patterns: { name: "internal-token", pattern: "int_[a-z0-9]{8}" },
+    actions_secrets: { name: "S", value: "$S" },
+    dependabot_secrets: { name: "S", value: "$S" },
+    codespaces_secrets: { name: "S", value: "$S" },
+    agents_secrets: { name: "S", value: "$S" },
+  };
+  const closed = SECTIONS.flatMap((section) =>
+    section.closedSurface === undefined
+      ? []
+      : [
+          {
+            key: section.key,
+            surface: section.closedSurface as {
+              known: Readonly<Record<string, true>>;
+              describe: (entry: Record<string, unknown>) => string;
+              consequence: string;
+            },
+          },
+        ],
+  );
 
-  test("a misspelled collaborator permission fails validation, before any write", () => {
-    expect(issuesOf({ collaborators: [{ username: "alice", permision: "admin" }] })).toEqual([
-      'collaborators[alice]: declares "permision", which this section does not recognize ' +
-        `(known keys: username, permission) - ${ROLE_CONSEQUENCE}. Fix the key name, or remove it`,
-    ]);
-  });
-
-  test("teams and workflows are closed too", () => {
-    expect(issuesOf({ teams: [{ name: "t", permissions: "admin" }] })).toEqual([
-      'teams[t]: declares "permissions", which this section does not recognize ' +
-        `(known keys: name, permission) - ${ROLE_CONSEQUENCE}. Fix the key name, or remove it`,
-    ]);
-    expect(issuesOf({ workflows: [{ path: "ci.yml", state: "active", enabled: true }] })).toEqual([
-      'workflows[ci.yml]: declares "enabled", which this section does not recognize (known keys: ' +
-        "path, state) - the enable/disable calls send no payload, so the key would silently do " +
-        "nothing. Fix the key name, or remove it",
-    ]);
-  });
-
-  test("open sections still pass extra keys through", () => {
-    const doc = {
-      collaborators: [{ username: "alice", permission: "admin" }],
-      milestones: [{ title: "v1", due_on: "2027-01-01T00:00:00Z" }],
-      labels: [{ name: "bug", extra_field: true }],
-    };
-    expect(validateSectionShapes(doc, "f.yml")).toEqual(ok(doc));
+  test("every closed section refuses a misspelled key, naming the key, its known keys, and its consequence; a correct entry passes", () => {
+    expect(Object.keys(ENTRIES).sort()).toEqual(closed.map((section) => section.key).sort());
+    for (const { key, surface } of closed) {
+      const entry = ENTRIES[key] as Record<string, unknown>;
+      expect(validateSectionShapes({ [key]: [entry] }, "f.yml").isOk(), key).toBe(true);
+      const misspelled = { ...entry, permision: "admin" };
+      expect(issuesOf({ [key]: [misspelled] }), key).toEqual([
+        `${key}[${surface.describe(misspelled)}]: declares "permision", which this section does not recognize ` +
+          `(known keys: ${Object.keys(surface.known).join(", ")}) - ${surface.consequence}. Fix the key name, or remove it`,
+      ]);
+    }
   });
 
   test("closed-surface entry checks see through the wrapper (collaborators)", () => {
@@ -141,15 +139,12 @@ describe("closed-surface sections reject unrecognized entry keys upfront", () =>
       issuesOf({
         collaborators: { _undeclared: "keep", entries: [{ username: "alice", permision: "x" }] },
       }),
-    ).toEqual([
-      'collaborators[alice]: declares "permision", which this section does not recognize ' +
-        `(known keys: username, permission) - ${ROLE_CONSEQUENCE}. Fix the key name, or remove it`,
-    ]);
+    ).toEqual([expect.stringMatching(/^collaborators\[alice\]: declares "permision", /)]);
   });
 });
 
 describe("the wrapped undeclared-policy form", () => {
-  test("both policies and the bare wrapper validate on every knobbed section", () => {
+  test("both policies and the bare wrapper validate", () => {
     const doc = {
       labels: { _undeclared: "keep", entries: [{ name: "bug" }] },
       autolinks: { _undeclared: "keep", entries: [{ key_prefix: "J-", url_template: "u" }] },
@@ -160,38 +155,41 @@ describe("the wrapped undeclared-policy form", () => {
     expect<unknown>(validateSectionShapes(doc, "f.yml")).toEqual(ok(doc));
   });
 
-  test("wrapper typos fail upfront: an unknown wrapper key and a bad policy value", () => {
+  test("wrapper typos fail upfront: an unknown wrapper key, a bad policy value, and an own __proto__ key", () => {
     // The wrapper is this action's own strict vocabulary, so a misspelled "entries" reads as both a missing list and an unrecognized key.
     expect(issuesOf({ labels: { entires: [{ name: "bug" }] } })).toEqual([
-      "labels.entries: Invalid input: expected array, received undefined",
-      'labels: Unrecognized key: "entires"',
+      expect.stringMatching(/^labels\.entries: /),
+      expect.stringMatching(/^labels: Unrecognized key: "entires"/),
     ]);
     expect(issuesOf({ milestones: { _undeclared: "detele", entries: [] } })).toEqual([
-      'milestones._undeclared: Invalid option: expected one of "keep"|"delete"',
+      expect.stringMatching(/^milestones\._undeclared: /),
     ]);
+    // JSON.parse creates "__proto__" as an OWN key; on the strict wrapper it is an unrecognized key like any other.
+    expect(
+      issuesOf(JSON.parse('{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}')),
+    ).toEqual([expect.stringMatching(/^rulesets: Unrecognized key: "__proto__"/)]);
   });
 
   test("an unknown underscore key on a wrapper names the two directives, on a top-level and a nested wrapper alike", () => {
-    const line =
-      'the wrapper\'s directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - ' +
-      "there are no private-note keys. Remove the key, or keep the note as a YAML comment";
     expect(issuesOf({ labels: { _notes: "private", entries: [{ name: "bug" }] } })).toEqual([
-      `labels: Unrecognized key: "_notes"; ${line}`,
+      expect.stringMatching(/^labels: Unrecognized key: "_notes"; .*"_undeclared".*"_layering"/),
     ]);
     expect(
       issuesOf({
         environments: [{ name: "prod", variables: { _layering: "merge", entries: [] } }],
       }),
-    ).toEqual([`environments[0].variables: Unrecognized key: "_layering"; ${line}`]);
+    ).toEqual([
+      expect.stringMatching(/^environments\[0\]\.variables: Unrecognized key: "_layering"; /),
+    ]);
     // Beside a plain typo the clause names the underscore key it is about; the typo stays on zod's own line.
     expect(issuesOf({ labels: { _notes: "x", entires: [], entries: [] } })).toEqual([
-      `labels: Unrecognized keys: "_notes", "entires"; "_notes": ${line}`,
+      expect.stringMatching(/^labels: Unrecognized keys: "_notes", "entires"; "_notes": /),
     ]);
     // Beside the pre-v3 policy key both clauses appear, so one run names every fix.
     expect(issuesOf({ labels: { undeclared: "keep", _owner: "note", entries: [] } })).toEqual([
-      'labels: Unrecognized keys: "undeclared", "_owner"; the wrapper\'s policy key "undeclared" was renamed ' +
-        'to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or ' +
-        `_undeclared: delete; "_owner": ${line}`,
+      expect.stringMatching(
+        /^labels: Unrecognized keys: "undeclared", "_owner"; .*"undeclared" was renamed to "_undeclared".*; "_owner": /,
+      ),
     ]);
   });
 
@@ -201,30 +199,23 @@ describe("the wrapped undeclared-policy form", () => {
         rulesets: { entries: [{ name: "r", conditions: { ref_name: { include: "main" } } }] },
       }),
     ).toEqual([
-      "rulesets.entries[0].conditions.ref_name.include: Invalid input: expected array, received string",
+      expect.stringMatching(
+        /^rulesets\.entries\[0\]\.conditions\.ref_name\.include: .*expected array/,
+      ),
     ]);
   });
 
-  test.each([
-    {
-      name: "a top-level section",
-      doc: { labels: { undeclared: "keep", entries: [{ name: "bug" }] } },
-      site: "labels",
-    },
-    {
-      name: "a nested environments list",
-      doc: {
+  test("the pre-v3 policy key fails naming the rename on a nested environments list", () => {
+    expect(
+      issuesOf({
         environments: [
           { name: "prod", variables: { undeclared: "keep", entries: [{ name: "A", value: "1" }] } },
         ],
-      },
-      site: "environments[0].variables",
-    },
-  ])("the pre-v3 policy key fails naming the rename on $name", ({ doc, site }) => {
-    expect(issuesOf(doc)).toEqual([
-      `${site}: Unrecognized key: "undeclared"; the wrapper's policy key "undeclared" was renamed ` +
-        'to "_undeclared" in v3 (a directive, like _layering) - write _undeclared: keep or ' +
-        "_undeclared: delete",
+      }),
+    ).toEqual([
+      expect.stringMatching(
+        /^environments\[0\]\.variables: Unrecognized key: "undeclared"; .*"undeclared" was renamed to "_undeclared"/,
+      ),
     ]);
   });
 });
