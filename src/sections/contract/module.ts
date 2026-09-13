@@ -694,30 +694,16 @@ export function undeclaredNote(opts: {
 }
 
 /**
- * The drift line for a declared resource the live side lacks. `where` names the home when "the repo"
- * understates it (a nested list says "the environment"); `action` when apply does more than create it.
- */
-export function missingDrift(
-  label: string,
-  opts: { where?: string; action?: string } = {},
-): string {
-  const where = opts.where ?? "the repo";
-  const action = opts.action ?? "create it";
-  return `${label}: missing - declared in the settings file but not on ${where}; apply will ${action}`;
-}
-
-/**
  * The drift line for a field whose live value differs, operands always in this order: declared first,
- * live second. Both arrive rendered (JSON.stringify, or a section's own spelling such as "unset");
- * `remedy: null` drops the clause when a generic line beside it names the remedy.
+ * live second. Both arrive rendered (JSON.stringify, or a section's own spelling such as "unset").
  */
 export function valueDrift(
   label: string,
   declared: string,
   live: string,
-  remedy: string | null = "apply will set the declared value",
+  remedy = "apply will set the declared value",
 ): string {
-  return `${label}: declared ${declared} != live ${live}${remedy === null ? "" : `; ${remedy}`}`;
+  return `${label}: declared ${declared} != live ${live}; ${remedy}`;
 }
 
 /**

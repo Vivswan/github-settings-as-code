@@ -229,68 +229,40 @@ describe("listSection", () => {
     });
   });
 
-  test("secret fields list their values per entry in both value forms, and demand the unverifiable facet on the roles that carry them", () => {
-    const secretive = listSection({
-      ...base,
-      endpoints: {
-        ...base.endpoints,
-        create: {
-          route: "POST /repos/{owner}/{repo}/labels",
-          statuses: { 201: "label created" },
-          unverifiable: true,
-        },
-        update: {
-          route: "PATCH /repos/{owner}/{repo}/labels/{name}",
-          statuses: { 200: "label updated" },
-          unverifiable: true,
-        },
-      },
-      secrets: ["description"],
-    });
-    const entries = [
-      { name: "a", description: "$A" },
-      { name: "b" },
-      { name: "c", description: "$C" },
-    ];
-    const listed = [
-      { label: 'the label "a" description', value: "$A" },
-      { label: 'the label "c" description', value: "$C" },
-    ];
-    expect(secretive.secretValues?.(entries)).toEqual(listed);
-    expect(secretive.secretValues?.({ _undeclared: "keep", entries })).toEqual(listed);
+  test("secret fields demand the unverifiable facet on the roles that carry them, and a dotted path sits under the mapping", () => {
     expect(labelsSection.secretValues).toBeUndefined();
-    // Without the facet the write would recur with empty drift, which the plan contract forbids: the path type admits none.
-    listSection({
-      ...base,
-      // @ts-expect-error neither create nor update declares unverifiable: true, so no secret path is declarable
-      secrets: ["description"],
-    });
-    listSection({
-      ...base,
-      endpoints: IMMUTABLE_ENDPOINTS,
-      // @ts-expect-error a resource GitHub cannot edit has no carrier: a recreate would re-send the value on every run
-      secrets: ["description"],
-    });
-    // The facts the types cannot see: a dotted path must sit under the mapping the updateConfig role writes, and that role carries the facet.
+    // Without the facet the write would recur with empty drift, which the plan contract forbids: the path type admits none,
+    // and the runtime refuses a path no mapping carries.
+    expect(() =>
+      listSection({
+        ...base,
+        // @ts-expect-error neither create nor updateConfig declares unverifiable: true, so no secret path is declarable
+        secrets: ["description"],
+      }),
+    ).toThrow(/declares the secret field "description" without a mapping/);
+    expect(() =>
+      listSection({
+        ...base,
+        endpoints: IMMUTABLE_ENDPOINTS,
+        // @ts-expect-error a resource GitHub cannot edit has no carrier: a recreate would re-send the value on every run
+        secrets: ["description"],
+      }),
+    ).toThrow(/declares the secret field "description" without a mapping/);
+    // The fact the types cannot see: a dotted path must sit under the mapping the updateConfig role writes.
     const { mapping: _mapping, ...hooks } = webhooksSection.decl;
     expect(() => listSection({ ...hooks, mapping: "config", secrets: ["events.secret"] })).toThrow(
       /declares the secret field "events.secret" outside its "config" mapping/,
     );
-    const { updateConfig, update: _general, ...others } = webhooksSection.decl.endpoints;
-    expect(() =>
-      listSection({
-        ...webhooksSection.decl,
-        endpoints: {
-          ...others,
-          update: {
-            route: "PATCH /repos/{owner}/{repo}/hooks/{hook_id}",
-            statuses: { 200: "webhook updated" },
-            unverifiable: true,
-          },
-          updateConfig: { route: updateConfig.route, statuses: updateConfig.statuses },
-        },
-      }),
-    ).toThrow(/"updateConfig" endpoint must declare unverifiable: true/);
+    // The carrier facet is the type's: an updateConfig without `unverifiable: true` admits no secret path.
+    const { updateConfig, ...others } = webhooksSection.decl.endpoints;
+    // @ts-expect-error the config write would recur with empty drift, which the plan contract forbids
+    listSection({
+      ...webhooksSection.decl,
+      endpoints: {
+        ...others,
+        updateConfig: { route: updateConfig.route, statuses: updateConfig.statuses },
+      },
+    });
   });
 
   test("the item roles close the shape: updateConfig demands update, and a nested identity keeps its siblings and cannot rename", () => {

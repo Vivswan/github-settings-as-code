@@ -194,7 +194,7 @@ Snapshot targets ride the same seal now: a private target's notes, file path, an
 v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed). v3 refuses every list section the same way, whether or not the settings file declares the pair:
 
 ```text
-webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook" and "https://ci.example.com/hook". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again
+webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook (hook id 11)" and "https://ci.example.com/hook (hook id 12)". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again
 ```
 
 Snapshot says the same. Delete the duplicates on GitHub, then re-run.

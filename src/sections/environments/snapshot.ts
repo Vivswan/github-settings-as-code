@@ -134,12 +134,8 @@ export async function snapshotNested(
       () => listBranchPolicies(ctx, section, envName),
     );
     if ("value" in policies && policies.value.length > 0) {
-      liveByIdentity(
-        section,
-        "deployment branch policy",
-        policies.value,
-        (policy) => String(policy.name),
-        (policy) => String(policy.name),
+      liveByIdentity(section, "deployment branch policy", policies.value, (policy) =>
+        String(policy.name),
       );
       nested.deployment_branch_policies = wrapped(
         "deployment_branch_policies",
@@ -155,12 +151,8 @@ export async function snapshotNested(
   );
   if ("value" in rules) {
     const enabled = rules.value.filter((rule) => rule.enabled !== false);
-    liveByIdentity(
-      section,
-      "deployment protection rule",
-      enabled,
-      (rule) => liveRuleSlug(rule, envName),
-      (rule) => liveRuleSlug(rule, envName),
+    liveByIdentity(section, "deployment protection rule", enabled, (rule) =>
+      liveRuleSlug(rule, envName),
     );
     if (enabled.length > 0) {
       nested.deployment_protection_rules = wrapped(

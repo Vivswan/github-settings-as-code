@@ -139,12 +139,8 @@ export async function planBranchPolicies(
   } else if (liveEnv !== undefined) {
     live = await listBranchPolicies(ctx, section, envName);
   }
-  const liveByName = liveByIdentity(
-    section,
-    "deployment branch policy",
-    live,
-    (pattern) => livePolicyName(pattern, envName),
-    (pattern) => livePolicyName(pattern, envName),
+  const liveByName = liveByIdentity(section, "deployment branch policy", live, (pattern) =>
+    livePolicyName(pattern, envName),
   );
   const declared = new Set(entries.map((pattern) => pattern.name));
 

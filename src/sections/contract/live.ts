@@ -25,7 +25,7 @@ export function liveByIdentity<T, Key extends string>(
   noun: string,
   items: readonly T[],
   keyOf: (item: T) => Key,
-  describe: (item: T) => string,
+  describe: (item: T) => string = keyOf,
 ): Map<Key, T> {
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {

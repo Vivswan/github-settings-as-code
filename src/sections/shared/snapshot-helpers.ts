@@ -128,14 +128,6 @@ export function leftOutOfSnapshot(label: string, reason: string): string {
 }
 
 /**
- * The ONE wording for a secret a snapshot declares as a `$NAME` reference because GitHub never
- * reveals its value: `what` names it ("DEPLOY_TOKEN", "the webhook secret").
- */
-export function unreadableSecretNote(label: string, what: string, variable: string): string {
-  return `${label}: value of ${what} is not readable; export it into the environment as ${variable} before apply`;
-}
-
-/**
  * One read of a snapshot whose denial is that read's alone, for a section whose keys sit behind
  * different grants (repository, actions, environments). Under `warn` a PermissionDenied becomes a
  * note naming the key left out and the grant advice; under `fail` it propagates, so the engine

@@ -149,7 +149,6 @@ export async function planProtectionRules(
     "deployment protection rule",
     live.filter((rule) => rule.enabled !== false),
     (rule) => liveRuleSlug(rule, envName),
-    (rule) => liveRuleSlug(rule, envName),
   );
   const declared = new Set(entries.map((rule) => rule.app));
   const planned: NestedPlan = { ops: [], notes: [] };

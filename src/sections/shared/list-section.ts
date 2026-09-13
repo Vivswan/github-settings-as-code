@@ -20,14 +20,12 @@ import {
   type GraphqlDict,
   type KeyedListLayering,
   loosen,
-  missingDrift,
   type SectionMeta,
   type SectionSnapshot,
   secretValuesOf,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-  valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -43,12 +41,7 @@ import {
 } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
-import {
-  knobbedSnapshot,
-  leftOutOfSnapshot,
-  projectOntoSchema,
-  unreadableSecretNote,
-} from "./snapshot-helpers.js";
+import { knobbedSnapshot, leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;
@@ -129,16 +122,15 @@ type OnlyListRoles<Ends> = (IsUnion<Ends> extends true ? never : unknown) &
   } & { readonly [R in keyof Ends & "get"]: GetDecl };
 
 /**
- * The write fields a `secrets` declaration may name: the facet admits an every-run re-send only on a
- * carrier declaring `unverifiable: true`, so a dotted path needs it on `updateConfig`, a top-level
- * one on `update`, and every path on `create`; an immutable resource admits none.
+ * The write fields a `secrets` declaration may name: a dotted path under `mapping`, admitted only where
+ * both carriers (`create` and `updateConfig`) declare `unverifiable: true`, since the value is re-sent on
+ * every run; an immutable resource admits none.
  */
-type SecretPath<Ends> = Ends extends { readonly create: { readonly unverifiable: true } }
-  ?
-      | (Ends extends { readonly updateConfig: { readonly unverifiable: true } }
-          ? `${string}.${string}`
-          : never)
-      | (Ends extends { readonly update: { readonly unverifiable: true } } ? string : never)
+type SecretPath<Ends> = Ends extends {
+  readonly create: { readonly unverifiable: true };
+  readonly updateConfig: { readonly unverifiable: true };
+}
+  ? `${string}.${string}`
   : never;
 
 export function updateRole(endpoints: ListEndpoints): UpdateDecl | undefined {
@@ -430,19 +422,19 @@ type Fields = Readonly<Record<string, unknown>>;
 
 /** A recreate names its remedy once on the generic line, so its field lines carry none. */
 interface Remedies {
-  readonly value: string | null;
+  readonly value: string;
   readonly rename: string;
   readonly phantom: string;
 }
 
 const UPDATE_REMEDIES: Remedies = {
-  value: "apply will set the declared value",
+  value: "; apply will set the declared value",
   rename: "apply will rename it",
   phantom: "this update will re-run",
 };
 
 const RECREATE_REMEDIES: Remedies = {
-  value: null,
+  value: "",
   rename: "apply will delete and recreate it",
   phantom: "this delete-and-recreate will repeat",
 };
@@ -591,12 +583,7 @@ function renderEntryDelta(
     delta.path.every((step) => typeof step === "string") &&
     (typeof delta.desired !== "object" || delta.desired === null)
   ) {
-    return valueDrift(
-      `${label}.${delta.path.join(".")}`,
-      JSON.stringify(delta.desired),
-      JSON.stringify(delta.live),
-      remedies.value,
-    );
+    return `${label}.${delta.path.join(".")}: declared ${JSON.stringify(delta.desired)} != live ${JSON.stringify(delta.live)}${remedies.value}`;
   }
   return renderDelta(label, delta);
 }
@@ -749,6 +736,14 @@ async function planList<Key extends string>(
     const name = nameOf(comparable, identity.field);
     return { item, comparable, name, key: fold(name) };
   });
+  // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
+  const liveByKey = liveByIdentity(
+    section,
+    noun,
+    liveItems,
+    (item) => item.key,
+    (item) => addressed(decl, item.item, item.name),
+  );
   const liveConflicts =
     decl.conflicts?.live?.(
       writes.map((w) => w.write),
@@ -759,13 +754,6 @@ async function planList<Key extends string>(
       `${key}: the settings file conflicts with the live ${plural(noun)}: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
     );
   }
-  const liveByKey = liveByIdentity(
-    section,
-    noun,
-    liveItems,
-    (item) => item.key,
-    (item) => addressed(decl, item.item, item.name),
-  );
   const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
 
   const plan: SectionPlan = { ops: [], notes: [], drift: [] };
@@ -791,7 +779,7 @@ async function planList<Key extends string>(
             : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
         describe: `creating ${noun} "${name}"`,
         drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
-          missingDrift(label),
+          `${label}: missing - declared in the settings file but not on the repo; apply will create it`,
         ]),
         change: `created ${noun} "${name}"`,
       });
@@ -929,11 +917,6 @@ async function planList<Key extends string>(
 
 // --- Snapshot ---------------------------------------------------------------
 
-/** The store a section's snapshot secret references name: the noun as a variable segment ("webhook"). */
-function secretStore(decl: ErasedDecl<string>): string {
-  return decl.noun.replace(/[^A-Za-z0-9]+/g, "_");
-}
-
 /**
  * Items are normalized as GitHub stores them before the projection onto the entry slice, so the
  * read-back compares equal to the declaration that produced it. An item a concealed field hides from
@@ -982,11 +965,10 @@ async function snapshotList(
     }
     let entry = projectOntoSchema(decl.entry, lens.fromLive(body)) as Fields;
     for (const field of declaredSecrets(decl, entry)) {
-      const suffix = (decl.secrets ?? []).length > 1 ? `_${leafOf(field).toUpperCase()}` : "";
-      const id = `${Object.values(decl.address(item)).join("_")}${suffix}`;
-      const { variable, reference } = snapshotSecretReference(secretStore(decl), id);
+      const id = Object.values(decl.address(item)).join("_");
+      const { variable, reference } = snapshotSecretReference(noun, id);
       notes.push(
-        unreadableSecretNote(`${label}.${field}`, `the ${noun} ${leafOf(field)}`, variable),
+        `${label}.${field}: value of the ${noun} ${leafOf(field)} is not readable; export it into the environment as ${variable} before apply`,
       );
       entry = withValueAt(entry, pathOf(field), reference);
     }
@@ -1016,29 +998,21 @@ function secretValuesFor(decl: ErasedDecl<string>, declared: unknown): DeclaredS
 }
 
 /**
- * The declaration facts the types cannot spell, since no type says "a path without a dot": a dotted
- * secret path must sit under `mapping`, and its carrier, the `updateConfig` role, must declare the
- * unverifiable facet (SecretPath's top-level arm admits a dotted path whenever `update` declares it).
+ * The declaration fact the types cannot spell, since no type says "under this key": a secret path must sit
+ * under `mapping`, the field the `updateConfig` role writes.
  */
 function checkDecl(decl: ErasedDecl<string>): void {
-  const { key, mapping, secrets, endpoints } = decl;
+  const { key, mapping, secrets } = decl;
   for (const field of secrets ?? []) {
     const [head, ...rest] = pathOf(field);
-    if (rest.length === 0) {
+    if (rest.length > 0 && head === mapping) {
       continue;
     }
-    if (head !== mapping) {
-      throw new Error(
-        mapping === undefined
-          ? `BUG: ${key} declares the dotted secret field "${field}" without a mapping (an updateConfig role) to carry it under the unverifiable facet`
-          : `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
-      );
-    }
-    if (!("updateConfig" in endpoints) || endpoints.updateConfig.unverifiable !== true) {
-      throw new Error(
-        `BUG: ${key} declares the secret field "${field}" under its "${mapping}" mapping, so its "updateConfig" endpoint must declare unverifiable: true (the write re-sends the value on every run)`,
-      );
-    }
+    throw new Error(
+      mapping === undefined
+        ? `BUG: ${key} declares the secret field "${field}" without a mapping (an updateConfig role) to carry it under the unverifiable facet`
+        : `BUG: ${key} declares the secret field "${field}" outside its "${mapping}" mapping, so no role carries it under the unverifiable facet`,
+    );
   }
 }
 

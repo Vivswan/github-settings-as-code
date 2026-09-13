@@ -19,7 +19,7 @@ description: >-
   the target as its placeholder.
 settings: {}
 env:
-  WEBHOOK_SECRET_701: vault-hook-secret-canary-2b7e
+  SECRET_WEBHOOK_701: vault-hook-secret-canary-2b7e
 repos:
   e2e-owner/svc-open:
     live_state:
@@ -65,7 +65,7 @@ repos:
                 url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
                 content_type: json
                 insecure_ssl: "0"
-                secret: $WEBHOOK_SECRET_701
+                secret: $SECRET_WEBHOOK_701
               events:
                 - push
               active: true
@@ -92,7 +92,7 @@ expect:
     - svc-vault
     - LEAKME-vault-endpoint-9f3a
     - hooks.internal.example
-    - WEBHOOK_SECRET_701
+    - SECRET_WEBHOOK_701
   never:
     - POST /
     - PATCH /
