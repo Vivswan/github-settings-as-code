@@ -223,10 +223,10 @@ describe("read gating fold", () => {
 describe("judgePreflightAbort", () => {
   const head = "## github-settings-as-code (apply)\n\n| Section | Status | Detail |\n|---|---|---|";
   const rows = `${head}\n| labels | :x: failed | - |`;
-  const barrier = "::error::preflight failed: the token cannot access 1 section(s)";
+  const barrier = "::error::preflight failed: the token cannot access 1 section";
   const other = "::error::settings.yml: unknown section";
   const aborted = {
-    summary: `## github-settings-as-code (apply)\n\n:x: failed - preflight denied 1 section(s)\n\n| Section | Status | Detail |\n|---|---|---|`,
+    summary: `## github-settings-as-code (apply)\n\n:x: failed - preflight denied 1 section\n\n| Section | Status | Detail |\n|---|---|---|`,
     result: "failed",
     stdout: barrier,
   };

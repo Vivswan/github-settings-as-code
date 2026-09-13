@@ -122,20 +122,31 @@ describe("runOutcome", () => {
 });
 
 describe("engineOutcome", () => {
-  test("passes a run through, and turns a preflight denial into one channel line and a note", () => {
+  test("passes a run through when preflight denied nothing", () => {
     const { io, events } = captureIo();
     const ran = { repo: "o/r", result: "applied" as const, outcomes: [], preflightDenied: [] };
     expect(engineOutcome(ran, io)).toEqual({ result: "applied", outcomes: [] });
-    const denied = { ...ran, result: "failed" as const, preflightDenied: ["labels", "rulesets"] };
-    expect(engineOutcome(denied, io)).toEqual({
-      result: "failed",
-      outcomes: [],
-      note: "preflight denied 2 section(s); nothing was applied to this repository",
-    });
-    expect(events).toEqual([
-      "annotate error: preflight failed: the token cannot access 2 section(s), so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections",
-    ]);
+    expect(events).toEqual([]);
   });
+
+  test.each<[string[], string]>([
+    [["labels"], "1 section"],
+    [["labels", "rulesets"], "2 sections"],
+  ])(
+    "turns a preflight denial of %j into one channel line and a note counting %s",
+    (denied, count) => {
+      const { io, events } = captureIo();
+      const ran = { repo: "o/r", result: "failed" as const, outcomes: [], preflightDenied: denied };
+      expect(engineOutcome(ran, io)).toEqual({
+        result: "failed",
+        outcomes: [],
+        note: `preflight denied ${count}; nothing was applied to this repository`,
+      });
+      expect(events).toEqual([
+        `annotate error: preflight failed: the token cannot access ${count}, so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections`,
+      ]);
+    },
+  );
 });
 
 describe("withDelivery", () => {
