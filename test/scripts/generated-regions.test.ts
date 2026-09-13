@@ -572,6 +572,15 @@ describe("assertRegionPlacement", () => {
   });
 });
 
+describe("relocatedRegion", () => {
+  test("moves exactly the inline span, leaving the text around the markers where it was", () => {
+    const inline = "<!-- BEGIN GENERATED: list -->`a` / `b`<!-- END GENERATED: list -->";
+    expect(relocatedRegion(PAGE, "list", "html", "## Notes\n\n")).toBe(
+      PAGE.replace(`(${inline}).`, "().").replace("## Notes\n\n", `## Notes\n\n${inline}`),
+    );
+  });
+});
+
 describe("regenerateRegions", () => {
   const render = (body: string) => () => body;
 

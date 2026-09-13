@@ -223,6 +223,20 @@ describe("changed-sections derived fan-out", () => {
       });
       expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
     }));
+
+  test("a computed import anywhere under src fails the whole derivation, naming the file", () =>
+    withTempDir("changed-sections-", (dir) => {
+      // The graph must read every file through the computed-specifier check, not the transpiler alone, which
+      // silently drops such an edge and under-selects.
+      const root = syntheticRepo(dir, {
+        ...GRAPH_FIXTURE,
+        "src/sections/webhooks/index.ts":
+          'const which = "../shared/engine.js";\nexport const engine = await import(which);\n',
+      });
+      expect(() => deriveSharedFanOut(root)).toThrow(
+        /src\/sections\/webhooks\/index\.ts:2 loads a module through a computed specifier/,
+      );
+    }));
 });
 
 describe("changed-sections file map", () => {
