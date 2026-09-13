@@ -355,7 +355,9 @@ describe("concludeRun", () => {
       target: {
         result: "drift",
         display: "o/r",
-        detail: channel.close([{ key: "labels", status: "drift", detail: ["+ bug"] }, skipped]),
+        detail: channel.close({
+          outcomes: [{ key: "labels", status: "drift", detail: ["+ bug"] }, skipped],
+        }),
       },
     });
     expect(code).toBe(1);
@@ -385,13 +387,13 @@ describe("concludeRun", () => {
           source: "remote",
           result: "partial",
           display: shown.display,
-          detail: shown.close([applied, skipped]),
+          detail: shown.close({ outcomes: [applied, skipped] }),
         },
         {
           source: "central",
           result: "partial",
           display: hidden.display,
-          detail: hidden.close([skipped], "note with o/priv inside"),
+          detail: hidden.close({ outcomes: [skipped], note: "note with o/priv inside" }),
         },
       ],
     });

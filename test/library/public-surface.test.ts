@@ -133,7 +133,6 @@ describe("the public entry", () => {
       "SnapshotLibraryOptions",
       "SnapshotReport",
       "SnapshotResult",
-      "SnapshotTargetView",
       "TaggedEndpoint",
       "Target",
       "TargetOutcome",

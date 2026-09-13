@@ -1,12 +1,12 @@
 /**
- * Where every run ends. Each target closes its channel and delivers here, and the summary, outputs, and exit code are
- * decided here, so the single- and multi-repo flows cannot drift in what they report.
+ * Where every run ends. Each target, whatever its mode, closes its channel here (closeTarget), the run flows deliver
+ * their private reports here, and the summary, outputs, and exit code are decided here, so the flows cannot drift in
+ * what they report.
  */
 
 import { err, ok, type Result } from "neverthrow";
 import type { RepoRef, Target } from "../discovery/targets.js";
 import {
-  type RepoResult,
   type RepoRunResult,
   type SectionOutcome,
   skippedSectionKeys,
@@ -17,13 +17,15 @@ import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { GithubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
-import { isPrivate } from "../private.js";
+import { isPrivate, type Private } from "../private.js";
 import { describeProblem, type Problem, type ProblemOf } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import {
+  type ClosedOutcome,
   isIssueChannel,
   openReportChannel,
   type PrivateReportChannel,
+  type RedactedDetail,
   type RunConclusion,
 } from "../report/delivery.js";
 import type { SectionKey } from "../schema.js";
@@ -40,11 +42,14 @@ import {
 } from "./redact.js";
 import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
+/** One target's end state as its flow hands it over: the result word plus everything the channel seals. */
 export interface TargetResult {
-  result: RepoResult;
-  outcomes: SectionOutcome[];
-  /** Human line for skips/failures that produced no section outcomes. */
+  result: RunOutcome;
+  outcomes: ClosedOutcome[];
+  /** Human line for skips/failures that produced no section outcomes, or where a snapshot's file went. */
   note?: string;
+  /** The snapshot file the target wrote; absent when nothing was written. */
+  file?: string;
 }
 
 export function failedTarget(message: string): TargetResult {
@@ -135,6 +140,25 @@ export interface Delivery {
   ): Promise<Omit<TargetOutcome, "source">>;
 }
 
+/**
+ * Where every target ends, in every mode: the channel closes its end state (sealed when redacted), `report` sees a
+ * sealed detail before the target's one closed-value line is spoken, and the outcome carries only the public label and
+ * the detail the projections open. A mode without a report channel (snapshot) passes no `report`.
+ */
+export async function closeTarget(
+  io: Io,
+  channel: TargetChannel,
+  outcome: TargetResult,
+  report?: (detail: Private<RedactedDetail>) => Promise<void>,
+): Promise<Omit<TargetOutcome, "source">> {
+  const detail = channel.close(outcome);
+  if (isPrivate(detail)) {
+    await report?.(detail);
+    emitRedactedResult(io, channel.display, outcome.result, detail);
+  }
+  return { result: outcome.result, display: channel.display, detail };
+}
+
 /** The delivery is flushed even when `body` throws: the artifact channel uploads every accumulated report as ONE document there. */
 export async function withDelivery<T>(
   run: { api: GithubClient; cfg: DeliveryConfig; io: Io; uploader?: ArtifactUploader },
@@ -163,21 +187,21 @@ export async function withDelivery<T>(
   const delivery: Delivery = {
     async target({ repo, channel, exposure }, work) {
       const outcome = await work(deliverable(exposure) && isIssueChannel(cfg.privateReport));
-      const detail = channel.close(outcome.outcomes, outcome.note);
-      if (isPrivate(detail)) {
-        if (reports !== null && !deliverable(exposure)) {
-          io.annotate("notice", `${channel.display}: ${WITHHELD_REPORT_NOTICE}`);
-        } else if (reports !== null) {
-          await reports.deliver({
-            repo,
-            display: channel.display,
-            conclusion: runOutcome([outcome], check),
-            detail,
-          });
+      return closeTarget(io, channel, outcome, async (detail) => {
+        if (reports === null) {
+          return;
         }
-        emitRedactedResult(io, channel.display, outcome.result, detail);
-      }
-      return { result: outcome.result, display: channel.display, detail };
+        if (!deliverable(exposure)) {
+          io.annotate("notice", `${channel.display}: ${WITHHELD_REPORT_NOTICE}`);
+          return;
+        }
+        await reports.deliver({
+          repo,
+          display: channel.display,
+          conclusion: runOutcome([outcome], check),
+          detail,
+        });
+      });
     },
   };
   try {

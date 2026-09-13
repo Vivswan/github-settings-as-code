@@ -12,14 +12,13 @@
 import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
-import type { RepoRef, Target } from "../discovery/targets.js";
+import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
-import { renderSnapshotYaml, type SnapshotResult, snapshotRepository } from "../engine/snapshot.js";
+import { renderSnapshotYaml, snapshotRepository } from "../engine/snapshot.js";
 import type { GithubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
-import type { SectionKey } from "../schema.js";
-import { conclude, type Exposure } from "./deliver.js";
+import { closeTarget, conclude, failedTarget, type TargetResult } from "./deliver.js";
 import {
   DEFAULT_SETTINGS_FILE,
   openTarget,
@@ -30,12 +29,13 @@ import {
 import {
   attempt,
   type PrivateReposPolicy,
-  REDACTED_DETAIL,
-  REDACTED_NOTE,
+  publicDetail,
   type TargetChannel,
+  type TargetOutcome,
+  toPublicView,
 } from "./redact.js";
 import { openSingleRepoChannel } from "./single.js";
-import { writeSnapshotDirSummary, writeSnapshotSummary } from "./summary.js";
+import { writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
 /**
  * The schema the written file's editor hint points at: the schema of this
@@ -66,36 +66,14 @@ export type SnapshotConfig =
   | (SnapshotConfigBase & { form: "file"; repo: RepoRef; snapshotFile: string })
   | (SnapshotConfigBase & TargetsConfig & { form: "dir"; snapshotDir: string });
 
-/** One snapshot target's end state before projection: the engine's outcomes plus where the file went. */
-interface SnapshotTargetResult {
-  result: SnapshotResult["result"];
-  outcomes: SnapshotResult["outcomes"];
-  /** Human line heading the target's summary. */
-  note: string;
-  /** The written file, as the channel may name it; absent when nothing was written. */
-  file?: string;
-}
-
-/** One target as the summary and the outputs see it: closed values, detail already projected. */
-export interface SnapshotTargetView {
-  /** The public label: the slug, or its "private repository #N" placeholder. */
-  display: string;
-  source?: Target["source"];
-  result: SnapshotResult["result"];
-  outcomes: Array<{
-    key: SectionKey;
-    status: SnapshotResult["outcomes"][number]["status"];
-    detail: string[];
-  }>;
-  note: string;
-  /** Where the file went, as the public view may show it. */
-  file?: string;
-}
-
-/** A finished mode: snapshot run as runSnapshot hands it over: every target's public view. */
+/**
+ * A finished mode: snapshot run as runSnapshot hands it over: every target
+ * closed through its channel, so a redacted one is sealed with its transcript
+ * and concludeSnapshot opens only the public view.
+ */
 export type FinishedSnapshot =
-  | { form: "file"; view: SnapshotTargetView }
-  | { form: "dir"; snapshotDir: string; views: SnapshotTargetView[] };
+  | { form: "file"; target: Omit<TargetOutcome, "source"> }
+  | { form: "dir"; snapshotDir: string; targets: TargetOutcome[] };
 
 /**
  * `path` as the filesystem names it: the real path of what exists, the rest
@@ -180,42 +158,12 @@ function destinationCollision(cfg: SnapshotConfig): Result<void, Problem> {
   return ok();
 }
 
-/** A target that produced no outcomes because `message` stopped it. */
-function failedSnapshotTarget(message: string): SnapshotTargetResult {
-  return { result: "failed", outcomes: [], note: message };
-}
-
-/**
- * The public projection of one target: a redacted target keeps its section
- * keys and statuses (closed values) and loses every detail line, its note,
- * and its file path, which names the slug.
- */
-function snapshotView(
-  channel: TargetChannel,
-  exposure: Exposure,
-  outcome: SnapshotTargetResult,
-  source?: Target["source"],
-): SnapshotTargetView {
-  const redacted = exposure.kind === "redacted";
-  return {
-    display: channel.display,
-    ...(source === undefined ? {} : { source }),
-    result: outcome.result,
-    outcomes: outcome.outcomes.map((o) => ({
-      key: o.key,
-      status: o.status,
-      detail: redacted ? [REDACTED_DETAIL] : o.detail,
-    })),
-    note: redacted ? REDACTED_NOTE : outcome.note,
-    ...(outcome.file === undefined ? {} : { file: redacted ? REDACTED_DETAIL : outcome.file }),
-  };
-}
-
 /**
  * Read one repository back and write its document to `path`, speaking only
  * through the target's channel. The engine has already annotated every
  * skipped and failed section; the unsupported ones get one notice here, since
- * they are the sections the file will not carry.
+ * they are the sections the file will not carry. The written path names the
+ * slug, so it travels in the result for the channel to seal.
  */
 async function snapshotTarget(ctx: {
   api: GithubClient;
@@ -226,7 +174,7 @@ async function snapshotTarget(ctx: {
   pathInput: "snapshot-file" | "snapshot-dir";
   channel: TargetChannel;
   timestamp: string;
-}): Promise<SnapshotTargetResult> {
+}): Promise<TargetResult> {
   const { api, repo, cfg, path, channel } = ctx;
   const result = await snapshotRepository(
     api,
@@ -331,8 +279,8 @@ function snapshotFilePath(
 /**
  * Execute a mode: snapshot run. A destination that would overwrite an authored
  * file, or a fleet that cannot be resolved, comes back as the error before any
- * target is read; otherwise every target's public view, which concludeSnapshot
- * turns into the summary, the outputs, and the exit code.
+ * target is read; otherwise every target's closed outcome, which
+ * concludeSnapshot turns into the summary, the outputs, and the exit code.
  */
 export function runSnapshot(
   api: GithubClient,
@@ -346,15 +294,15 @@ export function runSnapshot(
   );
 }
 
-/** The file form: one target, opened as the single-repo flow opens its own. */
+/** The file form: one target, opened as the single-repo flow opens its own and closed through the same seal. */
 async function snapshotFile(
   api: GithubClient,
   cfg: Extract<SnapshotConfig, { form: "file" }>,
   io: Io,
 ): Promise<FinishedSnapshot> {
-  const opened = await openSingleRepoChannel(api, cfg, io);
+  const { channel } = await openSingleRepoChannel(api, cfg, io);
   const outcome = await attempt(
-    opened.channel,
+    channel,
     () =>
       snapshotTarget({
         api,
@@ -362,12 +310,12 @@ async function snapshotFile(
         cfg,
         path: cfg.snapshotFile,
         pathInput: "snapshot-file",
-        channel: opened.channel,
+        channel,
         timestamp: new Date().toISOString(),
       }),
-    failedSnapshotTarget,
+    failedTarget,
   );
-  return { form: "file", view: snapshotView(opened.channel, opened.exposure, outcome) };
+  return { form: "file", target: await closeTarget(io, channel, outcome) };
 }
 
 /** The dir form: every resolved target, each through the channel the redaction plan opens for it. */
@@ -384,17 +332,17 @@ async function snapshotDir(
     canonicalPath(DEFAULT_SETTINGS_FILE),
     ...resolved.targets.flatMap((t) => (t.source === "central" ? [canonicalPath(t.filePath)] : [])),
   ]);
-  const views: SnapshotTargetView[] = [];
+  const targets: TargetOutcome[] = [];
   for (const target of resolved.targets) {
     // The channel is opened BEFORE any processing so a failure lands in a
     // redacted target's capture too; it is the only sink processing sees.
     const opened = openTarget(resolved.plan, io, target.slug, resolved.visibilityOf);
     const { channel, repo } = opened;
-    const fail = (message: string): SnapshotTargetResult => {
+    const fail = (message: string): TargetResult => {
       channel.io.annotate("error", message);
-      return failedSnapshotTarget(message);
+      return failedTarget(message);
     };
-    let outcome: SnapshotTargetResult;
+    let outcome: TargetResult;
     if (repo === null) {
       outcome = fail(
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
@@ -418,20 +366,25 @@ async function snapshotDir(
                   channel,
                   timestamp,
                 }),
-              failedSnapshotTarget,
+              failedTarget,
             );
     }
-    views.push(snapshotView(channel, opened.exposure, outcome, target.source));
+    targets.push({ source: target.source, ...(await closeTarget(io, channel, outcome)) });
   }
-  return { form: "dir", snapshotDir: cfg.snapshotDir, views };
+  return { form: "dir", snapshotDir: cfg.snapshotDir, targets };
 }
 
-/** A finished mode: snapshot run: the summary, then the outputs, the result line, and the exit code as every mode ends. */
+/**
+ * A finished mode: snapshot run: the public view is projected first, so nothing below carries a redacted slug; then
+ * the summary, the outputs, the result line, and the exit code as every mode ends.
+ */
 export function concludeSnapshot(io: Io, finished: FinishedSnapshot): number {
   if (finished.form === "file") {
-    writeSnapshotSummary(io, finished.view);
-    return conclude(io, finished.view, false);
+    const view = publicDetail(finished.target.detail);
+    writeSummary(io, view, "snapshot", finished.target.result);
+    return conclude(io, { ...view, result: finished.target.result }, false);
   }
-  writeSnapshotDirSummary(io, finished.views, finished.snapshotDir);
-  return conclude(io, finished.views, false);
+  const views = finished.targets.map(toPublicView);
+  writeSnapshotDirSummary(io, views, finished.snapshotDir);
+  return conclude(io, views, false);
 }

@@ -1,0 +1,101 @@
+# A private snapshot target's NOTES are values the public run must not print,
+# and the seal is proven by a negative. svc-vault is private and carries a
+# webhook with a secret; snapshot cannot read the secret back, so the section
+# notes the hook's URL and the variable to export, the same note a check run
+# prints. That note is the target's live detail: under the default redaction it
+# closes sealed through the same channel a multi-repo apply target closes
+# through, so the summary shows the placeholder row and "hidden (private
+# repository)" cells, the log carries nothing about the target, and the outputs
+# key it as "private repository #1". The URL, the slug, and the variable name
+# are asserted absent from every public surface; the runner's every-scenario
+# sweep hunts the env value (the secret the check re-run resolves) everywhere,
+# the written documents included. snapshot-private-notes-shown.yml is the
+# control: the same fleet under private-repos: show puts the URL in the summary,
+# so the needle is live on the surface this scenario proves it absent from.
+name: snapshot-private-notes-redacted
+description: >-
+  The dir form under the default redaction: a private target's snapshot notes (a webhook URL and
+  the secret variable to export) close sealed and reach only its file; every public surface knows
+  the target as its placeholder.
+settings: {}
+env:
+  WEBHOOK_SECRET_701: vault-hook-secret-canary-2b7e
+repos:
+  e2e-owner/svc-open:
+    live_state:
+      hooks:
+        - id: 702
+          config:
+            url: https://ci.example.com/hook
+            content_type: json
+            insecure_ssl: "0"
+    expect:
+      result: snapshot
+      snapshot:
+        webhooks:
+          _undeclared: keep
+          entries:
+            - name: web
+              config:
+                url: https://ci.example.com/hook
+                content_type: json
+                insecure_ssl: "0"
+              events:
+                - push
+              active: true
+  e2e-owner/svc-vault:
+    live_state:
+      repo:
+        private: true
+        visibility: private
+      hooks:
+        - id: 701
+          config:
+            url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
+            content_type: json
+            insecure_ssl: "0"
+            secret: the-live-vault-secret
+    expect:
+      snapshot:
+        webhooks:
+          _undeclared: keep
+          entries:
+            - name: web
+              config:
+                url: https://hooks.internal.example/LEAKME-vault-endpoint-9f3a
+                content_type: json
+                insecure_ssl: "0"
+                secret: $WEBHOOK_SECRET_701
+              events:
+                - push
+              active: true
+inputs:
+  mode: snapshot
+  snapshot_dir: snapshots
+  sections: webhooks
+expect:
+  exit_code: 0
+  result: snapshot
+  repos_result:
+    e2e-owner/svc-open: snapshot
+    "private repository #1": snapshot
+  summary_contains:
+    - "## github-settings-as-code (snapshot, 2 repositories)"
+    - "| e2e-owner/svc-open | remote | :white_check_mark: snapshot | snapshots/e2e-owner/svc-open.yml |"
+    - "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |"
+    - "### private repository #1 (snapshot)"
+    - "details hidden: the repository is private or internal."
+    - "| webhooks | :white_check_mark: snapshot | hidden (private repository) |"
+  stdout_contains:
+    - "e2e-owner/svc-open: snapshot written to snapshots/e2e-owner/svc-open.yml"
+  leaks_nowhere:
+    - svc-vault
+    - LEAKME-vault-endpoint-9f3a
+    - hooks.internal.example
+    - WEBHOOK_SECRET_701
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

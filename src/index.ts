@@ -120,7 +120,6 @@ export {
   runSnapshot,
   SNAPSHOT_SCHEMA_URL,
   type SnapshotConfig,
-  type SnapshotTargetView,
 } from "./flows/snapshot.js";
 export {
   type ApiError,

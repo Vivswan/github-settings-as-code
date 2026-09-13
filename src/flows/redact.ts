@@ -2,17 +2,17 @@
  * GitHub Actions has no log-level access control: run logs, summaries, and outputs inherit the admin repository's
  * visibility, so a public admin repo would leak a private target's slug and live settings. Redaction is the choke
  * point: the plan decides which targets hide, the channel routes their lines into a transcript and seals the end state,
- * and the projections open the seal into the public view.
+ * and the projections open the seal into the public view. Every mode's target (single, multi, snapshot) closes through
+ * the same channel, so no flow projects a private target on its own.
  */
 
 import type { Target } from "../discovery/targets.js";
-import type { RepoRunResult } from "../engine/orchestrate.js";
+import type { RunOutcome } from "../engine/outcome.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import { type CollectedLine, type Io, prefixedIo } from "../io.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
-import type { RedactedDetail, TargetDetail } from "../report/delivery.js";
-import type { SectionKey } from "../schema.js";
+import type { ClosedOutcome, RedactedDetail, TargetDetail } from "../report/delivery.js";
 
 export const PRIVATE_REPOS_POLICIES = ["redact", "show"] as const;
 
@@ -22,6 +22,11 @@ export const REDACTED_NOTE =
   "details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository";
 
 export const REDACTED_DETAIL = "hidden (private repository)";
+
+/** The one public label a hidden target gets, in every mode: numbered in target order, so a run over one target is #1. */
+export function privatePlaceholder(n: number): string {
+  return `private repository #${n}`;
+}
 
 /**
  * For a redacted target whose visibility could not be PROVEN private or internal, so the report was withheld (delivery
@@ -33,10 +38,10 @@ export const WITHHELD_REPORT_NOTICE =
   "withheld rather than risk delivering it to a public repository. Grant the token metadata " +
   "read access and re-run; a transient API failure also leaves visibility unverified";
 
-/** One multi-repo target's end state: safe closed values plus the detail the public view projects from. */
+/** One target's end state: safe closed values plus the detail the public view projects from. */
 export interface TargetOutcome {
   source: Target["source"];
-  result: RepoRunResult["result"];
+  result: RunOutcome;
   /** The public label: the slug, or its "private repository #N" placeholder. */
   display: string;
   detail: TargetDetail | Private<RedactedDetail>;
@@ -44,8 +49,8 @@ export interface TargetOutcome {
 
 /** A leak-free section outcome: key and status survive, detail is hidden. */
 type RedactedOutcome = {
-  key: SectionKey;
-  status: RepoRunResult["outcomes"][number]["status"];
+  key: ClosedOutcome["key"];
+  status: ClosedOutcome["status"];
   detail: string[];
 };
 
@@ -53,7 +58,7 @@ type RedactedOutcome = {
  * The key and status (closed enums, provably leak-free) survive; every detail value becomes the placeholder plus, on
  * failed/skipped rows, the HTTP code.
  */
-function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] {
+function redactOutcomes(outcomes: ClosedOutcome[]): RedactedOutcome[] {
   return outcomes.map((o) => {
     const withCode =
       o.httpStatus !== undefined ? `${REDACTED_DETAIL}, HTTP ${o.httpStatus}` : REDACTED_DETAIL;
@@ -61,26 +66,34 @@ function redactOutcomes(outcomes: RepoRunResult["outcomes"]): RedactedOutcome[] 
   });
 }
 
-/** The public rendering of one target's detail: the section rows and the note under its heading. */
+/** The public rendering of one target's detail: the section rows, the note under its heading, and the file it wrote. */
 export interface PublicDetail {
   outcomes: RedactedOutcome[];
   note?: string;
+  /** Where a snapshot target's file went, as the public view may show it. */
+  file?: string;
 }
 
 export function publicDetail(detail: TargetOutcome["detail"]): PublicDetail {
   if (isPrivate(detail)) {
-    return { outcomes: redactOutcomes(revealPrivate(detail).outcomes), note: REDACTED_NOTE };
+    const { outcomes, file } = revealPrivate(detail);
+    return {
+      outcomes: redactOutcomes(outcomes),
+      note: REDACTED_NOTE,
+      ...(file === undefined ? {} : { file: REDACTED_DETAIL }),
+    };
   }
   return {
     outcomes: detail.outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
     note: detail.note,
+    ...(detail.file === undefined ? {} : { file: detail.file }),
   };
 }
 
 export interface PublicTargetView extends PublicDetail {
   display: string;
   source: Target["source"];
-  result: RepoRunResult["result"];
+  result: RunOutcome;
 }
 
 export function toPublicView(target: TargetOutcome): PublicTargetView {
@@ -103,7 +116,7 @@ export function isPrivateVisibility(visibility: RepoVisibility): boolean {
 export function emitRedactedResult(
   io: Io,
   display: string,
-  result: RepoRunResult["result"],
+  result: RunOutcome,
   detail: Private<RedactedDetail>,
 ): void {
   const { outcomes } = revealPrivate(detail);
@@ -160,7 +173,7 @@ export function planRedaction(
       continue;
     }
     n += 1;
-    placeholders.set(key, `private repository #${n}`);
+    placeholders.set(key, privatePlaceholder(n));
     masked.set(key, slug);
   }
   for (const sealed of extraPrivateSlugs) {
@@ -213,7 +226,8 @@ export interface TargetChannel {
   io: Io;
   /** Sink for lines that already name their source (validation warnings): unprefixed, or the same capture. */
   unprefixed: Io;
-  close(outcomes: RepoRunResult["outcomes"], note?: string): TargetOutcome["detail"];
+  /** Seals or opens the target's end state: everything in its detail but the slug, which the channel holds. */
+  close(end: Omit<TargetDetail, "slug">): TargetOutcome["detail"];
 }
 
 export function publicChannel(io: Io, slug: string, attributed: boolean): TargetChannel {
@@ -221,7 +235,7 @@ export function publicChannel(io: Io, slug: string, attributed: boolean): Target
     display: slug,
     io: prefixedIo(io, attributed ? `${slug}: ` : ""),
     unprefixed: io,
-    close: (outcomes, note) => ({ slug, outcomes, note }),
+    close: ({ outcomes, note, file }) => ({ slug, outcomes, note, file }),
   };
 }
 
@@ -231,7 +245,8 @@ export function redactedChannel(io: Io, slug: string, display: string): TargetCh
     display,
     io: capture.io,
     unprefixed: capture.io,
-    close: (outcomes, note) => markPrivate({ slug, outcomes, note, transcript: capture.drain() }),
+    close: ({ outcomes, note, file }) =>
+      markPrivate({ slug, outcomes, note, file, transcript: capture.drain() }),
   };
 }
 
