@@ -57,6 +57,9 @@ describe("the commit-back push jobs", () => {
         expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
           "--force-with-lease=refs/heads/$HEAD_REF:$HEAD_SHA",
         ]);
+        // The lease guards one ref, so the push may write only that ref: the sole refspec's destination is the leased one.
+        const refspecs = words.filter((word) => /^[^-].*:refs\/heads\//.test(word));
+        expect(refspecs).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
         // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
         const forced = words.filter(
           (word) =>
