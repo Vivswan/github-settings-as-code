@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty-three breaks (the ninth and twenty-third are for library consumers, the twenty-first for anyone pinning a sha). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-three breaks (the ninth and twenty-third are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback and the renamed `GSAC_RETRY_BASE_MS`, so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Twenty-three breaks (the ninth and twenty-third are for library consumers, the t
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
 | A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
 | Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Only `_layering` and `_undeclared` exist; any other underscore key fails validation, on a wrapper and at the top level alike | Validation fails before any section runs, naming the two directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
-| `teams` takes the `_undeclared` knob | A plain array; an undeclared team was never listed or touched | `teams: {_undeclared: keep, entries: [...]}` accepted, default `keep`; `delete` revokes undeclared direct grants | No error. Every run now lists the repository's teams and notes each undeclared one; snapshots write the wrapper form; [section 17](#17-teams-takes-the-_undeclared-knob) |
+| `teams` takes the `_undeclared` knob | A plain array; an undeclared team was never listed or touched | `teams: {_undeclared: keep, entries: [...]}` accepted, default `keep`; `delete` revokes undeclared direct grants | No error. Every run now lists the repository's teams and notes each undeclared direct grant (access granted at the organization level is noted only under `delete`); snapshots write the wrapper form; [section 17](#17-teams-takes-the-_undeclared-knob) |
 | `GSAC_RETRY_BASE_MS` | `RETRY_BASE_MS`, undocumented | `GSAC_RETRY_BASE_MS`, in the inputs reference | No error: an unknown environment variable is ignored, so a harness setting the old name waits real seconds; [section 18](#18-gsac_retry_base_ms) |
 | The sealing key is read at apply time | Check mode read `GET .../secrets/public-key` and failed on a malformed key | The first sealed PUT reads it at apply | Check mode issues one request fewer per secret family; a malformed key fails at apply; [section 19](#19-the-sealing-key-is-read-at-apply-time) |
 | Environment secrets and variables plan through the shared engines | Their own wording | The engines' wording | Only a grep over the output notices; [section 20](#20-environment-secrets-and-variables-plan-through-the-shared-engines) |
