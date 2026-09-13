@@ -345,16 +345,9 @@ describe("patFormParameters and renderPatFormUrl", () => {
 describe("the committed pages", () => {
   const pages = Object.keys(PAGE_REGIONS);
 
-  test("are exactly what the generator renders, and every page is registered", () => {
+  test("are exactly what the generator renders", () => {
     // Every generated region fresh (build:check's contract) also proves the Sections renderer parses every real grant prose and every real permission
-    // has a form parameter.
-    expect(pages.sort()).toEqual([
-      "README.md",
-      "docs/reference/architecture.md",
-      "docs/reference/inputs.md",
-      "docs/reference/sections.md",
-      "docs/start/getting-started.md",
-    ]);
+    // has a form parameter. The page set is pinned against the tree by test/scripts/generated.test.ts, through the generated-output table.
     for (const path of pages) {
       const text = readFileSync(join(ROOT, path), "utf8");
       expect(renderPage(path, text), path).toBe(text);

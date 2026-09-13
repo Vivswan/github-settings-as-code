@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
-const INDEX_PATH = `${GAPS_DIR}/index.ts`;
+export const INDEX_PATH = `${GAPS_DIR}/index.ts`;
 
 export const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["index.ts", "gap.ts"]);
 
