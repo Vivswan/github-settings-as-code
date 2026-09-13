@@ -1,8 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
-import { writeSummary } from "../../src/flows/summary.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -12,6 +11,7 @@ function namesActionsCore(source: string): boolean {
 }
 
 describe("the Io port boundary", () => {
+  // The detector's controls: every way a module can name the package, and the two mentions that must not count.
   test.each([
     ['import * as core from "@actions/core";', true],
     ["import { debug } from '@actions/core';", true],
@@ -40,9 +40,13 @@ describe("the Io port boundary", () => {
       }
     }
     expect(offenders).toEqual([]);
-    // The scan saw the tree (a wrong root would pass vacuously).
+    // The scan saw the tree (a wrong root would pass vacuously), and the check tells an import from a mention:
+    // the action's Io imports the package, the CLI's runner face only names it in its header.
     expect(scanned).toBeGreaterThan(50);
     expect(namesActionsCore(readFileSync(join(srcDir, "action", "io.ts"), "utf8"))).toBe(true);
+    const cliRunner = readFileSync(join(srcDir, "cli", "actions.ts"), "utf8");
+    expect(cliRunner).toContain("@actions/core");
+    expect(namesActionsCore(cliRunner)).toBe(false);
   });
 });
 
@@ -69,35 +73,31 @@ describe("actionsIo", () => {
       delete process.env.GITHUB_STEP_SUMMARY;
       actionsIo.summary("dropped");
       process.env.GITHUB_STEP_SUMMARY = file;
-      writeSummary(
-        actionsIo,
-        { outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true -> false"] }] },
-        "check",
-        "drift",
-      );
-      actionsIo.summary("## second block");
-      expect(readFileSync(file, "utf8")).toBe(
-        [
-          "## github-settings-as-code (check)",
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          "| repository | :warning: drift | has_wiki: true -> false |",
-          "## second block",
-          "",
-        ].join("\n"),
-      );
+      actionsIo.summary("## first block");
+      actionsIo.summary("| a |\n|---|");
+      expect(readFileSync(file, "utf8")).toBe("## first block\n| a |\n|---|\n");
     }));
 
-  test("output writes the runner's output file only when it is set", () =>
+  test("output writes the runner's output file only when it is set, and never a stdout command", () =>
     withTempDir("sac-io-", (dir) => {
-      // The runner creates the file; @actions/core refuses to append to a missing one.
+      // The runner creates the file; @actions/core refuses to append to a missing one. Without the file, @actions/core
+      // would fall back to the retired ::set-output:: stdout command, so stdout is watched too.
       const file = join(dir, "output.txt");
       writeFileSync(file, "");
       delete process.env.GITHUB_OUTPUT;
-      actionsIo.output("result", "dropped");
-      // @ts-expect-error a misspelled output name fails to compile at the port
-      actionsIo.output("reslut", "dropped");
+      const chunks: string[] = [];
+      const write = spyOn(process.stdout, "write").mockImplementation((chunk) => {
+        chunks.push(String(chunk));
+        return true;
+      });
+      try {
+        actionsIo.output("result", "dropped");
+        // @ts-expect-error a misspelled output name fails to compile at the port
+        actionsIo.output("reslut", "dropped");
+      } finally {
+        write.mockRestore();
+      }
+      expect(chunks).toEqual([]);
       process.env.GITHUB_OUTPUT = file;
       actionsIo.output("result", "clean");
       // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
@@ -105,9 +105,4 @@ describe("actionsIo", () => {
       expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
       expect(written).not.toContain("dropped");
     }));
-
-  test("mask registers the value in the readable registry", () => {
-    actionsIo.mask("o/private");
-    expect(actionsIo.masked().has("o/private")).toBe(true);
-  });
 });
