@@ -105,6 +105,7 @@ describe("runOutcome", () => {
   // The ranking is worstOf's (test/engine/outcome.test.ts); the rows here vary the exit rule over it.
   test.each<[RunOutcome[], boolean, RunOutcome, 0 | 1]>([
     [["applied", "clean"], false, "applied", 0],
+    [["clean", "skipped", "applied"], false, "skipped", 0],
     [["clean", "partial"], true, "partial", 0],
     [["clean", "drift"], false, "drift", 0],
     [["clean", "drift"], true, "drift", 1],
