@@ -429,6 +429,68 @@ describe("the npm floor guard under bash", () => {
   });
 });
 
+/** The outcome literals of the pipeline's ConfirmVerdict union, read from the type the script exports; the case block must name each. */
+function confirmOutcomes(): string[] {
+  const source = readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
+  const union = must(
+    source.match(/export type ConfirmVerdict =([\s\S]*?);\n/)?.[1],
+    "the ConfirmVerdict union",
+  );
+  const outcomes = [...union.matchAll(/outcome: "([a-z]+)"/g)].map((m) => m[1] ?? "");
+  expect(outcomes.length).toBeGreaterThan(2);
+  return outcomes;
+}
+
+describe("the confirmation block under bash", () => {
+  const { next } = publishers();
+  const confirm = must(
+    next.steps.find((step) => /release-pipeline\.ts npm-confirm\b/.test(step.run ?? "")),
+    "the npm-confirm step",
+  );
+  const run = must(confirm.run, "confirm run");
+  const outcomes = confirmOutcomes();
+
+  /** A bun that prints the given confirm line. */
+  const stubBun =
+    (line: string) =>
+    (bin: string): void => {
+      writeFileSync(join(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "${line}"\n`, { mode: 0o755 });
+    };
+
+  test("the case block names every outcome the script can print, and the confirmation is gated on this job's own publish", () => {
+    for (const outcome of outcomes) {
+      expect(run, `the case block has no arm for "${outcome}"`).toContain(`${outcome}\\ *)`);
+    }
+    expect(condition(confirm.if)).toBe("steps.publish.outputs.published == 'true'");
+  });
+
+  /** One run per outcome plus an unknown line: the run ends 1 for behind and the unknown, 0 otherwise, and the message class follows the outcome. */
+  const expected: Record<string, { status: number; command: RegExp }> = {
+    settled: { status: 0, command: /^::notice::/ },
+    unsettled: { status: 0, command: /^::warning::/ },
+    behind: { status: 1, command: /^::error::/ },
+  };
+  test.each([...outcomes, "nonsense"])("a %s line", (outcome) => {
+    const step = runStep(
+      run,
+      { SOURCE_SHA: "b8df084c" },
+      stubBun(`${outcome} next 2.0.1-main.446 is placed`),
+    );
+    const want = expected[outcome] ?? {
+      status: 1,
+      command: /^::error::npm-confirm printed neither/,
+    };
+    expect(step.status, `a ${outcome} line must exit ${want.status}`).toBe(want.status);
+    const commands = step.lines.filter((line) => line.startsWith("::"));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(want.command);
+  });
+
+  test("every outcome of the union has an expected verdict here, so a new outcome fails until this table names it", () => {
+    expect(Object.keys(expected).sort()).toEqual([...outcomes].sort());
+  });
+});
+
 describe("the publish blocks under bash", () => {
   const { next } = publishers();
   const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);

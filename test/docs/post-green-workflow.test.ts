@@ -538,8 +538,9 @@ describe("post-green.yml", () => {
   test("the judged sha the caller passes is the ref every checkout takes and the source every packaging step names", () => {
     const [input, ...rest] = Object.keys(workflow.on.workflow_call?.inputs ?? {});
     expect(rest, "post-green.yml takes more than the one judged sha").toEqual([]);
-    expect(caller.with?.[input ?? ""]).toBe(`\${{ github.sha }}`);
-    const judged = `\${{ inputs.${input} }}`;
+    // Compared as expressions, so a sync respelling the managed caller's braces or spacing is not a behavior change here.
+    expect(condition(caller.with?.[input ?? ""])).toBe("github.sha");
+    const judged = `inputs.${input}`;
     const steps = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []);
     const checkouts = steps.filter((step) => (step.uses ?? "").startsWith("actions/checkout@"));
     // The steps that pass a source to the pipeline or to npm, found by the script that reads the variable, not by the env that sets it.
@@ -547,11 +548,13 @@ describe("post-green.yml", () => {
     expect(checkouts.length).toBeGreaterThan(1);
     expect(sources.length).toBeGreaterThan(1);
     for (const step of checkouts) {
-      expect(step.with?.ref, "a checkout of something other than the judged sha").toBe(judged);
+      expect(condition(step.with?.ref), "a checkout of something other than the judged sha").toBe(
+        judged,
+      );
     }
     for (const step of sources) {
       expect(
-        step.env?.SOURCE_SHA,
+        condition(step.env?.SOURCE_SHA),
         `"${step.name}" packages something other than the judged sha`,
       ).toBe(judged);
     }
