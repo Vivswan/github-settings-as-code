@@ -1,21 +1,23 @@
 # The update stage of the release pipeline: repo-owned, called by the managed ci.yml between release-please
 # cutting the DRAFT release and the attested publish. This hook, not release-please, mints the tag: main is
-# source-only, so every consumable ref must point at a packaged commit on the `build` branch (the topology is in
-# .github/scripts/release-pipeline.ts; release-please-config.json sets `draft` and pins `force-tag-creation` off).
+# source-only, so every consumable ref must point at a packaged commit, the merge commit's child carrying its build
+# (the topology is in .github/scripts/release-pipeline.ts; release-please-config.json sets `draft` and pins
+# `force-tag-creation` off).
 #
 #   resolve the merge commit from the draft's target commitish -> rebuild the bundle, verify the committed schema byte-for-byte
-#   package      -> find or append the build commit whose source is the merge commit, mint vX.Y.Z there ONCE, reconcile latest
-#   retag-major  -> force-move vX there, then upload bundle and schema to the draft (a published release freezes its assets)
+#   package      -> find or mint the merge commit's packaged commit under its build tag, mint vX.Y.Z there ONCE, move latest forward
+#   retag-major  -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
 #   verify       -> confirm origin's refs and the draft's assets; the managed publish stage then attests and flips the release live
 #   publish-npm  -> publish the library build to npm as the stable version through trusted publishing, once the refs check out
 #
 # Only ci.yml reaches this workflow, with the tag release-please just cut from its own merged PR, so a hand-edited
-# manifest never mints a tag. A rerun converges while this release is its line's newest (a version npm already holds
-# is skipped); once a NEWER release shipped, the major move stops by design.
+# manifest never mints a tag. A rerun converges: a version npm already holds is skipped, and once a NEWER release
+# shipped, the major stays on it and verify reports the difference.
 
-# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a chain commit
-# it appends carries no run trailer, and the npm publish has no hand path at all, only the workflow's OIDC identity may
-# publish). NEVER publish before `package` has minted the tag: a tagless draft makes GitHub create vX.Y.Z lazily on main.
+# Finishing a dead run by hand (prefer re-running its FAILED jobs: a hand run has no attestation.json, a packaged
+# commit it mints carries no run trailer, and the npm publish has no hand path at all, only the workflow's OIDC
+# identity may publish). NEVER publish before `package` has minted the tag: a tagless draft makes GitHub create
+# vX.Y.Z lazily on main.
 #   git checkout <merge sha>                    (the draft's target commitish)
 #   bun install --frozen-lockfile --ignore-scripts && bun run build
 #   TAG=vX.Y.Z GITHUB_SHA=<merge sha> bun .github/scripts/release-pipeline.ts package
@@ -39,8 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # Tag pushes, and the append to build when post-green did not run it: chain commits carry no
-      # .github/workflows/, so the default token needs no workflows grant. Also what makes the draft visible to gh.
+      # Tag pushes, and the packaged commit when post-green did not mint it: a packaged commit changes no workflow
+      # file against its parent, so the default token needs no workflows grant. Also what makes the draft visible to gh.
       contents: write
     outputs:
       source-sha: ${{ steps.source.outputs.sha }}
@@ -63,7 +65,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.source.outputs.sha }}
-          # The script judges whether the build tip's source lies on main; a shallow checkout cannot answer that.
+          # The script names the build tag by the merge commit's position on main and judges latest's source against its history; a shallow checkout can do neither.
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - name: Build the bundle and the schema
@@ -99,6 +101,9 @@ jobs:
       contents: write # read-only in spirit; write is what makes drafts visible to gh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The script judges whether the release's merge commit lies on main; a shallow checkout cannot.
+          fetch-depth: 0
       - uses: ./.github/actions/setup
         with:
           install: "false"
@@ -108,18 +113,13 @@ jobs:
           SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
         run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts verify
       # Publishing freezes the asset list, so an incomplete one must stop here while the release is still a draft
-      # (v2.0.0 shipped assetless exactly this way).
-      #   attestation.json   -> the managed publish stage's asset, attached after this job; ignored by the check
-      #   attestation.jsonl  -> stale provenance under the old name, which that stage no longer cleans up; deleted first
-      # COMPAT(v3): a draft still carrying attestation.jsonl under the old asset name passes; delete the delete-asset branch.
+      # (v2.0.0 shipped assetless exactly this way). attestation.json is the managed publish stage's asset, attached
+      # after this job, so the check ignores it.
       - name: Confirm the release carries both packaged assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx 'attestation.jsonl'; then
-            gh release delete-asset "$TAG" attestation.jsonl --yes
-          fi
           assets="$(gh release view "$TAG" --json assets \
             --jq '[.assets[].name | select(. != "attestation.json")] | sort | join(" ")')"
           expected="index.js settings.schema.json"

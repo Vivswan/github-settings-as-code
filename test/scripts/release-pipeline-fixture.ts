@@ -4,7 +4,7 @@
  * a landing between a read and the write it informs), and the helpers the test files share.
  */
 
-import { afterAll, beforeAll, expect } from "bun:test";
+import { afterAll, beforeAll } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -13,11 +13,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { PREPARATION_SCRIPTS } from "../../.github/scripts/release-pipeline.js";
+import { type PointerMove, PREPARATION_SCRIPTS } from "../../.github/scripts/release-pipeline.js";
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -39,8 +40,8 @@ export function guardRefusal(cwd: string): string {
 let shimDir = "";
 /** PATH as it was before the shim went first; undefined until it did. */
 let realPath: string | undefined;
-/** The real git, for a scripted rival that must not be logged as one of the pipeline's pushes. */
-export let realGit = "";
+/** The real git, which the shim execs. */
+let realGit = "";
 
 /** The per-file hooks: the shim goes first on PATH before the file's tests and comes off after them, and the
  * fixture roots the file created are removed; a test file calls this once at module scope. */
@@ -115,9 +116,14 @@ function disableBackgroundMaintenance(dir: string): void {
 }
 
 /** Hermetic clone: the developer's global gitconfig (identity, signing, hooks) must not leak into the fixtures. */
-export function clone(root: string, originDir: string, name: string): string {
+export function clone(
+  root: string,
+  originDir: string,
+  name: string,
+  options: { tags: boolean } = { tags: true },
+): string {
   const dir = join(root, name);
-  execFileSync("git", ["clone", "--quiet", originDir, dir]);
+  execFileSync("git", ["clone", "--quiet", ...(options.tags ? [] : ["--no-tags"]), originDir, dir]);
   disableBackgroundMaintenance(dir);
   git(dir, "config", "user.name", "fixture");
   git(dir, "config", "user.email", "fixture@example.invalid");
@@ -154,11 +160,6 @@ export function writeBuild(cwd: string, bundle: string): void {
   }
 }
 
-/** Stage the build outputs into a clone's index as the pipeline does (-f: they are gitignored). */
-export function stageBuild(cwd: string): void {
-  git(cwd, "add", "-f", "--", "lib/index.js", "lib/pkg");
-}
-
 /** The fixture's package.json: one of each script pacote takes as a preparation trigger, beside one that is not. */
 export function manifestJson(
   version: string,
@@ -173,8 +174,8 @@ const FIXTURE_SCRIPTS = {
 /** FIXTURE_SCRIPTS after the pipeline's strip: the preparation scripts gone, the rest kept. */
 export const STRIPPED_SCRIPTS = { test: "bun test" };
 
-/** What a chain commit's package.json looks like: the pipeline strips the preparation scripts when it mints one. */
-export function stripPrepare(cwd: string): void {
+/** What a packaged commit's package.json looks like: the pipeline strips the preparation scripts when it mints one. */
+function stripPrepare(cwd: string): void {
   const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
     scripts?: Record<string, string>;
   };
@@ -185,26 +186,17 @@ export function stripPrepare(cwd: string): void {
   git(cwd, "add", "package.json");
 }
 
-/** Whether a planter should strip the manifest as the pipeline does: the files include the library build (only
- * commits minted after the strip carry it) and no explicit package.json says what the manifest is instead. */
-export function shouldStripManifest(files: Record<string, unknown>): boolean {
-  return (
-    Object.keys(files).some((file) => file.startsWith("lib/pkg/")) && !("package.json" in files)
-  );
-}
-
-/** What every packaged tree lacks, so a planted chain commit deviates from the pipeline's only where the test means it to. */
-export function stripWorkflows(cwd: string): void {
-  git(cwd, "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".github/workflows");
+/** A planter strips the manifest as the pipeline does unless an explicit package.json says what the manifest is. */
+function shouldStripManifest(files: Record<string, unknown>): boolean {
+  return !("package.json" in files);
 }
 
 export function treePaths(cwd: string, sha: string): string[] {
   return git(cwd, "ls-tree", "-r", "--name-only", sha).split("\n");
 }
 
-/** The paths a chain commit's diff against its source lists: the workflow removal and the build outputs. */
-export const PACKAGED_DIFF =
-  ".github/workflows/ci.yml\nlib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
+/** The paths a packaged commit's diff against its source lists: the build outputs and the stripped manifest. */
+export const PACKAGED_DIFF = "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
 
 export const CHANGELOG_21 = `# Changelog
 
@@ -262,7 +254,7 @@ export function seedFixture(): Fixture {
     )}\n`,
   );
   write(work, "CHANGELOG.md", CHANGELOG_21.replace(/## \[2\.1\.0\][\s\S]*?\n\n## /, "## "));
-  // A workflow (which no chain commit may carry) beside another .github file (which every chain commit keeps).
+  // A workflow file rides along in every packaged commit: its parent is the source, so no diff GitHub judges shows a workflow change.
   write(work, ".github/workflows/ci.yml", "name: ci\non: push\njobs: {}\n");
   write(work, ".github/dependabot.yml", "version: 2\nupdates: []\n");
   write(work, "src/marker.ts", "export const marker = 1;\n");
@@ -298,34 +290,48 @@ export function pushGreenCommit(
   return { dir, sha };
 }
 
-/** The Source trailer as git parses it, proving the value sits in a real trailer block rather than somewhere in the body. */
-export function sourceTrailer(cwd: string, sha: string): string {
-  return git(cwd, "log", "-1", "--format=%(trailers:key=Source,valueonly)", sha);
+/** Where a main commit sits on origin's main: its first-parent count, the position its build tag carries. */
+export const positionOf = (fx: Fixture, sha: string): number =>
+  Number(git(fx.origin, "rev-list", "--count", "--first-parent", sha));
+/** The build tag the pipeline names for a main commit. */
+export const buildTagOf = (fx: Fixture, sha: string): string =>
+  `refs/tags/build/${positionOf(fx, sha)}.${sha.slice(0, 7)}`;
+/** Every build tag origin holds, in ref order. */
+export const buildTags = (fx: Fixture): string[] =>
+  git(fx.origin, "for-each-ref", "--format=%(refname)", "refs/tags/build/")
+    .split("\n")
+    .filter(Boolean);
+/** The packaged commit a main commit's build tag names on origin. */
+export const packagedOf = (fx: Fixture, sha: string): string =>
+  git(fx.origin, "rev-parse", `${buildTagOf(fx, sha)}^{}`);
+/** Whether origin still holds a commit object: a pruned tag's commit stays until origin collects it, one a
+ * release tag or latest names stays for good. */
+export function originHolds(fx: Fixture, sha: string): boolean {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: fx.origin, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * The verify job's checkout: depth 1 at main's head after main moved past the merge commit, so only the confirmation's own fetch can supply the merge
- * commit's tree.
+ * A verify checkout after main moved past the merge commit: a full clone without tags whose HEAD is the newer head,
+ * so only the confirmation's own fetches supply the tags.
  */
-export function shallowChecker(fx: Fixture, name: string): string {
+export function laterChecker(fx: Fixture, name: string): string {
   pushGreenCommit(fx, `${name}-after-release`, "packaged-bundle-bytes-9\n");
-  const checker = join(fx.root, name);
-  execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, checker]);
-  disableBackgroundMaintenance(checker);
-  let known = true;
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${fx.mergeSha}^{commit}`], {
-      cwd: checker,
-      stdio: "ignore",
-    });
-  } catch {
-    known = false;
-  }
-  expect(known).toBe(false);
-  return checker;
+  return clone(fx.root, fx.origin, name, { tags: false });
 }
 
-export const buildTip = (fx: Fixture): string => git(fx.origin, "rev-parse", "refs/heads/build");
+/** A depth-1 clone of origin's main: what a shallow checkout gives the pipeline. */
+export function shallowClone(fx: Fixture, name: string): string {
+  const dir = join(fx.root, name);
+  execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, dir]);
+  disableBackgroundMaintenance(dir);
+  return dir;
+}
+
 /** Author and committer of a commit, as the pipeline must stamp its own. */
 export const identityOf = (cwd: string, sha: string): string =>
   git(cwd, "log", "-1", "--format=%an <%ae> / %cn <%ce>", sha);
@@ -336,47 +342,211 @@ export const BOT_IDENTITY = `${BOT} / ${BOT}`;
 export const localIdentity = (cwd: string): string =>
   `${git(cwd, "config", "--local", "--get", "user.name")} <${git(cwd, "config", "--local", "--get", "user.email")}>`;
 export const FIXTURE_IDENTITY = "fixture <fixture@example.invalid>";
-/** A commit's first parent as its object records it, whatever ref or shallow state the reading clone is in. */
-export const parentOf = (cwd: string, sha: string): string =>
-  git(cwd, "cat-file", "-p", sha).match(/^parent ([0-9a-f]{40})$/m)?.[1] ?? "";
+/** A commit's parents as its object records them, whatever ref or shallow state the reading clone is in. */
+export const parentsOf = (cwd: string, sha: string): string[] =>
+  [...git(cwd, "cat-file", "-p", sha).matchAll(/^parent ([0-9a-f]{40})$/gm)].map((m) => m[1] ?? "");
 export const latestTag = (fx: Fixture): string =>
   git(fx.origin, "rev-parse", "refs/tags/latest^{}");
 export const remoteRef = (fx: Fixture, ref: string): string =>
   git(fx.work, "ls-remote", "origin", ref);
 
-/** A chain-shaped commit minted by another writer, not pushed; the clone holding it is returned for a competitor plan to push from. */
-export function rivalChainCommit(
+/** A commit planted over `parent` from `source`'s tree: the pipeline's shape (build outputs staged, manifest
+ * stripped) plus `files` over it, unpushed. `message` paragraphs default to the pipeline's subject. */
+export function plantCommit(
   fx: Fixture,
   name: string,
   source: string,
   parent: string | null,
-  bundle: string,
+  files: Record<string, string | { linkTo: string }> = builtFiles("planted\n"),
+  message: string[] = ["build: by hand"],
 ): { from: string; sha: string } {
   const from = clone(fx.root, fx.origin, name);
+  return { from, sha: plantCommitIn(from, source, parent, files, message) };
+}
+
+/** plantCommit inside an existing clone, for a source that clone alone holds. */
+export function plantCommitIn(
+  from: string,
+  source: string,
+  parent: string | null,
+  files: Record<string, string | { linkTo: string }>,
+  message: string[],
+): string {
   git(from, "checkout", "--quiet", source);
-  stripWorkflows(from);
-  writeBuild(from, bundle);
-  stageBuild(from);
-  stripPrepare(from);
-  const tree = git(from, "write-tree");
-  const sha = git(
+  for (const [file, content] of Object.entries(files)) {
+    if (typeof content === "string") {
+      write(from, file, content);
+    } else {
+      mkdirSync(dirname(join(from, file)), { recursive: true });
+      symlinkSync(content.linkTo, join(from, file));
+    }
+    git(from, "add", "-f", file);
+  }
+  if (shouldStripManifest(files)) {
+    stripPrepare(from);
+  }
+  return git(
     from,
     "commit-tree",
-    tree,
+    git(from, "write-tree"),
     ...(parent === null ? [] : ["-p", parent]),
-    "-m",
-    "build: by another run",
-    "-m",
-    `Source: ${source}`,
+    ...message.flatMap((paragraph) => ["-m", paragraph]),
   );
-  return { from, sha };
+}
+
+/** A package of `source` over `parent` with an EMPTY subtree at `empty/` beside the build outputs: invisible to a
+ * path diff (no path lives in an empty tree), so only tree identity catches it. */
+function plantEmptySubtree(
+  fx: Fixture,
+  name: string,
+  source: string,
+  parent: string,
+  bundle: string,
+): { from: string; sha: string } {
+  const planted = plantCommit(fx, name, source, parent, builtFiles(bundle));
+  const emptyTree = execFileSync("git", ["hash-object", "-w", "-t", "tree", "--stdin"], {
+    cwd: planted.from,
+    input: "",
+    encoding: "utf8",
+  }).trim();
+  const entries = `${git(planted.from, "ls-tree", `${planted.sha}^{tree}`)}\n040000 tree ${emptyTree}\tempty\n`;
+  const tree = execFileSync("git", ["mktree"], {
+    cwd: planted.from,
+    input: entries,
+    encoding: "utf8",
+  }).trim();
+  const sha = git(planted.from, "commit-tree", tree, "-p", parent, "-m", "build: by hand");
+  return { from: planted.from, sha };
+}
+
+/** A hand-planted commit under a packaged commit's name, and the refusal every path (a rerun, the major, verify)
+ * answers with; the remedy tail differs per ref and is the caller's to check. */
+export type PlantedPackage = (fx: Fixture) => { from: string; sha: string; error: RegExp };
+export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
+  [
+    "a child of another commit",
+    (fx) => {
+      const planted = plantCommit(
+        fx,
+        "planter",
+        fx.mergeSha,
+        fx.seedSha,
+        builtFiles("packaged-bundle-bytes-1\n"),
+      );
+      return {
+        ...planted,
+        error: new RegExp(
+          ` \\(${planted.sha}\\) has parent ${fx.seedSha}, so it is no package of ${fx.mergeSha} \\(a packaged commit is that commit's child\\); `,
+        ),
+      };
+    },
+  ],
+  [
+    "a root",
+    (fx) => ({
+      ...plantCommit(fx, "planter", fx.mergeSha, null, builtFiles("packaged-bundle-bytes-1\n")),
+      error: /has no parent, so it is no package of/,
+    }),
+  ],
+  [
+    "a child carrying a file beyond the build outputs",
+    (fx) => ({
+      ...plantCommit(fx, "planter", fx.mergeSha, fx.mergeSha, {
+        ...builtFiles("packaged-bundle-bytes-1\n"),
+        "src/marker.ts": "export const marker = 666;\n",
+      }),
+      error:
+        /is not [0-9a-f]{40} plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, alone: .*\(deviating paths: src\/marker\.ts\); /,
+    }),
+  ],
+  [
+    "a child whose package.json kept its preparation scripts",
+    (fx) => ({
+      ...plantCommit(fx, "planter", fx.mergeSha, fx.mergeSha, {
+        ...builtFiles("packaged-bundle-bytes-1\n"),
+        "package.json": manifestJson("2.1.0"),
+      }),
+      error: /alone: .*\(deviating paths: package\.json\); /,
+    }),
+  ],
+  [
+    "a child carrying an empty subtree beyond the build outputs",
+    (fx) => ({
+      ...plantEmptySubtree(fx, "planter", fx.mergeSha, fx.mergeSha, "packaged-bundle-bytes-1\n"),
+      error: /alone: .*\(deviating paths: none a path diff can list, such as an empty subtree\); /,
+    }),
+  ],
+  [
+    "a child without the library build",
+    (fx) => ({
+      ...plantCommit(fx, "planter", fx.mergeSha, fx.mergeSha, {
+        "lib/index.js": "packaged-bundle-bytes-1\n",
+      }),
+      error:
+        /is not the tree [0-9a-f]{40} this checkout's build packages|does not carry a non-empty regular-file lib\/pkg\/index\.js \(no entry\)/,
+    }),
+  ],
+  [
+    "a child carrying the bundle as a symlink",
+    (fx) => ({
+      ...plantCommit(fx, "planter", fx.mergeSha, fx.mergeSha, {
+        ...builtFiles("packaged-bundle-bytes-1\n"),
+        "lib/index.js": { linkTo: "../src/marker.ts" },
+      }),
+      // A run with a fresh build holds the tag to its tree; one without holds it to the required regular files.
+      error:
+        /is not the tree [0-9a-f]{40} this checkout's build packages|does not carry a non-empty regular-file lib\/index\.js/,
+    }),
+  ],
+];
+
+/** The moves movePointer reports, as whole results. */
+export const movedTo = (ref: string, commit: string): PointerMove => ({
+  ref,
+  sha: commit,
+  changed: true,
+  reason: `${ref}: moved to ${commit}`,
+});
+export const alreadyAt = (ref: string, commit: string): PointerMove => ({
+  ref,
+  sha: commit,
+  changed: false,
+  reason: `${ref} already at ${commit}`,
+});
+export const alreadyPast = (
+  ref: string,
+  source: string,
+  at: string,
+  packaging: string,
+): PointerMove => ({
+  ref,
+  sha: at,
+  changed: false,
+  reason: `${ref} is already past ${source} (at ${at}, packaging ${packaging}); the newer run moved it`,
+});
+export const replaced = (ref: string, commit: string, old: string): PointerMove => ({
+  ref,
+  sha: commit,
+  changed: true,
+  replaced: old,
+  reason: `${ref}: moved to ${commit}, replacing ${old}, which was no package of a main commit (a hand push, or a commit of the retired build chain)`,
+});
+
+/** A packaged commit as another run would mint it for `source` with `bundle`: its child, the pipeline's tree. */
+export function rivalPackage(
+  fx: Fixture,
+  name: string,
+  source: string,
+  bundle: string,
+): { from: string; sha: string } {
+  return plantCommit(fx, name, source, source, builtFiles(bundle), ["build: by another run"]);
 }
 
 /** What the shim does to the pipeline's n-th push, before real git sees it. */
 export type PushPlan =
   /** Force-push `sha` to `ref` first from the clone `from`; real git then judges the pipeline's push. */
   | { competitor: { from: string; sha: string; ref: string } }
-  /** Run this shell first (a rival whose commit depends on origin's state at that moment). */
+  /** Run this shell first (a rival whose action depends on origin's state at that moment). */
   | { script: string }
   /** Replay a remote a file:// origin cannot play: this stderr, this exit status. */
   | { fail: { stderr: string; status: number } };
@@ -390,6 +560,7 @@ export interface RemotePlans {
   afterLsRemote?: { naming: string; script: string };
 }
 
+/** Run `body` with the shim playing `plans` against the pipeline's pushes, in order; the pushes it attempted, as logged. */
 export function withPushPlans(
   fx: Fixture,
   plans: (PushPlan | null)[],
@@ -442,26 +613,30 @@ export function withRemotePlans(fx: Fixture, remote: RemotePlans, body: () => vo
     .map((line) => line.split(" "));
 }
 
-export const appendOf = (sha: string): string[] => ["push", "origin", `${sha}:refs/heads/build`];
-export const latestOf = (observed: string, tip: string): string[] => [
-  "push",
-  `--force-with-lease=refs/tags/latest:${observed}`,
-  "origin",
-  `${tip}:refs/tags/latest`,
-];
-export const majorOf = (observed: string): string[] => [
-  "push",
-  `--force-with-lease=refs/tags/v2:${observed}`,
-  "origin",
-  "refs/tags/v2",
-];
-export const TAG_PUSH = ["push", "origin", "refs/tags/v2.1.0"];
+export const LATEST = "refs/tags/latest";
 export const ANCHOR_PUSH = ["push", "origin", "HEAD:refs/heads/release-please--branches--main"];
-/** The commit a logged append carried (its objects exist in the pushing clone). */
-export const appendedSha = (push: string[]): string =>
-  push.join(" ").replace(/^push origin (\w+):refs\/heads\/build$/, "$1");
+/** The pipeline's pushes as the shim logs them: a create-once push, a lease-guarded move, a batch of deletions. */
+export const createOf = (commit: string, ref: string): string[] => [
+  "push",
+  "origin",
+  `${commit}:${ref}`,
+];
+export const moveOf = (ref: string, observed: string, commit: string): string[] => [
+  "push",
+  `--force-with-lease=${ref}:${observed}`,
+  "origin",
+  `${commit}:${ref}`,
+];
+export const deleteOf = (...refs: string[]): string[] => [
+  "push",
+  "origin",
+  ...refs.map((ref) => `:${ref}`),
+];
+/** The commit a logged create push carried (its objects exist in the pushing clone). */
+export const createdSha = (push: string[]): string => (push[2] ?? "").split(":")[0] ?? "";
 
-/** Remotes a file:// origin cannot play, as git words them; none is a retry's to win. */
+/** Remotes a file:// origin cannot play, as git words them, replayed with the ref UNMOVED on origin: none is a
+ * retry's to win, the third one however much its words look like a lost compare-and-set. */
 export const PERMANENT: [string, string][] = [
   [
     "a token without write access",
@@ -469,15 +644,39 @@ export const PERMANENT: [string, string][] = [
   ],
   [
     "a ruleset declining the ref",
-    "remote: error: GH013: Repository rule violations found for refs/heads/build.\nremote:\n" +
+    "remote: error: GH013: Repository rule violations found for refs/tags/latest.\nremote:\n" +
       "remote: - Cannot update this protected ref.\nremote:\nTo https://github.com/o/r.git\n" +
-      " ! [remote rejected] 0123abc -> build (push declined due to repository rule violations)\n" +
+      " ! [remote rejected] 0123abc -> latest (push declined due to repository rule violations)\n" +
       "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
   [
-    "a hook quoting git's compare-and-set words on its own line",
-    "remote: pre-receive hook declined: cannot lock ref 'refs/heads/build': reference already exists\n" +
-      "To https://github.com/o/r.git\n ! [remote rejected] 0123abc -> build (pre-receive hook declined)\n" +
+    "git's compare-and-set words while the ref stands where it was read",
+    "To https://github.com/o/r.git\n ! [rejected]        0123abc -> latest (stale info)\n" +
       "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
 ];
+
+/** Run the script's subcommand under this bun as the workflow does: stdout, stderr, and status as they were.
+ * Asynchronous, so a registry served from the test process can answer the child. */
+export async function subcommand(
+  cwd: string,
+  env: Record<string, string | undefined>,
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string; status: number }> {
+  const script = join(import.meta.dir, "..", "..", ".github", "scripts", "release-pipeline.ts");
+  const child = Bun.spawn([process.execPath, script, ...args], {
+    cwd,
+    env: Object.fromEntries(
+      Object.entries({ ...process.env, ...env }).filter(([, v]) => v !== undefined),
+    ) as Record<string, string>,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, status] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { stdout, stderr, status };
+}

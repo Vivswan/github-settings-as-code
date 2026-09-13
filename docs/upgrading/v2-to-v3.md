@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-one breaks (the ninth is for library consumers, the last for anyone pinning a sha). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -28,6 +28,7 @@ Twenty breaks (the ninth is for library consumers). One is silent (the fallback)
 | `GSAC_RETRY_BASE_MS` | `RETRY_BASE_MS`, undocumented | `GSAC_RETRY_BASE_MS`, in the inputs reference | No error: an unknown environment variable is ignored, so a harness setting the old name waits real seconds; [section 18](#18-gsac_retry_base_ms) |
 | The sealing key is read at apply time | Check mode read `GET .../secrets/public-key` and failed on a malformed key | The first sealed PUT reads it at apply | Check mode issues one request fewer per secret family; a malformed key fails at apply; [section 19](#19-the-sealing-key-is-read-at-apply-time) |
 | Environment secrets and variables plan through the shared engines | Their own wording | The engines' wording | Only a grep over the output notices; [section 20](#20-environment-secrets-and-variables-plan-through-the-shared-engines) |
+| The `build` branch retires | Every green push appended a packaged commit to the `build` branch; `latest` and the release tags pointed into it | One packaged commit per `main` commit under the tag `build/<position>.<sha7>`, the ten newest kept; `latest`, `@v3`, and `vX.Y.Z` point at them; the branch is deleted once every consumer has repinned | A sha pin into the branch stops resolving when the branch goes; a pin taken from a build tag goes when ten newer commits have been packaged; [section 21](#21-the-build-branch-retires) says what to pin instead |
 
 ## 1. The defaults-file fallback
 
@@ -299,6 +300,19 @@ Their lines are the engines' lines now:
 | The secrets cannot-verify note | once per environment that exists | once per environment with declared secrets, the missing environment included, under the `environments[prod].secrets` label |
 
 Repository variable operations (`actions_variables`, `agents_variables`) gain a describe line in failure prose (`creating Actions variable "X"`); nothing else moves.
+
+## 21. The build branch retires
+
+Nothing lands on the `build` branch any more, and the owner deletes it once the migration is complete: the first `build/<position>.<sha7>` tags exist, `latest` points at a tagged packaged commit, and every known consumer of a sha on the branch has repinned to a release tag, `@v3`, or an npm version. Repin now: a `Vivswan/github-settings-as-code@<sha>` pin into the branch stops resolving when it goes.
+
+Every green push to `main` now mints one packaged commit, the main commit's child carrying the built action and library, under the tag `build/<position>.<sha7>` (the position is the commit's first-parent count on `main`). Each green push then prunes those tags to the ten newest: a tag goes once ten newer commits have been packaged, and GitHub may then collect its commit.
+
+| You pin | Lifetime | Do |
+|---|---|---|
+| `@v3` or `@latest` | Moves forward only, never deleted | Nothing |
+| A release tag or its commit sha (`git rev-parse v3.0.0`) | Permanent | Nothing |
+| A sha from the `build` branch | Until the owner deletes the branch | Repin to `@v3` or a release tag's commit now |
+| A sha from a `build/*` tag | Until ten newer commits are packaged (the next merge, for an old tag) | Pin the release tag's commit or an npm version instead |
 
 ## Order of operations
 

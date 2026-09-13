@@ -49,5 +49,5 @@ bun test/e2e/fuzz.ts --seed <iterationSeed> --iterations 1  # replay one failing
 
 - Releases run downstream of the `all-green` gate: ci.yml calls the fleet's release workflow, so a release or a release-PR refresh only happens from a green `main`.
 - release-please does the version math, the changelog, the version pins, and the release PR; merging that PR cuts the release.
-- Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit on the `build` branch: the source tree without its workflows, plus the built bundle, its source named in a Source trailer. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
+- Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
 - The repo-owned hooks `update-release.yml` and `update-release-pr.yml` mint the tags and keep release-please's boundary (`last-release-sha`) fresh. The git topology lives in `.github/scripts/release-pipeline.ts` and its test.
