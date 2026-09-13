@@ -450,7 +450,6 @@ describe("the confirmation block under bash", () => {
   const run = must(confirm.run, "confirm run");
   const outcomes = confirmOutcomes();
 
-  /** A bun that prints the given confirm line. */
   const stubBun =
     (line: string) =>
     (bin: string): void => {
@@ -464,7 +463,6 @@ describe("the confirmation block under bash", () => {
     expect(condition(confirm.if)).toBe("steps.publish.outputs.published == 'true'");
   });
 
-  /** One run per outcome plus an unknown line: the run ends 1 for behind and the unknown, 0 otherwise, and the message class follows the outcome. */
   const expected: Record<string, { status: number; command: RegExp }> = {
     settled: { status: 0, command: /^::notice::/ },
     unsettled: { status: 0, command: /^::warning::/ },
