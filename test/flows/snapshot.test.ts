@@ -804,7 +804,7 @@ describe("runSnapshot, dir form", () => {
       ]);
     }));
 
-  test("two targets carried to one file by an operator link fail the second, naming both; the first's file stands", () =>
+  test("two targets carried to one file by an operator link fail the second, naming the first; the first's file stands", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       const api = new MockApi({
         "GET /repos/alice/r": { data: { private: false } },
@@ -813,20 +813,24 @@ describe("runSnapshot, dir form", () => {
         ...labelsRoute("bob/r", [DOCS]),
       });
       const cfg = dirCfg(dir, { reposInput: "alice/r,bob/r" });
-      // `snapshots/bob -> snapshots/alice`: bob/r's file lands on alice/r's, and a last-writer-wins would report both written.
+      // `snapshots/bob -> snapshots/alice`: bob/r's file lands on alice/r's, and a last-writer-wins would report both
+      // written. alice/r's destination is itself a link to an older file: the rename replaces the LINK, so the claim
+      // is the leaf under the real directory, not the old file the link pointed at, and old/r.yml stays as it was.
       mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
       symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+      mkdirSync(join(dir, "old"));
+      writeFileSync(join(dir, "old", "r.yml"), "labels: []\n");
+      symlinkSync(join("..", "..", "old", "r.yml"), join(cfg.snapshotDir, "alice", "r.yml"));
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(1);
-      const landing = realpathSync(join(cfg.snapshotDir, "alice", "r.yml"));
       expect(collected.lines).toEqual([
         { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
         {
           level: "error",
           line:
             `bob/r: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "r.yml")}: the filesystem carries it to ` +
-            `${landing}, the file this run already wrote for alice/r. Remove the link under the "snapshot-dir" input that ` +
-            "folds the two owners together, so each target has a file of its own",
+            'the file this run already claimed for alice/r. Remove the link under the "snapshot-dir" input that folds ' +
+            "the two owners together, so each target has a file of its own",
         },
         { line: "result: failed" },
       ]);
@@ -842,6 +846,7 @@ describe("runSnapshot, dir form", () => {
         doc(BUG),
       );
       expect(readdirSync(join(cfg.snapshotDir, "alice"))).toEqual(["r.yml"]);
+      expect(readFileSync(join(dir, "old", "r.yml"), "utf8")).toBe("labels: []\n");
     }));
 
   test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", () =>

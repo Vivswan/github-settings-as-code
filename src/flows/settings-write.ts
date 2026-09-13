@@ -48,16 +48,21 @@ function realOrSpelled(path: string): string {
 /** The error is the filesystem's own reason; each caller names the input that chose the path. */
 export function writeReplacing(path: string, text: string): Result<void, string> {
   const staging = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  // Set once the exclusive create succeeded: only a staging file THIS write made is removed on failure, never one
+  // another writer got there first with (`wx` fails on it, and that failure is the one reported).
+  let created = false;
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(staging, text, { flag: "wx" });
+    created = true;
     renameSync(staging, path);
     return ok();
   } catch (error) {
-    // Only this write's own staging file is removed, and the write's error is the one reported.
-    try {
-      rmSync(staging, { force: true });
-    } catch {}
+    if (created) {
+      try {
+        rmSync(staging, { force: true });
+      } catch {}
+    }
     return err(String(error));
   }
 }

@@ -9,7 +9,7 @@
  * lands on disk while nothing about it is printed.
  */
 
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
@@ -198,13 +198,18 @@ async function snapshotTarget(ctx: {
  * directory that leads into the other, or an owner spelled ".github". Two
  * targets can land on ONE file the same way (a link `out/bob -> out/alice`
  * with targets alice/r and bob/r), so every landing is claimed in `claimed`
- * for the run and a second claim is refused, naming both targets.
+ * for the run and a second claim is refused. The claim is the file the RENAME
+ * reaches: the directory as the filesystem names it plus the leaf as spelled,
+ * since the rename replaces a link at the leaf rather than following it. The
+ * refusal names the earlier target through `display`, so a redacted one stays
+ * sealed, and never the landing, whose spelling is the operator's.
  */
 function snapshotFilePath(
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
   repo: RepoRef,
   authored: ReadonlySet<string>,
   claimed: Map<string, string>,
+  display: (slug: string) => string,
 ): { path: string } | { error: string } {
   if ([repo.owner, repo.name].some((part) => part === "." || part === "..")) {
     return {
@@ -223,13 +228,14 @@ function snapshotFilePath(
       error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
     };
   }
-  const earlier = claimed.get(landing);
+  const written = join(canonicalPath(dirname(path)), basename(path));
+  const earlier = claimed.get(written);
   if (earlier !== undefined) {
     return {
-      error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, the file this run already wrote for ${earlier}. Remove the link under the "snapshot-dir" input that folds the two owners together, so each target has a file of its own`,
+      error: `cannot write the snapshot to ${path}: the filesystem carries it to the file this run already claimed for ${display(earlier)}. Remove the link under the "snapshot-dir" input that folds the two owners together, so each target has a file of its own`,
     };
   }
-  claimed.set(landing, repo.slug);
+  claimed.set(written, repo.slug);
   return { path };
 }
 
@@ -307,7 +313,9 @@ async function snapshotDir(
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
       );
     } else {
-      const located = snapshotFilePath(cfg, repo, authored, claimed);
+      const located = snapshotFilePath(cfg, repo, authored, claimed, (slug) =>
+        resolved.plan.display(slug),
+      );
       outcome =
         "error" in located
           ? fail(located.error)
