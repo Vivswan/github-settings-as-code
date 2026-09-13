@@ -23,14 +23,16 @@ runs:
       if: steps.openapi-cache.outputs.cache-hit != 'true'
       shell: bash
       run: bun .github/scripts/trim-openapi.ts
-    # The key hashes only the fetch script: it carries the pinned
-    # UPSTREAM_REF, the sole input that changes the output.
+    # The key hashes the fetch script (it carries the pinned UPSTREAM_REF)
+    # and the fetch helper the bytes come through.
     - name: Cache the GraphQL schema
       id: graphql-schema-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: test/e2e/graphql/schema.docs.graphql
-        key: graphql-schema-${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}
+        key: >-
+          graphql-schema-${{ hashFiles('.github/scripts/fetch-graphql-schema.ts',
+          '.github/scripts/lib/fetch-retry.ts') }}
     - name: Fetch the GraphQL schema (cache miss)
       if: steps.graphql-schema-cache.outputs.cache-hit != 'true'
       shell: bash
