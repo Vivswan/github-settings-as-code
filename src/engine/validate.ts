@@ -71,7 +71,8 @@ export function validateSectionShapes(
       }
       if (issues.length > 5) {
         // A silently truncated list costs one fix-and-rerun cycle per hidden offender.
-        problems.push(`${key}: ...and ${issues.length - 5} more issue(s) in this section`);
+        const rest = issues.length - 5;
+        problems.push(`${key}: ...and ${rest} more issue${rest === 1 ? "" : "s"} in this section`);
       }
       continue;
     }

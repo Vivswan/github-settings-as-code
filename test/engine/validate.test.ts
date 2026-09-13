@@ -223,30 +223,37 @@ describe("the wrapped undeclared-policy form", () => {
 describe("a long problem list is cut, and the remainder is counted", () => {
   // Both arms cut at the same depth: zod issues within one section, and unrecognized keys across a closed section's entries.
   const SHOWN = 5;
-  test.each<[arm: string, docOf: (n: number) => Record<string, unknown>, tail: RegExp]>([
+  test.each<[arm: string, docOf: (n: number) => Record<string, unknown>, noun: [string, string]]>([
     [
       "shape issues",
       (n) => ({
         workflows: Array.from({ length: n }, (_, i) => ({ path: `w${i}.yml`, state: "paused" })),
       }),
-      /\.\.\.and (\d+) more issue/,
+      ["issue", "issues"],
     ],
     [
       "unrecognized entry keys",
       (n) => ({
         collaborators: Array.from({ length: n }, (_, i) => ({ username: `u${i}`, permision: "x" })),
       }),
-      /\.\.\.and (\d+) more entr(?:y|ies)\b/,
+      ["entry", "entries"],
     ],
   ])(
-    "%s: N problems render the first five and count the rest; five render whole",
-    (_arm, docOf, tail) => {
+    "%s: N problems render the first five and count the rest, the noun agreeing with the count; five render whole",
+    (_arm, docOf, [one, many]) => {
+      const tail = new RegExp(`\\.\\.\\.and (\\d+) more (${one}|${many})\\b`);
+      /** The count and the noun of the remainder line after `n` hidden problems, or the whole line when it has neither. */
+      const remainder = (n: number): [number, string] | string => {
+        const line = (issuesOf(docOf(SHOWN + n)) ?? [])[SHOWN] ?? "";
+        const found = tail.exec(line);
+        return found ? [Number(found[1]), found[2] ?? ""] : line;
+      };
       const cut = issuesOf(docOf(SHOWN + 3)) ?? [];
       expect(cut).toHaveLength(SHOWN + 1);
       expect(cut.slice(0, SHOWN).filter((line) => tail.test(line))).toEqual([]);
-      expect(Number(tail.exec(cut[SHOWN] ?? "")?.[1])).toBe(3);
-      // The remainder is a count relation only: the zod arm spells its noun "issue(s)" whatever the count.
-      expect(Number(tail.exec(issuesOf(docOf(SHOWN + 1))?.[SHOWN] ?? "")?.[1])).toBe(1);
+      expect(remainder(3)).toEqual([3, many]);
+      expect(remainder(2)).toEqual([2, many]);
+      expect(remainder(1)).toEqual([1, one]);
       const whole = issuesOf(docOf(SHOWN)) ?? [];
       expect(whole).toHaveLength(SHOWN);
       expect(whole.filter((line) => tail.test(line))).toEqual([]);
