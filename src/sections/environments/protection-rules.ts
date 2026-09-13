@@ -3,6 +3,7 @@ import type { UndeclaredPolicy } from "../../types.js";
 import { liveByIdentity, parseLive } from "../contract/live.js";
 import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import type { ExecTools } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { ENDPOINTS, type EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig, EnvironmentConfig } from "./schema.js";
@@ -111,23 +112,17 @@ async function listProtectionRuleApps(
 }
 
 export function validateProtectionRules(
+  section: SectionMeta,
   env: EnvironmentConfig,
   entries: readonly DeploymentProtectionRuleConfig[],
 ): void {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  for (const rule of entries) {
-    if (seen.has(rule.app)) {
-      duplicates.add(rule.app);
-    }
-    seen.add(rule.app);
-  }
-  if (duplicates.size > 0) {
-    throw new Error(
-      `environments: the "${env.name}" entry declares the deployment protection rule App${duplicates.size === 1 ? "" : "s"} ` +
-        `${[...duplicates].map((app) => `"${app}"`).join(", ")} more than once. Keep exactly one entry per App`,
-    );
-  }
+  rejectDuplicates(
+    section,
+    entries,
+    (rule) => rule.app,
+    (rule) => rule.app,
+    `deployment protection rule App of the "${env.name}" environment`,
+  );
 }
 
 /** Every missing slug resolves from one Apps read before the first POST leaves, so an unlisted slug fails before any rule is half-enabled. */

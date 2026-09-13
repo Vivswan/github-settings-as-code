@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Eighteen breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -26,6 +26,8 @@ Eighteen breaks (the ninth is for library consumers). One is silent (the fallbac
 | Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Only `_layering` and `_undeclared` exist; any other underscore key fails validation, on a wrapper and at the top level alike | Validation fails before any section runs, naming the two directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
 | `teams` takes the `_undeclared` knob | A plain array; an undeclared team was never listed or touched | `teams: {_undeclared: keep, entries: [...]}` accepted, default `keep`; `delete` revokes undeclared direct grants | No error. Every run now lists the repository's teams and notes each undeclared one; snapshots write the wrapper form; [section 17](#17-teams-takes-the-_undeclared-knob) |
 | `GSAC_RETRY_BASE_MS` | `RETRY_BASE_MS`, undocumented | `GSAC_RETRY_BASE_MS`, in the inputs reference | No error: an unknown environment variable is ignored, so a harness setting the old name waits real seconds; [section 18](#18-gsac_retry_base_ms) |
+| The sealing key is read at apply time | Check mode read `GET .../secrets/public-key` and failed on a malformed key | The first sealed PUT reads it at apply | Check mode issues one request fewer per secret family; a malformed key fails at apply; [section 19](#19-the-sealing-key-is-read-at-apply-time) |
+| Environment secrets and variables plan through the shared engines | Their own wording | The engines' wording | Only a grep over the output notices; [section 20](#20-environment-secrets-and-variables-plan-through-the-shared-engines) |
 
 ## 1. The defaults-file fallback
 
@@ -276,6 +278,26 @@ The plain array form keeps working, and the [undeclared policy](../reference/und
 ## 18. GSAC_RETRY_BASE_MS
 
 The one environment variable of the tool's own, the retry-timing test knob, is `GSAC_RETRY_BASE_MS`; v2 read it as `RETRY_BASE_MS`, undocumented. An environment variable has no channel for a loud error, so the old name is simply ignored: a harness that set `RETRY_BASE_MS=1` to speed a mock run up now waits real seconds until it is renamed. The [inputs reference](../reference/inputs.md#environment-variables) lists it with the other variables a run reads.
+
+## 19. The sealing key is read at apply time
+
+Every secret family (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`) now reads `GET .../secrets/public-key` from the first sealed PUT, as environment secrets always did.
+
+- Check mode issues one request fewer per family and never touches the key endpoint.
+- A malformed key fails the first PUT at apply, before its request leaves, where v2 failed the plan in check mode too.
+- The cannot-verify note carries the section label and the shared template: `actions_secrets: Actions secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run`.
+
+## 20. Environment secrets and variables plan through the shared engines
+
+Their lines are the engines' lines now:
+
+| Line | v2 | v3 |
+|---|---|---|
+| A variable delete | `DELETED undeclared variable "X" from environment "prod"` | `DELETED undeclared variable "X" in environment "prod"` |
+| Two entries naming one variable or secret | `environments: the "prod" entry declares variables that GitHub treats as the same variable ...` | `environments: the settings file declares entries that name the same variable of the "prod" environment: "a" and "A". Keep exactly one entry per resource` (branch policies and protection rules spell theirs the same way) |
+| The secrets cannot-verify note | once per environment that exists | once per environment with declared secrets, the missing environment included, under the `environments[prod].secrets` label |
+
+Repository variable operations (`actions_variables`, `agents_variables`) gain a describe line in failure prose (`creating Actions variable "X"`); nothing else moves.
 
 ## Order of operations
 

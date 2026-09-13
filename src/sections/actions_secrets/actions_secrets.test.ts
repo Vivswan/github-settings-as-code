@@ -20,7 +20,7 @@ const LIST = "GET /repos/o/r/actions/secrets?per_page=100&page=1";
 const PUBLIC_KEY = "GET /repos/o/r/actions/secrets/public-key";
 const KEY_ROUTE = { data: { key_id: "test-key-id", key: MOCK_SECRETS_PUBLIC_KEY } };
 const CANNOT_VERIFY =
-  "Actions secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run";
+  "actions_secrets: Actions secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run";
 
 type Declared = Parameters<typeof actionsSecretsSection.plan>[1];
 
@@ -141,9 +141,9 @@ describe("actions_secrets planning", () => {
       notes: [CANNOT_VERIFY],
       drift: [],
     });
+    // The sealing key is an execution-time read, so check mode issues the list alone.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/o/r/actions/secrets?per_page=100&page=1",
-      "GET /repos/o/r/actions/secrets/public-key",
     ]);
   });
 
@@ -156,9 +156,15 @@ describe("actions_secrets planning", () => {
     ]);
     // Nothing at plan time could have resolved a reference: the resolver is first consulted when a thunk runs.
     const exec = tools({ $A: "value-a", $B: "value-b" });
-    const payloads = result.ops.map((op) =>
-      typeof op.payload === "function" ? sealedPayload({ payload: op.payload(exec) }) : null,
+    const payloads = await Promise.all(
+      result.ops.map(async (op) =>
+        typeof op.payload === "function"
+          ? sealedPayload({ payload: await op.payload(exec) })
+          : null,
+      ),
     );
+    // Both thunks share one key read, issued when the first ran.
+    expect(api.calls.filter((c) => c.path.endsWith("/public-key")).length).toBe(1);
     expect(exec.lookups).toEqual(["$A", "$B"]);
     expect(payloads.map((p) => p?.key_id)).toEqual(["test-key-id", "test-key-id"]);
     expect(payloads.map((p) => unsealSecretValue(p?.encrypted_value ?? ""))).toEqual([
@@ -413,20 +419,24 @@ describe("actions_secrets execution", () => {
 });
 
 describe("actions_secrets sealing key", () => {
-  test("an unusable public key fails the plan loudly, so no operation exists to execute", async () => {
+  test("an unusable public key fails the first PUT before its request leaves; check mode never reads the key", async () => {
     const api = new MockApi({ [LIST]: listOf(), [PUBLIC_KEY]: { data: { key: 42 } } });
-    await expect(plan(api, [{ name: "X", value: "$V" }])).rejects.toThrow(
+    const planned = await plan(api, [{ name: "X", value: "$V" }]);
+    expect(planned.ops.map((op) => op.role)).toEqual(["put"]);
+    await expect(apply(api, [{ name: "X", value: "$V" }], tools({ $V: "v" }))).rejects.toThrow(
       /no usable \{key_id, key\} pair \(key_id is missing\)/,
     );
+    expect(api.mutations()).toEqual([]);
 
     // GitHub requires key_id in the PUT body to route the ciphertext, so an empty one is as unusable as a missing one.
     const emptyId = new MockApi({
       [LIST]: listOf(),
       [PUBLIC_KEY]: { data: { key_id: "", key: MOCK_SECRETS_PUBLIC_KEY } },
     });
-    await expect(plan(emptyId, [{ name: "X", value: "$V" }])).rejects.toThrow(
+    await expect(apply(emptyId, [{ name: "X", value: "$V" }], tools({ $V: "v" }))).rejects.toThrow(
       /no usable \{key_id, key\} pair \(key_id is empty\)/,
     );
+    expect(emptyId.mutations()).toEqual([]);
   });
 });
 

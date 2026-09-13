@@ -99,7 +99,7 @@ describe("environments plan", () => {
       'applied environment "prod"',
       'created variable "NEW" in environment "prod"',
       'updated variable "UPD" in environment "prod"',
-      'DELETED undeclared variable "GONE" from environment "prod"',
+      'DELETED undeclared variable "GONE" in environment "prod"',
     ]);
     // The strip builds a fresh object, so the duplicate pre-pass (which reads env.variables across all entries) never sees a mutated declaration.
     expect(declared[0]?.variables).toEqual([
@@ -292,7 +292,7 @@ describe("environments variables case-insensitive matching", () => {
         },
       ]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares variables that GitHub treats as the same variable (names are case-insensitive): "Region" and "REGION". Keep exactly one entry per variable',
+      'environments: the settings file declares entries that name the same variable of the "prod" environment: "Region" and "REGION". Keep exactly one entry per resource',
     );
     expect(api.calls).toEqual([]);
   });
@@ -308,7 +308,7 @@ describe("environments variables undeclared policy", () => {
       { name: "prod", variables: { _undeclared: "keep", entries: [] } },
     ]);
     expect(result.notes).toEqual([
-      'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
+      'variable "LEGACY" exists on the environment but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
     ]);
     expect(api.mutations()).toEqual([]);
   });
@@ -319,9 +319,7 @@ describe("environments variables undeclared policy", () => {
       [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
     }).allowMutations("DELETE /repos/o/r/environments/prod/variables/LEGACY");
     const result = await apply(api, [{ name: "prod", variables: [] }]);
-    expect(result.changes).toEqual([
-      'DELETED undeclared variable "LEGACY" from environment "prod"',
-    ]);
+    expect(result.changes).toEqual(['DELETED undeclared variable "LEGACY" in environment "prod"']);
   });
 
   test("check mode under _undeclared:keep converges (note, not drift)", async () => {
@@ -585,7 +583,7 @@ describe("environments nested secrets validation and shape", () => {
           ],
         },
       ]),
-    ).rejects.toThrow(/"prod" entry declares secrets .*"token" and "TOKEN"/);
+    ).rejects.toThrow(/the same secret of the "prod" environment: "token" and "TOKEN"/);
     expect(api.calls).toEqual([]);
   });
 
@@ -811,7 +809,7 @@ describe("environments deployment branch policies validation and shape", () => {
     await expect(
       plan(api, [envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }])]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares deployment branch policy "release/*" more than once. Keep exactly one entry per pattern',
+      'environments: the settings file declares entries that name the same deployment branch policy of the "prod" environment: "release/*" and "release/*". Keep exactly one entry per resource',
     );
     expect(api.calls).toEqual([]);
   });
@@ -1137,14 +1135,22 @@ describe("environments missing-environment planning across the nested families",
     ],
   ] as Array<[string, EnvironmentConfig, string, string, string]>)(
     "%s: the sub-resource read is skipped, the note says it is unverifiable, and the create is planned",
-    async (_key, entry, expectedNote, subResourcePath, createDrift) => {
+    async (key, entry, expectedNote, subResourcePath, createDrift) => {
       const api = new MockApi({});
       const result = await check(api, [entry]);
       expect(result.drift).toEqual([
         "environments[prod]: missing - declared in the settings file but not on the repo; apply will create it",
         createDrift,
       ]);
-      expect(result.notes).toEqual([expectedNote]);
+      // The secrets engine states once per scope that values never read back, beside the missing-environment note.
+      expect(result.notes).toEqual(
+        key === "secrets"
+          ? [
+              expectedNote,
+              "environments[prod].secrets: prod environment secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run",
+            ]
+          : [expectedNote],
+      );
       expect(api.calls.filter((c) => c.path.includes(subResourcePath))).toEqual([]);
     },
   );
@@ -1161,7 +1167,7 @@ describe("environments deployment protection rules validation and shape", () => 
         },
       ]),
     ).rejects.toThrow(
-      'environments: the "prod" entry declares the deployment protection rule App "deploy-gate" more than once. Keep exactly one entry per App',
+      'environments: the settings file declares entries that name the same deployment protection rule App of the "prod" environment: "deploy-gate" and "deploy-gate". Keep exactly one entry per resource',
     );
     expect(api.calls).toEqual([]);
   });
@@ -1358,7 +1364,7 @@ describe("environments convergence", () => {
       'applied environment "prod"',
       'created variable "DEPLOY_REGION" in environment "prod"',
       'updated variable "log_level" in environment "prod"',
-      'DELETED undeclared variable "GONE" from environment "prod"',
+      'DELETED undeclared variable "GONE" in environment "prod"',
       'updated secret "DEPLOY_TOKEN" in environment "prod"',
       'created deployment branch policy "release/*" in environment "prod"',
       'deleted deployment branch policy "v*" in environment "prod" to change its immutable type (branch -> tag)',
@@ -1389,7 +1395,7 @@ describe("environments convergence", () => {
       "PUT /repos/o/r/environments/prod/secrets/DEPLOY_TOKEN",
     ]);
     expect(first.notes).toEqual([
-      "prod environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
+      "environments[prod].secrets: prod environment secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run",
       'prod environment secret "KEPT" exists on the environment but is not declared in the ' +
         'settings file; kept under "_undeclared: keep" - add it to the settings file to manage ' +
         'it, or set "_undeclared: delete" to have apply DELETE it (a deleted secret\'s value is ' +
@@ -1471,7 +1477,7 @@ describe("environments convergence", () => {
       [{ role: "putSecret", drift: [], change: 'updated secret "NEW" in environment "staging"' }],
     );
     expect(second.notes).toEqual([
-      "staging environment secret values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run",
+      "environments[staging].secrets: staging environment secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run",
     ]);
   });
 });

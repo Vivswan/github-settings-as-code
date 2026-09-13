@@ -84,7 +84,8 @@ export interface GatedReadDecl extends EndpointDeclFields {
   readonly accessGrade: "write";
   readonly alwaysRewrite?: never;
   readonly unverifiable?: never;
-  readonly phase?: never;
+  /** As on a plain GET: "execution" gates the read behind a thunk's token (the Codespaces sealing key). */
+  readonly phase?: "execution";
 }
 
 interface EndpointDeclFields {

@@ -9,6 +9,7 @@ import type { UndeclaredPolicy } from "../../types.js";
 import { liveByIdentity, parseLive } from "../contract/live.js";
 import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import { hasDrift, plainData } from "../contract/plan.js";
+import { rejectDuplicates } from "../contract/requests.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentBranchPolicyConfig, EnvironmentConfig } from "./schema.js";
@@ -59,23 +60,17 @@ export function livePolicyName(policy: LiveBranchPolicy, envName: string): strin
  * the zod shape (schema.ts), not here, so it fails before any section writes.
  */
 export function validateBranchPolicies(
+  section: SectionMeta,
   env: EnvironmentConfig,
   entries: readonly DeploymentBranchPolicyConfig[],
 ): void {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  for (const pattern of entries) {
-    if (seen.has(pattern.name)) {
-      duplicates.add(pattern.name);
-    }
-    seen.add(pattern.name);
-  }
-  if (duplicates.size > 0) {
-    throw new Error(
-      `environments: the "${env.name}" entry declares deployment branch polic${duplicates.size === 1 ? "y" : "ies"} ` +
-        `${[...duplicates].map((name) => `"${name}"`).join(", ")} more than once. Keep exactly one entry per pattern`,
-    );
-  }
+  rejectDuplicates(
+    section,
+    entries,
+    (pattern) => pattern.name,
+    (pattern) => pattern.name,
+    `deployment branch policy of the "${env.name}" environment`,
+  );
 }
 
 function createPolicyOp(

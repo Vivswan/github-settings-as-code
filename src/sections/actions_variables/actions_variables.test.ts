@@ -99,6 +99,7 @@ describe("actions_variables", () => {
             'actions_variables[DEPLOY_REGION].value: declared "eu-west-1" != live "us-east-1"; apply will set the declared value',
           ],
           change: 'updated Actions variable "DEPLOY_REGION"',
+          describe: 'updating Actions variable "DEPLOY_REGION"',
         },
         {
           role: "create",
@@ -107,6 +108,7 @@ describe("actions_variables", () => {
             "actions_variables[BUILD_MODE]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
           change: 'created Actions variable "BUILD_MODE"',
+          describe: 'creating Actions variable "BUILD_MODE"',
         },
         {
           role: "remove",
@@ -115,6 +117,7 @@ describe("actions_variables", () => {
             "actions_variables[RETIRED_FLAG]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
           ],
           change: 'DELETED undeclared Actions variable "RETIRED_FLAG"',
+          describe: 'deleting undeclared Actions variable "RETIRED_FLAG"',
         },
       ],
       notes: [],
@@ -166,6 +169,22 @@ describe("actions_variables", () => {
       ]),
     ).rejects.toThrow(/same actions_variables entry/);
     expect(api.calls).toHaveLength(0);
+  });
+
+  test("a passthrough value JSON cannot carry fails the plan at the payload, on a create and on an update alike", async () => {
+    // The loose shape admits any extra key; the engine proves the body plain before it is planned, so
+    // NaN (which JSON would turn into null) never reaches the wire as a silent change of value.
+    const api = new MockApi(listRoute([{ name: "PRESENT", value: "x" }]));
+    const odd = { name: "NEW", value: "v", extra: Number.NaN };
+    await expect(plan(api, [odd as never])).rejects.toThrow(
+      /a planned payload carries a value JSON cannot carry at extra/,
+    );
+    await expect(plan(api, [{ ...odd, name: "PRESENT" } as never])).rejects.toThrow(
+      /a planned payload carries a value JSON cannot carry at extra/,
+    );
+    // The control: a plain extra key rides through.
+    const plain = await plan(api, [{ name: "NEW", value: "v", extra: 42 } as never]);
+    expect(plain.ops.map((op) => op.payload)).toEqual([{ name: "NEW", value: "v", extra: 42 }]);
   });
 
   test("wrapped _undeclared:keep leaves the undeclared variable as a note, never a DELETE", async () => {

@@ -72,7 +72,7 @@ export const environmentsSection = {
     // one entry invalidates.
     for (const env of desired) {
       for (const key of NESTED_KEYS) {
-        validateNested(key, env);
+        validateNested(this, key, env);
       }
     }
     const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };

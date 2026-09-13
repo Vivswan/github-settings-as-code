@@ -3,7 +3,7 @@
  * a different path segment and differ only in PAT resource and noun, so each section module is ONE
  * repoVariablesSection() call.
  *
- *   environments section                    -> consumes ./variables-engine.ts directly, with nested scopes
+ *   environments section                    -> plans its nested variables through ./variables-engine.ts too, one scope per environment
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
@@ -28,12 +28,12 @@ import type {
   SectionPlan,
   SnapshotContext,
 } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 import {
   LiveVariable,
   planVariables,
+  rejectDuplicateVariableNames,
   type VariableEntry,
   type VariablesPlanScope,
   variableKey,
@@ -186,13 +186,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
-    // Variable names are case-insensitive on GitHub, so two entries differing only in case name one variable.
-    rejectDuplicates(
-      section,
-      entries,
-      (variable) => variableKey(variable.name),
-      (variable) => variable.name,
-    );
+    rejectDuplicateVariableNames(section, entries);
     // Built where the routes are known, so params typecheck ({name} on update/remove).
     type Op = PlannedOp<WideEndpoints>;
     const scope: VariablesPlanScope<
@@ -214,6 +208,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
         payload: write.payload,
         drift: write.drift,
         change: write.change,
+        describe: write.describe,
       }),
       update: (write) => ({
         role: "update",
@@ -221,12 +216,14 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
         payload: write.payload,
         drift: write.drift,
         change: write.change,
+        describe: write.describe,
       }),
       remove: (deletion) => ({
         role: "remove",
         params: { name: deletion.name },
         drift: deletion.drift,
         change: deletion.change,
+        describe: deletion.describe,
       }),
     };
     return planVariables(section, scope, { entries, policy, defaultPolicy });

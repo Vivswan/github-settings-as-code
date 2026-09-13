@@ -1,10 +1,15 @@
-/** Existence reconciliation over route-free scopes: values are never read back, and every declared secret is re-sealed on each apply. */
+/**
+ * Existence reconciliation over route-free scopes: values are never read back, and every declared secret
+ * is re-sealed on each apply. The four repo families (./repo-secrets.ts) and the environments section's
+ * nested secrets (../environments/nested.ts) plan through it.
+ */
 
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
 import { liveByIdentity } from "../contract/live.js";
 import {
+  cannotVerifyNote,
   type DeclaredSecretValue,
   type SectionMeta,
   secretValuesOf,
@@ -36,11 +41,16 @@ export type SealedSecretPayload = {
 
 type AnyPlannedOp = SectionPlan["ops"][number];
 
-interface SecretsScopeProse {
+/** The words a scope supplies; a nested scope names its home so the lines say where the secret lives. */
+export interface SecretsScopeProse {
   /** The drift-line prefix, e.g. "actions_secrets" or "environments[prod].secrets". */
   label: string;
   /** The noun for notes ("Actions secret"; a nested scope says "prod environment secret"). */
   noun: string;
+  /** Where the secrets live when "the repo" understates it ("the environment"). */
+  where?: string;
+  /** Appended to change and describe lines (` in environment "prod"`). */
+  suffix?: string;
 }
 
 /** The payload thunk resolves and seals only when executed, so the plan carries the `$NAME` reference and nothing derived from a value. */
@@ -49,8 +59,8 @@ interface SealedSecretWrite {
   readonly name: string;
   /** What the write is doing, in settings-file terms, for its error prose. */
   readonly describe: string;
-  /** Seals the resolved plaintext against the scope's sealing key at execution time. */
-  readonly payload: (exec: ExecTools) => SealedSecretPayload;
+  /** Reads the scope's sealing key (once per plan) and seals the resolved plaintext, at execution time. */
+  readonly payload: (exec: ExecTools) => Promise<SealedSecretPayload>;
   /** The missing-secret line, or empty when the name exists (the PUT recurs by declaration). */
   readonly drift: readonly string[];
   readonly change: string;
@@ -70,8 +80,11 @@ export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPl
   extends SecretsScopeProse {
   /** The parsed {name} identities of the enveloped secrets list, all pages. */
   readonly list: () => Promise<LiveSecretName[]>;
-  /** GET the {key_id, key} sealing key for this scope. */
-  readonly publicKey: (describe: string) => Promise<unknown>;
+  /**
+   * GET the {key_id, key} sealing key for this scope, at EXECUTION time: an environment's key exists
+   * only once the PUT that creates the environment has landed, so the read rides the first PUT's thunk.
+   */
+  readonly publicKey: (exec: ExecTools, describe: string) => Promise<unknown>;
   /** The declaration behind `publicKey`, named in the prose of a key the endpoint cannot supply. */
   readonly publicKeyEndpoint: EndpointDecl;
   /** The planned sealed PUT; function-valued so a builder demanding an unsupplied facet fails. */
@@ -84,11 +97,7 @@ export function secretKey(name: string): string {
   return name.toUpperCase();
 }
 
-/**
- * Each value is labelled with its entry's secret NAME so a validation error can point at it. DEFENSIVE by
- * contract: a malformed container returns [] instead of throwing, so the actionable error always comes
- * from shape validation, never a TypeError here.
- */
+/** Each value is labelled with its entry's secret NAME so a validation error can point at it. */
 export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   return secretValuesOf(declared, (entry) => {
     if (typeof entry.value !== "string") {
@@ -102,16 +111,21 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
   });
 }
 
-/** GitHub folds two names equal uppercased into one secret, so the last write would silently win on every run. */
+/**
+ * GitHub folds two names equal uppercased into one secret, so the last write would silently win on
+ * every run. `what` names the resource when "<section> entry" understates it (a nested scope's).
+ */
 export function rejectDuplicateSecretNames(
   section: SectionMeta,
   entries: readonly SecretEntry[],
+  what?: string,
 ): void {
   rejectDuplicates(
     section,
     entries,
     (entry) => secretKey(entry.name),
     (entry) => entry.name,
+    what,
   );
 }
 
@@ -179,19 +193,19 @@ export function parseSealingKey(
   };
 }
 
-function missingSecretDrift(scope: SecretsScopeProse, name: string): string {
-  return `${scope.label}[${name}]: missing - declared in the settings file but not on the repo; apply will create it`;
-}
-
 /** ONE note per scope (the LFS precedent): values are unverifiable by design. */
-function cannotVerifyNote(scope: SecretsScopeProse): string {
-  return `${scope.noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`;
+function valuesUnverifiableNote(scope: SecretsScopeProse): string {
+  return cannotVerifyNote(scope.label, {
+    why: `${scope.noun} values cannot be read back from GitHub`,
+    what: "them, only that each declared secret exists",
+    reasserts: "re-seals and rewrites every declared value",
+  });
 }
 
 function undeclaredSecretNote(scope: SecretsScopeProse, liveName: string): string {
   return undeclaredNote({
     subject: `${scope.noun} "${liveName}"`,
-    state: "exists on the repo but is not declared",
+    state: `exists on ${scope.where ?? "the repo"} but is not declared`,
     action: "DELETE it (a deleted secret's value is unrecoverable)",
   });
 }
@@ -210,7 +224,7 @@ function undeclaredSecretDrift(
 /** Uppercase key -> the name as listed (normalizing keeps a differently-cased mock harmless). */
 function liveSecretsByKey(
   section: SectionMeta,
-  scope: SecretsScopeProse,
+  scope: SecretsPlanScope<AnyPlannedOp, AnyPlannedOp>,
   live: readonly LiveSecretName[],
 ): Map<string, string> {
   const byKey = liveByIdentity(
@@ -237,33 +251,43 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   },
 ): Promise<SectionPlan<Put | Remove>> {
   const { entries, policy, defaultPolicy } = opts;
+  const suffix = scope.suffix ?? "";
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
   const liveByKey = liveSecretsByKey(section, scope, await scope.list());
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
-  if (entries.length > 0) {
-    const sealingKey = parseSealingKey(
-      section,
-      scope,
-      scope.publicKeyEndpoint,
-      await scope.publicKey(`reading the ${scope.label} sealing key`),
+  // Read once per scope, by the first payload thunk that runs; the token it demands is the one the thunk received.
+  let sealingKey: Promise<SealingKey> | undefined;
+  const readSealingKey = (exec: ExecTools): Promise<SealingKey> => {
+    sealingKey ??= scope
+      .publicKey(exec, `reading the ${scope.label} sealing key`)
+      .then((body) => parseSealingKey(section, scope, scope.publicKeyEndpoint, body));
+    return sealingKey;
+  };
+  for (const entry of entries) {
+    const name = secretKey(entry.name);
+    // The listing decides the verb; the executor does not surface the PUT's 201/204.
+    const exists = liveByKey.has(name);
+    plan.ops.push(
+      scope.put({
+        name,
+        describe: `writing secret "${name}"${suffix}`,
+        payload: async (exec) => {
+          const plaintext = exec.resolveSecret(entry.value);
+          return (await readSealingKey(exec)).seal(plaintext);
+        },
+        drift: exists
+          ? []
+          : [
+              `${scope.label}[${name}]: missing - declared in the settings file but not on ${scope.where ?? "the repo"}; apply will create it`,
+            ],
+        change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
+      }),
     );
-    for (const entry of entries) {
-      const name = secretKey(entry.name);
-      // The listing decides the verb; the executor does not surface the PUT's 201/204.
-      const exists = liveByKey.has(name);
-      plan.ops.push(
-        scope.put({
-          name,
-          describe: `writing secret "${name}"`,
-          payload: (exec) => sealingKey.seal(exec.resolveSecret(entry.value)),
-          drift: exists ? [] : [missingSecretDrift(scope, name)],
-          change: `${exists ? "updated" : "created"} secret "${name}"`,
-        }),
-      );
-    }
-    plan.notes.push(cannotVerifyNote(scope));
+  }
+  if (entries.length > 0) {
+    plan.notes.push(valuesUnverifiableNote(scope));
   }
 
   for (const [key, liveName] of liveByKey) {
@@ -276,9 +300,9 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
       plan.ops.push(
         scope.remove({
           name: liveName,
-          describe: `deleting undeclared secret "${liveName}"`,
+          describe: `deleting undeclared secret "${liveName}"${suffix}`,
           drift: [undeclaredSecretDrift(scope, defaultPolicy, liveName)],
-          change: `DELETED undeclared secret "${liveName}"`,
+          change: `DELETED undeclared secret "${liveName}"${suffix}`,
         }),
       );
     }

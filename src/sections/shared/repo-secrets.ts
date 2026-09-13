@@ -3,7 +3,7 @@
  * same four endpoints under a different path segment and differ only in PAT resource, noun, and (Codespaces)
  * the grade GitHub gates the reads at, so each section module is ONE repoSecretsSection() call.
  *
- *   environments section                    -> consumes ./secrets-engine.ts directly, with nested scopes
+ *   environments section                    -> plans its nested secrets through ./secrets-engine.ts too, one scope per environment
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
@@ -93,6 +93,7 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
     readonly route: `GET /repos/{owner}/{repo}/${P}/secrets/public-key`;
     readonly statuses: { readonly 200: string };
     readonly accessGrade?: "write";
+    readonly phase: "execution";
   };
   readonly put: {
     readonly route: `PUT /repos/{owner}/{repo}/${P}/secrets/{secret_name}`;
@@ -205,10 +206,12 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       // A fine-grained token conceals a denied list as 404; reading it as "no secrets" would be wrong, so it is a denial.
       primaryRead: { notFound: "denied" },
     },
+    // Read inside the first sealed PUT's payload thunk (the engine's rule), so check mode never issues it.
     publicKey: {
       route: `GET /repos/{owner}/{repo}/${pathSegment}/secrets/public-key`,
       statuses: { 200: "the sealing public key" },
       ...readGrade,
+      phase: "execution",
     },
     put: {
       route: `PUT /repos/{owner}/{repo}/${pathSegment}/secrets/{secret_name}`,
@@ -239,7 +242,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
           LIVE_SECRET_NAMES,
           await ctx.read.list.listAllEnveloped("secrets"),
         ),
-      publicKey: (describe) => ctx.read.publicKey.call({ describe }),
+      publicKey: (exec, describe) => ctx.read.publicKey.call(exec, { describe }),
       publicKeyEndpoint: wide.publicKey,
       put: (write) => ({
         role: "put",
