@@ -14,7 +14,9 @@ coverage:
       (GET /repos/{owner}/{repo}/teams) names the undeclared teams: kept by default and noted (a
       team is often granted by the org for reasons outside one repository's file); under the
       wrapped `_undeclared: delete` form a team's DIRECT grant is revoked, while access granted at
-      the organization or enterprise level is noted as beyond the repository's reach.
+      the organization or enterprise level is noted as beyond the repository's reach. A declared
+      child team whose access comes through an undeclared parent's grant loses it with that
+      revocation (the probe reads the inherited role as converged): declare the parent too, or keep.
       Snapshot lists the same teams and reads each team's role through the same probe, so a custom
       role reads back by name, and writes the wrapped form with the keep default spelled out;
       noted, not declared: access granted at the organization or enterprise level, a probe 404 (no
@@ -25,7 +27,8 @@ schema:
   SettingsFile.teams: >-
     Org team access to the repo; skipped on personal accounts. Undeclared teams are kept by default
     and noted; the wrapped form can set `_undeclared: delete` to revoke their direct access (a grant
-    made at the organization level is never touched).
+    made at the organization level is never touched). A declared child team can hold its access
+    through an undeclared parent's grant, which `delete` revokes: declare the parent too, or keep.
   TeamConfig: >-
     One org team's access to the repository, matched by team slug. Keys other than name and
     permission are rejected (a misspelled "permission" would otherwise silently grant the default

@@ -1274,7 +1274,7 @@
           ]
         },
         "teams": {
-          "description": "Org team access to the repo; skipped on personal accounts. Undeclared teams are kept by default and noted; the wrapped form can set `_undeclared: delete` to revoke their direct access (a grant made at the organization level is never touched).",
+          "description": "Org team access to the repo; skipped on personal accounts. Undeclared teams are kept by default and noted; the wrapped form can set `_undeclared: delete` to revoke their direct access (a grant made at the organization level is never touched). A declared child team can hold its access through an undeclared parent's grant, which `delete` revokes: declare the parent too, or keep.",
           "anyOf": [
             {
               "type": "array",

@@ -23,24 +23,28 @@ const renamedPolicyKeyError = renamedKeyError(
 );
 
 /**
- * The wrapper's unrecognized keys: the pre-v3 policy spelling names its rename, and any other underscore key names
- * the two directives, since a wrapper takes no private notes either (the document level says the same in
- * src/problem.ts). A misspelled entry field is the strict object's own line.
+ * The wrapper's unrecognized keys, one clause per kind, joined: the pre-v3 policy spelling names its rename, and
+ * any other underscore key names the two directives, since a wrapper takes no private notes either (the document
+ * level says the same in src/problem.ts). A misspelled entry field beside them stays on zod's own line, so the
+ * directives clause names the underscore keys it is about whenever the list holds anything else.
  */
 function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
-  const renamed = renamedPolicyKeyError(issue);
-  if (renamed !== undefined) {
-    return renamed;
-  }
-  if (issue.code !== "unrecognized_keys" || !issue.keys.some((key) => key.startsWith("_"))) {
+  if (issue.code !== "unrecognized_keys") {
     return undefined;
   }
-  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
-  return (
-    `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${keys}; the wrapper's directives are ` +
+  const renamed = renamedPolicyKeyError(issue);
+  const directives = issue.keys.filter((key) => key.startsWith("_"));
+  if (directives.length === 0) {
+    return renamed;
+  }
+  const quoted = (keys: readonly string[]) => keys.map((key) => JSON.stringify(key)).join(", ");
+  const clause =
+    `${directives.length < issue.keys.length ? `${quoted(directives)}: ` : ""}the wrapper's directives are ` +
     '"_undeclared" and, on a top-level section, "_layering", and nothing else - there are no ' +
-    "private-note keys. Remove the key, or keep the note as a YAML comment"
-  );
+    "private-note keys. Remove the key, or keep the note as a YAML comment";
+  return renamed === undefined
+    ? `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${quoted(issue.keys)}; ${clause}`
+    : `${renamed}; ${clause}`;
 }
 
 /**
