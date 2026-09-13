@@ -9,25 +9,24 @@
 import { Command, CommanderError, Option } from "commander";
 import pc from "picocolors";
 import {
+  describeProblem,
   executeRun,
   failRun,
   GitHubApi,
   type Io,
-  type Problem,
   parseConfig,
   type RunConfig,
+  type RunEnd,
 } from "../index.js";
-import { INPUT_DECLS, type Mode, type MustBeNever } from "../internal.js";
+import { INPUT_DECLS, type Mode, type MustBeNever, snapshotFileDestination } from "../internal.js";
 import {
-  ARTIFACT_REFUSED,
   type CliHost,
-  describeCliProblem,
   failedEnvelope,
   permissionsFor,
   type Rendered,
   validateFile,
 } from "./commands.js";
-import { failInit, type InitConfig, initSettingsFile, parseInitConfig, runInit } from "./init.js";
+import { failInit, type InitConfig, parseInitConfig, runInit } from "./init.js";
 import {
   argvReader,
   INIT_INPUTS,
@@ -88,12 +87,8 @@ export interface ProgramOptions {
   readonly streams: MaskedStreams;
   /** Color the level labels and the permissions table; defaults to picocolors' detection. */
   readonly colors?: boolean;
-  /** Run a parsed config, wording a fatal problem with `describe`; tests capture the config here instead of running it. */
-  readonly execute?: (
-    cfg: RunConfig,
-    io: Io,
-    describe: (problem: Problem) => string,
-  ) => Promise<number>;
+  /** Run a parsed config to its end; tests capture the config here instead of running it. */
+  readonly execute?: (cfg: RunConfig, io: Io) => Promise<RunEnd>;
   /** Run a parsed init config to its rendering; tests capture the config here instead of running it. */
   readonly executeInit?: (cfg: InitConfig, io: Io) => Promise<Rendered>;
 }
@@ -105,6 +100,9 @@ export function processHost(): CliHost {
     createClient: (token, io, apiVersion) => new GitHubApi({ token, io, apiVersion }),
   };
 }
+
+/** A terminal has no Actions artifact service, so the artifact report channel is refused at the parse. */
+const CLI_CAPABILITIES = { artifactUpload: false } as const;
 
 /**
  * The whole command tree, wired to `options`; the exit code lands in the
@@ -120,11 +118,10 @@ export function buildProgram(options: ProgramOptions): {
   const paint = pc.createColors(colors);
   const execute =
     options.execute ??
-    ((cfg, io, describe) =>
+    ((cfg, io) =>
       executeRun(cfg, {
         io,
         createClient: (token, io, apiVersion) => host.createClient(token, io, apiVersion),
-        describe,
       }));
   const executeInit = options.executeInit ?? ((cfg, io) => runInit(cfg, io, host, paint.bold));
   const envToken = host.env.GITHUB_TOKEN?.trim();
@@ -186,20 +183,19 @@ export function buildProgram(options: ProgramOptions): {
       const values = this.optsWithGlobals<Globals & Record<string, unknown>>();
       const { io, flush } = openIo(values);
       const read = argvReader(mode, values);
-      // The face words the fatal problem AND keeps the words: the envelope carries them beside the outputs.
+      // The envelope carries the fatal problem's text beside the outputs; the line itself is already on stderr.
       let fatal: string | undefined;
-      const describe = (problem: Problem): string => {
-        fatal = describeCliProblem(problem);
-        return fatal;
-      };
-      // Refused before parseConfig, which would otherwise ask for the channel's age key first.
-      exitCode =
-        read("private-report") === "artifact"
-          ? failRun(io, ARTIFACT_REFUSED, describe)
-          : await parseConfig(read, host.env).match(
-              (cfg) => execute(cfg, io, describe),
-              async (problem) => failRun(io, problem, describe),
-            );
+      exitCode = await parseConfig(read, host.env, CLI_CAPABILITIES).match(
+        async (cfg) => {
+          const end = await execute(cfg, io);
+          fatal = end.fatal === undefined ? undefined : describeProblem(end.fatal);
+          return end.exitCode;
+        },
+        async (problem) => {
+          fatal = describeProblem(problem);
+          return failRun(io, problem);
+        },
+      );
       flush(fatal);
     });
   }
@@ -222,7 +218,7 @@ export function buildProgram(options: ProgramOptions): {
       const read = argvReader("snapshot", values);
       const rendered = await parseInitConfig(read, values.force === true, host.env).match(
         (cfg) => executeInit(cfg, io),
-        async (problem) => failInit(io, problem, initSettingsFile(read)),
+        async (problem) => failInit(io, problem, snapshotFileDestination(read, "settings-file")),
       );
       present(rendered, values);
       exitCode = rendered.code;
@@ -293,14 +289,21 @@ export async function main(
       }
       return error.exitCode;
     }
-    const verbose = program.opts<Globals>().verbose === true;
+    const globals = program.opts<Globals>();
+    const verbose = globals.verbose === true;
     const detail = verbose && error instanceof Error && error.stack ? error.stack : String(error);
     // Under --verbose the stack is already printed, so asking for it again would loop.
     const remedy = verbose
       ? "The stack above is the report: if it recurs, file a bug with it attached"
       : "Re-run with --verbose for the stack; if it recurs, file a bug with that output attached";
     const message = `github-settings-as-code stopped unexpectedly: ${detail}. ${remedy}`;
-    streams.stderr.write(`error: ${message}\n`);
+    // The crash line goes through the same renderer as every other error line, so its label and color match.
+    cliIo({
+      streams,
+      json: globals.json === true,
+      verbose,
+      colors: options.colors ?? pc.isColorSupported,
+    }).io.annotate("error", message);
     failedJson(message);
     return 1;
   }

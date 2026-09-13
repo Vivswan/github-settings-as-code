@@ -178,7 +178,7 @@ describe("a caller-supplied client that echoes a secret", () => {
           `fetch failed; body was ${JSON.stringify({ config: { secret: plaintext } })}`,
         );
       },
-      detail: `webhooks: POST /repos/o/r/hooks failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+      detail: `webhooks: POST /repos/o/r/hooks failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
   ])("apply withholds the failure when the client $answer", async ({ create, detail }) => {
     const { client, marks } = echoing(create);

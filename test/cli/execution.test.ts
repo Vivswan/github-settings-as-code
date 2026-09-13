@@ -352,7 +352,9 @@ describe("the action and the CLI run one arm to one result", () => {
   test("the table reaches every arm, both snapshot forms, both exit codes, and a partial result", () => {
     const arms = new Set<string>();
     for (const c of cases) {
-      const parsed = parseConfig((name) => c.inputs("<dir>")[name] ?? "", c.env)._unsafeUnwrap();
+      const parsed = parseConfig((name) => c.inputs("<dir>")[name] ?? "", c.env, {
+        artifactUpload: true,
+      })._unsafeUnwrap();
       arms.add(parsed.kind === "snapshot" ? `snapshot:${parsed.form}` : parsed.kind);
     }
     expect([...arms].sort()).toEqual(["merge", "multi", "single", "snapshot:dir", "snapshot:file"]);

@@ -1201,7 +1201,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
     {
       wire: "REST, the client throws",
       run: () => rest(throwing, true),
-      thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+      thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "GraphQL, the client answers with errors",
@@ -1211,7 +1211,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
     {
       wire: "GraphQL, the client throws",
       run: () => graphql(throwing, true),
-      thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run the workflow`,
+      thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "REST, the client answers a rate limit signalled only by its message",

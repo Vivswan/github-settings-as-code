@@ -9,7 +9,6 @@ import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
   type ArtifactUploader,
   collectingIo,
-  describeProblem,
   executeRun,
   parseRepoSlug,
   type RunConfig,
@@ -71,7 +70,7 @@ describe("executeRun", () => {
         },
         d.run,
       );
-      expect(code).toBe(0);
+      expect(code).toEqual({ exitCode: 0 });
       expect(d.opened()).toBe(0);
       expect(api.calls).toEqual([]);
       expect(d.collected.outputs).toEqual({
@@ -85,12 +84,20 @@ describe("executeRun", () => {
       ]);
     }));
 
-  test("a fatal problem raised after the parse is worded by the face's describe", () =>
+  test("a fatal problem raised after the parse comes back beside the exit code, worded once on the Io", () =>
     withTempDir("gsac-execute-", async (dir) => {
       const settingsFile = join(dir, "missing.yml");
       const api = new MockApi({});
-      const d = deps(api, { describe: (problem) => `worded: ${problem.code}` });
-      expect(await executeRun(single({ settingsFile }), d.run)).toBe(1);
+      const d = deps(api);
+      expect(await executeRun(single({ settingsFile }), d.run)).toEqual({
+        exitCode: 1,
+        fatal: {
+          code: "settings-file-unreadable",
+          role: "settings-file",
+          path: settingsFile,
+          reason: expect.stringContaining("ENOENT"),
+        },
+      });
       expect(d.opened()).toBe(1);
       expect(api.calls).toEqual([]);
       expect(d.collected.outputs).toEqual({
@@ -99,30 +106,15 @@ describe("executeRun", () => {
         "repos-result": "{}",
       });
       expect(d.collected.lines).toEqual([
-        { level: "error", line: "worded: settings-file-unreadable" },
+        { level: "error", line: expect.stringMatching(/^cannot read settings from /) },
         { line: "result: failed" },
       ]);
     }));
 
-  test("the artifact channel is the uploader dep's: absent it fails before any API call, present the run reaches the API", async () => {
+  test("the artifact channel uploads through the uploader dep, and a target proven public gets no report", async () => {
     const reportPublicKey = await identityToRecipient(await generateX25519Identity());
     const cfg = single({ privateRepos: "redact", privateReport: "artifact", reportPublicKey });
     const routes = { "GET /repos/o/r": { data: { has_wiki: false, private: false } } };
-
-    const refused = new MockApi(routes);
-    const without = deps(refused);
-    expect(await executeRun(cfg, without.run)).toBe(1);
-    expect(refused.calls).toEqual([]);
-    expect(without.collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(without.collected.lines).toEqual([
-      { level: "error", line: describeProblem({ code: "artifact-uploader-missing" }) },
-      { line: "result: failed" },
-    ]);
-
     const uploads: string[] = [];
     const uploader: ArtifactUploader = {
       async upload(name) {
@@ -131,14 +123,13 @@ describe("executeRun", () => {
     };
     const reached = new MockApi(routes);
     const with_ = deps(reached, { uploader });
-    expect(await executeRun(cfg, with_.run)).toBe(0);
+    expect(await executeRun(cfg, with_.run)).toEqual({ exitCode: 0 });
     expect(reached.calls.map((c) => `${c.method} ${c.path}`)).toContain("GET /repos/o/r");
     expect(with_.collected.outputs).toEqual({
       result: "clean",
       "skipped-sections": "",
       "repos-result": "{}",
     });
-    // A target proven public gets no private report, so nothing was uploaded.
     expect(uploads).toEqual([]);
   });
 });

@@ -1,14 +1,13 @@
 /**
- * What the file-only subcommands and init render for the program to print,
- * and the CLI's own wording of a problem; check, apply, merge, and snapshot run
- * through the library's executor from the program.
+ * What the file-only subcommands and init render for the program to print;
+ * check, apply, merge, and snapshot run through the library's executor from
+ * the program.
  */
 
 import {
   describeProblem,
   type GitHubClient,
   type Io,
-  type Problem,
   type RunOutcome,
   readSettingsFile,
   SECTIONS,
@@ -17,7 +16,6 @@ import {
   type ValidatedSettings,
   validateSettings,
 } from "../index.js";
-import { INPUT_DECLS, PRIVATE_REPORT_CHANNELS } from "../internal.js";
 
 /** What the CLI needs from its process: the environment and a client factory tests can stub. */
 export interface CliHost {
@@ -110,31 +108,3 @@ export function permissionsFor(file: string, io: Io, bold: (text: string) => str
     },
   );
 }
-
-/**
- * The action's wording for a problem, except where the remedy names the
- * workflow step: from a terminal the fix is a flag or an environment variable.
- */
-export function describeCliProblem(problem: Problem): string {
-  switch (problem.code) {
-    case "input-token-missing":
-      return "cannot call the GitHub API: no token was provided. Pass --token, or export GITHUB_TOKEN";
-    case "input-repository-not-slug":
-      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)`;
-    default:
-      return describeProblem(problem);
-  }
-}
-
-/**
- * The one report channel a terminal cannot serve: the artifact upload needs
- * the Actions runner. Worded as the unsupported value it is from here.
- */
-export const ARTIFACT_REFUSED: Problem = {
-  code: "input-unsupported-value",
-  input: "private-report",
-  value: "artifact",
-  noun: "private-report channel from the command line (the artifact upload needs the Actions runner)",
-  allowed: PRIVATE_REPORT_CHANNELS.filter((channel) => channel !== "artifact"),
-  fallback: INPUT_DECLS["private-report"].default,
-};

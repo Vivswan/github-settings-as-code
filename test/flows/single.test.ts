@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
+import { REDACTED_NOTE } from "../../src/flows/redact.js";
 import {
   collectingIo,
   parseRepoSlug,
-  runMulti,
   runSingle,
   SectionSelection,
   type SingleConfig,
@@ -27,6 +27,44 @@ const cfg = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
 });
 
 describe("runSingle", () => {
+  test("a redacted target ending partial prints its one sealed line: the skipped sections and their codes, no detail", async () => {
+    // A private repository under on-missing-permission: warn with one denied section: the shown run prints the
+    // section's skipped line; the redacted one must still say partial, or a denied grant goes unnoticed.
+    const api = new MockApi({
+      "GET /repos/o/r": {
+        data: { private: true, visibility: "private", has_wiki: false, has_projects: false },
+      },
+      "GET /repos/o/r/labels?per_page=100&page=1": {
+        error: {
+          status: 403,
+          message: "Resource not accessible by personal access token",
+          body: "",
+        },
+      },
+    });
+    const collected = collectingIo();
+    const outcome = await runSingle(
+      api,
+      cfg({
+        settingsFile: "test/fixtures/layers/fleet.yml",
+        sections: SectionSelection.of({ only: ["repository", "labels"] })._unsafeUnwrap(),
+        onMissingPermission: "warn",
+        privateRepos: "redact",
+        selfSlug: "admin/fleet",
+      }),
+      collected.io,
+    );
+    expect(outcome.map((target) => [target.result, target.display])).toEqual(
+      ok(["partial", "private repository #1"]),
+    );
+    expect(collected.lines).toEqual([
+      {
+        level: "warning",
+        line: `private repository #1: partial - labels (403). ${REDACTED_NOTE}`,
+      },
+    ]);
+  });
+
   test("a clean check returns the one target's outcome and prints nothing", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } });
     const collected = collectingIo();
@@ -42,41 +80,6 @@ describe("runSingle", () => {
       }),
     );
     expect(collected.lines).toEqual([]);
-  });
-
-  test("the artifact channel without an uploader is fatal before any API call", async () => {
-    const api = new MockApi({});
-    const fatal = err({ code: "artifact-uploader-missing" as const });
-    expect(
-      await runSingle(
-        api,
-        cfg({ privateRepos: "redact", privateReport: "artifact", reportPublicKey: "age1x" }),
-        collectingIo().io,
-      ),
-    ).toEqual(fatal);
-    expect(
-      await runMulti(
-        api,
-        {
-          ...cfg({ privateRepos: "redact", privateReport: "artifact", reportPublicKey: "age1x" }),
-          reposDir: "",
-          reposInput: "o/a",
-          defaultsFile: "",
-          adminOwner: "o",
-          discoveryFilters: {
-            visibility: "all",
-            archived: "skip",
-            forks: "include",
-            affiliation: ["owner"],
-            topics: [],
-            exclude: [],
-          },
-          discoveryFiltersSet: [],
-        },
-        collectingIo().io,
-      ),
-    ).toEqual(fatal);
-    expect(api.calls).toEqual([]);
   });
 
   test("an unreadable settings file is fatal, carrying the path under the settings-file role", async () => {

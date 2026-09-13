@@ -26,7 +26,7 @@ import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { RunOutcome } from "./outcome.js";
-import type { SectionSelection } from "./section-selection.js";
+import { SectionSelection } from "./section-selection.js";
 
 export interface SnapshotRunOptions {
   /** The target repository, parsed at the caller's validated boundary. */
@@ -190,7 +190,7 @@ export async function snapshotRepository(
     const verdict = validateSettingsDoc(
       { [section.key]: snapshot.value },
       `the ${section.key} snapshot of ${opts.repo.slug}`,
-      new Set(),
+      SectionSelection.ALL,
       io,
     );
     if (verdict.isErr()) {
@@ -209,7 +209,12 @@ export async function snapshotRepository(
   }
   // The brand's one mint, over the already-parsed fragments: every section validated alone
   // above, so the whole cannot fail.
-  const verdict = validateSettingsDoc(document, `the snapshot of ${opts.repo.slug}`, new Set(), io);
+  const verdict = validateSettingsDoc(
+    document,
+    `the snapshot of ${opts.repo.slug}`,
+    SectionSelection.ALL,
+    io,
+  );
   if (verdict.isErr()) {
     throw new Error(
       `BUG: the assembled snapshot of ${opts.repo.slug} failed validation after every section validated on its own: ${describeProblem(verdict.error)}`,

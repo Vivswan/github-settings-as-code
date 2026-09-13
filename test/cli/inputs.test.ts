@@ -10,7 +10,6 @@
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
-import { ARTIFACT_REFUSED, describeCliProblem } from "../../src/cli/commands.js";
 import {
   CLI_UNSUPPORTED_INPUTS,
   declared,
@@ -233,7 +232,7 @@ function cases(): Case[] {
         "private-report": "artifact",
       },
       env: { GITHUB_REPOSITORY: "o/admin" },
-      cliRefuses: describeCliProblem(ARTIFACT_REFUSED),
+      cliRefuses: describeProblem({ code: "input-artifact-unsupported" }),
     },
     {
       name: "merge, layers as repeated flags",
@@ -315,19 +314,22 @@ async function throughArgv(argv: readonly string[], env: ConfigEnv) {
     colors: false,
     execute: async (cfg) => {
       parsed = cfg;
-      return 0;
+      return { exitCode: 0 };
     },
   });
   return { parsed, code, stderr: stderr.text() };
 }
 
+/** The action's face: it hands the run an artifact uploader, so parseConfig admits the artifact channel. */
+const ACTION = { artifactUpload: true } as const;
+
 describe("argv -> config equals env -> config", () => {
   test("for every RunConfig arm and every rejection", async () => {
     for (const { name, argv, inputs, env = {}, unknownFlag, cliRefuses } of cases()) {
-      const expected = parseConfig(recordReader(inputs), env);
+      const expected = parseConfig(recordReader(inputs), env, ACTION);
       const actual = await throughArgv(argv, env);
       if (cliRefuses !== undefined) {
-        // The action would ask for the channel's key next; the CLI refuses the channel itself.
+        // The action would ask for the channel's key next; the CLI's face has no artifact upload, so parseConfig refuses the channel for it.
         expect(actual, name).toEqual({
           parsed: undefined,
           code: 1,
@@ -343,7 +345,7 @@ describe("argv -> config equals env -> config", () => {
       expect(actual.parsed, name).toBeUndefined();
       expect(actual.code, name).toBe(1);
       if (unknownFlag === undefined) {
-        expect(actual.stderr, name).toBe(`error: ${describeCliProblem(expected.error)}\n`);
+        expect(actual.stderr, name).toBe(`error: ${describeProblem(expected.error)}\n`);
       } else {
         expect(actual.stderr, name).toStartWith(`error: unknown option '--${unknownFlag}'`);
       }
@@ -356,7 +358,7 @@ describe("argv -> config equals env -> config", () => {
     let envToken = 0;
     let rejected = 0;
     for (const { argv, inputs, env = {}, cliRefuses } of cases()) {
-      const result = parseConfig(recordReader(inputs), env);
+      const result = parseConfig(recordReader(inputs), env, ACTION);
       if (result.isErr() || cliRefuses !== undefined) {
         rejected++;
         continue;
@@ -453,13 +455,14 @@ describe("the per-mode flag split", () => {
           const result = parseConfig(
             recordReader({ ...base(mode), ...companions(mode, name), [name]: value }),
             env,
+            ACTION,
           );
           expect(
             result.isOk(),
             `${mode} --${name}: ${result.match(() => "", describeProblem)}`,
           ).toBe(true);
         } else {
-          const result = parseConfig(recordReader({ ...base(mode), [name]: value }), env);
+          const result = parseConfig(recordReader({ ...base(mode), [name]: value }), env, ACTION);
           expect(result.isErr(), `${mode} --${name} should be rejected by parseConfig`).toBe(true);
           expect(
             result.match(
@@ -707,19 +710,17 @@ describe("the help text", () => {
   });
 
   test("the private-report flag's help offers exactly the channels the CLI accepts", () => {
-    // The CLI's refusal is the source: its value leaves the list, its allowed channels stay.
-    if (ARTIFACT_REFUSED.code !== "input-unsupported-value") {
-      throw new Error("ARTIFACT_REFUSED no longer names the refused value");
-    }
+    // parseConfig refuses the artifact channel for a face without an upload, so its value leaves the list and the other channels stay.
+    const accepted = PRIVATE_REPORT_CHANNELS.filter((channel) => channel !== "artifact");
     const check = inputDescription("private-report", modeSubcommand("check"));
     const opening = check.slice(0, check.indexOf(". ") + 1);
     const named: string[] = PRIVATE_REPORT_CHANNELS.filter((channel) =>
       new RegExp(`(?<![\\w-])${channel}(?![\\w-])`).test(opening),
     );
-    expect([...named]).toEqual([...ARTIFACT_REFUSED.allowed]);
+    expect([...named]).toEqual([...accepted]);
     // The derivation admits a stray extra word; the exact sentence does not.
     expect(opening).toBe("none (default), issue, or issue-on-failure.");
-    expect(check).not.toContain(ARTIFACT_REFUSED.value);
+    expect(check).not.toContain("artifact");
     // With the key flag present the declaration stands whole, so the removal is the clause's alone.
     const withKey = { ...modeSubcommand("check"), flags: new Set(exposedInputs()) };
     withKey.flags.add("report-public-key");

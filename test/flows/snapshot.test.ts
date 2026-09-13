@@ -10,9 +10,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -39,6 +39,11 @@ import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
 const repo = parseRepoSlug("o/r")._unsafeUnwrap();
+
+/** `text` as a regex source matching itself literally. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Run a snapshot the way the action does: the finished run concludes, a problem fails the run. */
 async function run(api: MockApi, cfg: SnapshotConfig, io: Io): Promise<number> {
@@ -321,59 +326,29 @@ describe("runSnapshot writes through a staging file", () => {
     line: `cannot write the snapshot to ${path}: ${os}. Check that the "${input}" input names a writable path`,
   });
 
-  test("a staging write that fails leaves the previous snapshot intact and reports the write's error", () =>
+  test("the user's own `<snapshot-file>.tmp` sibling is never touched: the write stages under a name of its own", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       const api = new MockApi(labelsRoute("o/r", [BUG]));
       const cfg = fileCfg(dir);
-      const staging = `${cfg.snapshotFile}.tmp`;
+      const sibling = `${cfg.snapshotFile}.tmp`;
       mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
       writeFileSync(cfg.snapshotFile, "labels: []\n");
-      // A directory at the staging path fails the run before the rename; the run must not remove it either.
-      mkdirSync(staging);
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(1);
-      expect(collected.outputs).toEqual({
-        result: "failed",
-        "skipped-sections": "",
-        "repos-result": "{}",
-      });
-      expect(collected.lines).toEqual([
-        unwritable(
-          cfg.snapshotFile,
-          "snapshot-file",
-          `SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${staging}`,
-        ),
-        { line: "result: failed" },
-      ]);
-      expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
-      rmSync(staging, { recursive: true });
-      expect(await run(api, cfg, collectingIo().io)).toBe(0);
-      expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-      expect(existsSync(staging)).toBe(false);
-    }));
-
-  test("a leftover link at the staging path is unlinked, never written through: the destination becomes a regular file", () =>
-    withTempDir("snapshot-flow-", async (dir) => {
-      const api = new MockApi(labelsRoute("o/r", [BUG]));
-      const cfg = fileCfg(dir);
-      const staging = `${cfg.snapshotFile}.tmp`;
-      mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
-      writeFileSync(cfg.snapshotFile, "labels: []\n");
-      symlinkSync("snapshot.yml", staging);
+      // A directory with content at the `.tmp` sibling: a writer staging THERE would remove it or fail on it.
+      mkdirSync(sibling);
+      writeFileSync(join(sibling, "keep"), "user data\n");
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
-      expect(collected.outputs).toEqual({
-        result: "snapshot",
-        "skipped-sections": "",
-        "repos-result": "{}",
-      });
       expect(collected.lines).toEqual([
         { line: `snapshot written to ${cfg.snapshotFile}` },
         { line: "result: snapshot" },
       ]);
-      expect(lstatSync(cfg.snapshotFile).isSymbolicLink()).toBe(false);
       expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-      expect(existsSync(staging)).toBe(false);
+      expect(readFileSync(join(sibling, "keep"), "utf8")).toBe("user data\n");
+      // No staging file of the run's own is left beside the destination.
+      expect(readdirSync(dirname(cfg.snapshotFile)).sort()).toEqual([
+        basename(cfg.snapshotFile),
+        basename(sibling),
+      ]);
     }));
 
   test("a rename that fails removes the staging file, fails only that target, and leaves the destination as it was", () =>
@@ -403,17 +378,25 @@ describe("runSnapshot writes through a staging file", () => {
       const { level, line } = unwritable(
         fileA,
         "snapshot-dir",
-        `Error: EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
+        `Error: EISDIR: illegal operation on a directory, rename '<staging>' -> '${fileA}'`,
       );
+      // The staging name carries the pid and random bytes, so the line is matched with that piece wild.
+      const [head = "", tail = ""] = line.split("<staging>");
+      const stagingRe = `${escapeRegExp(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
       expect(collected.lines).toEqual([
-        { level, line: `o/a: ${line}` },
+        {
+          level,
+          line: expect.stringMatching(
+            new RegExp(`^o/a: ${escapeRegExp(head)}${stagingRe}${escapeRegExp(tail)}$`),
+          ),
+        },
         { line: `o/b: snapshot written to ${fileB}` },
         { line: "result: failed" },
       ]);
-      expect(existsSync(`${fileA}.tmp`)).toBe(false);
+      // No staging file of the run's own is left beside either destination.
+      expect(readdirSync(join(cfg.snapshotDir, "o")).sort()).toEqual(["a.yml", "b.yml"]);
       expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
       expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
-      expect(existsSync(`${fileB}.tmp`)).toBe(false);
       expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
         "## github-settings-as-code (snapshot, 2 repositories)",
         "",
@@ -820,6 +803,127 @@ describe("runSnapshot, dir form", () => {
         { line: `o/r: snapshot written to ${join(cfg.snapshotDir, "o", "r.yml")}` },
         { line: "result: snapshot" },
       ]);
+    }));
+
+  test("two targets carried to one file by an operator link fail the second, naming the first; the first's file stands", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/alice/r": { data: { private: false } },
+        "GET /repos/bob/r": { data: { private: false } },
+        ...labelsRoute("alice/r", [BUG]),
+        ...labelsRoute("bob/r", [DOCS]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "alice/r,bob/r" });
+      // `snapshots/bob -> snapshots/alice`: bob/r's file lands on alice/r's, and a last-writer-wins would report both
+      // written. alice/r's destination is itself a link to an older file: the rename replaces the LINK, so the claim
+      // is the leaf under the real directory, not the old file the link pointed at, and old/r.yml stays as it was.
+      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+      symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+      mkdirSync(join(dir, "old"));
+      writeFileSync(join(dir, "old", "r.yml"), "labels: []\n");
+      symlinkSync(join("..", "..", "old", "r.yml"), join(cfg.snapshotDir, "alice", "r.yml"));
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(collected.lines).toEqual([
+        { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
+        {
+          level: "error",
+          line:
+            `bob/r: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "r.yml")}: the filesystem carries it to ` +
+            'the file this run already claimed for alice/r. Remove the link under the "snapshot-dir" input that folds ' +
+            "the two owners together, so each target has a file of its own",
+        },
+        { line: "result: failed" },
+      ]);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "failed",
+        "repos-result": JSON.stringify({
+          "alice/r": { result: "snapshot", source: "remote", "skipped-sections": [] },
+          "bob/r": { result: "failed", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "r.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+      expect(readdirSync(join(cfg.snapshotDir, "alice"))).toEqual(["r.yml"]);
+      expect(readFileSync(join(dir, "old", "r.yml"), "utf8")).toBe("labels: []\n");
+    }));
+
+  test("a destination that was a link to another owner's file claims only itself: that owner's own target still writes", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // alice/r.yml -> ../old/r.yml before the run; the rename replaces the link, so old/r.yml is not alice's file and
+      // the target old/r keeps its own.
+      const api = new MockApi({
+        "GET /repos/alice/r": { data: { private: false } },
+        "GET /repos/old/r": { data: { private: false } },
+        ...labelsRoute("alice/r", [BUG]),
+        ...labelsRoute("old/r", [DOCS]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "alice/r,old/r" });
+      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+      mkdirSync(join(cfg.snapshotDir, "old"));
+      writeFileSync(join(cfg.snapshotDir, "old", "r.yml"), "labels: []\n");
+      symlinkSync(join("..", "old", "r.yml"), join(cfg.snapshotDir, "alice", "r.yml"));
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      expect(collected.lines).toEqual([
+        { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
+        { line: `old/r: snapshot written to ${join(cfg.snapshotDir, "old", "r.yml")}` },
+        { line: "result: snapshot" },
+      ]);
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "r.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "old", "r.yml"), "utf8"))).toEqual(
+        doc(DOCS),
+      );
+    }));
+
+  test("two targets whose leaves differ only in case are one file on a case-insensitive filesystem: the second is refused", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // Slugs dedupe case-insensitively, so the alias needs two owners folded by a link and leaves spelled apart:
+      // alice/R writes alice/R.yml, bob/r reaches the same directory through the link with the leaf r.yml. The
+      // filesystem's own name for that path (realpath, on-disk case) is the first's file, so the referent name
+      // catches what the rename target cannot; in either order.
+      writeFileSync(join(dir, "Probe"), "");
+      const caseInsensitive = existsSync(join(dir, "probe"));
+      for (const [first, second] of [
+        ["alice/R", "bob/r"],
+        ["bob/r", "alice/R"],
+      ] as const) {
+        const api = new MockApi({
+          "GET /repos/alice/R": { data: { private: false } },
+          "GET /repos/bob/r": { data: { private: false } },
+          ...labelsRoute("alice/R", [BUG]),
+          ...labelsRoute("bob/r", [DOCS]),
+        });
+        const cfg = dirCfg(dir, {
+          reposInput: `${first},${second}`,
+          snapshotDir: join(dir, `snapshots-${first.replace("/", "-")}`),
+        });
+        mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+        symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+        const collected = collectingIo();
+        expect(await run(api, cfg, collected.io)).toBe(caseInsensitive ? 1 : 0);
+        const written = readdirSync(join(cfg.snapshotDir, "alice"));
+        if (caseInsensitive) {
+          expect(collected.lines[1]).toEqual({
+            level: "error",
+            line: expect.stringMatching(
+              new RegExp(
+                `^${escapeRegExp(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${escapeRegExp(first)}\\. `,
+              ),
+            ),
+          });
+          expect(written).toHaveLength(1);
+          expect(
+            parseYaml(readFileSync(join(cfg.snapshotDir, "alice", written[0] ?? ""), "utf8")),
+          ).toEqual(doc(first === "alice/R" ? BUG : DOCS));
+        } else {
+          expect(written.sort()).toEqual(["R.yml", "r.yml"]);
+        }
+      }
     }));
 
   test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", () =>

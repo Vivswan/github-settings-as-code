@@ -389,7 +389,7 @@ describe("actions_secrets execution", () => {
     const validated = validateSettingsDoc(
       { actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }] },
       "settings.yml",
-      new Set(),
+      SectionSelection.ALL,
       io,
     );
     if (validated.isErr()) {

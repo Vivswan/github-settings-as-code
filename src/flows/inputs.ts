@@ -688,16 +688,29 @@ function parseSnapshotFileArm(
 }
 
 /**
- * The file arm for a caller whose destination is fixed: the CLI's init writes
- * the settings file, so it reads no snapshot-file input and can never be the
- * dir form.
+ * The file a one-file destination input names, or its declared default: known before any parsing, so a failure can
+ * name it. The CLI's init reads `settings-file` this way, since it writes the file apply and check read.
+ */
+export function snapshotFileDestination(read: InputReader, destination: "settings-file"): string {
+  return inputs(read).orDefault(destination);
+}
+
+/**
+ * The file arm for a caller whose destination is a one-file input of its own:
+ * the CLI's init writes the settings file, so it reads `settings-file` as the
+ * destination (refusing a list separator as apply and check do) and can never
+ * be the dir form.
  */
 export function parseSnapshotFileConfig(
   read: InputReader,
   env: ConfigEnv,
-  snapshotFile: string,
+  destination: "settings-file",
 ): Result<SnapshotFileConfig, Problem> {
-  return parseSnapshotFileArm(inputs(read), env, snapshotFile);
+  const path = snapshotFileDestination(read, destination);
+  if (LIST_SEPARATOR.test(path)) {
+    return err({ code: "input-settings-file-is-list", value: path, mode: "init" });
+  }
+  return parseSnapshotFileArm(inputs(read), env, path);
 }
 
 /** Read and validate the mode: snapshot inputs; the first problem wins. */
@@ -746,8 +759,21 @@ function parseSnapshotConfig(
   });
 }
 
+/**
+ * What the face running the config can do; parseConfig refuses an input that needs a capability the face lacks, so
+ * the refusal has one owner and the flows never re-check it.
+ */
+export interface RunCapabilities {
+  /** The face hands the run a workflow-artifact uploader (the Actions runner); without it `private-report: artifact` is refused. */
+  readonly artifactUpload: boolean;
+}
+
 /** Read and validate every input through `read`; the first problem wins. */
-export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig, Problem> {
+export function parseConfig(
+  read: InputReader,
+  env: ConfigEnv,
+  capabilities: RunCapabilities,
+): Result<RunConfig, Problem> {
   const input = inputs(read);
   return safeTry(function* () {
     // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
@@ -777,6 +803,10 @@ export function parseConfig(read: InputReader, env: ConfigEnv): Result<RunConfig
       INPUT_DECLS["private-report"].default,
       "private-report channel",
     );
+    // Refused before the channel's key is asked for: a face with no upload has no use for the key either.
+    if (privateReport === "artifact" && !capabilities.artifactUpload) {
+      return err({ code: "input-artifact-unsupported" });
+    }
     // A report channel only ever runs for a REDACTED target, so combined with private-repos: show it would silently deliver nothing.
     if (privateReport !== "none" && privateRepos === "show") {
       return err({ code: "input-report-without-redaction" });

@@ -6,6 +6,7 @@ import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { MERGE_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flows/inputs.js";
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
@@ -709,7 +710,7 @@ describe("docs/ guide pages", () => {
         ).toBe(expected);
         if (row.gate === "validation") {
           // "with the same messages a standalone file gets"
-          const standalone = validateSettingsDoc(doc, layerName, new Set(), silentIo());
+          const standalone = validateSettingsDoc(doc, layerName, SectionSelection.ALL, silentIo());
           expect(
             standalone.match(() => null, describeProblem),
             `standalone ${input}`,
@@ -725,7 +726,7 @@ describe("docs/ guide pages", () => {
     const result = validateSettingsDoc(
       { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
       ".github/settings.yml",
-      new Set(),
+      SectionSelection.ALL,
       silentIo(),
     );
     if (result.isOk()) {

@@ -12,7 +12,6 @@ import type { GitHubClient } from "../github/api.js";
 import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
-import { describeProblem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
 import { composeReport } from "./composer.js";
@@ -140,8 +139,8 @@ export interface ReportChannel {
 }
 
 /**
- * The flows check for the artifact uploader before any API work (requireUploader); the throw here is the backstop for
- * a caller that skipped that check, an invariant violation and not a run outcome.
+ * parseConfig refuses the artifact channel for a face without an upload capability, so an artifact channel with no
+ * uploader here is a face that declared a capability it does not hand in: an invariant violation, not a run outcome.
  */
 export function openReportChannel(
   api: GitHubClient,
@@ -160,7 +159,9 @@ export function openReportChannel(
       return issueChannel(api, meta, "on-failure", io);
     case "artifact":
       if (uploader === undefined) {
-        throw new Error(describeProblem({ code: "artifact-uploader-missing" }));
+        throw new Error(
+          "BUG: the artifact report channel was opened without an uploader; parseConfig admits private-report: artifact only for a face with an artifact upload, which must hand its uploader to the run",
+        );
       }
       return artifactChannel(meta, reportPublicKey, io, uploader);
   }

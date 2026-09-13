@@ -35,11 +35,12 @@ export {
   type FinishedMerge,
   failRun,
 } from "./flows/deliver.js";
-export { executeRun, type RunDeps } from "./flows/execute.js";
+export { executeRun, type RunDeps, type RunEnd } from "./flows/execute.js";
 export {
   type ConfigEnv,
   type InputReader,
   parseConfig,
+  type RunCapabilities,
   type RunConfig,
 } from "./flows/inputs.js";
 export { readLayerFiles } from "./flows/layers.js";

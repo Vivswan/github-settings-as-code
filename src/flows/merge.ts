@@ -3,8 +3,6 @@
  * here touches GitHub, so the flow takes no client and needs no token.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 import { describeOptOut, type Layering } from "../engine/layers.js";
 import type { Io } from "../io.js";
@@ -12,6 +10,7 @@ import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { renderMergedYaml } from "./library.js";
+import { readEntries, renameEntry, writeReplacing } from "./settings-write.js";
 
 export interface MergeConfig {
   settingsFiles: string[];
@@ -22,12 +21,19 @@ export interface MergeConfig {
 const MERGED_LABEL = "the merged settings document";
 
 /**
- * Paths are compared resolved, so "./a.yml" and "a.yml" collide. Guarded beside the write: the next run would fold the
- * merged document as if it were a layer.
+ * An input layer is never the destination, under any name the read follows or the rename reaches: the entry the
+ * rename replaces (the leaf under its resolved parent, a link there unfollowed) against every entry each layer's read
+ * follows (each component, every link hop, the final file), compared by identity, so spellings, directory links, case
+ * aliases, and link chains all meet. `out.yml -> layer.yml` as the destination with `layer.yml` as the layer is
+ * admitted: the write replaces the link and leaves the layer intact. Guarded beside the write: the next run would
+ * fold the merged document as if it were a layer.
  */
 function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
-  const mergedPath = resolve(cfg.mergedFile);
-  const index = cfg.settingsFiles.findIndex((layer) => resolve(layer) === mergedPath);
+  const replaced = renameEntry(cfg.mergedFile);
+  if (replaced === null) {
+    return ok();
+  }
+  const index = cfg.settingsFiles.findIndex((layer) => readEntries(layer).has(replaced));
   const layer = cfg.settingsFiles[index];
   return layer === undefined
     ? ok()
@@ -42,16 +48,10 @@ export function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge, Proble
       for (const notice of folded.notices) {
         io.annotate("notice", describeOptOut(notice));
       }
-      try {
-        mkdirSync(dirname(cfg.mergedFile), { recursive: true });
-        writeFileSync(cfg.mergedFile, renderMergedYaml(folded.settings));
-      } catch (error) {
-        return err({
-          code: "merged-file-unwritable",
-          path: cfg.mergedFile,
-          reason: String(error),
-        });
-      }
-      return ok({ layers: cfg.settingsFiles, mergedFile: cfg.mergedFile });
+      return writeReplacing(cfg.mergedFile, renderMergedYaml(folded.settings))
+        .mapErr(
+          (reason): Problem => ({ code: "merged-file-unwritable", path: cfg.mergedFile, reason }),
+        )
+        .map(() => ({ layers: cfg.settingsFiles, mergedFile: cfg.mergedFile }));
     });
 }

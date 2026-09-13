@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
@@ -345,7 +346,7 @@ describe("deliverIssueReport", () => {
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
       warning:
-        "could not deliver the private report (HTTP 500). Re-run the workflow, or set " +
+        "could not deliver the private report (HTTP 500). Re-run, or set " +
         "private-report: none if it persists",
     });
   });
@@ -357,7 +358,7 @@ describe("deliverIssueReport", () => {
     expect(result).toEqual({
       warning:
         "could not deliver the private report: the request failed before an HTTP response " +
-        "arrived. Re-run the workflow, or set private-report: none if it persists",
+        "arrived. Re-run, or set private-report: none if it persists",
     });
   });
 
@@ -419,7 +420,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
       warning:
-        "could not deliver the private report (HTTP 500). Re-run the workflow, or set " +
+        "could not deliver the private report (HTTP 500). Re-run, or set " +
         "private-report: none if it persists",
     });
   });
@@ -597,7 +598,12 @@ describe("injectMarkerLabel", () => {
     for (const { doc, expected } of cases) {
       const result = injectMarkerLabel(doc);
       expect(result.outcome).toBe(expected as typeof result.outcome);
-      const verdict = validateSettingsDoc(result.settings, "injected doc", new Set(), silentIo());
+      const verdict = validateSettingsDoc(
+        result.settings,
+        "injected doc",
+        SectionSelection.ALL,
+        silentIo(),
+      );
       expect(
         verdict.match(() => null, describeProblem),
         `outcome "${expected}" produced a document validation rejects`,

@@ -22,8 +22,7 @@ const PASSTHROUGH =
   "through, except in closed sections and strict nested objects like actions.cache, which reject " +
   "unrecognized keys)";
 
-const RERUN =
-  "This is not a permission problem; re-run the workflow, and retry later if it persists";
+const RERUN = "This is not a permission problem; re-run, and retry later if it persists";
 
 const PAT =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
@@ -51,8 +50,8 @@ const SPECIMENS = {
       ],
       known: SECTION_KEYS,
     },
-    `unknown section "nope" in the "required-sections" input; it matches none of: ${KNOWN}. Fix the name in the workflow's input list; ` +
-      `unknown sections "typo", "nope" in the "sections" input; each matches none of: ${KNOWN}. Fix the names in the workflow's input list`,
+    `unknown section "nope" in the "required-sections" input; it matches none of: ${KNOWN}. Fix the section name; ` +
+      `unknown sections "typo", "nope" in the "sections" input; each matches none of: ${KNOWN}. Fix the section names`,
   ],
   "required-sections-excluded": [
     { code: "required-sections-excluded", excluded: ["labels", "milestones"] },
@@ -124,7 +123,7 @@ const SPECIMENS = {
   ],
   "input-token-missing": [
     { code: "input-token-missing" },
-    'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)',
+    'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
   ],
   "input-report-without-redaction": [
     { code: "input-report-without-redaction" },
@@ -166,7 +165,13 @@ const SPECIMENS = {
   ],
   "input-repository-not-slug": [
     { code: "input-repository-not-slug", value: "nope" },
-    'cannot target a repository: "nope" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"',
+    'cannot target a repository: "nope" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it',
+  ],
+  "input-artifact-unsupported": [
+    { code: "input-artifact-unsupported" },
+    "private-report: artifact uploads the reports as a workflow artifact, which only the GitHub " +
+      "Actions runner can do, and this run has no artifact upload (the command line, or a library " +
+      'caller without an uploader). Set private-report to "issue", "issue-on-failure", or "none"',
   ],
   "settings-not-mapping": [
     { code: "settings-not-mapping", source: "f.yml", shape: "list" },
@@ -245,10 +250,6 @@ const SPECIMENS = {
       second: 2,
     },
     'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
-  ],
-  "artifact-uploader-missing": [
-    { code: "artifact-uploader-missing" },
-    "private-report: artifact needs an artifact uploader, and none was supplied: the action supplies its own; a library caller passes one as the uploader argument, or picks another private-report channel",
   ],
   "merged-file-is-layer": [
     { code: "merged-file-is-layer", mergedFile: "./repo.yml", index: 1, layer: "repo.yml" },
@@ -379,6 +380,21 @@ describe("describeProblem", () => {
       "a layer that cannot be read",
       { code: "settings-file-unreadable", role: "layer", path: "fleet.yml", reason: "ENOENT" },
       'cannot read the settings layer fleet.yml: ENOENT. Check that every path in the "settings-file" input exists and is valid YAML',
+    ],
+    [
+      "a central repos-dir file that cannot be read",
+      {
+        code: "settings-file-unreadable",
+        role: "central-file",
+        path: "repos/o/r.yml",
+        reason: "EACCES",
+      },
+      "cannot read the central settings file repos/o/r.yml: EACCES. Fix the file, or delete it to stop managing this repository",
+    ],
+    [
+      "init's settings-file spelled as a list",
+      { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "init" },
+      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
     ],
     [
       "no targets with nothing filtered",

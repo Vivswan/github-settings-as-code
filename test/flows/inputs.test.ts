@@ -11,9 +11,9 @@ import {
 } from "../../src/index.js";
 import { INPUT_DECLS, type InputName, SNAPSHOT_REJECTED_INPUTS } from "../../src/internal.js";
 
-/** Parse a step's inputs (unset ones read as empty, as the runner reports them) under `env`. */
+/** Parse a step's inputs (unset ones read as empty, as the runner reports them) under `env`, as the action's face does. */
 function parse(inputs: Partial<Record<InputName, string>>, env: ConfigEnv = {}) {
-  return parseConfig((name) => inputs[name] ?? "", env);
+  return parseConfig((name) => inputs[name] ?? "", env, { artifactUpload: true });
 }
 
 /** A single-repo apply run's inputs, with `inputs` on top. */

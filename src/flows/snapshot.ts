@@ -9,8 +9,7 @@
  * lands on disk while nothing about it is printed.
  */
 
-import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
@@ -34,6 +33,7 @@ import {
   type TargetOutcome,
   toPublicView,
 } from "./redact.js";
+import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./settings-write.js";
 import { openSingleRepoChannel } from "./single.js";
 import { writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
@@ -74,36 +74,6 @@ export type SnapshotConfig =
 export type FinishedSnapshot =
   | { form: "file"; target: Omit<TargetOutcome, "source"> }
   | { form: "dir"; snapshotDir: string; targets: TargetOutcome[] };
-
-/**
- * `path` as the filesystem names it: the real path of what exists, the rest
- * as spelled. Built one segment at a time, so ".." steps out of a symlink's
- * TARGET as the write will: handed "link/../x" whole, bun's realpath collapses
- * the ".." lexically before following the link and names a different file
- * than the one the write reaches. Every step retries realpath, since
- * "missing/../link" is back on existing ground after the "..".
- */
-function canonicalPath(path: string): string {
-  // The platform reads the root (a drive-relative "C:x" resolves on that drive); the walk reads the rest.
-  const { root } = parse(path);
-  let real = realOrSpelled(root === "" ? process.cwd() : resolve(root));
-  for (const part of path.slice(root.length).split(sep === "\\" ? /[\\/]/ : sep)) {
-    if (part === "" || part === ".") {
-      continue;
-    }
-    real = part === ".." ? dirname(real) : realOrSpelled(join(real, part));
-  }
-  return real;
-}
-
-/** `path`'s real path when it exists, else `path` itself. */
-function realOrSpelled(path: string): string {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    return path;
-  }
-}
 
 /** Whether `path` is `dir` itself or lies under it; both already named the same way. */
 function isWithin(path: string, dir: string): boolean {
@@ -195,15 +165,14 @@ async function snapshotTarget(ctx: {
       note: "the snapshot failed, so no file was written",
     };
   }
-  try {
-    writeReplacing(
-      path,
-      renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
-    );
-  } catch (error) {
+  const written = writeReplacing(
+    path,
+    renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
+  );
+  if (written.isErr()) {
     channel.io.annotate(
       "error",
-      `cannot write the snapshot to ${path}: ${String(error)}. Check that the "${ctx.pathInput}" input names a writable path`,
+      `cannot write the snapshot to ${path}: ${written.error}. Check that the "${ctx.pathInput}" input names a writable path`,
     );
     return {
       result: "failed",
@@ -221,40 +190,24 @@ async function snapshotTarget(ctx: {
 }
 
 /**
- * Write `text` to `path` through a sibling staging file renamed into place, so
- * a write that fails partway (disk full, an interrupted run) leaves the
- * previous snapshot at `path` intact instead of a truncated one; the rename is
- * atomic on POSIX and a single replace call on Windows. A leftover staging
- * file or link is unlinked first, never written through.
- */
-function writeReplacing(path: string, text: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const staging = `${path}.tmp`;
-  try {
-    rmSync(staging, { force: true });
-    writeFileSync(staging, text, { flag: "wx" });
-    renameSync(staging, path);
-  } catch (error) {
-    // The write's error is the one reported: a directory at the staging path fails both the write and this rm.
-    try {
-      rmSync(staging, { force: true });
-    } catch {}
-    throw error;
-  }
-}
-
-/**
  * A target's file under the snapshot directory, in the repos-dir layout so the
  * directory can later serve as one, or why the target has none. SLUG_RE admits
  * "." and "..", which GitHub never issues but a repos entry can spell; either
  * would leave the directory. And the filesystem may carry the file onto
  * authored ground in a way the two inputs cannot show: a link under either
- * directory that leads into the other, or an owner spelled ".github".
+ * directory that leads into the other, or an owner spelled ".github". Two
+ * targets can land on ONE file the same way (a link `out/bob -> out/alice`
+ * with targets alice/r and bob/r), so every file this run writes is claimed
+ * in `claimed` and a second target reaching it is refused. The refusal names
+ * the earlier target through `display`, so a redacted one stays sealed, and
+ * never the landing, whose spelling is the operator's.
  */
 function snapshotFilePath(
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
   repo: RepoRef,
   authored: ReadonlySet<string>,
+  claimed: Map<string, string>,
+  display: (slug: string) => string,
 ): { path: string } | { error: string } {
   if ([repo.owner, repo.name].some((part) => part === "." || part === "..")) {
     return {
@@ -273,6 +226,22 @@ function snapshotFilePath(
       error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
     };
   }
+  // The claim is the file the rename reaches; a later target is refused when any of its landing names is claimed
+  // (its own rename target for a leaf that was a link, its referent for a leaf spelled in another case on a
+  // case-insensitive filesystem once the first file exists).
+  const written = renameTarget(path);
+  const earlier = landingNames(path)
+    .map((name) => claimed.get(name))
+    .find((slug) => slug !== undefined);
+  if (earlier !== undefined) {
+    return {
+      error:
+        `cannot write the snapshot to ${path}: the filesystem carries it to the file this run already claimed for ` +
+        `${display(earlier)}. Remove the link under the "snapshot-dir" input that folds the two owners together, so ` +
+        "each target has a file of its own",
+    };
+  }
+  claimed.set(written, repo.slug);
   return { path };
 }
 
@@ -332,6 +301,8 @@ async function snapshotDir(
     canonicalPath(DEFAULT_SETTINGS_FILE),
     ...resolved.targets.flatMap((t) => (t.source === "central" ? [canonicalPath(t.filePath)] : [])),
   ]);
+  // Every landing this run writes, by the target that claimed it; the one writer's answer to two targets on one file.
+  const claimed = new Map<string, string>();
   const targets: TargetOutcome[] = [];
   for (const target of resolved.targets) {
     // The channel is opened BEFORE any processing so a failure lands in a
@@ -348,7 +319,9 @@ async function snapshotDir(
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
       );
     } else {
-      const located = snapshotFilePath(cfg, repo, authored);
+      const located = snapshotFilePath(cfg, repo, authored, claimed, (slug) =>
+        resolved.plan.display(slug),
+      );
       outcome =
         "error" in located
           ? fail(located.error)

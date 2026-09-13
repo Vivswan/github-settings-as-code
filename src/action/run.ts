@@ -24,7 +24,7 @@ export async function run(overrides?: {
     uploader: overrides?.uploader ?? actionsArtifactUploader,
   };
   return parseActionConfig().match(
-    (cfg) => executeRun(cfg, deps),
+    async (cfg) => (await executeRun(cfg, deps)).exitCode,
     async (problem) => failRun(io, problem),
   );
 }

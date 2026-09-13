@@ -15,10 +15,11 @@ import type { SectionKey } from "./schema.js";
  * The advice appended to a transient (non-permission) API failure: a network
  * blip or a 5xx that survived the retries. One source for the discovery
  * problems rendered here and multi.ts's remote-file read failure, so the "not
- * a permission problem" wording cannot drift between them.
+ * a permission problem" wording cannot drift between them. Face-neutral: the
+ * action and the command line print the same line.
  */
 export const RERUN_ADVICE =
-  "This is not a permission problem; re-run the workflow, and retry later if it persists";
+  "This is not a permission problem; re-run, and retry later if it persists";
 
 /** Names as an error message lists them: each quoted, comma-separated. */
 export function quoteList(names: readonly string[]): string {
@@ -41,7 +42,7 @@ export type TopLevelShape =
   | "function";
 
 /** Which input named an unreadable settings file; each role's advice names its fix. */
-export type SettingsFileRole = "settings-file" | "defaults-file" | "layer";
+export type SettingsFileRole = "settings-file" | "defaults-file" | "layer" | "central-file";
 
 /** One repos-dir file the central resolution cannot turn into a target. */
 export type CentralFileProblem =
@@ -121,9 +122,11 @@ export type Problem =
   | {
       readonly code: "input-settings-file-is-list";
       readonly value: string;
-      readonly mode: EngineMode;
+      /** An engine mode reading its one file, or the command line's init, which writes one. */
+      readonly mode: EngineMode | "init";
     }
   | { readonly code: "input-repository-not-slug"; readonly value: string }
+  | { readonly code: "input-artifact-unsupported" }
   // The settings document
   | {
       readonly code: "settings-not-mapping";
@@ -189,7 +192,6 @@ export type Problem =
   // The section selection
   | { readonly code: "required-sections-excluded"; readonly excluded: readonly SectionKey[] }
   // The run flows
-  | { readonly code: "artifact-uploader-missing" }
   | {
       readonly code: "merged-file-is-layer";
       readonly mergedFile: string;
@@ -310,6 +312,8 @@ function describeUnreadable(problem: ProblemOf<"settings-file-unreadable">): str
       return `cannot read the defaults file ${problem.path}: ${problem.reason}. Check the "defaults-file" path and that the file is valid YAML`;
     case "layer":
       return `cannot read the settings layer ${problem.path}: ${problem.reason}. Check that every path in the "settings-file" input exists and is valid YAML`;
+    case "central-file":
+      return `cannot read the central settings file ${problem.path}: ${problem.reason}. Fix the file, or delete it to stop managing this repository`;
   }
 }
 
@@ -335,8 +339,8 @@ function describeUnknownSectionInput(
 ): string {
   const quoted = quoteList(unknown.names);
   return unknown.names.length === 1
-    ? `unknown section ${quoted} in the "${unknown.input}" input; it matches none of: ${known.join(", ")}. Fix the name in the workflow's input list`
-    : `unknown sections ${quoted} in the "${unknown.input}" input; each matches none of: ${known.join(", ")}. Fix the names in the workflow's input list`;
+    ? `unknown section ${quoted} in the "${unknown.input}" input; it matches none of: ${known.join(", ")}. Fix the section name`
+    : `unknown sections ${quoted} in the "${unknown.input}" input; each matches none of: ${known.join(", ")}. Fix the section names`;
 }
 
 function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-entries">): string {
@@ -441,7 +445,7 @@ export function describeProblem(problem: Problem): string {
     case "input-snapshot-dir-without-targets":
       return 'the "snapshot-dir" input needs multi-repo targets: set "repos" (an owner/name list, or "*" to discover) or "repos-dir". To snapshot one repository, set "snapshot-file" instead';
     case "input-token-missing":
-      return 'cannot call the GitHub API: no token was provided. Set the "token" input on the action step (or export GITHUB_TOKEN)';
+      return 'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN';
     case "input-report-without-redaction":
       return 'the "private-report" input delivers reports only for redacted targets, but "private-repos" is "show", so nothing is redacted and no report would ever be sent. Set private-repos: redact, or set private-report: none';
     case "input-affiliation-unsupported":
@@ -461,14 +465,20 @@ export function describeProblem(problem: Problem): string {
     case "input-defaults-file-without-multi":
       return 'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode';
     case "input-settings-file-is-list":
-      return (
-        `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
-        `${problem.mode} mode reads exactly one settings file, and only mode: merge takes a ` +
-        "newline- or comma-separated list. Name one file, or set mode: merge to fold the list into " +
-        "one document"
-      );
+      return problem.mode === "init"
+        ? `the "settings-file" input is "${problem.value}", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file`
+        : `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
+            `${problem.mode} mode reads exactly one settings file, and only mode: merge takes a ` +
+            "newline- or comma-separated list. Name one file, or set mode: merge to fold the list into " +
+            "one document";
     case "input-repository-not-slug":
-      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (or GITHUB_REPOSITORY) to a value like "octocat/hello-world"`;
+      return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
+    case "input-artifact-unsupported":
+      return (
+        "private-report: artifact uploads the reports as a workflow artifact, which only the GitHub " +
+        "Actions runner can do, and this run has no artifact upload (the command line, or a library " +
+        'caller without an uploader). Set private-report to "issue", "issue-on-failure", or "none"'
+      );
     case "settings-not-mapping":
       return `${problem.source} must be a YAML mapping of section names to settings, but its top level parsed as a ${problem.shape}. Rewrite the top level as "section: ..." keys`;
     case "settings-not-plain-mapping":
@@ -495,8 +505,6 @@ export function describeProblem(problem: Problem): string {
       return `${layerSite(problem)} carries no string ${quote(problem.keyField)}, which every entry needs to layer by`;
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
-    case "artifact-uploader-missing":
-      return "private-report: artifact needs an artifact uploader, and none was supplied: the action supplies its own; a library caller passes one as the uploader argument, or picks another private-report channel";
     case "merged-file-is-layer":
       return (
         `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the ` +

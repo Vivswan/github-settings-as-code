@@ -4,12 +4,13 @@
 
 import { expect } from "bun:test";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { SPECIAL_KEYS } from "../../src/sections/repository/index.js";
 
 /** Assert `doc` validates and its repository special-looking keys are real. */
 export function assertValidSettingsExample(doc: unknown, label: string): void {
-  const invalid = validateSettingsDoc(doc, label, new Set(), silentIo());
+  const invalid = validateSettingsDoc(doc, label, SectionSelection.ALL, silentIo());
   expect(
     "error" in invalid ? invalid.error : null,
     `${label} failed validation: ${"error" in invalid ? invalid.error : ""}`,

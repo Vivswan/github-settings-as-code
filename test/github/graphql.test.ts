@@ -398,7 +398,7 @@ describe("tryGraphql tracing and redaction", () => {
         (error: unknown) => String(error),
       );
     expect(thrown).toBe(
-      "Error: GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run the workflow",
+      "Error: GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run",
     );
   });
 

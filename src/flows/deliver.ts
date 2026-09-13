@@ -4,7 +4,6 @@
  * what they report.
  */
 
-import { err, ok, type Result } from "neverthrow";
 import type { RepoRef, Target } from "../discovery/targets.js";
 import {
   type RepoRunResult,
@@ -18,7 +17,7 @@ import type { GitHubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import { isPrivate, type Private } from "../private.js";
-import { describeProblem, type Problem, type ProblemOf } from "../problem.js";
+import { describeProblem, type Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import {
   type ClosedOutcome,
@@ -108,16 +107,6 @@ export interface RunFlowConfig extends DeliveryConfig {
   sections: SectionSelection;
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
-}
-
-/** Both flows check this before any API work; openReportChannel asserts the same rule as its backstop. */
-export function requireUploader(
-  cfg: Pick<DeliveryConfig, "privateReport">,
-  uploader: ArtifactUploader | undefined,
-): Result<void, ProblemOf<"artifact-uploader-missing">> {
-  return cfg.privateReport === "artifact" && uploader === undefined
-    ? err({ code: "artifact-uploader-missing" })
-    : ok();
 }
 
 export type Exposure = { kind: "shown" } | { kind: "redacted"; visibility: RepoVisibility };
@@ -230,15 +219,11 @@ export function concludeRun(io: Io, run: FinishedRun): number {
 }
 
 /**
- * A run that failed before any target ran gets a failed target's conclusion and no summary; the one place a fatal problem becomes text.
- * `describe` is the action's wording unless the caller's face (the command line) words a remedy differently.
+ * A run that failed before any target ran gets a failed target's conclusion and no summary; the one place a fatal
+ * problem becomes text, in the one wording both faces print.
  */
-export function failRun(
-  io: Io,
-  problem: Problem,
-  describe: (problem: Problem) => string = describeProblem,
-): number {
-  const message = describe(problem);
+export function failRun(io: Io, problem: Problem): number {
+  const message = describeProblem(problem);
   io.annotate("error", message);
   // The mode may be unknown here (a config error); a failure exits 1 under either.
   return conclude(io, failedTarget(message), false);

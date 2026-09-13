@@ -75,8 +75,8 @@ The examples continue from one another and form one program (the docs tests comp
 | `OptOutNotice` | type | A `null` that deleted what a lower layer declared: the layer and the path |
 | `describeOptOut` | function | One notice as the line the action prints |
 | `readLayerFiles` | function | Read paths into `Layer`s in order; the first unreadable file is the problem |
-| `readSettingsFile` | function | Read and parse one YAML file, given its role (`settings-file`, `defaults-file`, `layer`), so the problem's advice fits |
-| `SettingsFileRole` | type | The three roles |
+| `readSettingsFile` | function | Read and parse one YAML file, given its role (`settings-file`, `defaults-file`, `layer`, `central-file`), so the problem's advice fits |
+| `SettingsFileRole` | type | The four roles |
 | `parseSettingsDoc` | function | Parse YAML text into an unknown document |
 | `Problem` | type | Every typed failure a call can return, keyed by `code` |
 | `describeProblem` | function | A `Problem` as the message the action prints |
@@ -191,10 +191,12 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 
 | Name | Kind | Says |
 |---|---|---|
-| `executeRun` | function | The executor the action and the CLI share: a `RunConfig` plus a face's `RunDeps` runs to its exit code |
-| `RunDeps` | type | What a face hands in: the `io`, the client factory, the artifact `uploader` only the Actions runner has, and the problem wording |
+| `executeRun` | function | The executor the action and the CLI share: a `RunConfig` plus a face's `RunDeps` runs to its `RunEnd` |
+| `RunDeps` | type | What a face hands in: the `io`, the client factory, and the artifact `uploader` only the Actions runner has |
+| `RunEnd` | type | How the run ended: its `exitCode`, and the fatal `Problem` when it never reached a target |
 | `RunConfig` | type | The action's parsed inputs: a `SingleConfig`, `MultiConfig`, `MergeConfig`, or `SnapshotConfig`, discriminated by `kind` |
-| `parseConfig` | function | Build a `RunConfig` from an input reader and the environment the way the action does |
+| `parseConfig` | function | Build a `RunConfig` from an input reader, the environment, and the face's `RunCapabilities`, the way the action does; a face without an artifact upload is refused `private-report: artifact` here |
+| `RunCapabilities` | type | What the face can do: `artifactUpload`, whether it hands the run a workflow-artifact uploader |
 | `InputReader` | type | `(name) => string`: how `parseConfig` reads an input |
 | `ConfigEnv` | type | The environment `parseConfig` reads |
 | `runSingle` | function | One repository from a local settings file, in check or apply |
