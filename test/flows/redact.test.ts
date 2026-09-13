@@ -300,6 +300,9 @@ describe("public projections", () => {
   test.each([
     ["failed", "error: private repository #1: failed - labels (403). "],
     ["drift", "warning: private repository #1: drift - rulesets. "],
+    // No row is skipped in this fixture, so the partial line carries no section list; the flow test in
+    // test/flows/single.test.ts pins the `- labels (403)` form.
+    ["partial", "warning: private repository #1: partial. "],
     ["skipped", "notice: private repository #1: skipped. "],
   ] as const)("emitRedactedResult on %s names only closed values", (result, head) => {
     const { io, events } = captureIo();

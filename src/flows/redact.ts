@@ -120,23 +120,40 @@ export function emitRedactedResult(
   detail: Private<RedactedDetail>,
 ): void {
   const { outcomes } = revealPrivate(detail);
-  if (result === "failed") {
-    const failed = outcomes
-      .filter((o) => o.status === "failed")
+  // The keys in one status, each with its safe HTTP code when the row carries one (a denial's, never a body).
+  const keysWith = (status: ClosedOutcome["status"]): string => {
+    const keys = outcomes
+      .filter((o) => o.status === status)
       .map((o) => (o.httpStatus !== undefined ? `${o.key} (${o.httpStatus})` : o.key));
-    const sections = failed.length > 0 ? ` - ${failed.join(", ")}` : "";
-    io.annotate("error", `${display}: failed${sections}. ${REDACTED_NOTE}`);
-    return;
+    return keys.length > 0 ? ` - ${keys.join(", ")}` : "";
+  };
+  switch (result) {
+    case "failed":
+      io.annotate("error", `${display}: failed${keysWith("failed")}. ${REDACTED_NOTE}`);
+      return;
+    case "drift":
+      io.annotate("warning", `${display}: drift${keysWith("drift")}. ${REDACTED_NOTE}`);
+      return;
+    case "partial":
+      io.annotate("warning", `${display}: partial${keysWith("skipped")}. ${REDACTED_NOTE}`);
+      return;
+    case "skipped":
+      io.annotate("notice", `${display}: skipped. ${REDACTED_NOTE}`);
+      return;
+    case "applied":
+    case "clean":
+    case "snapshot":
+    case "merged":
+      // A healthy result prints nothing: the summary row already says so in closed values.
+      return;
+    default:
+      unreachable(result);
   }
-  if (result === "drift") {
-    const drifted = outcomes.filter((o) => o.status === "drift").map((o) => o.key);
-    const sections = drifted.length > 0 ? ` - ${drifted.join(", ")}` : "";
-    io.annotate("warning", `${display}: drift${sections}. ${REDACTED_NOTE}`);
-    return;
-  }
-  if (result === "skipped") {
-    io.annotate("notice", `${display}: skipped. ${REDACTED_NOTE}`);
-  }
+}
+
+/** A result the switch above does not name fails to compile here, so a new one cannot fall through silently. */
+function unreachable(result: never): never {
+  throw new Error(`BUG: emitRedactedResult has no arm for the run result ${String(result)}`);
 }
 
 export interface RedactionPlan {

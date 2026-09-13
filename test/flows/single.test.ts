@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
+import { REDACTED_NOTE } from "../../src/flows/redact.js";
 import {
   collectingIo,
   parseRepoSlug,
@@ -26,6 +27,44 @@ const cfg = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
 });
 
 describe("runSingle", () => {
+  test("a redacted target ending partial prints its one sealed line: the skipped sections and their codes, no detail", async () => {
+    // A private repository under on-missing-permission: warn with one denied section: the shown run prints the
+    // section's skipped line; the redacted one must still say partial, or a denied grant goes unnoticed.
+    const api = new MockApi({
+      "GET /repos/o/r": {
+        data: { private: true, visibility: "private", has_wiki: false, has_projects: false },
+      },
+      "GET /repos/o/r/labels?per_page=100&page=1": {
+        error: {
+          status: 403,
+          message: "Resource not accessible by personal access token",
+          body: "",
+        },
+      },
+    });
+    const collected = collectingIo();
+    const outcome = await runSingle(
+      api,
+      cfg({
+        settingsFile: "test/fixtures/layers/fleet.yml",
+        sections: SectionSelection.of({ only: ["repository", "labels"] })._unsafeUnwrap(),
+        onMissingPermission: "warn",
+        privateRepos: "redact",
+        selfSlug: "admin/fleet",
+      }),
+      collected.io,
+    );
+    expect(outcome.map((target) => [target.result, target.display])).toEqual(
+      ok(["partial", "private repository #1"]),
+    );
+    expect(collected.lines).toEqual([
+      {
+        level: "warning",
+        line: `private repository #1: partial - labels (403). ${REDACTED_NOTE}`,
+      },
+    ]);
+  });
+
   test("a clean check returns the one target's outcome and prints nothing", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } });
     const collected = collectingIo();
