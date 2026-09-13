@@ -189,20 +189,23 @@ describe("gapFileBases", () => {
 
 describe("generateIndex", () => {
   test("one import and one GAPS element per gap file, aliased and sorted; an empty directory keeps the same template around an empty GAPS", () => {
+    // The varying parts of the file: the gap imports (gap.js's is the template's) and the GAPS array, whole.
+    const gapImports = (text: string): string[] => text.match(/^import \{ GAP as .*$/gm) ?? [];
+    const gapsArray = (text: string): string =>
+      text.match(/const GAPS = [\s\S]*?\] as const;/)?.[0] ?? "";
     const two = generateIndex(["pages-https", "merge-queue"]);
-    expect(two).toContain(
-      'import { GAP as mergeQueue } from "./merge-queue.js";\nimport { GAP as pagesHttps } from "./pages-https.js";\n',
-    );
-    expect(two).toContain("\nconst GAPS = [\n  mergeQueue,\n  pagesHttps,\n] as const;\n");
+    expect(gapImports(two)).toEqual([
+      'import { GAP as mergeQueue } from "./merge-queue.js";',
+      'import { GAP as pagesHttps } from "./pages-https.js";',
+    ]);
+    expect(gapsArray(two)).toBe("const GAPS = [\n  mergeQueue,\n  pagesHttps,\n] as const;");
     const none = generateIndex([]);
-    expect(none).toContain("\nconst GAPS = [] as const;\n");
-    expect(none).not.toContain("import { GAP");
+    expect(gapImports(none)).toEqual([]);
+    expect(gapsArray(none)).toBe("const GAPS = [] as const;");
     // Everything but the imports and the GAPS elements is one template, so the derivations the consumers import
     // (SupplementalRoute, UNDOCUMENTED_ROUTES) are the same text whatever the directory holds.
     const template = (text: string): string =>
-      text
-        .replace(/^import \{ GAP as .*\n/gm, "")
-        .replace(/const GAPS = \[[\s\S]*?\] as const;/, "");
+      text.replace(/^import \{ GAP as .*\n/gm, "").replace(gapsArray(text), "");
     expect(template(none)).toBe(template(two));
     expect(none).toContain("export type SupplementalRoute");
     expect(none).toContain("export const UNDOCUMENTED_ROUTES");
