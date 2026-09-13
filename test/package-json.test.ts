@@ -77,6 +77,16 @@ describe("package.json as the npm manifest", () => {
       "./package.json",
     ]);
     expect(built.filter((module) => !targets.includes(module))).toEqual([]);
+    // The bin NAMES are public too: the library page's CLI section names every bin entry, and both must run the one CLI build.
+    const page = readFileSync(join(ROOT, "docs/reference/library.md"), "utf8");
+    const sentence =
+      page.match(/The package's `bin` entries, (.+?), run the same flows/)?.[1] ?? "";
+    const documentedBins = [...sentence.matchAll(/`([^`]+)`/g)]
+      .map((match) => match[1] ?? "")
+      .sort();
+    expect(documentedBins).not.toEqual([]);
+    expect(Object.keys(pkg.bin).sort()).toEqual(documentedBins);
+    expect(new Set(Object.values(pkg.bin)).size).toBe(1);
     const declarations: string[] = [];
     for (const entry of Object.values(pkg.exports)) {
       if (typeof entry !== "string") {

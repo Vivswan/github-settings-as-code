@@ -1,8 +1,9 @@
 /**
  * The problem union's renderer: one specimen per member that carries fields, each pinned to the exact line the action prints for it, so a
  * dropped or swapped interpolation and a wrong plural show up as the line a user would read. A member whose only field is its code renders
- * a constant and has nothing to pin; the specimen table is typed over the fielded members, so a new one fails compilation here until it has a
- * specimen, and describeProblem's switch fails until it has a case.
+ * a constant, which is its own source of truth, so those members are pinned to render distinct lines instead of to their text: a case
+ * copied from its neighbor, or one falling through to the next, renders a line written for another problem. Both tables are typed over
+ * the union, so a new member fails compilation here until it is placed, and describeProblem's switch fails until it has a case.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -19,6 +20,23 @@ import { SECTION_KEYS } from "../src/schema.js";
 type FieldlessCode = {
   [C in Problem["code"]]: keyof ProblemOf<C> extends "code" ? C : never;
 }[Problem["code"]];
+
+const FIELDLESS: Record<FieldlessCode, true> = {
+  "input-report-key-missing": true,
+  "input-merged-file-missing": true,
+  "input-snapshot-destination-missing": true,
+  "input-snapshot-destinations-both": true,
+  "input-snapshot-file-with-multi": true,
+  "input-repository-with-snapshot-dir": true,
+  "input-snapshot-dir-without-targets": true,
+  "input-token-missing": true,
+  "input-report-without-redaction": true,
+  "input-repository-with-multi": true,
+  "input-settings-file-with-multi": true,
+  "input-defaults-file-without-multi": true,
+  "input-artifact-unsupported": true,
+  "repos-input-wildcard-mixed": true,
+};
 
 const KNOWN = SECTION_KEYS.join(", ");
 
@@ -385,6 +403,20 @@ describe("describeProblem", () => {
     ],
   ])("renders the variant: %s", (_what, problem, line) => {
     expect(describeProblem(problem)).toBe(line);
+  });
+});
+
+describe("the fieldless members", () => {
+  test("each renders its own non-empty line, distinct from every other member's", () => {
+    const fielded = new Set(Object.values(SPECIMENS).map(([, line]) => line));
+    const seen = new Map<string, string>();
+    for (const code of Object.keys(FIELDLESS) as FieldlessCode[]) {
+      const line = describeProblem({ code });
+      expect(line.length, code).toBeGreaterThan(40);
+      expect(fielded.has(line), `${code} renders a fielded member's line`).toBe(false);
+      expect(seen.get(line), `${code} renders the same line as ${seen.get(line)}`).toBeUndefined();
+      seen.set(line, code);
+    }
   });
 });
 
