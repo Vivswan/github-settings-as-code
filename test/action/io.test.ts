@@ -105,4 +105,10 @@ describe("actionsIo", () => {
       expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
       expect(written).not.toContain("dropped");
     }));
+
+  test("mask registers the value in the registry masked() reads", () => {
+    // One registry behind both: the API tracer reads masked() at runtime to redact what mask() registered.
+    actionsIo.mask("o/private");
+    expect(actionsIo.masked().has("o/private")).toBe(true);
+  });
 });
