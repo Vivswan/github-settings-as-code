@@ -68,7 +68,7 @@ async function requests(result: SectionPlan, resolved: Record<string, string> = 
 }
 
 const SECRET_NOTE =
-  'webhooks["https://x.test/h"].config.secret: GitHub never reveals a webhook secret (reads echo "********"), so the declared value cannot be verified; apply re-sends it on every run so rotations propagate';
+  "webhooks[https://x.test/h].config.secret: GitHub never reveals a webhook secret, so check mode cannot verify the declared value; apply re-sends it on every run";
 
 describe("webhooks shape", () => {
   test("an entry-level secret is rejected, pointing at config.secret", () => {
@@ -145,7 +145,7 @@ describe("webhooks plan", () => {
         {
           unverifiable: SECRET_NOTE,
           lines: [
-            'webhooks["https://x.test/h"]: missing - declared in the settings file but not on the repo; apply will create it',
+            "webhooks[https://x.test/h]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
         },
         'creating webhook "https://x.test/h"',
@@ -157,7 +157,6 @@ describe("webhooks plan", () => {
         "create",
         undefined,
         {
-          name: "web",
           config: { url: "https://x.test/h", content_type: "json", secret: "plain-secret" },
           events: ["push"],
           active: true,
@@ -165,7 +164,7 @@ describe("webhooks plan", () => {
       ],
     ]);
     expect(planDrift(result)).toEqual([
-      'webhooks["https://x.test/h"]: missing - declared in the settings file but not on the repo; apply will create it',
+      "webhooks[https://x.test/h]: missing - declared in the settings file but not on the repo; apply will create it",
     ]);
     expect(planCheckNotes(result)).toEqual([SECRET_NOTE]);
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
@@ -215,15 +214,15 @@ describe("webhooks plan", () => {
       [
         "updateConfig",
         { hook_id: "3" },
-        ['webhooks["https://x.test/h"].config.content_type: "form" != "json"'],
+        ['webhooks[https://x.test/h].config.content_type: "form" != "json"'],
         'updated webhook "https://x.test/h" config',
       ],
       [
         "update",
         { hook_id: "4" },
         [
-          'webhooks["https://y.test/h"].events: declared ["push","release"] != live ["push"] (compared order-insensitively); apply will set the declared events',
-          'webhooks["https://y.test/h"].active: declared false != live true; apply will set the declared value',
+          'webhooks[https://y.test/h].events: missing "release"',
+          "webhooks[https://y.test/h].active: declared false != live true; apply will set the declared value",
         ],
         'updated webhook "https://y.test/h"',
       ],
@@ -273,7 +272,7 @@ describe("webhooks plan", () => {
         "create",
         undefined,
         [
-          'webhooks["https://new.test/h"]: missing - declared in the settings file but not on the repo; apply will create it',
+          "webhooks[https://new.test/h]: missing - declared in the settings file but not on the repo; apply will create it",
         ],
         'created webhook "https://new.test/h"',
       ],
@@ -281,26 +280,27 @@ describe("webhooks plan", () => {
         "remove",
         { hook_id: "8" },
         [
-          'webhooks["https://old.test/h"]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+          'webhooks[https://old.test/h]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
         ],
         'DELETED undeclared webhook "https://old.test/h"',
       ],
     ]);
   });
 
-  test("a declared url matching several live hooks fails BEFORE any operation is planned, naming their ids", async () => {
-    // A missing url declared before the ambiguous one must not become a create; the scan runs over the whole declaration first.
+  test("two live hooks under one url fail BEFORE any operation is planned, declared or not", async () => {
+    // A missing url declared before the ambiguous one must not become a create; the live index is built over the whole list first.
     const api = new MockApi({
       [LIST]: { data: [liveHook(11, "https://dup.test/h"), liveHook(12, "https://dup.test/h")] },
     });
+    const refusal =
+      'webhooks: GitHub holds webhooks that resolve to one identity: "https://dup.test/h" and "https://dup.test/h". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again';
     await expect(
       plan(api, [
         { config: { url: "https://new.test/h" } },
         { config: { url: "https://dup.test/h" } },
       ]),
-    ).rejects.toThrow(
-      /webhooks: 1 declared url\(s\) each match more than one live hook.*"https:\/\/dup.test\/h" matches 2 live hooks \(ids 11, 12\)/,
-    );
+    ).rejects.toThrow(refusal);
+    await expect(plan(api, [])).rejects.toThrow(refusal);
   });
 
   test("two declared entries with the same url are rejected before any call", async () => {
@@ -370,13 +370,13 @@ describe("webhooks plan", () => {
       [
         "updateConfig",
         { hook_id: "601" },
-        { unverifiable: expect.stringContaining('webhooks["https://ci.test/hook"]'), lines: [] },
+        { unverifiable: expect.stringContaining("webhooks[https://ci.test/hook]"), lines: [] },
       ],
       [
         "updateConfig",
         { hook_id: expect.any(String) },
         {
-          unverifiable: expect.stringContaining('webhooks["https://deploy.test/hook"]'),
+          unverifiable: expect.stringContaining("webhooks[https://deploy.test/hook]"),
           lines: [],
         },
       ],

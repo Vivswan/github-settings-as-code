@@ -187,7 +187,6 @@ describe("runForRepo provenance", () => {
         method: "POST",
         path: "/repos/o/r/hooks",
         payload: {
-          name: "web",
           config: { url: "https://x.test/h", secret: "fleet-plaintext" },
         },
         carriesSecret: true,

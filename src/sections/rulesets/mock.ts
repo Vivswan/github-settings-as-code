@@ -3,6 +3,7 @@
  * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
+import type { ListMockSpec } from "../../../test/e2e/mock/list-fragment.js";
 import {
   asObject,
   invalidRuleTypeResponse,
@@ -12,6 +13,17 @@ import {
   type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
+
+/**
+ * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS): the create handler
+ * below mints the same source_type, so a seed is served as a created ruleset would be.
+ */
+export const RULESETS_MOCK: ListMockSpec = {
+  collection: (state) => state.rulesets,
+  defaults: { source_type: "Repository" },
+  owned: (id) => ({ id }),
+  unique: "identity",
+};
 
 // GitHub returns bypass_actors only to a token with write access to the ruleset (Administration at
 // write); every other read omits the KEY, never answering `[]`, and the list never carries it.

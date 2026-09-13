@@ -10,16 +10,17 @@ coverage:
     notes: >-
       GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT, verbatim
       passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
-      through). New rule types/bypass fields/condition types GitHub ships work day one. Undeclared
+      through). The list carries summaries, so each matched ruleset is read whole before the
+      comparison. New rule types/bypass fields/condition types GitHub ships work day one. Undeclared
       rulesets kept by default (notes only); the wrapped `_undeclared: delete` form deletes them.
-      Org-sourced rulesets filtered out via source_type. GitHub returns bypass_actors only to a
-      token with write access to the ruleset, so under a token without Administration write a
-      declared bypass_actors is left out of the comparison and noted as not visible instead of
-      reported as drift. Snapshot reads repository rulesets back as entries under the keep default
-      (id, source, links, timestamps, and the caller's bypass state fall away); an inherited
-      organization ruleset is noted, not declared, and a ruleset whose bypass_actors the token cannot
-      see is left out with a note (kept undeclared), since an entry without the key would clear the
-      bypass list on the next full-payload update.
+      Org-sourced rulesets are outside the section (source_type other than Repository). GitHub
+      returns bypass_actors only to a token with write access to the ruleset, so under a token
+      without Administration write a declared bypass_actors is left out of the comparison and noted
+      as not visible instead of reported as drift. Snapshot reads repository rulesets back as entries
+      under the keep default (id, source, links, timestamps, and the caller's bypass state fall
+      away); an inherited organization ruleset is left out with a note, and so is a ruleset whose
+      bypass_actors the token cannot see (kept undeclared), since an entry without the key would
+      clear the bypass list on the next full-payload update.
   - area: "[Merge queue](https://docs.github.com/en/rest/repos/rules)"
     notes: >-
       Configured as the merge_queue rule type inside a branch ruleset; passes through verbatim like

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   type EntryOf,
   type SectionMeta,
@@ -276,7 +276,13 @@ async function planVariables(
   const params = { environment_name: envName };
   const label = `environments[${envName}].variables`;
   const live = liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, section, envName);
-  const liveByKey = new Map(live.map((variable) => [variableKey(variable.name), variable]));
+  const liveByKey = liveByIdentity(
+    section,
+    "variable",
+    live,
+    (variable) => variableKey(variable.name),
+    (variable) => variable.name,
+  );
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
   const planned: NestedPlan = { ops: [], notes: [] };
 
@@ -413,7 +419,17 @@ async function planEnvironmentSecrets(
   const suffix = ` in environment "${envName}"`;
   const live = liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, section, envName);
   // Real GitHub lists names uppercase already; keying by secretKey keeps a differently-cased mock or proxy harmless.
-  const liveByKey = new Map(live.map((item) => [secretKey(item.name), item.name]));
+  const liveByKey = new Map(
+    [
+      ...liveByIdentity(
+        section,
+        noun,
+        live,
+        (item) => secretKey(item.name),
+        (item) => item.name,
+      ),
+    ].map(([key, item]) => [key, item.name]),
+  );
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
   const planned: NestedPlan = { ops: [], notes: [] };
 

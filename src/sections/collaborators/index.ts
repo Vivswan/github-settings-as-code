@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -151,9 +151,19 @@ export const collaboratorsSection = {
     // undeclared in the other pool; email invitations (null invitee, which no username can declare)
     // split into their own pool.
     const { collaborators: live, invitations, emailInvitations } = await readLiveAccess(ctx, this);
-    const liveByLogin = new Map(live.map((c) => [c.login.toLowerCase(), c]));
-    const inviteByLogin = new Map(
-      invitations.map((invitation) => [invitation.invitee.login.toLowerCase(), invitation]),
+    const liveByLogin = liveByIdentity(
+      this,
+      "collaborator",
+      live,
+      (c) => c.login.toLowerCase(),
+      (c) => c.login,
+    );
+    const inviteByLogin = liveByIdentity(
+      this,
+      "pending invitation",
+      invitations,
+      (invitation) => invitation.invitee.login.toLowerCase(),
+      (invitation) => invitation.invitee.login,
     );
     const declaredKeys = new Set<string>();
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };

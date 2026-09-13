@@ -3,6 +3,7 @@
 import { z } from "zod";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
+import { liveByIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
   type SectionMeta,
@@ -218,12 +219,19 @@ function undeclaredSecretDrift(
 }
 
 /** Uppercase key -> the name as listed (normalizing keeps a differently-cased mock harmless). */
-function liveSecretsByKey(live: readonly LiveSecretName[]): Map<string, string> {
-  const liveByKey = new Map<string, string>();
-  for (const item of live) {
-    liveByKey.set(secretKey(item.name), item.name);
-  }
-  return liveByKey;
+function liveSecretsByKey(
+  section: SectionMeta,
+  scope: SecretsScopeProse,
+  live: readonly LiveSecretName[],
+): Map<string, string> {
+  const byKey = liveByIdentity(
+    section,
+    scope.noun,
+    live,
+    (item) => secretKey(item.name),
+    (item) => item.name,
+  );
+  return new Map([...byKey].map(([key, item]) => [key, item.name]));
 }
 
 export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPlannedOp>(
@@ -242,7 +250,7 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   const { entries, policy, defaultPolicy } = opts;
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveSecretsByKey(await scope.list());
+  const liveByKey = liveSecretsByKey(section, scope, await scope.list());
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 
   if (entries.length > 0) {

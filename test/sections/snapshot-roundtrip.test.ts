@@ -101,8 +101,8 @@ describe("snapshot round trip", () => {
       deployKeysSection.snapshot(snapshotContext(deployKeysSection, keys, REPO, "fail")),
     ).rejects.toThrow(
       'deploy_keys: GitHub holds deploy keys that resolve to one identity: "ci" and "ci". ' +
-        "This section manages one deploy key per identity, so the snapshot cannot declare them; " +
-        "delete all but one of each on GitHub, then snapshot again",
+        "This section manages one deploy key per identity, so it cannot tell them apart; " +
+        "delete all but one of each on GitHub, then run again",
     );
     const hooks = registryFake({
       hooks: [
@@ -110,23 +110,29 @@ describe("snapshot round trip", () => {
         { id: 2, config: { url: "https://ci.example.com/hook" }, events: ["release"] },
       ],
     });
-    // A service hook on the same url counts too: the planner matches against every live hook.
+    // A service hook on the same url is outside the section (left out with a note), so it is no duplicate.
     const mixed = registryFake({
       hooks: [
         { id: 1, config: { url: "https://ci.example.com/hook" } },
         { id: 2, name: "slack", config: { url: "https://ci.example.com/hook" } },
       ],
     });
-    await expect(
-      webhooksSection.snapshot(snapshotContext(webhooksSection, mixed, REPO, "fail")),
-    ).rejects.toThrow(/webhooks: GitHub holds webhooks that resolve to one identity/);
+    const read = await webhooksSection.snapshot(
+      snapshotContext(webhooksSection, mixed, REPO, "fail"),
+    );
+    expect(read.notes).toEqual([
+      'webhooks[https://ci.example.com/hook]: left out of the snapshot - a "slack" service hook is not a web hook this section manages',
+    ]);
+    expect(read.value).toMatchObject({
+      entries: [{ config: { url: "https://ci.example.com/hook" } }],
+    });
     await expect(
       webhooksSection.snapshot(snapshotContext(webhooksSection, hooks, REPO, "fail")),
     ).rejects.toThrow(
       "webhooks: GitHub holds webhooks that resolve to one identity: " +
-        '"https://ci.example.com/hook (id 1)" and "https://ci.example.com/hook (id 2)". ' +
-        "This section manages one webhook per identity, so the snapshot cannot declare them; " +
-        "delete all but one of each on GitHub, then snapshot again",
+        '"https://ci.example.com/hook" and "https://ci.example.com/hook". ' +
+        "This section manages one webhook per identity, so it cannot tell them apart; " +
+        "delete all but one of each on GitHub, then run again",
     );
   });
 
@@ -154,9 +160,9 @@ describe("snapshot round trip", () => {
     await expect(
       milestonesSection.snapshot(snapshotContext(milestonesSection, api, REPO, "fail")),
     ).rejects.toThrow(
-      'milestones: GitHub holds milestones that resolve to one identity: "v1 (number 1)" and ' +
-        '"v1 (number 2)". This section manages one milestone per identity, so the snapshot ' +
-        "cannot declare them; delete all but one of each on GitHub, then snapshot again",
+      'milestones: GitHub holds milestones that resolve to one identity: "v1" and ' +
+        '"v1". This section manages one milestone per identity, so it ' +
+        "cannot tell them apart; delete all but one of each on GitHub, then run again",
     );
   });
 
@@ -223,7 +229,7 @@ describe("snapshot round trip", () => {
     expect(snapshot).toEqual({
       value: undefined,
       notes: [
-        "webhooks[id 7 (no config.url)]: the hook has no config.url, the natural key this section manages by, so it is left out of the snapshot",
+        "webhooks[id 7 (no config.url)]: left out of the snapshot - the hook has no config.url, the natural key this section manages by",
       ],
     });
   });

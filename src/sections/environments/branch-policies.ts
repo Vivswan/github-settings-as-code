@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { ENDPOINTS, type EnvironmentRestOp, type EnvironmentsRestContext } from "./endpoints.js";
@@ -139,10 +139,13 @@ export async function planBranchPolicies(
   } else if (liveEnv !== undefined) {
     live = await listBranchPolicies(ctx, section, envName);
   }
-  const liveByName = new Map<string, LiveBranchPolicy>();
-  for (const pattern of live) {
-    liveByName.set(livePolicyName(pattern, envName), pattern);
-  }
+  const liveByName = liveByIdentity(
+    section,
+    "deployment branch policy",
+    live,
+    (pattern) => livePolicyName(pattern, envName),
+    (pattern) => livePolicyName(pattern, envName),
+  );
   const declared = new Set(entries.map((pattern) => pattern.name));
 
   for (const pattern of entries) {

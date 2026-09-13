@@ -167,9 +167,9 @@ describe("rulesets", () => {
           describe: 'updating ruleset "main"',
           drift: [
             "rulesets[main].rules[non_fast_forward]: present live but not declared",
-            'rulesets[main].enforcement: "active" != "evaluate"',
+            'rulesets[main].enforcement: declared "active" != live "evaluate"; apply will set the declared value',
           ],
-          change: 'updated ruleset "main" (id 9)',
+          change: 'updated ruleset "main"',
         },
       ],
       notes: [],
@@ -199,7 +199,7 @@ describe("rulesets", () => {
           drift: [
             'rulesets[main].enforcemant: declared "evaluate" but the API response has no such field (new or write-only field?)',
           ],
-          change: 'updated ruleset "main" (id 9)',
+          change: 'updated ruleset "main"',
         },
       ],
       notes: [
@@ -226,7 +226,7 @@ describe("rulesets", () => {
     });
     expect(execution).toEqual({
       status: "applied",
-      changes: ['updated ruleset "main" (id 9)'],
+      changes: ['updated ruleset "main"'],
       notes: [],
       landed: 1,
     });
@@ -241,7 +241,7 @@ describe("rulesets", () => {
           drift: [
             'rulesets[main].enforcemant: declared "evaluate" but the API response has no such field (new or write-only field?)',
           ],
-          change: 'updated ruleset "main" (id 9)',
+          change: 'updated ruleset "main"',
         },
       ],
       notes: [
@@ -296,7 +296,7 @@ describe("rulesets", () => {
               drift: [
                 'rulesets[main].bypass_actors[0]: no matching live entry for {"actor_id":1,"actor_type":"Team","bypass_mode":"always"}',
               ],
-              change: 'updated ruleset "main" (id 9)',
+              change: 'updated ruleset "main"',
             },
           ],
           notes: [],
@@ -344,8 +344,10 @@ describe("rulesets", () => {
               bypass_actors: [team],
             },
             describe: 'updating ruleset "main"',
-            drift: ['rulesets[main].enforcement: "active" != "evaluate"'],
-            change: 'updated ruleset "main" (id 9)',
+            drift: [
+              'rulesets[main].enforcement: declared "active" != live "evaluate"; apply will set the declared value',
+            ],
+            change: 'updated ruleset "main"',
           },
         ],
         notes: [HIDDEN_NOTE],
@@ -423,9 +425,9 @@ describe("rulesets", () => {
           describe: 'updating ruleset "main"',
           drift: [
             "rulesets[main].rules[deletion]: missing live",
-            'rulesets[main].enforcement: "active" != "disabled"',
+            'rulesets[main].enforcement: declared "active" != live "disabled"; apply will set the declared value',
           ],
-          change: 'updated ruleset "main" (id 9)',
+          change: 'updated ruleset "main"',
         },
         {
           role: "remove",
@@ -443,8 +445,8 @@ describe("rulesets", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("_undeclared:delete never deletes a ruleset without an explicit Repository source", async () => {
-    // source_type is optional in the API type; a missing field is not proof of repository ownership, and deletion cannot be undone.
+  test("_undeclared:delete deletes a repository-owned ruleset, a source_type-less one included, and never an inherited one", async () => {
+    // source_type is optional in the API type; a body without it is read as repository-owned, the only kind the repository endpoints can write.
     const api = writable({
       [listRoute]: {
         data: [
@@ -455,24 +457,18 @@ describe("rulesets", () => {
         ],
       },
     });
+    const undeclared = (name: string, id: number) => ({
+      role: "remove" as const,
+      params: { ruleset_id: String(id) },
+      describe: `deleting undeclared ruleset "${name}"`,
+      drift: [
+        `rulesets[${name}]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it`,
+      ] as const,
+      change: `DELETED undeclared ruleset "${name}"`,
+    });
     expect(await plan(api, { _undeclared: "delete", entries: [] })).toEqual({
-      ops: [
-        {
-          role: "remove",
-          params: { ruleset_id: "10" },
-          describe: 'deleting undeclared ruleset "repo-owned"',
-          drift: [
-            'rulesets[repo-owned]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
-          ],
-          change: 'DELETED undeclared ruleset "repo-owned"',
-        },
-      ],
-      notes: [
-        'ruleset "ambiguous" is undeclared, but the list response does not mark it source_type ' +
-          '"Repository"; NOT deleting - only rulesets the API explicitly marks repository-owned ' +
-          "are deleted; add it to the settings file to manage it, or delete it in GitHub if it " +
-          "should not exist",
-      ],
+      ops: [undeclared("ambiguous", 7), undeclared("repo-owned", 10)],
+      notes: [],
       drift: [],
     });
   });
@@ -504,7 +500,7 @@ describe("rulesets", () => {
       ],
     });
     expect(changes).toEqual([
-      'updated ruleset "main" (id 9)',
+      'updated ruleset "main"',
       'created ruleset "tags"',
       'DELETED undeclared ruleset "legacy"',
     ]);
@@ -615,10 +611,9 @@ describe("rulesets snapshot", () => {
         ],
       },
       notes: [
-        'rulesets[org-wide]: inherited from the organization (source_type "Organization"), so it is not part of the repository\'s snapshot; manage it where it is defined',
-        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
-          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
-          "grant Administration write to read it back",
+        'rulesets[org-wide]: left out of the snapshot - inherited from the organization (source_type "Organization"); manage it where it is defined',
+        "rulesets[tags]: left out of the snapshot - bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear it on the next update; grant Administration write to read it back",
       ],
     });
     expect(api.writes).toEqual([]);
@@ -630,7 +625,7 @@ describe("rulesets snapshot", () => {
       served(2, "main", { target: "tag", enforcement: "active" }),
     ]);
     await expect(snapshot(api)).rejects.toThrow(
-      'rulesets: GitHub holds rulesets that resolve to one identity: "main (id 1)" and "main (id 2)". This section manages one ruleset per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again',
+      'rulesets: GitHub holds rulesets that resolve to one identity: "main" and "main". This section manages one ruleset per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
     );
   });
 
@@ -640,9 +635,8 @@ describe("rulesets snapshot", () => {
     expect(read).toEqual({
       value: { _undeclared: "keep", entries: [] },
       notes: [
-        "rulesets[tags]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
-          "and an entry without it would clear the bypass list on the next update, so the ruleset is left out of the snapshot (kept undeclared); " +
-          "grant Administration write to read it back",
+        "rulesets[tags]: left out of the snapshot - bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
+          "and an entry without it would clear it on the next update; grant Administration write to read it back",
       ],
     });
     const planned = await rulesetsSection.plan(
@@ -663,7 +657,7 @@ describe("rulesets snapshot", () => {
     expect(await snapshot(api)).toEqual({
       value: undefined,
       notes: [
-        'rulesets[org-wide]: inherited from the organization (source_type "Organization"), so it is not part of the repository\'s snapshot; manage it where it is defined',
+        'rulesets[org-wide]: left out of the snapshot - inherited from the organization (source_type "Organization"); manage it where it is defined',
       ],
     });
   });

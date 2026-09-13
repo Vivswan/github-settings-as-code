@@ -283,7 +283,30 @@ export function writeOnlyCheckNote(
       `BUG: ${section.key} declares a read operation, so it is not write-only and the cannot-verify note would be false; diff against the read instead`,
     );
   }
-  return `${section.key}: GitHub exposes no read endpoint for ${opts.resource}, so check mode cannot verify them; apply re-asserts ${opts.reasserts} on every run`;
+  return cannotVerifyNote(section.key, {
+    why: `GitHub exposes no read endpoint for ${opts.resource}`,
+    what: "them",
+    reasserts: `re-asserts ${opts.reasserts}`,
+  });
+}
+
+/**
+ * The ONE wording for a declared value check mode cannot compare (a secret GitHub never echoes, a
+ * toggle with no read endpoint, a duration GitHub reports only as its computed expiry): why, what
+ * stays unverified, and what apply does about it on every run.
+ */
+export function cannotVerifyNote(
+  label: string,
+  opts: {
+    /** Why GitHub cannot show the value ("GitHub never reveals a webhook secret"). */
+    why: string;
+    /** What stays unverified ("the declared value", "them"). */
+    what: string;
+    /** Apply's every-run verb phrase ("re-sends it", "re-asserts the declared preferences"). */
+    reasserts: string;
+  },
+): string {
+  return `${label}: ${opts.why}, so check mode cannot verify ${opts.what}; apply ${opts.reasserts} on every run`;
 }
 
 /**
@@ -429,6 +452,35 @@ export function snapshotUnsupportedNote(section: SectionMeta): string {
 export interface DeclaredSecretValue {
   readonly label: string;
   readonly value: string;
+}
+
+/**
+ * The secret values of a list section's declared value, one `extract` per entry. DEFENSIVE by contract:
+ * secretValues runs before shape validation, so a malformed container or entry contributes nothing
+ * rather than throwing, and the actionable error always comes from validation.
+ */
+export function secretValuesOf(
+  declared: unknown,
+  extract: (entry: Readonly<Record<string, unknown>>) => readonly DeclaredSecretValue[],
+): DeclaredSecretValue[] {
+  const isWrapper =
+    typeof declared === "object" &&
+    declared !== null &&
+    !Array.isArray(declared) &&
+    Array.isArray((declared as { entries?: unknown }).entries);
+  if (!Array.isArray(declared) && !isWrapper) {
+    return [];
+  }
+  // "keep" is a placeholder: only the entries are read.
+  const { entries } = undeclaredPolicy(
+    declared as readonly unknown[] | UndeclaredPolicyList<unknown>,
+    "keep",
+  );
+  return entries.flatMap((entry) =>
+    typeof entry === "object" && entry !== null && !Array.isArray(entry)
+      ? [...extract(entry as Readonly<Record<string, unknown>>)]
+      : [],
+  );
 }
 
 /**
@@ -639,6 +691,33 @@ export function undeclaredNote(opts: {
   const add = opts.add ?? "it";
   const manage = opts.manage ?? "it";
   return `${opts.subject} ${state} in the settings file; kept under "_undeclared: keep" - add ${add} to the settings file to manage ${manage}, or set "_undeclared: delete" to have apply ${opts.action}`;
+}
+
+/**
+ * The drift line for a declared resource the live side lacks. `where` names the home when "the repo"
+ * understates it (a nested list says "the environment"); `action` when apply does more than create it.
+ */
+export function missingDrift(
+  label: string,
+  opts: { where?: string; action?: string } = {},
+): string {
+  const where = opts.where ?? "the repo";
+  const action = opts.action ?? "create it";
+  return `${label}: missing - declared in the settings file but not on ${where}; apply will ${action}`;
+}
+
+/**
+ * The drift line for a field whose live value differs, operands always in this order: declared first,
+ * live second. Both arrive rendered (JSON.stringify, or a section's own spelling such as "unset");
+ * `remedy: null` drops the clause when a generic line beside it names the remedy.
+ */
+export function valueDrift(
+  label: string,
+  declared: string,
+  live: string,
+  remedy: string | null = "apply will set the declared value",
+): string {
+  return `${label}: declared ${declared} != live ${live}${remedy === null ? "" : `; ${remedy}`}`;
 }
 
 /**

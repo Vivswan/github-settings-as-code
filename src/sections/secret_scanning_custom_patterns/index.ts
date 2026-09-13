@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
+import { liveByIdentity, parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -168,7 +168,13 @@ export const secretScanningPatternsSection = {
       z.array(LivePatternEntry),
       await ctx.read.list.listAll(),
     ).map(liveFrom);
-    const liveByName = new Map(live.map((p) => [p.name, p]));
+    const liveByName = liveByIdentity(
+      this,
+      "secret scanning custom pattern",
+      live,
+      (p) => p.name,
+      (p) => p.name,
+    );
     const declaredNames = new Set(desired.map((p) => p.name));
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };

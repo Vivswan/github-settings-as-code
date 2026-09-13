@@ -53,10 +53,10 @@ expect:
       _undeclared: keep
       entries: []
   stdout_contains:
-    - "rulesets[org-baseline]: inherited from the organization"
-    - "rulesets[build]: bypass_actors is not visible to this token"
-    - "rulesets[protect-main]: bypass_actors is not visible to this token"
-    - "so the ruleset is left out of the snapshot (kept undeclared)"
+    - "rulesets[org-baseline]: left out of the snapshot - inherited from the organization"
+    - "rulesets[build]: left out of the snapshot - bypass_actors is not visible to this token"
+    - "rulesets[protect-main]: left out of the snapshot - bypass_actors is not visible to this token"
+    - "and an entry without it would clear it on the next update; grant Administration write to read it back"
   never:
     - POST /
     - PATCH /

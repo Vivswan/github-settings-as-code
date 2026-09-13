@@ -12,8 +12,10 @@ import {
   exactName,
   type ListEndpoints,
   type ListSectionModule,
+  type ListWrite,
   listSection,
 } from "../../src/sections/shared/list-section.js";
+import { webhooksSection } from "../../src/sections/webhooks/index.js";
 import { generatorFromSlice, uniqueBy } from "../e2e/gen-support.js";
 import { mockFragmentFor } from "../e2e/mock/list-fragment.js";
 import { Rng } from "../e2e/prng.js";
@@ -80,7 +82,7 @@ describe("listSection", () => {
     expect(api.state.labels.map((label) => [label.name, label.color])).toEqual([["bug", "d73a4a"]]);
   });
 
-  test("two live items one fold apart are a conflict for the entry claiming them, never silently one", async () => {
+  test("two live items one fold apart are refused before any comparison, whether or not an entry claims them", async () => {
     const api = new MockApi({
       [LIST]: {
         data: [
@@ -89,19 +91,36 @@ describe("listSection", () => {
         ],
       },
     });
+    const refusal = new Error(
+      'labels: GitHub holds labels that resolve to one identity: "bug" and "BUG". This section manages one label per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
+    );
     await expect(
       labelsSection.plan(planContext(labelsSection, api, REPO), [{ name: "bug" }]),
+    ).rejects.toThrow(refusal);
+    // Unclaimed, the pair is still one identity the planner cannot manage.
+    await expect(labelsSection.plan(planContext(labelsSection, api, REPO), [])).rejects.toThrow(
+      refusal,
+    );
+  });
+
+  test("an entry claiming two identities that both exist live (a rename onto a taken name) is refused naming both", async () => {
+    const api = new MockApi({
+      [LIST]: {
+        data: [
+          { name: "bug", color: "000000", description: null },
+          { name: "defect", color: "ffffff", description: null },
+        ],
+      },
+    });
+    await expect(
+      labelsSection.plan(planContext(labelsSection, api, REPO), [
+        { name: "bug", new_name: "defect" },
+      ]),
     ).rejects.toThrow(
       new Error(
-        'labels: the entry "bug" matches 2 separate live labels ("bug", "BUG"), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry',
+        'labels: the entry "defect" matches 2 separate live labels ("defect", "bug"), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry',
       ),
     );
-    // Unclaimed, both are undeclared and both are removed.
-    const unclaimed = await labelsSection.plan(planContext(labelsSection, api, REPO), []);
-    expect(unclaimed.ops.map((op) => [op.role, op.params?.name])).toEqual([
-      ["remove", "bug"],
-      ["remove", "BUG"],
-    ]);
   });
 
   test("the declaration's types close the shape: same params on both item routes, no undefined write fields, matchBy over entry fields", () => {
@@ -139,6 +158,7 @@ describe("listSection", () => {
       ...base,
       // @ts-expect-error a dictionary widened to the union cannot say which roles it has, so it is refused outright
       endpoints: base.endpoints as ListEndpoints,
+      // @ts-expect-error nor can its item routes agree on params, so no address is declarable either
       address: unreachable,
     });
     // A conditional between two literal dictionaries is a union too: keyof would hide the second arm's DELETE-as-update.
@@ -209,11 +229,23 @@ describe("listSection", () => {
     });
   });
 
-  test("declared secret values are listed per entry in both value forms", () => {
+  test("secret fields list their values per entry in both value forms, and demand the unverifiable facet on the roles that carry them", () => {
     const secretive = listSection({
       ...base,
-      secretValues: (label) =>
-        label.description === undefined ? [] : [{ label: label.name, value: label.description }],
+      endpoints: {
+        ...base.endpoints,
+        create: {
+          route: "POST /repos/{owner}/{repo}/labels",
+          statuses: { 201: "label created" },
+          unverifiable: true,
+        },
+        update: {
+          route: "PATCH /repos/{owner}/{repo}/labels/{name}",
+          statuses: { 200: "label updated" },
+          unverifiable: true,
+        },
+      },
+      secrets: ["description"],
     });
     const entries = [
       { name: "a", description: "$A" },
@@ -221,12 +253,64 @@ describe("listSection", () => {
       { name: "c", description: "$C" },
     ];
     const listed = [
-      { label: "a", value: "$A" },
-      { label: "c", value: "$C" },
+      { label: 'the label "a" description', value: "$A" },
+      { label: 'the label "c" description', value: "$C" },
     ];
     expect(secretive.secretValues?.(entries)).toEqual(listed);
     expect(secretive.secretValues?.({ _undeclared: "keep", entries })).toEqual(listed);
     expect(labelsSection.secretValues).toBeUndefined();
+    // Without the facet the write would recur with empty drift, which the plan contract forbids: the path type admits none.
+    listSection({
+      ...base,
+      // @ts-expect-error neither create nor update declares unverifiable: true, so no secret path is declarable
+      secrets: ["description"],
+    });
+    listSection({
+      ...base,
+      endpoints: IMMUTABLE_ENDPOINTS,
+      // @ts-expect-error a resource GitHub cannot edit has no carrier: a recreate would re-send the value on every run
+      secrets: ["description"],
+    });
+    // The facts the types cannot see: a dotted path must sit under the mapping the updateConfig role writes, and that role carries the facet.
+    const { mapping: _mapping, ...hooks } = webhooksSection.decl;
+    expect(() => listSection({ ...hooks, mapping: "config", secrets: ["events.secret"] })).toThrow(
+      /declares the secret field "events.secret" outside its "config" mapping/,
+    );
+    const { updateConfig, update: _general, ...others } = webhooksSection.decl.endpoints;
+    expect(() =>
+      listSection({
+        ...webhooksSection.decl,
+        endpoints: {
+          ...others,
+          update: {
+            route: "PATCH /repos/{owner}/{repo}/hooks/{hook_id}",
+            statuses: { 200: "webhook updated" },
+            unverifiable: true,
+          },
+          updateConfig: { route: updateConfig.route, statuses: updateConfig.statuses },
+        },
+      }),
+    ).toThrow(/"updateConfig" endpoint must declare unverifiable: true/);
+  });
+
+  test("the item roles close the shape: updateConfig demands update, and a nested identity keeps its siblings and cannot rename", () => {
+    const { update: _update, ...withoutUpdate } = webhooksSection.decl.endpoints;
+    listSection({
+      ...webhooksSection.decl,
+      // @ts-expect-error updateConfig without update: the general update carries the fields outside the mapping
+      endpoints: withoutUpdate,
+    });
+    listSection({
+      ...webhooksSection.decl,
+      // @ts-expect-error a nested identity field cannot rename through another key
+      identity: { field: "config.url", fold: exactName, renameKey: "new_url" },
+    });
+    // A write annotated with the nested carrier admits the mapping's other fields beside the identity.
+    const write: ListWrite<"config.url"> = {
+      config: { url: "https://x.test/h", secret: "$A", content_type: "json" },
+      events: ["push"],
+    };
+    expect(write.config.url).toBe("https://x.test/h");
   });
 });
 

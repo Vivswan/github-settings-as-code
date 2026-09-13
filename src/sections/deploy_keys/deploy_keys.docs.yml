@@ -7,8 +7,8 @@ coverage:
   - area: "[Deploy keys](https://docs.github.com/en/rest/deploy-keys/deploy-keys)"
     notes: >-
       GET/POST /repos/{owner}/{repo}/keys and DELETE /repos/{owner}/{repo}/keys/{key_id}, matched by
-      exact title (a declared title matching several live keys fails loudly naming their ids -
-      GitHub does not enforce title uniqueness). The declared material is a PUBLIC key, so it is
+      exact title (two live keys under one title fail loudly, since GitHub does not enforce title
+      uniqueness). The declared material is a PUBLIC key, so it is
       safe to keep in settings.yml (unlike secrets). Keys are immutable upstream (no update endpoint
       exists), so a changed key or declared read_only is applied as delete + recreate, the autolinks
       pattern (an UNDECLARED read_only survives the recreate: the live value is re-sent, so a

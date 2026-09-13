@@ -425,18 +425,20 @@ export function collidingPairs<T>(
 
 /**
  * Two entries resolving to one natural key would fight each other on every run. Every collision is
- * collected and reported once (each against the first entry under its key), so N duplicates cost one run to discover.
+ * collected and reported once (each against the first entry under its key), so N duplicates cost one run
+ * to discover. `what` names the resource when "<section> entry" understates it (a nested list's items).
  */
 export function rejectDuplicates<T>(
   section: SectionMeta,
   items: readonly T[],
   keyOf: (item: T) => string,
   describe: (item: T) => string,
+  what = `${section.key} entry`,
 ): void {
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {
     throw new Error(
-      `${section.key}: the settings file declares entries that name the same ${section.key} entry: ${collisions.join("; ")}. Keep exactly one entry per resource`,
+      `${section.key}: the settings file declares entries that name the same ${what}: ${collisions.join("; ")}. Keep exactly one entry per resource`,
     );
   }
 }

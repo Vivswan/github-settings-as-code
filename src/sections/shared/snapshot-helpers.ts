@@ -10,7 +10,6 @@ import type { UndeclaredPolicyList } from "../../types.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { collidingPairs } from "../contract/requests.js";
 
 /** The zod internals the projection walks: the def discriminator and its children. */
 interface ProjectionDef {
@@ -120,23 +119,20 @@ function project(schema: z.ZodType, live: unknown): unknown {
 }
 
 /**
- * Refuse a live list holding two resources under one identity (GitHub allows repeated deploy-key
- * titles and hook urls): the planner manages one resource per identity and would refuse the
- * snapshot's own file, so the snapshot fails here, naming the pairs, instead of emitting it.
+ * The ONE wording for a live resource, key, or entry a snapshot reads but does not declare: the label,
+ * then the reason (a denied read, an inherited ruleset, a role no declaration plans as), then what the
+ * operator can do about it when there is something.
  */
-export function rejectLiveDuplicates<T>(
-  section: SectionMeta,
-  noun: string,
-  items: readonly T[],
-  keyOf: (item: T) => string,
-  describe: (item: T) => string,
-): void {
-  const collisions = collidingPairs(items, keyOf, describe);
-  if (collisions.length > 0) {
-    throw new Error(
-      `${section.key}: GitHub holds ${noun}s that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so the snapshot cannot declare them; delete all but one of each on GitHub, then snapshot again`,
-    );
-  }
+export function leftOutOfSnapshot(label: string, reason: string): string {
+  return `${label}: left out of the snapshot - ${reason}`;
+}
+
+/**
+ * The ONE wording for a secret a snapshot declares as a `$NAME` reference because GitHub never
+ * reveals its value: `what` names it ("DEPLOY_TOKEN", "the webhook secret").
+ */
+export function unreadableSecretNote(label: string, what: string, variable: string): string {
+  return `${label}: value of ${what} is not readable; export it into the environment as ${variable} before apply`;
 }
 
 /**
@@ -156,7 +152,7 @@ export async function readOrNote<T>(
     return { value: await read() };
   } catch (error) {
     if (error instanceof PermissionDenied && ctx.onMissingPermission.notesDenials) {
-      notes.push(`${label}: left out of the snapshot - ${error.detail}`);
+      notes.push(leftOutOfSnapshot(label, error.detail));
       return { denied: true };
     }
     throw error;

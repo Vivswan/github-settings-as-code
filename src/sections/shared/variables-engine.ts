@@ -3,7 +3,8 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { undeclaredDrift, undeclaredNote } from "../contract/module.js";
+import { liveByIdentity } from "../contract/live.js";
+import { type SectionMeta, undeclaredDrift, undeclaredNote } from "../contract/module.js";
 import type { ExecTools, SectionPlan } from "../contract/plan.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
@@ -94,12 +95,18 @@ function undeclaredVariableDrift(
   });
 }
 
-function liveVariablesByKey(live: readonly LiveVariable[]): Map<string, LiveVariable> {
-  const liveByKey = new Map<string, LiveVariable>();
-  for (const variable of live) {
-    liveByKey.set(variableKey(variable.name), variable);
-  }
-  return liveByKey;
+function liveVariablesByKey(
+  section: SectionMeta,
+  scope: VariablesScopeProse,
+  live: readonly LiveVariable[],
+): Map<string, LiveVariable> {
+  return liveByIdentity(
+    section,
+    scope.noun,
+    live,
+    (variable) => variableKey(variable.name),
+    (variable) => variable.name,
+  );
 }
 
 export async function planVariables<
@@ -107,6 +114,7 @@ export async function planVariables<
   Update extends AnyPlannedOp,
   Remove extends AnyPlannedOp,
 >(
+  section: SectionMeta,
   scope: VariablesPlanScope<Create, Update, Remove>,
   opts: {
     entries: readonly VariableEntry[];
@@ -121,7 +129,7 @@ export async function planVariables<
   const { entries, policy, defaultPolicy } = opts;
   const plan: SectionPlan<Create | Update | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveVariablesByKey(await scope.list());
+  const liveByKey = liveVariablesByKey(section, scope, await scope.list());
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
 
   for (const variable of entries) {

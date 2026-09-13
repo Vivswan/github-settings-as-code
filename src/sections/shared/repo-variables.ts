@@ -229,7 +229,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
         change: deletion.change,
       }),
     };
-    return planVariables(scope, { entries, policy, defaultPolicy });
+    return planVariables(section, scope, { entries, policy, defaultPolicy });
   };
 
   const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {

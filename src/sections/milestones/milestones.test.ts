@@ -36,8 +36,8 @@ describe("milestones", () => {
           payload: { title: "v1", description: "first", state: "closed" },
           describe: 'updating milestone "v1"',
           drift: [
-            'milestones[v1].description: "first" != null',
-            'milestones[v1].state: "closed" != "open"',
+            'milestones[v1].description: declared "first" != live null; apply will set the declared value',
+            'milestones[v1].state: declared "closed" != live "open"; apply will set the declared value',
           ],
           change: 'updated milestone "v1"',
         },
@@ -109,7 +109,7 @@ describe("milestones", () => {
           drift: [
             'milestones[old]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it, detaching it from every issue that carries it; add it to the settings file to keep it',
           ],
-          change: 'DELETED undeclared milestone "old" (detached from every issue that carried it)',
+          change: 'DELETED undeclared milestone "old"',
         },
       ],
       [],
@@ -168,7 +168,7 @@ describe("milestones", () => {
     expect(changes).toEqual([
       'updated milestone "v1.0"',
       'created milestone "v2.0"',
-      'DELETED undeclared milestone "v0.9" (detached from every issue that carried it)',
+      'DELETED undeclared milestone "v0.9"',
     ]);
     expect(notes).toEqual([]);
     expect(api.writes).toEqual([

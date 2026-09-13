@@ -34,10 +34,10 @@ expect:
   outcomes:
     webhooks: drift
   stdout_contains:
-    - 'drift: webhooks["https://ci.example.com/hook"].config.content_type'
-    - compared order-insensitively
-    - 'webhooks["https://ci.example.com/hook"].active: declared false'
-    - cannot be verified
+    - "drift: webhooks[https://ci.example.com/hook].config.content_type"
+    - 'webhooks[https://ci.example.com/hook].events: missing "release"'
+    - "webhooks[https://ci.example.com/hook].active: declared false"
+    - cannot verify
   stdout_lacks:
     - insecure_ssl
   never:
