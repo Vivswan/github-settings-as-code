@@ -9,6 +9,7 @@
 import { Command, CommanderError, Option } from "commander";
 import pc from "picocolors";
 import {
+  executeRun,
   failRun,
   GithubApi,
   INPUT_DECLS,
@@ -24,7 +25,6 @@ import {
   describeCliProblem,
   permissionsFor,
   type Rendered,
-  runConfig,
   validateFile,
 } from "./commands.js";
 import { failInit, type InitConfig, parseInitConfig, runInit } from "./init.js";
@@ -114,7 +114,14 @@ export function buildProgram(options: ProgramOptions): {
   const { host, streams } = options;
   const colors = options.colors ?? pc.isColorSupported;
   const paint = pc.createColors(colors);
-  const execute = options.execute ?? ((cfg, io) => runConfig(cfg, io, host));
+  const execute =
+    options.execute ??
+    ((cfg, io) =>
+      executeRun(cfg, {
+        io,
+        createClient: (token, io, apiVersion) => host.createClient(token, io, apiVersion),
+        describe: describeCliProblem,
+      }));
   const executeInit = options.executeInit ?? ((cfg, io) => runInit(cfg, io, host, paint.bold));
   const envToken = host.env.GITHUB_TOKEN?.trim();
   if (envToken !== undefined && envToken !== "") {

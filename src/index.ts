@@ -60,6 +60,7 @@ export {
   MERGE_RESULT,
   type RunFlowConfig,
 } from "./flows/deliver.js";
+export { executeRun, type RunDeps } from "./flows/execute.js";
 export {
   type ConfigEnv,
   DEFAULT_PRIVATE_REPOS,

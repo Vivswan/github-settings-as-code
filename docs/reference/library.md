@@ -89,7 +89,7 @@ console.log(report.result, report.outcomes.map((o) => `${o.key}: ${o.status}`), 
 
 ### Flows
 
-The run flows the action wraps: `runSingle` (one repository from a local file), `runMulti` (repos-dir, discovery, defaults file), `runMerge` (fold files into one), with `concludeRun`, `concludeMerge`, and `failRun` turning a finished run or its problem into outputs and an exit code. `SingleConfig`, `MultiConfig`, and `MergeConfig` are the inputs the action parses into; `parseConfig` builds one from an input reader and the environment the way the action does.
+`executeRun` is the executor the action and the CLI share: a parsed `RunConfig` plus the face's `RunDeps` (the Io, the client factory, the artifact uploader only the Actions runner has, the problem wording) runs to its exit code. Underneath it, the run flows: `runSingle` (one repository from a local file), `runMulti` (repos-dir, discovery, defaults file), `runMerge` (fold files into one), `runSnapshot` (the live settings of one repository to a file, or of every target to a directory), with `concludeRun`, `concludeMerge`, `concludeSnapshot`, and `failRun` turning a finished run or its problem into outputs and an exit code. `SingleConfig`, `MultiConfig`, `MergeConfig`, and `SnapshotConfig` are the inputs the action parses into; `parseConfig` builds one from an input reader and the environment the way the action does.
 
 ```ts
 import { concludeMerge, failRun, runMerge, silentIo } from "@vivswan/github-settings-as-code";

@@ -1,27 +1,17 @@
 /**
- * What each subcommand does once its inputs are parsed: the engine and merge
- * runs end exactly where the action's do (concludeRun, concludeMerge,
- * failRun), so the exit codes and the outputs are the action's; the two
- * file-only commands and init render a result for the program to print.
+ * What the file-only subcommands and init render for the program to print,
+ * and the CLI's own wording of a problem; check, apply, merge, and snapshot run
+ * through the library's executor from the program.
  */
 
 import {
-  concludeMerge,
-  concludeRun,
-  concludeSnapshot,
   describeProblem,
-  failRun,
   type GithubClient,
   INPUT_DECLS,
   type Io,
   PRIVATE_REPORT_CHANNELS,
   type Problem,
-  type RunConfig,
   readSettingsFile,
-  runMerge,
-  runMulti,
-  runSingle,
-  runSnapshot,
   SECTIONS,
   type SectionModule,
   sectionGrant,
@@ -40,33 +30,6 @@ export interface Rendered {
   readonly code: number;
   readonly lines: readonly string[];
   readonly json: unknown;
-}
-
-/** Run a parsed config to its conclusion; the CLI has no artifact uploader, so that channel fails loudly. */
-export async function runConfig(cfg: RunConfig, io: Io, host: CliHost): Promise<number> {
-  if (cfg.kind === "merge") {
-    return runMerge(cfg, io).match(
-      (merged) => concludeMerge(io, merged),
-      (problem) => failRun(io, problem),
-    );
-  }
-  const api = host.createClient(cfg.token, io, cfg.apiVersion);
-  if (cfg.kind === "snapshot") {
-    return runSnapshot(api, cfg, io).match(
-      (finished) => concludeSnapshot(io, finished),
-      (problem) => failRun(io, problem),
-    );
-  }
-  if (cfg.kind === "multi") {
-    return runMulti(api, cfg, io).match(
-      (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),
-      (problem) => failRun(io, problem),
-    );
-  }
-  return runSingle(api, cfg, io).match(
-    (target) => concludeRun(io, { kind: "single", mode: cfg.mode, target }),
-    (problem) => failRun(io, problem),
-  );
 }
 
 /** The section modules a validated document declares, in execution order. */

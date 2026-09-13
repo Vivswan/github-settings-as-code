@@ -1,16 +1,10 @@
 import {
-  type ArtifactUploader,
-  concludeMerge,
-  concludeRun,
-  concludeSnapshot,
+  executeRun,
   failRun,
   GithubApi,
   type GithubClient,
   type Io,
-  runMerge,
-  runMulti,
-  runSingle,
-  runSnapshot,
+  type RunDeps,
 } from "../index.js";
 import { actionsArtifactUploader } from "./artifact.js";
 import { parseActionConfig } from "./inputs.js";
@@ -20,40 +14,17 @@ import { actionsIo } from "./io.js";
 export async function run(overrides?: {
   api?: GithubClient;
   io?: Io;
-  uploader?: ArtifactUploader;
+  uploader?: RunDeps["uploader"];
 }): Promise<number> {
   const io = overrides?.io ?? actionsIo;
-  const uploader = overrides?.uploader ?? actionsArtifactUploader;
-
-  const parsed = parseActionConfig();
-  if (parsed.isErr()) {
-    return failRun(io, parsed.error);
-  }
-  const cfg = parsed.value;
-
-  if (cfg.kind === "merge") {
-    return runMerge(cfg, io).match(
-      (merged) => concludeMerge(io, merged),
-      (problem) => failRun(io, problem),
-    );
-  }
-  const api = overrides?.api ?? new GithubApi({ token: cfg.token, io, apiVersion: cfg.apiVersion });
-
-  if (cfg.kind === "snapshot") {
-    return runSnapshot(api, cfg, io).match(
-      (finished) => concludeSnapshot(io, finished),
-      (problem) => failRun(io, problem),
-    );
-  }
-  if (cfg.kind === "multi") {
-    return runMulti(api, cfg, io, uploader).match(
-      (targets) => concludeRun(io, { kind: "multi", mode: cfg.mode, targets }),
-      (problem) => failRun(io, problem),
-    );
-  }
-
-  return runSingle(api, cfg, io, uploader).match(
-    (target) => concludeRun(io, { kind: "single", mode: cfg.mode, target }),
-    (problem) => failRun(io, problem),
+  const deps: RunDeps = {
+    io,
+    createClient: (token, io, apiVersion) =>
+      overrides?.api ?? new GithubApi({ token, io, apiVersion }),
+    uploader: overrides?.uploader ?? actionsArtifactUploader,
+  };
+  return parseActionConfig().match(
+    (cfg) => executeRun(cfg, deps),
+    async (problem) => failRun(io, problem),
   );
 }
