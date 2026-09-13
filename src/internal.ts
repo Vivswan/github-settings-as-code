@@ -47,8 +47,7 @@ export {
   type SnapshotFileConfig,
   snapshotFileDestination,
 } from "./flows/inputs.js";
-export { foldLayers } from "./flows/layers.js";
-export { renderMergedYaml } from "./flows/library.js";
+export { type FoldedLayers, foldLayers, renderMergedYaml } from "./flows/layers.js";
 export {
   DEFAULT_SETTINGS_FILE,
   type ResolvedTargets,

@@ -1,6 +1,7 @@
 /** The action-side boundary of mode: merge; nothing here reaches GitHub. */
 
 import { ok, Result } from "neverthrow";
+import { stringify as stringifyYaml } from "yaml";
 import {
   type Layer,
   type Layering,
@@ -62,16 +63,32 @@ function standaloneView(doc: unknown): unknown {
  */
 const EVERY_SECTION = SectionSelection.ALL;
 
-/** A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into a valid one. */
+/**
+ * The merged document exactly as mode: merge writes it to merged-file. A node a layer aliased (a YAML anchor reused by
+ * a hundred branches) is written per occurrence: aliases would trip the reader's alias cap on the next run.
+ */
+export function renderMergedYaml(document: Readonly<Record<string, unknown>>): string {
+  return stringifyYaml(document, { aliasDuplicateObjects: false });
+}
+
+export interface FoldedLayers {
+  /** The fold as validation parsed it: the branded document every other verb takes. */
+  settings: ValidatedSettings;
+  notices: OptOutNotice[];
+  /** The fold itself rendered, so a layer's key order is the file's: validation judges the fold and never re-serializes it. */
+  yaml: string;
+}
+
+/**
+ * A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into
+ * a valid one. The fold, not the validated parse, is what is written: zod orders keys as the schema declares them.
+ */
 export function foldLayers(
   layers: readonly Layer[],
   sourceLabel: string,
   layering: Layering,
   io: Io,
-): Result<
-  { settings: ValidatedSettings; notices: OptOutNotice[] },
-  SettingsProblem | LayerProblem
-> {
+): Result<FoldedLayers, SettingsProblem | LayerProblem> {
   return Result.combine(
     layers.map((layer) =>
       validateSettingsDoc(standaloneView(layer.doc), layer.name, EVERY_SECTION, io),
@@ -82,6 +99,8 @@ export function foldLayers(
       validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, io).map((settings) => ({
         settings,
         notices: merged.notices,
+        // Validation just proved the fold a plain mapping of section keys: the directives were consumed, and any other key refused.
+        yaml: renderMergedYaml(merged.settings as Record<string, unknown>),
       })),
     );
 }

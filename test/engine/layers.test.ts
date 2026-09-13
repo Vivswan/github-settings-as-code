@@ -109,6 +109,26 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(merge(layers)).toEqual({ settings: { pages: null }, notices: [] });
   });
 
+  test.each([
+    ["one layer", [layer("repo", { repository: { has_wiki: false }, labels: null })]],
+    [
+      "a stack declaring it nowhere below",
+      [layer("fleet", { repository: { has_wiki: false } }), layer("repo", { labels: null })],
+    ],
+  ])(
+    "a null on a section that has no null value, over %s, opts out of nothing: it drops, with no notice",
+    (_case, layers) => {
+      expect(merge(layers)).toEqual({ settings: { repository: { has_wiki: false } }, notices: [] });
+    },
+  );
+
+  test("a null on an unknown key over nothing stays as written for the validator to name", () => {
+    expect(merge([layer("repo", { typo: null })])).toEqual({
+      settings: { typo: null },
+      notices: [],
+    });
+  });
+
   test("arrays outside the keyed sections replace wholesale, whatever the run layering", () => {
     const layers = [
       layer("fleet", {
@@ -533,6 +553,19 @@ describe("mergeLayers: the undeclared knob across layers", () => {
       },
       notices: [],
     });
+  });
+
+  test("a resolved policy leads its wrapper, where an author's own sits after the fold", () => {
+    const result = merge([
+      layer("fleet", { labels: [{ name: "a" }] }),
+      layer("repo", { rulesets: { entries: [{ name: "r" }], _undeclared: "delete" } }),
+    ]);
+    if ("error" in result) {
+      throw new Error(result.error);
+    }
+    const settings = result.settings as Record<string, object | undefined>;
+    expect(Object.keys(settings.labels ?? {})).toEqual(["_undeclared", "entries"]);
+    expect(Object.keys(settings.rulesets ?? {})).toEqual(["_undeclared", "entries"]);
   });
 
   test("a knobbed section only a lower layer declares reaches the result resolved", () => {

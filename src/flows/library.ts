@@ -5,7 +5,6 @@
  */
 
 import type { Result } from "neverthrow";
-import { stringify as stringifyYaml } from "yaml";
 import type { RepoRef } from "../discovery/targets.js";
 import type { Layer, Layering, OptOutNotice } from "../engine/layers.js";
 import {
@@ -78,7 +77,7 @@ export interface MergeOptions {
   io?: Io;
 }
 
-/** The fold's result: the merged document, its opt-out notices, and the file text mode: merge writes. */
+/** The fold's result: the merged document, its opt-out notices, and the file text mode: merge writes, byte for byte. */
 export interface MergeReport {
   settings: ValidatedSettings;
   notices: OptOutNotice[];
@@ -97,12 +96,7 @@ export function mergeSettings(
     options.source ?? MERGED_SOURCE,
     options.layering ?? "merge",
     out.io,
-  ).map((folded) => ({ ...folded, yaml: renderMergedYaml(folded.settings), log: out.log() }));
-}
-
-/** The merged document exactly as mode: merge writes it to merged-file. */
-export function renderMergedYaml(settings: ValidatedSettings): string {
-  return stringifyYaml(settings);
+  ).map((folded) => ({ ...folded, log: out.log() }));
 }
 
 /** The knobs a run over one repository takes, each defaulted as the action's input of the same name. */

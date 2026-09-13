@@ -67,9 +67,9 @@ The examples continue from one another and form one program (the docs tests comp
 | `ValidateOptions` | type | `source`, `sections`, `io` |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
-| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: merge` does: each layer validated alone, folded, validated again |
+| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: merge` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: merge` writes, the fold in the layers' own key order (validation judges the fold and never re-serializes it) |
 | `MergeOptions` | type | `source`, `layering`, `io` |
-| `MergeReport` | type | `settings`, `notices` (one per null opt-out), `yaml` (the file text `merged-file` gets), `log` |
+| `MergeReport` | type | `settings`, `notices` (one per null that deleted a lower declaration; a top-level null that met nothing drops without one, or stays where null is the section's value: `pages`, `interaction_limits`), `yaml` (the file text `merged-file` gets), `log` |
 | `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
 | `Layering` | type | `"merge"` or `"replace"`: how the list sections with a layering key fold |
 | `OptOutNotice` | type | A `null` that deleted what a lower layer declared: the layer and the path |

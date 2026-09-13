@@ -9,7 +9,6 @@ import type { Io } from "../io.js";
 import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
-import { renderMergedYaml } from "./library.js";
 import { readEntries, renameEntry, writeReplacing } from "./settings-write.js";
 
 export interface MergeConfig {
@@ -48,7 +47,7 @@ export function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge, Proble
       for (const notice of folded.notices) {
         io.annotate("notice", describeOptOut(notice));
       }
-      return writeReplacing(cfg.mergedFile, renderMergedYaml(folded.settings))
+      return writeReplacing(cfg.mergedFile, folded.yaml)
         .mapErr(
           (reason): Problem => ({ code: "merged-file-unwritable", path: cfg.mergedFile, reason }),
         )

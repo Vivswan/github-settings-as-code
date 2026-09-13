@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty-three breaks (the ninth and twenty-third are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback and the renamed `GSAC_RETRY_BASE_MS`, so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-four breaks (the ninth, the twenty-third, and the last are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, and the merged file (it reorders once, and a top-level `null` over nothing drops), so run `mode: check` before the first v3 apply and diff the first v3 merged file. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -31,6 +31,7 @@ Twenty-three breaks (the ninth and twenty-third are for library consumers, the t
 | The `build` branch retires | Every green push appended a packaged commit to the `build` branch; `latest` and the release tags pointed into it | One packaged commit per `main` commit under the tag `build/<position>.<sha7>`, the ten newest kept; `latest`, `@v3`, and `vX.Y.Z` point at them; the branch is deleted once every consumer has repinned | A sha pin into the branch stops resolving when the branch goes; a pin taken from a build tag goes when ten newer commits have been packaged; [section 21](#21-the-build-branch-retires) says what to pin instead |
 | One wording for every face | The command line reworded two remedies and refused `private-report: artifact` on its own; other remedies said "re-run the workflow" | One problem renderer; remedies name the input and its flag; `parseConfig` refuses the artifact channel for a face without an upload (`input-artifact-unsupported`) | No error. A step or script matching an error line by its old text stops matching; [section 22](#22-one-wording-for-every-face) |
 | Library: one owner per refusal, one selection type | `parseConfig(read, env)`; `executeRun` returned a number and took `describe`; `artifact-uploader-missing`; `validateSettings` took a `Set` | `parseConfig(read, env, capabilities)`; `executeRun` returns `{exitCode, fatal?}`; `input-artifact-unsupported`; `SectionSelection` everywhere; `writeReplacing`, `snapshotFileDestination`, the `central-file` role | The call fails to compile, naming the missing argument or member; [section 23](#23-library-one-owner-per-refusal-one-selection-type) |
+| The merged file is the fold, and a null over nothing drops | `mode: merge` wrote the validated parse, keys in the schema's order; `labels: null` with nothing below failed the merge | The fold in the layers' key order, byte for byte what `mergeSettings` returns as `yaml`; the null drops without a notice | No error: a committed merged file reorders once, and a one-layer read of a fleet layer carrying `labels: null` succeeds; [section 24](#24-the-merged-file-is-the-fold-and-a-null-over-nothing-drops) |
 
 ## 1. The defaults-file fallback
 
@@ -339,9 +340,28 @@ For `@vivswan/github-settings-as-code` consumers.
 | `executeRun(cfg, deps): Promise<number>`, with `deps.describe` rewording a fatal problem | `executeRun(cfg, deps): Promise<RunEnd>`, `{ exitCode, fatal? }`; `failRun(io, problem)` takes no wording hook |
 | `validateSettingsDoc(doc, source, onlySections: ReadonlySet<SectionKey>, io)`; `validateSettings(doc, { sections?: ReadonlySet<SectionKey> })` | Both take a `SectionSelection` (`SectionSelection.ALL` for no allowlist) |
 | `parseSnapshotFileConfig(read, env, snapshotFile)` | `parseSnapshotFileConfig(read, env, "settings-file")` reads the destination itself; `snapshotFileDestination(read, "settings-file")` names it before parsing |
-| Every flow wrote its file in place with its own try/catch | `writeReplacing(path, text): Result<void, string>` stages and renames, for the snapshot, the merged file, and init alike |
+| The snapshot staged through `<path>.tmp` and renamed; the merged file and init wrote in place, each with its own try/catch | `writeReplacing(path, text): Result<void, string>` stages and renames for all three |
 | `SettingsFileRole`: `settings-file`, `defaults-file`, `layer` | plus `central-file`, the repos-dir file a multi-repo target is read from |
 
+
+## 24. The merged file is the fold, and a null over nothing drops
+
+Two changes to the document `mode: merge` writes and `mergeSettings` returns as `yaml`; the number of this section may shift as v3 grows.
+
+```text
+v2   repository:                         # zod's order: the schema declares enable_vulnerability_alerts first
+       enable_vulnerability_alerts: true
+       has_issues: true
+     labels: null                        # nothing below declares labels: "labels: ... parsed as null", the merge fails
+
+v3   repository:                         # the layers' order
+       has_issues: true
+       enable_vulnerability_alerts: true
+                                         # no labels key: the null opted out of nothing and dropped, without a notice
+```
+
+- The written file is the fold in the order the layers declared their keys; validation judges the fold and never re-serializes it. A merged file committed under v2 reorders once.
+- A top-level `null` on a section nothing below declares drops, on every section but `pages` and `interaction_limits`, where null is the section's value and stays. v2 refused the merge naming the section, so a one-layer read of a fleet layer carrying `labels: null` failed.
 
 ## Order of operations
 

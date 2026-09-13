@@ -212,9 +212,12 @@ describe("the section selection a library call runs under", () => {
 });
 
 describe("renderMergedYaml", () => {
-  test("is the document's YAML serialization, byte for byte", () => {
-    expect(renderMergedYaml(settings)).toBe(stringifyYaml(settings));
-    expect(renderMergedYaml(settings)).toBe("repository:\n  has_wiki: false\n");
+  test("is the document's YAML serialization, byte for byte, in the document's own key order", () => {
+    const document = { repository: { has_wiki: false, enable_vulnerability_alerts: true } };
+    expect(renderMergedYaml(document)).toBe(stringifyYaml(document));
+    expect(renderMergedYaml(document)).toBe(
+      "repository:\n  has_wiki: false\n  enable_vulnerability_alerts: true\n",
+    );
   });
 });
 
@@ -327,9 +330,58 @@ describe("mergeSettings", () => {
         labels: { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a" }] },
       }),
     );
-    expect(report.yaml).toBe(renderMergedYaml(report.settings));
+    expect(report.yaml).toBe(
+      [
+        "repository:",
+        "  has_wiki: false",
+        "  has_issues: true",
+        "labels:",
+        "  _undeclared: delete",
+        "  entries:",
+        "    - name: bug",
+        "      color: d73a4a",
+        "",
+      ].join("\n"),
+    );
     expect(report.notices).toEqual([]);
     expect(report.log).toEqual([]);
+  });
+
+  test("the file keeps the layers' key order where the validated parse takes the schema's", () => {
+    const report = mergeSettings([
+      {
+        name: "fleet.yml",
+        doc: { repository: { has_issues: true, enable_vulnerability_alerts: true } },
+      },
+    ])._unsafeUnwrap();
+    expect(report.yaml).toBe(
+      "repository:\n  has_issues: true\n  enable_vulnerability_alerts: true\n",
+    );
+    expect(Object.keys(report.settings.repository ?? {})).toEqual([
+      "enable_vulnerability_alerts",
+      "has_issues",
+    ]);
+  });
+
+  test("a node the layer aliases is written per occurrence, never as a YAML anchor the reader would cap", () => {
+    const protection = { enforce_admins: true };
+    const branches = Array.from({ length: 101 }, (_, i) => ({ name: `b${i}`, protection }));
+    const report = mergeSettings([{ name: "fleet.yml", doc: { branches } }])._unsafeUnwrap();
+    expect(report.yaml).not.toMatch(/[&*]/);
+    expect(parseYamlDoc(report.yaml)).toEqual({ branches });
+  });
+
+  test("one layer opting out with null folds to the section absent, with no notice", () => {
+    expect(
+      mergeSettings([{ name: "fleet.yml", doc: { repository: { has_wiki: true }, labels: null } }]),
+    ).toEqual(
+      ok({
+        settings: branded({ repository: { has_wiki: true } }),
+        notices: [],
+        yaml: "repository:\n  has_wiki: true\n",
+        log: [],
+      }),
+    );
   });
 
   test("a null over a declared section is a notice, and an invalid layer is the problem naming that layer", () => {
