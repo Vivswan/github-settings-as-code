@@ -41,9 +41,10 @@ describe("the commit-back push jobs", () => {
           .filter((line) => /\bgit\s+push\b/.test(line))
           .map((line) => ({
             step,
-            // Quotes removed and `${NAME}` written `$NAME`: the word as git receives it, whichever spelling the script used.
-            words: line
-              .split(/[\s;&|()]+/)
+            // The command from `git` to the next shell separator; quotes removed and `${NAME}` written `$NAME`: the words as git
+            // receives them, whichever spelling the script used.
+            words: (line.match(/\bgit\s+push\b[^;&|()]*/)?.[0] ?? "")
+              .split(/\s+/)
               .map((w) => w.replace(/["']/g, "").replace(/\$\{(\w+)\}/g, "$$$1")),
           })),
       );
@@ -57,9 +58,12 @@ describe("the commit-back push jobs", () => {
         expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
           "--force-with-lease=refs/heads/$HEAD_REF:$HEAD_SHA",
         ]);
-        // The lease guards one ref, so the push may write only that ref: the sole refspec's destination is the leased one.
-        const refspecs = words.filter((word) => /^[^-].*:refs\/heads\//.test(word));
-        expect(refspecs).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
+        // The lease guards one ref, so the push may write only that ref: after the options, the operands are the remote and the one refspec.
+        const operands = words
+          .slice(words.indexOf("push") + 1)
+          .filter((word) => !word.startsWith("-"));
+        expect(operands.slice(1)).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
+        expect(operands[0], "the remote is not a URL").toMatch(/^https:\/\//);
         // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
         const forced = words.filter(
           (word) =>
