@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@build";
+const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
 
 interface Step {
   name?: string;
