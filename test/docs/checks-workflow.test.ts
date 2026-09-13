@@ -69,6 +69,26 @@ function cacheKeyOf(step: Step, path: string): string {
   return key as string;
 }
 
+/** The bodies of the key's `${{ }}` expressions, read as GitHub's lexer does: a `}}` inside a single-quoted string closes nothing. */
+function expressionsOf(key: string): string[] {
+  const bodies: string[] = [];
+  for (let at = key.indexOf("${{"); at !== -1; at = key.indexOf("${{", at)) {
+    let end = at + 3;
+    let quoted = false;
+    for (; end < key.length; end++) {
+      if (key[end] === "'") {
+        quoted = !quoted; // a doubled quote inside a string toggles twice and stays quoted
+      } else if (!quoted && key.startsWith("}}", end)) {
+        break;
+      }
+    }
+    expect(end < key.length, `unterminated expression in cache key: ${key}`).toBe(true);
+    bodies.push(key.slice(at + 3, end));
+    at = end + 2;
+  }
+  return bodies;
+}
+
 /**
  * The quoted file patterns of the key's hashFiles(...) call. The call must BE the `${{ }}` expression, bare or as the one argument of a
  * literal format(): any other expression around it (`false && hashFiles(...) || 'v1'`) can leave the key constant while the call still
@@ -80,8 +100,8 @@ function hashFilesPatterns(key: string): string[] {
     String.raw`^\s*(?:${HASH_CALL}|format\(\s*'[^']*\{0\}[^']*'\s*,\s*${HASH_CALL}\s*\))\s*$`,
   );
   const match =
-    [...key.matchAll(/\$\{\{([\s\S]*?)\}\}/g)]
-      .map((m) => (m[1] ?? "").match(WHOLE))
+    expressionsOf(key)
+      .map((body) => body.match(WHOLE))
       .map((m) => (m ? [m[0], m[1] ?? m[2] ?? ""] : null))
       .find((m) => m) ?? null;
   expect(match, `cache key has no expression that is a hashFiles call: ${key}`).not.toBeNull();
@@ -183,6 +203,11 @@ describe("the fetch-test-artifacts cache keys", () => {
     [
       "a hashFiles call short-circuited inside the expression",
       keyed("false && hashFiles('.github/scripts/fetch-graphql-schema.ts') || 'v1'"),
+      /no expression that is a hashFiles call/,
+    ],
+    [
+      "a hashFiles call spelled inside a string literal with its own fake delimiters",
+      keyed(`'}}\${{ hashFiles('.github/scripts/fetch-graphql-schema.ts') }}'`),
       /no expression that is a hashFiles call/,
     ],
   ])("%s fails the guard (negative control)", (_, key, message) => {
