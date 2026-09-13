@@ -17,6 +17,7 @@ import {
   parseConfig,
 } from "../../src/index.js";
 import { MockApi, type Route } from "../mock-api.js";
+import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { runCli } from "./streams.js";
 
@@ -36,7 +37,6 @@ interface Case {
   readonly ends: { readonly code: number; readonly result: string };
 }
 
-const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 const TOKEN = "ghp_equivalence_token";

@@ -3,9 +3,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { checkCompatMarkers } from "../../.github/scripts/check-compat-markers.js";
+import { ROOT } from "../root.js";
 import { tempDirTest, withTempDir } from "../temp-dir.js";
 
-const SCRIPT = join(import.meta.dir, "..", "..", ".github", "scripts", "check-compat-markers.ts");
+const SCRIPT = join(ROOT, ".github", "scripts", "check-compat-markers.ts");
 
 const tempTest = tempDirTest("compat-markers-");
 

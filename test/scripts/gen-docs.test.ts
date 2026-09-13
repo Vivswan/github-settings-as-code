@@ -14,9 +14,8 @@ import {
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
+import { ROOT } from "../root.js";
 import { relocatedRegion } from "./relocated-region.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
 
 describe("renderSectionsTable", () => {
   test("renders one row per section, derived cells around the authored ones", () => {

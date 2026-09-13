@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
 import { writeSummary } from "../../src/flows/summary.js";
+import { ROOT } from "../root.js";
 import { tempDirTest } from "../temp-dir.js";
 
 /** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
@@ -25,7 +26,7 @@ describe("the Io port boundary", () => {
 
   test("only src/action/ names @actions/core", () => {
     // Every other layer reaches the runner through the Io port, so redaction and capture have one place to stand.
-    const srcDir = join(import.meta.dir, "..", "..", "src");
+    const srcDir = join(ROOT, "src");
     const files = readdirSync(srcDir, { recursive: true }) as string[];
     const offenders: string[] = [];
     let scanned = 0;

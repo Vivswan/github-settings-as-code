@@ -12,10 +12,10 @@ import {
   sectionsForFiles,
 } from "../../.github/scripts/changed-sections.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { ROOT } from "../root.js";
 import { tempDirTest } from "../temp-dir.js";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..");
-const SRC_DIR = join(REPO_ROOT, "src");
+const SRC_DIR = join(ROOT, "src");
 const SECTIONS_DIR = join(SRC_DIR, "sections");
 
 function changed(...paths: string[]): ChangedFile[] {
@@ -80,7 +80,7 @@ describe("changed-sections derived fan-out", () => {
   test("the real tree derives exactly the layout's fan-out for every shared file", () => {
     // A canary over the whole map: a new or dropped importer, a new or deleted shared file, or a hub edge reopening surfaces here and forces a
     // decision.
-    expect(deriveSharedFanOut(REPO_ROOT)).toEqual({
+    expect(deriveSharedFanOut(ROOT)).toEqual({
       "roles.ts": inKeyOrder("collaborators", "teams"),
       "secrets-engine.ts": inKeyOrder(
         "environments",

@@ -27,6 +27,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 
 - A test's temp directory lives inside the test body: `withTempDir()` or `tempDirTest()` from `test/temp-dir.ts` (try/finally, removed on every exit path); no afterEach or afterAll hook cleans up.
 - An Io a test records through is `captureIo()` from `test/io/capture.ts`: every channel in its own list and in one ordered event log.
+- A repository-relative path in a test resolves from `ROOT` in `test/root.ts`; a file beside the test resolves from `import.meta.dir`.
 
 ## End-to-end tests
 

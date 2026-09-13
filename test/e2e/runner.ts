@@ -23,6 +23,7 @@ import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import type { OutputName } from "../../src/io.js";
+import { ROOT } from "../root.js";
 import {
   assertApplyIdempotent,
   captureRerun,
@@ -37,7 +38,6 @@ import { type ServerOptions, startMockServer } from "./mock/server.js";
 import { sharedValidator } from "./openapi/validate.js";
 import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "./schema.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 /**
  * The production bundle command, pinned verbatim so the Bun.build call below cannot drift from it: a
  * flag added to build:bundle (minify, sourcemap, define) would make e2e exercise a different artifact

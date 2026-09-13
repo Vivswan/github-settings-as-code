@@ -16,8 +16,7 @@ import { endpointPath, type Route } from "../../src/sections/contract/endpoints.
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "../docs/claims.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 /** `text` as a regex source matching itself literally. */
 function escapeRe(text: string): string {

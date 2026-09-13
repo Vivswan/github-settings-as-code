@@ -28,6 +28,7 @@ import {
   stablePublishVerdict,
   verifyPublishedRefs,
 } from "../../.github/scripts/release-pipeline.js";
+import { ROOT } from "../root.js";
 import {
   ANCHOR_PUSH,
   appendedSha,
@@ -1340,9 +1341,7 @@ describe("anchorCheck", () => {
 
 describe("release configuration contract", () => {
   test("the committed config pins the tagless-draft knobs (shape only; the flow itself is not exercised here)", () => {
-    const config = JSON.parse(
-      readFileSync(join(import.meta.dir, "../../release-please-config.json"), "utf8"),
-    ) as {
+    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
       "skip-github-release"?: unknown;
       "include-component-in-tag"?: unknown;
       "last-release-sha"?: unknown;
@@ -1496,7 +1495,7 @@ describe("prereleaseVersion", () => {
     env: Record<string, string | undefined>,
     ...args: string[]
   ): Promise<{ stdout: string; stderr: string; status: number }> {
-    const script = join(import.meta.dir, "..", "..", ".github", "scripts", "release-pipeline.ts");
+    const script = join(ROOT, ".github", "scripts", "release-pipeline.ts");
     const child = Bun.spawn([process.execPath, script, ...args], {
       cwd,
       env: Object.fromEntries(

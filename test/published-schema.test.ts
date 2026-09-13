@@ -10,8 +10,8 @@ import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
 import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
+import { ROOT } from "./root.js";
 
-const ROOT = join(import.meta.dir, "..");
 const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
   $id?: string;
   definitions: Record<string, Record<string, unknown>>;

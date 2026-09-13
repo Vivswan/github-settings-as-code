@@ -14,8 +14,8 @@ import {
 } from "../../src/sections/contract/endpoints.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
+import { ROOT } from "../root.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const coverage = renderCoverage(SECTIONS, DOCS, COVERAGE_DATA);
 
 describe("COVERAGE path citations", () => {

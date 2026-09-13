@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
 import { ARCHITECTURE_PATH, lintArchitecture } from "../../.github/scripts/arch-lint.js";
+import { ROOT } from "../root.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const ENTRY = "src/index.ts";
 
 /** Every name src/index.ts exports, runtime and type-only alike, sorted. */

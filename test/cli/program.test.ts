@@ -13,10 +13,10 @@ import type { CliHost } from "../../src/cli/commands.js";
 import { CLI_COMMANDS, main } from "../../src/cli/program.js";
 import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
+import { ROOT } from "../root.js";
 import { tempDirTest, withTempDir } from "../temp-dir.js";
 import { memoryStream, runCli } from "./streams.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 const TOKEN = "ghp_cli_test_token";

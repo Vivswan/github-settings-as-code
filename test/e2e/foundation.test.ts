@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { ROOT } from "../root.js";
 import {
   ADMIN_OWNER,
   ADMIN_REPO,
@@ -482,12 +483,11 @@ describe("harness identity constants", () => {
   test("section mock fragments mint identity from state.slug, never the harness constants", async () => {
     // Urls minted from ADMIN_SLUG were served verbatim for multi-repo targets in five fragments, so the
     // class is banned at the import boundary: a fragment always has the owning state in scope.
-    const root = join(import.meta.dir, "..", "..");
     const offenders: string[] = [];
     let fragments = 0;
-    for await (const file of new Bun.Glob("src/sections/*/mock.ts").scan(root)) {
+    for await (const file of new Bun.Glob("src/sections/*/mock.ts").scan(ROOT)) {
       fragments++;
-      const text = await Bun.file(join(root, file)).text();
+      const text = await Bun.file(join(ROOT, file)).text();
       if (/from "[^"]*\/test\/e2e\/constants\.js"/.test(text)) {
         offenders.push(file);
       }

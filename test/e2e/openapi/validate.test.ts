@@ -116,7 +116,7 @@ describe("toJsonSchema", () => {
   test("leaves primitives untouched", () => {
     expect(toJsonSchema("s")).toBe("s");
     expect(toJsonSchema(3)).toBe(3);
-    expect(toJsonSchema(null)).toBe(null);
+    expect(toJsonSchema(null)).toBeNull();
   });
 
   test("relaxed variant rewrites oneOf to anyOf (widened branches may overlap)", () => {

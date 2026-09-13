@@ -17,9 +17,9 @@ import {
   SectionSelection,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
+import { ROOT } from "../root.js";
 import { tempDirTest } from "../temp-dir.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 
 type SingleConfig = Extract<RunConfig, { kind: "single" }>;

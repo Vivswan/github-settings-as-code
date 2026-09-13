@@ -9,6 +9,7 @@ import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
+import { ROOT } from "../root.js";
 import { tempDirTest, withTempDir } from "../temp-dir.js";
 
 // A capturing Io replaces the @actions/core sink, so a green suite prints no raw workflow commands and the failure-path tests assert the exact
@@ -542,7 +543,7 @@ describe("run in mode: merge", () => {
     "GITHUB_REPOSITORY",
   ];
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
-  const FIXTURES = join(import.meta.dir, "..", "fixtures", "layers");
+  const FIXTURES = join(ROOT, "test", "fixtures", "layers");
   const layer = (name: string) => join(FIXTURES, name);
   const tempTest = tempDirTest("merge-mode-");
 

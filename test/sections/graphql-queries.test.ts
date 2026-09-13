@@ -14,8 +14,9 @@ import {
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../src/sections/branches/graphql-rules.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
+import { ROOT } from "../root.js";
 
-const SCHEMA_PATH = join(import.meta.dir, "..", "e2e", "graphql", "schema.docs.graphql");
+const SCHEMA_PATH = join(ROOT, "test", "e2e", "graphql", "schema.docs.graphql");
 const FETCH_COMMAND = "bun .github/scripts/fetch-graphql-schema.ts";
 
 const schemaAvailable = existsSync(SCHEMA_PATH);

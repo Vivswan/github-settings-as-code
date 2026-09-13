@@ -3,8 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GENERATED_OUTPUTS, generatedPaths } from "../../.github/scripts/generated.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 /** A generated-region marker in either comment syntax, opening a line. */
 const BEGIN_MARKER = /^[ \t]*(?:<!-- |# )BEGIN GENERATED: /m;
