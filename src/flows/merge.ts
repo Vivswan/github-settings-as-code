@@ -10,7 +10,7 @@ import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedMerge } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { renderMergedYaml } from "./library.js";
-import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./settings-write.js";
+import { readEntries, renameEntry, writeReplacing } from "./settings-write.js";
 
 export interface MergeConfig {
   settingsFiles: string[];
@@ -21,19 +21,19 @@ export interface MergeConfig {
 const MERGED_LABEL = "the merged settings document";
 
 /**
- * The destination's landing names (the rename target, and the referent unless the leaf is a link) against every
- * name a layer is read or written through (its rename target AND its referent, since the fold reads a link's referent
- * and the write may replace the link itself). So "./a.yml", "a.yml", a spelling through a symlinked directory (macOS's
- * /tmp for /private/tmp), a case alias of an existing layer, a layer that IS the link at the destination, and a layer
- * READ through a link to the destination (`alias.yml -> repo.yml` folded into `repo.yml`) all collide, while
- * `out.yml -> layer.yml` with `layer.yml` as the layer does not: the write replaces the link and leaves the layer
- * intact. Guarded beside the write: the next run would fold the merged document as if it were a layer.
+ * An input layer is never the destination, under any name the read follows or the rename reaches: the entry the
+ * rename replaces (the leaf under its resolved parent, a link there unfollowed) against every entry each layer's read
+ * follows (each component, every link hop, the final file), compared by identity, so spellings, directory links, case
+ * aliases, and link chains all meet. `out.yml -> layer.yml` as the destination with `layer.yml` as the layer is
+ * admitted: the write replaces the link and leaves the layer intact. Guarded beside the write: the next run would
+ * fold the merged document as if it were a layer.
  */
 function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
-  const landings = new Set(landingNames(cfg.mergedFile));
-  const index = cfg.settingsFiles.findIndex((layer) =>
-    [renameTarget(layer), canonicalPath(layer)].some((name) => landings.has(name)),
-  );
+  const replaced = renameEntry(cfg.mergedFile);
+  if (replaced === null) {
+    return ok();
+  }
+  const index = cfg.settingsFiles.findIndex((layer) => readEntries(layer).has(replaced));
   const layer = cfg.settingsFiles[index];
   return layer === undefined
     ? ok()

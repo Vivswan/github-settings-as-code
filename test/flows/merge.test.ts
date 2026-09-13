@@ -127,6 +127,54 @@ describe("runMerge writes through the shared writer", () => {
       expect(readFileSync(join(dir, "repo.yml"), "utf8")).toBe(REPO);
     }));
 
+  test.each<[string, (dir: string) => { layer: string; mergedFile: string }]>([
+    [
+      "a chain: the destination is a link in the middle of the layer's read",
+      (d) => {
+        symlinkSync("repo.yml", join(d, "out.yml"));
+        symlinkSync("out.yml", join(d, "alias.yml"));
+        return { layer: join(d, "alias.yml"), mergedFile: join(d, "out.yml") };
+      },
+    ],
+    [
+      "a directory link the layer is read through",
+      (d) => {
+        symlinkSync(".", join(d, "folder"));
+        return { layer: join(d, "folder", "repo.yml"), mergedFile: join(d, "folder") };
+      },
+    ],
+  ])("%s is refused: the write would change what the next run reads", (_case, shape) =>
+    withTempDir("run-merge-", (dir) => {
+      twoLayers(dir);
+      const { layer, mergedFile } = shape(dir);
+      const layers = [join(dir, "fleet.yml"), layer];
+      expect(merge(layers, mergedFile)).toEqual(
+        err({ code: "merged-file-is-layer" as const, mergedFile, index: 1, layer }),
+      );
+      expect(readFileSync(join(dir, "repo.yml"), "utf8")).toBe(REPO);
+    }),
+  );
+
+  test("a merged-file that spells a layer's link in another case is refused on a case-insensitive filesystem", () =>
+    withTempDir("run-merge-", (dir) => {
+      writeFileSync(join(dir, "Probe"), "");
+      const caseInsensitive = existsSync(join(dir, "probe"));
+      twoLayers(dir);
+      const alias = join(dir, "alias.yml");
+      symlinkSync("repo.yml", alias);
+      const layers = [join(dir, "fleet.yml"), alias];
+      const mergedFile = join(dir, "ALIAS.YML");
+      const merged = merge(layers, mergedFile);
+      if (caseInsensitive) {
+        expect(merged).toEqual(
+          err({ code: "merged-file-is-layer" as const, mergedFile, index: 1, layer: alias }),
+        );
+        expect(lstatSync(alias).isSymbolicLink()).toBe(true);
+      } else {
+        expect(merged).toEqual(ok({ layers, mergedFile }));
+      }
+    }));
+
   test("a layer that IS the link at the destination is refused: the rename would replace the layer's own entry", () =>
     withTempDir("run-merge-", (dir) => {
       twoLayers(dir);
