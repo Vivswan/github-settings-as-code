@@ -550,6 +550,29 @@ describe("runMulti redaction (private-repos: redact)", () => {
       "private repository #2",
     ]);
   });
+
+  test("a private repository listed twice is deduped under its placeholder; neither notice half names the slug", () =>
+    withTempDir("sac-multi-", async (dir) => {
+      // The repos-dir file holds the slug in its path, so the notice's central half must read generically under redaction too.
+      mkdirSync(join(dir, "o"));
+      writeFileSync(join(dir, "o", "priv.yml"), "repository:\n  has_wiki: false\n");
+      const api = new MockApi({
+        "GET /repos/o/priv": { data: { has_wiki: false, private: true } },
+      });
+      const { io, annotations } = captureIo();
+      const targets = await runTargets(
+        api,
+        cfg({ reposDir: dir, reposInput: "o/priv", mode: "check", privateRepos: "redact" }),
+        io,
+      );
+      expect(targets.map((t) => [t.display, t.source, redacted(t)])).toEqual([
+        ["private repository #1", "central", true],
+      ]);
+      expect(annotations).toContain(
+        'notice: private repository #1: using the central file a repos-dir file; the entry for the same repository from the "repos" input is ignored',
+      );
+      expect(annotations.join("\n")).not.toContain("o/priv");
+    }));
 });
 
 describe("runMulti private-report: issue wiring", () => {

@@ -30,6 +30,10 @@ interface SectionRow {
   detail: string[];
 }
 
+function repositoryCount(count: number): string {
+  return `${count} ${count === 1 ? "repository" : "repositories"}`;
+}
+
 function outcomeRows(outcomes: readonly SectionRow[]): string[] {
   const rows = ["| Section | Status | Detail |", "|---|---|---|"];
   for (const outcome of outcomes) {
@@ -74,7 +78,7 @@ export function writeMergeSummary(
 
 export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode: string): void {
   const lines = [
-    `## github-settings-as-code (${mode}, ${views.length} repositories)`,
+    `## github-settings-as-code (${mode}, ${repositoryCount(views.length)})`,
     "",
     "| Repository | Source | Result |",
     "|---|---|---|",
@@ -104,7 +108,7 @@ export function writeSnapshotDirSummary(
 ): void {
   const written = views.filter((view) => view.file !== undefined).length;
   const lines = [
-    `## github-settings-as-code (snapshot, ${views.length} repositories)`,
+    `## github-settings-as-code (snapshot, ${repositoryCount(views.length)})`,
     "",
     written === 0
       ? `No snapshot was written under ${markdownCell(snapshotDir)}.`
