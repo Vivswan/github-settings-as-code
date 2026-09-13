@@ -35,9 +35,15 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     // A step without a condition runs on success() only, so a dropped `if:` files nothing on the night that fails.
     expect(report?.if).toBe("failure()");
     expect(upload?.if).toBe(report?.if);
-    expect(String(report?.with?.["artifact-name"])).toBe(String(upload?.with?.name));
+    // upload-artifact refuses a duplicate name, so a re-run attempt uploads under its own: the name carries the attempt number.
+    const name = upload?.with?.name;
+    expect(
+      typeof name === "string" && name.includes("github.run_attempt"),
+      `the upload name ${JSON.stringify(name)} does not vary by run attempt`,
+    ).toBe(true);
+    expect(report?.with?.["artifact-name"]).toBe(name);
     const dir = String(upload?.with?.path).replace(/\/$/, "");
-    expect(dir).toBe(String(report?.with?.["artifacts-dir"]));
+    expect(report?.with?.["artifacts-dir"]).toBe(dir);
     // The runner joins the directory from ROOT and quoted segments; the workflow's path must be exactly those segments, in order.
     const segments = dir
       .split("/")
@@ -68,6 +74,19 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
       read.filter((id) => !ids.has(id)),
       `${file}#${job} reads steps that do not exist`,
     ).toEqual([]);
+  });
+
+  test("the dispatched issue is the one the report step filed, and only when it filed one", () => {
+    const dispatch = steps.find((s) => /\bgh workflow run\b/.test(s.run ?? ""));
+    expect(dispatch, "no dispatch step").toBeDefined();
+    expect(report?.id, "the report step has no id to read an output from").toBeDefined();
+    const output = `steps.${report?.id}.outputs.issue-number`;
+    // The field's value is a shell variable the step's env fills from the report step's output.
+    const variable = (dispatch?.run ?? "").match(/["']?issue=\$\{?([A-Z_]+)\}?/)?.[1] ?? "";
+    expect(variable, "the issue field is not filled from a $VARIABLE").not.toBe("");
+    expect(dispatch?.env?.[variable]).toBe(`\${{ ${output} }}`);
+    // Gated on a non-empty number, so the dispatch never expands to a bare `issue=`.
+    expect(dispatch?.if).toContain(`${output} != ''`);
   });
 
   test("every workflow it dispatches declares every input it passes", () => {

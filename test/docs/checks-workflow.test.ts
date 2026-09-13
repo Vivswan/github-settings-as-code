@@ -80,17 +80,20 @@ function hashFilesPatterns(key: string): string[] {
 }
 
 /**
- * The repository .ts files `file` imports. Only single-line static imports are recognized; any other import-ish line fails, so an unsupported
- * form extends this parser instead of being skipped.
+ * The repository .ts files `file` imports. Single-line static imports and literal `import()`/`require()` calls are recognized; any other
+ * import-ish line fails, so an unsupported form extends this parser instead of being skipped.
  */
 function relativeImportsOf(file: string): string[] {
   const source = readFileSync(join(ROOT, file), "utf8");
   const specifiers: string[] = [];
   for (const line of source.split("\n")) {
-    if (!/^\s*import[\s{"]|\brequire\(/.test(line)) {
+    const call = /\b(?:import|require)\s*\(/.test(line);
+    if (!call && !/^\s*import[\s{"]/.test(line)) {
       continue;
     }
-    const match = line.match(/^import [^"]*from "([^"]+)";$/);
+    const match = call
+      ? line.match(/\b(?:import|require)\s*\(\s*(["'])([^"']+)\1\s*\)/)?.slice(1)
+      : line.match(/^import [^"]*from "([^"]+)";$/);
     expect(
       match,
       `unrecognized import form in ${file}: "${line.trim()}" - teach relativeImportsOf() to parse it`,

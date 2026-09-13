@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ROOT } from "../root.js";
-import { readWorkflow, SETUP_USES, type Step } from "./workflow-loader.js";
+import { readWorkflow, type Step } from "./workflow-loader.js";
 
 const SCRIPTS = (
   JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
@@ -18,9 +18,9 @@ const SCRIPTS = (
 ).scripts;
 /** A bun invocation the shell would run: the word `bun` at a command position. */
 const RUNS_BUN = /(?:^|[\s;&|(])bun(?=\s|$)/m;
-/** A step that runs code from the checkout: a run step invoking bun, or a local composite (each of ours runs bun). */
+/** A step that runs code from the checkout: a run step invoking bun, or any local action (its action.yml is PR-editable). */
 const runsCheckoutCode = (step: Step) =>
-  RUNS_BUN.test(step.run ?? "") || (step.uses !== SETUP_USES && (step.uses ?? "").startsWith("./"));
+  RUNS_BUN.test(step.run ?? "") || (step.uses ?? "").startsWith("./");
 
 describe("the commit-back push jobs", () => {
   test.each(["auto-fix.yml", "auto-format.yml"])(
