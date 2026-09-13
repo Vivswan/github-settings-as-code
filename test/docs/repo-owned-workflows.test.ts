@@ -43,10 +43,12 @@ describe("the commit-back push jobs", () => {
         .flatMap((line) => line.split(/[\s;&|()]+/))
         .map((word) => word.replace(/["']/g, ""));
       expect(words).toContain(`--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`);
-      // A forced update hides in a short-option cluster (-vf, -f4) or a +refspec as readily as in a bare --force.
+      // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
       const forced = words.filter(
         (word) =>
-          /^-[^-]*f/.test(word) || /^--force(?!-with-lease)/.test(word) || word.startsWith("+"),
+          /^-[^-]*f/.test(word) ||
+          /^--(?:no-)?force(?!-with-lease=|-if-includes$)/.test(word) ||
+          word.startsWith("+"),
       );
       expect(forced).toEqual([]);
     },
