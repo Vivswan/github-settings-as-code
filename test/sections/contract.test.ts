@@ -431,7 +431,7 @@ describe("throwFor context enrichment", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
-      'the token was denied creating ruleset "quality" failed - POST /repos/o/r/rulesets: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      'the token was denied POST /repos/o/r/rulesets (creating ruleset "quality"): 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
     );
   });
 
@@ -449,7 +449,7 @@ describe("throwFor context enrichment", () => {
       { status: 404, message: "Not Found" },
       {
         denied:
-          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+          'the token was denied PUT /repos/o/r/branches/x/protection (protecting "x"): 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
       },
     ],
     [
@@ -457,7 +457,7 @@ describe("throwFor context enrichment", () => {
       { status: 404, message: "Branch not found on fork" },
       {
         denied:
-          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 404 Branch not found on fork ' +
+          'the token was denied PUT /repos/o/r/branches/x/protection (protecting "x"): 404 Branch not found on fork ' +
           '(a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
       },
     ],
@@ -466,7 +466,7 @@ describe("throwFor context enrichment", () => {
       { status: 403, message: "Branch not found" },
       {
         denied:
-          'the token was denied protecting "x" failed - PUT /repos/o/r/branches/x/protection: 403 Branch not found. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+          'the token was denied PUT /repos/o/r/branches/x/protection (protecting "x"): 403 Branch not found. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
       },
     ],
   ] as const)(
@@ -1222,7 +1222,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       wire: "REST, the client answers a plain 403",
       run: () => rest(answering(403), true),
       thrown:
-        `actions: the token was denied arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. ` +
+        `actions: the token was denied PATCH /repos/o/r/code-quality/setup (arming the setup): 403 ${SECRET_RESPONSE_WITHHELD}. ` +
         `To fix, grant "Administration" (read and write) under the PAT's Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)`,
     },
     // The controls: unmarked, the same answers render as the client gave them.

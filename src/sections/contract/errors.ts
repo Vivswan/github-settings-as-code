@@ -60,8 +60,11 @@ export function throwFor(
 ): never {
   // The operation label says WHAT was being done in settings-file terms; the raw method/path keeps the request identifiable.
   //   creating ruleset "x" failed - POST /repos/...: 422 ...
-  const operation = context?.operation ? `${context.operation} failed - ` : "";
-  const cause = `${operation}${method} ${path}: ${error.status} ${error.message}`;
+  //   the token was denied POST /repos/... (creating ruleset "x"): 403 ...
+  const request = `${method} ${path}`;
+  const outcome = `${error.status} ${error.message}`;
+  const cause = `${context?.operation ? `${context.operation} failed - ` : ""}${request}: ${outcome}`;
+  const denied = `${request}${context?.operation ? ` (${context.operation})` : ""}: ${outcome}`;
   if (isRateLimitError(error)) {
     // Secondary rate limits arrive as 403 and must not read as missing permissions.
     throw new Error(
@@ -85,7 +88,7 @@ export function throwFor(
         : sectionGrant(section);
     throw new PermissionDenied(
       section.key,
-      `the token was denied ${cause}${alsoMissing}. To fix, ${grant}${denialHint}`,
+      `the token was denied ${denied}${alsoMissing}. To fix, ${grant}${denialHint}`,
       error.status,
     );
   }
