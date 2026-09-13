@@ -91,6 +91,8 @@ interface Contract {
 }
 
 const OIDC_GATE = "steps.oidc.outputs.proceed == 'true'";
+/** The confirmation's gate: the publish step sets this output only on its OIDC-gated publish path. */
+const PUBLISHED_GATE = "steps.publish.outputs.published == 'true'";
 const EXPECTED: Contract = {
   stablePermissions: { contents: "read", "id-token": "write" },
   nextPermissions: undefined,
@@ -110,7 +112,7 @@ const EXPECTED: Contract = {
   registries: ["https://registry.npmjs.org", "https://registry.npmjs.org"],
   setupNodeEnvs: [undefined, undefined],
   publishCommands: [
-    ["npm pkg delete scripts.prepare", 'GITHUB_SHA="$SOURCE_SHA" npm publish --tag next ;;'],
+    ["npm pkg delete scripts.prepare", 'GITHUB_SHA="$SOURCE_SHA" npm publish --tag next'],
     ["npm pkg delete scripts.prepare", 'GITHUB_SHA="$SOURCE_SHA" npm publish ;;'],
   ],
 };
@@ -131,7 +133,7 @@ function contractOf(next: Job, stable: Job): Contract {
     stableNeeds: [...(stable.needs ?? [])].sort(),
     ungatedNextSteps: next.steps
       .slice(probe + 1)
-      .filter((step) => step.if !== OIDC_GATE)
+      .filter((step) => step.if !== OIDC_GATE && step.if !== PUBLISHED_GATE)
       .map((step) => step.name ?? step.uses ?? "<unnamed step>"),
     tokenInputs: [...next.steps, ...stable.steps]
       .flatMap(stepInputs)
@@ -205,7 +207,12 @@ describe("the npm publish jobs", () => {
     ],
     [
       "a pre-release step that runs without the OIDC gate",
-      (next) => (must(next.steps.at(-1), "publish step").if = undefined),
+      (next) => (must(next.steps.at(-2), "publish step").if = undefined),
+      "ungatedNextSteps",
+    ],
+    [
+      "a confirmation step that runs whether or not this job published",
+      (next) => (must(next.steps.at(-1), "confirm step").if = undefined),
       "ungatedNextSteps",
     ],
     [
@@ -245,8 +252,8 @@ describe("the npm publish jobs", () => {
     [
       "a pre-release published under the default dist-tag",
       (next) => {
-        const step = must(next.steps.at(-1), "publish step");
-        step.run = step.run?.replace("npm publish --tag next ;;", "npm publish ;;");
+        const step = must(next.steps.at(-2), "publish step");
+        step.run = step.run?.replace("npm publish --tag next", "npm publish");
       },
       "publishCommands",
     ],

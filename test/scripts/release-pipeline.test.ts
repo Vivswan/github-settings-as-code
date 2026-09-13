@@ -14,6 +14,7 @@ import {
   anchorReleasePr,
   boundaryCheck,
   nextPublishVerdict,
+  npmConfirm,
   npmVerdict,
   type Packument,
   type PublishVerdict,
@@ -1561,6 +1562,25 @@ describe("prereleaseVersion", () => {
       },
     ],
     [
+      "a retry of an old run while the dist-tags lag behind a newer version the registry holds",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0", "2.0.1-main.411.g0000000", "2.0.1-main.413.g2222222"], {
+        latest: "2.0.0",
+        next: "2.0.1-main.411.g0000000",
+      }),
+      {
+        publish: false,
+        version: `2.0.1-main.412.g${sha7}`,
+        reason: `the registry already holds 2.0.1-main.413.g2222222, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      },
+    ],
+    [
+      "a hand-published version this pipeline never minted, which no dist-tag names",
+      `2.0.1-main.412.g${sha7}`,
+      registry(["2.0.0", "2.0.1-beta.1"], { latest: "2.0.0" }),
+      { publish: true, version: `2.0.1-main.412.g${sha7}` },
+    ],
+    [
       "the first CI run after the hand bootstrap, whatever dist-tag the registry gave it",
       `2.0.1-main.412.g${sha7}`,
       registry(["2.0.1-main.0.g0000000"], {
@@ -1644,16 +1664,21 @@ describe("prereleaseVersion", () => {
     expect(asked).toEqual([]);
   });
 
-  /** A registry serving one packument (or the status given) for the fixture's package, on a local port. */
+  type Answer = { status: number; body?: unknown };
+  /** A registry for the fixture's package on a local port: one answer, or a sequence served in order with its last
+   * answer repeated. Each request is recorded as its path and query. */
   function withRegistry<T>(
-    answer: { status: number; body?: unknown },
+    answers: Answer | Answer[],
     body: (url: string, requests: string[]) => Promise<T>,
   ): Promise<T> {
+    const sequence = Array.isArray(answers) ? answers : [answers];
     const requests: string[] = [];
     const server = Bun.serve({
       port: 0,
       fetch(request) {
-        requests.push(new URL(request.url).pathname);
+        const { pathname, search } = new URL(request.url);
+        requests.push(pathname + search);
+        const answer = sequence[Math.min(requests.length, sequence.length) - 1] as Answer;
         return answer.body === undefined
           ? new Response("", { status: answer.status })
           : Response.json(answer.body, { status: answer.status });
@@ -1662,7 +1687,7 @@ describe("prereleaseVersion", () => {
     return body(`http://127.0.0.1:${server.port}`, requests).finally(() => server.stop(true));
   }
 
-  test("the verdict reads the registry's record of the package named in package.json, and 404 is an unpublished package", async () => {
+  test("the verdict reads the registry's record of the package named in package.json past the CDN cache, and 404 is an unpublished package", async () => {
     const fx = seedFixture();
     const verdict = await withRegistry({ status: 404 }, async (registry, requests) => {
       const result = await npmVerdict({
@@ -1674,10 +1699,14 @@ describe("prereleaseVersion", () => {
       });
       return { result, requests };
     });
-    expect(verdict).toEqual({
-      result: { publish: true, version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}` },
-      requests: ["/@scope%2Fpkg"],
+    expect(verdict.result).toEqual({
+      publish: true,
+      version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
     });
+    // A query string no earlier request carried: the CDN caches a packument by URL for up to 300 s and misses on it.
+    expect(verdict.requests).toEqual([
+      expect.stringMatching(/^\/@scope%2Fpkg\?fresh=\d+-[0-9a-z]+$/),
+    ]);
   });
 
   test("the verdict skips what the registry already holds on both channels", async () => {
@@ -1800,6 +1829,182 @@ describe("prereleaseVersion", () => {
       stderr:
         "release-pipeline npm-verdict: npm-verdict takes the channel, next or stable, not null\n",
       status: 1,
+    });
+  });
+
+  describe("npm-confirm after a next publish", () => {
+    /** The fixture's published version, the older pre-release next named before it, and a newer run's. */
+    const published = (fx: { mergeSha: string }) => `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`;
+    const older = "2.1.1-main.411.g0000000";
+    const newer = "2.1.1-main.413.g2222222";
+    const confirm = (fx: { work: string; mergeSha: string }, registry: string, attempts = 5) =>
+      npmConfirm({
+        cwd: fx.work,
+        sourceSha: fx.mergeSha,
+        runNumber: "412",
+        registry,
+        attempts,
+        delayMs: 0,
+      });
+
+    test("a record that lags the publish is read again until it shows the version, each read past the CDN cache", async () => {
+      const fx = seedFixture();
+      const lagging = registry(["2.1.0", older], { latest: "2.1.0", next: older });
+      const caughtUp = registry(["2.1.0", older, published(fx)], {
+        latest: "2.1.0",
+        next: published(fx),
+      });
+      const result = await withRegistry(
+        [
+          { status: 200, body: lagging },
+          { status: 200, body: lagging },
+          { status: 200, body: caughtUp },
+        ],
+        async (url, requests) => ({ verdict: await confirm(fx, url), requests }),
+      );
+      expect(result.verdict).toEqual({ outcome: "settled", version: published(fx), reads: 3 });
+      expect(result.requests).toHaveLength(3);
+      expect(new Set(result.requests).size).toBe(3);
+    });
+
+    test("a record that already shows the version settles on the first read", async () => {
+      const fx = seedFixture();
+      const converged = registry(["2.1.0", older, published(fx)], {
+        latest: "2.1.0",
+        next: published(fx),
+      });
+      const result = await withRegistry(
+        { status: 200, body: converged },
+        async (url, requests) => ({
+          verdict: await confirm(fx, url),
+          requests,
+        }),
+      );
+      expect(result.verdict).toEqual({ outcome: "settled", version: published(fx), reads: 1 });
+      expect(result.requests).toHaveLength(1);
+    });
+
+    test("the reads stop at the bound while the record still lacks the version, whether it lags or is 404", async () => {
+      const fx = seedFixture();
+      const lagging = registry(["2.1.0", older], { latest: "2.1.0", next: older });
+      const unsettled = {
+        outcome: "unsettled" as const,
+        version: published(fx),
+        reason: `the registry's record still lacks ${published(fx)} after 3 reads; a run judged before it shows may move next back, and the green push after it moves next forward`,
+      };
+      const lagged = await withRegistry({ status: 200, body: lagging }, async (url, requests) => ({
+        verdict: await confirm(fx, url, 3),
+        requests,
+      }));
+      expect(lagged.verdict).toEqual(unsettled);
+      expect(lagged.requests).toHaveLength(3);
+      const missing = await withRegistry({ status: 404 }, async (url, requests) => ({
+        verdict: await confirm(fx, url, 3),
+        requests,
+      }));
+      expect(missing.verdict).toEqual(unsettled);
+      expect(missing.requests).toHaveLength(3);
+    });
+
+    test("next behind a newer pre-release the record holds is reported, never moved", async () => {
+      const fx = seedFixture();
+      const drifted = registry(["2.1.0", older, newer, published(fx)], {
+        latest: "2.1.0",
+        next: published(fx),
+      });
+      await withRegistry({ status: 200, body: drifted }, async (url) => {
+        expect(await confirm(fx, url)).toEqual({
+          outcome: "behind",
+          version: published(fx),
+          reason: `the registry's next is ${published(fx)} while it holds ${newer}; this stale run moved next back, and the next green push moves it forward (npm dist-tag add @scope/pkg@${newer} next repairs it by hand)`,
+        });
+      });
+    });
+
+    test("a newer release the record holds is not a drift: next sits below latest until the next push", async () => {
+      const fx = seedFixture();
+      const released = registry(["2.1.0", published(fx), "2.2.0"], {
+        latest: "2.2.0",
+        next: published(fx),
+      });
+      await withRegistry({ status: 200, body: released }, async (url) => {
+        expect(await confirm(fx, url)).toEqual({
+          outcome: "settled",
+          version: published(fx),
+          reads: 1,
+        });
+      });
+    });
+
+    test("a read the registry fails is a read that did not show the version: the lane is held through the budget", async () => {
+      const fx = seedFixture();
+      const caughtUp = registry(["2.1.0", published(fx)], { latest: "2.1.0", next: published(fx) });
+      const recovered = await withRegistry(
+        [{ status: 503 }, { status: 503 }, { status: 200, body: caughtUp }],
+        async (url, requests) => ({ verdict: await confirm(fx, url), requests }),
+      );
+      expect(recovered.verdict).toEqual({ outcome: "settled", version: published(fx), reads: 3 });
+      expect(recovered.requests).toHaveLength(3);
+    });
+
+    test("a registry that answers anything but 200 or 404 on every read stops the confirmation after the budget", async () => {
+      const fx = seedFixture();
+      const requests = await withRegistry({ status: 503 }, async (url, requests) => {
+        await expect(confirm(fx, url, 3)).rejects.toThrow(
+          `the registry answered 503 for @scope/pkg (${url}/@scope%2Fpkg); refusing to publish without knowing what it holds.`,
+        );
+        return requests;
+      });
+      expect(requests).toHaveLength(3);
+      await expect(
+        npmConfirm({
+          cwd: fx.work,
+          sourceSha: fx.mergeSha,
+          runNumber: "412",
+          registry: "http://127.0.0.1:9",
+          attempts: 0,
+          delayMs: 0,
+        }),
+      ).rejects.toThrow("the read attempts must be a positive integer, not 0");
+    });
+
+    test("the npm-confirm subcommand prints settled, unsettled, or behind on stdout, and takes the next channel alone", async () => {
+      const fx = seedFixture();
+      const converged = registry(["2.1.0", published(fx)], {
+        latest: "2.1.0",
+        next: published(fx),
+      });
+      const drifted = registry(["2.1.0", newer, published(fx)], {
+        latest: "2.1.0",
+        next: published(fx),
+      });
+      const env = (url: string) => ({
+        GITHUB_SHA: fx.mergeSha,
+        GITHUB_RUN_NUMBER: "412",
+        NPM_REGISTRY_URL: url,
+      });
+      await withRegistry({ status: 200, body: converged }, async (url) => {
+        expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
+          stdout: `settled ${published(fx)} is on the registry after 1 read(s), and next names the newest pre-release\n`,
+          stderr: "",
+          status: 0,
+        });
+      });
+      await withRegistry({ status: 200, body: drifted }, async (url) => {
+        expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
+          stdout: `behind the registry's next is ${published(fx)} while it holds ${newer}; this stale run moved next back, and the next green push moves it forward (npm dist-tag add @scope/pkg@${newer} next repairs it by hand)\n`,
+          stderr: "",
+          status: 0,
+        });
+      });
+      expect(await subcommand(fx.work, env("http://127.0.0.1:9"), "npm-confirm", "stable")).toEqual(
+        {
+          stdout: "",
+          stderr:
+            'release-pipeline npm-confirm: npm-confirm takes the channel, next, not "stable"\n',
+          status: 1,
+        },
+      );
     });
   });
 });
