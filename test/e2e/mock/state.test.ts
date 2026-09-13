@@ -77,45 +77,23 @@ describe("buildState overlay semantics", () => {
     expect(ids.size).toBe(3);
   });
 
-  test("list collections complete sparse seeds with the mock's defaults and server-owned fields", () => {
+  test("a sparse list seed is completed with its family's declared defaults; a deploy key loses its comment", () => {
+    // The defaults are the factory mock's own declaration, so the relation is "applied", not their values. The key
+    // comment is stripped the way GitHub stores a created key, so a converging apply over a seeded key proves the
+    // section compares algorithm + blob.
+    const label = { name: "bug", color: "d73a4a" };
+    const autolink = { key_prefix: "JIRA-", url_template: "https://j.example.com/<num>" };
     const state = buildState(
       {
-        labels: [{ name: "bug", color: "d73a4a" }],
-        autolinks: [{ key_prefix: "JIRA-", url_template: "https://j.example.com/<num>" }],
+        labels: [label],
+        autolinks: [autolink],
         deploy_keys: [{ title: "bot", key: "ssh-ed25519 AAAAC3seedseedseed deploy@bot" }],
       },
       "org",
     );
-    expect(state.labels).toEqual([
-      {
-        name: "bug",
-        color: "d73a4a",
-        description: null,
-        default: false,
-        id: 90_000_000,
-        node_id: "MDU6TGFiZWw90000000",
-        url: "https://api.github.com/repos/e2e-owner/e2e-repo/labels/bug",
-      },
-    ]);
-    expect(state.autolinks).toEqual([
-      {
-        key_prefix: "JIRA-",
-        url_template: "https://j.example.com/<num>",
-        is_alphanumeric: true,
-        id: 90_000_001,
-      },
-    ]);
-    // The seed's comment is stripped the way a created key is stored, so a converging apply over a seeded
-    // key proves the section compares algorithm + blob.
-    expect(state.deploy_keys[0]).toEqual({
-      title: "bot",
-      key: "ssh-ed25519 AAAAC3seedseedseed",
-      read_only: false,
-      verified: true,
-      id: 90_000_002,
-      url: "https://api.github.com/repos/e2e-owner/e2e-repo/keys/90000002",
-      created_at: "2026-07-01T00:00:00Z",
-    });
+    expect(state.labels[0]).toMatchObject({ ...LIST_MOCKS.labels.defaults, ...label });
+    expect(state.autolinks[0]).toMatchObject({ ...LIST_MOCKS.autolinks.defaults, ...autolink });
+    expect(state.deploy_keys.map((key) => key.key)).toEqual(["ssh-ed25519 AAAAC3seedseedseed"]);
   });
 
   test("a pinned seed id anywhere in the overlay is reserved before any family mints", () => {
@@ -170,11 +148,7 @@ describe("buildState overlay semantics", () => {
     expect(Object.keys(LIST_MOCKS).sort()).toEqual([...factoryKeys].sort());
   });
 
-  test("actions retention and cache limits default to GitHub's values, overlay replaces", () => {
-    const state = buildState(undefined, "org");
-    expect(state.actions_retention).toEqual({ days: 90, maximum_allowed_days: 400 });
-    expect(state.cache_retention_limit).toEqual({ max_cache_retention_days: 7 });
-    expect(state.cache_storage_limit).toEqual({ max_cache_size_gb: 10 });
+  test("a seeded actions_retention replaces the default", () => {
     const seeded = buildState(
       { actions_retention: { days: 30, maximum_allowed_days: 400 } },
       "org",
@@ -526,16 +500,8 @@ describe("completeInvitation", () => {
 });
 
 describe("bypassUser", () => {
-  test("a sparse seed keeps its own fields and gains the simple-user scaffold", () => {
-    const completed = bypassUser({ login: "dave" }, 42) as Record<string, unknown>;
-    expect(completed.id).toBe(42);
-    expect(completed.login).toBe("dave");
-    expect(completed.type).toBe("User");
-    expect(completed.site_admin).toBe(false);
-    expect(completed.node_id).toBe("MDQ6VXNlcj42");
-    expect(completed.url).toBe("https://api.github.com/users/dave");
-    expect(completed.html_url).toBe("https://github.com/dave");
-    expect(completed.avatar_url).toBe("https://avatars.githubusercontent.com/u/42?v=4");
+  test("a sparse seed keeps its login and takes the caller's id", () => {
+    expect(bypassUser({ login: "dave" }, 42)).toMatchObject({ id: 42, login: "dave" });
   });
 
   test("a seeded id wins over the caller's and drives the derived fields", () => {

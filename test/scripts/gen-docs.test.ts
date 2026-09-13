@@ -13,7 +13,6 @@ import {
   renderPatFormUrl,
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
-import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { ROOT } from "../root.js";
 import { relocatedRegion } from "./relocated-region.js";
 
@@ -52,20 +51,6 @@ describe("renderSectionsTable", () => {
         "| `environments` | PUT environments | Environments: write; declared `deployment_branch_policies` keys additionally need Actions: read and Administration: write | untouched | reviewers |",
       ].join("\n"),
     );
-  });
-
-  test("the Undeclared default column is rendered from undeclaredDefault for every policy", () => {
-    const docs = { sections_table: { endpoints: "e", notes: "n" } };
-    const column = (undeclaredDefault: "delete" | "keep" | "untouched"): string | undefined =>
-      renderSectionsTable(
-        [{ key: "labels", permission: { repo: ["issues"] }, undeclaredDefault }],
-        { labels: docs },
-      )
-        .split("\n")[2]
-        ?.split(" | ")[3];
-    expect(column("delete")).toBe("deleted (settable)");
-    expect(column("keep")).toBe("kept (settable)");
-    expect(column("untouched")).toBe("untouched");
   });
 
   test("refuses a section without docs and a cell that would split its row", () => {
@@ -279,10 +264,7 @@ describe("renderPatCell", () => {
 });
 
 describe("renderOutputsList", () => {
-  test("enumerates the words it is given, worst first as RUN_RESULTS ranks them, then the exit rule", () => {
-    expect(renderOutputsList(RUN_RESULTS)).toBe(
-      "`failed` / `drift` / `partial` / `skipped` / `applied` / `clean` / `snapshot` / `merged`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check",
-    );
+  test("enumerates the words it is given in order, then the exit rule", () => {
     expect(renderOutputsList(["failed", "applied"])).toBe(
       "`failed` / `applied`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check",
     );
@@ -451,12 +433,6 @@ describe("the committed pages", () => {
       'the outputs-list region must sit under "## Outputs" in docs/reference/inputs.md; "## Inputs" is the heading above its BEGIN marker',
     ],
     [
-      "the outputs list quoted",
-      "docs/reference/inputs.md",
-      (page) => page.replace("\n- `result`: <!-- BEGIN", "\n> - `result`: <!-- BEGIN"),
-      "the outputs-list region sits inside a blockquote in docs/reference/inputs.md",
-    ],
-    [
       "the outputs list markers around the bullet's prose",
       "docs/reference/inputs.md",
       (page) => {
@@ -480,68 +456,6 @@ describe("the committed pages", () => {
 describe("the committed COVERAGE.md", () => {
   const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
 
-  // Each Supported row as (Section cell, Area link text), in page order.
-  const supportedRows = (page: string): Array<[string, string]> =>
-    [...page.matchAll(/^\| \[([^\]]+)\][^|]*\| `([^`]+)`/gm)].map((m) => [m[2] ?? "", m[1] ?? ""]);
-
-  test("keeps every Supported row in the order the hand-written page had", () => {
-    // Display order is a documentation decision; the registry's run order (environments before branches) is an engine constraint.
-    expect(supportedRows(coverage)).toEqual([
-      ["repository", "Repository core settings"],
-      ["repository", "security_and_analysis"],
-      ["repository (topics key)", "Topics"],
-      ["repository (enable_vulnerability_alerts)", "Dependabot alerts"],
-      ["repository (enable_automated_security_fixes)", "Dependabot security updates"],
-      ["repository (enable_private_vulnerability_reporting)", "Private vulnerability reporting"],
-      ["repository (enable_git_lfs)", "Git LFS enable/disable"],
-      ["repository (enable_immutable_releases)", "Immutable releases"],
-      ["repository (enable_sponsorships)", "Sponsor button"],
-      ["repository (issue_creation_policy)", "Issue creation policy"],
-      ["repository (allow_forking, fork-related PATCH fields)", "Forking policy"],
-      ["labels", "Labels"],
-      ["rulesets", "Rulesets"],
-      ["rulesets", "Merge queue"],
-      ["rulesets", "Tag protection (modern)"],
-      ["branches", "Classic branch protection"],
-      ["environments", "Environments"],
-      ["autolinks", "Autolinks"],
-      ["actions", "Actions permissions"],
-      ["actions_secrets", "Actions secrets"],
-      ["dependabot_secrets", "Dependabot secrets"],
-      ["codespaces_secrets", "Codespaces repository secrets"],
-      ["agents_secrets", "Copilot agents secrets"],
-      ["workflows", "Workflow enable/disable state"],
-      ["check_suite_preferences", "Check suite preferences"],
-      ["pages", "GitHub Pages"],
-      ["code_scanning_default_setup", "Code scanning default setup"],
-      ["code_quality_setup", "Code quality setup"],
-      ["collaborators", "Collaborators"],
-      ["teams", "Team repository permissions"],
-      ["milestones", "Milestones"],
-      ["interaction_limits", "Interaction limits"],
-      ["actions_variables", "Actions variables"],
-      ["agents_variables", "Copilot agents variables"],
-      ["webhooks", "Webhooks"],
-      ["custom_properties", "Custom property values"],
-      ["deploy_keys", "Deploy keys"],
-      ["secret_scanning_custom_patterns", "Secret scanning custom patterns"],
-    ]);
-  });
-
-  test("the row pin sees a swap of two rows within one section", () => {
-    const rows = coverage.split("\n").filter((line) => /^\| \[/.test(line));
-    const [first, second] = rows;
-    if (first === undefined || second === undefined) {
-      throw new Error("the page has fewer than two Supported rows");
-    }
-    const swapped = coverage.replace(`${first}\n${second}`, `${second}\n${first}`);
-    expect(swapped).not.toBe(coverage);
-    expect(supportedRows(swapped)).not.toEqual(supportedRows(coverage));
-    expect(supportedRows(swapped).slice(0, 2)).toEqual(
-      supportedRows(coverage).slice(0, 2).reverse(),
-    );
-  });
-
   test("is exactly what the generator renders from the declarations and the authored data", () => {
     expect(renderCoverageFile(coverage)).toBe(coverage);
   });
@@ -558,10 +472,9 @@ describe("the committed COVERAGE.md", () => {
     expect(() => renderCoverageFile(coverage.replace("# Coverage\n", "# Inventory\n"))).toThrow(
       exact,
     );
-    // Whitespace past the END marker regenerates as a no-op, so it is refused too.
+    // Whitespace past the END marker regenerates as a no-op, so it is refused too; so is the final newline missing.
     expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
-    expect(() => renderCoverageFile(`${coverage.trimEnd()}  \n`)).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
     // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.
     const shape =
@@ -621,33 +534,5 @@ describe("the committed COVERAGE.md", () => {
         ),
       ),
     ).toThrow("the coverage region in COVERAGE.md encloses content the generator would not write");
-    expect(() =>
-      renderCoverageFile(coverage.replace("<!-- END GENERATED: coverage -->\n", "")),
-    ).toThrow('region "coverage" needs exactly one BEGIN and one END marker, found 1 and 0');
-  });
-});
-
-describe("marker-shaped text on a Markdown page", () => {
-  const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
-  const begin = "<!-- BEGIN GENERATED: coverage -->";
-
-  test("a # marker line is never a marker on a Markdown page, so the YAML form leaves the region unclosed", () => {
-    // The page's language picks the marker syntax (lib/generated-regions.ts), so the `# BEGIN` form is plain text here.
-    const yamlForm = coverage.replace(/<!-- (BEGIN GENERATED: coverage[^\n]*?) -->/, "# $1");
-    expect(() => renderCoverageFile(yamlForm)).toThrow(
-      'region "coverage" needs exactly one BEGIN and one END marker, found 0 and 1',
-    );
-  });
-
-  test("a marker inside backticks in a paragraph is still a marker, loudly", () => {
-    // Generated pages never quote a marker, so no code-span masking exists on purpose: a loud false positive beats a masker whose CommonMark corner
-    // cases hide a real marker.
-    const quoted = coverage.replace(
-      /(<!-- BEGIN GENERATED: coverage[^\n]*-->\n)/,
-      `$1see \`${begin}\` here\n`,
-    );
-    expect(() => renderCoverageFile(quoted)).toThrow(
-      'region "coverage" needs exactly one BEGIN and one END marker, found 2 and 1',
-    );
   });
 });

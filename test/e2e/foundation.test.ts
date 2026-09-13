@@ -231,16 +231,15 @@ describe("scenario schema", () => {
   });
 
   // The runner writes these at the root before the child runs; a destination starting with one
-  // would overwrite it, or hand it to the dir form's walk. Derived from the runner's own list.
+  // would overwrite it, or hand it to the dir form's walk. Derived from the runner's own list; both
+  // destination inputs share the one schema, so the file form carries the names and one dir row the wiring.
   test.each<[name: string, inputs: Record<string, string>]>([
-    ...Object.values(RUNNER_ROOT_FILES).flatMap(
-      (name): Array<[string, Record<string, string>]> => [
-        [`snapshot_dir: ${name}`, { snapshot_dir: name }],
-        [`snapshot_file: ${name}`, { snapshot_file: name }],
-      ],
-    ),
+    ...Object.values(RUNNER_ROOT_FILES).map((name): [string, Record<string, string>] => [
+      `snapshot_file: ${name}`,
+      { snapshot_file: name },
+    ]),
     [
-      `a nested path under ${RUNNER_ROOT_FILES.settings}`,
+      `a nested snapshot_dir under ${RUNNER_ROOT_FILES.settings}`,
       { snapshot_dir: `${RUNNER_ROOT_FILES.settings}/out` },
     ],
     [`a merge layer, ${layerFile(0)}`, { snapshot_file: layerFile(0) }],
@@ -387,28 +386,21 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
     },
   );
 
-  test("scenarioRoots names every registered section's scenarios/ path, present or not", () => {
-    // existsSync cannot tell an absent scenarios/ from one under a mode-000 parent, so the roots are
-    // never filtered; the loader is the one place that tells absent from unreadable.
-    withTempRoot((sections) => {
-      const roots = scenarioRoots(sections);
-      expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));
-      expect(roots.slice(1)).toEqual(SECTION_KEYS.map((key) => join(sections, key, "scenarios")));
-      expect(loadScenarios(roots.slice(1))).toEqual([]);
-    });
-  });
-
   test.skipIf(runningAsRoot)(
-    "an unreadable section scenarios/ directory fails the whole corpus, naming it",
+    "an unreadable section directory fails the whole corpus, naming its scenarios/ root",
     () => {
+      // The roots are never filtered by existence: existsSync cannot tell an absent scenarios/ from one
+      // under a mode-000 <key>/, so scenarioRoots lists it and the loader is what tells absent from unreadable.
       withTempRoot((sections) => {
         const key = SECTION_KEYS[0];
-        const unreadable = join(sections, key, "scenarios");
+        const section = join(sections, key);
+        const unreadable = join(section, "scenarios");
         mkdirSync(unreadable, { recursive: true });
         writeFileSync(join(unreadable, "one.yml"), "name: one\n");
-        chmodSync(unreadable, 0o000);
+        chmodSync(section, 0o000);
         try {
           const roots = scenarioRoots(sections);
+          expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));
           expect(roots).toContain(unreadable);
           expect(() => loadScenarios(roots.slice(1))).toThrow(
             new RegExp(
@@ -418,7 +410,7 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
         } finally {
           // withTempRoot restores only the top of the tree; this nested
           // directory needs its own restore before the recursive removal.
-          chmodSync(unreadable, 0o700);
+          chmodSync(section, 0o700);
         }
       });
     },

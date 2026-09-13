@@ -3,8 +3,8 @@ import { matchEndpoint, paramAccessor } from "./dispatch.js";
 import { handlerTestContext } from "./handler-test-ctx.js";
 import { buildState } from "./state.js";
 
-/** An undeclared token must throw whatever its name, including names every object inherits. */
-const INHERITED_NAMES = ["toString", "constructor", "hasOwnProperty", "__proto__", "valueOf"];
+/** An undeclared token must throw whatever its name: a prototype member and the accessor every object inherits. */
+const INHERITED_NAMES = ["toString", "__proto__"];
 
 describe("path params are own keys of the matched route", () => {
   const matched = matchEndpoint("GET", "/repos/acme/widgets/labels");

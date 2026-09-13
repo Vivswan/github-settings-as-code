@@ -621,19 +621,14 @@ export const deleteOf = (...refs: string[]): string[] => [
 /** The commit a logged create push carried (its objects exist in the pushing clone). */
 export const createdSha = (push: string[]): string => (push[2] ?? "").split(":")[0] ?? "";
 
-/** Remotes a file:// origin cannot play, as git words them, replayed with the ref UNMOVED on origin: none is a
- * retry's to win, the third one however much its words look like a lost compare-and-set. */
+/** Remotes a file:// origin cannot play, as git words them, replayed with the ref UNMOVED on origin, so none is a
+ * lost compare-and-set: a pointer or anchor push throws on the first, a tag create tries again while the ref reads
+ * absent and throws after the last. The pipeline judges origin's ref, never git's words; the stale-info wording is
+ * the proof. A ruleset's refusal (GH013) takes the token's path and is not replayed. */
 export const PERMANENT: [string, string][] = [
   [
     "a token without write access",
     "remote: Write access to repository not granted.\nfatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 403\n",
-  ],
-  [
-    "a ruleset declining the ref",
-    "remote: error: GH013: Repository rule violations found for refs/tags/latest.\nremote:\n" +
-      "remote: - Cannot update this protected ref.\nremote:\nTo https://github.com/o/r.git\n" +
-      " ! [remote rejected] 0123abc -> latest (push declined due to repository rule violations)\n" +
-      "error: failed to push some refs to 'https://github.com/o/r.git'\n",
   ],
   [
     "git's compare-and-set words while the ref stands where it was read",

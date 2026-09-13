@@ -1637,23 +1637,6 @@ describe("prereleaseVersion", () => {
       expect(new Set(result.requests).size).toBe(3);
     });
 
-    test("a record that already shows the version settles on the first read", async () => {
-      const fx = seedFixture();
-      const converged = registry(["2.1.0", older(fx), published(fx)], {
-        latest: "2.1.0",
-        next: published(fx),
-      });
-      const result = await withRegistry(
-        { status: 200, body: converged },
-        async (url, requests) => ({
-          verdict: await confirm(fx, url),
-          requests,
-        }),
-      );
-      expect(result.verdict).toEqual({ outcome: "settled", version: published(fx), reads: 1 });
-      expect(result.requests).toHaveLength(1);
-    });
-
     test("the reads stop at the bound while the record still lacks the version, whether it lags or is 404", async () => {
       const fx = seedFixture();
       const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });

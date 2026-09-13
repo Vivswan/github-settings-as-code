@@ -141,7 +141,7 @@ Four flags are the command line's own, and `init` has one more, `--force` (repla
 |---|---|
 | `--token <value>` | The token; `GITHUB_TOKEN` when absent |
 | `--json` | Print the outputs as one JSON object on stdout; log lines move to stderr |
-| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; `init`, `validate`, and `permissions` have none |
+| `--summary <file>` | Append the run's markdown summary (the action's step summary) to this file; under GitHub Actions the step summary itself when absent; `init`, `validate`, and `permissions` have none |
 | `--verbose` | Show the debug trace on stderr |
 
 ## Output and exit codes
@@ -154,6 +154,8 @@ result=clean
 skipped-sections=
 repos-result={}
 ```
+
+As a GitHub Actions step (`GITHUB_ACTIONS=true` in the environment, as the runner sets it) the command line reports as the action does, in addition: a masked value is a `::add-mask::` command, an annotation a `::notice::`, `::warning::`, or `::error::` command on stdout instead of the stderr line, the outputs land in the step outputs (`GITHUB_OUTPUT`), and the summary in the step summary (`GITHUB_STEP_SUMMARY`) unless `--summary` names a file. Those commands share stdout with the `--json` object, so a step reads the outputs from the step outputs, not by parsing stdout; the one-object rule below holds in a terminal.
 
 With `--json` the outputs are one object instead, and stdout carries nothing else; `skipped-sections` is a list there and `repos-result` a map, never a string to parse again:
 
