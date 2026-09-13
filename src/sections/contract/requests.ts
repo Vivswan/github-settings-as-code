@@ -238,10 +238,11 @@ async function listPages(
   path: string,
   extract: (data: unknown) => unknown[] | null,
   shape: string,
+  describe?: string,
 ): Promise<unknown[]> {
   const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
   if ("error" in result) {
-    throwFor(section, "GET", path, result.error, { op: endpoint });
+    throwFor(section, "GET", path, result.error, { operation: describe, op: endpoint });
   }
   if ("malformed" in result) {
     throw new Error(
@@ -255,7 +256,7 @@ export async function listAll<E extends EndpointDecl>(
   ctx: SectionContext,
   section: SectionMeta,
   endpoint: E,
-  ...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>
+  ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
 ): Promise<unknown[]> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
@@ -266,6 +267,7 @@ export async function listAll<E extends EndpointDecl>(
     path,
     (data) => (Array.isArray(data) ? data : null),
     "a list",
+    opts?.describe,
   );
 }
 
@@ -275,7 +277,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
   section: SectionMeta,
   endpoint: E,
   envelopeKey: string,
-  ...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>
+  ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
 ): Promise<unknown[]> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
@@ -289,6 +291,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
       return Array.isArray(chunk) ? chunk : null;
     },
     `a "${envelopeKey}" list`,
+    opts?.describe,
   );
 }
 

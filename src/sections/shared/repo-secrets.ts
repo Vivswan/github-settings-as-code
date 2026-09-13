@@ -7,14 +7,13 @@
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
-import type { z } from "zod";
+import { z } from "zod";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
-import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -34,7 +33,7 @@ import type {
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
-  LIVE_SECRET_NAMES,
+  LiveSecretName,
   listSecretValues,
   liveSecretsByKey,
   planSecrets,
@@ -233,14 +232,8 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     const scope: SecretsPlanScope<Described<"put">, Described<"remove">> = {
       label: key,
       noun,
-      list: async () =>
-        parseLive(
-          section,
-          wide.list,
-          LIVE_SECRET_NAMES,
-          await ctx.read.list.listAllEnveloped("secrets"),
-        ),
-      publicKey: (exec, describe) => ctx.read.publicKey.call(exec, { describe }),
+      list: async () => ctx.read.list.listAllEnveloped("secrets", LiveSecretName),
+      publicKey: (exec, describe) => ctx.read.publicKey.call(exec, z.unknown(), { describe }),
       publicKeyEndpoint: wide.publicKey,
       put: (write) => ({
         role: "put",
@@ -265,12 +258,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   // export before an apply, and a note says so per secret. The engine's index hands back the
   // uppercase keys GitHub stores and the planner compares by, so the reference grammar holds.
   const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
-    const live = parseLive(
-      section,
-      wide.list,
-      LIVE_SECRET_NAMES,
-      await ctx.read.list.listAllEnveloped("secrets"),
-    );
+    const live = await ctx.read.list.listAllEnveloped("secrets", LiveSecretName);
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }

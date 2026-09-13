@@ -674,12 +674,16 @@ export function buildState(
     pinned_environments: pinnedSeed,
     _pinned_position_counter: Math.max(0, ...pinnedSeed.map((pin) => pin.position)),
     autolinks: ls.autolinks ? clone(ls.autolinks) : [],
-    actions_permissions: ls.actions_permissions ? clone(ls.actions_permissions) : {},
-    selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},
-    workflow_permissions: ls.workflow_permissions ? clone(ls.workflow_permissions) : {},
-    actions_access: ls.actions_access ? clone(ls.actions_access) : {},
     // GitHub's real defaults, not {}: each body carries required fields, so
     // an unseeded GET must still answer a spec-valid shape.
+    actions_permissions: ls.actions_permissions
+      ? clone(ls.actions_permissions)
+      : { enabled: true, allowed_actions: "all" },
+    selected_actions: ls.selected_actions ? clone(ls.selected_actions) : {},
+    workflow_permissions: ls.workflow_permissions
+      ? clone(ls.workflow_permissions)
+      : { default_workflow_permissions: "read", can_approve_pull_request_reviews: false },
+    actions_access: ls.actions_access ? clone(ls.actions_access) : { access_level: "none" },
     actions_retention: ls.actions_retention
       ? clone(ls.actions_retention)
       : { days: 90, maximum_allowed_days: 400 },

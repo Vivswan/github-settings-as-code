@@ -69,6 +69,34 @@ const ENV_WITH_POLICIES = {
   deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
 };
 
+/** A GraphQL rule node as the selection returns it: every twin off, so only the id and pattern matter. */
+function ruleNode(id: string, pattern: string): Record<string, unknown> {
+  return {
+    id,
+    pattern,
+    isAdminEnforced: false,
+    requiresLinearHistory: false,
+    allowsForcePushes: false,
+    allowsDeletions: false,
+    blocksCreations: false,
+    requiresConversationResolution: false,
+    lockBranch: false,
+    lockAllowsFetchAndMerge: false,
+    requiresCommitSignatures: false,
+    requiresStatusChecks: false,
+    requiresStrictStatusChecks: false,
+    requiredStatusCheckContexts: [],
+    requiresApprovingReviews: false,
+    requiredApprovingReviewCount: null,
+    requiresCodeOwnerReviews: false,
+    dismissesStaleReviews: false,
+    requireLastPushApproval: false,
+    requiresDeployments: false,
+    requiredDeploymentEnvironments: [],
+    bypassForcePushAllowances: { nodes: [], pageInfo: { hasNextPage: false } },
+  };
+}
+
 function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Seed[] {
   return [
     {
@@ -266,10 +294,7 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
         data: {
           repository: {
             branchProtectionRules: {
-              nodes: [
-                { id: "BPR_1", pattern: "release/*" },
-                { id: "BPR_2", pattern: "release/*" },
-              ],
+              nodes: [ruleNode("BPR_1", "release/*"), ruleNode("BPR_2", "release/*")],
               pageInfo: { hasNextPage: false, endCursor: null },
             },
           },

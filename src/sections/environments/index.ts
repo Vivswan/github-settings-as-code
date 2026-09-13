@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
   loosen,
@@ -26,8 +26,42 @@ import {
 import { EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
 import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
-/** One item of the environment listing: the GET body plan() probes by name, so the name is pinned; the id tells two same-fold names apart. */
-const LiveEnvironment = z.looseObject({ id: z.number().optional(), name: z.string() });
+/**
+ * The environment body (the probe's, and each listing item's): the protection rules GET nests, which
+ * flattenEnvironment un-nests, and the branch-policy flags the nested planners read. Every field the
+ * section touches is declared, so an off-shape body fails the read instead of a translation.
+ */
+const LiveEnvironmentBody = z.looseObject({
+  node_id: z.string().optional(),
+  protection_rules: z
+    .array(
+      z.looseObject({
+        type: z.string().optional(),
+        wait_timer: z.number().optional(),
+        prevent_self_review: z.boolean().optional(),
+        reviewers: z
+          .array(
+            z.looseObject({
+              type: z.string().optional(),
+              reviewer: z.looseObject({ id: z.number() }).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .optional(),
+  deployment_branch_policy: z
+    .looseObject({
+      protected_branches: z.boolean().optional(),
+      custom_branch_policies: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+export type LiveEnvironmentBody = z.infer<typeof LiveEnvironmentBody>;
+
+/** One item of the environment listing: the name plan() probes by is pinned; the id tells two same-fold names apart. */
+const LiveEnvironment = LiveEnvironmentBody.extend({ id: z.number().optional(), name: z.string() });
 
 const permission: SectionPermission = { repo: ["environments"] };
 
@@ -80,8 +114,11 @@ export const environmentsSection = {
       const { settings, nested, routed } = splitEntry(env);
       const name = env.name;
       const params = { environment_name: name };
-      const probe = await ctx.read.probe.probeAbsent({ params });
-      const live = "missing" in probe ? undefined : ((probe.data ?? {}) as Record<string, unknown>);
+      const probe = await ctx.read.probe.probeAbsent(LiveEnvironmentBody, {
+        params,
+        describe: `environment "${name}"`,
+      });
+      const live = "missing" in probe ? undefined : probe.data;
       const drift =
         live === undefined
           ? [missingDrift(`environments[${name}]`)]
@@ -136,12 +173,7 @@ export const environmentsSection = {
     return plan;
   },
   async snapshot(ctx) {
-    const listed = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LiveEnvironment),
-      await ctx.read.list.listAllEnveloped("environments"),
-    );
+    const listed = await ctx.read.list.listAllEnveloped("environments", LiveEnvironment);
     if (listed.length === 0) {
       return { value: undefined, notes: [] };
     }
@@ -172,22 +204,16 @@ export const environmentsSection = {
  * to the PUT shape so check compares like with like. Exported so the e2e state tests can assert
  * their environmentFromPut inverts this exact function.
  */
-export function flattenEnvironment(live: unknown): Record<string, unknown> {
-  const raw = (live ?? {}) as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...raw };
-  const rules = (raw.protection_rules ?? []) as Array<Record<string, unknown>>;
-  for (const rule of rules) {
+export function flattenEnvironment(live: LiveEnvironmentBody): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...live };
+  for (const rule of live.protection_rules ?? []) {
     if (rule.type === "wait_timer") {
       out.wait_timer = rule.wait_timer;
     } else if (rule.type === "required_reviewers") {
       if (rule.prevent_self_review !== undefined) {
         out.prevent_self_review = rule.prevent_self_review;
       }
-      const reviewers = (rule.reviewers ?? []) as Array<{
-        type: unknown;
-        reviewer?: { id?: unknown };
-      }>;
-      out.reviewers = reviewers.map((r) => ({ type: r.type, id: r.reviewer?.id }));
+      out.reviewers = (rule.reviewers ?? []).map((r) => ({ type: r.type, id: r.reviewer?.id }));
     } else {
       // Unknown rule types un-nest generically, or a declared setting of theirs would read as drift.
       for (const [key, value] of Object.entries(rule)) {

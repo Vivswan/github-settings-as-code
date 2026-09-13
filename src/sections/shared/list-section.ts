@@ -11,7 +11,7 @@ import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive, plural } from "../contract/live.js";
+import { liveByIdentity, liveIdentity, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
@@ -595,11 +595,11 @@ function updateBody(decl: ErasedDecl<string>, write: Fields): Fields {
 async function readList(
   decl: ErasedDecl<string>,
   ctx: PlanContext<ListEndpoints>,
-): Promise<unknown> {
+): Promise<object[]> {
   const query = decl.listing?.query;
   return decl.listing?.unpaginated === true
-    ? ctx.read.list.call({ query })
-    : ctx.read.list.listAll({ query });
+    ? ctx.read.list.call(z.array(decl.live), { query })
+    : ctx.read.list.listAll(decl.live, { query });
 }
 
 interface LiveItems {
@@ -610,15 +610,9 @@ interface LiveItems {
 /** The parsed list split by `foreign`, in live order on both sides. */
 async function readLive(
   decl: ErasedDecl<string>,
-  section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
 ): Promise<LiveItems> {
-  const live = parseLive(
-    section,
-    decl.endpoints.list,
-    z.array(decl.live),
-    await readList(decl, ctx),
-  );
+  const live = await readList(decl, ctx);
   const out: LiveItems = { managed: [], foreign: [] };
   for (const item of live) {
     const foreign = decl.foreign?.(item) ?? null;
@@ -633,22 +627,20 @@ async function readLive(
 
 /** The read port of the optional `get` role; the erased dictionary cannot type it, so the shape is spelled here. */
 interface ItemReadPort {
-  call(opts: { params: Readonly<Record<string, string>> }): Promise<unknown>;
+  call<T>(schema: z.ZodType<T>, opts: { params: Readonly<Record<string, string>> }): Promise<T>;
 }
 
 /** The item's full body when the dictionary declares a `get`, the list item otherwise. */
 async function readItem(
   decl: ErasedDecl<string>,
-  section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
   item: object,
 ): Promise<object> {
-  const get = "get" in decl.endpoints ? decl.endpoints.get : undefined;
-  if (get === undefined) {
+  if (!("get" in decl.endpoints)) {
     return item;
   }
   const port = (ctx.read as unknown as { readonly get: ItemReadPort }).get;
-  return parseLive(section, get, decl.live, await port.call({ params: decl.address(item) }));
+  return port.call(decl.live, { params: decl.address(item) });
 }
 
 // --- Plan -------------------------------------------------------------------
@@ -723,7 +715,7 @@ async function planList<Key extends string>(
     );
   }
 
-  const live = await readLive(decl, section, ctx);
+  const live = await readLive(decl, ctx);
   const liveItems = live.managed.map((item) => {
     const comparable = lens.fromLive(item);
     const name = nameOf(comparable, identity.field);
@@ -778,7 +770,7 @@ async function planList<Key extends string>(
       });
       continue;
     }
-    const body = await readItem(decl, section, ctx, existing.item);
+    const body = await readItem(decl, ctx, existing.item);
     const compared = comparison(decl, label, write, body, lens.fromLive(body));
     plan.notes.push(...compared.notes);
     const found = deltas(compared.write, compared.live, { matchBy: lens.matchBy });
@@ -922,7 +914,7 @@ async function snapshotList(
   ctx: PlanContext<ListEndpoints>,
 ): Promise<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }> {
   const { key, noun, identity, lens } = decl;
-  const live = await readLive(decl, section, ctx);
+  const live = await readLive(decl, ctx);
   const notes = live.foreign.map(({ name, reason }) =>
     leftOutOfSnapshot(`${key}[${name}]`, reason),
   );
@@ -943,7 +935,7 @@ async function snapshotList(
   const entries: object[] = [];
   for (const { item, name } of items) {
     const label = `${key}[${name}]`;
-    const body = await readItem(decl, section, ctx, item);
+    const body = await readItem(decl, ctx, item);
     const hidden = decl.concealed?.(body) ?? [];
     if (hidden.length > 0) {
       for (const { field, reason, remedy } of hidden) {

@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import { parseLive } from "../contract/live.js";
 import { type EntryOf, type SectionMeta, undeclaredPolicy } from "../contract/module.js";
-import { LIVE_SECRET_NAMES, planSecrets, type SecretsPlanScope } from "../shared/secrets-engine.js";
+import { LiveSecretName, planSecrets, type SecretsPlanScope } from "../shared/secrets-engine.js";
 import {
   LiveVariable,
   planVariables,
@@ -199,18 +198,12 @@ export function splitEntry(env: EnvironmentConfig): {
 /** One environment's live Actions variables. */
 export async function listEnvironmentVariables(
   ctx: EnvironmentsRestContext,
-  section: SectionMeta,
   envName: string,
 ): Promise<LiveVariable[]> {
-  return parseLive(
-    section,
-    ENDPOINTS.listVariables,
-    z.array(LiveVariable),
-    await ctx.read.listVariables.listAllEnveloped("variables", {
-      params: { environment_name: envName },
-    }),
-    `environment "${envName}"`,
-  );
+  return ctx.read.listVariables.listAllEnveloped("variables", LiveVariable, {
+    params: { environment_name: envName },
+    describe: `environment "${envName}"`,
+  });
 }
 
 /**
@@ -246,8 +239,7 @@ async function planEnvironmentVariables(
     Op<"removeVariable">
   > = {
     ...nestedProse(envName, "variables", "variable"),
-    list: async () =>
-      liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, section, envName),
+    list: async () => (liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, envName)),
     create: (write) => ({
       role: "createVariable",
       params,
@@ -283,18 +275,12 @@ async function planEnvironmentVariables(
 /** One environment's live Actions secret names (GitHub never lists values). */
 export async function listEnvironmentSecrets(
   ctx: EnvironmentsRestContext,
-  section: SectionMeta,
   envName: string,
-): Promise<z.infer<typeof LIVE_SECRET_NAMES>> {
-  return parseLive(
-    section,
-    ENDPOINTS.listSecrets,
-    LIVE_SECRET_NAMES,
-    await ctx.read.listSecrets.listAllEnveloped("secrets", {
-      params: { environment_name: envName },
-    }),
-    `environment "${envName}"`,
-  );
+): Promise<LiveSecretName[]> {
+  return ctx.read.listSecrets.listAllEnveloped("secrets", LiveSecretName, {
+    params: { environment_name: envName },
+    describe: `environment "${envName}"`,
+  });
 }
 
 /**
@@ -313,9 +299,9 @@ async function planEnvironmentSecrets(
   const params = { environment_name: envName };
   const scope: SecretsPlanScope<Op<"putSecret">, Op<"removeSecret">> = {
     ...nestedProse(envName, "secrets", `${envName} environment secret`),
-    list: async () =>
-      liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, section, envName),
-    publicKey: (exec, describe) => ctx.read.secretsPublicKey.call(exec, { params, describe }),
+    list: async () => (liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, envName)),
+    publicKey: (exec, describe) =>
+      ctx.read.secretsPublicKey.call(exec, z.unknown(), { params, describe }),
     publicKeyEndpoint: ENDPOINTS.secretsPublicKey,
     put: (write) => ({
       role: "putSecret",

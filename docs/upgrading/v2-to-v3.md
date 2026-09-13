@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty-four breaks (the ninth, the twenty-third, and the last are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, and the merged file (it reorders once, and a top-level `null` over nothing drops), so run `mode: check` before the first v3 apply and diff the first v3 merged file. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-five breaks (the ninth, the twenty-third, and the twenty-fourth are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, and the merged file (it reorders once, and a top-level `null` over nothing drops), so run `mode: check` before the first v3 apply and diff the first v3 merged file. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -32,6 +32,7 @@ Twenty-four breaks (the ninth, the twenty-third, and the last are for library co
 | One wording for every face | The command line reworded two remedies and refused `private-report: artifact` on its own; other remedies said "re-run the workflow" | One problem renderer; remedies name the input and its flag; `parseConfig` refuses the artifact channel for a face without an upload (`input-artifact-unsupported`) | No error. A step or script matching an error line by its old text stops matching; [section 22](#22-one-wording-for-every-face) |
 | Library: one owner per refusal, one selection type | `parseConfig(read, env)`; `executeRun` returned a number and took `describe`; `artifact-uploader-missing`; `validateSettings` took a `Set` | `parseConfig(read, env, capabilities)`; `executeRun` returns `{exitCode, fatal?}`; `input-artifact-unsupported`; `SectionSelection` everywhere; `writeReplacing`, `snapshotFileDestination`, the `central-file` role | The call fails to compile, naming the missing argument or member; [section 23](#23-library-one-owner-per-refusal-one-selection-type) |
 | The merged file is the fold, and a null over nothing drops | `mode: merge` wrote the validated parse, keys in the schema's order; `labels: null` with nothing below failed the merge | The fold in the layers' key order, byte for byte what `mergeSettings` returns as `yaml`; the null drops without a notice | No error: a committed merged file reorders once, and a one-layer read of a fleet layer carrying `labels: null` succeeds; [section 24](#24-the-merged-file-is-the-fold-and-a-null-over-nothing-drops) |
+| Every live read is parsed at the port | A body off the documented shape flowed into the comparison (a null Actions body read as drift on every key) | Every read fails loudly naming the endpoint and the field | The section fails with `returned a body outside the documented shape`; [section 25](#25-every-live-read-is-parsed-at-the-port) |
 
 ## 1. The defaults-file fallback
 
@@ -362,6 +363,21 @@ v3   repository:                         # the layers' order
 
 - The written file is the fold in the order the layers declared their keys; validation judges the fold and never re-serializes it. A merged file committed under v2 reorders once.
 - A top-level `null` on a section nothing below declares drops, on every section but `pages` and `interaction_limits`, where null is the section's value and stays. v2 refused the merge naming the section, so a one-layer read of a fleet layer carrying `labels: null` failed.
+
+## 25. Every live read is parsed at the port
+
+Every GET and GraphQL query a section issues now passes through one parser before the section sees the body, so a response off the documented shape fails the section instead of flowing into a comparison. v2 parsed some reads (the lists, the toggles) and compared others raw: a `null` Actions permissions body read as drift on every declared key and re-applied the PUT on every run; a pinned environment without a position was reported by its own message.
+
+```text
+actions: GET /repos/{owner}/{repo}/actions/permissions returned a body outside the documented shape - (body): Invalid input: expected object, received null. Check the "api-version" input against the GitHub REST docs for this endpoint
+```
+
+A GraphQL read says `GRAPHQL <operation>` in place of the method and path and points at the GraphQL reference. Where a read names its resource, the denial and the shape failure both carry it (`GET .../deployment_protection_rules (environment "production"): 403 ...`). The `api-version` advice is the fix in every case: the shapes are GitHub's documented ones.
+
+Two smaller moves ride along:
+
+- A section that reads anything must declare `snapshot()`; only the write-only `check_suite_preferences` reports `unsupported`, and the `snapshot is not implemented for this section yet` note is gone.
+- The organization-only sections (`teams`, `custom_properties`) are probed for the owner kind by the registry, ahead of their own plan and snapshot. The personal-account note is unchanged; a settings-file mistake in those sections (two entries naming one team) is now reported after that one public probe instead of before any request.
 
 ## Order of operations
 

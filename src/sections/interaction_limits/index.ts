@@ -11,12 +11,10 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { parseLive } from "../contract/live.js";
 import {
   cannotVerifyNote,
   loosen,
   requirePlainMapping,
-  type SectionMeta,
   type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -103,19 +101,6 @@ const ENDPOINTS = {
 type InteractionLimitsContext = PlanContext<typeof ENDPOINTS>;
 type InteractionLimitsPlan = SectionPlan<PlannedOp<typeof ENDPOINTS>>;
 
-/**
- * An EMPTY plain object is GitHub's "no limit set"; anything else falls through to the limit parse,
- * which fails loudly instead of reading a malformed body as absence.
- */
-function noLiveLimit(live: unknown): boolean {
-  return (
-    typeof live === "object" &&
-    live !== null &&
-    !Array.isArray(live) &&
-    Object.keys(live).length === 0
-  );
-}
-
 const LiveCreationCap = z.looseObject({
   enabled: z.boolean(),
   max_open_pull_requests: z.number(),
@@ -126,20 +111,24 @@ const LiveInteractionLimit = z.looseObject({
   origin: z.string().optional(),
 });
 
+/**
+ * An EMPTY plain object is GitHub's "no limit set"; anything else must be a limit, so a malformed
+ * body fails at the port instead of reading as absence.
+ */
+const LiveBaseLimit = z.union([z.strictObject({}), LiveInteractionLimit]);
+
+const LiveBypassUser = z.looseObject({ login: z.string() });
+
 type LiveLimitState =
   | { kind: "none" }
   | { kind: "repository"; limit: string; body: Record<string, unknown> }
   | { kind: "inherited"; limit: string; origin: string; body: Record<string, unknown> };
 
-async function liveBaseLimit(
-  ctx: InteractionLimitsContext,
-  section: SectionMeta,
-): Promise<LiveLimitState> {
-  const body = await ctx.read.get.call();
-  if (noLiveLimit(body)) {
+async function liveBaseLimit(ctx: InteractionLimitsContext): Promise<LiveLimitState> {
+  const parsed = await ctx.read.get.call(LiveBaseLimit);
+  if (!("limit" in parsed)) {
     return { kind: "none" };
   }
-  const parsed = parseLive(section, ENDPOINTS.get, LiveInteractionLimit, body);
   // An absent origin reads as the repository's own limit: only a non-repository origin changes what apply can do.
   return parsed.origin !== undefined && parsed.origin.toLowerCase() !== "repository"
     ? { kind: "inherited", limit: parsed.limit, origin: parsed.origin, body: parsed }
@@ -198,16 +187,8 @@ function bypassDelta(
  * A single GET, not listAll(): the endpoint documents no pagination parameters (the list holds at
  * most 100 users), so a page loop on a full 100-user list would re-request the same body forever.
  */
-async function liveBypassLogins(
-  ctx: InteractionLimitsContext,
-  section: SectionMeta,
-): Promise<string[]> {
-  const live = parseLive(
-    section,
-    ENDPOINTS.bypassList,
-    z.array(z.looseObject({ login: z.string() })),
-    await ctx.read.bypassList.call(),
-  );
+async function liveBypassLogins(ctx: InteractionLimitsContext): Promise<string[]> {
+  const live = await ctx.read.bypassList.call(z.array(LiveBypassUser));
   return live.map((user) => user.login);
 }
 
@@ -222,7 +203,7 @@ export const interactionLimitsSection = {
 
     if (desired === null) {
       // null clears the BASE limit only; the cap and bypass list are separate resources.
-      const live = await liveBaseLimit(ctx, this);
+      const live = await liveBaseLimit(ctx);
       if (live.kind === "none") {
         return plan;
       }
@@ -249,7 +230,7 @@ export const interactionLimitsSection = {
     const { base, cap, bypass } = splitDeclared(desired);
 
     if (base !== undefined) {
-      const live = await liveBaseLimit(ctx, this);
+      const live = await liveBaseLimit(ctx);
       // Declared != effective is drift REGARDLESS of who set the live limit: an inherited limit adds
       // the cannot-fix note, but check stays red rather than reporting a non-matching repository as clean.
       const drift: string[] = [];
@@ -294,7 +275,7 @@ export const interactionLimitsSection = {
       });
     }
     if (cap !== undefined) {
-      const outcome = await ctx.read.capGet.tryCall({
+      const outcome = await ctx.read.capGet.tryCall(LiveCreationCap, {
         describe: "reading the pull request creation cap",
       });
       if ("error" in outcome) {
@@ -339,7 +320,7 @@ export const interactionLimitsSection = {
       }
     }
     if (bypass !== undefined) {
-      const liveLogins = await liveBypassLogins(ctx, this);
+      const liveLogins = await liveBypassLogins(ctx);
       const { add, remove } = bypassDelta(bypass, liveLogins);
       if (remove.length > 0) {
         plan.ops.push({
@@ -377,7 +358,7 @@ export const interactionLimitsSection = {
   async snapshot(ctx) {
     const notes: string[] = [];
     const value: Record<string, unknown> = {};
-    const live = await liveBaseLimit(ctx, this);
+    const live = await liveBaseLimit(ctx);
     if (live.kind === "repository") {
       value.limit = live.limit;
       notes.push(
@@ -391,7 +372,7 @@ export const interactionLimitsSection = {
         ),
       );
     }
-    const cap = await ctx.read.capGet.tryCall({
+    const cap = await ctx.read.capGet.tryCall(LiveCreationCap, {
       describe: "reading the pull request creation cap",
     });
     if ("error" in cap) {
@@ -399,16 +380,14 @@ export const interactionLimitsSection = {
         `interaction_limits: ${CAP_UNAVAILABLE} (405), so pull_request_creation_cap and pull_request_creation_bypass are omitted`,
       );
     } else {
-      // Parsed at the boundary: a body off the shape (a null, a quoted flag) fails the section
-      // instead of reading as "no cap".
-      const liveCap = parseLive(this, ENDPOINTS.capGet, LiveCreationCap, cap.data);
-      if (liveCap.enabled) {
+      // Parsed at the port: a body off the shape (a null, a quoted flag) fails the section instead of reading as "no cap".
+      if (cap.data.enabled) {
         value.pull_request_creation_cap = projectOntoSchema(
           InteractionLimitsConfig.unwrap().shape.pull_request_creation_cap,
-          liveCap,
+          cap.data,
         );
       }
-      const bypass = await liveBypassLogins(ctx, this);
+      const bypass = await liveBypassLogins(ctx);
       if (bypass.length > 0) {
         value.pull_request_creation_bypass = bypass;
       }

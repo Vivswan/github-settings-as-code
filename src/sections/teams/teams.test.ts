@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
+import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -7,13 +9,16 @@ import { REPO } from "../../../test/sections/section-run.js";
 import { teamsSection } from "./index.js";
 import { teamsMockHandlers } from "./mock.js";
 
+/** The registered module: the owner gate the registry composes is part of the behavior under test. */
+const gated = sectionModule("teams") as SectionModule<"teams"> &
+  Required<Pick<SectionModule<"teams">, "snapshot">>;
+
 const ORG = "GET /orgs/o";
 const LIST = "GET /repos/o/r/teams?per_page=100&page=1";
 const probeOf = (slug: string) => `GET /orgs/o/teams/${slug}/repos/o/r`;
 const plan = (api: MockApi, desired: Parameters<typeof teamsSection.plan>[1]) =>
-  teamsSection.plan(planContext(teamsSection, api, REPO), desired);
-const snapshot = (api: MockApi) =>
-  teamsSection.snapshot(snapshotContext(teamsSection, api, REPO, "fail"));
+  gated.plan(planContext(gated, api, REPO), desired);
+const snapshot = (api: MockApi) => gated.snapshot(snapshotContext(gated, api, REPO, "fail"));
 
 describe("teams", () => {
   test("a personal account no-ops with a note after the org probe alone", async () => {
@@ -151,12 +156,12 @@ describe("teams", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);
   });
 
-  test("two entries naming the same slug are rejected before any API call", async () => {
-    const api = new MockApi({});
+  test("two entries naming the same slug are rejected after the owner probe alone", async () => {
+    const api = new MockApi({ [ORG]: { data: { login: "o" } } });
     await expect(plan(api, [{ name: "ops" }, { name: "Ops", permission: "pull" }])).rejects.toThrow(
       /same teams entry: "ops" and "Ops"/,
     );
-    expect(api.calls).toHaveLength(0);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);
   });
 
   test("executing the plan against the mock fragment converges: the re-plan is empty", async () => {

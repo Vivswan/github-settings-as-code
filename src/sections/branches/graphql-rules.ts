@@ -1,5 +1,6 @@
 /** index.ts decides which entries reach this module; nothing here classifies entries. */
 
+import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import { repoVariables } from "../contract/endpoints.js";
@@ -275,7 +276,68 @@ export function hasRoutedGraphqlKeys(
   return protection !== null && ROUTED_KEYS.some((key) => protection[key] !== undefined);
 }
 
-type RuleNode = Record<string, unknown>;
+/**
+ * A rule node as the selection returns it, every twin the translators read declared with the SDL's
+ * nullability, so a value off the vocabulary fails the read instead of vanishing from the classic view.
+ */
+const RuleNode = z.looseObject({
+  id: z.string(),
+  pattern: z.string(),
+  isAdminEnforced: z.boolean(),
+  requiresLinearHistory: z.boolean(),
+  allowsForcePushes: z.boolean(),
+  allowsDeletions: z.boolean(),
+  blocksCreations: z.boolean(),
+  requiresConversationResolution: z.boolean(),
+  lockBranch: z.boolean(),
+  lockAllowsFetchAndMerge: z.boolean(),
+  requiresCommitSignatures: z.boolean(),
+  requiresStatusChecks: z.boolean(),
+  requiresStrictStatusChecks: z.boolean(),
+  requiredStatusCheckContexts: z.array(z.string()).nullable(),
+  requiresApprovingReviews: z.boolean(),
+  requiredApprovingReviewCount: z.number().nullable(),
+  requiresCodeOwnerReviews: z.boolean(),
+  dismissesStaleReviews: z.boolean(),
+  requireLastPushApproval: z.boolean(),
+  requiresDeployments: z.boolean(),
+  requiredDeploymentEnvironments: z.array(z.string()).nullable(),
+  bypassForcePushAllowances: z.looseObject({
+    nodes: z
+      .array(
+        z
+          .looseObject({
+            // The selection names one identity per actor variant (User login, Team combinedSlug, App slug).
+            actor: z
+              .union([
+                z.looseObject({ login: z.string() }),
+                z.looseObject({ combinedSlug: z.string() }),
+                z.looseObject({ slug: z.string() }),
+              ])
+              .nullable()
+              .optional(),
+          })
+          .nullable(),
+      )
+      .nullable(),
+    pageInfo: z.looseObject({ hasNextPage: z.boolean() }),
+  }),
+});
+type RuleNode = z.infer<typeof RuleNode>;
+
+/** The node id a lookup selects; null when the token cannot see the object. */
+const NodeId = z.looseObject({ id: z.string() }).nullable().optional();
+
+const RepositoryLookup = z.looseObject({ repository: NodeId });
+
+const UserLookup = z.looseObject({ repository: NodeId, user: NodeId });
+
+const TeamLookup = z.looseObject({
+  repository: NodeId,
+  organization: z.looseObject({ team: NodeId }).nullable().optional(),
+});
+
+const AppLookup = z.looseObject({ node_id: z.string().optional() });
 
 /**
  * null when the rules query answered its tolerated NOT_FOUND: unreadable is not the same as empty,
@@ -299,7 +361,7 @@ export type BranchesContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL>;
 export type BranchesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS, typeof GRAPHQL>>;
 
 export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
-  const read = await ctx.read.rulesQuery.listConnection(repoVariables(ctx));
+  const read = await ctx.read.rulesQuery.listConnection(RuleNode, repoVariables(ctx));
   if ("error" in read) {
     // The declared NOT_FOUND: the denial surfaces at the first write instead of here.
     return null;
@@ -309,7 +371,7 @@ export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
 
 /** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
 export async function fetchRulesForSnapshot(ctx: BranchesContext): Promise<Map<string, RuleNode>> {
-  const read = await ctx.read.rulesSnapshot.listConnection(repoVariables(ctx));
+  const read = await ctx.read.rulesSnapshot.listConnection(RuleNode, repoVariables(ctx));
   if ("error" in read) {
     throw new Error(
       "BUG: branches: the snapshot rules query declares no tolerated outcome, yet its read returned an error instead of throwing",
@@ -319,34 +381,29 @@ export async function fetchRulesForSnapshot(ctx: BranchesContext): Promise<Map<s
 }
 
 /** The rules by pattern under the duplicate-live guard: GitHub matches a pattern exactly, so the fold is the pattern itself. */
-function indexRules(ctx: BranchesContext, items: readonly unknown[]): Map<string, RuleNode> {
-  const rules = items.flatMap((node) => {
-    if (typeof node !== "object" || node === null) {
-      return [];
-    }
-    const rule = node as RuleNode;
+function indexRules(ctx: BranchesContext, rules: readonly RuleNode[]): Map<string, RuleNode> {
+  for (const rule of rules) {
     // The nested allowance connection is read in one 100-node page; a rule beyond that would
     // silently truncate, so check would report phantom drift against the truncated list.
-    const allowances = rule.bypassForcePushAllowances as
-      | { pageInfo?: { hasNextPage?: unknown } }
-      | undefined;
-    if (allowances?.pageInfo?.hasNextPage === true) {
+    if (rule.bypassForcePushAllowances.pageInfo.hasNextPage) {
       throw new Error(
-        `branches: the live protection rule "${String(rule.pattern)}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
+        `branches: the live protection rule "${rule.pattern}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
       );
     }
-    return [rule];
-  });
+  }
   return liveByIdentity(
     { key: ctx.section },
     "protection rule",
     rules,
-    (rule) => String(rule.pattern),
-    (rule) => liveIdentity(String(rule.pattern), { rule_id: String(rule.id) }),
+    (rule) => rule.pattern,
+    (rule) => liveIdentity(rule.pattern, { rule_id: rule.id }),
   );
 }
 
-export function bypassActorStrings(node: RuleNode): string[] {
+/** A rule as its classic view reads it: the twins by name, so the mock's projection and the parsed node both qualify. */
+type RuleFields = Record<string, unknown>;
+
+export function bypassActorStrings(node: RuleFields): string[] {
   const allowances = (node.bypassForcePushAllowances as { nodes?: unknown } | undefined)?.nodes;
   if (!Array.isArray(allowances)) {
     return [];
@@ -373,7 +430,7 @@ export function bypassActorStrings(node: RuleNode): string[] {
  * and "" as one empty value, so null stays for the clearer drift message. The e2e state test proves
  * the mock's REST-state projection round-trips through it.
  */
-export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
+export function classicViewOfRule(node: RuleFields): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [classic, twin] of Object.entries(GRAPHQL_BOOLEAN_TWINS)) {
     out[classic] = node[twin];
@@ -413,7 +470,7 @@ export function classicViewOfRule(node: RuleNode): Record<string, unknown> {
  * list and a requirement that is on. An omitted routed key leaves the live value untouched (unlike
  * the replacing PUT, which resets an omitted control), so the file pins what is set.
  */
-export function routedKeysSnapshot(node: RuleNode): Pick<BranchProtectionConfig, RoutedKey> {
+export function routedKeysSnapshot(node: RuleFields): Pick<BranchProtectionConfig, RoutedKey> {
   const view = classicViewOfRule(node);
   const out: Pick<BranchProtectionConfig, RoutedKey> = {};
   const actors = view.force_push_bypassers as string[];
@@ -431,7 +488,7 @@ export function routedKeysSnapshot(node: RuleNode): Pick<BranchProtectionConfig,
  * dropped and a nested null (an unset review count) omitted, so the entry carries only keys the
  * wildcard shape accepts and the check reads clean against the same rule.
  */
-export function wildcardSnapshot(node: RuleNode): BranchProtectionConfig {
+export function wildcardSnapshot(node: RuleFields): BranchProtectionConfig {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(classicViewOfRule(node))) {
     if (value === false || value === null || (Array.isArray(value) && value.length === 0)) {
@@ -653,34 +710,33 @@ async function resolveActorId(
   if (actor === null) {
     throw new Error(`BUG: force_push_bypassers actor "${raw}" escaped shape validation`);
   }
-  let id: unknown;
+  let id: string | undefined;
   if (actor.kind === "user") {
     const data = await ctx.read.actorUser.call(
       exec,
+      UserLookup,
       { ...repoVariables(ctx), login: actor.login },
       { describe: `resolving force-push bypass user "${raw}"` },
     );
     adoptRepoId(graphqlRun, data);
-    id = (data.user as Record<string, unknown> | null)?.id;
+    id = data.user?.id;
   } else if (actor.kind === "team") {
     const data = await ctx.read.actorTeam.call(
       exec,
+      TeamLookup,
       { ...repoVariables(ctx), org: actor.org, team: actor.team },
       { describe: `resolving force-push bypass team "${raw}"` },
     );
     adoptRepoId(graphqlRun, data);
-    const team = (data.organization as Record<string, unknown> | null)?.team as Record<
-      string,
-      unknown
-    > | null;
-    if (!team) {
+    const team = data.organization?.team;
+    if (team === null || team === undefined) {
       throw new Error(
         `branches: force_push_bypassers actor "${raw}": the organization "${actor.org}" has no team with slug "${actor.team}" (or the token cannot see it); check the actor spelling in the settings file`,
       );
     }
     id = team.id;
   } else {
-    const result = await ctx.read.appLookup.tryCall(exec, {
+    const result = await ctx.read.appLookup.tryCall(exec, AppLookup, {
       params: { app_slug: actor.slug },
       describe: `resolving force-push bypass App "${raw}"`,
     });
@@ -689,9 +745,9 @@ async function resolveActorId(
         `branches: force_push_bypassers actor "${raw}": no GitHub App with slug "${actor.slug}" exists; check the actor spelling in the settings file`,
       );
     }
-    id = (result.data as Record<string, unknown> | null)?.node_id;
+    id = result.data.node_id;
   }
-  if (typeof id !== "string" || id.length === 0) {
+  if (id === undefined || id.length === 0) {
     throw new Error(
       `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
     );
@@ -700,9 +756,9 @@ async function resolveActorId(
   return id;
 }
 
-function adoptRepoId(graphqlRun: GraphqlRun, data: Record<string, unknown>): void {
-  const id = (data.repository as Record<string, unknown> | null)?.id;
-  if (graphqlRun.repoId === null && typeof id === "string" && id.length > 0) {
+function adoptRepoId(graphqlRun: GraphqlRun, data: z.infer<typeof RepositoryLookup>): void {
+  const id = data.repository?.id;
+  if (graphqlRun.repoId === null && id !== undefined && id.length > 0) {
     graphqlRun.repoId = id;
   }
 }
@@ -786,11 +842,11 @@ async function repositoryNodeId(
   graphqlRun: GraphqlRun,
 ): Promise<string> {
   if (graphqlRun.repoId === null) {
-    const data = await ctx.read.repoLookup.call(exec, repoVariables(ctx), {
+    const data = await ctx.read.repoLookup.call(exec, RepositoryLookup, repoVariables(ctx), {
       describe: "resolving the repository's GraphQL node id",
     });
-    const id = (data.repository as Record<string, unknown> | null)?.id;
-    if (typeof id !== "string" || id.length === 0) {
+    const id = data.repository?.id;
+    if (id === undefined || id.length === 0) {
       throw new Error(
         "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow and retry if it persists",
       );

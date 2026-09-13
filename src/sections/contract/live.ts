@@ -5,8 +5,8 @@
  */
 
 import type { z } from "zod";
-import { type EndpointDecl, endpointMethod, endpointPath } from "./endpoints.js";
-import type { SectionMeta } from "./module.js";
+import { endpointMethod, endpointPath } from "./endpoints.js";
+import type { FailingOp, SectionMeta } from "./module.js";
 import { collidingPairs } from "./requests.js";
 
 /** The plural of a section noun for a message ("custom property" -> "custom properties", "protected branch" -> "protected branches"). */
@@ -65,11 +65,12 @@ export function liveByIdentity<T, Key extends string>(
 
 /**
  * Schemas stay loose objects, so passthrough fields survive for subsetDiff/phantomKeys. `describe` names
- * the concrete resource (an environment, a page) the path template alone cannot spell.
+ * the concrete resource (an environment, a page) the path template alone cannot spell. The read port
+ * (./plan.ts) parses every answer through it; a section reaches it directly only for a write's response.
  */
 export function parseLive<T>(
-  section: SectionMeta,
-  endpoint: EndpointDecl,
+  section: Pick<SectionMeta, "key">,
+  op: FailingOp,
   schema: z.ZodType<T>,
   data: unknown,
   describe?: string,
@@ -87,7 +88,13 @@ export function parseLive<T>(
   });
   const more = issues.length > 3 ? `; and ${issues.length - 3} more issue(s)` : "";
   const where = describe === undefined ? "" : ` (${describe})`;
+  const request =
+    "route" in op ? `${endpointMethod(op.route)} ${endpointPath(op.route)}` : `GRAPHQL ${op.name}`;
+  const reference =
+    "route" in op
+      ? "GitHub REST docs for this endpoint"
+      : "GitHub GraphQL reference for this operation";
   throw new Error(
-    `${section.key}: ${endpointMethod(endpoint.route)} ${endpointPath(endpoint.route)}${where} returned a body outside the documented shape - ${shown.join("; ")}${more}. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    `${section.key}: ${request}${where} returned a body outside the documented shape - ${shown.join("; ")}${more}. Check the "api-version" input against the ${reference}`,
   );
 }

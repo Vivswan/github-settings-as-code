@@ -246,8 +246,8 @@ describe("snapshot round trip", () => {
         ),
       ).rejects.toThrow(
         "interaction_limits: GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap " +
-          `returned a body outside the documented shape - ${issue}. Check the "api-version" ` +
-          "input against the GitHub REST docs for this endpoint",
+          `(reading the pull request creation cap) returned a body outside the documented shape - ${issue}. ` +
+          'Check the "api-version" input against the GitHub REST docs for this endpoint',
       );
     },
   );

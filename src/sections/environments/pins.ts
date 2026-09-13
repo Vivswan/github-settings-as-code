@@ -3,6 +3,7 @@
  * planning. plan() gates the call on a declared `pinned` key, so a pin-free file never touches /graphql.
  */
 
+import { z } from "zod";
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -103,23 +104,13 @@ interface LivePin {
 export type PinnedNames = readonly string[];
 
 /**
- * A pin without a numeric position and a name has no identity to reconcile by, and silently
- * skipping it would let check report falsely clean while apply reordered blind.
+ * A pin needs a numeric position and a name to reconcile by; silently skipping one would let check
+ * report falsely clean while apply reordered blind, so the node schema demands both.
  */
-function livePin(node: unknown): LivePin {
-  const pin = node as { position?: unknown; environment?: { name?: unknown } } | null;
-  const position = pin?.position;
-  const name = pin?.environment?.name;
-  if (typeof position !== "number" || typeof name !== "string") {
-    throw new Error(
-      `environments: the pinned-environments listing returned a pin node this section cannot ` +
-        `read (${JSON.stringify(node) ?? String(node)}): it needs a numeric "position" and an ` +
-        `"environment.name" string, so the declared pins cannot be reconciled. Check the ` +
-        `"api-version" input against the GitHub GraphQL reference for pinnedEnvironments`,
-    );
-  }
-  return { position, name };
-}
+const LivePinNode = z.looseObject({
+  position: z.number(),
+  environment: z.looseObject({ name: z.string() }),
+});
 
 /**
  * A tolerated NOT_FOUND (how GraphQL delivers a fine-grained denial on the repository) reads as
@@ -127,7 +118,7 @@ function livePin(node: unknown): LivePin {
  * write instead of failing the read pass.
  */
 async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
-  const listed = await ctx.read.pins.listConnection(repoVariables(ctx));
+  const listed = await ctx.read.pins.listConnection(LivePinNode, repoVariables(ctx));
   if ("error" in listed) {
     return [];
   }
@@ -136,7 +127,7 @@ async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
 
 /** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
 export async function snapshotPins(ctx: EnvironmentsPlanContext): Promise<PinnedNames> {
-  const listed = await ctx.read.pinsSnapshot.listConnection(repoVariables(ctx));
+  const listed = await ctx.read.pinsSnapshot.listConnection(LivePinNode, repoVariables(ctx));
   if ("error" in listed) {
     throw new Error(
       "BUG: environments: the snapshot pins query declares no tolerated outcome, yet its read returned an error instead of throwing",
@@ -146,8 +137,13 @@ export async function snapshotPins(ctx: EnvironmentsPlanContext): Promise<Pinned
 }
 
 /** The pins in rank order, under the duplicate-live guard (one pin per environment, names folded as pinKey folds them). */
-function rankPins(ctx: EnvironmentsPlanContext, nodes: readonly unknown[]): LivePin[] {
-  const pins = nodes.map(livePin).sort((a, b) => a.position - b.position);
+function rankPins(
+  ctx: EnvironmentsPlanContext,
+  nodes: readonly z.infer<typeof LivePinNode>[],
+): LivePin[] {
+  const pins = nodes
+    .map((node) => ({ position: node.position, name: node.environment.name }))
+    .sort((a, b) => a.position - b.position);
   liveByIdentity(
     { key: ctx.section },
     "pinned environment",

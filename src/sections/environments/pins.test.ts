@@ -270,7 +270,7 @@ describe("environments pinned apply mode", () => {
       },
     });
     await expect(plan(api, [{ name: "prod", pinned: true }])).rejects.toThrow(
-      /returned a pin node this section cannot read/,
+      "environments: GRAPHQL EnvironmentPins returned a body outside the documented shape - [0].position: Invalid input: expected number, received undefined",
     );
   });
 });

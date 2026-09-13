@@ -13,7 +13,8 @@ import {
 export const actionsMockHandlers: SectionRestHandlers<"actions"> = {
   "actions.getPermissions": ({ state }) => ok(state.actions_permissions),
   "actions.putPermissions": ({ state, body }) => {
-    state.actions_permissions = asObject(body);
+    // GitHub keeps the fields a partial PUT leaves out (allowed_actions beside enabled), so the body merges.
+    state.actions_permissions = { ...state.actions_permissions, ...asObject(body) };
     return noContent();
   },
   "actions.getSelected": ({ state }) => {
@@ -30,7 +31,8 @@ export const actionsMockHandlers: SectionRestHandlers<"actions"> = {
   },
   "actions.getWorkflow": ({ state }) => ok(state.workflow_permissions),
   "actions.putWorkflow": ({ state, body }) => {
-    state.workflow_permissions = asObject(body);
+    // Both fields are optional on the PUT and GitHub keeps the one left out, so the body merges.
+    state.workflow_permissions = { ...state.workflow_permissions, ...asObject(body) };
     return noContent();
   },
   "actions.getAccess": ({ state }) => ok(state.actions_access),

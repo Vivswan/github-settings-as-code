@@ -1,12 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
+import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
+import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { customPropertiesSection, normalizeValue } from "./index.js";
 import { customPropertiesMockHandlers } from "./mock.js";
+
+/** The registered module: the owner gate the registry composes is part of the behavior under test. */
+const gated = sectionModule("custom_properties") as SectionModule<"custom_properties"> &
+  Required<Pick<SectionModule<"custom_properties">, "snapshot">>;
 
 /** Routes for an org-owned repo with the given live property values. */
 function orgRoutes(values: Array<{ property_name: string; value: unknown }>) {
@@ -17,7 +23,7 @@ function orgRoutes(values: Array<{ property_name: string; value: unknown }>) {
 }
 
 const plan = (api: MockApi, desired: Parameters<typeof customPropertiesSection.plan>[1]) =>
-  customPropertiesSection.plan(planContext(customPropertiesSection, api, REPO), desired);
+  gated.plan(planContext(gated, api, REPO), desired);
 
 /** The lines an op's change renders; the section builds them at plan time, so no response is needed. */
 function changeLines(op: SectionPlan["ops"][number]): readonly string[] {
@@ -195,10 +201,10 @@ describe("custom_properties", () => {
       ],
       /same custom_properties entry/,
     ],
-  ])("%s is rejected before any API call", async (_form, declared, error) => {
-    const api = new MockApi({});
+  ])("%s is rejected after the owner probe alone", async (_form, declared, error) => {
+    const api = new MockApi({ "GET /orgs/o": { data: { login: "o" } } });
     await expect(plan(api, declared)).rejects.toThrow(error);
-    expect(api.calls).toHaveLength(0);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /orgs/o"]);
   });
 
   test("a live entry without a string property_name fails loudly as a contract violation", async () => {

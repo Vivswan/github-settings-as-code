@@ -89,7 +89,7 @@ export async function snapshotNested(
     ...liveVariablesByKey(
       section,
       "variable",
-      await listEnvironmentVariables(ctx, section, envName),
+      await listEnvironmentVariables(ctx, envName),
     ).values(),
   ];
   if (variables.length > 0) {
@@ -102,7 +102,7 @@ export async function snapshotNested(
     ...liveSecretsByKey(
       section,
       `${envName} environment secret`,
-      await listEnvironmentSecrets(ctx, section, envName),
+      await listEnvironmentSecrets(ctx, envName),
     ).keys(),
   ];
   if (secrets.length > 0) {
@@ -126,7 +126,7 @@ export async function snapshotNested(
       ctx,
       notes,
       `environments[${envName}].deployment_branch_policies`,
-      () => listBranchPolicies(ctx, section, envName),
+      () => listBranchPolicies(ctx, envName),
     );
     if ("value" in policies && policies.value.length > 0) {
       const byName = policiesByName(section, policies.value, envName);
@@ -142,7 +142,7 @@ export async function snapshotNested(
     ctx,
     notes,
     `environments[${envName}].deployment_protection_rules`,
-    () => listProtectionRules(ctx, section, envName),
+    () => listProtectionRules(ctx, envName),
   );
   if ("value" in rules) {
     const enabled = [...enabledRulesBySlug(section, rules.value, envName).keys()];

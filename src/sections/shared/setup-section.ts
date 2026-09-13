@@ -117,6 +117,9 @@ export interface SetupSectionModule<K extends SetupKey> {
   ) => Promise<SectionSnapshot<K>>;
 }
 
+/** The GET body: the whole configuration as a mapping, which subsetDiff compares the declared keys against. */
+const LiveSetup = z.looseObject({});
+
 /** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
 export function setupSection<K extends SetupKey>(setup: {
   key: K;
@@ -152,7 +155,7 @@ export function setupSection<K extends SetupKey>(setup: {
   const plan: SharedPlan = async (ctx, declared) => {
     const desired: Record<string, unknown> = declared;
     const planned: SectionPlan<PlannedOp<WideEndpoints>> = { ops: [], notes: [], drift: [] };
-    const drift = subsetDiff(desired, await ctx.read.get.call(), key);
+    const drift = subsetDiff(desired, await ctx.read.get.call(LiveSetup), key);
     if (!hasDrift(drift)) {
       return planned;
     }
@@ -186,7 +189,9 @@ export function setupSection<K extends SetupKey>(setup: {
   const snapshot = async (
     ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
   ): Promise<SectionSnapshot<K>> => {
-    const live = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call();
+    const live = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call(
+      LiveSetup,
+    );
     return { value: projectOntoSchema(slice as z.ZodType, live) as SetupDeclared<K>, notes: [] };
   };
 

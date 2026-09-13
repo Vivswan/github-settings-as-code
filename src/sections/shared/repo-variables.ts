@@ -7,12 +7,11 @@
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
-import { z } from "zod";
+import type { z } from "zod";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
-import { parseLive } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
@@ -181,7 +180,6 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     },
   };
 
-  const wide: WideEndpoints = endpoints;
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
     const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
@@ -194,13 +192,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     > = {
       label: key,
       noun,
-      list: async () =>
-        parseLive(
-          section,
-          wide.list,
-          z.array(LiveVariable),
-          await ctx.read.list.listAllEnveloped("variables"),
-        ),
+      list: async () => ctx.read.list.listAllEnveloped("variables", LiveVariable),
       create: (write) => ({
         role: "create",
         payload: write.payload,
@@ -228,12 +220,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
   };
 
   const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
-    const live = parseLive(
-      section,
-      wide.list,
-      z.array(LiveVariable),
-      await ctx.read.list.listAllEnveloped("variables"),
-    );
+    const live = await ctx.read.list.listAllEnveloped("variables", LiveVariable);
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }

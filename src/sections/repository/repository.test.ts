@@ -734,12 +734,13 @@ describe("repository GraphQL-routed keys", () => {
     await expect(plan(unknownEnum, { issue_creation_policy: "all" })).rejects.toThrow(
       "MAINTAINERS_ONLY",
     );
+    // A flag off its wire type never reaches the decoder: the read port refuses the body.
     const stringFlag = new MockApi({
       [GET]: { data: {} },
       ...features({ hasSponsorshipsEnabled: "yes" }),
     });
     await expect(plan(stringFlag, { enable_sponsorships: true })).rejects.toThrow(
-      "cannot read as a repository.enable_sponsorships value",
+      "repository: GRAPHQL RepositoryFeatures returned a body outside the documented shape - repository.hasSponsorshipsEnabled: Invalid input: expected boolean, received string",
     );
   });
 

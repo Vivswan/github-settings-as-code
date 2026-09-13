@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { executePlan } from "../../src/engine/execute.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import { PermissionDenied } from "../../src/sections/contract/errors.js";
@@ -124,7 +125,7 @@ describe("executePlan", () => {
         },
         {
           role: "create",
-          payload: async () => ({ copies: JSON.stringify(await port.list.listAll()) }),
+          payload: async () => ({ copies: JSON.stringify(await port.list.listAll(z.unknown())) }),
           drift: ["labels[copy]: missing"],
           change: "2",
         },
@@ -420,7 +421,7 @@ describe("executePlan", () => {
         {
           role: "create",
           before: async () => {
-            seen.push(JSON.stringify(await port.list.listAll()));
+            seen.push(JSON.stringify(await port.list.listAll(z.unknown())));
           },
           payload: { name: "bug" },
           drift: ["labels[bug]: missing"],

@@ -143,7 +143,7 @@ function rulesData(nodes: unknown[]): { data: Record<string, unknown> } {
   };
 }
 
-/** One live rule node with GitHub's fresh-rule defaults for selected fields. */
+/** One live rule node with GitHub's fresh-rule defaults (every twin off), the selected fields over them. */
 function ruleNode(
   pattern: string,
   fields: Record<string, unknown> = {},
@@ -152,9 +152,26 @@ function ruleNode(
   return {
     id: `RULE:${pattern}`,
     pattern,
+    isAdminEnforced: false,
+    requiresLinearHistory: false,
+    allowsForcePushes: false,
+    allowsDeletions: false,
+    blocksCreations: false,
+    requiresConversationResolution: false,
+    lockBranch: false,
+    lockAllowsFetchAndMerge: false,
+    requiresCommitSignatures: false,
+    requiresStatusChecks: false,
+    requiresStrictStatusChecks: false,
+    requiredStatusCheckContexts: [],
+    requiresApprovingReviews: false,
+    requiredApprovingReviewCount: null,
+    requiresCodeOwnerReviews: false,
+    dismissesStaleReviews: false,
+    requireLastPushApproval: false,
     requiresDeployments: false,
     requiredDeploymentEnvironments: [],
-    bypassForcePushAllowances: { nodes: actors },
+    bypassForcePushAllowances: { nodes: actors, pageInfo: { hasNextPage: false } },
     ...fields,
   };
 }

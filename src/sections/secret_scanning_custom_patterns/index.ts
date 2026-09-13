@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   loosen,
@@ -179,12 +179,7 @@ export const secretScanningPatternsSection = {
       (p) => p.name,
       (p) => p.name,
     );
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LivePatternEntry),
-      await ctx.read.list.listAll(),
-    ).map(liveFrom);
+    const live = (await ctx.read.list.listAll(LivePatternEntry)).map(liveFrom);
     const liveByName = patternsByName(this, live);
     const declaredNames = new Set(desired.map((p) => p.name));
 
@@ -277,12 +272,7 @@ export const secretScanningPatternsSection = {
     return plan;
   },
   async snapshot(ctx) {
-    const live = parseLive(
-      this,
-      ENDPOINTS.list,
-      z.array(LivePatternEntry),
-      await ctx.read.list.listAll(),
-    );
+    const live = await ctx.read.list.listAll(LivePatternEntry);
     if (live.length === 0) {
       return { value: undefined, notes: [] };
     }

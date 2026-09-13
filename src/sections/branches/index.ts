@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
-import { liveByIdentity, liveIdentity, parseLive } from "../contract/live.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
@@ -284,12 +284,9 @@ export const branchesSection = {
   // listed branch answers it. The rules read is unconditional, unlike plan()'s: it is the only view
   // of the wildcard rules and of the two routed keys, and it names which rule protects a branch.
   async snapshot(ctx) {
-    const listed = parseLive(
-      this,
-      ENDPOINTS.listProtected,
-      z.array(LiveBranchSummary),
-      await ctx.read.listProtected.listAll({ query: { protected: "true" } }),
-    );
+    const listed = await ctx.read.listProtected.listAll(LiveBranchSummary, {
+      query: { protected: "true" },
+    });
     // Git refnames are exact, so the fold is the name itself.
     liveByIdentity(
       this,
@@ -302,7 +299,10 @@ export const branchesSection = {
     const entries: BranchConfig[] = [];
     const notes: string[] = [];
     for (const { name } of listed) {
-      const probe = await ctx.read.getProtection.probeAbsent({ params: { branch: name } });
+      const probe = await ctx.read.getProtection.probeAbsent(LiveProtection, {
+        params: { branch: name },
+        describe: `branch "${name}"`,
+      });
       if ("missing" in probe) {
         continue;
       }
@@ -312,16 +312,9 @@ export const branchesSection = {
         // below as the wildcard entry, and a literal entry here would create a second rule on apply.
         continue;
       }
-      const live = parseLive(
-        this,
-        ENDPOINTS.getProtection,
-        LiveProtection,
-        probe.data,
-        `branch "${name}"`,
-      );
       entries.push({
         name,
-        protection: { ...protectionSnapshot(live), ...routedKeysSnapshot(rule) },
+        protection: { ...protectionSnapshot(probe.data), ...routedKeysSnapshot(rule) },
       });
     }
     const written = new Set(entries.map((entry) => entry.name));
@@ -370,7 +363,10 @@ async function planLiteralEntry(
   const { branch } = entry;
   const params = { branch: branch.name };
   const prefix = `branches[${branch.name}].protection`;
-  const probe = await ctx.read.getProtection.probeAbsent({ params });
+  const probe = await ctx.read.getProtection.probeAbsent(LiveProtection, {
+    params,
+    describe: `branch "${branch.name}"`,
+  });
   if (branch.protection === null) {
     if ("missing" in probe) {
       return;
@@ -410,7 +406,7 @@ async function planLiteralEntry(
     // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied probe
     // is a 404 "Not Found" as well (fine-grained tokens conceal denied reads), so only GitHub's own
     // body counts and a denial keeps the plain unprotected reading.
-    const branchProbe = await ctx.read.branchProbe.tryCall({ params });
+    const branchProbe = await ctx.read.branchProbe.tryCall(z.unknown(), { params });
     if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
       // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.
       throw new Error(`${section.key}: branches[${branch.name}]: ${MISSING_BRANCH.advice}`);
@@ -427,15 +423,7 @@ async function planLiteralEntry(
     });
     putPlanned = true;
   } else {
-    live = flattenProtection(
-      parseLive(
-        section,
-        ENDPOINTS.getProtection,
-        LiveProtection,
-        probe.data,
-        `branch "${branch.name}"`,
-      ),
-    );
+    live = flattenProtection(probe.data);
     // The protection GET OMITS required_signatures entirely when signed commits are not required,
     // so an absent live field means false; normalized so declared false does not read as drift.
     if (!("required_signatures" in live)) {

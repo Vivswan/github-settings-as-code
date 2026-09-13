@@ -39,6 +39,16 @@ export type EndpointDict = Readonly<Record<string, EndpointDecl>>;
 export type GraphqlDict = Readonly<Record<string, GraphqlOpDecl>>;
 
 /**
+ * GET /orgs/{org} is public, so no token permission; its 404 is the personal-account signal. A section whose
+ * other reads can never be denied marks it the primary read (`primaryRead: { notFound: "absent" }`).
+ */
+export const ORG_PROBE = {
+  route: "GET /orgs/{org}",
+  statuses: { 200: "the organization", 404: "not an organization (a personal account)" },
+  permission: "none",
+} as const satisfies EndpointDecl;
+
+/**
  * `E` and `G` must be the module's LITERAL (`as const`) dictionaries: ../registry.ts derives the
  * `${key}.${role}` unions from them, and the e2e mock's handler tables are typed by those unions.
  */
@@ -53,9 +63,11 @@ export interface SectionMeta<
   /** Appended to the derived grant advice when a denial can mean more than a missing grant (an ambiguous 403). */
   readonly grantCaveat?: string;
   /**
-   * "org": the resources exist only under an ORGANIZATION owner, so the handler probes GET /orgs/{org}
-   * (404 tolerated) and no-ops with a note on a personal account. The single source of owner-kind modeling:
-   * the fuzz oracle's personal-account fold reads it, and test/sections/registry.test.ts pins it to the probe endpoint.
+   * "org": the resources exist only under an ORGANIZATION owner. The registry wraps the module's plan() and
+   * snapshot() in the owner gate (./owner.ts), which probes the `org` role (ORG_PROBE, 404 tolerated) and
+   * no-ops with a note on a personal account, so no section body spells the probe; the registry's lockstep
+   * type admits the flag only beside that role. The single source of owner-kind modeling: the fuzz oracle's
+   * personal-account fold reads it, and test/sections/registry.test.ts pins it to the probe endpoint.
    */
   readonly ownerSensitivity?: "org";
   /** Every REST endpoint the section may call, by role; the e2e mock's routes and USED_PATHS derive from it. */
@@ -377,19 +389,39 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
  * repository; the engine renders them as drift in check mode and executes them in apply mode.
  * Modules register in ../registry.ts.
  *
- *   snapshot() present  -> reads through the same port (plus the run's denial policy), so it cannot write either
- *   snapshot() absent   -> the section is unsupported by snapshot (snapshotUnsupportedNote)
+ *   snapshot() required  -> the section declares a read (a GET or a GraphQL query), so the live state it
+ *                           compares against can be read back; the compiler flags a reading section without one
+ *   snapshot() absent    -> only a write-only section (no read at all), which snapshot reports unsupported
+ *                           (snapshotUnsupportedNote)
  */
-export interface SectionModule<
+export type SectionModule<
   K extends SectionKey = SectionKey,
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
-> extends SectionModuleBase<K, E, G> {
-  plan(ctx: PlanContext<E, G, K>, desired: SectionInput<K>): Promise<SectionPlan<PlannedOp<E, G>>>;
-  snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>>;
-  /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
-  run?: never;
-}
+> = SectionModuleBase<K, E, G> &
+  SnapshotFacet<K, E, G> & {
+    plan(
+      ctx: PlanContext<E, G, K>,
+      desired: SectionInput<K>,
+    ): Promise<SectionPlan<PlannedOp<E, G>>>;
+    /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
+    run?: never;
+  };
+
+/** Whether a LITERAL dictionary pair declares any read; the erased pair (the engine's view) keeps snapshot optional. */
+type DeclaresRead<E extends EndpointDict, G extends GraphqlDict> = string extends keyof E
+  ? false
+  : [
+        | { [R in keyof E]: E[R]["route"] extends `GET ${string}` ? true : never }[keyof E]
+        | { [R in keyof G]: G[R] extends { readonly kind: "read" } ? true : never }[keyof G],
+      ] extends [never]
+    ? false
+    : true;
+
+type SnapshotFacet<K extends SectionKey, E extends EndpointDict, G extends GraphqlDict> =
+  DeclaresRead<E, G> extends true
+    ? { snapshot(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>> }
+    : { snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>> };
 
 /**
  * Freezes in place through every nested object and array; functions are left as they are (nothing
@@ -437,12 +469,18 @@ export function freezeDeclarations<M extends SectionModule>(module: M): M {
   return Object.freeze(module);
 }
 
-/** Write-only is derived from the operations, as writeOnlyCheckNote does, so the two notes cannot disagree. */
+/**
+ * The one reason a registered section has no snapshot(): it reads nothing, so there is nothing to read back
+ * (SectionModule makes snapshot() required otherwise). Write-only is derived from the operations, as
+ * writeOnlyCheckNote does, so the two notes cannot disagree.
+ */
 export function snapshotUnsupportedNote(section: SectionMeta): string {
-  if (planningReads(section).length === 0) {
-    return `${section.key}: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run`;
+  if (planningReads(section).length > 0) {
+    throw new Error(
+      `BUG: ${section.key} declares a read operation but no snapshot(); a section that reads must read back, so declare snapshot() on the module`,
+    );
   }
-  return `${section.key}: snapshot is not implemented for this section yet`;
+  return `${section.key}: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run`;
 }
 
 /**

@@ -4,6 +4,7 @@
  * planned operation can only name a write role, so "check mode issued a write" is unrepresentable.
  */
 
+import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { ApiError, GitHubClient } from "../../github/api.js";
 import type { SectionKey } from "../../schema.js";
@@ -19,6 +20,7 @@ import type {
   GraphqlTolerableError,
   GraphqlVariablesOf,
 } from "./graphql.js";
+import { parseLive } from "./live.js";
 import type { EndpointDict, GraphqlDict, SectionContext, SectionMeta } from "./module.js";
 import {
   call,
@@ -136,15 +138,8 @@ export interface ExecTools {
   resolveSecret(reference: string): string;
 }
 
-/** A plan() body has no ExecTools token, so an execution-phase read does not compile there; a thunk passes the one it received. */
-type Gated<T> = {
-  readonly [K in keyof T]: T[K] extends (...args: infer A) => infer R
-    ? (exec: ExecTools, ...args: A) => R
-    : T[K];
-};
-
-/** The runtime shape of Gated; the token is discarded, so the gate is the type alone. */
-function gated<T extends object>(bound: T): Gated<T> {
+/** The runtime shape of the gated ports: the token is discarded, so the gate is the type alone. */
+function gated<T extends object>(bound: T): object {
   return Object.fromEntries(
     Object.entries(bound).map(([name, helper]) => [
       name,
@@ -152,7 +147,7 @@ function gated<T extends object>(bound: T): Gated<T> {
         ? (_exec: ExecTools, ...args: unknown[]) => helper(...args)
         : helper,
     ]),
-  ) as Gated<T>;
+  );
 }
 
 type ReadRole<E extends EndpointDict> = {
@@ -167,69 +162,137 @@ type GraphqlReadRole<G extends GraphqlDict> = {
 
 type GraphqlWriteRole<G extends GraphqlDict> = Exclude<keyof G & string, GraphqlReadRole<G>>;
 
-/** The request helpers (./requests.ts) bound to ONE read endpoint, minus the declaration argument and any payload. */
+// `payload?: never` on the request options, as on the helpers they forward to: a read never carries a body, and a
+// body that did reach the wire this way would be unmarked (requests.ts).
+type CallOpts<E extends EndpointDecl> = OptsArg<
+  E,
+  { query?: Readonly<Record<string, string>>; payload?: never; describe?: string }
+>;
+
+type TryCallOpts<E extends EndpointDecl> = OptsArg<
+  E,
+  {
+    query?: Readonly<Record<string, string>>;
+    payload?: never;
+    tolerate?: readonly DeclaredErrorStatus<E>[];
+    describe?: string;
+  }
+>;
+
+type ProbeOpts<E extends EndpointDecl> = OptsArg<
+  E,
+  {
+    query?: Readonly<Record<string, string>>;
+    tolerate?: readonly DeclaredErrorStatus<E>[];
+    accept?: string;
+    describe?: string;
+  }
+>;
+
+type ListOpts<E extends EndpointDecl> = OptsArg<
+  E,
+  { query?: Readonly<Record<string, string>>; describe?: string }
+>;
+
+/**
+ * The request helpers (./requests.ts) bound to ONE read endpoint, minus the declaration argument and any payload.
+ * Every helper takes the zod schema of the body it returns and parses through parseLive (./live.ts) before the
+ * section sees it, so an unparsed body is unrepresentable: a malformed answer is a loud "outside the documented
+ * shape" failure naming the endpoint, never an undefined reaching a plan. The list helpers take the ITEM schema.
+ */
 interface BoundRead<E extends EndpointDecl> {
-  // `payload?: never` on both, as on the helpers they forward to: a read never carries a body, and a body that did
-  // reach the wire this way would be unmarked (requests.ts).
-  call(
-    ...args: OptsArg<
-      E,
-      { query?: Readonly<Record<string, string>>; payload?: never; describe?: string }
-    >
-  ): Promise<unknown>;
-  tryCall(
-    ...args: OptsArg<
-      E,
-      {
-        query?: Readonly<Record<string, string>>;
-        payload?: never;
-        tolerate?: readonly DeclaredErrorStatus<E>[];
-        describe?: string;
-      }
-    >
-  ): Promise<{ data: unknown } | { error: ApiError }>;
-  probeAbsent(
-    ...args: OptsArg<
-      E,
-      {
-        query?: Readonly<Record<string, string>>;
-        tolerate?: readonly DeclaredErrorStatus<E>[];
-        accept?: string;
-        describe?: string;
-      }
-    >
-  ): Promise<{ data: unknown } | { missing: true }>;
-  listAll(...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>): Promise<unknown[]>;
-  listAllEnveloped(
-    envelopeKey: string,
-    ...args: OptsArg<E, { query?: Readonly<Record<string, string>> }>
-  ): Promise<unknown[]>;
+  call<T>(schema: z.ZodType<T>, ...args: CallOpts<E>): Promise<T>;
+  tryCall<T>(
+    schema: z.ZodType<T>,
+    ...args: TryCallOpts<E>
+  ): Promise<{ data: T } | { error: ApiError }>;
+  probeAbsent<T>(
+    schema: z.ZodType<T>,
+    ...args: ProbeOpts<E>
+  ): Promise<{ data: T } | { missing: true }>;
+  listAll<T>(item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
+  listAllEnveloped<T>(envelopeKey: string, item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
 }
 
+/**
+ * BoundRead behind the ExecTools token: a plan() body has no token, so an execution-phase read does not compile
+ * there; a thunk passes the one it received. Spelled out rather than mapped from BoundRead, since a mapped type
+ * erases the per-call schema generic.
+ */
+interface GatedBoundRead<E extends EndpointDecl> {
+  call<T>(exec: ExecTools, schema: z.ZodType<T>, ...args: CallOpts<E>): Promise<T>;
+  tryCall<T>(
+    exec: ExecTools,
+    schema: z.ZodType<T>,
+    ...args: TryCallOpts<E>
+  ): Promise<{ data: T } | { error: ApiError }>;
+  probeAbsent<T>(
+    exec: ExecTools,
+    schema: z.ZodType<T>,
+    ...args: ProbeOpts<E>
+  ): Promise<{ data: T } | { missing: true }>;
+  listAll<T>(exec: ExecTools, item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
+  listAllEnveloped<T>(
+    exec: ExecTools,
+    envelopeKey: string,
+    item: z.ZodType<T>,
+    ...args: ListOpts<E>
+  ): Promise<T[]>;
+}
+
+type GraphqlTryOpts<O extends GraphqlOpDecl> = {
+  tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
+  describe?: string;
+};
+
 type BoundGraphqlRead<O extends GraphqlOpDecl> = {
-  call(
+  call<T>(
+    schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
     opts?: { describe?: string },
-  ): Promise<Record<string, unknown>>;
-  tryCall(
+  ): Promise<T>;
+  tryCall<T>(
+    schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
-    opts?: {
-      tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
-      describe?: string;
-    },
-  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }>;
+    opts?: GraphqlTryOpts<O>,
+  ): Promise<{ data: T } | { error: ApiError }>;
 } & (O extends GraphqlPaginatedReadDecl
   ? {
-      /** Every node of the declared connection (the loop owns `$cursor`). */
-      listConnection(
+      /** Every node of the declared connection (the loop owns `$cursor`), each parsed by the node schema. */
+      listConnection<T>(
+        node: z.ZodType<T>,
         variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
-      ): Promise<{ items: unknown[] } | { error: ApiError }>;
+      ): Promise<{ items: T[] } | { error: ApiError }>;
+    }
+  : { listConnection?: never });
+
+/** BoundGraphqlRead behind the ExecTools token (the GatedBoundRead twin). */
+type GatedBoundGraphqlRead<O extends GraphqlOpDecl> = {
+  call<T>(
+    exec: ExecTools,
+    schema: z.ZodType<T>,
+    variables: Readonly<GraphqlVariablesOf<O>>,
+    opts?: { describe?: string },
+  ): Promise<T>;
+  tryCall<T>(
+    exec: ExecTools,
+    schema: z.ZodType<T>,
+    variables: Readonly<GraphqlVariablesOf<O>>,
+    opts?: GraphqlTryOpts<O>,
+  ): Promise<{ data: T } | { error: ApiError }>;
+} & (O extends GraphqlPaginatedReadDecl
+  ? {
+      listConnection<T>(
+        exec: ExecTools,
+        node: z.ZodType<T>,
+        variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
+      ): Promise<{ items: T[] } | { error: ApiError }>;
     }
   : { listConnection?: never });
 
 /**
  * Write roles are absent from the type, so `ctx.read.<writeRole>` does not compile. A role with a
- * `primaryRead` posture exposes only the helpers that honor it; a `phase: "execution"` role exposes them Gated.
+ * `primaryRead` posture exposes only the helpers that honor it; a `phase: "execution"` role exposes them gated.
  */
 type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
   readonly [R in ReadRole<E>]: ReadPort<E[R]>;
@@ -238,7 +301,7 @@ type BoundReads<E extends EndpointDict, G extends GraphqlDict> = {
 };
 
 type GraphqlReadPort<O extends GraphqlOpDecl> = O extends { readonly phase: "execution" }
-  ? Gated<BoundGraphqlRead<O>>
+  ? GatedBoundGraphqlRead<O>
   : BoundGraphqlRead<O>;
 
 /**
@@ -246,16 +309,16 @@ type GraphqlReadPort<O extends GraphqlOpDecl> = O extends { readonly phase: "exe
  * advisory, denied, or absent posture by picking another helper.
  */
 type ReadPort<E extends EndpointDecl> = E extends { readonly phase: "execution" }
-  ? Gated<PlanReadPort<E>>
-  : PlanReadPort<E>;
+  ? Pick<GatedBoundRead<E>, PosturedHelpers<E>>
+  : Pick<BoundRead<E>, PosturedHelpers<E>>;
 
-type PlanReadPort<E extends EndpointDecl> = E extends { readonly advisory: true }
-  ? Pick<BoundRead<E>, "tryCall">
+type PosturedHelpers<E extends EndpointDecl> = E extends { readonly advisory: true }
+  ? "tryCall"
   : E extends { readonly primaryRead: { notFound: "denied" } }
-    ? Pick<BoundRead<E>, "call" | "listAll" | "listAllEnveloped">
+    ? "call" | "listAll" | "listAllEnveloped"
     : E extends { readonly primaryRead: { notFound: "absent" } }
-      ? Pick<BoundRead<E>, "probeAbsent" | "tryCall">
-      : BoundRead<E>;
+      ? "probeAbsent" | "tryCall"
+      : keyof BoundRead<E>;
 
 /**
  * `K` is the section the context was built for: a module's plan() takes PlanContext<_, _, K> over its own
@@ -500,7 +563,9 @@ function snapshot<T>(value: T): T {
 
 /**
  * Only GETs and GraphQL queries are bound, so the port cannot issue a write however it is called: the
- * runtime twin of BoundReads. The cast at the end is the construction boundary.
+ * runtime twin of BoundReads. Each helper parses its answer through parseLive with the schema the call
+ * supplied (`describe` names the resource in the failure), so no raw body leaves the port. The cast at
+ * the end is the construction boundary.
  */
 function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<SectionKey, E, G>,
@@ -515,13 +580,29 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
       continue;
     }
     const endpoint = snapshot(declaration);
+    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string): T =>
+      parseLive(meta, endpoint, schema, data, describe);
     const bound: BoundRead<EndpointDecl> = {
-      call: (...args) => call(ctx, meta, endpoint, ...args),
-      tryCall: (...args) => tryCall(ctx, meta, endpoint, ...args),
-      probeAbsent: (...args) => probeAbsent(ctx, meta, endpoint, ...args),
-      listAll: (...args) => listAll(ctx, meta, endpoint, ...args),
-      listAllEnveloped: (envelopeKey, ...args) =>
-        listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args),
+      call: async (schema, ...args) =>
+        parse(schema, await call(ctx, meta, endpoint, ...args), args[0]?.describe),
+      tryCall: async (schema, ...args) => {
+        const result = await tryCall(ctx, meta, endpoint, ...args);
+        return "error" in result ? result : { data: parse(schema, result.data, args[0]?.describe) };
+      },
+      probeAbsent: async (schema, ...args) => {
+        const result = await probeAbsent(ctx, meta, endpoint, ...args);
+        return "missing" in result
+          ? result
+          : { data: parse(schema, result.data, args[0]?.describe) };
+      },
+      listAll: async (item, ...args) =>
+        parse(z.array(item), await listAll(ctx, meta, endpoint, ...args), args[0]?.describe),
+      listAllEnveloped: async (envelopeKey, item, ...args) =>
+        parse(
+          z.array(item),
+          await listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args),
+          args[0]?.describe,
+        ),
     };
     port[role] = endpoint.phase === "execution" ? gated(bound) : bound;
   }
@@ -530,14 +611,25 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
       continue;
     }
     const op = snapshot(declaration);
+    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string): T =>
+      parseLive(meta, op, schema, data, describe);
     const bound: BoundGraphqlRead<GraphqlOpDecl> = {
-      call: (variables, opts) => callGraphql(ctx, meta, op, variables, opts),
-      tryCall: (variables, opts) => tryCallGraphql(ctx, meta, op, variables, opts),
+      call: async (schema, variables, opts) =>
+        parse(schema, await callGraphql(ctx, meta, op, variables, opts), opts?.describe),
+      tryCall: async (schema, variables, opts) => {
+        const result = await tryCallGraphql(ctx, meta, op, variables, opts);
+        return "error" in result ? result : { data: parse(schema, result.data, opts?.describe) };
+      },
       ...(op.connection === undefined
         ? {}
         : {
-            listConnection: (variables: Readonly<Record<string, unknown>> & { cursor?: never }) =>
-              listGraphqlConnection(ctx, meta, op, variables),
+            listConnection: async <T>(
+              node: z.ZodType<T>,
+              variables: Readonly<Record<string, unknown>> & { cursor?: never },
+            ) => {
+              const result = await listGraphqlConnection(ctx, meta, op, variables);
+              return "error" in result ? result : { items: parse(z.array(node), result.items) };
+            },
           }),
     };
     port[role] = op.phase === "execution" ? gated(bound) : bound;
