@@ -1,0 +1,105 @@
+import { describe, expect, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { stringify as stringifyYaml } from "yaml";
+import { mergeSettings, readLayerFiles, runMerge, silentIo } from "../../src/index.js";
+import { layerFile, RUNNER_ROOT_FILES } from "../e2e/constants.js";
+import { loadScenarios, scenarioRoots, settingsYamlFor } from "../e2e/schema.js";
+import { withTempDir } from "../temp-dir.js";
+
+/** Every layer file's text, lowest first, as the e2e runner writes a scenario's stack. */
+type Stack = readonly string[];
+
+/**
+ * A stack in no schema order: `labels` before `repository` (SECTION_KEYS lists them the other way), `has_issues` before
+ * `enable_vulnerability_alerts` (zod declares them the other way), a wrapper opening with its entries, and a higher
+ * layer opening with the section the schema lists last. The bytes pinned here are the fold's; the validated parse
+ * would reorder every one of them.
+ */
+const UNORDERED: Stack = [
+  stringifyYaml({
+    labels: { entries: [{ name: "bug", color: "d73a4a" }], _undeclared: "keep" },
+    repository: { has_issues: true, enable_vulnerability_alerts: true, has_wiki: false },
+  }),
+  stringifyYaml({
+    secret_scanning_custom_patterns: [{ name: "token", pattern: "tok_[a-z]+" }],
+    repository: { has_issues: false },
+    labels: [{ name: "docs", color: "0075ca" }],
+  }),
+];
+
+const UNORDERED_MERGED = [
+  "labels:",
+  "  _undeclared: keep",
+  "  entries:",
+  "    - name: bug",
+  "      color: d73a4a",
+  "    - name: docs",
+  "      color: 0075ca",
+  "repository:",
+  "  has_issues: false",
+  "  enable_vulnerability_alerts: true",
+  "  has_wiki: false",
+  "secret_scanning_custom_patterns:",
+  "  _undeclared: keep",
+  "  entries:",
+  "    - name: token",
+  "      pattern: tok_[a-z]+",
+  "",
+].join("\n");
+
+/** Every e2e scenario mode: merge runs, as the runner lays it out: the layers below, the scenario's settings on top. */
+const SCENARIO_STACKS: [string, Stack, "merge" | "replace"][] = loadScenarios(scenarioRoots())
+  .filter((scenario) => scenario.inputs?.mode === "merge")
+  .map((scenario) => [
+    scenario.name,
+    [
+      ...(scenario.settings_layers ?? []).map((layer) => stringifyYaml(layer)),
+      settingsYamlFor(scenario),
+    ],
+    scenario.inputs?.layering ?? "merge",
+  ]);
+
+/** The bytes mode: merge writes for the stack, and the layers it read, so the library verb starts from the same documents. */
+function actionMerge(
+  dir: string,
+  stack: Stack,
+  layering: "merge" | "replace",
+): { written: string; layers: ReturnType<typeof readLayerFiles> } {
+  const paths = stack.map((text, index) => {
+    const path = join(
+      dir,
+      index === stack.length - 1 ? RUNNER_ROOT_FILES.settings : layerFile(index),
+    );
+    writeFileSync(path, text);
+    return path;
+  });
+  const mergedFile = join(dir, RUNNER_ROOT_FILES.merged);
+  const merged = runMerge({ settingsFiles: paths, mergedFile, layering }, silentIo());
+  if (merged.isErr()) {
+    throw new Error(`mode: merge refused the stack: ${JSON.stringify(merged.error)}`);
+  }
+  return { written: readFileSync(mergedFile, "utf8"), layers: readLayerFiles(paths) };
+}
+
+describe("mergeSettings writes the bytes mode: merge writes", () => {
+  test.each<[string, Stack, "merge" | "replace"]>([
+    ...SCENARIO_STACKS,
+    ["a stack in no schema order", UNORDERED, "merge"],
+  ])("%s", (_name, stack, layering) =>
+    withTempDir("merge-parity-", (dir) => {
+      const { written, layers } = actionMerge(dir, stack, layering);
+      const report = mergeSettings(layers._unsafeUnwrap(), { layering })._unsafeUnwrap();
+      expect(report.yaml).toBe(written);
+    }),
+  );
+
+  test("the e2e corpus contributes at least the three curated merge scenarios", () => {
+    expect(SCENARIO_STACKS.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("the written file is the fold: the layers' key order, the knob leading its wrapper", () =>
+    withTempDir("merge-parity-", (dir) => {
+      expect(actionMerge(dir, UNORDERED, "merge").written).toBe(UNORDERED_MERGED);
+    }));
+});

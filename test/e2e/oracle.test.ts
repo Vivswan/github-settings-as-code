@@ -1156,6 +1156,25 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     ]);
   });
 
+  test.each([
+    ["one layer", stack({ repository: { has_wiki: true }, labels: null, pages: null })],
+    [
+      "a stack declaring it nowhere below",
+      stack({ repository: { has_wiki: true } }, { labels: null, pages: null }),
+    ],
+  ])(
+    "a top-level null over nothing drops unless null is the section's value, over %s; the engine agrees",
+    (_case, layers) => {
+      const expected = { repository: { has_wiki: true }, pages: null };
+      const oracle = foldMergeLayers(layers, "merge");
+      expect(oracle).toEqual({ merged: expected, notices: [] });
+      expect(mergeLayers(layers, { layering: "merge" })._unsafeUnwrap()).toEqual({
+        settings: expected,
+        notices: [],
+      });
+    },
+  );
+
   test("a lower null is not a declaration: nulling it again earns no notice, declaring over it replaces", () => {
     const twice = foldMergeLayers(stack({ pages: null }, { pages: null }), "merge");
     expect(twice.merged).toEqual({ pages: null });

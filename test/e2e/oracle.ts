@@ -33,6 +33,7 @@ import {
 } from "./gen-support.js";
 import {
   displayKeyOf,
+  isNullValued,
   type MergeLayer,
   type MergeScenarioMeta,
   type MultiScenarioMeta,
@@ -956,6 +957,10 @@ export function foldMergeLayers(
       for (const { layer, value } of column) {
         slot = settle(slot, value, key, { layer, notices });
       }
+    }
+    // A top-level null that met nothing below opted out of nothing: it drops, unless null is the section's value.
+    if (slot === null && !isNullValued(key)) {
+      continue;
     }
     if (slot !== undefined) {
       merged[key] = slot;

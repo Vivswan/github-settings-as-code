@@ -81,7 +81,7 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 | A mapping | A mapping | Merged key by key. Lower keys keep their order, higher-only keys follow |
 | A scalar, a list, or a YAML-tagged value | Anything | Replaces |
 | `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path |
-| `null` | Nothing, or another `null` | Stays as written, so `pages: null` still means "disable Pages" |
+| `null` | Nothing, or another `null` | Below the top level, stays as written. At the top level it opted out of nothing and drops with no notice, except on `pages` and `interaction_limits`, where `null` is the section's value and stays (`pages: null` still means "disable Pages") |
 | `labels` entries, layering `merge` | `labels` entries | Union by name (case-folded). A same-name entry replaces the lower one in place, new names are appended |
 | `rulesets` entries, layering `merge` | `rulesets` entries | Union by name. A same-name ruleset merges key by key; its `rules` pair by `type`, a same-type rule replacing in place and new types appended |
 | Any list section under layering `replace`, or one without a key (`milestones`, `webhooks`, ...) | Its entries | The higher list wins. An omitted `_undeclared` still inherits the lower layer's |
@@ -195,7 +195,7 @@ The merged file is exactly what apply runs, so it is worth knowing its shape:
 
 - Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. Other lists (`branches`, `environments`, and the nested per-environment lists) stay as written.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
-- A `null` that met nothing below stays, keeping its engine meaning.
+- A top-level `null` that met nothing below is gone, except `pages: null` and `interaction_limits: null`, which keep their engine meaning; a nested one stays as written.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
 
 ## The two-step workflow

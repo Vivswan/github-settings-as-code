@@ -6,16 +6,24 @@
  * higher plain mapping                  -> merged key by key
  * higher scalar, list, tagged           -> replaces
  * higher null over a lower declaration  -> deletes it (an opt-out notice)
- * higher null over nothing, or a null   -> stays as written, so `pages: null` keeps its engine meaning
+ * higher null over nothing, or a null   -> stays as written below the top level and on a section that takes null as its
+ *                                          value (`pages: null` keeps its engine meaning); on any other section it opted
+ *                                          out of nothing and drops, so a one-layer `labels: null` folds to no labels
  */
 
 import { err, ok, type Result } from "neverthrow";
 import { isPlainObject } from "../plain-data.js";
 import type { LayerProblem } from "../problem.js";
-import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../schema.js";
+import {
+  SECTION_KEYS,
+  type SectionKey,
+  type SettingsFile,
+  UNDECLARED_POLICY_SECTIONS,
+  type UndeclaredPolicySection,
+} from "../schema.js";
 import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
 import { sectionModule } from "../sections/registry.js";
-import type { DistributiveOmit, UndeclaredPolicy } from "../types.js";
+import type { DistributiveOmit, MustBeNever, UndeclaredPolicy } from "../types.js";
 
 /** One settings document in the stack, named for notices and refusals. */
 export interface Layer {
@@ -39,6 +47,28 @@ function isLayering(value: unknown): value is Layering {
   return LAYERINGS.some((layering) => layering === value);
 }
 
+const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
+
+/**
+ * The sections whose null is a document value (Pages disabled, no interaction limits), the only top-level nulls the
+ * fold may leave standing; the two pins fail to compile when a section's schema starts or stops admitting null.
+ */
+const NULL_VALUED_SECTIONS = [
+  "pages",
+  "interaction_limits",
+] as const satisfies readonly SectionKey[];
+type NullValuedSection = {
+  [K in SectionKey]: null extends SettingsFile[K] ? K : never;
+}[SectionKey];
+type _NullValuedComplete = MustBeNever<
+  Exclude<NullValuedSection, (typeof NULL_VALUED_SECTIONS)[number]>
+>;
+type _NullValuedSound = MustBeNever<
+  Exclude<(typeof NULL_VALUED_SECTIONS)[number], NullValuedSection>
+>;
+
+const NULL_VALUED: ReadonlySet<string> = new Set(NULL_VALUED_SECTIONS);
+
 /**
  * A plain array becomes `{entries}` with NO `_undeclared`: that omission is what lets a merge inherit a lower layer's
  * policy. Resolved to the section default here, a higher layer's default would overwrite the lower's explicit policy.
@@ -61,12 +91,15 @@ function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
   return defaultUndeclaredPolicy(sectionModule(key));
 }
 
-/** After the fold, a wrapper still without `_undeclared` takes the section default, so the merged document is self-describing. */
+/**
+ * After the fold, a wrapper still without `_undeclared` takes the section default, so the merged document is
+ * self-describing; the knob leads the wrapper, where an author's own sits after the fold.
+ */
 function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
   for (const key of UNDECLARED_POLICY_SECTIONS) {
     const value = merged[key];
     if (isPlainObject(value) && Array.isArray(value.entries) && value._undeclared === undefined) {
-      value._undeclared = sectionDefaultPolicy(key);
+      put(merged, key, { _undeclared: sectionDefaultPolicy(key), ...value });
     }
   }
 }
@@ -386,14 +419,28 @@ function put(record: Record<string, unknown>, key: string, value: unknown): void
   });
 }
 
-function applyNull(out: Record<string, unknown>, key: string, path: string, step: Step): void {
+/** `stays`: whether a null that met nothing below is kept as written; only a top-level null on a section that has no null value drops. */
+function applyNull(
+  out: Record<string, unknown>,
+  key: string,
+  path: string,
+  step: Step,
+  stays = true,
+): void {
   const lower = own(out, key);
   if (lower !== undefined && lower !== null) {
     delete out[key];
     step.notices.push({ layer: step.layer, path });
     return;
   }
-  put(out, key, null);
+  if (stays) {
+    put(out, key, null);
+  }
+}
+
+/** A top-level null on an unknown key stays for the validator to name; on a section it opts out and is a value only where the section takes null. */
+function sectionNullStays(key: string): boolean {
+  return !KNOWN_SECTIONS.has(key) || NULL_VALUED.has(key);
 }
 
 function mergeValue(
@@ -520,7 +567,7 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, notices: OptOutNotice[]):
       continue;
     }
     if (value === null) {
-      applyNull(out, key, key, step);
+      applyNull(out, key, key, step, sectionNullStays(key));
       continue;
     }
     const section = layer.sections.get(key);
