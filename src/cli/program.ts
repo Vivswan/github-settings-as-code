@@ -19,6 +19,7 @@ import {
   type RunEnd,
 } from "../index.js";
 import { INPUT_DECLS, type Mode, type MustBeNever, snapshotFileDestination } from "../internal.js";
+import { actionsRunner } from "./actions.js";
 import {
   type CliHost,
   failedEnvelope,
@@ -142,9 +143,10 @@ export function buildProgram(options: ProgramOptions): {
     )
     .option("--json", "Print the outputs as one JSON object on stdout; log lines move to stderr")
     .addOption(
-      new Option("--summary <file>", "Append the run's markdown summary to this file").argParser(
-        once("summary"),
-      ),
+      new Option(
+        "--summary <file>",
+        "Append the run's markdown summary to this file (under GitHub Actions, the step summary when absent)",
+      ).argParser(once("summary")),
     )
     .option("--verbose", "Show the debug trace on stderr")
     .exitOverride()
@@ -254,12 +256,13 @@ export function buildProgram(options: ProgramOptions): {
 /**
  * Run `argv` (the full process.argv shape) to its exit code; every line, a crash's included, is masked. Under --json a
  * failure the parser or a crash ends in prints the same failed envelope a run prints, so stdout is always one object.
+ * Whether the run reports to a GitHub Actions runner is decided here, once, from the host's environment.
  */
 export async function main(
   argv: readonly string[],
   options: Omit<ProgramOptions, "streams"> & { readonly streams: CliStreams },
 ): Promise<number> {
-  const streams = maskedStreams(options.streams);
+  const streams = maskedStreams(options.streams, actionsRunner(options.host.env));
   for (const token of tokenValues(argv)) {
     streams.mask(token);
   }
