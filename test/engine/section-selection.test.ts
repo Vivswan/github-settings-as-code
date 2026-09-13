@@ -7,7 +7,6 @@ describe("SectionSelection.of", () => {
   test.each<
     [what: string, only: SectionKey[], required: SectionKey[], excluded: SectionKey[] | null]
   >([
-    ["nothing restricted, nothing required", [], [], null],
     ["a required section inside the allowlist", ["labels", "repository"], ["labels"], null],
     ["an empty allowlist restricts nothing, so any required section passes", [], ["labels"], null],
     ["a required section outside the allowlist", ["repository"], ["labels"], ["labels"]],

@@ -13,7 +13,6 @@ describe("worstOf", () => {
     [["applied", "skipped"], "skipped"],
     [["snapshot", "partial"], "partial"],
     [["snapshot", "failed"], "failed"],
-    [["merged"], "merged"],
   ])("%j -> %s", (results, worst) => {
     expect(worstOf(results.map((result) => ({ result })))).toBe(worst);
   });

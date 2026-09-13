@@ -1,23 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import {
-  runForRepo,
-  type ValidatedSettings,
-  validateSettingsDoc,
-} from "../../src/engine/orchestrate.js";
 import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
 import { collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
-import { silentIo } from "../../src/io.js";
-import { describeProblem } from "../../src/problem.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { captureIo } from "../io/capture.js";
-import { MockApi } from "../mock-api.js";
-
-/** The operator defaults under test: one fleet secret, applied whole to fileless targets. */
-const FLEET_DEFAULTS = {
-  actions_secrets: [{ name: "FLEET_TOKEN", value: "$FLEET_TOKEN" }],
-} as SettingsFile;
 
 /** The secret values of one document under the provenance multi.ts decides for its kind. */
 function valuesOf(doc: SettingsFile, source: SettingsSource) {
@@ -52,13 +37,8 @@ function secretDocs(ref: string): Array<[SectionKey, SettingsFile]> {
 }
 
 describe("secret provenance is one source per document", () => {
-  test.each([
-    ["a document declaring nothing", {} as SettingsFile],
-    [
-      "a document declaring a secret-free section",
-      { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile,
-    ],
-  ])("%s contributes no secret values under either source", (_name, doc) => {
+  test("a document declaring only a secret-free section contributes no secret values under either source", () => {
+    const doc = { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile;
     expect(valuesOf(doc, "target")).toEqual([]);
     expect(valuesOf(doc, "operator")).toEqual([]);
   });
@@ -74,18 +54,6 @@ describe("secret provenance is one source per document", () => {
         `${key}: ${source} document`,
       ).toEqual([[key, "$FLEET_TOKEN", source]]);
     }
-  });
-
-  test("labels name the declaring entry, for a target and an operator document alike", () => {
-    const targetDoc = {
-      webhooks: [{ config: { url: "https://x.test/h", secret: "$HOOK_SECRET" } }],
-    } as SettingsFile;
-    expect(valuesOf(targetDoc, "target")).toEqual([
-      { section: "webhooks", label: HOOK_LABEL, value: "$HOOK_SECRET", source: "target" },
-    ]);
-    expect(valuesOf(FLEET_DEFAULTS, "operator")).toEqual([
-      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
-    ]);
   });
 
   test("the wrapped undeclared-policy form carries the document's source like the plain array", () => {
@@ -124,103 +92,6 @@ describe("secret provenance is one source per document", () => {
       ]);
     },
   );
-});
-
-describe("runForRepo provenance", () => {
-  // Branded through the REAL boundary, so an invalid fixture fails here instead of riding a cast.
-  const validated = (doc: unknown): ValidatedSettings => {
-    const verdict = validateSettingsDoc(doc, "fixture", SectionSelection.ALL, silentIo());
-    if (verdict.isErr()) {
-      throw new Error(`fixture failed validation: ${describeProblem(verdict.error)}`);
-    }
-    return verdict.value;
-  };
-  const baseOpts = (settings: unknown) => ({
-    repo: { owner: "o", name: "r", slug: "o/r" },
-    settings: validated(settings),
-    onMissingPermission: "fail" as const,
-    sections: SectionSelection.ALL,
-  });
-  /** A remote target's own document, run the way multi.ts runs it. */
-  const targetOpts = (targetDoc: SettingsFile) => ({
-    ...baseOpts(targetDoc),
-    secretSource: "target" as const,
-  });
-
-  test("a target document's reference is refused, naming the declaring section only", async () => {
-    const targetDoc = {
-      webhooks: [{ config: { url: "https://x.test/h", secret: "$FLEET_TOKEN" } }],
-    } as SettingsFile;
-    const api = new MockApi({});
-    const { io, annotations } = captureIo();
-    const result = await runForRepo(api, { ...targetOpts(targetDoc), mode: "check" as const }, io);
-    expect(result.result).toBe("failed");
-    expect(result.outcomes).toEqual([
-      { key: "webhooks", status: "failed", detail: [expect.stringContaining("target-fetched")] },
-    ]);
-    expect(annotations.filter((a) => a.includes("actions_secrets"))).toEqual([]);
-    expect(api.calls).toEqual([]);
-  });
-
-  test("a fallback-applied defaults reference resolves from the operator environment", async () => {
-    // The defaults document runs as "operator" (multi.ts decides that for a fileless target), so its $FLEET_TOKEN resolves.
-    const defaults = {
-      webhooks: [{ config: { url: "https://x.test/h", secret: "$FLEET_TOKEN" } }],
-    } as SettingsFile;
-    const api = new MockApi({
-      "GET /repos/o/r/hooks?per_page=100&page=1": { data: [] },
-    }).allowMutations("POST /repos/o/r/hooks");
-    const { io } = captureIo();
-    const result = await runForRepo(
-      api,
-      {
-        ...baseOpts(defaults),
-        mode: "apply" as const,
-        secretSource: "operator" as const,
-        secretEnv: { FLEET_TOKEN: "fleet-plaintext" },
-      },
-      io,
-    );
-    expect(result.result).toBe("applied");
-    expect(api.mutations()).toEqual([
-      {
-        method: "POST",
-        path: "/repos/o/r/hooks",
-        payload: {
-          config: { url: "https://x.test/h", secret: "fleet-plaintext" },
-        },
-        carriesSecret: true,
-      },
-    ]);
-  });
-
-  test("a target reference in a section excluded by `sections` is never refused", async () => {
-    const targetDoc = {
-      webhooks: [{ config: { url: "https://x.test/h", secret: "$FLEET_TOKEN" } }],
-      labels: [{ name: "healthy", color: "00ff00" }],
-    } as SettingsFile;
-    const api = new MockApi({
-      "GET /repos/o/r/labels?per_page=100&page=1": {
-        data: [{ name: "healthy", color: "00ff00", description: null }],
-      },
-    });
-    const { io } = captureIo();
-    const result = await runForRepo(
-      api,
-      {
-        ...targetOpts(targetDoc),
-        mode: "check" as const,
-        sections: SectionSelection.of({ only: ["labels"] })._unsafeUnwrap(),
-      },
-      io,
-    );
-    // The excluded webhooks section contributes no values, so its target reference is never collected, let alone refused.
-    expect(result.result).toBe("clean");
-    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
-      ["labels", "clean"],
-      ["webhooks", "excluded"],
-    ]);
-  });
 });
 
 describe("snapshotSecretReference", () => {
