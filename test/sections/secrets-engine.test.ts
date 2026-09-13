@@ -55,7 +55,7 @@ function fabricatedPlanScope(live: string[], reads: string[]): SecretsPlanScope<
       return live.map((name) => ({ name }));
     },
     publicKeyEndpoint: PUBLIC_KEY_ENDPOINT,
-    publicKey: async (describe) => {
+    publicKey: async (_exec, describe) => {
       reads.push(describe);
       return KEY_DATA;
     },
@@ -156,7 +156,7 @@ describe("secretKey and duplicates", () => {
 });
 
 describe("planSecrets and the execution-time resolver", () => {
-  test("each PUT's thunk seals its OWN entry's resolved value, uppercasing the name; planning resolves nothing", async () => {
+  test("each PUT's thunk seals its OWN entry's resolved value, uppercasing the name; planning reads the list alone and the key once at execution", async () => {
     await mockSodiumReady();
     const reads: string[] = [];
     const plan = await planSecrets(section, fabricatedPlanScope([], reads), {
@@ -167,8 +167,8 @@ describe("planSecrets and the execution-time resolver", () => {
       policy: "keep",
       defaultPolicy: "keep",
     });
-    // The sealing key is read once at plan time, after the list.
-    expect(reads).toEqual(["list", "reading the actions_secrets sealing key"]);
+    // The sealing key is an execution-time read: check mode never issues it.
+    expect(reads).toEqual(["list"]);
     expect(plan.ops.map((op) => op.params)).toEqual([
       { secret_name: "FIRST" },
       { secret_name: "SECOND" },
@@ -180,9 +180,15 @@ describe("planSecrets and the execution-time resolver", () => {
         return resolver({ $ONE: "plain-1", $TWO: "plain-2" })(reference);
       },
     };
-    const sealed = plan.ops.map((op) =>
-      typeof op.payload === "function" ? (op.payload(exec) as SealedSecretPayload) : null,
+    const sealed = await Promise.all(
+      plan.ops.map((op) =>
+        typeof op.payload === "function"
+          ? (op.payload(exec) as Promise<SealedSecretPayload>)
+          : Promise.resolve(null),
+      ),
     );
+    // Both thunks share ONE key read.
+    expect(reads).toEqual(["list", "reading the actions_secrets sealing key"]);
     expect(lookups).toEqual(["$ONE", "$TWO"]);
     expect(sealed.map((p) => p?.key_id)).toEqual(["key-1", "key-1"]);
     expect(sealed.map((p) => unsealSecretValue(p?.encrypted_value ?? ""))).toEqual([

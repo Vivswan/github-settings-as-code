@@ -77,7 +77,7 @@ describe("callGraphql", () => {
     }
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
-      'the token was denied reading repository toggles failed - GRAPHQL RepoToggles: 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
+      'the token was denied GRAPHQL RepoToggles (reading repository toggles): 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
     );
   });
 

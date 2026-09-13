@@ -72,7 +72,7 @@ describe("runForRepo", () => {
     'branches: replacing protection for branch "main" failed - PUT /repos/o/r/branches/main/protection: 404 Branch not found. ' +
     "The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file";
   const deniedPut =
-    'the token was denied replacing protection for branch "main" failed - PUT /repos/o/r/branches/main/protection: 404 Not Found ' +
+    'the token was denied PUT /repos/o/r/branches/main/protection (replacing protection for branch "main"): 404 Not Found ' +
     '(a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions';
   test.each([
     ["warn", "Branch not found", "failed", ["branches", "failed"], `error: ${missingBranch}`],

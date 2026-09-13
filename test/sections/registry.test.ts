@@ -1274,7 +1274,7 @@ describe("handler contracts", () => {
     );
   });
 
-  test("the execution-phase reads are exactly the thunk-issued lookups: the branches ids and the environment sealing key", () => {
+  test("the execution-phase reads are exactly the thunk-issued lookups: the branches ids and every sealing key", () => {
     // Check mode never issues these (the e2e mock fails a check-mode arrival), so a read that moves in or out of this list changes what a
     // read-only token meets in check mode.
     const byLateReads = SECTIONS.flatMap((section) => {
@@ -1286,6 +1286,10 @@ describe("handler contracts", () => {
     expect(Object.fromEntries(byLateReads)).toEqual({
       branches: ["appLookup", "repoLookup", "actorUser", "actorTeam"],
       environments: ["secretsPublicKey", "listProtectionRuleApps"],
+      actions_secrets: ["publicKey"],
+      dependabot_secrets: ["publicKey"],
+      codespaces_secrets: ["publicKey"],
+      agents_secrets: ["publicKey"],
     });
   });
 });

@@ -1,22 +1,19 @@
 import { z } from "zod";
-import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import { liveByIdentity, parseLive } from "../contract/live.js";
-import {
-  type EntryOf,
-  type SectionMeta,
-  undeclaredDrift,
-  undeclaredNote,
-  undeclaredPolicy,
-} from "../contract/module.js";
-import { type ExecTools, hasDrift, plainData } from "../contract/plan.js";
+import { parseLive } from "../contract/live.js";
+import { type EntryOf, type SectionMeta, undeclaredPolicy } from "../contract/module.js";
 import {
   LIVE_SECRET_NAMES,
-  parseSealingKey,
-  type SealingKey,
-  secretKey,
+  planSecrets,
+  rejectDuplicateSecretNames,
+  type SecretsPlanScope,
 } from "../shared/secrets-engine.js";
-import { LiveVariable, variableKey } from "../shared/variables-engine.js";
+import {
+  LiveVariable,
+  planVariables,
+  rejectDuplicateVariableNames,
+  type VariablesPlanScope,
+} from "../shared/variables-engine.js";
 import {
   BRANCH_POLICIES_DEFAULT_POLICY,
   planBranchPolicies,
@@ -87,7 +84,11 @@ interface NestedPlanner<K extends NestedKey> {
    */
   missingNote: (envName: string) => string;
   /** Rejects misdeclared entries for every environment before anything is read or written. */
-  validate?: (env: EnvironmentConfig, entries: readonly NestedEntry<K>[]) => void;
+  validate?: (
+    section: SectionMeta,
+    env: EnvironmentConfig,
+    entries: readonly NestedEntry<K>[],
+  ) => void;
   plan: (
     ctx: EnvironmentsRestContext,
     section: SectionMeta,
@@ -102,6 +103,11 @@ interface NestedPlanner<K extends NestedKey> {
   ) => Promise<NestedPlan>;
 }
 
+/** The resource noun a nested duplicate is reported under: `variable of the "prod" environment`. */
+function nestedWhat(noun: string, env: EnvironmentConfig): string {
+  return `${noun} of the "${env.name}" environment`;
+}
+
 const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
   variables: {
     // "delete" like the top-level actions_variables default: variables are
@@ -109,8 +115,9 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     defaultPolicy: "delete",
     missingNote: (envName) =>
       `environments[${envName}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
-    validate: (env, entries) => rejectDuplicateVariables(env.name, entries),
-    plan: planVariables,
+    validate: (section, env, entries) =>
+      rejectDuplicateVariableNames(section, entries, nestedWhat("variable", env)),
+    plan: planEnvironmentVariables,
   },
   secrets: {
     // "keep" like the top-level secret families: a deleted secret's value is
@@ -118,7 +125,8 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     defaultPolicy: "keep",
     missingNote: (envName) =>
       `environments[${envName}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
-    validate: (env, entries) => rejectDuplicateSecrets(env.name, entries),
+    validate: (section, env, entries) =>
+      rejectDuplicateSecretNames(section, entries, nestedWhat("secret", env)),
     plan: planEnvironmentSecrets,
   },
   deployment_branch_policies: {
@@ -158,10 +166,14 @@ export function nestedDefaultPolicy(key: NestedKey): UndeclaredPolicy {
   return NESTED_PLANNERS[key].defaultPolicy;
 }
 
-export function validateNested<K extends NestedKey>(key: K, env: EnvironmentConfig): void {
+export function validateNested<K extends NestedKey>(
+  section: SectionMeta,
+  key: K,
+  env: EnvironmentConfig,
+): void {
   const declared = env[key];
   if (declared !== undefined) {
-    NESTED_PLANNERS[key].validate?.(env, unwrapNested(key, declared).entries);
+    NESTED_PLANNERS[key].validate?.(section, env, unwrapNested(key, declared).entries);
   }
 }
 
@@ -225,29 +237,6 @@ export function splitEntry(env: EnvironmentConfig): {
   return { settings: settings as Record<string, unknown>, nested, routed };
 }
 
-/** Two spellings of one case-insensitive name would fight each other on every run. */
-function rejectDuplicateVariables(
-  envName: string,
-  entries: readonly EnvironmentVariableConfig[],
-): void {
-  const seen = new Map<string, string>();
-  const collisions: string[] = [];
-  for (const variable of entries) {
-    const key = variableKey(variable.name);
-    const first = seen.get(key);
-    if (first !== undefined) {
-      collisions.push(`"${first}" and "${variable.name}"`);
-      continue;
-    }
-    seen.set(key, variable.name);
-  }
-  if (collisions.length > 0) {
-    throw new Error(
-      `environments: the "${envName}" entry declares variables that GitHub treats as the same variable (names are case-insensitive): ${collisions.join("; ")}. Keep exactly one entry per variable`,
-    );
-  }
-}
-
 /** One environment's live Actions variables. */
 export async function listEnvironmentVariables(
   ctx: EnvironmentsRestContext,
@@ -265,7 +254,24 @@ export async function listEnvironmentVariables(
   );
 }
 
-async function planVariables(
+/**
+ * The words the two engines render one environment's nested lists with. A variable's kept note names
+ * the environment (two environments holding the same undeclared name would otherwise emit one note
+ * twice); a secret's noun already carries it.
+ */
+function nestedProse(envName: string, key: "variables" | "secrets", noun: string) {
+  return {
+    label: `environments[${envName}].${key}`,
+    noun,
+    where: key === "variables" ? `environment "${envName}"` : "the environment",
+    suffix: ` in environment "${envName}"`,
+  };
+}
+
+type Op<R extends EnvironmentRestOp["role"]> = Extract<EnvironmentRestOp, { role: R }>;
+
+/** The variables engine over one environment; an environment the plan creates lists nothing and plans every entry as a create. */
+async function planEnvironmentVariables(
   ctx: EnvironmentsRestContext,
   section: SectionMeta,
   envName: string,
@@ -274,113 +280,44 @@ async function planVariables(
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
-  const label = `environments[${envName}].variables`;
-  const live = liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, section, envName);
-  const liveByKey = liveByIdentity(
-    section,
-    "variable",
-    live,
-    (variable) => variableKey(variable.name),
-    (variable) => variable.name,
-  );
-  const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
-  const planned: NestedPlan = { ops: [], notes: [] };
-
-  for (const variable of entries) {
-    const entryLabel = `${label}[${variable.name}]`;
-    const existing = liveByKey.get(variableKey(variable.name));
-    const { name: _name, value: _value, ...extraKeys } = variable;
-    if (!existing) {
-      planned.ops.push({
-        role: "createVariable",
-        params,
-        payload: plainData({ name: variable.name, value: variable.value, ...extraKeys }),
-        drift: [
-          `${entryLabel}: missing - declared in the settings file but not on the environment; apply will create it`,
-        ],
-        change: `created variable "${variable.name}" in environment "${envName}"`,
-        describe: `creating variable "${variable.name}" in environment "${envName}"`,
-      });
-      continue;
-    }
-    // GitHub stores the name uppercased whatever casing the file uses, so the name never drifts;
-    // only the value and the declared passthrough fields can.
-    const drift = [
-      ...(existing.value === variable.value
-        ? []
-        : [
-            `${entryLabel}.value: declared ${JSON.stringify(variable.value)} != live ${JSON.stringify(existing.value)}; apply will set the declared value`,
-          ]),
-      ...subsetDiff(extraKeys, existing, entryLabel),
-    ];
-    if (!hasDrift(drift)) {
-      continue;
-    }
-    const phantom = phantomKeys(extraKeys, existing);
-    if (phantom.length > 0) {
-      planned.notes.push(phantomNote(entryLabel, phantom, "variable", "this update will re-run"));
-    }
-    planned.ops.push({
+  const scope: VariablesPlanScope<
+    Op<"createVariable">,
+    Op<"updateVariable">,
+    Op<"removeVariable">
+  > = {
+    ...nestedProse(envName, "variables", "variable"),
+    list: async () =>
+      liveEnv === undefined ? [] : await listEnvironmentVariables(ctx, section, envName),
+    create: (write) => ({
+      role: "createVariable",
+      params,
+      payload: write.payload,
+      drift: write.drift,
+      change: write.change,
+      describe: write.describe,
+    }),
+    update: (write) => ({
       role: "updateVariable",
-      params: { ...params, name: existing.name },
-      payload: plainData({ value: variable.value, ...extraKeys }),
-      drift,
-      change: `updated variable "${variable.name}" in environment "${envName}"`,
-      describe: `updating variable "${variable.name}" in environment "${envName}"`,
-    });
-  }
-
-  for (const variable of liveByKey.values()) {
-    if (declaredKeys.has(variableKey(variable.name))) {
-      continue;
-    }
-    if (policy === "keep") {
-      planned.notes.push(
-        undeclaredNote({
-          subject: `variable "${variable.name}"`,
-          state: `exists on environment "${envName}" but is not declared`,
-          action: "DELETE it",
-        }),
-      );
-      continue;
-    }
-    planned.ops.push({
+      params: { ...params, name: write.liveName },
+      payload: write.payload,
+      drift: write.drift,
+      change: write.change,
+      describe: write.describe,
+    }),
+    remove: (deletion) => ({
       role: "removeVariable",
-      params: { ...params, name: variable.name },
-      drift: [
-        undeclaredDrift(NESTED_PLANNERS.variables.defaultPolicy, {
-          label: `${label}[${variable.name}]`,
-          action: "DELETE it",
-        }),
-      ],
-      change: `DELETED undeclared variable "${variable.name}" from environment "${envName}"`,
-      describe: `deleting undeclared variable "${variable.name}" from environment "${envName}"`,
-    });
-  }
-  return planned;
-}
-
-/** Two spellings of one case-insensitive name (GitHub stores secret names uppercase) would fight each other on every run. */
-function rejectDuplicateSecrets(
-  envName: string,
-  entries: readonly EnvironmentSecretConfig[],
-): void {
-  const seen = new Map<string, string>();
-  const collisions: string[] = [];
-  for (const secret of entries) {
-    const key = secretKey(secret.name);
-    const first = seen.get(key);
-    if (first !== undefined) {
-      collisions.push(`"${first}" and "${secret.name}"`);
-      continue;
-    }
-    seen.set(key, secret.name);
-  }
-  if (collisions.length > 0) {
-    throw new Error(
-      `environments: the "${envName}" entry declares secrets that GitHub treats as the same secret (names are case-insensitive): ${collisions.join("; ")}. Keep exactly one entry per secret`,
-    );
-  }
+      params: { ...params, name: deletion.name },
+      drift: deletion.drift,
+      change: deletion.change,
+      describe: deletion.describe,
+    }),
+  };
+  const planned = await planVariables(section, scope, {
+    entries,
+    policy,
+    defaultPolicy: NESTED_PLANNERS.variables.defaultPolicy,
+  });
+  return { ops: planned.ops, notes: planned.notes };
 }
 
 /** One environment's live Actions secret names (GitHub never lists values). */
@@ -401,9 +338,9 @@ export async function listEnvironmentSecrets(
 }
 
 /**
- * Existence is the only comparable state (values never read back), so every declared secret is a
- * sealed PUT. The sealing key is an execution-phase read (endpoints.ts), issued once per environment
- * from the first payload thunk that runs; the token it demands is the one the thunk received.
+ * The secrets engine over one environment. The sealing key is an execution-phase read (endpoints.ts):
+ * in apply the environment PUT may only just have created the environment the key belongs to, so the
+ * engine reads it from the first payload thunk that runs, with the token that thunk received.
  */
 async function planEnvironmentSecrets(
   ctx: EnvironmentsRestContext,
@@ -414,87 +351,32 @@ async function planEnvironmentSecrets(
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<NestedPlan> {
   const params = { environment_name: envName };
-  const label = `environments[${envName}].secrets`;
-  const noun = `${envName} environment secret`;
-  const suffix = ` in environment "${envName}"`;
-  const live = liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, section, envName);
-  // Real GitHub lists names uppercase already; keying by secretKey keeps a differently-cased mock or proxy harmless.
-  const liveByKey = new Map(
-    [
-      ...liveByIdentity(
-        section,
-        noun,
-        live,
-        (item) => secretKey(item.name),
-        (item) => item.name,
-      ),
-    ].map(([key, item]) => [key, item.name]),
-  );
-  const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
-  const planned: NestedPlan = { ops: [], notes: [] };
-
-  let sealingKey: Promise<SealingKey> | undefined;
-  const readSealingKey = (exec: ExecTools): Promise<SealingKey> => {
-    sealingKey ??= ctx.read.secretsPublicKey
-      .call(exec, { params, describe: `reading the ${label} sealing key` })
-      .then((body) => parseSealingKey(section, { label }, ENDPOINTS.secretsPublicKey, body));
-    return sealingKey;
-  };
-  for (const entry of entries) {
-    const name = secretKey(entry.name);
-    const exists = liveByKey.has(name);
-    planned.ops.push({
+  const scope: SecretsPlanScope<Op<"putSecret">, Op<"removeSecret">> = {
+    ...nestedProse(envName, "secrets", `${envName} environment secret`),
+    list: async () =>
+      liveEnv === undefined ? [] : await listEnvironmentSecrets(ctx, section, envName),
+    publicKey: (exec, describe) => ctx.read.secretsPublicKey.call(exec, { params, describe }),
+    publicKeyEndpoint: ENDPOINTS.secretsPublicKey,
+    put: (write) => ({
       role: "putSecret",
-      params: { ...params, secret_name: name },
-      payload: async (exec) => {
-        const plaintext = exec.resolveSecret(entry.value);
-        return (await readSealingKey(exec)).seal(plaintext);
-      },
-      drift: exists
-        ? []
-        : [
-            `${label}[${name}]: missing - declared in the settings file but not on the environment; apply will create it`,
-          ],
-      // The listing decides the verb: the PUT's own 201/204 would say the same, but the executor
-      // deliberately does not surface statuses.
-      change: `${exists ? "updated" : "created"} secret "${name}"${suffix}`,
-      describe: `writing secret "${name}"${suffix}`,
-    });
-  }
-  if (entries.length > 0 && liveEnv !== undefined) {
-    // One note per environment; an environment the plan creates already carries the
-    // missing-environment note, which covers its whole list.
-    planned.notes.push(
-      `${noun} values cannot be read back from GitHub, so check mode verifies only that each declared secret exists; apply re-seals and rewrites every declared value on each run`,
-    );
-  }
-
-  for (const [key, liveName] of liveByKey) {
-    if (declaredKeys.has(key)) {
-      continue;
-    }
-    if (policy === "keep") {
-      planned.notes.push(
-        undeclaredNote({
-          subject: `${noun} "${liveName}"`,
-          state: "exists on the environment but is not declared",
-          action: "DELETE it (a deleted secret's value is unrecoverable)",
-        }),
-      );
-      continue;
-    }
-    planned.ops.push({
+      params: { ...params, secret_name: write.name },
+      payload: write.payload,
+      drift: write.drift,
+      change: write.change,
+      describe: write.describe,
+    }),
+    remove: (deletion) => ({
       role: "removeSecret",
-      params: { ...params, secret_name: liveName },
-      drift: [
-        undeclaredDrift(NESTED_PLANNERS.secrets.defaultPolicy, {
-          label: `${label}[${liveName}]`,
-          action: "DELETE it (the value is unrecoverable)",
-        }),
-      ],
-      change: `DELETED undeclared secret "${liveName}"${suffix}`,
-      describe: `deleting undeclared secret "${liveName}"${suffix}`,
-    });
-  }
-  return planned;
+      params: { ...params, secret_name: deletion.name },
+      drift: deletion.drift,
+      change: deletion.change,
+      describe: deletion.describe,
+    }),
+  };
+  const planned = await planSecrets(section, scope, {
+    entries,
+    policy,
+    defaultPolicy: NESTED_PLANNERS.secrets.defaultPolicy,
+  });
+  return { ops: planned.ops, notes: planned.notes };
 }
