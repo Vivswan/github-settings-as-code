@@ -171,7 +171,6 @@ describe("snapshotRepository", () => {
         [expect.stringMatching(/^check_suite_preferences: GitHub exposes no read endpoint/)],
       ],
     ]);
-    // The secret's note names the variable its minted reference reads.
     const secretNote = expect.stringMatching(
       /^actions_secrets\[DEPLOY_TOKEN\]: .*export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN/,
     );

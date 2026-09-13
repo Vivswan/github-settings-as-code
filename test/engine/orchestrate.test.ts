@@ -281,7 +281,6 @@ describe("runForRepo secret references", () => {
           detail: [expect.stringContaining("target-fetched settings file")],
         },
       ]);
-      // The annotation names the declaring section, the same key as the outcome row.
       expect(annotations).toEqual([
         expect.stringMatching(/^error: webhooks: .*target-fetched settings file/),
       ]);
