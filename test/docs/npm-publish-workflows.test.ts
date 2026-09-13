@@ -145,6 +145,22 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
     if (JSON.stringify(body(a)) !== JSON.stringify(body(b)))
       problems.push(`"${label}" diverged between the publishers`);
   }
+  // The publish comes after every shared step: setup, setup-node, the floor guard, and the library build it publishes.
+  for (const [label, job] of [
+    [NEXT_JOB, next],
+    [STABLE_JOB, stable],
+  ] as const) {
+    const publish = job.steps.findIndex((step) => /\bnpm\s+publish\b/.test(step.run ?? ""));
+    if (publish < 0) {
+      problems.push(`${label} has no npm publish step`);
+      continue;
+    }
+    for (const [name, a, b] of sharedSteps(next, stable)) {
+      const shared = job === next ? a : b;
+      if (job.steps.indexOf(shared) > publish)
+        problems.push(`${label}: "${name}" runs after the publish`);
+    }
+  }
   const registry = setupNode(next).with?.["registry-url"];
   if (typeof registry !== "string" || setupNode(stable).with?.["registry-url"] !== registry) {
     problems.push("the publishers name different registries");
@@ -217,6 +233,16 @@ describe("the npm publish jobs", () => {
         w.env = { NODE_AUTH_TOKEN: `\${{ github.token }}` };
       },
       /a token reaches npm: NODE_AUTH_TOKEN/,
+    ],
+    [
+      "a library build moved after the stable publish",
+      (_n, w) => {
+        const steps = must(w.jobs[STABLE_JOB], "stable").steps ?? [];
+        const build = steps.findIndex((step) => step.name === "Build the library");
+        const [moved] = steps.splice(build, 1);
+        steps.push(moved as Step);
+      },
+      /publish-npm: "Build the library" runs after the publish/,
     ],
     [
       "a floor guard fixed in one job only",
@@ -404,7 +430,7 @@ describe("the publish blocks under bash", () => {
       },
     ],
     [
-      "next: a skip verdict calls npm not at all, reports why, and leaves the confirmation ungated",
+      "next: a skip verdict calls npm not at all, reports why, and writes no publish output, so the confirmation skips",
       nextRun,
       "skip the registry's next is newer",
       { lines: ["::notice::the registry's next is newer"], status: 0, output: "" },

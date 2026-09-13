@@ -374,6 +374,10 @@ function wiringProblems(workflow: Workflow): string[] {
       if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
         problems.push(`${id}: ${label(step)} runs whatever the probe found`);
       }
+      if (probe >= 0 && index < probe && step.if !== undefined) {
+        // A step the probe depends on (the checkout) that skips leaves the probe judging an empty workspace: it warns and stands down.
+        problems.push(`${id}: ${label(step)} runs under a condition of its own ahead of the probe`);
+      }
       for (const [source, name] of outputsRead(step)) {
         const writer = steps.findIndex((s, at) => at < index && s.id === source);
         if (writer < 0 || !outputsWritten(steps[writer] as Step).includes(name)) {
@@ -403,11 +407,13 @@ describe("post-green.yml", () => {
     "post-green caller",
   ).job;
 
-  test("every step after a probe runs on its verdict, every read names a written output, every output is read", () => {
+  test("every step after a probe runs on its verdict, every read names a written output, every output is read, in every hook", () => {
     const probes = Object.values(workflow.jobs).filter((job) => (job.steps ?? []).some(isProbe));
-    // Both jobs open with a probe today; a job without one is not judged here.
+    // Both post-green jobs open with a probe today; the release hooks have none, and their output reads are judged the same way.
     expect(probes.length).toBe(Object.keys(workflow.jobs).length);
-    expect(wiringProblems(workflow)).toEqual([]);
+    for (const { file } of HOOKS) {
+      expect(wiringProblems(readWorkflow(file)), file).toEqual([]);
+    }
   });
 
   test.each<[string, (w: Workflow) => void, RegExp]>([
@@ -447,6 +453,14 @@ describe("post-green.yml", () => {
       /writes published, which no later step reads/,
     ],
     [
+      "the checkout ahead of the probe under a condition of its own",
+      (w) => {
+        must(must(w.jobs.build, "build").steps?.[0], "checkout").if =
+          "github.event_name == 'release'";
+      },
+      /runs under a condition of its own ahead of the probe/,
+    ],
+    [
       "a probe under a condition of its own",
       (w) => {
         must(must(w.jobs.build, "build").steps?.[1], "probe").if = "github.event_name == 'release'";
@@ -465,6 +479,19 @@ describe("post-green.yml", () => {
     const drifted = structuredClone(workflow);
     mutate(drifted);
     expect(wiringProblems(drifted).join("\n")).toMatch(message);
+  });
+
+  test("a verdict gate copied onto a hook without that probe fails the wiring there (negative control)", () => {
+    const stable = readWorkflow("update-release.yml");
+    for (const job of Object.values(stable.jobs)) {
+      for (const step of job.steps ?? []) {
+        if (/npm-verdict stable/.test(step.run ?? ""))
+          step.if = "steps.oidc.outputs.proceed == 'true'";
+      }
+    }
+    expect(wiringProblems(stable).join("\n")).toMatch(
+      /reads steps\.oidc\.outputs\.proceed, which no earlier step writes/,
+    );
   });
 
   test("the judged sha the caller passes is the ref every checkout takes and the source every packaging step names", () => {
