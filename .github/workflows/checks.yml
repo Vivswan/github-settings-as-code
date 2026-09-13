@@ -12,18 +12,19 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+          yamllint: "true"
       # bun test loads the fetched, gitignored OpenAPI spec and GraphQL
       # schema; the composite restores each from cache or fetches on a miss.
       - uses: ./.github/actions/fetch-test-artifacts
       - name: Lint (biome)
         run: bun run lint
+      - name: Lint (yaml)
+        run: bun run lint:yaml
       - name: Lint (architecture)
         run: bun run lint:arch
       - name: Typecheck
@@ -50,9 +51,9 @@ jobs:
         with:
           # The newest release merge can be arbitrarily far behind HEAD.
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: .bun-version
+          install: "false"
       - name: Confirm last-release-sha matches the newest release merge
         run: bun .github/scripts/release-pipeline.ts boundary-check
 
@@ -63,21 +64,18 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: .bun-version
+          install: "false"
       - name: Require the release PR to carry this cycle's anchor
         run: bun .github/scripts/release-pipeline.ts anchor-check
 
   schema-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Regenerate the schema and compare
         run: bun run build:check
 
@@ -87,15 +85,14 @@ jobs:
   # than the floor, so the PATH node is 24 and the floor's binary is handed to the consumer alone.
   package-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         node-version: ["22.14", "24"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
@@ -104,8 +101,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
       - name: Build, pack, install, import, and typecheck the library
         run: bun .github/scripts/package-smoke.ts
 
@@ -113,13 +108,10 @@ jobs:
   # exception never sets the result output.
   self-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup
       - name: Build the action bundle
         run: bun run build:bundle
       - name: Run settings-as-code (check mode)
@@ -142,18 +134,15 @@ jobs:
   # to diff against, so it runs the full corpus.
   e2e-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
       - name: Select sections from the diff
         id: select
         env:
@@ -188,18 +177,15 @@ jobs:
   # the selector finds nothing settings-related in the diff.
   endpoint-coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
       # Only the selector's "none" answer matters here. It runs BEFORE the spec cache/fetch so a PR that selects
       # nothing skips the download too.
       - name: Check whether the diff can affect route coverage

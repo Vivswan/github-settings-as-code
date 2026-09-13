@@ -1,6 +1,6 @@
 # Restores the two fetched, gitignored test artifacts (trimmed OpenAPI spec, GraphQL schema)
 # from cache, fetching each on a miss: the ONE place an artifact is cached (the drift-tripwire
-# nightlies fetch uncached by design). Needs setup-bun and `bun install` earlier in the job.
+# nightlies fetch uncached by design). Needs ./.github/actions/setup (bun and the install) earlier in the job.
 name: Fetch the test artifacts
 description: Restore the trimmed OpenAPI spec and the GraphQL schema from cache, fetching each on a miss
 

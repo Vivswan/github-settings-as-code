@@ -30,15 +30,11 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Install dependencies
-        id: install
-        run: bun install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup
+        id: setup
 
       # PR CI proves USED_PATHS against the pinned descriptor; this probe
       # re-cuts against upstream HEAD (deliberately bypassing the cached
@@ -74,12 +70,12 @@ jobs:
           fi
 
       # always() so a red spec probe cannot mask this one (the job still
-      # fails if either step failed); gated on install because there is
-      # nothing to probe when setup itself broke. --no-save keeps the
+      # fails if either step failed); gated on the setup step because there
+      # is nothing to probe when setup itself broke. --no-save keeps the
       # lockfile and package.json untouched; the upgraded node_modules stays
       # ambient for the rest of this job, so keep later steps out of it.
       - name: Probe the latest @octokit/types
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
           bun add --no-save --ignore-scripts @octokit/types@latest
           log="$(mktemp)"
@@ -111,12 +107,14 @@ jobs:
   # probe needs a clean tree to re-resolve from.
   float-canary:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # The gate below runs lint:yaml; the from-scratch resolve is this job's install.
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: .bun-version
+          install: "false"
+          yamllint: "true"
       # Delete before resolving, exactly like the Dependabot workflow: bun
       # keeps a stale lockfile as a valid resolution, and only a
       # from-scratch resolve floats what that workflow would float.

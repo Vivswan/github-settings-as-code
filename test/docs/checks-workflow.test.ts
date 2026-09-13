@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -9,9 +9,21 @@ import {
 } from "../../.github/scripts/changed-sections.js";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
 import { headRefPrefixes, headRefPrefixesIn } from "./head-ref.js";
+import {
+  type CompositeAction,
+  executedLines,
+  installs,
+  ROOT,
+  readAction,
+  readWorkflow,
+  SETUP_USES,
+  type Step,
+  setupInstalls,
+  type Workflow,
+  workflowFiles,
+  workflowText,
+} from "./workflow-loader.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
-const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 const COMPOSITE_DIR = ".github/actions/fetch-test-artifacts";
 const COMPOSITE_USES = `./${COMPOSITE_DIR}`;
 const PATHS_TS = "test/e2e/openapi/paths.ts";
@@ -125,22 +137,6 @@ const LOADERS: readonly Loader[] = [
 ];
 const [SUITE, HARNESS] = LOADERS as [Loader, Loader];
 
-interface Step {
-  id?: string;
-  uses?: string;
-  run?: string;
-  shell?: string;
-  if?: string;
-  "continue-on-error"?: boolean;
-  with?: Record<string, unknown>;
-}
-interface Workflow {
-  jobs: Record<string, { if?: string; steps?: Step[] }>;
-}
-interface CompositeAction {
-  runs: { using?: string; steps?: Step[] };
-}
-
 /** True when a cache `path` entry (a file, a directory, or a glob) takes in `file`. */
 function pathEntryCovers(entry: string, file: string): boolean {
   return (
@@ -172,16 +168,6 @@ function cacheKeyOf(step: Step, path: string): string {
     `the cache step for ${path} has a non-string key: ${JSON.stringify(key)}`,
   ).toBe("string");
   return key as string;
-}
-
-function readWorkflow(file: string): Workflow {
-  return parseYaml(readFileSync(join(WORKFLOWS_DIR, file), "utf8")) as Workflow;
-}
-
-function readComposite(): CompositeAction {
-  return parseYaml(
-    readFileSync(join(ROOT, COMPOSITE_DIR, "action.yml"), "utf8"),
-  ) as CompositeAction;
 }
 
 /** The quoted file patterns inside the key's hashFiles(...) call. */
@@ -306,33 +292,6 @@ function supports(step: Step, provider: Step): boolean {
   );
 }
 
-/** The run scalar's lines with every heredoc body (`<<TAG` through its terminator) removed: what the shell executes. */
-function executedLines(run: string): string[] {
-  const lines: string[] = [];
-  let terminator: string | undefined;
-  for (const line of run.split("\n")) {
-    if (terminator !== undefined) {
-      if (line.trim() === terminator) {
-        terminator = undefined;
-      }
-      continue;
-    }
-    lines.push(line);
-    terminator = line
-      .match(/<<-?\s*(?:'([^']+)'|"([^"]+)"|(\w+))/)
-      ?.slice(1)
-      .find(Boolean);
-  }
-  return lines;
-}
-
-/** A `bun install` the job relies on: `|| true` masks the failure, so a line carrying `||` is not one. */
-function installs(run: string | undefined): boolean {
-  return executedLines(run ?? "").some(
-    (line) => /^\s*bun install(?:\s|$)/.test(line) && !line.includes("||"),
-  );
-}
-
 function runsFetch(run: string | undefined, fetchScript: string): boolean {
   const token = new RegExp(`(?:^|[\\s!(;&|])bun ${escapeRegExp(fetchScript)}(?=[\\s;)&|]|$)`);
   return executedLines(run ?? "").some((line) => !line.trim().startsWith("#") && token.test(line));
@@ -383,13 +342,13 @@ function expectArtifactsProvided(where: string, steps: Step[]): void {
     const provider = steps[providerIdx] as Step;
     const before = steps.slice(0, providerIdx);
     expect(
-      before.some(
-        (step) => (step.uses ?? "").startsWith("oven-sh/setup-bun@") && supports(step, provider),
-      ),
-      `${where}: a reliable oven-sh/setup-bun must precede the ${artifact.label} provider (its fetch runs under bun)`,
+      before.some((step) => step.uses === SETUP_USES && supports(step, provider)),
+      `${where}: a reliable ${SETUP_USES} must precede the ${artifact.label} provider (its fetch runs under bun)`,
     ).toBe(true);
     expect(
-      before.some((step) => installs(step.run) && supports(step, provider)),
+      before.some(
+        (step) => (installs(step.run) || setupInstalls(step)) && supports(step, provider),
+      ),
       `${where}: a reliable bun install must precede the ${artifact.label} provider (its fetch imports installed packages)`,
     ).toBe(true);
     for (const [loader, loaderIdx] of consumers) {
@@ -448,8 +407,8 @@ function expectKeyPinned(key: string, artifact: FetchedArtifact): void {
 }
 
 describe("the fetch-test-artifacts composite", () => {
-  const action = readComposite();
-  const steps = () => readComposite().runs.steps ?? [];
+  const action = readAction(COMPOSITE_DIR);
+  const steps = () => readAction(COMPOSITE_DIR).runs.steps ?? [];
   const cacheOf = (artifact: FetchedArtifact) =>
     steps().find((step) => cachesArtifact(step, artifact.path)) as Step;
   const keyOf = (artifact: FetchedArtifact) => cacheKeyOf(cacheOf(artifact), artifact.path);
@@ -641,7 +600,7 @@ describe("the fetch-test-artifacts composite", () => {
 });
 
 describe("fetched test artifacts across workflows", () => {
-  const files = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
+  const files = workflowFiles();
   const workflows = files.map((file) => ({ file, wf: readWorkflow(file) }));
 
   // Pinned: a derivation that silently found nothing would pass every guard below vacuously.
@@ -699,9 +658,11 @@ describe("fetched test artifacts across workflows", () => {
   });
 
   const CANARY = "nightly.yml#float-canary";
+  const CHECK = "checks.yml#check";
   const E2E_NIGHTLY = "e2e-nightly.yml#nightly";
   const COVERAGE = "checks.yml#endpoint-coverage";
   const canary = () => readWorkflow("nightly.yml").jobs["float-canary"]?.steps ?? [];
+  const check = () => readWorkflow("checks.yml").jobs.check?.steps ?? [];
   const coverage = () => readWorkflow("checks.yml").jobs["endpoint-coverage"]?.steps ?? [];
   const ungated = ({ if: _, ...step }: Step): Step => step;
   const e2eNightly = () => readWorkflow("e2e-nightly.yml").jobs.nightly?.steps ?? [];
@@ -714,8 +675,8 @@ describe("fetched test artifacts across workflows", () => {
   const isInstall = (step: Step) => installs(step.run);
   const onInstall = (steps: Step[], patch: (step: Step) => Step) =>
     steps.map((step) => (isInstall(step) ? patch(step) : step));
-  const onSetupBun = (steps: Step[], patch: (step: Step) => Step) =>
-    steps.map((step) => ((step.uses ?? "").startsWith("oven-sh/setup-bun@") ? patch(step) : step));
+  const onSetup = (steps: Step[], patch: (step: Step) => Step) =>
+    steps.map((step) => (step.uses === SETUP_USES ? patch(step) : step));
   const moved = (steps: Step[], matches: (step: Step) => boolean, to: "first" | "last") => {
     const [step] = steps.splice(steps.findIndex(matches), 1);
     return to === "first" ? [step as Step, ...steps] : [...steps, step as Step];
@@ -781,22 +742,38 @@ describe("fetched test artifacts across workflows", () => {
       /nightly\.yml#float-canary fetches the GraphQL schema directly; a cached loading job restores it through/,
     ],
     [
-      "a composite step before setup-bun",
+      "a composite step before the setup",
       CANARY,
       () => moved(canary(), isComposite, "first"),
-      /reliable oven-sh\/setup-bun must precede the trimmed OpenAPI spec provider/,
+      /reliable \.\/\.github\/actions\/setup must precede the trimmed OpenAPI spec provider/,
     ],
     [
-      "a setup-bun allowed to fail",
+      "a setup allowed to fail",
       CANARY,
-      () => onSetupBun(canary(), (step) => ({ ...step, "continue-on-error": true })),
-      /reliable oven-sh\/setup-bun must precede/,
+      () => onSetup(canary(), (step) => ({ ...step, "continue-on-error": true })),
+      /reliable \.\/\.github\/actions\/setup must precede/,
     ],
     [
       "a composite step before the install",
       CANARY,
       () => moved(canary(), isInstall, "last"),
       /reliable bun install must precede the trimmed OpenAPI spec provider/,
+    ],
+    [
+      "a setup whose install is switched off where no run step installs",
+      CHECK,
+      () => onSetup(check(), (step) => ({ ...step, with: { ...step.with, install: "false" } })),
+      /checks\.yml#check: a reliable bun install must precede the trimmed OpenAPI spec provider/,
+    ],
+    [
+      "a setup whose install is an expression the pin cannot read",
+      CHECK,
+      () =>
+        onSetup(check(), (step) => ({
+          ...step,
+          with: { ...step.with, install: `\${{ 'true' }}` },
+        })),
+      /checks\.yml#check: a reliable bun install must precede the trimmed OpenAPI spec provider/,
     ],
     [
       "a duplicated composite step",
@@ -913,7 +890,7 @@ function expectReleasePrefixes(wf: Workflow): void {
 }
 
 describe("checks.yml release PR branch spelling", () => {
-  const text = readFileSync(join(WORKFLOWS_DIR, "checks.yml"), "utf8");
+  const text = workflowText("checks.yml");
 
   // Workflows cannot import the constant, so the head_ref conditions spell it by hand; a drifted spelling skips the anchor-check on every release PR
   // instead of failing there.

@@ -4,31 +4,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { readWorkflow } from "./workflow-loader.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
-
-interface Step {
-  name?: string;
-  id?: string;
-  run?: string;
-  uses?: string;
-  if?: string;
-  env?: Record<string, string>;
-  with?: Record<string, unknown>;
-}
-interface Workflow {
-  on?: Record<string, unknown>;
-  permissions?: Record<string, string>;
-  jobs: Record<string, { steps?: Step[]; with?: Record<string, unknown> }>;
-}
-
-function workflow(file: string): Workflow {
-  return parseYaml(readFileSync(join(ROOT, ".github", "workflows", file), "utf8")) as Workflow;
-}
 
 describe.each([
   // The run_attempt suffix: upload-artifact refuses a duplicate name, so a re-run attempt would upload nothing
@@ -36,7 +14,7 @@ describe.each([
   ["e2e-nightly.yml", "nightly", "e2e-fuzz", `e2e-artifacts-\${{ github.run_attempt }}`],
   ["nightly-fuzz.yml", "fuzz", "fuzz-nightly", `fuzz-failures-\${{ github.run_attempt }}`],
 ])("%s issue + auto-assign path", (file, job, label, artifactName) => {
-  const wf = workflow(file);
+  const wf = readWorkflow(file);
   const steps = wf.jobs[job]?.steps ?? [];
   const filers = steps.filter((s) => s.uses === FUZZ_ISSUE_ACTION);
 
@@ -100,16 +78,11 @@ describe.each([
 });
 
 describe("auto-assign.yml caller forwards the dispatched issue", () => {
-  const wf = parseYaml(
-    readFileSync(join(ROOT, ".github", "workflows", "auto-assign.yml"), "utf8"),
-  ) as Workflow;
+  const wf = readWorkflow("auto-assign.yml");
 
   test("workflow_dispatch declares issue as an optional input and the reusable call forwards it", () => {
-    const dispatch = wf.on?.workflow_dispatch as
-      | { inputs?: Record<string, { required?: boolean; default?: unknown }> }
-      | undefined;
     // The nightly filer always passes a number, and a bare dispatch must still run the full sweep.
-    expect(dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
+    expect(wf.on.workflow_dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
     expect(String(wf.jobs["auto-assign"]?.with?.issue)).toContain("inputs.issue");
   });
 });

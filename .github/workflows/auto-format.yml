@@ -3,6 +3,9 @@
 # commit to the PR branch, then removes the label. Generated once by
 # the fleet sync and never overwritten by a later
 # sync: adjust the format commands to this repository's tooling.
+#
+# Formatting runs PR-controlled code (the locked biome, the lint:fix script), so it happens in a job without a write
+# token and crosses to the push job as a git patch; applying a patch executes nothing, as in auto-fix.yml.
 
 name: Auto Format
 
@@ -13,42 +16,80 @@ on:
 permissions:
   contents: read
 
+# One run per PR at a time: the label removed and re-applied while a run is pushing would start a second run against
+# the same branch, and two formatting pushes race. The later run queues and formats the pushed head instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   format:
-    # Same-repo PRs only: GITHUB_TOKEN cannot push to a fork's branch, and
-    # PR-controlled tool configuration should not run next to write
-    # credentials (checkout below persists none; the push step scopes them).
+    # Same-repo PRs only: GITHUB_TOKEN cannot push to a fork's branch.
     if: github.event.label.name == 'fix-lint' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.format.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
+      # The install puts the locked biome in node_modules, so the format runs the gate's biome, not the newest one.
+      - uses: ./.github/actions/setup
+      - name: Format (biome) and stage the patch
+        id: format
+        run: |
+          bun run lint:fix
+          git add -A
+          git diff --cached --binary > "$RUNNER_TEMP/format.patch"
+          if [ -s "$RUNNER_TEMP/format.patch" ]; then
+            git diff --cached --stat
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing to format"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.format.outputs.changed == 'true'
+        with:
+          name: format-patch
+          path: ${{ runner.temp }}/format.patch
+          if-no-files-found: error
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - name: Format (biome)
-        run: bun x @biomejs/biome check --write .
-
-      - name: Commit and push changes
+  # Runs whenever the format job ran, so the label comes off even after a failed format: the label is a one-shot
+  # request, and a broken run must not loop.
+  push:
+    needs: format
+    if: always() && needs.format.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.format.outputs.changed == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: false
+      # The patch lands OUTSIDE the checkout so nothing in the work tree can shadow or stage it.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.format.outputs.changed == 'true'
+        with:
+          name: format-patch
+          path: ${{ runner.temp }}/format
+      - name: Commit and push the formatting
+        if: needs.format.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          if git diff --quiet; then
-            echo "nothing to format"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "style: apply automated formatting"
-            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
-          fi
-      # The label is a one-shot request: remove it even when a step failed,
-      # so a broken run cannot loop.
+          git apply --index --binary "$RUNNER_TEMP/format/format.patch"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --no-verify -m "style: apply automated formatting"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
       - name: Remove the fix-lint label
         if: always()
         env:

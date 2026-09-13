@@ -59,14 +59,11 @@ jobs:
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
           rm -f probe.err
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         if: steps.token.outputs.proceed == 'true'
-        with:
-          bun-version-file: .bun-version
       - name: Build the bundle and the library
         if: steps.token.outputs.proceed == 'true'
         run: |
-          bun install --frozen-lockfile --ignore-scripts
           bun run build:bundle
           bun run build:lib
       - name: Append this commit's packaged commit to build and point latest at the newest main source
@@ -112,10 +109,8 @@ jobs:
           # The version counts main's commits under this one and the verdict places published sources by ancestry; a shallow checkout can do neither.
           fetch-depth: 0
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         if: steps.oidc.outputs.proceed == 'true'
-        with:
-          bun-version-file: .bun-version
       # registry-url writes the .npmrc npm publishes through; with no
       # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
       # OIDC exchange replaces.
@@ -140,9 +135,7 @@ jobs:
           fi
       - name: Build the library
         if: steps.oidc.outputs.proceed == 'true'
-        run: |
-          bun install --frozen-lockfile --ignore-scripts
-          bun run build:lib
+        run: bun run build:lib
       # scripts.prepare is dropped from the published manifest: it installs
       # lefthook, a devDependency the tarball does not carry, and npm blocks
       # install scripts from a provenance-attested package anyway.

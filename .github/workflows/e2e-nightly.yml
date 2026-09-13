@@ -1,3 +1,8 @@
+# The nightly run of the whole curated e2e corpus (test/e2e/run.ts) plus the endpoint-coverage tripwire, against an
+# OpenAPI spec fetched fresh: PR CI restores a cached spec for speed, so this fetch is where upstream drift surfaces.
+# A red night files or updates one tracking issue through the fleet's fuzz-issue action; a green one closes it.
+# Repo-owned, never overwritten by sync.
+
 name: E2E Nightly
 
 on:
@@ -18,16 +23,13 @@ concurrency:
 jobs:
   nightly:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
 
       # The trimmed OpenAPI spec is a fetched, gitignored artifact. The nightly
       # ALWAYS fetches it (no cache) on purpose: the fetch is the drift tripwire.

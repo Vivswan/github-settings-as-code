@@ -65,12 +65,9 @@ jobs:
           ref: ${{ steps.source.outputs.sha }}
           # The script judges whether the build tip's source lies on main; a shallow checkout cannot answer that.
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       - name: Build the bundle and the schema
         run: |
-          bun install --frozen-lockfile --ignore-scripts
           bun run build
           # The schema asset and the raw URLs at the tags must serve the bytes committed at the merge commit; a
           # divergent regeneration (generator drift, or a compromised generator) stops the release here.
@@ -102,9 +99,9 @@ jobs:
       contents: write # read-only in spirit; write is what makes drafts visible to gh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: .bun-version
+          install: "false"
       - name: Confirm the published refs carry the build outputs
         env:
           TAG: ${{ inputs.tag }}
@@ -155,9 +152,7 @@ jobs:
         with:
           ref: ${{ needs.package-release.outputs.source-sha }}
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup
       # registry-url writes the .npmrc npm publishes through; with no
       # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
       # OIDC exchange replaces.
@@ -179,9 +174,7 @@ jobs:
             exit 1
           fi
       - name: Build the library
-        run: |
-          bun install --frozen-lockfile --ignore-scripts
-          bun run build:lib
+        run: bun run build:lib
       # scripts.prepare is dropped from the published manifest, as in
       # post-green.yml's publish-next.
       # The verdict holds the built package.json to the tag and reads the
