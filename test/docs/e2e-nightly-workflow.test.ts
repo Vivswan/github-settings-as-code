@@ -1,88 +1,150 @@
 /**
- * Both nightlies file through the fleet's nightly issue action and then dispatch auto-assign with the issue number, so
- * assignment policy stays in auto-assign rather than in a filer. One shape, pinned over both workflows.
+ * Both nightlies file a failure issue through the fleet's fuzz-issue action, pointing at the artifact the run uploaded, resolve it on the
+ * next green night, and dispatch auto-assign.yml with the issue number. The links a rename on one side breaks with no other check noticing:
+ * the directory the runner writes, the artifact the issue cites, the conditions the steps run under, the step ids the expressions read, the
+ * label the report and the resolve share, and the input names the dispatch passes to a workflow the platform syncs.
  */
 
 import { describe, expect, test } from "bun:test";
-import { readWorkflow } from "./workflow-loader.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ROOT } from "../root.js";
+import { readWorkflow, type Step } from "./workflow-loader.js";
 
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
+/** The harness writes every failure's replay bundle under one directory, spelled as path segments where the dump happens. */
+const RUNNER = readFileSync(join(ROOT, "test", "e2e", "runner.ts"), "utf8");
 
-describe.each([
-  // The run_attempt suffix: upload-artifact refuses a duplicate name, so a re-run attempt would upload nothing
-  // and the filed issue would point at an artifact that never existed.
-  ["e2e-nightly.yml", "nightly", "e2e-fuzz", `e2e-artifacts-\${{ github.run_attempt }}`],
-  ["nightly-fuzz.yml", "fuzz", "fuzz-nightly", `fuzz-failures-\${{ github.run_attempt }}`],
-])("%s issue + auto-assign path", (file, job, label, artifactName) => {
-  const wf = readWorkflow(file);
-  const steps = wf.jobs[job]?.steps ?? [];
-  const filers = steps.filter((s) => s.uses === FUZZ_ISSUE_ACTION);
+const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [
+  ["e2e-nightly.yml", "nightly"],
+  ["nightly-fuzz.yml", "fuzz"],
+];
 
-  test("grants issues: write for the filer and actions: write for the dispatch", () => {
-    expect([wf.permissions?.issues, wf.permissions?.actions]).toEqual(["write", "write"]);
-  });
+const filerIn = (steps: Step[], mode: string) =>
+  steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
 
-  test("files on failure from the artifacts dir and resolves on success, one label, one artifact name", () => {
-    const shape = filers.map((s) => ({
-      id: s.id,
-      if: s.if,
-      mode: s.with?.mode,
-      label: s.with?.label,
-      dir: s.with?.["artifacts-dir"],
-      artifact: s.with?.["artifact-name"],
-    }));
-    expect(shape).toEqual([
-      {
-        id: "file-issue",
-        if: "failure()",
-        mode: "report",
-        label,
-        dir: "test/e2e/.artifacts",
-        artifact: artifactName,
-      },
-      {
-        id: undefined,
-        if: "success()",
-        mode: "resolve",
-        label,
-        dir: undefined,
-        artifact: undefined,
-      },
-    ]);
-    // The upload the issue points at carries the same name the filer names.
+/** A step condition as the runner evaluates it: with or without the `${{ }}` wrapper, whitespace aside. */
+const condition = (raw: unknown): string =>
+  String(raw ?? "")
+    .trim()
+    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
+    .trim();
+
+describe.each(NIGHTLIES)("%s failure path", (file, job) => {
+  const workflow = readWorkflow(file);
+  const steps = workflow.jobs[job]?.steps ?? [];
+  const report = filerIn(steps, "report");
+  const resolve = filerIn(steps, "resolve");
+
+  test("on failure, the filed issue names the artifact the run uploads, from the directory the runner writes", () => {
     const upload = steps.find((s) => (s.uses ?? "").startsWith("actions/upload-artifact@"));
-    expect([upload?.if, upload?.with?.name, upload?.with?.path]).toEqual([
-      "failure()",
-      artifactName,
-      "test/e2e/.artifacts/",
-    ]);
+    expect(report, "no reporting fuzz-issue step").toBeDefined();
+    expect(upload, "no upload-artifact step").toBeDefined();
+    // A step without a condition runs on success() only, so a dropped `if:` files nothing on the night that fails.
+    expect(condition(report?.if)).toBe("failure()");
+    expect(condition(upload?.if)).toBe(condition(report?.if));
+    // upload-artifact refuses a duplicate name, so a re-run attempt uploads under its own: the name carries the attempt number.
+    const name = upload?.with?.name;
+    expect(
+      typeof name === "string" && /\$\{\{[^}]*\bgithub\.run_attempt\b[^}]*\}\}/.test(name),
+      `the upload name ${JSON.stringify(name)} does not vary by run attempt`,
+    ).toBe(true);
+    expect(report?.with?.["artifact-name"]).toBe(name);
+    const dir = String(upload?.with?.path).replace(/\/$/, "");
+    expect(report?.with?.["artifacts-dir"]).toBe(dir);
+    // The runner joins the directory from ROOT and quoted segments; the workflow's path must be exactly those segments, in order.
+    const segments = dir
+      .split("/")
+      .map((segment) => JSON.stringify(segment).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    expect(RUNNER, `test/e2e/runner.ts never joins ${dir} under ROOT`).toMatch(
+      new RegExp(`join\\(\\s*ROOT\\s*,\\s*${segments.join("\\s*,\\s*")}\\s*,\\s*\``),
+    );
   });
 
-  test("dispatches auto-assign.yml with the filed issue number, after filing, on failure", () => {
-    const fileIdx = steps.findIndex((s) => s.id === "file-issue");
-    const dispatchIdx = steps.findIndex((s) =>
-      (s.run ?? "").includes("gh workflow run auto-assign.yml"),
+  test("on success, the resolve step closes the label the report step files under", () => {
+    expect(resolve, "no resolving fuzz-issue step").toBeDefined();
+    expect(condition(resolve?.if)).toBe("success()");
+    expect(String(resolve?.with?.label)).toBe(String(report?.with?.label));
+  });
+
+  test("every steps.<id> a step reads names a step that precedes it", () => {
+    // An output read from a later step is empty, not an error: a gate on it is quietly false.
+    const reads = steps.flatMap((s, index) =>
+      [
+        s.if ?? "",
+        s.run ?? "",
+        ...Object.values(s.env ?? {}),
+        ...Object.values(s.with ?? {}).map(String),
+      ].flatMap((text) =>
+        [...text.matchAll(/\bsteps\.([\w-]+)\./g)].map((m) => ({ index, id: m[1] ?? "" })),
+      ),
     );
-    expect(fileIdx, "no filer step").toBeGreaterThanOrEqual(0);
-    expect(dispatchIdx, "no auto-assign dispatch step").toBeGreaterThan(fileIdx);
-    const dispatch = steps[dispatchIdx];
-    // Gated on a non-empty issue-number, so the dispatch never expands to a bare `-f issue=`.
-    expect(dispatch?.if).toBe("failure() && steps.file-issue.outputs.issue-number != ''");
-    expect(dispatch?.env?.ISSUE_NUMBER).toBe(`\${{ steps.file-issue.outputs.issue-number }}`);
-    // The joined `|| echo "::warning::` shape ties the warning to the failed dispatch; asserting the pieces separately
-    // would pass with the warning detached from the fallback branch.
-    expect(dispatch?.run).toBe(
-      'gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"',
+    // The dispatch is gated on the filer's output, so a zero here means the walk went blind, not that the job reads nothing.
+    expect(reads.length).toBeGreaterThan(0);
+    const unresolved = reads.filter(
+      ({ index, id }) => !steps.slice(0, index).some((earlier) => earlier.id === id),
     );
+    expect(
+      unresolved.map(
+        ({ index, id }) => `step ${index + 1} reads steps.${id}, which no earlier step defines`,
+      ),
+      `${file}#${job}`,
+    ).toEqual([]);
+  });
+
+  test("the job holds the grant each step consumes", () => {
+    // A missing grant is not loud: the fuzz-issue action files nothing, and the dispatch's 403 is swallowed by its `|| echo ::warning`.
+    const grants = workflow.jobs[job]?.permissions ?? workflow.permissions ?? {};
+    const consumers = steps.flatMap((s) => [
+      ...(s.uses === FUZZ_ISSUE_ACTION ? [["issues", `the ${s.with?.mode} fuzz-issue step`]] : []),
+      ...(/\bgh workflow run\b/.test(s.run ?? "")
+        ? [["actions", "the gh workflow run dispatch"]]
+        : []),
+    ]);
+    expect(consumers.length).toBeGreaterThan(1);
+    for (const [scope, why] of consumers) {
+      expect(grants[scope as string], `${file}#${job}: ${why} needs ${scope}: write`).toBe("write");
+    }
+  });
+
+  test("the dispatched issue is the one the report step filed, and only when it filed one", () => {
+    const dispatch = steps.find((s) => /\bgh workflow run\b/.test(s.run ?? ""));
+    expect(dispatch, "no dispatch step").toBeDefined();
+    expect(report?.id, "the report step has no id to read an output from").toBeDefined();
+    const output = `steps.${report?.id}.outputs.issue-number`;
+    // The field's value is a shell variable the step's env fills from the report step's output.
+    const variable =
+      (dispatch?.run ?? "").match(/["']?issue=\$\{?([A-Za-z_][\w]*)\}?(?![\w])/)?.[1] ?? "";
+    expect(variable, "the issue field is not filled from a $VARIABLE").not.toBe("");
+    expect(dispatch?.env?.[variable]).toBe(`\${{ ${output} }}`);
+    // Gated on a non-empty number, so the dispatch never expands to a bare `issue=`.
+    expect(condition(dispatch?.if)).toBe(`failure() && ${output} != ''`);
+  });
+
+  test("every workflow it dispatches declares every input it passes", () => {
+    // The dispatch command runs to the next shell separator (continuations joined), so every field on it is read, wherever the other options sit.
+    const dispatches = steps.flatMap((s) => [
+      ...(s.run ?? "").replace(/\\\n/g, " ").matchAll(/gh workflow run (\S+\.yml)([^;&|\n]*)/g),
+    ]);
+    expect(dispatches.length, "no gh workflow run dispatch").toBeGreaterThan(0);
+    for (const [, target = "", rest = ""] of dispatches) {
+      const passed = [
+        ...rest.matchAll(/(?:^|\s)(?:-f|--raw-field|-F|--field)[\s=]+["']?([\w-]+)=/g),
+      ].map((m) => m[1] ?? "");
+      expect(passed.length, `the ${target} dispatch passes no input`).toBeGreaterThan(0);
+      const declared = Object.keys(readWorkflow(target).on.workflow_dispatch?.inputs ?? {});
+      expect(
+        passed.filter((input) => !declared.includes(input)),
+        `${target} declares no workflow_dispatch input for these`,
+      ).toEqual([]);
+    }
   });
 });
 
-describe("auto-assign.yml caller forwards the dispatched issue", () => {
-  const wf = readWorkflow("auto-assign.yml");
-
-  test("workflow_dispatch declares issue as an optional input and the reusable call forwards it", () => {
-    // The nightly filer always passes a number, and a bare dispatch must still run the full sweep.
-    expect(wf.on.workflow_dispatch?.inputs?.issue).toMatchObject({ required: false, default: "" });
-    expect(String(wf.jobs["auto-assign"]?.with?.issue)).toContain("inputs.issue");
-  });
+test("the nightlies file under distinct labels, so one's green night cannot close the other's issue", () => {
+  const labels = NIGHTLIES.map(
+    ([file, job]) => filerIn(readWorkflow(file).jobs[job]?.steps ?? [], "report")?.with?.label,
+  );
+  // GitHub compares label names without regard to case.
+  expect(new Set(labels.map((label) => String(label).toLowerCase())).size).toBe(labels.length);
 });

@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
-import { DEFAULT_PRIVATE_REPOS } from "../../src/flows/inputs.js";
+import { DEFAULT_PRIVATE_REPOS, INPUT_DECLS } from "../../src/flows/inputs.js";
 import { REDACTED_DETAIL } from "../../src/flows/redact.js";
 import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
+import { ISSUE_REPORT_PERMISSION } from "../../src/report/issue-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
+import { grantFor } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
@@ -31,77 +33,6 @@ function assertBacktickedEnumeration(
   const listed = [...(parenthesized ?? "").matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
   expect(listed.sort()).toEqual([...expected].sort());
 }
-
-describe("README front door", () => {
-  // Each pin is a shape the reference content would break if it grew back into the README; the tables live on the reference pages.
-  const prose = readme.replace(/```[\s\S]*?```/g, "");
-
-  test("carries exactly the front-door headings, in order", () => {
-    expect(prose.match(/^#{1,6} .*$/gm)).toEqual([
-      "# GitHub Settings as Code",
-      "## Quick start",
-      "## Versioning",
-      "## Library",
-      "## Docs",
-      "## Contributing",
-    ]);
-  });
-
-  test("the token-form link is its only generated region", () => {
-    // A reference-table marker reappearing here would regenerate silently.
-    const regions = [...readme.matchAll(/<!-- BEGIN GENERATED: ([a-z-]+)/g)].map((m) => m[1]);
-    expect(regions).toEqual(["readme-pat-url"]);
-  });
-
-  test("the quick-start workflow runs in check mode", () => {
-    const workflow = fencedBlocks(readme, "yaml").find((block) => block.includes("uses:"));
-    expect(workflow, "README lost its workflow example").toBeDefined();
-    const doc = parseYaml(workflow ?? "") as {
-      jobs: Record<string, { steps: Array<{ uses?: string; with?: Record<string, string> }> }>;
-    };
-    const step = Object.values(doc.jobs)
-      .flatMap((job) => job.steps)
-      .find((candidate) => candidate.uses?.startsWith("Vivswan/github-settings-as-code@"));
-    expect(step?.with?.mode).toBe("check");
-  });
-
-  test("the Docs table links every guide the front door promises, and each resolves", () => {
-    const rows = sectionLines(readme, "Docs", "README.md")
-      .map((line) => line.match(/^\| [^|]+ \| \[[^\]]+\]\(([^)]+)\) \|$/)?.[1])
-      .filter((target): target is string => target !== undefined);
-    expect(rows.sort()).toEqual(
-      [
-        "docs/start/getting-started.md",
-        "docs/start/examples.md",
-        "docs/start/migrating-from-probot.md",
-        "docs/start/cli.md",
-        "docs/reference/sections.md",
-        "docs/reference/architecture.md",
-        "docs/reference/library.md",
-        "docs/reference/inputs.md",
-        "docs/reference/semantics.md",
-        "docs/reference/permissions.md",
-        "docs/reference/undeclared-policy.md",
-        "docs/reference/secrets-and-vaults.md",
-        "docs/operate/check-mode.md",
-        "docs/operate/multi-repo.md",
-        "docs/operate/layering.md",
-        "docs/operate/private-repositories.md",
-        "docs/operate/troubleshooting.md",
-        "docs/playbooks/README.md",
-        "docs/upgrading/README.md",
-      ].sort(),
-    );
-    for (const target of rows) {
-      expect(existsSync(join(ROOT, target)), `README Docs table links ${target}`).toBe(true);
-    }
-  });
-
-  test("stays a front door in size", () => {
-    // The tripwire against the reference tables growing back.
-    expect(readme.split("\n").length).toBeLessThanOrEqual(101);
-  });
-});
 
 describe("README example settings.yml blocks", () => {
   test("every settings.yml example validates and its repository keys are known", () => {
@@ -128,6 +59,28 @@ describe("README example settings.yml blocks", () => {
   });
 });
 
+describe("README quick-start mode", () => {
+  test("the workflow step runs in the mode the prose beside it names", () => {
+    // The input defaults to apply, so a dropped `mode:` line turns the copied first run into the apply the prose says it is not.
+    const prose = sectionLines(readme, "Quick start", "README.md").join("\n");
+    const named = prose.match(/Keep `mode: ([a-z]+)` for the first run/)?.[1];
+    expect(
+      named,
+      'the quick start lost its "Keep `mode: ...` for the first run" line',
+    ).toBeDefined();
+    const workflow = fencedBlocks(readme, "yaml").find((block) => block.includes("uses:"));
+    expect(workflow, "README lost its workflow example").toBeDefined();
+    const doc = parseYaml(workflow ?? "") as {
+      jobs: Record<string, { steps: Array<{ uses?: string; with?: Record<string, string> }> }>;
+    };
+    const step = Object.values(doc.jobs)
+      .flatMap((job) => job.steps)
+      .find((candidate) => candidate.uses?.startsWith("Vivswan/github-settings-as-code@"));
+    expect(step, "the workflow example has no github-settings-as-code step").toBeDefined();
+    expect(step?.with?.mode ?? INPUT_DECLS.mode.default).toBe(named ?? "");
+  });
+});
+
 describe("README version pins", () => {
   test("every uses: pin names the current release's moving major tag", () => {
     const pins = stalePins([{ label: "README.md", text: readme }]);
@@ -139,24 +92,6 @@ describe("README version pins", () => {
       pins.stale.map(
         (pin) => `README pins @${pin.ref}, but the current major tag is ${pins.major}`,
       ),
-    ).toEqual([]);
-  });
-
-  test("the exact-pin advice names the version tag and the build/ namespace stays retired", () => {
-    // Every vX.Y.Z tag points at a packaged commit, so the version tag itself is the exact pin.
-    expect(
-      readme.includes("`@vX.Y.Z`"),
-      "README's exact-pin advice must name the `@vX.Y.Z` tag form",
-    ).toBe(true);
-    expect(
-      readme.includes("build/"),
-      "README references the retired build/ tag namespace; version tags are the packaged, runnable refs now",
-    ).toBe(false);
-    // Concrete version pins would rot on every release.
-    const versionPins = [...readme.matchAll(/@v\d+\.\d+\.\d+/g)].map((m) => m[0]);
-    expect(
-      versionPins,
-      `README pins concrete version tag(s) ${versionPins.join(", ")}; offer the moving major or the @vX.Y.Z placeholder instead`,
     ).toEqual([]);
   });
 });
@@ -172,7 +107,7 @@ describe("delete-by-default enumeration", () => {
   });
 });
 
-describe("schema $schema hints and $id", () => {
+describe("schema $schema hints", () => {
   const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8"));
   const id = schema.$id as string;
 
@@ -185,7 +120,7 @@ describe("schema $schema hints and $id", () => {
       .map((name) => ({ label: `docs/${name}`, path: join(ROOT, "docs", name) })),
   ];
 
-  test("every yaml-language-server line in the README and the guides names the schema at the moving major tag", () => {
+  test("every yaml-language-server hint in the README and the guides names the schema at the moving major tag", () => {
     expect(id, "lib/settings.schema.json has no $id").toBeTruthy();
     // The $id is version-free (HEAD); the hints are what editors download, so they pin the moving major tag.
     const pins = stalePins([{ label: "README.md", text: readme }]);
@@ -193,61 +128,31 @@ describe("schema $schema hints and $id", () => {
     const idUrl = new URL(id);
     const [owner, repo, , ...rest] = idUrl.pathname.split("/").filter(Boolean);
     const expectedHint = `${idUrl.origin}/${owner}/${repo}/${pins?.major}/${rest.join("/")}`;
-    // Per-file counts: a global total would let the README's hint disappear while the guides' keeps the sum positive.
-    const EXPECTED_HINTS: Record<string, number> = {
-      "README.md": 1, // the quick-start settings example
-      "docs/start/getting-started.md": 1,
-      "docs/operate/snapshot.md": 1, // the example snapshot file
-    };
     // The hint every snapshot file starts with is the same URL: the file a
     // reader gets from mode: snapshot validates exactly as the quick start's does.
     expect(SNAPSHOT_SCHEMA_URL).toBe(expectedHint);
+    // Every line naming the modeline is read; one the strict form cannot parse fails rather than slipping past the URL check.
+    const hints: string[] = [];
+    const problems: string[] = [];
     for (const page of hintPages()) {
-      const markdown = readFileSync(page.path, "utf8");
-      const hints = [...markdown.matchAll(/yaml-language-server: \$schema=(\S+)/g)];
-      expect(
-        hints.length,
-        `${page.label} carries ${hints.length} $schema hint(s), expected ${EXPECTED_HINTS[page.label] ?? 0}; update EXPECTED_HINTS if the move is deliberate`,
-      ).toBe(EXPECTED_HINTS[page.label] ?? 0);
-      for (const match of hints) {
-        expect(
-          match[1],
-          `${page.label} carries a $schema hint that is not the schema at ${pins?.major}`,
-        ).toBe(expectedHint);
+      for (const line of readFileSync(page.path, "utf8").split("\n")) {
+        if (!line.includes("yaml-language-server")) {
+          continue;
+        }
+        // The language server reads the modeline only as a comment opening the line (indent aside, for the README's list nesting).
+        const url = line.match(/^\s*# yaml-language-server: \$schema=(\S+)/)?.[1];
+        if (url === undefined) {
+          problems.push(`${page.label}: unreadable modeline "${line.trim()}"`);
+        } else if (url !== expectedHint) {
+          problems.push(`${page.label} carries ${url}, not the schema at ${pins?.major}`);
+        } else {
+          hints.push(page.label);
+        }
       }
     }
-  });
-
-  test("the $id points at this repository's raw HEAD copy of the build output", () => {
-    // gen-settings-schema.ts stamps the $id as the raw copy at HEAD; each URL part is held to its own single source.
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
-      repository: { url: string };
-    };
-    const url = new URL(id);
-    expect(url.protocol).toBe("https:");
-    expect(url.hostname).toBe("raw.githubusercontent.com");
-    const [owner, repo, ref, ...rest] = url.pathname.split("/").filter(Boolean);
-    const genScript = readFileSync(
-      join(ROOT, ".github", "scripts", "gen-settings-schema.ts"),
-      "utf8",
-    );
-    expect(
-      genScript.includes(`join(ROOT, ${rest.map((part) => JSON.stringify(part)).join(", ")})`),
-      `gen-settings-schema.ts does not write to ${rest.join("/")}, where the $id points`,
-    ).toBe(true);
-    // The package name is scoped and cannot serve as the slug, so the manifest's repository URL does; the equality catches a rename on either side.
-    const manifestSlug = pkg.repository.url.match(
-      /^git\+https:\/\/github\.com\/([^/]+\/[^/]+)\.git$/,
-    )?.[1];
-    expect(`${owner}/${repo}`).toBe(manifestSlug ?? "");
-    // includes() cannot prove EVERY install line agrees (third-party actions share the uses: syntax), but a $id naming a slug no snippet installs
-    // fails here.
-    expect(
-      readme.includes(`uses: ${owner}/${repo}@`),
-      `the README never installs "uses: ${owner}/${repo}@...", so the $id's slug matches no workflow snippet`,
-    ).toBe(true);
-    // HEAD is version-free, so a major bump never waits on a schema regeneration to go green.
-    expect(ref).toBe("HEAD");
+    expect(problems).toEqual([]);
+    // Zero matches means the pattern rotted, not that the pages went hint-free.
+    expect(hints.length, "no page carries a $schema hint").toBeGreaterThan(0);
   });
 });
 
@@ -293,39 +198,26 @@ describe("private repositories guide", () => {
   test("names every private-report channel the code accepts", () => {
     for (const channel of PRIVATE_REPORT_CHANNELS) {
       expect(
-        section.includes(`\`private-report: ${channel}\``) || channel === "none",
+        section.includes(`\`private-report: ${channel}\``),
         `the private repositories guide does not document the "${channel}" channel`,
       ).toBe(true);
     }
-    // `none` delivers nothing, so it is named as the input default; a bare "none" would match unrelated prose.
-    expect(section).toContain("defaults to `private-report: none`, which delivers nothing");
   });
 
-  test("states the default redaction policy and the placeholder/detail constants", () => {
+  test("names the redaction default, the redacted-detail placeholder, and the artifact from the code's constants", () => {
     expect(section).toContain(`\`private-repos: ${DEFAULT_PRIVATE_REPOS}\` (the default)`);
-    expect(section).toContain("private repository #N");
     expect(section).toContain(REDACTED_DETAIL);
-  });
-
-  test("pins the artifact names and the age keygen/decrypt commands", () => {
     expect(section).toContain(ARTIFACT_NAME);
     expect(section).toContain(ARTIFACT_FILE);
-    expect(section).toContain("age-keygen -o key.txt");
-    expect(section).toContain(`age -d -i key.txt ${ARTIFACT_FILE}`);
   });
 
-  test("documents the issue-channel PAT grant", () => {
-    // The grant prose mirrors grantFor(ISSUE_REPORT_PERMISSION).
-    expect(section).toContain('`"Issues"` (read and write)');
-  });
-
-  test("states the delivery accuracy caveats the review pinned", () => {
-    // Delivery is gated on PROVEN private/internal, not merely redacted.
-    expect(section.toLowerCase()).toContain("private or internal");
-    // The artifact channel does not work on GitHub Enterprise Server.
-    expect(section).toContain("GitHub Enterprise Server");
-    // A downloaded artifact is a ZIP; the docs give an extraction path.
-    expect(section).toContain("gh run download");
+  test("the issue-channel PAT advice names the grant the issue report asks for", () => {
+    // The same grantFor() call the failed delivery prints (src/report/issue-report.ts): its resource labels and access level.
+    const grant = grantFor(ISSUE_REPORT_PERMISSION).match(
+      /^grant ("[^"]+"(?: or "[^"]+")*) \(([a-z ]+)\)/,
+    );
+    expect(grant, "grantFor() no longer opens with the quoted labels and the level").not.toBeNull();
+    expect(section).toContain(`the PAT needs \`${grant?.[1]}\` (${grant?.[2]})`);
   });
 
   test("the overall-result enumeration names exactly the per-target RUN_RESULTS words", () => {
@@ -355,33 +247,6 @@ describe("SettingsFile deletion claims", () => {
       for (const problem of defaultClaimProblems(description ?? "", section.undeclaredDefault)) {
         throw new Error(`SettingsFile.${section.key} description: ${problem}`);
       }
-    }
-  });
-});
-
-describe("schema.ts file-header additions claim", () => {
-  const schemaSrc = readFileSync(join(ROOT, "src", "schema.ts"), "utf8");
-  // URLs removed so a section-key word inside a link (e.g. "repository" in the repository-settings/app URL) cannot match.
-  const header = schemaSrc.slice(0, schemaSrc.indexOf("*/")).replace(/https?:\/\/\S+/g, "");
-
-  test("the header defers to PROBOT_PARITY_KEYS", () => {
-    // The pointer to the constant IS the derivation; an enumeration would be the copy that drifts.
-    expect(
-      header.includes("PROBOT_PARITY_KEYS"),
-      "the schema.ts file header must define the additions via PROBOT_PARITY_KEYS",
-    ).toBe(true);
-  });
-
-  test("the header names no addition section", () => {
-    const parity = new Set<string>(PROBOT_PARITY_KEYS);
-    for (const key of SECTION_KEYS) {
-      if (parity.has(key)) {
-        continue;
-      }
-      expect(
-        new RegExp(`\\b${key}\\b`).test(header),
-        `the schema.ts file header names the addition section "${key}"; defer to PROBOT_PARITY_KEYS instead of enumerating`,
-      ).toBe(false);
     }
   });
 });

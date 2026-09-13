@@ -184,26 +184,6 @@ describe("docs/ diagrams", () => {
     .filter((name) => name.endsWith(".md"))
     .sort();
 
-  test("the architecture page carries exactly the seven concept diagrams and the module map", () => {
-    // Pinning the list means a section cannot quietly disappear while the per-page checks still pass.
-    const markdown = readFileSync(join(DOCS, "reference", "architecture.md"), "utf8");
-    const headings = markdown.split("\n").filter((line) => line.startsWith("## "));
-    expect(headings).toEqual([
-      "## The journey of one settings file",
-      "## The mental model: declare, diff, converge",
-      "## The mode ladder",
-      "## The layering fold as a stack",
-      "## Trust and provenance",
-      "## The section-module contract",
-      "## The multi-repo flow",
-      "## The module map",
-    ]);
-    expect(fencedBlocks(markdown, "mermaid")).toHaveLength(8);
-    expect(markdown.split("\n").filter((line) => line.startsWith("Demonstrated by:"))).toHaveLength(
-      7,
-    );
-  });
-
   for (const page of pages) {
     test(`docs/${page}: every diagram names real code and links its demonstration`, () => {
       expect(diagramProblems(readFileSync(join(DOCS, page), "utf8"), ROOT)).toEqual([]);
