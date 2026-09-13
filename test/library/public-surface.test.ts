@@ -5,12 +5,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
 import { ARCHITECTURE_PATH, lintArchitecture } from "../../.github/scripts/arch-lint.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 const ENTRY = "src/index.ts";
 const INTERNAL_ENTRY = "src/internal.ts";
@@ -59,10 +59,39 @@ export function documentedNames(markdown: string): string[] {
   if (start < 0) {
     throw new Error(`${PAGE} has no "${API_HEADING}" heading`);
   }
-  const section = lines.slice(start + 1).map((raw) => raw.trim());
+  // A line as GFM reads it: its blockquote depth (a marker is `>` plus any spaces, nested markers stack) and the text under the markers.
+  const section = lines.slice(start + 1).map((raw) => {
+    let text = raw.trim();
+    let depth = 0;
+    for (let marker = text.match(/^>\s*/); marker; marker = text.match(/^>\s*/)) {
+      depth++;
+      text = text.slice(marker[0].length);
+    }
+    return { depth, text: text.trim() };
+  });
   const names: string[] = [];
   let inNameTable = false;
-  for (const [offset, line] of section.entries()) {
+  // The open fence: its mark and the quote depth it opened at. A closer is the whole line at that depth; a `>` line
+  // inside a fence at depth 0 is fence text, and so is a table. A line below the fence's depth ends the blockquote,
+  // and the fence with it.
+  let fence: { mark: string; depth: number } | null = null;
+  for (const [offset, { depth, text: line }] of section.entries()) {
+    // A backtick fence's info string carries no backtick, so a triple-backtick inline span is not an opener.
+    const opener = line.match(/^(`{3,})(?![^`]*`)|^(~{3,})/)?.[0];
+    if (fence !== null && depth < fence.depth) {
+      fence = null;
+    }
+    if (fence !== null) {
+      if (depth === fence.depth && line.startsWith(fence.mark) && /^(`+|~+)$/.test(line)) {
+        fence = null;
+      }
+      continue;
+    }
+    if (opener !== undefined) {
+      fence = { mark: opener, depth };
+      inNameTable = false;
+      continue;
+    }
     if (line.startsWith("## ")) {
       break;
     }
@@ -71,14 +100,14 @@ export function documentedNames(markdown: string): string[] {
       continue;
     }
     if (!inNameTable) {
-      if (NAME_TABLE_HEADER.test(line) && DELIMITER_ROW.test(section[offset + 1] ?? "")) {
+      if (NAME_TABLE_HEADER.test(line) && DELIMITER_ROW.test(section[offset + 1]?.text ?? "")) {
         inNameTable = true;
       }
       continue;
     }
     if (
       offset > 0 &&
-      NAME_TABLE_HEADER.test(section[offset - 1] ?? "") &&
+      NAME_TABLE_HEADER.test(section[offset - 1]?.text ?? "") &&
       DELIMITER_ROW.test(line)
     ) {
       continue;
@@ -147,6 +176,27 @@ describe("the public entry", () => {
     expect(documentedNames(afterSection)).toEqual(documentedNames(page));
   });
 
+  // A fence shows its text; a table inside one renders as code, so it is not a documented name.
+  const FENCED_TABLE =
+    "| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Fenced |";
+  test.each([
+    ["a backtick fence", `\`\`\`md\n${FENCED_TABLE}\n\`\`\``],
+    ["a tilde fence", `~~~\n${FENCED_TABLE}\n~~~`],
+    ["a fence whose body opens another fence", `\`\`\`md\n\`\`\`ts\n${FENCED_TABLE}\n\n\`\`\``],
+    [
+      "a fence inside a blockquote",
+      `>   \`\`\`md\n> ${FENCED_TABLE.replaceAll("\n", "\n> ")}\n>\n>   \`\`\``,
+    ],
+    [
+      "a fence whose body quotes a closed fence",
+      `\`\`\`md\n> \`\`\`ts\n> const example = 1;\n> \`\`\`\n\n${FENCED_TABLE}\n\n\`\`\``,
+    ],
+  ])("%s holds shown text, not a documented name (negative control)", (_form, block) => {
+    const fenced = page.replace("### Io\n", `### Io\n\n${block}\n\n`);
+    expect(fenced).not.toBe(page);
+    expect(documentedNames(fenced)).toEqual(documentedNames(page));
+  });
+
   // Every table form GFM renders is read, so a row cannot escape the pin by its spelling.
   test.each([
     [
@@ -169,10 +219,36 @@ describe("the public entry", () => {
       "### Io\n",
       "### Io\n\nName | Kind | Says\n--- | --- | ---\n`notExported` | function | Extra\n\n",
     ],
+    [
+      "a table inside a blockquote",
+      "### Io\n",
+      "### Io\n\n> | Name | Kind | Says |\n> |---|---|---|\n> | `notExported` | function | Quoted |\n\n",
+    ],
+    [
+      "a table inside a nested blockquote",
+      "### Io\n",
+      "### Io\n\n> > | Name | Kind | Says |\n> > |---|---|---|\n> > | `notExported` | function | Quoted |\n\n",
+    ],
+    [
+      "a table inside a nested blockquote whose markers are spaced apart",
+      "### Io\n",
+      "### Io\n\n>  > | Name | Kind | Says |\n>  > |---|---|---|\n>  > | `notExported` | function | Quoted |\n\n",
+    ],
+    [
+      "a table after a quoted fence its blockquote ended without a closer",
+      "### Io\n",
+      "### Io\n\n> ```md\n> example\n\n| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Extra |\n\n",
+    ],
+    [
+      "a table after a triple-backtick inline span, which opens no fence",
+      "### Io\n",
+      "### Io\n\n```an inline `code` span```\n\n| Name | Kind | Says |\n|---|---|---|\n| `notExported` | function | Extra |\n\n",
+    ],
   ])("%s is read as a documented name (negative control)", (_form, anchor, replacement) => {
     const variant = page.replace(anchor, replacement);
     expect(variant).not.toBe(page);
     expect(documentedNames(variant)).toEqual([...documentedNames(page), "notExported"].sort());
+    expect(documentedNames(variant)).not.toEqual(exportedNames(ENTRY, entry));
   });
 
   test("a star re-export is refused, since it pins no names (negative control)", () => {
@@ -194,9 +270,8 @@ describe("the public entry", () => {
     ["the internal entry", "../internal.js", "internal", "src/internal.ts"],
   ])(
     "a src/action file importing %s fails the architecture lint (negative control)",
-    (_target, specifier, layer, resolved) => {
-      const root = mkdtempSync(join(tmpdir(), "public-surface-"));
-      try {
+    (_target, specifier, layer, resolved) =>
+      withTempDir("public-surface-", (root) => {
         cpSync(join(ROOT, "src"), join(root, "src"), { recursive: true });
         cpSync(join(ROOT, ARCHITECTURE_PATH), join(root, ARCHITECTURE_PATH));
         writeFileSync(
@@ -206,9 +281,6 @@ describe("the public entry", () => {
         expect(lintArchitecture(root)).toEqual([
           `forbidden import action -> ${layer}: src/action/direct.ts -> ${resolved}; move it or declare the edge`,
         ]);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    },
+      }),
   );
 });

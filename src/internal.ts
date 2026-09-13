@@ -85,12 +85,7 @@ export {
   PRIVATE_REPORT_CHANNELS,
 } from "./report/delivery.js";
 export { ISSUE_TITLE, MARKER_LABEL, MARKER_LABEL_CONFIG } from "./report/issue-report.js";
-export {
-  DOCUMENT_DIRECTIVE_KEYS,
-  PROBOT_PARITY_KEYS,
-  UNDECLARED_POLICY_SECTIONS,
-  type UndeclaredPolicySection,
-} from "./schema.js";
+export { DOCUMENT_DIRECTIVE_KEYS, PROBOT_PARITY_KEYS } from "./schema.js";
 export {
   denialPosture,
   type KeyedListLayering,

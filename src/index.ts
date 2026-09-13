@@ -104,7 +104,13 @@ export {
 } from "./report/artifact-report.js";
 export { composeReport, type ReportInput } from "./report/composer.js";
 export { openReportChannel, type PrivateReportChannel } from "./report/delivery.js";
-export { SECTION_KEYS, type SectionKey, SettingsFile } from "./schema.js";
+export {
+  SECTION_KEYS,
+  type SectionKey,
+  SettingsFile,
+  UNDECLARED_POLICY_SECTIONS,
+  type UndeclaredPolicySection,
+} from "./schema.js";
 export {
   type EndpointDecl,
   endpointMethod,
