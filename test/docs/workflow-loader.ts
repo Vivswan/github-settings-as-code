@@ -9,8 +9,6 @@ import { parse as parseYaml } from "yaml";
 import { ROOT } from "../root.js";
 
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
-/** The setup composite (bun, the locked install, yamllint on request), as a job's `uses:` spells it. */
-export const SETUP_USES = "./.github/actions/setup";
 
 export interface Step {
   name?: string;

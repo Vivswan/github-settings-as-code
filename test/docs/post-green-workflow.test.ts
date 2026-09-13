@@ -1,592 +1,243 @@
-/** post-green.yml runs only from ci.yml's post-green slot, so neither a build tag, latest, nor npm is written from a
- * commit the all-green gate has not judged. */
+/**
+ * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs and publish
+ * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: a hook is
+ * reachable through workflow_call alone and every ci.yml job that calls one sits downstream of all-green; a job's effective grant covers
+ * what its steps consume; post-green's judged sha reaches every checkout and packaging step; every step after a probe runs on a verdict
+ * an earlier step wrote. The push probe also runs under bash against a stubbed git, since no pin shows what a branch does.
+ *
+ * The static guards catch ACCIDENTAL drift: a trigger, grant, or gate added or dropped in plain YAML. Deliberately hiding one behind
+ * other syntax is out of scope.
+ */
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readWorkflow, SETUP_USES, type Workflow } from "./workflow-loader.js";
+import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
+
+const CI = readWorkflow("ci.yml");
+const CALLER_PREFIX = "./.github/workflows/";
 
 function must<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`post-green.yml has no ${what}`);
+  if (value === undefined) throw new Error(`no ${what}`);
   return value;
 }
 
-interface PinnedStep {
-  name: string | undefined;
-  id: string | undefined;
-  uses: string | undefined;
-  if: string | undefined;
-  run: string | undefined;
-  env: Record<string, string> | undefined;
-  with: Record<string, unknown> | undefined;
+/** A step condition as the runner evaluates it: with or without the `${{ }}` wrapper, whitespace aside. */
+const condition = (raw: unknown): string =>
+  String(raw ?? "")
+    .trim()
+    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
+    .trim();
+
+const needsOf = (job: Job | undefined): string[] => [job?.needs ?? []].flat();
+
+/** Every job reachable from `gate` by following `needs` edges away from it, however many hops. */
+function downstreamOf(jobs: Record<string, Job>, gate: string): Set<string> {
+  const downstream = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [name, job] of Object.entries(jobs)) {
+      if (downstream.has(name)) continue;
+      if (needsOf(job).some((dep) => dep === gate || downstream.has(dep))) {
+        downstream.add(name);
+        grew = true;
+      }
+    }
+  }
+  return downstream;
 }
 
-interface CallerContract {
-  /** The workflow's top-level keys: no lane, permissions, or env above the jobs. */
-  topLevel: string[];
-  triggers: string[];
-  /** The whole workflow_call interface ci.yml must satisfy. */
-  inputs: Record<string, { required: boolean; type: string | undefined; hasDefault: boolean }>;
-  secrets: string[];
-  /** Pinned to the exact key set so nothing gates or extends the two jobs; no permissions ceiling of their own, so
-   * they inherit the caller's grant. */
-  jobs: Array<{
-    id: string;
-    keys: string[];
-    uses: unknown;
-    with: unknown;
-    secrets: unknown;
-    permissions: unknown;
-    steps: PinnedStep[] | undefined;
-  }>;
-}
+/** ci.yml's calls of this repository's own workflows: the calling job and the callee file. */
+const localCalls = (ci: Workflow): Array<{ caller: string; job: Job; file: string }> =>
+  Object.entries(ci.jobs).flatMap(([caller, job]) =>
+    (job.uses ?? "").startsWith(CALLER_PREFIX)
+      ? [{ caller, job, file: (job.uses ?? "").slice(CALLER_PREFIX.length) }]
+      : [],
+  );
 
-/** The build job's gate: every step after the push probe runs only when the token can push. */
-const PROCEED = "steps.token.outputs.proceed == 'true'";
-/**
- * git's stderr prints inside a stop-commands fence keyed by a token minted for the run, so remote-supplied text can neither forge a workflow command
- * nor swallow the static error that follows.
- *   % and encoded line breaks in a message  -> the runner decodes them, so one line can carry a second command
- *   a line whose first non-blank text is "::" -> the runner acts on it, wherever it came from
- *   the fence's own token                     -> the only resume; awk terminates probe.err's last line, so the closing fence is a line of its own
- */
-const FENCED_STDERR = [
-  "  fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n')",
-  '  echo "::stop-commands::$fence"',
-  '  echo "probe stderr:"',
-  "  awk '{ print \"  \" $0 }' probe.err",
-  '  echo "::$fence::"',
-].join("\n");
-const PUSH_PROBE = [
-  "if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then",
-  '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
-  'elif [ "$PAT_SET" = "true" ]; then',
-  FENCED_STDERR,
-  '  echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git\'s refusal is in the probe stderr lines above."',
-  "  rm -f probe.err",
-  "  exit 1",
-  "else",
-  '  echo "::warning::this run\'s token cannot push (the caller grants contents: read);" \\',
-  '    "this commit was not packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself)." \\',
-  '    "Raise the caller\'s ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \\',
-  '    "with Contents (read and write) on this repository, to publish every green push to @latest."',
-  '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
-  "fi",
-  "rm -f probe.err",
-  "",
-].join("\n");
-
-/** The publish job's gate: every step after the OIDC probe runs only when the runner minted a token URL. */
-const OIDC_PROCEED = "steps.oidc.outputs.proceed == 'true'";
-/** The OIDC probe: the runner sets ACTIONS_ID_TOKEN_REQUEST_URL only under an
- * id-token: write grant (the managed caller gives post-green one; a fork or a
- * ceiling change may not); without it the job warns, naming the caller's
- * ceiling, and skips. */
-const OIDC_PROBE = [
-  'if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then',
-  '  echo "proceed=true" >> "$GITHUB_OUTPUT"',
-  "else",
-  '  echo "::warning::this run has no OIDC token (the post-green call in the managed ci.yml grants no id-token: write);" \\',
-  '    "the library pre-release was not published to npm." \\',
-  '    "Add id-token: write to that call\'s permissions in Vivswan/repo-platform to publish every green push to @next."',
-  '  echo "proceed=false" >> "$GITHUB_OUTPUT"',
-  "fi",
-  "",
-].join("\n");
-/** The npm floor: trusted publishing needs 11.5.1; an older npm is upgraded once, then held to it. */
-const NPM_FLOOR = [
-  "floor=11.5.1",
-  'below_floor() { [ "$(printf \'%s\\n\' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }',
-  "if below_floor; then",
-  "  npm install -g npm@latest",
-  "fi",
-  "if below_floor; then",
-  '  echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."',
-  "  exit 1",
-  "fi",
-  "",
-].join("\n");
-/** The publish: the pipeline's verdict names the version or the reason to skip; the source sha reaches npm's provenance; no token is passed. */
-const PUBLISH_NEXT = [
-  `verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict next)"`,
-  'case "$verdict" in',
-  "  publish\\ *)",
-  `    npm version "\${verdict#publish }" --no-git-tag-version`,
-  "    npm pkg delete scripts.prepare",
-  `    GITHUB_SHA="$SOURCE_SHA" npm publish --tag next`,
-  '    echo "published=true" >> "$GITHUB_OUTPUT" ;;',
-  `  skip\\ *) echo "::notice::\${verdict#skip }" ;;`,
-  "  *)",
-  '    echo "unexpected npm-verdict output: $verdict"',
-  '    echo "::error::npm-verdict printed neither publish nor skip; see the line above."',
-  "    exit 1 ;;",
-  "esac",
-  "",
-].join("\n");
-
-/** The confirmation's gate: it runs only after this job's own publish, so the lane is held until the registry shows it. */
-const PUBLISHED = "steps.publish.outputs.published == 'true'";
-/** After the publish: the registry is read until it shows the version; next behind a newer pre-release fails the job
- * (trusted publishing cannot move a dist-tag), and a version the registry never shows warns. */
-const CONFIRM_NEXT = [
-  `confirmed="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-confirm next)"`,
-  'case "$confirmed" in',
-  `  settled\\ *) echo "::notice::\${confirmed#settled }" ;;`,
-  `  unsettled\\ *) echo "::warning::\${confirmed#unsettled }" ;;`,
-  "  behind\\ *)",
-  `    echo "::error::\${confirmed#behind }"`,
-  "    exit 1 ;;",
-  "  *)",
-  '    echo "unexpected npm-confirm output: $confirmed"',
-  '    echo "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above."',
-  "    exit 1 ;;",
-  "esac",
-  "",
-].join("\n");
-
-const CALLER_EXPECTED: CallerContract = {
-  topLevel: ["jobs", "name", "on"],
-  triggers: ["workflow_call"],
-  inputs: { sha: { required: true, type: "string", hasDefault: false } },
-  secrets: [],
-  jobs: [
-    {
-      id: "build",
-      keys: ["runs-on", "steps", "timeout-minutes"],
-      uses: undefined,
-      with: undefined,
-      secrets: undefined,
-      permissions: undefined,
-      steps: [
-        {
-          name: undefined,
-          id: undefined,
-          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-          if: undefined,
-          run: undefined,
-          env: undefined,
-          with: {
-            ref: `\${{ inputs.sha }}`,
-            "fetch-depth": 0,
-            token: `\${{ secrets.REPO_PLATFORM_TOKEN || github.token }}`,
-          },
-        },
-        {
-          name: "Check the token can push",
-          id: "token",
-          uses: undefined,
-          if: undefined,
-          run: PUSH_PROBE,
-          env: { PAT_SET: `\${{ secrets.REPO_PLATFORM_TOKEN != '' }}` },
-          with: undefined,
-        },
-        {
-          name: undefined,
-          id: undefined,
-          uses: SETUP_USES,
-          if: PROCEED,
-          run: undefined,
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: "Build the bundle and the library",
-          id: undefined,
-          uses: undefined,
-          if: PROCEED,
-          run: "bun run build:bundle\nbun run build:lib\n",
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: "Package this commit under its build tag, prune the window, and point latest at the newest main source",
-          id: undefined,
-          uses: undefined,
-          if: PROCEED,
-          run: 'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package-commit',
-          env: {
-            SOURCE_SHA: `\${{ inputs.sha }}`,
-            RUN_URL: `\${{ github.server_url }}/\${{ github.repository }}/actions/runs/\${{ github.run_id }}`,
-          },
-          with: undefined,
-        },
-      ],
-    },
-    {
-      id: "publish-next",
-      keys: ["concurrency", "if", "runs-on", "steps", "timeout-minutes"],
-      uses: undefined,
-      with: undefined,
-      secrets: undefined,
-      permissions: undefined,
-      steps: [
-        {
-          name: "Check the caller grants an OIDC token",
-          id: "oidc",
-          uses: undefined,
-          if: undefined,
-          run: OIDC_PROBE,
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: undefined,
-          id: undefined,
-          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-          if: OIDC_PROCEED,
-          run: undefined,
-          env: undefined,
-          with: { ref: `\${{ inputs.sha }}`, "fetch-depth": 0, "persist-credentials": false },
-        },
-        {
-          name: undefined,
-          id: undefined,
-          uses: SETUP_USES,
-          if: OIDC_PROCEED,
-          run: undefined,
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: undefined,
-          id: undefined,
-          uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-          if: OIDC_PROCEED,
-          run: undefined,
-          env: undefined,
-          with: { "node-version": 24, "registry-url": "https://registry.npmjs.org" },
-        },
-        {
-          name: "Require an npm that publishes through OIDC",
-          id: undefined,
-          uses: undefined,
-          if: OIDC_PROCEED,
-          run: NPM_FLOOR,
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: "Build the library",
-          id: undefined,
-          uses: undefined,
-          if: OIDC_PROCEED,
-          run: "bun run build:lib",
-          env: undefined,
-          with: undefined,
-        },
-        {
-          name: "Publish the pre-release under the next dist-tag",
-          id: "publish",
-          uses: undefined,
-          if: OIDC_PROCEED,
-          run: PUBLISH_NEXT,
-          env: { SOURCE_SHA: `\${{ inputs.sha }}` },
-          with: undefined,
-        },
-        {
-          name: "Confirm the registry shows the publish and next moved forward",
-          id: undefined,
-          uses: undefined,
-          if: PUBLISHED,
-          run: CONFIRM_NEXT,
-          env: { SOURCE_SHA: `\${{ inputs.sha }}` },
-          with: undefined,
-        },
-      ],
-    },
-  ],
+/** The hooks: callees of ci.yml jobs downstream of all-green, with the caller that reaches each. */
+const postGateHooks = (ci: Workflow) => {
+  const gated = downstreamOf(ci.jobs, "all-green");
+  return localCalls(ci).filter(({ caller }) => gated.has(caller));
 };
 
-function callerContractOf(wf: Workflow): CallerContract {
-  const call = wf.on.workflow_call;
-  return {
-    topLevel: Object.keys(wf).sort(),
-    triggers: Object.keys(wf.on).sort(),
-    inputs: Object.fromEntries(
-      Object.entries(call?.inputs ?? {}).map(([name, input]) => [
-        name,
-        { required: input.required === true, type: input.type, hasDefault: "default" in input },
-      ]),
-    ),
-    secrets: Object.keys(call?.secrets ?? {}).sort(),
-    jobs: Object.entries(wf.jobs).map(([id, job]) => ({
-      id,
-      keys: Object.keys(job).sort(),
-      uses: job.uses,
-      with: job.with,
-      secrets: job.secrets,
-      permissions: job.permissions,
-      steps: job.steps?.map((step) => ({
-        name: step.name,
-        id: step.id,
-        uses: step.uses,
-        if: step.if,
-        run: step.run,
-        env: step.env,
-        with: step.with,
-      })),
-    })),
-  };
-}
+describe("the hooks ci.yml calls after the gate", () => {
+  const hooks = postGateHooks(CI);
 
-function expectCallerContract(wf: Workflow): void {
-  expect(callerContractOf(wf)).toEqual(CALLER_EXPECTED);
-}
-
-describe("post-green.yml packages the judged commit", () => {
-  const wf = readWorkflow("post-green.yml");
-
-  test("two self-contained jobs, each gated on its probe, with the judged sha as the only input", () => {
-    expectCallerContract(wf);
+  test("every post-gate hook is reachable through workflow_call alone, and its caller sits downstream of all-green", () => {
+    // Non-vacuity: the packaging and release hooks are called this way today.
+    expect(hooks.map((hook) => hook.file).sort()).toContain("post-green.yml");
+    expect(hooks.length).toBeGreaterThan(1);
+    for (const { file } of hooks) {
+      expect(
+        Object.keys(readWorkflow(file).on),
+        `${file} is reachable outside ci.yml's gate`,
+      ).toEqual(["workflow_call"]);
+    }
+    // The pre-gate call (checks.yml) is not a hook: it is what the gate judges.
+    expect(localCalls(CI).map((call) => call.file)).toContain("checks.yml");
+    expect(hooks.map((hook) => hook.file)).not.toContain("checks.yml");
   });
 
-  const REGRESSIONS: Array<[string, (w: Workflow) => void, keyof CallerContract]> = [
+  test.each(hooks.map((hook) => [hook.file, hook.job] as const))(
+    "%s: ci.yml passes exactly the inputs it declares",
+    (file, job) => {
+      const declared = Object.keys(readWorkflow(file).on.workflow_call?.inputs ?? {}).sort();
+      expect(Object.keys(job.with ?? {}).sort()).toEqual(declared);
+    },
+  );
+
+  test("a hook that grew a dispatch trigger fails, and a caller moved ahead of the gate stops counting as a hook (negative controls)", () => {
+    const dispatchable = structuredClone(readWorkflow("post-green.yml"));
+    dispatchable.on.workflow_dispatch = null;
+    expect(Object.keys(dispatchable.on)).not.toEqual(["workflow_call"]);
+    const ci = structuredClone(CI);
+    must(ci.jobs["post-green"], "post-green caller").needs = ["ci"];
+    expect(postGateHooks(ci).map((hook) => hook.file)).not.toContain("post-green.yml");
+  });
+});
+
+/** The grant a step's commands consume: a push or a release write needs contents: write, an OIDC-authenticated publish id-token: write. */
+function consumedGrants(step: Step): Array<[scope: string, why: string]> {
+  const run = step.run ?? "";
+  const label = step.name ?? "unnamed step";
+  const grants: Array<[string, string]> = [];
+  if (/\bgit\s+push\b|\bgh\s+release\s+(?:upload|edit|create)\b/.test(run)) {
+    grants.push(["contents", `"${label}" pushes or writes a release`]);
+  }
+  if (/\bnpm\s+publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)) {
+    grants.push(["id-token", `"${label}" publishes through OIDC`]);
+  }
+  return grants;
+}
+
+/** A called job's grant: its own permissions block, else the caller's (GitHub inherits the caller's when the job declares none). */
+const effectiveGrant = (job: Job, caller: Job): Record<string, string> =>
+  job.permissions ?? caller.permissions ?? {};
+
+describe("the hooks' grants", () => {
+  test("every job's effective grant covers what its steps consume", () => {
+    // A missing grant is quiet here: the push probe warns and skips, the OIDC probe warns and skips, and the job stays green.
+    const consumers = postGateHooks(CI).flatMap(({ file, job: caller }) =>
+      Object.entries(readWorkflow(file).jobs).flatMap(([id, job]) =>
+        (job.steps ?? []).flatMap((step) =>
+          consumedGrants(step).map(([scope, why]) => ({
+            where: `${file}#${id}`,
+            granted: effectiveGrant(job, caller)[scope],
+            scope,
+            why,
+          })),
+        ),
+      ),
+    );
+    // The packaging job pushes and both publishers mint OIDC tokens today.
+    expect(consumers.length).toBeGreaterThan(2);
+    for (const { where, granted, scope, why } of consumers) {
+      expect(granted, `${where}: ${why}, so it needs ${scope}: write`).toBe("write");
+    }
+  });
+
+  test("a publisher whose own ceiling drops the OIDC grant fails, whatever the caller grants (negative control)", () => {
+    const caller: Job = { permissions: { contents: "write", "id-token": "write" } };
+    const job: Job = { permissions: { contents: "read" } };
+    expect(effectiveGrant(job, caller)["id-token"]).toBeUndefined();
+    expect(consumedGrants({ run: "npm publish --tag next" })).toEqual([
+      ["id-token", '"unnamed step" publishes through OIDC'],
+    ]);
+  });
+});
+
+/** The probe steps: each writes a `proceed=` verdict to GITHUB_OUTPUT for the steps after it to read. */
+const isProbe = (step: Step) =>
+  /echo "proceed=(?:true|false)" >> "\$GITHUB_OUTPUT"/.test(step.run ?? "");
+
+/**
+ * Whether the step at `index` runs on a verdict: its condition is `steps.<id>.outputs.<name> == 'true'` where `<id>` names an
+ * earlier step that is the probe itself or is gated the same way (a chain back to the probe).
+ */
+function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
+  const match = condition(steps[index]?.if).match(/^steps\.([\w-]+)\.outputs\.[\w-]+ == 'true'$/);
+  if (!match) return false;
+  const source = steps.findIndex((step, at) => at < index && step.id === match[1]);
+  if (source < 0) return false;
+  return source === probe || gatedOnProbe(steps, source, probe);
+}
+
+/** The job ids whose steps after a probe are not gated on it, with the offending step names. */
+function ungatedAfterProbe(workflow: Workflow): string[] {
+  return Object.entries(workflow.jobs).flatMap(([id, job]) => {
+    const steps = job.steps ?? [];
+    const probe = steps.findIndex(isProbe);
+    if (probe < 0) return [];
+    return steps.flatMap((step, index) =>
+      index > probe && !gatedOnProbe(steps, index, probe)
+        ? [`${id}: "${step.name ?? step.uses ?? "unnamed step"}" runs whatever the probe found`]
+        : [],
+    );
+  });
+}
+
+describe("post-green.yml", () => {
+  const workflow = readWorkflow("post-green.yml");
+  const caller = must(
+    localCalls(CI).find((call) => call.file === "post-green.yml"),
+    "post-green caller",
+  ).job;
+
+  test("every step after a probe runs on the probe's verdict", () => {
+    const probes = Object.values(workflow.jobs).filter((job) => (job.steps ?? []).some(isProbe));
+    // Both jobs open with a probe today; a job without one is not judged here.
+    expect(probes.length).toBe(Object.keys(workflow.jobs).length);
+    expect(ungatedAfterProbe(workflow)).toEqual([]);
+  });
+
+  test.each<[string, (w: Workflow) => void]>([
     [
-      "an undeclared job beside the publisher",
-      (w) => (w.jobs.extra = { "runs-on": "ubuntu-latest", steps: [{ run: "echo" }] }),
-      "jobs",
+      "the packaging step without its gate",
+      (w) => delete must(must(w.jobs.build, "build").steps?.at(-1), "step").if,
     ],
     [
-      "a job that calls another workflow with inherited secrets",
+      "the confirmation gated on a step that is not gated itself",
       (w) => {
-        w.jobs.call = {
-          uses: "./.github/workflows/checks.yml",
-          with: { sha: `\${{ inputs.sha }}` },
-          secrets: "inherit",
-        };
+        const steps = must(must(w.jobs["publish-next"], "publish-next").steps, "steps");
+        must(steps.at(-1), "confirm").if = "steps.oidc-copy.outputs.proceed == 'true'";
+        steps.splice(1, 0, { id: "oidc-copy", run: "echo" });
       },
-      "jobs",
     ],
     [
-      "a build step that runs the packaging without the token gate",
+      "a gate that is not an equality on true",
       (w) => {
-        const step = must(w.jobs.build, "build job").steps?.at(-1);
-        must(step, "packaging step").if = undefined;
+        must(must(w.jobs.build, "build").steps?.at(-1), "step").if =
+          "always() || steps.token.outputs.proceed == 'true'";
       },
-      "jobs",
     ],
-    [
-      "a build job whose packaging runs another subcommand",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.at(-1);
-        must(step, "packaging step").run =
-          'GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts package';
-      },
-      "jobs",
-    ],
-    [
-      "a build job with a ceiling of its own instead of the caller's grant",
-      (w) => (must(w.jobs.build, "build job").permissions = { contents: "read" }),
-      "jobs",
-    ],
-    [
-      "a publish job with a ceiling of its own, which the managed caller's rejects as a whole",
-      (w) =>
-        (must(w.jobs["publish-next"], "publish-next job").permissions = {
-          contents: "read",
-          "id-token": "write",
-        }),
-      "jobs",
-    ],
-    [
-      "a publish step that runs without the OIDC gate",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
-        must(step, "publish step").if = undefined;
-      },
-      "jobs",
-    ],
-    [
-      "a confirmation that runs without the publish gate, holding the lane for a publish that never happened",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
-        must(step, "confirm step").if = OIDC_PROCEED;
-      },
-      "jobs",
-    ],
-    [
-      "a confirmation that treats next behind a newer pre-release as a warning",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-1);
-        must(step, "confirm step").run = CONFIRM_NEXT.replace(
-          `echo "::error::\${confirmed#behind }"\n    exit 1 ;;`,
-          `echo "::warning::\${confirmed#behind }" ;;`,
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a publish job that hands npm a registry token",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
-        must(step, "publish step").env = {
-          ...must(step, "publish step").env,
-          NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}`,
-        };
-      },
-      "jobs",
-    ],
-    [
-      "a publish job that publishes under the default dist-tag",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.at(-2);
-        must(step, "publish step").run = PUBLISH_NEXT.replace(
-          "npm publish --tag next",
-          "npm publish",
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a publish job open to forks",
-      (w) => delete must(w.jobs["publish-next"], "publish-next job").if,
-      "jobs",
-    ],
-    [
-      "a push probe whose warning names only one of the two remedies",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        must(step, "probe step").run = PUSH_PROBE.replace(
-          "Raise the caller's ceiling to contents: write, or add",
-          "Add",
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a push probe that interpolates git's stderr into the workflow command",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        must(step, "probe step").run = PUSH_PROBE.replace(
-          `${FENCED_STDERR}\n  echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above."`,
-          "  echo \"::error::REPO_PLATFORM_TOKEN cannot push to this repository: $(tr '\\n' ' ' <probe.err)\"",
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a push probe that prints git's stderr outside the stop-commands fence",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        must(step, "probe step").run = PUSH_PROBE.replace(
-          FENCED_STDERR,
-          '  echo "probe stderr:"\n  awk \'{ print "  " $0 }\' probe.err',
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a push probe whose fence token is fixed, so remote text could name it and resume commands",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        must(step, "probe step").run = PUSH_PROBE.replace(
-          "  fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \\n')",
-          "  fence=probe-marker",
-        );
-      },
-      "jobs",
-    ],
-    [
-      "a probe whose output the gates cannot read (its id gone)",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        delete must(step, "probe step").id;
-      },
-      "jobs",
-    ],
-    [
-      "a probe that cannot tell a rejected PAT from a read ceiling (PAT_SET gone)",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[1];
-        delete must(step, "probe step").env;
-      },
-      "jobs",
-    ],
-    [
-      "a shallow checkout, which package-commit refuses (fetch-depth gone)",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[0];
-        delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
-      },
-      "jobs",
-    ],
-    [
-      "a shallow publish-next checkout, which prerelease-version refuses (fetch-depth gone)",
-      (w) => {
-        const step = must(w.jobs["publish-next"], "publish-next job").steps?.[1];
-        delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
-      },
-      "jobs",
-    ],
-    [
-      "a checkout that never tries the caller's token",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[0];
-        must(must(step, "checkout step").with, "checkout with").token =
-          `\${{ secrets.REPO_PLATFORM_TOKEN }}`;
-      },
-      "jobs",
-    ],
-    [
-      "a checkout of the live default branch instead of the judged sha",
-      (w) => {
-        const step = must(w.jobs.build, "build job").steps?.[0];
-        must(must(step, "checkout step").with, "checkout with").ref =
-          `\${{ github.event.repository.default_branch }}`;
-      },
-      "jobs",
-    ],
-    [
-      "a workflow-level lane above the jobs",
-      (w) => (w.concurrency = { group: `post-green-\${{ github.repository }}` }),
-      "topLevel",
-    ],
-    [
-      "an optional judged sha",
-      (w) => (must(w.on.workflow_call?.inputs?.sha, "sha input").required = false),
-      "inputs",
-    ],
-    [
-      "a judged sha with a fallback default",
-      (w) => (must(w.on.workflow_call?.inputs?.sha, "sha input").default = ""),
-      "inputs",
-    ],
-    [
-      "a judged sha that is not a string",
-      (w) => (must(w.on.workflow_call?.inputs?.sha, "sha input").type = "boolean"),
-      "inputs",
-    ],
-    [
-      "a second required input ci.yml does not pass",
-      (w) =>
-        (must(must(w.on.workflow_call ?? undefined, "workflow_call").inputs, "inputs").mode = {
-          required: true,
-          type: "string",
-        }),
-      "inputs",
-    ],
-    [
-      "a declared secret ci.yml does not pass by name",
-      (w) =>
-        (must(w.on.workflow_call ?? undefined, "workflow_call").secrets = {
-          REPO_PLATFORM_TOKEN: { required: true },
-        }),
-      "secrets",
-    ],
-    ["a push trigger of its own", (w) => (w.on.push = { branches: ["main"] }), "triggers"],
-    [
-      "a dispatch that could reach the publisher outside the gate",
-      (w) => (w.on.workflow_dispatch = null),
-      "triggers",
-    ],
-  ];
-  test.each(REGRESSIONS)("catches %s (negative control)", (_label, mutate, key) => {
-    const drifted = structuredClone(wf);
+  ])("%s fails the gate relation (negative control)", (_case, mutate) => {
+    const drifted = structuredClone(workflow);
     mutate(drifted);
-    expect(callerContractOf(drifted)[key]).not.toEqual(CALLER_EXPECTED[key]);
-    expect(() => expectCallerContract(drifted)).toThrow();
+    expect(ungatedAfterProbe(drifted)).not.toEqual([]);
+  });
+
+  test("the judged sha the caller passes is the ref every checkout takes and the source every packaging step names", () => {
+    const [input, ...rest] = Object.keys(workflow.on.workflow_call?.inputs ?? {});
+    expect(rest, "post-green.yml takes more than the one judged sha").toEqual([]);
+    expect(caller.with?.[input ?? ""]).toBe(`\${{ github.sha }}`);
+    const judged = `\${{ inputs.${input} }}`;
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []);
+    const checkouts = steps.filter((step) => (step.uses ?? "").startsWith("actions/checkout@"));
+    const sources = steps.filter((step) => step.env?.SOURCE_SHA !== undefined);
+    expect(checkouts.length).toBeGreaterThan(1);
+    expect(sources.length).toBeGreaterThan(1);
+    for (const step of checkouts) {
+      expect(step.with?.ref, "a checkout of something other than the judged sha").toBe(judged);
+    }
+    for (const step of sources) {
+      expect(
+        step.env?.SOURCE_SHA,
+        `"${step.name}" packages something other than the judged sha`,
+      ).toBe(judged);
+    }
   });
 });
 
@@ -600,7 +251,7 @@ interface ProbeRun {
 }
 
 /**
- * Run the pinned probe under `bash -e` (what a `run:` step gets on a Linux runner) with git stubbed to write `stderr` and exit `gitStatus`; the
+ * Run the probe under `bash -e` (what a `run:` step gets on a Linux runner) with git stubbed to write `stderr` and exit `gitStatus`; the
  * scratch directory is removed on every path.
  */
 function runProbe(run: string, stderr: string, gitStatus: number, patSet: boolean): ProbeRun {
@@ -646,22 +297,27 @@ function runProbe(run: string, stderr: string, gitStatus: number, patSet: boolea
   }
 }
 
-const STATIC_ERROR =
-  "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
 const FENCE_OPEN = /^::stop-commands::([0-9a-f]{32})$/;
 
 describe("the push probe under bash", () => {
-  const wf = readWorkflow("post-green.yml");
-  const run = must(must(must(wf.jobs.build, "build job").steps?.[1], "probe step").run, "run");
+  const steps = must(readWorkflow("post-green.yml").jobs.build, "build job").steps ?? [];
+  const run = must(must(steps.find(isProbe), "probe step").run, "probe run");
 
+  /**
+   * The fenced block: git's stderr, indented, between a stop-commands line keyed by a fresh 32-hex token and its own resume line, then one
+   * static error. The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks the
+   * lines as quoted text in the log.
+   */
   function expectFenced(lines: string[], inner: string[]): void {
     const [open, header, ...rest] = lines;
     const token = open?.match(FENCE_OPEN)?.[1];
     expect(token).toBeDefined();
     expect(header).toBe("probe stderr:");
-    expect(rest).toEqual([...inner, `::${token}::`, STATIC_ERROR, ""]);
-    // The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks the lines as quoted text in
-    // the log.
+    expect(rest.slice(0, inner.length)).toEqual(inner);
+    expect(rest[inner.length]).toBe(`::${token}::`);
+    const after = rest.slice(inner.length + 1).filter(Boolean);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatch(/^::error::/);
     for (const line of inner) {
       expect(line.startsWith("  ")).toBe(true);
     }
@@ -694,15 +350,15 @@ describe("the push probe under bash", () => {
     expect(probe.probeErrLeft).toBe(false);
   });
 
-  test("without a PAT a refused probe warns, skips, and prints no stderr (control)", () => {
+  test("without a PAT a refused probe warns naming both remedies, skips, and prints no stderr (control)", () => {
     const probe = runProbe(run, "refused\n", 1, false);
     expect(probe.status).toBe(0);
-    expect(probe.lines.filter((line) => line.startsWith("::"))).toEqual([
-      "::warning::this run's token cannot push (the caller grants contents: read); this commit was not " +
-        "packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself). " +
-        "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with " +
-        "Contents (read and write) on this repository, to publish every green push to @latest.",
-    ]);
+    const commands = probe.lines.filter((line) => line.startsWith("::"));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/^::warning::/);
+    // The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from.
+    expect(commands[0]).toContain("contents: write");
+    expect(commands[0]).toContain("REPO_PLATFORM_TOKEN");
     expect(probe.lines).not.toContain("  refused");
     expect(probe.output).toBe("proceed=false\n");
     expect(probe.probeErrLeft).toBe(false);
