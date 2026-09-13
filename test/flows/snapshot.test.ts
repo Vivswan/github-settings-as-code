@@ -1102,7 +1102,7 @@ describe("runSnapshot, dir form", () => {
       });
       // The whole rendering; only the detail cell, the engine's denial text, is matched by its head.
       expect(collected.summary[0]?.split("\n")).toEqual([
-        "## github-settings-as-code (snapshot, 1 repositories)",
+        "## github-settings-as-code (snapshot, 1 repository)",
         "",
         `No snapshot was written under ${cfg.snapshotDir}.`,
         "",
