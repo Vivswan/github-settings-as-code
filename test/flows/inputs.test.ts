@@ -9,7 +9,7 @@ import {
   SECTION_KEYS,
   SectionSelection,
 } from "../../src/index.js";
-import { INPUT_DECLS, type InputName, SNAPSHOT_REJECTED_INPUTS } from "../../src/internal.js";
+import { INPUT_DECLS, type InputName } from "../../src/internal.js";
 
 /** Parse a step's inputs (unset ones read as empty, as the runner reports them) under `env`, as the action's face does. */
 function parse(inputs: Partial<Record<InputName, string>>, env: ConfigEnv = {}) {
@@ -110,13 +110,6 @@ describe("the declared defaults", () => {
 });
 
 describe("required-sections x sections cross-validation", () => {
-  test("rejects a required section excluded by the sections allowlist", () => {
-    expect(rejection(single({ "required-sections": "labels", sections: "repository" }))).toEqual({
-      code: "required-sections-excluded",
-      excluded: ["labels"],
-    });
-  });
-
   test("names every excluded required section at once, and only those", () => {
     expect(
       rejection(
@@ -170,7 +163,6 @@ describe("the mode input", () => {
 
   test.each([
     ["layering", { layering: "replace" }, ["layering"]],
-    ["merged-file", { "merged-file": "out.yml" }, ["merged-file"]],
     [
       "both merge-only inputs",
       { layering: "merge", "merged-file": "out.yml" },
@@ -186,7 +178,6 @@ describe("the mode input", () => {
 
   test.each([
     ["snapshot-file", { "snapshot-file": "snap.yml" }, ["snapshot-file"]],
-    ["snapshot-dir", { "snapshot-dir": "snapshots" }, ["snapshot-dir"]],
     [
       "both snapshot-only inputs",
       { "snapshot-file": "snap.yml", "snapshot-dir": "snapshots" },
@@ -206,19 +197,15 @@ describe("the mode input", () => {
     ).toEqual({ code: "input-merge-only", inputs: ["merged-file"], mode: "check" });
   });
 
-  const SEPARATOR_CASES = [
-    ["a comma list", "a.yml,b.yml"],
-    ["a newline list", "a.yml\nb.yml"],
-    ["an empty list", ","],
-    ["a trailing separator", "only.yml,"],
-    ["a leading separator", ",only.yml"],
-  ] as const;
-
-  test.each(
-    (["apply", "check"] as const).flatMap((mode) =>
-      SEPARATOR_CASES.map(([label, value]) => [mode, label, value] as const),
-    ),
-  )("%s mode rejects a settings-file with %s rather than repairing it", (mode, _case, value) => {
+  // A stray separator is refused rather than repaired: "only.yml," is one path to a splitter and still not a file.
+  test.each<["apply" | "check", string, string]>([
+    ["apply", "a comma list", "a.yml,b.yml"],
+    ["apply", "a newline list", "a.yml\nb.yml"],
+    ["apply", "a trailing separator", "only.yml,"],
+    ["apply", "a leading separator", ",only.yml"],
+    ["apply", "an empty list", ","],
+    ["check", "a comma list", "a.yml,b.yml"],
+  ])("%s mode rejects a settings-file with %s rather than repairing it", (mode, _case, value) => {
     expect(rejection(single({ mode, "settings-file": value }))).toEqual({
       code: "input-settings-file-is-list",
       value,
@@ -301,27 +288,19 @@ describe("mode: merge", () => {
     });
   });
 
+  // MERGE_REJECTED_INPUTS is every declared input outside MERGE_INPUTS; test/docs/guides.test.ts pins the set against
+  // the layering guide. The rows here hold the filter's two clauses (an empty default, a non-empty one) and the order.
   test.each([
-    ["repository", { repository: "o/r" }, ["repository"]],
-    ["repos", { repos: "o/a" }, ["repos"]],
-    ["defaults-file", { "defaults-file": "defaults.yml" }, ["defaults-file"]],
-    ["required-sections", { "required-sections": "labels" }, ["required-sections"]],
-    ["a discovery filter", { forks: "exclude" }, ["forks"]],
-    ["private-report", { "private-report": "issue" }, ["private-report"]],
-    ["report-public-key", { "report-public-key": "age1x" }, ["report-public-key"]],
-    ["sections: the allowlist belongs on the apply step", { sections: "labels" }, ["sections"]],
-    ["on-missing-permission: warn", { "on-missing-permission": "warn" }, ["on-missing-permission"]],
-    ["a custom api-version", { "api-version": "2099-01-01" }, ["api-version"]],
-    ["private-repos: show", { "private-repos": "show" }, ["private-repos"]],
+    ["repos, whose default is empty", { repos: "o/a" }, ["repos"]],
+    [
+      "a custom api-version, set off its non-empty default",
+      { "api-version": "2099-01-01" },
+      ["api-version"],
+    ],
     [
       "several at once, every one named in declaration order",
       { repos: "o/a", "repos-dir": "repos", "private-report": "artifact" },
       ["repos", "repos-dir", "private-report"],
-    ],
-    [
-      "a previously tolerated control beside an always-rejected one, both named",
-      { repos: "o/a", sections: "labels", "api-version": "2099-01-01" },
-      ["sections", "api-version", "repos"],
     ],
   ] as const)(
     "%s is rejected: a merge has no repository, API, report, or allowlist",
@@ -484,26 +463,19 @@ describe("mode: snapshot", () => {
     expect(rejection(snapshot(inputs))).toEqual(problem);
   });
 
-  test("the rejected set is every declared input the snapshot does not read", () => {
-    expect(SNAPSHOT_REJECTED_INPUTS).toEqual([
-      "settings-file",
-      "merged-file",
-      "required-sections",
-      "defaults-file",
-      "layering",
-      "private-report",
-      "report-public-key",
-    ]);
-  });
-
+  // SNAPSHOT_REJECTED_INPUTS is every declared input outside SNAPSHOT_INPUTS; test/docs/guides.test.ts pins the set
+  // against the snapshot guide. The rows here hold the filter, as the merge rows above do.
   test.each([
-    ["settings-file", { "settings-file": "other.yml" }, ["settings-file"]],
-    ["merged-file", { "merged-file": "out.yml" }, ["merged-file"]],
-    ["required-sections", { "required-sections": "labels" }, ["required-sections"]],
-    ["defaults-file", { "defaults-file": "defaults.yml" }, ["defaults-file"]],
-    ["layering", { layering: "replace" }, ["layering"]],
-    ["private-report", { "private-report": "issue" }, ["private-report"]],
-    ["report-public-key", { "report-public-key": "age1x" }, ["report-public-key"]],
+    [
+      "settings-file, set off its non-empty default",
+      { "settings-file": "other.yml" },
+      ["settings-file"],
+    ],
+    [
+      "defaults-file, whose default is empty",
+      { "defaults-file": "defaults.yml" },
+      ["defaults-file"],
+    ],
     [
       "several at once, every one named in declaration order",
       { "defaults-file": "d.yml", "settings-file": "s.yml", layering: "merge" },

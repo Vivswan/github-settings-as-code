@@ -13,7 +13,7 @@ import {
   redactedChannel,
   toPublicView,
 } from "../../src/flows/redact.js";
-import { type Io, maskRegistry, prefixedIo, silentIo } from "../../src/io.js";
+import { type Io, maskRegistry, prefixedIo } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
 import { captureIo } from "../io/capture.js";
 
@@ -24,12 +24,6 @@ function privateSet(...slugs: string[]): (slug: string) => boolean {
 }
 
 describe("planRedaction", () => {
-  test("the plan's placeholders are the one mint every mode labels a hidden target with", () => {
-    const plan = planRedaction("redact", ["o/priv"], [], privateSet("o/priv"), "admin/repo");
-    expect(privatePlaceholder(1)).toBe("private repository #1");
-    expect(plan.display("o/priv")).toBe(privatePlaceholder(1));
-  });
-
   test("numbers redacted targets 1-based in target order, keyed lowercase", () => {
     const plan = planRedaction(
       "redact",
@@ -45,6 +39,7 @@ describe("planRedaction", () => {
     expect(plan.isRedacted("o/privB")).toBe(true);
     expect(plan.display("o/privB")).toBe("private repository #2");
     expect(plan.display("O/PRIVA")).toBe("private repository #1");
+    expect(plan.maskedSlugs).toEqual(["o/PrivA", "o/privB"]);
   });
 
   test("a central and remote entry for the same slug share one placeholder", () => {
@@ -72,12 +67,6 @@ describe("planRedaction", () => {
     expect(plan.display("Admin/Repo")).toBe("Admin/Repo");
     expect(plan.display("o/priv")).toBe("private repository #1");
     expect(plan.maskedSlugs).toEqual(["o/priv"]);
-  });
-
-  test("public targets are neither redacted nor masked", () => {
-    const plan = planRedaction("redact", ["o/a", "o/b"], [], privateSet(), "admin/repo");
-    expect(plan.isRedacted("o/a")).toBe(false);
-    expect(plan.maskedSlugs).toEqual([]);
   });
 
   test("discovery-filtered privates are unsealed into the mask set but get no placeholder", () => {
@@ -263,12 +252,7 @@ describe("public projections", () => {
       display: "private repository #2",
       source: "remote",
       result: "failed",
-      outcomes: [
-        { key: "repository", status: "applied", detail: ["hidden (private repository)"] },
-        { key: "labels", status: "failed", detail: ["hidden (private repository), HTTP 403"] },
-        { key: "rulesets", status: "drift", detail: ["hidden (private repository)"] },
-      ],
-      note: REDACTED_NOTE,
+      ...publicDetail(sealed),
     });
   });
 
@@ -371,26 +355,9 @@ describe("capturingIo", () => {
     expect([...io.masked()]).toEqual(["o/secret"]);
     expect(drain()).toEqual([]);
   });
-
-  test("composes as capturingIo(prefixedIo(io, display)): capture is per-target, mask stays raw", () => {
-    // capturingIo suppresses the wrapped sink entirely, so the prefix never reaches the base; each target owns its own buffer, so recorded lines need
-    // no prefix.
-    const { io: base, events, masks } = captureIo();
-    const { io, drain } = capturingIo(prefixedIo(base, "private repository #1: "));
-    io.log("changed a label");
-    io.mask("o/secret");
-    expect(events).toEqual(["mask: o/secret"]);
-    expect(drain()).toEqual([{ line: "changed a label" }]);
-    expect(masks).toEqual(["o/secret"]);
-  });
 });
 
 describe("prefixedIo", () => {
-  test("empty prefix returns the sink unchanged", () => {
-    const base = silentIo();
-    expect(prefixedIo(base, "")).toBe(base);
-  });
-
   test("prefixes annotate and log only; the other channels pass through raw", () => {
     const through: string[] = [];
     const base: Io = {

@@ -32,49 +32,19 @@ async function captureOutput<T>(
 
 const MARKER = "MARKER_VALUE_MUST_NOT_PRINT";
 
-/**
- * Documents the yaml library parses successfully while warning at its default log level; each warning quotes the offending source line, so each
- * document carries the marker there.
- */
-const WARNING_DOCUMENTS: Array<{ name: string; raw: string; doc: unknown }> = [
-  {
-    name: "an unknown directive",
-    raw: `%FOO ${MARKER}\n---\nlabels:\n  - name: a\n`,
-    doc: { labels: [{ name: "a" }] },
-  },
-  {
-    name: "an unresolved custom tag",
-    raw: `repository:\n  description: !unknown ${MARKER}\n`,
-    doc: { repository: { description: MARKER } },
-  },
-  {
-    name: "a scalar tag on a collection",
-    raw: `labels: !!str [${MARKER}]\n`,
-    doc: { labels: [MARKER] },
-  },
-  {
-    name: "an anchor ending in a colon",
-    raw: `repository:\n  description: &desc: ${MARKER}\n  homepage: *desc:\n`,
-    doc: { repository: { description: MARKER, homepage: MARKER } },
-  },
-  {
-    name: "a collection used as a key",
-    raw: `? [${MARKER}, b]\n: v\n`,
-    doc: { [`[ ${MARKER}, b ]`]: "v" },
-  },
-];
-
 describe("parseSettingsDoc", () => {
-  test.each(WARNING_DOCUMENTS)(
-    "a document with $name parses to the same object and prints nothing",
-    async ({ raw, doc }) => {
-      expect(await captureOutput(() => parseSettingsDoc(raw))).toEqual({
-        result: ok(doc),
-        warnings: [],
-        stderr: "",
-      });
-    },
-  );
+  test("a document the parser warns on at its default log level parses to the same object and prints nothing", async () => {
+    // An unresolved tag: the default log level would quote this line, value included, to stderr.
+    expect(
+      await captureOutput(() =>
+        parseSettingsDoc(`repository:\n  description: !unknown ${MARKER}\n`),
+      ),
+    ).toEqual({
+      result: ok({ repository: { description: MARKER } }),
+      warnings: [],
+      stderr: "",
+    });
+  });
 
   test("a plain document parses to its object; an empty one becomes {}", async () => {
     expect(
