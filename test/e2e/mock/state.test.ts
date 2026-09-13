@@ -501,7 +501,11 @@ describe("completeInvitation", () => {
 
 describe("bypassUser", () => {
   test("a sparse seed keeps its login and takes the caller's id", () => {
-    expect(bypassUser({ login: "dave" }, 42)).toMatchObject({ id: 42, login: "dave" });
+    expect(bypassUser({ login: "dave" }, 42)).toMatchObject({
+      id: 42,
+      login: "dave",
+      html_url: "https://github.com/dave",
+    });
   });
 
   test("a seeded id wins over the caller's and drives the derived fields", () => {
