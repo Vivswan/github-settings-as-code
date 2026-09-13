@@ -240,10 +240,22 @@ describe("the hooks' grants", () => {
 /** The hook a library-page claim about "every green push" or "every release cut" points at, by its ci.yml caller's condition. */
 function hookFor(claim: string): { file: string; workflow: Workflow } {
   const release = /release cut/i.test(claim);
-  const hook = must(
-    HOOKS.find(({ job }) => /release_created == 'true'/.test(condition(job.if)) === release),
-    `a hook whose caller runs on ${release ? "a release cut" : "a green push"}`,
-  );
+  // A green push: the caller's own condition names the push event and the main ref beside the gate's success; a release cut: it
+  // names release-please's release_created output. One caller each, or the claim points at nothing.
+  const runsOn = (job: Job) => {
+    const on = condition(job.if);
+    return release
+      ? /release_created == 'true'/.test(on)
+      : /needs\.all-green\.result == 'success'/.test(on) &&
+          /github\.event_name == 'push'/.test(on) &&
+          /github\.ref == 'refs\/heads\/main'/.test(on);
+  };
+  const matching = HOOKS.filter(({ job }) => runsOn(job));
+  expect(
+    matching.map((hook) => hook.file),
+    `exactly one hook caller runs on ${release ? "a release cut" : "a green push to main"}`,
+  ).toHaveLength(1);
+  const hook = matching[0] as LocalCall;
   return { file: hook.file, workflow: readWorkflow(hook.file) };
 }
 
@@ -293,6 +305,19 @@ describe("the library page's publishing claims", () => {
 
   test("each channel the page says publishes on a green push or a release cut is published by that hook", () => {
     expect(claimProblems(page)).toEqual([]);
+  });
+
+  test("a green-push caller widened to pull requests matches no claim (negative control)", () => {
+    const ci = structuredClone(CI);
+    must(ci.jobs["post-green"], "post-green caller").if =
+      "needs.all-green.result == 'success' && github.event_name == 'pull_request'";
+    const widened = postGateHooks(ci).hooks.filter(({ job }) => {
+      const on = condition(job.if);
+      return (
+        /github\.event_name == 'push'/.test(on) && /github\.ref == 'refs\/heads\/main'/.test(on)
+      );
+    });
+    expect(widened.map((hook) => hook.file)).not.toContain("post-green.yml");
   });
 
   test("a packaging step gone, or a channel's verdict gone, fails the claim (negative control)", () => {
@@ -357,7 +382,10 @@ function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
   return source === probe || gatedOnProbe(steps, source, probe);
 }
 
-/** Every wiring fault in a job's outputs: a step after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads. */
+/**
+ * Every wiring fault in a job's steps: a step conditioned on anything but a verdict (it would skip on the caller's own event), a step
+ * after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads.
+ */
 function wiringProblems(workflow: Workflow): string[] {
   return Object.entries(workflow.jobs).flatMap(([id, job]) => {
     const steps = job.steps ?? [];
@@ -374,9 +402,10 @@ function wiringProblems(workflow: Workflow): string[] {
       if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
         problems.push(`${id}: ${label(step)} runs whatever the probe found`);
       }
-      if (probe >= 0 && index < probe && step.if !== undefined) {
-        // A step the probe depends on (the checkout) that skips leaves the probe judging an empty workspace: it warns and stands down.
-        problems.push(`${id}: ${label(step)} runs under a condition of its own ahead of the probe`);
+      if ((probe < 0 || index < probe) && step.if !== undefined) {
+        // A hook runs on the caller's event, so a step's own condition skips it quietly: retag-major on a release, or the checkout
+        // the probe judges an empty workspace without.
+        problems.push(`${id}: ${label(step)} runs under a condition of its own`);
       }
       for (const [source, name] of outputsRead(step)) {
         const writer = steps.findIndex((s, at) => at < index && s.id === source);
@@ -458,7 +487,7 @@ describe("post-green.yml", () => {
         must(must(w.jobs.build, "build").steps?.[0], "checkout").if =
           "github.event_name == 'release'";
       },
-      /runs under a condition of its own ahead of the probe/,
+      /"actions\/checkout@[0-9a-f]+" runs under a condition of its own/,
     ],
     [
       "a probe under a condition of its own",
@@ -479,6 +508,18 @@ describe("post-green.yml", () => {
     const drifted = structuredClone(workflow);
     mutate(drifted);
     expect(wiringProblems(drifted).join("\n")).toMatch(message);
+  });
+
+  test("a release-hook step under a condition of its own fails the wiring there (negative control)", () => {
+    const stable = readWorkflow("update-release.yml");
+    for (const job of Object.values(stable.jobs)) {
+      for (const step of job.steps ?? []) {
+        if (/retag-major/.test(step.run ?? "")) step.if = "github.event_name == 'release'";
+      }
+    }
+    expect(wiringProblems(stable).join("\n")).toMatch(
+      /"Move the major tag to the packaged commit" runs under a condition of its own/,
+    );
   });
 
   test("a verdict gate copied onto a hook without that probe fails the wiring there (negative control)", () => {
