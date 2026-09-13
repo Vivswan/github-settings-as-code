@@ -62,7 +62,7 @@ jobs:
       - name: File or update the e2e issue
         id: file-issue
         if: failure()
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: report
           label: e2e-fuzz
@@ -82,7 +82,7 @@ jobs:
 
       - name: Close the e2e issue on a green night
         if: success()
-        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
           mode: resolve
           label: e2e-fuzz
