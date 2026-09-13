@@ -151,7 +151,7 @@ environments:
         value: $PROD_DEPLOY_TOKEN
 ```
 
-Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
+Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. The public key that seals a value is read at apply, by the first sealed write of its scope; check mode never requests it. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
 
 ## Multi-repo fan-out
 
