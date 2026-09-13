@@ -8,7 +8,7 @@ runs:
   using: composite
   steps:
     # Hashes every input that changes the output: the trim script (UPSTREAM_REF), its fetch helper
-    # and the staleness helper (the recorded-ref key), USED_PATHS and its route-data imports, and
+    # and the staleness helper (the recorded source-URL key), USED_PATHS and its route-data imports, and
     # the DEFAULT_API_VERSION source.
     - name: Cache the trimmed OpenAPI spec
       id: openapi-cache
@@ -24,7 +24,7 @@ runs:
       if: steps.openapi-cache.outputs.cache-hit != 'true'
       shell: bash
       run: bun .github/scripts/trim-openapi.ts
-    # The key hashes the fetch script (it carries the pinned UPSTREAM_REF and the marker line),
+    # The key hashes the fetch script (it carries the pinned UPSTREAM_REF and the source-URL marker line),
     # the fetch helper the bytes come through, and the staleness helper.
     - name: Cache the GraphQL schema
       id: graphql-schema-cache

@@ -6,7 +6,7 @@
  *                                    from another ref, or holding other paths, so a fresh checkout fetches once
  *   CI                            -> restores it from cache, re-fetches on a miss, then runs the same bun run test
  *   UPSTREAM_REF                  -> PINNED to a commit SHA, so two runs months apart produce byte-identical output
- *                                    from the same USED_PATHS; the output records it under "x-upstream-ref"
+ *                                    from the same USED_PATHS; the output records SPEC_URL under "x-source-url"
  */
 
 import { renameSync, writeFileSync } from "node:fs";
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { DEFAULT_API_VERSION } from "../../src/github/api.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "../../test/e2e/openapi/paths.js";
 import { fetchTextWithRetry } from "./lib/fetch-retry.js";
-import { REF_KEY, readArtifact, specStaleness, whenStale } from "./lib/fetched-artifact.js";
+import { readArtifact, SOURCE_KEY, specStaleness, whenStale } from "./lib/fetched-artifact.js";
 
 const UPSTREAM_REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
 
@@ -117,7 +117,7 @@ function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; miss
     openapi: doc.openapi,
     info: doc.info,
     ...(doc.servers ? { servers: doc.servers } : {}),
-    [REF_KEY]: REF,
+    [SOURCE_KEY]: SPEC_URL,
     paths,
   };
   return { trimmed, kept, missing };
@@ -125,9 +125,9 @@ function trimPaths(doc: OpenApiDoc): { trimmed: OpenApiDoc; kept: string[]; miss
 
 async function main(): Promise<number> {
   if (whenStale(process.argv)) {
-    const reason = specStaleness(readArtifact(OUT_PATH), REF, USED_PATHS);
+    const reason = specStaleness(readArtifact(OUT_PATH), SPEC_URL, USED_PATHS);
     if (reason === null) {
-      console.log(`${OUT_PATH} is current (trimmed from ${REF}); not fetching`);
+      console.log(`${OUT_PATH} is current (trimmed from ${SPEC_URL}); not fetching`);
       return 0;
     }
     console.log(`regenerating ${OUT_PATH}: ${reason}`);

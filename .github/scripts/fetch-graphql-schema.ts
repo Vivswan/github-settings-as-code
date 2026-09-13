@@ -6,7 +6,7 @@
  *                                             or fetched from another ref, so a fresh checkout fetches once
  *   CI                                     -> restores it from cache, re-fetches on a miss, then the same bun run test
  *   UPSTREAM_REF                           -> PINNED to a github/docs commit, so two runs months apart write
- *                                             byte-identical text; the first line records it as a schema comment
+ *                                             byte-identical text; the first line records SCHEMA_URL as a comment
  */
 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -24,8 +24,8 @@ const SCHEMA_URL =
 
 const OUT_PATH = join(import.meta.dir, "..", "..", "test", "e2e", "graphql", "schema.docs.graphql");
 
-/** The first line of the written file: a GraphQL comment naming the pin, so --when-stale can tell a stale file. */
-const MARKER = `# github/docs@${UPSTREAM_REF}`;
+/** The first line of the written file: a GraphQL comment naming the source URL, so --when-stale can tell a stale file. */
+const MARKER = `# ${SCHEMA_URL}`;
 
 const FETCH_TIMEOUT_MS = 60_000;
 
@@ -33,7 +33,7 @@ async function main(): Promise<number> {
   if (whenStale(process.argv)) {
     const reason = schemaStaleness(readArtifact(OUT_PATH), MARKER);
     if (reason === null) {
-      console.log(`${OUT_PATH} is current (fetched from ${UPSTREAM_REF}); not fetching`);
+      console.log(`${OUT_PATH} is current (fetched from ${SCHEMA_URL}); not fetching`);
       return 0;
     }
     console.log(`regenerating ${OUT_PATH}: ${reason}`);

@@ -7,24 +7,26 @@ import { describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  REF_KEY,
   readArtifact,
+  SOURCE_KEY,
   schemaStaleness,
   specStaleness,
   whenStale,
 } from "../../.github/scripts/lib/fetched-artifact.js";
 import { withTempDir } from "../temp-dir.js";
 
-const REF = "16bc535ad66fac59d585b1516d1d52f58f787962";
+const URL =
+  "https://raw.githubusercontent.com/github/rest-api-description/16bc535a/api.2022-11-28.deref.json";
+const OTHER_URL = URL.replace("2022-11-28", "2025-01-01");
 const PATHS = ["/repos/{owner}/{repo}", "/repos/{owner}/{repo}/labels"];
 
-function spec(ref: unknown, paths: readonly string[]): string {
+function spec(sourceUrl: unknown, paths: readonly string[]): string {
   const doc: Record<string, unknown> = {
     openapi: "3.0.3",
     paths: Object.fromEntries(paths.map((p) => [p, {}])),
   };
-  if (ref !== undefined) {
-    doc[REF_KEY] = ref;
+  if (sourceUrl !== undefined) {
+    doc[SOURCE_KEY] = sourceUrl;
   }
   return JSON.stringify(doc);
 }
@@ -47,30 +49,36 @@ describe("readArtifact", () => {
 });
 
 describe("specStaleness", () => {
-  test("a spec trimmed from the pinned ref with exactly USED_PATHS is current, in any path order", () => {
-    expect(specStaleness(spec(REF, PATHS), REF, PATHS)).toBeNull();
-    expect(specStaleness(spec(REF, [...PATHS].reverse()), REF, PATHS)).toBeNull();
+  test("a spec trimmed from the source URL with exactly USED_PATHS is current, in any path order", () => {
+    expect(specStaleness(spec(URL, PATHS), URL, PATHS)).toBeNull();
+    expect(specStaleness(spec(URL, [...PATHS].reverse()), URL, PATHS)).toBeNull();
   });
 
   test.each<[string, string | null, string]>([
     ["an absent file", null, "the file is absent"],
     ["invalid JSON", "{", "the file is not valid JSON"],
-    ["another ref", spec("0000000", PATHS), `it was trimmed from 0000000, the script pins ${REF}`],
+    ["a JSON null root", "null", "the file is not a JSON object"],
+    ["a JSON string root", '"spec"', "the file is not a JSON object"],
     [
-      "no recorded ref",
-      spec(undefined, PATHS),
-      `it was trimmed from an unrecorded ref, the script pins ${REF}`,
+      "another URL (a different API version)",
+      spec(OTHER_URL, PATHS),
+      `it was trimmed from ${OTHER_URL}, the script fetches ${URL}`,
     ],
-    ["a missing path", spec(REF, PATHS.slice(1)), "its paths differ from USED_PATHS"],
-    ["an extra path", spec(REF, [...PATHS, "/user"]), "its paths differ from USED_PATHS"],
-    ["no paths object", JSON.stringify({ [REF_KEY]: REF }), "its paths differ from USED_PATHS"],
+    [
+      "no recorded URL",
+      spec(undefined, PATHS),
+      `it was trimmed from an unrecorded URL, the script fetches ${URL}`,
+    ],
+    ["a missing path", spec(URL, PATHS.slice(1)), "its paths differ from USED_PATHS"],
+    ["an extra path", spec(URL, [...PATHS, "/user"]), "its paths differ from USED_PATHS"],
+    ["no paths object", JSON.stringify({ [SOURCE_KEY]: URL }), "its paths differ from USED_PATHS"],
   ])("%s is stale (negative control)", (_, raw, reason) => {
-    expect(specStaleness(raw, REF, PATHS)).toBe(reason);
+    expect(specStaleness(raw, URL, PATHS)).toBe(reason);
   });
 });
 
 describe("schemaStaleness", () => {
-  const marker = "# github/docs@01f2174e1ab5d15d4946cfe96ef7dfb5c9a8b889";
+  const marker = "# https://raw.githubusercontent.com/github/docs/01f2174e/schema.docs.graphql";
 
   test("a schema whose first line is the marker is current", () => {
     expect(schemaStaleness(`${marker}\ntype Query { a: Int }\n`, marker)).toBeNull();
@@ -84,9 +92,9 @@ describe("schemaStaleness", () => {
       `its first line is "type Query { a: Int }", the script writes ${JSON.stringify(marker)}`,
     ],
     [
-      "another ref",
-      "# github/docs@0000000\ntype Query { a: Int }\n",
-      `its first line is "# github/docs@0000000", the script writes ${JSON.stringify(marker)}`,
+      "another URL",
+      "# https://raw.githubusercontent.com/github/docs/00000000/schema.docs.graphql\ntype Query { a: Int }\n",
+      `its first line is "# https://raw.githubusercontent.com/github/docs/00000000/schema.docs.graphql", the script writes ${JSON.stringify(marker)}`,
     ],
   ])("%s is stale (negative control)", (_, raw, reason) => {
     expect(schemaStaleness(raw, marker)).toBe(reason);
