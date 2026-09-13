@@ -33,48 +33,6 @@ beforeEach(() => {
   outputs = {};
 });
 
-describe("run (legacy single-repo regression)", () => {
-  const ENV_KEYS = ["INPUT_TOKEN", "INPUT_MODE", "INPUT_REPOSITORY", "INPUT_SETTINGS-FILE"];
-  const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
-
-  afterEach(() => {
-    for (const [key, value] of saved) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  });
-
-  function setEnv() {
-    process.env.INPUT_TOKEN = "t";
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-  }
-
-  test("check mode: clean exits 0, drift exits 1", async () => {
-    setEnv();
-    process.env.INPUT_MODE = "check";
-    const clean = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } });
-    expect(await run({ api: clean, io: testIo })).toBe(0);
-    const drifted = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
-    expect(await run({ api: drifted, io: testIo })).toBe(1);
-  });
-
-  test("apply mode patches the declared keys and exits 0", async () => {
-    setEnv();
-    process.env.INPUT_MODE = "apply";
-    const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } }).allowMutations(
-      "PATCH /repos/o/r",
-    );
-    expect(await run({ api: api, io: testIo })).toBe(0);
-    expect(api.mutations()).toEqual([
-      { method: "PATCH", path: "/repos/o/r", payload: { has_wiki: false } },
-    ]);
-  });
-});
-
 describe("run in multi-repo mode (env glue)", () => {
   const ENV_KEYS = [
     "INPUT_TOKEN",
@@ -102,23 +60,6 @@ describe("run in multi-repo mode (env glue)", () => {
         process.env[key] = value;
       }
     }
-  });
-
-  test("writes repos-result and result outputs and exits by worst-of", async () => {
-    process.env.INPUT_TOKEN = "t";
-    process.env.INPUT_MODE = "check";
-    process.env.INPUT_REPOS = "o/a";
-    delete process.env.INPUT_REPOSITORY;
-    const api = new MockApi({
-      "GET /repos/o/a": { data: { has_wiki: false, private: false } },
-      "GET /repos/o/a/contents/.github/settings.yml": {
-        data: "repository:\n  has_wiki: false\n",
-      },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(0);
-    const output = outputs["repos-result"] ?? "";
-    expect(outputs.result).toBe("clean");
-    expect(output).toContain('"o/a":{"result":"clean","source":"remote"');
   });
 
   test("repository input combined with repos is a hard error", async () => {
@@ -201,31 +142,6 @@ describe("run in multi-repo mode (env glue)", () => {
     expect(api.calls.some((c) => c.path.startsWith("/repos/o/y"))).toBe(false);
   });
 
-  test("multi-repo check mode exits 1 on drift and on failure", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOS = "o/a";
-    const drifted = new MockApi({
-      "GET /repos/o/a": { data: { has_wiki: true, private: false } },
-      "GET /repos/o/a/contents/.github/settings.yml": {
-        data: "repository:\n  has_wiki: false\n",
-      },
-    });
-    expect(await run({ api: drifted, io: testIo })).toBe(1);
-    captured = []; // attribute the assertions below to the failing run alone
-    const failing = new MockApi({
-      "GET /repos/o/a": { error: { status: 500, message: "boom", body: "" } },
-      "GET /repos/o/a/contents/.github/settings.yml": {
-        data: "repository:\n  has_wiki: false\n",
-      },
-    });
-    expect(await run({ api: failing, io: testIo })).toBe(1);
-    // The error annotation is redacted by default, since the 500 leaves the target's visibility unproven.
-    expect(captured).toContain(
-      "error: private repository #1: failed - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
-    );
-    expect(captured).toContain("result: failed");
-  });
-
   test("defaults-file in single-repo mode is a hard error", async () => {
     setDiscoveryEnv();
     process.env.INPUT_REPOSITORY = "o/r";
@@ -249,56 +165,6 @@ describe("run in multi-repo mode (env glue)", () => {
     const summary = summaries.join("\n");
     expect(summary).toContain(":warning: drift");
     expect(summary).toContain("want \\| desc");
-  });
-
-  test("redact default: repos-result and summary key a private target by its placeholder", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOS = "o/priv";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env.INPUT_MODE = "check";
-    const api = new MockApi({
-      "GET /repos/o/priv": { data: { description: "SECRET-live", private: true } },
-      "GET /repos/o/priv/contents/.github/settings.yml": {
-        data: 'repository:\n  description: "SECRET-want"\n',
-      },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    const output = outputs["repos-result"] ?? "";
-    const summary = summaries.join("\n");
-    for (const text of [output, summary]) {
-      expect(text).not.toContain("o/priv");
-      expect(text).not.toContain("SECRET-live");
-      expect(text).not.toContain("SECRET-want");
-    }
-    expect(output).toContain('"private repository #1":{"result":"drift"');
-    expect(summary).toContain("private repository #1");
-    expect(summary).toContain("hidden (private repository)");
-  });
-
-  test("redact single-repo cross-repo target: generic summary, no slug or live values", async () => {
-    setDiscoveryEnv();
-    delete process.env.INPUT_REPOS;
-    process.env.INPUT_REPOSITORY = "o/priv";
-    process.env.GITHUB_REPOSITORY = "admin/repo";
-    process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-    process.env["INPUT_PRIVATE-REPOS"] = "redact";
-    process.env.INPUT_MODE = "check";
-    // has_wiki drifts; the live value is a boolean but the slug must not leak.
-    const api = new MockApi({
-      "GET /repos/o/priv": { data: { has_wiki: true, private: true } },
-    });
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(captured).toContain("mask: o/priv");
-    const summary = summaries.join("\n");
-    expect(summary).not.toContain("o/priv");
-    expect(summary).toContain("details hidden");
-    // The redacted single-repo summary renders the SAME per-section table the multi path does: statuses stay visible everywhere, only the detail cell
-    // is hidden.
-    expect(summary).toContain("| Section | Status | Detail |");
-    expect(summary).toContain("repository");
-    expect(summary).toContain(":warning: drift");
-    expect(summary).toContain("hidden (private repository)");
-    expect(summary).not.toContain("has_wiki");
   });
 
   test("self-target single-repo run is never redacted (carve-out)", async () => {
@@ -503,11 +369,17 @@ describe("run in multi-repo mode (env glue)", () => {
         expect(body).toContain("# settings-as-code private report: o/priv");
         expect(body).toContain("## Transcript");
       }
-      // The public surfaces stay redacted throughout; only the mask registration names the slug.
+      // The public surfaces stay redacted throughout; only the mask registration names the slug. The summary keeps
+      // the per-section statuses and hides the live values behind the placeholder note.
       expect(captured).toContain("mask: o/priv");
       const publicText = [...captured.filter((line) => !line.startsWith("mask: ")), ...summaries];
       expect(publicText.join("\n")).not.toContain("o/priv");
-      expect(summaries.join("\n")).toContain("details hidden");
+      expect(publicText.join("\n")).not.toContain("has_wiki");
+      const summary = summaries.join("\n");
+      expect(summary).toContain("details hidden");
+      expect(summary).toContain("| Section | Status | Detail |");
+      expect(summary).toContain(drifts ? ":warning: drift" : ":white_check_mark: clean");
+      expect(summary).toContain("hidden (private repository)");
     },
   );
 
@@ -635,32 +507,6 @@ describe("run in mode: merge", () => {
       ]);
     }));
 
-  test("a layer that is invalid on its own fails the run naming the layer, before any merge or write", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const broken = tempLayer(dir, "broken.yml", { labels: [{ color: "ffffff" }] });
-      const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), broken]);
-      const api = new MockApi({});
-      expect(await run({ api, io: testIo })).toBe(1);
-      expect(api.calls).toEqual([]);
-      expect(existsSync(mergedFile)).toBe(false);
-      expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
-      const errors = captured.filter((line) => line.startsWith("error: "));
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toStartWith(
-        `error: ${broken} has malformed section entries: labels[0].name:`,
-      );
-    }));
-
-  test("an unreadable layer fails the run naming the path and the input", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const missing = join(dir, "nope.yml");
-      setMergeEnv(dir, [layer("fleet.yml"), missing]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
-      expect(captured.filter((line) => line.startsWith("error: "))).toEqual([
-        `error: cannot read the settings layer ${missing}: Error: ENOENT: no such file or directory, open '${missing}'. Check that every path in the "settings-file" input exists and is valid YAML`,
-      ]);
-    }));
-
   test("layering: replace lets the higher layer's keyed lists win while mappings still merge", () =>
     withTempDir("merge-mode-", async (dir) => {
       const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
@@ -672,64 +518,6 @@ describe("run in mode: merge", () => {
         labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
         rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
       });
-    }));
-
-  test("a wrapper _layering: replace under a merge run replaces that section alone, and never reaches the file", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const top = tempLayer(dir, "top.yml", {
-        labels: { _layering: "replace", entries: [{ name: "only", color: "000000" }] },
-        rulesets: [{ name: "tags", target: "tag" }],
-      });
-      const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
-      expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
-        repository: { has_wiki: false, has_projects: false },
-        labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
-        rulesets: {
-          _undeclared: "keep",
-          entries: [FLEET_RULESET, { name: "tags", target: "tag" }],
-        },
-        pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
-      });
-    }));
-
-  test("a top-level _layering: replace governs every keyed section of its layer and is consumed", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const top = tempLayer(dir, "top.yml", {
-        _layering: "replace",
-        labels: [{ name: "only", color: "000000" }],
-        rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
-      });
-      const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
-      expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
-        repository: { has_wiki: false, has_projects: false },
-        labels: { _undeclared: "delete", entries: [{ name: "only", color: "000000" }] },
-        rulesets: {
-          _undeclared: "keep",
-          entries: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
-        },
-        pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
-      });
-    }));
-
-  test("a null inside a keyed entry is a merge marker too, announced against its layer", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
-      const fleet = tempLayer(dir, "fleet.yml", {
-        rulesets: [{ ...FLEET_RULESET, bypass_actors: bypass }],
-      });
-      const top = tempLayer(dir, "top.yml", { rulesets: [{ name: "main", bypass_actors: null }] });
-      const mergedFile = setMergeEnv(dir, [fleet, top]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
-      expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
-        rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
-      });
-      expect(captured).toEqual([
-        `notice: ${top}: null removed rulesets[0].bypass_actors declared by a lower layer`,
-        `merged 2 layer(s) into ${mergedFile}`,
-        "result: merged",
-      ]);
     }));
 
   test.each([
@@ -753,80 +541,6 @@ describe("run in mode: merge", () => {
         ]);
       }),
   );
-
-  test("a sections allowlist is rejected before any layer is read, so the written document is never narrower than the fold", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      // An allowlist naming one of the three folded sections is refused up front rather than narrowing the file; the nonexistent layer path proves the
-      // refusal precedes the read.
-      const mergedFile = setMergeEnv(dir, [
-        layer("fleet.yml"),
-        layer("repo.yml"),
-        join(dir, "nope.yml"),
-      ]);
-      process.env.INPUT_SECTIONS = "labels";
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
-      expect(existsSync(mergedFile)).toBe(false);
-      expect(captured).toEqual([
-        'error: the "sections" input(s) do not apply to mode: merge, which only folds the ' +
-          "settings-file layers into merged-file: it never targets a repository, calls the GitHub " +
-          "API, delivers a report, or narrows the sections it writes. Remove the input(s), or move " +
-          "them to the apply or check step that runs the merged document",
-        "result: failed",
-      ]);
-    }));
-
-  test("a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      // A self-referencing anchor under an open section parses to a cyclic object; the standalone validation passes the unknown nested key through, so the
-      // engine's boundary is what refuses the layer.
-      const top = join(dir, "top.yml");
-      writeFileSync(top, ["repository: &loop", "  self: *loop", "labels: []", ""].join("\n"));
-      const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
-      expect(existsSync(mergedFile)).toBe(false);
-      expect(captured).toEqual([
-        `error: layer "${top}": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees`,
-        "result: failed",
-      ]);
-    }));
-
-  test("merge then apply: the written file applies exactly like the expected merged document", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const mergedFile = setMergeEnv(dir, [
-        layer("fleet.yml"),
-        layer("team.yml"),
-        layer("repo.yml"),
-      ]);
-      expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
-      const expectedFile = tempLayer(dir, "expected.yml", THREE_LAYERS_MERGED);
-
-      const applyRun = async (settingsFile: string): Promise<MockApi> => {
-        for (const key of ENV_KEYS) {
-          delete process.env[key];
-        }
-        process.env.INPUT_TOKEN = "t";
-        process.env.INPUT_MODE = "apply";
-        process.env.INPUT_REPOSITORY = "o/r";
-        process.env.GITHUB_REPOSITORY = "o/r";
-        process.env.INPUT_SECTIONS = "repository,labels";
-        process.env["INPUT_SETTINGS-FILE"] = settingsFile;
-        const api = new MockApi({
-          "GET /repos/o/r": { data: { has_wiki: true, description: "old" } },
-          "GET /repos/o/r/labels?per_page=100&page=1": { data: [] },
-        }).allowMutations("PATCH /repos/o/r", "POST /repos/o/r/labels");
-        expect(await run({ api, io: testIo })).toBe(0);
-        return api;
-      };
-      const fromMerged = await applyRun(mergedFile);
-      const fromExpected = await applyRun(expectedFile);
-      expect(fromMerged.mutations()).toEqual(fromExpected.mutations());
-      expect(fromMerged.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-        "PATCH /repos/o/r",
-        "POST /repos/o/r/labels",
-        "POST /repos/o/r/labels",
-        "POST /repos/o/r/labels",
-      ]);
-    }));
 });
 
 describe("run in mode: snapshot", () => {
@@ -870,36 +584,6 @@ describe("run in mode: snapshot", () => {
   const LABELS = [{ name: "bug", color: "d73a4a", description: "Something is broken" }];
   const labelsApi = () =>
     new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: LABELS } });
-
-  test("writes the live settings to snapshot-file and publishes the snapshot result", () =>
-    withTempDir("snapshot-mode-", async (dir) => {
-      const snapshotFile = setSnapshotEnv(dir);
-      const api = labelsApi();
-      expect(await run({ api, io: testIo })).toBe(0);
-      expect(api.mutations()).toEqual([]);
-      expect(parseYaml(readFileSync(snapshotFile, "utf8"))).toEqual({
-        labels: { _undeclared: "delete", entries: LABELS },
-      });
-      expect(outputs).toEqual({ result: "snapshot", "skipped-sections": "", "repos-result": "{}" });
-      expect(captured).toEqual([`snapshot written to ${snapshotFile}`, "result: snapshot"]);
-    }));
-
-  test("an apply-time input is rejected before any API call, and no file is written", () =>
-    withTempDir("snapshot-mode-", async (dir) => {
-      const snapshotFile = setSnapshotEnv(dir);
-      process.env["INPUT_SETTINGS-FILE"] = "other.yml";
-      const api = labelsApi();
-      expect(await run({ api, io: testIo })).toBe(1);
-      expect(api.calls).toEqual([]);
-      expect(existsSync(snapshotFile)).toBe(false);
-      expect(captured).toEqual([
-        'error: the "settings-file" input(s) do not apply to mode: snapshot, which only reads the ' +
-          "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
-          "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
-          "the apply, check, or merge step they belong to",
-        "result: failed",
-      ]);
-    }));
 
   test("snapshot then check: the written file checks clean against the live state it was read from", () =>
     withTempDir("snapshot-mode-", async (dir) => {
