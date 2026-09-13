@@ -8,7 +8,6 @@ import {
   skippedSectionKeys,
   type ValidatedSettings,
   validateSettingsDoc,
-  worstOf,
 } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import type { Io } from "../../src/io.js";
@@ -402,17 +401,6 @@ describe("validateSettingsDoc", () => {
     const branded: unknown = validateSettingsDoc(doc, "s.yml", new Set(), io)._unsafeUnwrap();
     expect(branded).toEqual(doc);
     expect(branded).not.toBe(doc);
-  });
-});
-
-describe("worstOf", () => {
-  test("failed outranks everything; clean is the floor in check mode", () => {
-    expect(worstOf([{ result: "clean" }, { result: "failed" }, { result: "drift" }], true)).toBe(
-      "failed",
-    );
-    expect(worstOf([{ result: "clean" }, { result: "drift" }], true)).toBe("drift");
-    expect(worstOf([], true)).toBe("clean");
-    expect(worstOf([], false)).toBe("applied");
   });
 });
 

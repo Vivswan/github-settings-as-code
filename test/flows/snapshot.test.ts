@@ -150,7 +150,11 @@ describe("runSnapshot, file form", () => {
     expect(hasSnapshotHeader(written, "o/r")).toBe(true);
     expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
     expect(api.mutations()).toEqual([]);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
+    expect(collected.outputs).toEqual({
+      result: "snapshot",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       { line: `snapshot written to ${cfg.snapshotFile}` },
       { line: "result: snapshot" },
@@ -186,8 +190,9 @@ describe("runSnapshot, file form", () => {
       /^# actions_variables: the token was denied GET \/repos\/o\/r\/actions\/variables/m,
     );
     expect(collected.outputs).toEqual({
-      "skipped-sections": "actions_variables",
       result: "partial",
+      "skipped-sections": "actions_variables",
+      "repos-result": "{}",
     });
     expect(collected.lines.map((entry) => `${entry.level ?? "log"}: ${entry.line}`)).toEqual([
       expect.stringMatching(/^warning: actions_variables: skipped - the token was denied GET/),
@@ -208,7 +213,11 @@ describe("runSnapshot, file form", () => {
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(1);
     expect(existsSync(cfg.snapshotFile)).toBe(false);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       {
         level: "error",
@@ -275,7 +284,11 @@ describe("runSnapshot writes through a staging file", () => {
     mkdirSync(staging);
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       unwritable(
         cfg.snapshotFile,
@@ -300,7 +313,11 @@ describe("runSnapshot writes through a staging file", () => {
     symlinkSync("snapshot.yml", staging);
     const collected = collectingIo();
     expect(await run(api, cfg, collected.io)).toBe(0);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
+    expect(collected.outputs).toEqual({
+      result: "snapshot",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       { line: `snapshot written to ${cfg.snapshotFile}` },
       { line: "result: snapshot" },
@@ -329,8 +346,8 @@ describe("runSnapshot writes through a staging file", () => {
       "skipped-sections": "",
       result: "failed",
       "repos-result": JSON.stringify({
-        "o/a": { result: "failed", source: "remote", skippedSections: [] },
-        "o/b": { result: "snapshot", source: "remote", skippedSections: [] },
+        "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
+        "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
       }),
     });
     const { level, line } = unwritable(
@@ -392,7 +409,11 @@ describe("runSnapshot refuses a destination that would overwrite an authored fil
     const collected = collectingIo();
     expect(await run(api, cfg(), collected.io)).toBe(1);
     expect(api.calls).toEqual([]);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       { level: "error", line: message },
       { line: "result: failed" },
@@ -440,7 +461,11 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
       process.chdir(previous);
     }
     expect(api.calls).toEqual([]);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines).toEqual([
       { level: "error", line: message },
       { line: "result: failed" },
@@ -673,7 +698,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         Object.fromEntries(
           carried.targets.map((t) => [
             t.slug,
-            { result: "failed", source: t.source, skippedSections: [] },
+            { result: "failed", source: t.source, "skipped-sections": [] },
           ]),
         ),
       ),
@@ -721,7 +746,7 @@ describe("runSnapshot, dir form", () => {
       "skipped-sections": "",
       result: "snapshot",
       "repos-result": JSON.stringify({
-        "o/r": { result: "snapshot", source: "central", skippedSections: [] },
+        "o/r": { result: "snapshot", source: "central", "skipped-sections": [] },
       }),
     });
     expect(collected.lines).toEqual([
@@ -750,8 +775,8 @@ describe("runSnapshot, dir form", () => {
       "skipped-sections": "",
       result: "snapshot",
       "repos-result": JSON.stringify({
-        "o/a": { result: "snapshot", source: "remote", skippedSections: [] },
-        "o/b": { result: "snapshot", source: "remote", skippedSections: [] },
+        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
       }),
     });
     expect(collected.lines).toEqual([
@@ -811,12 +836,14 @@ describe("runSnapshot, dir form", () => {
     for (const needle of ["o/p", "p.yml", "secret-project", "hush"]) {
       expect(publicText, `"${needle}" reached a public surface`).not.toContain(needle);
     }
-    expect(collected.outputs["repos-result"]).toBe(
-      JSON.stringify({
-        "o/a": { result: "snapshot", source: "remote", skippedSections: [] },
-        "private repository #1": { result: "snapshot", source: "remote", skippedSections: [] },
+    expect(collected.outputs).toEqual({
+      result: "snapshot",
+      "skipped-sections": "",
+      "repos-result": JSON.stringify({
+        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        "private repository #1": { result: "snapshot", source: "remote", "skipped-sections": [] },
       }),
-    );
+    });
     expect(collected.summary[0]).toContain(
       "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |",
     );
@@ -835,14 +862,17 @@ describe("runSnapshot, dir form", () => {
     expect(await run(api, cfg, collected.io)).toBe(1);
     expect(existsSync(join(dir, "escape.yml"))).toBe(false);
     expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
-    expect(collected.outputs.result).toBe("failed");
     expect(collected.lines[0]).toEqual({
       level: "error",
       line: `../escape: the repository name "../escape" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
     });
-    expect(JSON.parse(collected.outputs["repos-result"] ?? "")).toEqual({
-      "../escape": { result: "failed", source: "remote", skippedSections: [] },
-      "o/a": { result: "snapshot", source: "remote", skippedSections: [] },
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": JSON.stringify({
+        "../escape": { result: "failed", source: "remote", "skipped-sections": [] },
+        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+      }),
     });
   });
 
@@ -857,7 +887,7 @@ describe("runSnapshot, dir form", () => {
       "skipped-sections": "",
       result: "failed",
       "repos-result": JSON.stringify({
-        "o/a": { result: "failed", source: "remote", skippedSections: [] },
+        "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
       }),
     });
     expect(collected.summary).toEqual([
@@ -890,7 +920,11 @@ describe("runSnapshot, dir form", () => {
     expect(await run(api, cfg, collected.io)).toBe(1);
     expect(api.calls).toEqual([]);
     expect(existsSync(join(dir, "snapshots"))).toBe(false);
-    expect(collected.outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(collected.outputs).toEqual({
+      result: "failed",
+      "skipped-sections": "",
+      "repos-result": "{}",
+    });
     expect(collected.lines[0]).toEqual({
       level: "error",
       line: expect.stringMatching(

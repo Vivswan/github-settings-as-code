@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Four breaks. One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Nine breaks (the ninth is for library consumers). One is silent (the fallback), so run `mode: check` before the first v3 apply. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -12,6 +12,11 @@ Four breaks. One is silent (the fallback), so run `mode: check` before the first
 | The wrapper key is `_undeclared` | `labels: {undeclared: keep, entries: [...]}` | `labels: {_undeclared: keep, entries: [...]}` | Validation fails before any section runs, naming the rename; the full error is under [section 2](#2-undeclared-becomes-_undeclared) |
 | Layering happens in `mode: merge` | The only merge was the defaults-file one | An ordered list of files folds in a merge step; apply and check take one final document | No error. Reach for the [two-step workflow](../operate/layering.md#the-two-step-workflow) to get merging back |
 | A `settings-file` path cannot contain a comma or newline | `settings-file: settings,prod.yml` named one file | A comma or newline is a list separator in every mode | Apply and check refuse the run before reading anything (the error is under [section 4](#4-commas-and-newlines-in-a-settings-file-path)); `mode: merge` reads two layer paths |
+| `repos-result` rows spell `skipped-sections` | `{"o/r": {"result": "applied", "source": "central", "skippedSections": []}}` | `{"o/r": {"result": "applied", "source": "central", "skipped-sections": []}}` | No error. A step reading `.skippedSections` gets `null`; [section 5](#5-repos-result-rows-spell-skipped-sections) |
+| The three outputs are always set | `repos-result` existed only in multi-repo runs and the `snapshot-dir` form; unset elsewhere | `result`, `skipped-sections`, and `repos-result` are set on every run; `repos-result` is `{}` outside a fleet | No error. A step testing `repos-result != ''` to detect a fleet run now always passes; [section 6](#6-the-three-outputs-are-always-set) |
+| One `--json` envelope on the command line | `validate` printed `{file, valid, sections}`, `permissions` a bare grant map, `init` `skippedSections` | Every subcommand prints `{result, ...}`; `permissions` puts its grants under `grant`, lists are lists | A `jq` filter on the old keys reads `null`; [section 7](#7-one---json-envelope) |
+| A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
+| Library: one `RUN_RESULTS` | `REPO_RESULTS`, `SNAPSHOT_RESULTS`, `MERGE_RESULT`, `SnapshotRunResult`; `worstOf(results, check)` | `RUN_RESULTS`, `RunOutcome`; `worstOf(results)` | The import fails to compile, naming the missing export; [section 9](#9-library-one-run_results) |
 
 ## 1. The defaults-file fallback
 
@@ -67,9 +72,59 @@ the "settings-file" input is "settings,prod.yml", which contains a list separato
 
 Check mode says the same with `check mode`. The fix is a rename: move the file to a path without the separator (`settings-prod.yml`) and point `settings-file` at it.
 
+## 5. repos-result rows spell skipped-sections
+
+Every key inside the `repos-result` map is spelled like the outputs themselves: kebab-case. The one camelCase key, `skippedSections`, is gone.
+
+```text
+{"o/r": {"result": "partial", "source": "central", "skipped-sections": ["actions_variables"]}}
+```
+
+A step that read `fromJSON(steps.settings.outputs.repos-result)['o/r'].skippedSections` now reads `null`; rename the key in the expression.
+
+## 6. The three outputs are always set
+
+| Output | v2 | v3 |
+|---|---|---|
+| `result` | Every mode | Every mode |
+| `skipped-sections` | Apply, check, snapshot; `merge` set it to `""` | Every mode, `""` when none |
+| `repos-result` | Multi-repo runs and `snapshot-dir` only; unset elsewhere | Every mode; `{}` for a run over one repository or a merge |
+
+A step that used an unset `repos-result` to tell a single-repo run from a fleet run must test `repos-result == '{}'` instead. The exit rule did not move: 1 exactly when `result` is `failed`, or `drift` in `mode: check`.
+
+## 7. One --json envelope
+
+Every `gsac` subcommand prints one object under `--json`, `result` first:
+
+| Command | v2 | v3 |
+|---|---|---|
+| `check`, `apply`, `merge`, `snapshot` | `{"skipped-sections": "", "result": "clean"}` | `{"result": "clean", "skipped-sections": [], "repos-result": {}}`: the list is a list, the map a map |
+| `validate` | `{"file": ..., "valid": true, "sections": [...]}` | `{"result": "valid", "file": ..., "sections": [...]}` |
+| `permissions` | `{"labels": "<grant>", ...}` | `{"result": "valid", "file": ..., "grant": {"labels": "<grant>", ...}}` |
+| `init` | `{"file", "repository", "result", "skippedSections", "failedSections", "grant"}` | `{"result", "file", "repository", "skipped-sections", "grant"}`; `failedSections` is gone, since a failed section now fails init |
+| any failure | `{"file", "valid": false, "problem"}` or `{"result": "failed", "problem"}`; a mode command's fatal problem and a parser error printed no `problem` | `{"result": "failed", "file"?: ..., "problem": ...}`; a mode command that fails before any target runs prints `problem` beside its three outputs, a parser error or a crash prints it alone. A target that fails while running has no `problem`: its errors are on stderr and its row in `repos-result` |
+
+## 8. A failed snapshot section fails the target
+
+Every mode now applies one crash rule: a section whose read throws (an API error) fails its target, `result` is `failed`, the run exits 1, and no snapshot file is written for that target. v2 wrote the file without the section and reported `partial` with exit 0. A value the section's own schema rejects already failed the target in v2; that case did not move. A denial under `on-missing-permission: warn` still skips the section and still reports `partial`.
+
+`gsac init` follows: a failed section refuses to write the settings file, with the errors above naming the section and the fix.
+
+## 9. Library: one RUN_RESULTS
+
+For `@vivswan/github-settings-as-code` consumers. Every result word of every mode is one `RunOutcome`, ranked once:
+
+| v2 | v3 |
+|---|---|
+| `REPO_RESULTS`, `SNAPSHOT_RESULTS`, `MERGE_RESULT` | `RUN_RESULTS` (worst first: `failed`, `drift`, `partial`, `skipped`, `applied`, `clean`, `snapshot`, `merged`) |
+| `RepoResult` (still exported, the engine's per-repository subset), `SnapshotRunResult` | `RunOutcome` |
+| `worstOf(results, check)`, with `check` picking the floor of an empty list | `worstOf(results)`; an empty list throws, since every run concludes over at least one target |
+| `concludeSnapshot` set `repos-result` only in the dir form; `concludeMerge` set no `repos-result` | Every conclude sets the three outputs |
+
 ## Order of operations
 
 1. Rename any settings file whose path contains a comma, and rename `undeclared` to `_undeclared` in every settings file; the v2 line accepts the old spelling only, so do both together with the pin move.
-2. Move the pin to `@v3` with `mode: check`.
-3. Read the fallback notices and the drift; add merge steps where a target needs the old overlay behavior.
-4. Switch back to apply.
+2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
+3. Move the pin to `@v3` with `mode: check`.
+4. Read the fallback notices and the drift; add merge steps where a target needs the old overlay behavior.
+5. Switch back to apply.

@@ -21,9 +21,16 @@ import {
   type RepoRef,
   type SectionSelection,
   type SnapshotReport,
+  skippedSectionKeys,
   snapshotRepository,
 } from "../index.js";
-import { type CliHost, describeCliProblem, grantTable, type Rendered } from "./commands.js";
+import {
+  type CliHost,
+  describeCliProblem,
+  failedEnvelope,
+  grantTable,
+  type Rendered,
+} from "./commands.js";
 
 export interface InitConfig {
   readonly kind: "init";
@@ -64,13 +71,18 @@ export type InitProblem =
 /** The separators every mode reads as a list, which one path can therefore never contain. */
 const LIST_SEPARATOR = /[\n,]/;
 
+/** The file init writes: the one named, else the one apply and check read. Known before any parsing, so a failure names it. */
+export function initSettingsFile(read: InputReader): string {
+  return read("settings-file") || DEFAULT_SETTINGS_FILE;
+}
+
 /** The init flags are the snapshot inputs of one repository, so every problem is the snapshot subcommand's. */
 export function parseInitConfig(
   read: InputReader,
   force: boolean,
   env: ConfigEnv,
 ): Result<InitConfig, InitProblem> {
-  const settingsFile = read("settings-file") || DEFAULT_SETTINGS_FILE;
+  const settingsFile = initSettingsFile(read);
   if (LIST_SEPARATOR.test(settingsFile)) {
     return err({ code: "init-settings-file-is-list", value: settingsFile });
   }
@@ -111,10 +123,11 @@ function describeInitProblem(problem: InitProblem): string {
   }
 }
 
-export function failInit(io: Io, problem: InitProblem): Rendered {
+/** `file` is the settings file the command was told (or defaulted to); only a test that renders no command omits it. */
+export function failInit(io: Io, problem: InitProblem, file?: string): Rendered {
   const message = describeInitProblem(problem);
   io.annotate("error", message);
-  return { code: 1, lines: [], json: { result: "failed", problem: message } };
+  return { code: 1, lines: [], json: failedEnvelope(message, file) };
 }
 
 function writeSettingsFile(cfg: InitConfig, yaml: string): Result<void, InitProblem> {
@@ -145,7 +158,11 @@ export function runInit(
 ): Promise<Rendered> {
   if (!cfg.force && existsSync(cfg.settingsFile)) {
     return Promise.resolve(
-      failInit(io, { code: "init-settings-file-exists", settingsFile: cfg.settingsFile }),
+      failInit(
+        io,
+        { code: "init-settings-file-exists", settingsFile: cfg.settingsFile },
+        cfg.settingsFile,
+      ),
     );
   }
   const api = host.createClient(cfg.token, io, cfg.apiVersion);
@@ -166,11 +183,9 @@ export function runInit(
       }
       const grant = grantTable(report.settings, bold);
       const unsupported = keysWith(report, "unsupported");
-      const skipped = keysWith(report, "skipped");
-      const failed = keysWith(report, "failed");
+      const skipped = skippedSectionKeys(report.outcomes);
       // An empty document is no starting point, and under --force it would erase the file:
-      // a section failing on its own leaves the run partial, and an unsupported-only
-      // selection reads back nothing at all.
+      // an unsupported-only selection reads back nothing at all.
       if (grant.sections.length === 0) {
         return err({
           code: "init-empty-document",
@@ -179,7 +194,6 @@ export function runInit(
           reasons: [
             ["cannot be read back", unsupported],
             ["skipped", skipped],
-            ["failed", failed],
             ["nothing exists on the repository", keysWith(report, "snapshot")],
           ],
         });
@@ -199,18 +213,14 @@ export function runInit(
               : [
                   `skipped: ${skipped.join(", ")} (the file omits them; the warnings above say why)`,
                 ]),
-            ...(failed.length === 0
-              ? []
-              : [`failed: ${failed.join(", ")} (the file omits them; the errors above say why)`]),
             "Token permissions the file needs:",
             ...grant.lines.map((line) => `  ${line}`),
           ],
           json: {
+            result: report.result,
             file: cfg.settingsFile,
             repository: cfg.repo.slug,
-            result: report.result,
-            skippedSections: skipped,
-            failedSections: failed,
+            "skipped-sections": skipped,
             grant: grant.json,
           },
         };
@@ -218,6 +228,6 @@ export function runInit(
     })
     .match(
       (rendered) => rendered,
-      (problem) => failInit(io, problem),
+      (problem) => failInit(io, problem, cfg.settingsFile),
     );
 }

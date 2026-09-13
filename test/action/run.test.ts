@@ -613,7 +613,7 @@ describe("run in mode: merge", () => {
     expect(await run({ api, io: testIo })).toBe(0);
     expect(api.calls).toEqual([]);
     expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual(THREE_LAYERS_MERGED);
-    expect(outputs).toEqual({ "skipped-sections": "", result: "merged" });
+    expect(outputs).toEqual({ result: "merged", "skipped-sections": "", "repos-result": "{}" });
     expect(captured).toEqual([
       `notice: ${layer("team.yml")}: null removed repository.has_projects declared by a lower layer`,
       `notice: ${layer("repo.yml")}: null removed pages declared by a lower layer`,
@@ -642,7 +642,7 @@ describe("run in mode: merge", () => {
     expect(await run({ api, io: testIo })).toBe(1);
     expect(api.calls).toEqual([]);
     expect(existsSync(mergedFile)).toBe(false);
-    expect(outputs).toEqual({ "skipped-sections": "", result: "failed" });
+    expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
     const errors = captured.filter((line) => line.startsWith("error: "));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toStartWith(
@@ -862,7 +862,7 @@ describe("run in mode: snapshot", () => {
     expect(parseYaml(readFileSync(snapshotFile, "utf8"))).toEqual({
       labels: { _undeclared: "delete", entries: LABELS },
     });
-    expect(outputs).toEqual({ "skipped-sections": "", result: "snapshot" });
+    expect(outputs).toEqual({ result: "snapshot", "skipped-sections": "", "repos-result": "{}" });
     expect(captured).toEqual([`snapshot written to ${snapshotFile}`, "result: snapshot"]);
   });
 

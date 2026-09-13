@@ -38,26 +38,37 @@ function exercise(io: ReturnType<typeof cliIo>["io"]): void {
   io.annotate("warning", "skipped teams");
   io.annotate("error", "PATCH /repos/o/r failed: 500 boom");
   io.debug("GET /repos/o/r -> 200");
-  io.output("skipped-sections", "teams");
   io.output("result", "partial");
+  io.output("skipped-sections", "teams");
+  io.output("repos-result", JSON.stringify(REPOS_RESULT));
 }
+
+const REPOS_RESULT = {
+  "o/r": { result: "partial", source: "remote", "skipped-sections": ["teams"] },
+};
 
 describe("the CLI Io", () => {
   test("logs land on stdout, annotations on stderr as level: message, outputs as name=value lines", () => {
     const { io, flush, stdout, stderr } = open();
     exercise(io);
     flush();
-    expect(stdout()).toBe("labels: 2 in sync\nskipped-sections=teams\nresult=partial\n");
+    expect(stdout()).toBe(
+      `labels: 2 in sync\nresult=partial\nskipped-sections=teams\nrepos-result=${JSON.stringify(REPOS_RESULT)}\n`,
+    );
     expect(stderr()).toBe(
       "notice: nothing to do\nwarning: skipped teams\nerror: PATCH /repos/o/r failed: 500 boom\n",
     );
   });
 
-  test("--json prints the outputs as one object on stdout and moves the log lines to stderr", () => {
+  test("--json prints the outputs as one object on stdout, the list and the map as values, and moves the log lines to stderr", () => {
     const { io, flush, stdout, stderr } = open({ json: true });
     exercise(io);
     flush();
-    expect(JSON.parse(stdout())).toEqual({ "skipped-sections": "teams", result: "partial" });
+    expect(JSON.parse(stdout())).toEqual({
+      result: "partial",
+      "skipped-sections": ["teams"],
+      "repos-result": REPOS_RESULT,
+    });
     expect(stdout().split("\n")).toHaveLength(2);
     expect(stderr()).toBe(
       "labels: 2 in sync\nnotice: nothing to do\nwarning: skipped teams\nerror: PATCH /repos/o/r failed: 500 boom\n",

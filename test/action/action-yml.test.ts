@@ -6,10 +6,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
-import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
-import { MERGE_RESULT } from "../../src/flows/deliver.js";
+import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
-import { SNAPSHOT_RESULTS } from "../../src/flows/snapshot.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -56,20 +54,19 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description enumerates exactly the RepoResult values, the merge result, and the snapshot results", () => {
-    // The enumerated values are the `a | b | c` chains; a value named only in prose ("in mode: snapshot") does not count.
+  test("the result description enumerates exactly the RUN_RESULTS words, worst first, and states the exit rule", () => {
+    // The enumerated values are the `a | b | c` chain; a value named only in prose does not count.
     const { description } = OUTPUT_DECLS.result;
-    const enumerated = (description.match(/[a-z]+(?: \| [a-z]+)+/g) ?? []).flatMap((chain) =>
-      chain.split(" | "),
-    );
-    expect(new Set(enumerated)).toEqual(
-      new Set([...REPO_RESULTS.filter((value) => value !== "skipped"), ...SNAPSHOT_RESULTS]),
-    );
-    expect(description).toContain("where skipped can also appear");
-    expect(description).toContain(`${MERGE_RESULT} in mode: merge`);
-    // SNAPSHOT_RESULTS is worst-first; the description reads best-first like the RepoResult chain.
-    expect(description).toContain(
-      `${[...SNAPSHOT_RESULTS].reverse().join(" | ")} in mode: snapshot`,
-    );
+    const [chain, ...more] = description.match(/[a-z]+(?: \| [a-z]+)+/g) ?? [];
+    expect(more).toEqual([]);
+    expect(chain?.split(" | ")).toEqual([...RUN_RESULTS]);
+    expect(description).toContain("Exit 1 exactly when it is failed, or drift in mode: check");
+  });
+
+  test("the repos-result description spells the body keys as the outputs spell theirs, and names the empty map", () => {
+    const { description } = OUTPUT_DECLS["repos-result"];
+    expect(description).toContain("{result, source, skipped-sections}");
+    expect(description).not.toContain("skippedSections");
+    expect(description).toContain("The empty map {} for a run over one repository or a merge");
   });
 });

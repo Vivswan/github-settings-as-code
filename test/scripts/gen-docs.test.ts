@@ -13,7 +13,7 @@ import {
   renderPatFormUrl,
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
-import { REPO_RESULTS } from "../../src/engine/orchestrate.js";
+import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { relocatedRegion } from "./relocated-region.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -280,12 +280,12 @@ describe("renderPatCell", () => {
 });
 
 describe("renderOutputsList", () => {
-  test("lists the any-mode values in display order, then the multi-repo-only ones, then the merge and snapshot results", () => {
-    expect(renderOutputsList(REPO_RESULTS)).toBe(
-      "`applied` / `partial` / `clean` / `drift` / `failed`; worst-of across targets in multi-repo mode, where `skipped` can also appear; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot",
+  test("enumerates the words it is given, worst first as RUN_RESULTS ranks them, then the exit rule", () => {
+    expect(renderOutputsList(RUN_RESULTS)).toBe(
+      "`failed` / `drift` / `partial` / `skipped` / `applied` / `clean` / `snapshot` / `merged`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check",
     );
     expect(renderOutputsList(["failed", "applied"])).toBe(
-      "`applied` / `failed`; worst-of across targets in multi-repo mode; `merged` in mode: merge; `snapshot` / `partial` / `failed` in mode: snapshot",
+      "`failed` / `applied`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check",
     );
   });
 });

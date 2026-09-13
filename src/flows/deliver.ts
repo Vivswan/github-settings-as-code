@@ -4,15 +4,16 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import type { RepoRef } from "../discovery/targets.js";
+import type { RepoRef, Target } from "../discovery/targets.js";
 import {
   type RepoResult,
   type RepoRunResult,
   type SectionOutcome,
   skippedSectionKeys,
-  worstOf,
 } from "../engine/orchestrate.js";
+import { type RunOutcome, worstOf } from "../engine/outcome.js";
 import type { SectionSelection } from "../engine/section-selection.js";
+import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { GithubClient } from "../github/api.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
@@ -25,6 +26,7 @@ import {
   type PrivateReportChannel,
   type RunConclusion,
 } from "../report/delivery.js";
+import type { SectionKey } from "../schema.js";
 import {
   emitRedactedResult,
   isPrivateVisibility,
@@ -77,10 +79,10 @@ export function engineOutcome(run: RepoRunResult, channelIo: Io): TargetResult {
  * single target's report opens under the same rule.
  */
 export function runOutcome(
-  results: ReadonlyArray<{ result: RepoResult }>,
+  results: ReadonlyArray<{ result: RunOutcome }>,
   check: boolean,
 ): RunConclusion {
-  const result = worstOf([...results], check);
+  const result = worstOf(results);
   const exitCode = result === "failed" || (check && result === "drift") ? 1 : 0;
   return { result, exitCode } as RunConclusion;
 }
@@ -196,21 +198,10 @@ export function concludeRun(io: Io, run: FinishedRun): number {
   if (run.kind === "single") {
     const view = publicDetail(run.target.detail);
     writeSummary(io, view, run.mode, run.target.result);
-    return conclude(io, [{ ...view, result: run.target.result }], run.mode === "check");
+    return conclude(io, { ...view, result: run.target.result }, run.mode === "check");
   }
   const views: PublicTargetView[] = run.targets.map(toPublicView);
   writeMultiSummary(io, views, run.mode);
-  io.output(
-    "repos-result",
-    JSON.stringify(
-      Object.fromEntries(
-        views.map((v) => [
-          v.display,
-          { result: v.result, source: v.source, skippedSections: skippedSectionKeys(v.outcomes) },
-        ]),
-      ),
-    ),
-  );
   return conclude(io, views, run.mode === "check");
 }
 
@@ -226,11 +217,8 @@ export function failRun(
   const message = describe(problem);
   io.annotate("error", message);
   // The mode may be unknown here (a config error); a failure exits 1 under either.
-  return conclude(io, [failedTarget(message)], false);
+  return conclude(io, failedTarget(message), false);
 }
-
-/** Not a RepoResult: a merge has no target, so it never enters worstOf and never appears beside the per-repo values. */
-export const MERGE_RESULT = "merged";
 
 export interface FinishedMerge {
   layers: readonly string[];
@@ -240,26 +228,57 @@ export interface FinishedMerge {
 export function concludeMerge(io: Io, run: FinishedMerge): number {
   writeMergeSummary(io, run.layers, run.mergedFile);
   io.log(`merged ${run.layers.length} layer(s) into ${run.mergedFile}`);
-  io.output("skipped-sections", "");
-  io.output("result", MERGE_RESULT);
-  io.log(`result: ${MERGE_RESULT}`);
-  return 0;
+  return conclude(io, { result: "merged", outcomes: [] }, false);
 }
 
-function conclude(
+/** One target as the outputs see it: its result and the closed section statuses `skipped-sections` is filtered from. */
+export interface ConcludedTarget {
+  result: RunOutcome;
+  outcomes: ReadonlyArray<{
+    key: SectionKey;
+    status: SectionOutcome["status"] | SectionSnapshotOutcome["status"];
+  }>;
+}
+
+/** A fleet target, keyed into `repos-result` by its public label (the slug, or its "private repository #N" placeholder). */
+export interface ConcludedFleetTarget extends ConcludedTarget {
+  display: string;
+  source?: Target["source"];
+}
+
+/**
+ * Where every mode ends: the three outputs, always all three, then the result line and the exit code. A run over one
+ * target (single, merge, snapshot-file, a fatal problem) has no fleet, so its `repos-result` is the empty map; a fleet
+ * (multi, snapshot-dir) maps every target's label to its own row, spelled in the outputs' kebab-case.
+ */
+export function conclude(
   io: Io,
-  results: ReadonlyArray<{
-    result: RepoResult;
-    outcomes: ReadonlyArray<Pick<SectionOutcome, "key" | "status">>;
-  }>,
+  run: ConcludedTarget | readonly ConcludedFleetTarget[],
   check: boolean,
 ): number {
+  const targets = Array.isArray(run) ? run : [run];
+  const fleet: ReadonlyArray<ConcludedFleetTarget> = Array.isArray(run) ? run : [];
+  const { result, exitCode } = runOutcome(targets, check);
+  io.output("result", result);
   io.output(
     "skipped-sections",
-    [...new Set(results.flatMap((r) => skippedSectionKeys(r.outcomes)))].join(","),
+    [...new Set(targets.flatMap((target) => skippedSectionKeys(target.outcomes)))].join(","),
   );
-  const { result, exitCode } = runOutcome(results, check);
-  io.output("result", result);
+  io.output(
+    "repos-result",
+    JSON.stringify(
+      Object.fromEntries(
+        fleet.map((target) => [
+          target.display,
+          {
+            result: target.result,
+            source: target.source,
+            "skipped-sections": skippedSectionKeys(target.outcomes),
+          },
+        ]),
+      ),
+    ),
+  );
   io.log(`result: ${result}`);
   return exitCode;
 }

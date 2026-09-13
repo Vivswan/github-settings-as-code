@@ -5,7 +5,8 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { RepoResult, RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
+import type { RepoRunResult, ValidatedSettings } from "../engine/orchestrate.js";
+import type { RunOutcome } from "../engine/outcome.js";
 import type { GithubClient } from "../github/api.js";
 import type { CollectedLine, Io } from "../io.js";
 import type { Private } from "../private.js";
@@ -100,7 +101,7 @@ declare const CONCLUDED: unique symbol;
 
 /** The brand makes runOutcome() the only constructor, so the report cannot be told a result and a verdict that disagree. */
 export interface RunConclusion {
-  readonly result: RepoResult;
+  readonly result: RunOutcome;
   readonly exitCode: 0 | 1;
   readonly [CONCLUDED]: true;
 }

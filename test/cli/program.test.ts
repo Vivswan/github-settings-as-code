@@ -58,7 +58,7 @@ describe("check and apply", () => {
     });
     expect({ code, stdout: stdout.text(), stderr: stderr.text() }).toEqual({
       code: 0,
-      stdout: "result: clean\nskipped-sections=\nresult=clean\n",
+      stdout: "result: clean\nresult=clean\nskipped-sections=\nrepos-result={}\n",
       stderr: "",
     });
   });
@@ -72,7 +72,7 @@ describe("check and apply", () => {
     );
     expect(clean).toEqual({
       code: 0,
-      stdout: "result: clean\nskipped-sections=\nresult=clean\n",
+      stdout: "result: clean\nresult=clean\nskipped-sections=\nrepos-result={}\n",
       stderr: "",
     });
     const drifted = await cli(
@@ -82,7 +82,9 @@ describe("check and apply", () => {
     expect(drifted.code).toBe(1);
     // Drift lines are log lines: stdout, with the outputs closing the run.
     expect(drifted.stdout).toContain("has_wiki");
-    expect(drifted.stdout).toEndWith("result: drift\nskipped-sections=\nresult=drift\n");
+    expect(drifted.stdout).toEndWith(
+      "result: drift\nresult=drift\nskipped-sections=\nrepos-result={}\n",
+    );
     expect(drifted.stderr).toBe("");
   });
 
@@ -104,7 +106,7 @@ describe("check and apply", () => {
     );
     const applied = await cli(["apply", ...target], api);
     expect(applied.code).toBe(0);
-    expect(applied.stdout).toEndWith("result=applied\n");
+    expect(applied.stdout).toEndWith("result=applied\nskipped-sections=\nrepos-result={}\n");
     expect(api.mutations()).toEqual([
       { method: "PATCH", path: "/repos/o/r", payload: { has_wiki: false } },
     ]);
@@ -117,7 +119,11 @@ describe("check and apply", () => {
     );
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("result: clean\n");
-    expect(JSON.parse(result.stdout)).toEqual({ "skipped-sections": "", result: "clean" });
+    expect(JSON.parse(result.stdout)).toEqual({
+      result: "clean",
+      "skipped-sections": [],
+      "repos-result": {},
+    });
   });
 
   test("the token comes from GITHUB_TOKEN when no flag names it", async () => {
@@ -137,7 +143,9 @@ describe("check and apply", () => {
     expect(result.stderr).toBe(
       'error: cannot target a repository: "not-a-slug" is not an owner/name slug. Pass --repository owner/name (inside GitHub Actions, GITHUB_REPOSITORY supplies it)\n',
     );
-    expect(result.stdout).toBe("result: failed\nskipped-sections=\nresult=failed\n");
+    expect(result.stdout).toBe(
+      "result: failed\nresult=failed\nskipped-sections=\nrepos-result={}\n",
+    );
   });
 
   test.each<[string, string[], string]>([
@@ -162,7 +170,7 @@ describe("check and apply", () => {
     expect(api.calls).toHaveLength(0);
     expect(result).toEqual({
       code: 1,
-      stdout: "result: failed\nskipped-sections=\nresult=failed\n",
+      stdout: "result: failed\nresult=failed\nskipped-sections=\nrepos-result={}\n",
       stderr: `error: ${message}\n`,
     });
   });
@@ -256,7 +264,9 @@ describe("merge", () => {
       out,
     ]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toEndWith("result: merged\nskipped-sections=\nresult=merged\n");
+    expect(result.stdout).toEndWith(
+      "result: merged\nresult=merged\nskipped-sections=\nrepos-result={}\n",
+    );
     // The whole document only the fold produces: team.yml's label and rule join
     // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
     // fleet.yml's key, and pages passes through untouched.
@@ -289,7 +299,9 @@ describe("merge", () => {
     const result = await cli(["merge", "--settings-file", join(LAYERS, "fleet.yml")]);
     expect(result.code).toBe(1);
     expect(result.stderr).toStartWith('error: mode: merge needs a "merged-file" input');
-    expect(result.stdout).toBe("result: failed\nskipped-sections=\nresult=failed\n");
+    expect(result.stdout).toBe(
+      "result: failed\nresult=failed\nskipped-sections=\nrepos-result={}\n",
+    );
   });
 });
 
@@ -318,7 +330,7 @@ describe("snapshot", () => {
     );
     expect(result).toEqual({
       code: 0,
-      stdout: `snapshot written to ${out}\nresult: snapshot\nskipped-sections=\nresult=snapshot\n`,
+      stdout: `snapshot written to ${out}\nresult: snapshot\nresult=snapshot\nskipped-sections=\nrepos-result={}\n`,
       stderr: "",
     });
     expect(api.mutations()).toEqual([]);
@@ -333,7 +345,7 @@ describe("snapshot", () => {
     expect(api.calls).toHaveLength(0);
     expect(result).toEqual({
       code: 1,
-      stdout: "result: failed\nskipped-sections=\nresult=failed\n",
+      stdout: "result: failed\nresult=failed\nskipped-sections=\nrepos-result={}\n",
       stderr:
         'error: mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them\n',
     });
@@ -352,8 +364,8 @@ describe("validate and permissions", () => {
     expect(json.code).toBe(0);
     expect(json.stderr).toBe("");
     expect(JSON.parse(json.stdout)).toEqual({
+      result: "valid",
       file: SINGLE,
-      valid: true,
       sections: ["repository"],
     });
   });
@@ -370,7 +382,7 @@ describe("validate and permissions", () => {
     const json = await cli(["validate", file, "--json"]);
     expect(json.code).toBe(1);
     expect(json.stderr).toBe(result.stderr);
-    expect(JSON.parse(json.stdout)).toEqual({ file, valid: false, problem });
+    expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
   });
 
   test("validate: an unreadable file exits 1 naming the path", async () => {
@@ -395,8 +407,106 @@ describe("validate and permissions", () => {
     expect(json.code).toBe(0);
     expect(json.stderr).toBe("");
     expect(JSON.parse(json.stdout)).toEqual({
-      repository: sectionGrant(sectionModule("repository")),
-      labels: sectionGrant(sectionModule("labels")),
+      result: "valid",
+      file,
+      grant: {
+        repository: sectionGrant(sectionModule("repository")),
+        labels: sectionGrant(sectionModule("labels")),
+      },
+    });
+  });
+});
+
+describe("the --json failure envelope", () => {
+  test.each<[string, string[]]>([
+    [
+      "a config problem in a mode command",
+      [
+        "check",
+        "--token",
+        TOKEN,
+        "--repository",
+        "not-a-slug",
+        "--settings-file",
+        SINGLE,
+        "--json",
+      ],
+    ],
+    ["a missing required input", ["merge", "--settings-file", SINGLE, "--json"]],
+    ["a parser error", ["validate", "--json"]],
+    // The duplicate is refused at the second --token, before the parser reaches --json.
+    [
+      "a parser error raised before the flag",
+      ["check", "--token", "ghp_first", "--token", "ghp_second", "--json"],
+    ],
+  ])(
+    "%s: stdout is one failed envelope carrying the stderr line as its problem, exit 1",
+    async (_case, argv) => {
+      const result = await cli(argv);
+      expect(result.code).toBe(1);
+      const lines = result.stdout.split("\n").filter((line) => line !== "");
+      expect(lines).toHaveLength(1);
+      const problem = result.stderr.match(/^error: (.*)$/m)?.[1];
+      expect(problem).toBeDefined();
+      const envelope = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
+      expect(envelope.result).toBe("failed");
+      expect(envelope.problem).toBe(problem);
+    },
+  );
+
+  test.each<[string, string[], boolean]>([
+    [
+      "a --json after the -- terminator is an argument",
+      ["validate", "--", "--json", "extra"],
+      false,
+    ],
+    [
+      "a --json the parser took as --summary's value still reads as the flag",
+      ["validate", "--summary", "--json"],
+      true,
+    ],
+    [
+      "a --json after --summary took -- as its value is the flag",
+      ["validate", "--summary", "--", "--json"],
+      true,
+    ],
+  ])("what counts as --json on a parser error: %s", async (_case, argv, envelope) => {
+    const result = await cli(argv);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toStartWith("error: ");
+    expect(result.stdout).toBe(
+      envelope
+        ? `${JSON.stringify({ result: "failed", problem: "missing required argument 'file'" })}\n`
+        : "",
+    );
+  });
+
+  test("--help under --json is the one exception: the usage on stdout, no envelope, exit 0", async () => {
+    const result = await cli(["--json", "--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toStartWith("Usage: github-settings-as-code");
+    expect(result.stdout).not.toContain('"result"');
+  });
+
+  test("no subcommand under --json: the usage on stderr, an envelope naming the missing subcommand, exit 1", async () => {
+    const result = await cli(["--json"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toStartWith("Usage: github-settings-as-code");
+    expect(JSON.parse(result.stdout)).toEqual({
+      result: "failed",
+      problem: "no subcommand was given; the usage above lists them",
+    });
+  });
+
+  test("a mode command's failed envelope still carries the three outputs", async () => {
+    const result = await cli(["merge", "--settings-file", SINGLE, "--json"]);
+    expect(JSON.parse(result.stdout)).toEqual({
+      result: "failed",
+      "skipped-sections": [],
+      "repos-result": {},
+      problem:
+        'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
     });
   });
 });

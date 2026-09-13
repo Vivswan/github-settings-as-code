@@ -22,7 +22,7 @@ The decision comes down to the policy and what the visibility probe finds:
 
 ## What a redacted run still shows
 
-Redaction hides values, not the shape of the outcome. The public surfaces still carry the safe skeleton of each target. The step summary shows, per target, the overall result (`applied`, `partial`, `clean`, `drift`, `failed`, `skipped`), each section's key and status, and the HTTP status code on a failed or skipped section; the `repos-result` output carries `{result, source, skippedSections}` per target, keyed by the placeholder. These are closed enumerations and numeric codes, safe to show, and enough to tell whether the fleet is healthy and which section broke. What they never carry is the slug, a live setting, a desired setting, or an API error message.
+Redaction hides values, not the shape of the outcome. The public surfaces still carry the safe skeleton of each target. The step summary shows, per target, the overall result (`failed`, `drift`, `partial`, `skipped`, `applied`, `clean`, `snapshot`), each section's key and status, and the HTTP status code on a failed or skipped section; the `repos-result` output carries `{result, source, skipped-sections}` per target, keyed by the placeholder. These are closed enumerations and numeric codes, safe to show, and enough to tell whether the fleet is healthy and which section broke. What they never carry is the slug, a live setting, a desired setting, or an API error message.
 
 ## Seeing the full detail
 

@@ -458,7 +458,7 @@ export function foldSectionOutcomes(outcomes: string[], check: boolean): string 
 }
 
 /**
- * orchestrate.ts's REPO_RESULTS order, mirrored by hand rather than imported: the engine's own order
+ * The repo words of outcome.ts's RUN_RESULTS order, mirrored by hand rather than imported: the engine's own order
  * would agree with its own regression.
  */
 const MULTI_RESULT_ORDER = ["failed", "drift", "partial", "skipped", "applied", "clean"] as const;
