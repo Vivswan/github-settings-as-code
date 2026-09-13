@@ -102,27 +102,19 @@ async function delivered(
 }
 
 describe("runOutcome", () => {
+  // The ranking is worstOf's (test/engine/outcome.test.ts); the rows here vary the exit rule over it.
   test.each<[RunOutcome[], boolean, RunOutcome, 0 | 1]>([
     [["applied", "clean"], false, "applied", 0],
-    [["clean", "skipped", "applied"], false, "skipped", 0],
-    [["clean", "partial"], false, "partial", 0],
+    [["clean", "partial"], true, "partial", 0],
     [["clean", "drift"], false, "drift", 0],
     [["clean", "drift"], true, "drift", 1],
     [["applied", "failed", "drift"], false, "failed", 1],
-    [["clean", "failed"], true, "failed", 1],
-    [["snapshot", "partial"], false, "partial", 0],
-    [["snapshot", "failed"], false, "failed", 1],
-    [["merged"], false, "merged", 0],
   ])("%j in check=%p -> %s exits %i", (results, check, result, exitCode) => {
     const conclusion = runOutcome(
       results.map((r) => ({ result: r })),
       check,
     );
     expect([conclusion.result, conclusion.exitCode]).toEqual([result, exitCode]);
-  });
-
-  test("a run without targets is a bug, never a healthy conclusion", () => {
-    expect(() => runOutcome([], true)).toThrow("BUG: worstOf was given no results");
   });
 });
 
