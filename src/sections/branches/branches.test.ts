@@ -83,6 +83,7 @@ function liveRepo(live: LiveState): GithubClient & { writes: Recorded[] } {
         param,
         query: {},
         body: payload,
+        headers: {},
         grants: () => true,
       });
       if (method !== "GET") {

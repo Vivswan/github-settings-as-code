@@ -61,6 +61,12 @@ interface HandlerContext {
   query: Record<string, string>;
   body: unknown;
   /**
+   * The request headers, lower-cased names, frozen (requestHeaders in dispatch.ts is the one minter). For the
+   * endpoints whose reply GitHub shapes by media type (the teams probe's 200 body vs bare 204), so a client that
+   * drops its Accept header meets GitHub's real answer here instead of passing.
+   */
+  headers: Readonly<Record<string, string>>;
+  /**
    * For a field GitHub reveals only above the endpoint's own grade (a ruleset's bypass_actors,
    * admin-only), so the mock omits it like GitHub does.
    */
@@ -393,9 +399,25 @@ export const CAP_UNAVAILABLE_405 = {
   body: { message: "Method Not Allowed: the pull request creation cap is not available" },
 } as const;
 
+/**
+ * The body's `users`, one entry per distinct login (case-insensitive, first spelling kept): GitHub stores a login
+ * once however many times one body repeats it, so a repeated login neither lands twice nor counts twice toward
+ * the 100-user cap. Both callers (the bypass PUT and DELETE) want set semantics, so the dedupe lives here.
+ */
 export function bypassLogins(body: unknown): string[] {
   const users = asObject(body).users;
-  return Array.isArray(users) ? users.map(String) : [];
+  if (!Array.isArray(users)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return users.map(String).filter((login) => {
+    const key = login.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Case-insensitive login match, as GitHub treats logins. */

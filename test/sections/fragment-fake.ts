@@ -11,7 +11,7 @@ import type { ApiError, GithubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
-import { graphqlOpForBody, matchEndpoint } from "../e2e/mock/dispatch.js";
+import { graphqlOpForBody, matchEndpoint, requestHeaders } from "../e2e/mock/dispatch.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
 import type { Handler, Json } from "../e2e/mock/support.js";
@@ -46,7 +46,7 @@ function handlerFake(
   return {
     state,
     writes,
-    async tryRequest(method, path, payload) {
+    async tryRequest(method, path, payload, options) {
       const url = new URL(path, "https://api.github.com");
       const matched = matchEndpoint(method, url.pathname);
       const handler = matched === null ? undefined : handlers[matched.key];
@@ -72,6 +72,8 @@ function handlerFake(
         },
         query: Object.fromEntries(url.searchParams),
         body: payload,
+        // The section's media type reaches the handler, so a probe whose reply GitHub shapes by Accept is proven here too.
+        headers: requestHeaders(options?.accept === undefined ? {} : { accept: options.accept }),
         grants: () => true,
       });
       if (response.status >= 400) {

@@ -3,6 +3,7 @@ import { GithubApi } from "../../../src/github/api.js";
 import { maskRegistry } from "../../../src/io.js";
 import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
+import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../../src/sections/teams/mock.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { assertFaultKeys } from "./chaos.js";
 import { declaredStatuses, statusAllowed } from "./dispatch.js";
@@ -1032,6 +1033,7 @@ describe("429 fault production parity", () => {
 });
 
 describe("handler statuses obey the realism rule", () => {
+  const TEAM_ACCEPT = { accept: TEAM_REPOSITORY_MEDIA_TYPE };
   test("every handler branch returns an allowed status", async () => {
     const h = await start(
       scenario({
@@ -1087,7 +1089,7 @@ describe("handler statuses obey the realism rule", () => {
       }),
     );
     // Ordering matters where one call sets up another (a create before the list, a remove last).
-    const cases: Array<[string, string, string, unknown?]> = [
+    const cases: Array<[string, string, string, unknown?, Record<string, string>?]> = [
       // repository core + all four readable toggles (enabled GET, put, remove)
       ["repository.get", "GET", `/repos/${OWNER}/${REPO}`],
       ["repository.update", "PATCH", `/repos/${OWNER}/${REPO}`, { description: "x" }],
@@ -1407,10 +1409,22 @@ describe("handler statuses obey the realism rule", () => {
       ["collaborators.cancelInvitation", "DELETE", `/repos/${OWNER}/${REPO}/invitations/314`],
       ["collaborators.remove", "DELETE", `/repos/${OWNER}/${REPO}/collaborators/ghost`], // no-op 204
       ["collaborators.remove", "DELETE", `/repos/${OWNER}/${REPO}/collaborators/carol`],
-      // teams: org, probe (both), grant
+      // teams: org, probe (both, under the media type the section sends; a bare probe is the undeclared 204), grant
       ["teams.org", "GET", `/orgs/${OWNER}`],
-      ["teams.probe", "GET", `/orgs/${OWNER}/teams/reviewers/repos/${OWNER}/${REPO}`],
-      ["teams.probe", "GET", `/orgs/${OWNER}/teams/absent/repos/${OWNER}/${REPO}`], // 404
+      [
+        "teams.probe",
+        "GET",
+        `/orgs/${OWNER}/teams/reviewers/repos/${OWNER}/${REPO}`,
+        undefined,
+        TEAM_ACCEPT,
+      ],
+      [
+        "teams.probe",
+        "GET",
+        `/orgs/${OWNER}/teams/absent/repos/${OWNER}/${REPO}`,
+        undefined,
+        TEAM_ACCEPT,
+      ], // 404
       [
         "teams.grant",
         "PUT",
@@ -1463,8 +1477,11 @@ describe("handler statuses obey the realism rule", () => {
         { users: ["dave"] },
       ],
     ];
-    for (const [key, method, path, body] of cases) {
-      const res = await call(h, method, path, body === undefined ? {} : { body });
+    for (const [key, method, path, body, headers] of cases) {
+      const res = await call(h, method, path, {
+        ...(body === undefined ? {} : { body }),
+        ...(headers === undefined ? {} : { headers }),
+      });
       if (!statusAllowed(key, res.status)) {
         throw new Error(
           `handler ${key} returned status ${res.status}, which is neither declared [${[...declaredStatuses(key)].join(", ")}] nor a >= 400 error status`,

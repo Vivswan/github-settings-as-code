@@ -5,6 +5,7 @@
 
 import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
 import { GRADE_RANK, type MaskGrade } from "../schema.js";
+import { requestHeaders } from "./dispatch.js";
 import { type MockState, named } from "./state.js";
 import type { Handler } from "./support.js";
 
@@ -15,6 +16,8 @@ export function handlerTestContext(
     body?: unknown;
     params?: Record<string, string>;
     query?: Record<string, string>;
+    /** Request headers in any casing; the context lower-cases them like the pipeline does. */
+    headers?: Record<string, string>;
     /** The token's grade on the endpoint's permission; write, the mask default, unless a test narrows it. */
     grade?: MaskGrade;
   } = {},
@@ -35,6 +38,7 @@ export function handlerTestContext(
     },
     query: opts.query ?? {},
     body: opts.body,
+    headers: requestHeaders(opts.headers ?? {}),
     grants: (kind) => GRADE_RANK[opts.grade ?? "write"] >= GRADE_RANK[kind],
   };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../../src/sections/teams/mock.js";
 import type { MockHandle } from "./server.js";
 import { call, json, jsonArray, mockServerLifecycle, scenario } from "./server-test-support.js";
 
@@ -9,6 +10,11 @@ describe("multi-repo mode", () => {
   const settingsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
   const contentsGet = (h: MockHandle, slug: string) =>
     call(h, "GET", settingsPath(slug), { headers: { accept: RAW_ACCEPT } });
+  /** The team probe as the section sends it: the repository media type is what earns the role_name body. */
+  const probeTeam = (h: MockHandle, slug: string) =>
+    call(h, "GET", `/orgs/e2e-owner/teams/reviewers/repos/${slug}`, {
+      headers: { accept: TEAM_REPOSITORY_MEDIA_TYPE },
+    });
 
   test("contents serves a configured slug's raw settings, 404s a null-settings slug", async () => {
     const h = await start(
@@ -209,10 +215,10 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    const res = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-a");
+    const res = await probeTeam(h, "e2e-owner/svc-a");
     expect(res.status).toBe(200);
     expect((await json(res)).role_name).toBe("write");
-    const missing = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-b");
+    const missing = await probeTeam(h, "e2e-owner/svc-b");
     expect(missing.status).toBe(404);
     expect(h.violations).toHaveLength(0);
   });
@@ -233,7 +239,7 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    const res = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-a");
+    const res = await probeTeam(h, "e2e-owner/svc-a");
     expect(res.status).toBe(404); // denied by global org_members: none
     const log = h.requests.find((r) => r.pathname.includes("/teams/reviewers/"));
     expect(log?.deniedBy).toBe("org_members");
@@ -260,12 +266,12 @@ describe("multi-repo mode", () => {
         },
       }),
     );
-    const a = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-a");
+    const a = await probeTeam(h, "e2e-owner/svc-a");
     expect(a.status).toBe(404);
     expect(h.requests.find((r) => r.pathname.endsWith("/repos/e2e-owner/svc-a"))?.deniedBy).toBe(
       "administration",
     );
-    const b = await call(h, "GET", "/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/svc-b");
+    const b = await probeTeam(h, "e2e-owner/svc-b");
     expect(b.status).toBe(200);
   });
 
