@@ -399,8 +399,9 @@ describe("concludeRun", () => {
     const { io, events, outputs } = captureIo();
     expect(failRun(io, { code: "input-token-missing" })).toBe(1);
     expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
+    // The wording is describeProblem's (test/problem.test.ts); here only the line's place before the outputs matters.
     expect(events).toEqual([
-      'annotate error: cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
+      expect.stringMatching(/^annotate error: cannot call the GitHub API: no token was provided/),
       "output result=failed",
       "output skipped-sections=",
       "output repos-result={}",
