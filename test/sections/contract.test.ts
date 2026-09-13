@@ -940,7 +940,7 @@ describe("plainData", () => {
   const PLAIN = "; request data must be plain";
   // One refusal covers two list shapes; it names both and what JSON does with each, so the reader can tell them apart.
   const HOLE_OR_HIDDEN_ITEM = new RegExp(
-    `^${BUG}list: (?=.*\\ba hole\\b.*\\bnull\\b)(?=.*non-enumerable item\\b.*\\bkeeps\\b).*${PLAIN}$`,
+    `^${BUG}list: (?=.*\\ba hole, which JSON \\w+ as null\\b)(?=.*\\bnon-enumerable item, which JSON keeps\\b).*${PLAIN}$`,
   );
   test.each<[what: string, value: unknown, message: string | RegExp]>([
     ["a function", { rules: [{ check: () => true }] }, `${BUG}rules[0].check: a function${PLAIN}`],
