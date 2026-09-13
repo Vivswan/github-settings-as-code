@@ -134,10 +134,6 @@ function isOwner(ctx: CollaboratorsContext, login: string): boolean {
   return login.toLowerCase() === ctx.repo.owner.toLowerCase();
 }
 
-function emailInvitationNote(invitation: LiveInvitation, outcome: string): string {
-  return `invitation ${invitation.id} was sent by email, so no username can declare it; ${outcome}`;
-}
-
 export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
@@ -323,10 +319,7 @@ export const collaboratorsSection = {
 
     for (const invitation of emailInvitations) {
       plan.notes.push(
-        emailInvitationNote(
-          invitation,
-          "left untouched - cancel it from the repository's Access settings if it is unwanted",
-        ),
+        `invitation ${invitation.id} was sent by email, so no username can declare it; left untouched - cancel it from the repository's Access settings if it is unwanted`,
       );
     }
     return plan;

@@ -25,7 +25,7 @@ export const ORG_PROBE = {
 export function personalAccountNote(
   section: SectionMeta,
   owner: string,
-  probe: object,
+  probe: { data: unknown } | { missing: true },
   phase: "plan" | "snapshot",
 ): string | undefined {
   if (!("missing" in probe)) {
