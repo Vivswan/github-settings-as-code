@@ -293,6 +293,7 @@ Their lines are the engines' lines now:
 
 | Line | v2 | v3 |
 |---|---|---|
+| A missing declared variable | `environments[prod].variables[X]: missing - declared in the settings file but not on the environment; ...` | `... but not on environment "prod"; ...` |
 | A variable delete | `DELETED undeclared variable "X" from environment "prod"` | `DELETED undeclared variable "X" in environment "prod"` |
 | Two entries naming one variable or secret | `environments: the "prod" entry declares variables that GitHub treats as the same variable ...` | `environments: the settings file declares entries that name the same variable of the "prod" environment: "a" and "A". Keep exactly one entry per resource` (branch policies and protection rules spell theirs the same way) |
 | The secrets cannot-verify note | once per environment that exists | once per environment with declared secrets, the missing environment included, under the `environments[prod].secrets` label |

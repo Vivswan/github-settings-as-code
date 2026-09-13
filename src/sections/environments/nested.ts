@@ -254,12 +254,16 @@ export async function listEnvironmentVariables(
   );
 }
 
-/** The words the two engines render one environment's nested lists with. */
+/**
+ * The words the two engines render one environment's nested lists with. A variable's kept note names
+ * the environment (two environments holding the same undeclared name would otherwise emit one note
+ * twice); a secret's noun already carries it.
+ */
 function nestedProse(envName: string, key: "variables" | "secrets", noun: string) {
   return {
     label: `environments[${envName}].${key}`,
     noun,
-    where: "the environment",
+    where: key === "variables" ? `environment "${envName}"` : "the environment",
     suffix: ` in environment "${envName}"`,
   };
 }

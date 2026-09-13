@@ -251,7 +251,7 @@ describe("environments variables check mode", () => {
     });
     const result = await check(api, [{ name: "prod", variables: [{ name: "A", value: "1" }] }]);
     expect(result.drift).toEqual([
-      "environments[prod].variables[A]: missing - declared in the settings file but not on the environment; apply will create it",
+      'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
     ]);
   });
 });
@@ -308,7 +308,7 @@ describe("environments variables undeclared policy", () => {
       { name: "prod", variables: { _undeclared: "keep", entries: [] } },
     ]);
     expect(result.notes).toEqual([
-      'variable "LEGACY" exists on the environment but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
+      'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
     ]);
     expect(api.mutations()).toEqual([]);
   });
@@ -1110,7 +1110,7 @@ describe("environments missing-environment planning across the nested families",
       { name: "prod", variables: [{ name: "A", value: "1" }] },
       "environments[prod].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables",
       "/variables",
-      "environments[prod].variables[A]: missing - declared in the settings file but not on the environment; apply will create it",
+      'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
     ],
     [
       "secrets",
