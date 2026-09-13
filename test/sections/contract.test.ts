@@ -938,7 +938,11 @@ describe("plainData", () => {
 
   const BUG = "BUG: a planned payload carries a value JSON cannot carry at ";
   const PLAIN = "; request data must be plain";
-  test.each<[what: string, value: unknown, message: string]>([
+  // One refusal covers two list shapes; it names both and what JSON does with each, so the reader can tell them apart.
+  const HOLE_OR_HIDDEN_ITEM = new RegExp(
+    `^${BUG}list: (?=.*\\ba hole, which JSON \\w+ as null\\b)(?=.*\\bnon-enumerable item, which JSON keeps\\b).*${PLAIN}$`,
+  );
+  test.each<[what: string, value: unknown, message: string | RegExp]>([
     ["a function", { rules: [{ check: () => true }] }, `${BUG}rules[0].check: a function${PLAIN}`],
     ["a bigint", { limit: 10n }, `${BUG}limit: a bigint${PLAIN}`],
     ["a class instance", { when: new Date(0) }, `${BUG}when: a non-plain object${PLAIN}`],
@@ -983,15 +987,17 @@ describe("plainData", () => {
       // Enumerable keys against the length: a hole and a non-enumerable item both fall short of it.
       "a list with a non-enumerable item",
       { list: Object.defineProperty([1], "0", { enumerable: false }) },
-      `${BUG}list: a list with a hole or a non-enumerable item, which JSON reads as null${PLAIN}`,
+      HOLE_OR_HIDDEN_ITEM,
     ],
     [
       "a list with a hole",
       { list: Object.assign(new Array(3), { 0: 1, 2: 3 }) },
-      `${BUG}list: a list with a hole or a non-enumerable item, which JSON reads as null${PLAIN}`,
+      HOLE_OR_HIDDEN_ITEM,
     ],
   ])("rejects %s, naming its path", (_what, value, message) => {
-    expect(() => plainData(value)).toThrow(new Error(message));
+    expect(() => plainData(value)).toThrow(
+      typeof message === "string" ? new Error(message) : message,
+    );
   });
 
   test("rejects a cycle, and only a cycle: a shared sibling reference is plain", () => {

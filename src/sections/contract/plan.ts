@@ -102,7 +102,10 @@ export function plainData(value: unknown): PlainData {
         reject(path, "a list carrying named properties, which JSON drops");
       }
       if (Object.keys(node).length !== node.length) {
-        reject(path, "a list with a hole or a non-enumerable item, which JSON reads as null");
+        reject(
+          path,
+          "a list whose enumerable keys fall short of its length: a hole, which JSON renders as null, or a non-enumerable item, which JSON keeps but Object.keys skips",
+        );
       }
       for (const [index, item] of node.entries()) {
         if (item === undefined) {

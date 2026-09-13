@@ -96,7 +96,8 @@ export const RESOURCE_SLUGS: Record<PatResource, string | null> = {
 /**
  * `access` defaults to "write" (a section both reads and writes), and a denial on an override endpoint
  * passes overrideAdviceLevel (./errors.ts) so the advice asks for exactly the level the section needs.
- * The output is user-facing: EXPECTED_GRANT in test/sections/registry.test.ts pins every grant character for character.
+ * The output is user-facing and parsed: .github/scripts/gen-docs.ts reads each clause by regex into the PAT column
+ * of docs/reference/sections.md, so a reworded clause fails `bun run build:check` until the regex and the docs follow.
  */
 export function grantFor(
   permission: SectionPermission,

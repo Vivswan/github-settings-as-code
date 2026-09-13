@@ -219,3 +219,37 @@ describe("the wrapped undeclared-policy form", () => {
     ]);
   });
 });
+
+describe("a long problem list is cut, and the remainder is counted", () => {
+  // Both arms cut at the same depth: zod issues within one section, and unrecognized keys across a closed section's entries.
+  const SHOWN = 5;
+  test.each<[arm: string, docOf: (n: number) => Record<string, unknown>, tail: RegExp]>([
+    [
+      "shape issues",
+      (n) => ({
+        workflows: Array.from({ length: n }, (_, i) => ({ path: `w${i}.yml`, state: "paused" })),
+      }),
+      /\.\.\.and (\d+) more issue/,
+    ],
+    [
+      "unrecognized entry keys",
+      (n) => ({
+        collaborators: Array.from({ length: n }, (_, i) => ({ username: `u${i}`, permision: "x" })),
+      }),
+      /\.\.\.and (\d+) more entr(?:y|ies)\b/,
+    ],
+  ])(
+    "%s: N problems render the first five and count the rest; five render whole",
+    (_arm, docOf, tail) => {
+      const cut = issuesOf(docOf(SHOWN + 3)) ?? [];
+      expect(cut).toHaveLength(SHOWN + 1);
+      expect(cut.slice(0, SHOWN).filter((line) => tail.test(line))).toEqual([]);
+      expect(Number(tail.exec(cut[SHOWN] ?? "")?.[1])).toBe(3);
+      // The remainder is a count relation only: the zod arm spells its noun "issue(s)" whatever the count.
+      expect(Number(tail.exec(issuesOf(docOf(SHOWN + 1))?.[SHOWN] ?? "")?.[1])).toBe(1);
+      const whole = issuesOf(docOf(SHOWN)) ?? [];
+      expect(whole).toHaveLength(SHOWN);
+      expect(whole.filter((line) => tail.test(line))).toEqual([]);
+    },
+  );
+});
