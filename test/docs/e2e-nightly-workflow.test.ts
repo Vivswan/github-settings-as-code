@@ -82,7 +82,8 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(report?.id, "the report step has no id to read an output from").toBeDefined();
     const output = `steps.${report?.id}.outputs.issue-number`;
     // The field's value is a shell variable the step's env fills from the report step's output.
-    const variable = (dispatch?.run ?? "").match(/["']?issue=\$\{?([A-Z_]+)\}?/)?.[1] ?? "";
+    const variable =
+      (dispatch?.run ?? "").match(/["']?issue=\$\{?([A-Za-z_][\w]*)\}?(?![\w])/)?.[1] ?? "";
     expect(variable, "the issue field is not filled from a $VARIABLE").not.toBe("");
     expect(dispatch?.env?.[variable]).toBe(`\${{ ${output} }}`);
     // Gated on a non-empty number, so the dispatch never expands to a bare `issue=`.

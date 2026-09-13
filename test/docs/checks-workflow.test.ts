@@ -92,7 +92,7 @@ function relativeImportsOf(file: string): string[] {
       continue;
     }
     const match = call
-      ? line.match(/\b(?:import|require)\s*\(\s*(["'])([^"']+)\1\s*\)/)?.slice(1)
+      ? (line.match(/\b(?:import|require)\s*\(\s*(["'])([^"']+)\1\s*\)/)?.slice(1) ?? null)
       : line.match(/^import [^"]*from "([^"]+)";$/);
     expect(
       match,
