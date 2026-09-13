@@ -247,6 +247,21 @@ describe("runMerge writes through the shared writer", () => {
       }
     }));
 
+  test("a merged-file with a trailing slash fails on the rename, staged under the directory's own hidden name", () =>
+    withTempDir("run-merge-", (dir) => {
+      const layers = twoLayers(dir);
+      const mergedFile = `${dir}/out.yml/`;
+      // The rename cannot land on `out.yml/`; the staging name in the OS's line is the one observable of where the write staged.
+      expect(merge(layers, mergedFile)).toEqual(
+        err({
+          code: "merged-file-unwritable" as const,
+          path: mergedFile,
+          reason: expect.stringContaining(`rename '${dir}/.gsac-`),
+        }),
+      );
+      expect(readdirSync(dir).sort()).toEqual(["fleet.yml", "repo.yml"]);
+    }));
+
   test("a merged-file leaf at the filesystem's name limit is written: the staging name is short and its own", () =>
     withTempDir("run-merge-", (dir) => {
       const layers = twoLayers(dir);

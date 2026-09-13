@@ -6,7 +6,8 @@
  * or written through: an existing path there fails the write instead. A destination that is a symlink is replaced by
  * the rename, the link itself, never its referent, so the written document is always a regular file at `path`. The
  * guards over the writer hold one promise: an input layer is never the destination, under any name the read follows
- * or the rename reaches; deliberate evasion (hardlinks, mounts, races) is out of scope.
+ * or the rename reaches; deliberate evasion (hardlinks, mounts, races) is out of scope. A hard crash mid-write leaves
+ * the staging file for the user to remove (.gitignore hides it); no run sweeps a file another process may be writing.
  */
 
 import { randomBytes } from "node:crypto";
@@ -168,13 +169,12 @@ function isSymlink(path: string): boolean {
 
 /**
  * The error is the filesystem's own reason; each caller names the input that chose the path. The staging file sits in
- * the destination's directory, spelled as the caller spelled it (a `link/..` segment is the OS's to resolve, the same
- * way for both names), under a short name of its own (the destination's leaf may already be at NAME_MAX), and takes
- * an existing regular destination's mode, so a replaced 0600 file stays 0600.
+ * the destination's directory, spelled as the caller spelled it (dirname keeps a `link/..` segment for the OS to
+ * resolve, the same way for both names; join would collapse it), under a short name of its own (the destination's
+ * leaf may already be at NAME_MAX), and takes an existing regular destination's mode, so a replaced 0600 file stays 0600.
  */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  const directory = path.slice(0, path.length - basename(path).length);
-  const staging = `${directory}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+  const staging = `${dirname(path)}${sep}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
   // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
   // another writer got there first with (`wx` fails on it, and that failure is the one reported).
   let created = false;
