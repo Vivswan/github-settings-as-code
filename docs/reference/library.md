@@ -24,7 +24,7 @@ The `github:` form installs a packaged commit: the child of one `main` commit, c
 - Every green push to `main` mints one under the tag `build/<position>.<sha7>` and then prunes the tags to the ten newest: once ten newer commits have been packaged, a tag is deleted and GitHub may collect its commit, so a pin taken from an old tag can go on the next merge. A durable pin names a release tag's commit (`git rev-parse v2.1.0`) or an npm version.
 - The tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits; the retired `build` branch holds the packaged commits minted before the per-commit tags until the owner deletes it.
 
-To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at.
+To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/`: the entry and the internal entry with their declarations, and the CLI, the files the manifest's `exports` and `bin` point at.
 
 ## The two entries
 

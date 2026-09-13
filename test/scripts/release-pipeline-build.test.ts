@@ -494,28 +494,56 @@ describe("packageCommit", () => {
   });
 
   test.each(PERMANENT)(
-    "%s fails the tag push for good, with git's own words, and nothing reaches origin",
+    "%s fails the tag push for good after every attempt (a refusal with the ref absent looks like a rival's create-and-prune), with git's own words, and nothing reaches origin",
     (_name, stderr) => {
       const fx = seedFixture();
       const ref = buildTagOf(fx, fx.mergeSha);
+      const fail = { fail: { stderr, status: 128 } };
       let error: unknown;
-      const pushes = withPushPlans(fx, [{ fail: { stderr, status: 128 } }], () => {
+      const pushes = withPushPlans(fx, [fail, fail, fail], () => {
         try {
           packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
         } catch (thrown) {
           error = thrown;
         }
       });
-      const attempted = createdSha(pushes[0] ?? []);
-      expect(pushes).toEqual([createOf(attempted, ref)]);
-      expect(parentsOf(fx.work, attempted)).toEqual([fx.mergeSha]);
+      const attempted = pushes.map(createdSha);
+      expect(pushes).toEqual(attempted.map((sha) => createOf(sha, ref)));
+      expect(attempted).toHaveLength(3);
+      for (const sha of attempted) {
+        expect(parentsOf(fx.work, sha)).toEqual([fx.mergeSha]);
+      }
       expect(error).toEqual(
-        new Error(`git push origin ${attempted}:${ref} failed: ${stderr.trim()}`),
+        new Error(`git push origin ${attempted[2]}:${ref} failed: ${stderr.trim()}`),
       );
       expect(buildTags(fx)).toEqual([]);
       expect(remoteRef(fx, LATEST)).toBe("");
     },
   );
+
+  test("a create refused while the ref reads absent (a rival created and pruned it in between) is tried again, and the retry lands", () => {
+    const fx = seedFixture();
+    const ref = buildTagOf(fx, fx.mergeSha);
+    const stderr = PERMANENT[0]?.[1] ?? "";
+    let result: ReturnType<typeof packageCommit> | undefined;
+    const pushes = withPushPlans(fx, [{ fail: { stderr, status: 128 } }], () => {
+      result = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha, runUrl: RUN_URL });
+    });
+    const packaged = packagedOf(fx, fx.mergeSha);
+    expect(result && outcome(result)).toEqual({
+      created: true,
+      ref,
+      commit: packaged,
+      source: fx.mergeSha,
+      pruned: [],
+      latest: { sha: packaged, changed: true },
+    });
+    expect(pushes).toEqual([
+      createOf(createdSha(pushes[0] ?? []), ref),
+      createOf(packaged, ref),
+      moveOf(LATEST, "", packaged),
+    ]);
+  });
 
   test.each(PERMANENT)(
     "%s fails the latest push for good, with git's own words, after the tag was minted",

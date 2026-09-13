@@ -346,7 +346,9 @@ interface EnsuredTag extends Packaged {
 /**
  * A tag that exists exactly once: an existing one is fetched and `verify`d, an absent one is created with a plain
  * push (no force, no lease) on the commit `mint` returns. git refuses the push once the tag exists, so the loser of
- * two runs verifies the winner's commit as a rerun does. A ref that vanishes or moves mid-read is read again.
+ * two runs verifies the winner's commit as a rerun does. A ref that vanishes or moves mid-read is read again, and so
+ * is a refused create whose ref is absent on the re-read (a rival created and pruned it in between, or the push was
+ * refused for good: the two look alike, so the refusal is thrown only once every attempt is spent).
  */
 function ensureTag(
   cwd: string,
@@ -355,6 +357,7 @@ function ensureTag(
   mint: () => string,
   verify: (peeled: string) => void,
 ): EnsuredTag {
+  let refused: Error | null = null;
   for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
     const observed = observeRemote(cwd, ref);
     if (observed.id !== "") {
@@ -365,16 +368,16 @@ function ensureTag(
       return { created: false, ref, commit: observed.peeled, source };
     }
     const commit = mint();
-    const refused = push(cwd, "origin", `${commit}:${ref}`);
+    refused = push(cwd, "origin", `${commit}:${ref}`);
     if (refused === null) {
       return { created: true, ref, commit, source };
     }
-    if (observeRemote(cwd, ref).id === "") {
-      throw refused;
-    }
   }
-  throw new Error(
-    `${ref} kept changing under this run through ${PUSH_ATTEMPTS} reads; something keeps creating and deleting it - rerun this job once it settles.`,
+  throw (
+    refused ??
+    new Error(
+      `${ref} kept changing under this run through ${PUSH_ATTEMPTS} reads; something keeps creating and deleting it - rerun this job once it settles.`,
+    )
   );
 }
 
