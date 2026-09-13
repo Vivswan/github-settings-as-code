@@ -39,10 +39,10 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(String(report?.with?.["artifact-name"])).toBe(String(upload?.with?.name));
     const dir = String(upload?.with?.path).replace(/\/$/, "");
     expect(dir).toBe(String(report?.with?.["artifacts-dir"]));
-    // The runner joins the directory from quoted segments; the workflow's path must be those segments in order.
+    // The runner joins the directory from ROOT and quoted segments; the workflow's path must be exactly those segments, in order.
     const segments = dir.split("/").map((segment) => JSON.stringify(segment).replace(/\./g, "\\."));
-    expect(RUNNER, `test/e2e/runner.ts never joins ${dir}`).toMatch(
-      new RegExp(segments.join("\\s*,\\s*")),
+    expect(RUNNER, `test/e2e/runner.ts never joins ${dir} under ROOT`).toMatch(
+      new RegExp(`join\\(\\s*ROOT\\s*,\\s*${segments.join("\\s*,\\s*")}\\s*,\\s*\``),
     );
   });
 
@@ -90,5 +90,6 @@ test("the nightlies file under distinct labels, so one's green night cannot clos
   const labels = NIGHTLIES.map(
     ([file, job]) => filerIn(readWorkflow(file).jobs[job]?.steps ?? [], "report")?.with?.label,
   );
-  expect(new Set(labels).size).toBe(labels.length);
+  // GitHub compares label names without regard to case.
+  expect(new Set(labels.map((label) => String(label).toLowerCase())).size).toBe(labels.length);
 });
