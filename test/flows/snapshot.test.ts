@@ -804,6 +804,46 @@ describe("runSnapshot, dir form", () => {
       ]);
     }));
 
+  test("two targets carried to one file by an operator link fail the second, naming both; the first's file stands", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/alice/r": { data: { private: false } },
+        "GET /repos/bob/r": { data: { private: false } },
+        ...labelsRoute("alice/r", [BUG]),
+        ...labelsRoute("bob/r", [DOCS]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "alice/r,bob/r" });
+      // `snapshots/bob -> snapshots/alice`: bob/r's file lands on alice/r's, and a last-writer-wins would report both written.
+      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+      symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      const landing = realpathSync(join(cfg.snapshotDir, "alice", "r.yml"));
+      expect(collected.lines).toEqual([
+        { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
+        {
+          level: "error",
+          line:
+            `bob/r: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "r.yml")}: the filesystem carries it to ` +
+            `${landing}, the file this run already wrote for alice/r. Remove the link under the "snapshot-dir" input that ` +
+            "folds the two owners together, so each target has a file of its own",
+        },
+        { line: "result: failed" },
+      ]);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "failed",
+        "repos-result": JSON.stringify({
+          "alice/r": { result: "snapshot", source: "remote", "skipped-sections": [] },
+          "bob/r": { result: "failed", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "r.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+      expect(readdirSync(join(cfg.snapshotDir, "alice"))).toEqual(["r.yml"]);
+    }));
+
   test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       const api = new MockApi({

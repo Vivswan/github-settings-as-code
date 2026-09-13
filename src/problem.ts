@@ -29,9 +29,6 @@ export function quoteList(names: readonly string[]): string {
 /** The run modes that read exactly one settings file. */
 type EngineMode = "apply" | "check";
 
-/** Who reads exactly one settings file: an engine mode, or the command line's init, which writes one. */
-type OneFileReader = EngineMode | "init";
-
 /** How a non-mapping settings document's top level reads, in typeof terms. */
 export type TopLevelShape =
   | "list"
@@ -125,7 +122,8 @@ export type Problem =
   | {
       readonly code: "input-settings-file-is-list";
       readonly value: string;
-      readonly mode: OneFileReader;
+      /** An engine mode reading its one file, or the command line's init, which writes one. */
+      readonly mode: EngineMode | "init";
     }
   | { readonly code: "input-repository-not-slug"; readonly value: string }
   | { readonly code: "input-artifact-unsupported" }

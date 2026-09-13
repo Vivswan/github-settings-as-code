@@ -195,12 +195,16 @@ async function snapshotTarget(ctx: {
  * "." and "..", which GitHub never issues but a repos entry can spell; either
  * would leave the directory. And the filesystem may carry the file onto
  * authored ground in a way the two inputs cannot show: a link under either
- * directory that leads into the other, or an owner spelled ".github".
+ * directory that leads into the other, or an owner spelled ".github". Two
+ * targets can land on ONE file the same way (a link `out/bob -> out/alice`
+ * with targets alice/r and bob/r), so every landing is claimed in `claimed`
+ * for the run and a second claim is refused, naming both targets.
  */
 function snapshotFilePath(
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
   repo: RepoRef,
   authored: ReadonlySet<string>,
+  claimed: Map<string, string>,
 ): { path: string } | { error: string } {
   if ([repo.owner, repo.name].some((part) => part === "." || part === "..")) {
     return {
@@ -219,6 +223,13 @@ function snapshotFilePath(
       error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, inside the "repos-dir" input "${cfg.reposDir}". Write the snapshots to a directory that leads to no central file`,
     };
   }
+  const earlier = claimed.get(landing);
+  if (earlier !== undefined) {
+    return {
+      error: `cannot write the snapshot to ${path}: the filesystem carries it to ${landing}, the file this run already wrote for ${earlier}. Remove the link under the "snapshot-dir" input that folds the two owners together, so each target has a file of its own`,
+    };
+  }
+  claimed.set(landing, repo.slug);
   return { path };
 }
 
@@ -278,6 +289,8 @@ async function snapshotDir(
     canonicalPath(DEFAULT_SETTINGS_FILE),
     ...resolved.targets.flatMap((t) => (t.source === "central" ? [canonicalPath(t.filePath)] : [])),
   ]);
+  // Every landing this run writes, by the target that claimed it; the one writer's answer to two targets on one file.
+  const claimed = new Map<string, string>();
   const targets: TargetOutcome[] = [];
   for (const target of resolved.targets) {
     // The channel is opened BEFORE any processing so a failure lands in a
@@ -294,7 +307,7 @@ async function snapshotDir(
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
       );
     } else {
-      const located = snapshotFilePath(cfg, repo, authored);
+      const located = snapshotFilePath(cfg, repo, authored, claimed);
       outcome =
         "error" in located
           ? fail(located.error)

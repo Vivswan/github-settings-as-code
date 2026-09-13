@@ -3,7 +3,8 @@
  * the destination and renamed into place, so a write that fails partway (disk full, an interrupted run) leaves the
  * previous file intact instead of a truncated one. The rename is atomic on POSIX and a single replace call on
  * Windows. The staging name is unique to the write (pid and random bytes), so no file of the user's is ever unlinked
- * or written through: an existing path there fails the write instead.
+ * or written through: an existing path there fails the write instead. A destination that is a symlink is replaced by
+ * the rename, the link itself, never its referent, so the written document is always a regular file at `path`.
  */
 
 import { randomBytes } from "node:crypto";
