@@ -1470,10 +1470,7 @@ const UNKEYED_KNOBBED_SECTIONS: readonly SectionKey[] = UNDECLARED_POLICY_SECTIO
 );
 
 /** The sections whose top-level null is the section's value; on every other section a null over nothing drops. */
-export const NULLABLE_SECTIONS = [
-  "pages",
-  "interaction_limits",
-] as const satisfies readonly SectionKey[];
+const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
 
 export function isNullValued(key: string): boolean {
   return (NULLABLE_SECTIONS as readonly string[]).includes(key);
