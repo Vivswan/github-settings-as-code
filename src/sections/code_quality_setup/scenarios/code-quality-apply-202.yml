@@ -23,4 +23,4 @@ expect:
     - "PATCH /repos/{repo}/code-quality/setup"
   stdout_contains:
     - "GitHub started configuration run"
-  converges: true
+  fixpoint: converges

@@ -30,4 +30,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/actions/permissions/fork-pr-contributor-approval"
     - "PUT /repos/{repo}/actions/permissions/fork-pr-workflows-private-repos"
-  converges: true
+  fixpoint: converges

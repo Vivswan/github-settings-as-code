@@ -30,4 +30,4 @@ expect:
     - "DELETED undeclared milestone \"v0.9\" (detached from every issue that carried it)"
   summary_contains:
     - "detached from every issue"
-  converges: true
+  fixpoint: converges

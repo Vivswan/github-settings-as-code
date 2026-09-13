@@ -25,4 +25,4 @@ expect:
   stdout_contains:
     - "invited collaborator \"e2e-new\""
     - "updated collaborator \"e2e-existing\""
-  converges: true
+  fixpoint: converges

@@ -23,4 +23,4 @@ expect:
     pages: applied
   mutations:
     - "PUT /repos/{repo}/pages"
-  converges: true
+  fixpoint: converges

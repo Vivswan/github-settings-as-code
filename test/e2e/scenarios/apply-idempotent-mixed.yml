@@ -40,4 +40,4 @@ live_state:
 expect:
   exit_code: 0
   result: applied
-  apply_idempotent: true
+  fixpoint: apply_idempotent

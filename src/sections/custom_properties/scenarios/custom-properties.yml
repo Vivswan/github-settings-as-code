@@ -36,4 +36,4 @@ expect:
   requests_contain:
     - GET /orgs/e2e-owner
     - GET /repos/e2e-owner/e2e-repo/properties/values
-  apply_idempotent: true
+  fixpoint: apply_idempotent

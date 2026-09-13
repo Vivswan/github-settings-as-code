@@ -41,4 +41,4 @@ expect:
     - "PUT /repos/{repo}/rulesets/4242"
   never:
     - "POST /repos/{repo}/rulesets"
-  converges: true
+  fixpoint: converges

@@ -21,4 +21,4 @@ expect:
     - "PATCH /repos/{repo}/code-quality/setup"
   stdout_contains:
     - "applied code quality setup"
-  converges: true
+  fixpoint: converges

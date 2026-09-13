@@ -37,4 +37,4 @@ expect:
     - DELETE /repos/{repo}/actions/variables/RETIRED_FLAG
   requests_contain:
     - GET /repos/e2e-owner/e2e-repo/actions/variables?per_page=30&page=1
-  apply_idempotent: true
+  fixpoint: apply_idempotent

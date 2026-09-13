@@ -29,4 +29,4 @@ expect:
     - "DELETE /repos/{repo}/autolinks/10"
     - "POST /repos/{repo}/autolinks"
     - "DELETE /repos/{repo}/autolinks/20"
-  converges: true
+  fixpoint: converges

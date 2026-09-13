@@ -34,4 +34,4 @@ expect:
   never:
     - "PUT /repos/{repo}/rulesets/900"
     - "DELETE /repos/{repo}/rulesets/900"
-  converges: true
+  fixpoint: converges

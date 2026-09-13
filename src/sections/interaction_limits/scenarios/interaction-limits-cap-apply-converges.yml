@@ -19,4 +19,4 @@ expect:
     - "PATCH /repos/{repo}/interaction-limits/pulls/creation-cap"
   never:
     - "PUT /repos/{repo}/interaction-limits"
-  converges: true
+  fixpoint: converges

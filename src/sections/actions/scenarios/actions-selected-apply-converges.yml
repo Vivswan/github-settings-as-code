@@ -24,4 +24,4 @@ expect:
   mutations:
     - "PUT /repos/{repo}/actions/permissions"
     - "PUT /repos/{repo}/actions/permissions/selected-actions"
-  converges: true
+  fixpoint: converges

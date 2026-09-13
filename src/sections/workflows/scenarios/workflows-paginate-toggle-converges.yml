@@ -127,4 +127,4 @@ expect:
     - "PUT /repos/{repo}/actions/workflows/2/enable"
   requests_contain:
     - "/actions/workflows?per_page=100&page=2"
-  converges: true
+  fixpoint: converges

@@ -16,4 +16,4 @@ expect:
     - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
   stdout_contains:
     - "granted team \"platform\" push"
-  converges: true
+  fixpoint: converges

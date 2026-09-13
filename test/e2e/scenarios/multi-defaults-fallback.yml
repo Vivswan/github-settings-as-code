@@ -54,4 +54,4 @@ expect:
   stdout_lacks:
     - "svc-own-file: applying the defaults file"
     - "skipped - the repository has no .github/settings.yml"
-  converges: true
+  fixpoint: converges

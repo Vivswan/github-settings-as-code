@@ -18,4 +18,4 @@ expect:
     interaction_limits: applied
   mutations:
     - "DELETE /repos/{repo}/interaction-limits"
-  converges: true
+  fixpoint: converges

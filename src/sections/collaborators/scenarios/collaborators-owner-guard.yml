@@ -28,4 +28,4 @@ expect:
     - "PUT /repos/{repo}/collaborators/e2e-keeper"
   stdout_contains:
     - "REMOVED undeclared collaborator \"e2e-stale\""
-  converges: true
+  fixpoint: converges

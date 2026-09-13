@@ -21,4 +21,4 @@ expect:
     actions: applied
   mutations:
     - "PUT /repos/{repo}/actions/oidc/customization/sub"
-  converges: true
+  fixpoint: converges

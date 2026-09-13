@@ -25,4 +25,4 @@ expect:
     - "POST /repos/{repo}/milestones"
   stdout_contains:
     - "updated milestone \"v1.0\""
-  converges: true
+  fixpoint: converges

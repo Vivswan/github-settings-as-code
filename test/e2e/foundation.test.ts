@@ -282,6 +282,43 @@ describe("scenario schema", () => {
       ),
     ).toThrow(/snapshot_converges only applies with inputs.mode: snapshot/);
   });
+
+  test.each(["converges", "apply_idempotent"] as const)("expect.fixpoint: %s parses", (proof) => {
+    const s = parseScenario(
+      { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: proof } },
+      "fixpoint.yml",
+    );
+    expect(s.expect.fixpoint).toBe(proof);
+  });
+
+  test("expect.fixpoint rejects a value outside the two proofs", () => {
+    expect(() =>
+      parseScenario(
+        { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: "idempotent" } },
+        "fixpoint.yml",
+      ),
+    ).toThrow(/expect\.fixpoint/);
+  });
+
+  test.each(["converges", "apply_idempotent"] as const)(
+    "the retired boolean expect.%s: true fails naming fixpoint and the rewrite",
+    (old) => {
+      expect(() =>
+        parseScenario(
+          { name: "x", settings: {}, expect: { exit_code: 0, [old]: true } },
+          "old.yml",
+        ),
+      ).toThrow(
+        `Unrecognized key: "${old}"; the expect key "${old}" was renamed to "fixpoint" - write fixpoint: ${old} and rewrite the scenario`,
+      );
+    },
+  );
+
+  test("an unknown expect key that is not a retired boolean stays a bare unrecognized-key issue", () => {
+    expect(() =>
+      parseScenario({ name: "x", settings: {}, expect: { exit_code: 0, bogus: true } }, "b.yml"),
+    ).toThrow(/expect: Unrecognized key: "bogus"$/m);
+  });
 });
 
 describe("scenario corpus loader (collectYmlFiles)", () => {

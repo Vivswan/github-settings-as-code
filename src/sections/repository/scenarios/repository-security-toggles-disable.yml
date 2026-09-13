@@ -25,4 +25,4 @@ expect:
   mutations:
     - "DELETE /repos/{repo}/vulnerability-alerts"
     - "DELETE /repos/{repo}/automated-security-fixes"
-  converges: true
+  fixpoint: converges

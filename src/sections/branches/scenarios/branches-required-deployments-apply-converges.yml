@@ -41,4 +41,4 @@ expect:
     - "GRAPHQL UpdateBranchProtectionRule"
   never:
     - "PUT /repos/{repo}/branches/dev/protection"
-  apply_idempotent: true
+  fixpoint: apply_idempotent

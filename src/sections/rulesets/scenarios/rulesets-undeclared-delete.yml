@@ -34,4 +34,4 @@ expect:
     - "DELETE /repos/{repo}/rulesets/501"
   stdout_contains:
     - "DELETED undeclared ruleset \"legacy-guard\""
-  converges: true
+  fixpoint: converges
