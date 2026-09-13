@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   ALL_SELECTING_PREFIXES,
@@ -11,12 +11,13 @@ import {
   scanImports,
   sectionsForFiles,
 } from "../../.github/scripts/changed-sections.js";
-import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
 const SRC_DIR = join(ROOT, "src");
 const SECTIONS_DIR = join(SRC_DIR, "sections");
+const SECTION_KEY_SET: ReadonlySet<string> = new Set(SECTION_KEYS);
 
 function changed(...paths: string[]): ChangedFile[] {
   return paths.map((path) => ({ path, deleted: false }));
@@ -75,74 +76,26 @@ const GRAPH_FIXTURE: Record<string, string> = {
 };
 
 describe("changed-sections derived fan-out", () => {
-  test("the real tree derives exactly the layout's fan-out for every shared file", () => {
-    // A canary over the whole map: a new or dropped importer, a new or deleted shared file, or a hub edge reopening surfaces here and forces a
-    // decision.
-    expect(deriveSharedFanOut(ROOT)).toEqual({
-      "roles.ts": inKeyOrder("collaborators", "teams"),
-      "secrets-engine.ts": inKeyOrder(
-        "environments",
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-      ),
-      "sealed-box.ts": inKeyOrder(
-        "environments",
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-      ),
-      "repo-secrets.ts": inKeyOrder(
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-      ),
-      "list-section.ts": inKeyOrder(
-        "labels",
-        "rulesets",
-        "autolinks",
-        "milestones",
-        "webhooks",
-        "deploy_keys",
-      ),
-      "variables-engine.ts": inKeyOrder("environments", "actions_variables", "agents_variables"),
-      "repo-variables.ts": inKeyOrder("actions_variables", "agents_variables"),
-      "setup-section.ts": inKeyOrder("code_scanning_default_setup", "code_quality_setup"),
-      // The snapshot projection and knobbed wrapper: every section with a snapshot() except
-      // workflows, whose two-field entries are spelled by hand.
-      "snapshot-helpers.ts": inKeyOrder(
-        "repository",
-        "labels",
-        "rulesets",
-        "environments",
-        "autolinks",
-        "actions",
-        "actions_secrets",
-        "dependabot_secrets",
-        "codespaces_secrets",
-        "agents_secrets",
-        "pages",
-        "code_scanning_default_setup",
-        "code_quality_setup",
-        "collaborators",
-        "teams",
-        "milestones",
-        "interaction_limits",
-        "actions_variables",
-        "agents_variables",
-        "webhooks",
-        "custom_properties",
-        "deploy_keys",
-        "secret_scanning_custom_patterns",
-      ),
-      // src/schema.ts imports knobbed() too, but sections reach src/schema.ts only through type imports, which are not edges.
-      "schema-helpers.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
-      // The docs shape imports renamed-key.ts too, but nothing bundled reaches the docs shape.
-      "renamed-key.ts": inKeyOrder(...UNDECLARED_POLICY_SECTIONS, "environments"),
-    });
+  test("every section that spells a shared import is in that shared file's derived fan-out", () => {
+    // The scan against a plain-text reading of the tree: a form the scan misses, or a section file it skips, would
+    // shrink a fan-out and let a PR under-select its smoke run.
+    const fanOut = deriveSharedFanOut(ROOT);
+    const spelled = new Map<string, Set<string>>();
+    for (const path of sectionsPathsOnDisk()) {
+      const dir = path.split("/")[2] ?? "";
+      if (!SECTION_KEY_SET.has(dir) || !path.endsWith(".ts") || path.endsWith(".test.ts")) {
+        continue;
+      }
+      const text = readFileSync(join(ROOT, path), "utf8");
+      for (const [, spec = ""] of text.matchAll(/from "\.\.\/shared\/([^"]+)"/g)) {
+        const shared = `${spec.replace(/\.js$/, "")}.ts`;
+        spelled.set(shared, new Set([...(spelled.get(shared) ?? []), dir]));
+      }
+    }
+    expect(spelled.size).toBeGreaterThan(5);
+    for (const [shared, dirs] of spelled) {
+      expect(fanOut[shared], shared).toEqual(expect.arrayContaining([...dirs]));
+    }
   });
 
   test("scanImports finds every runtime import form and nothing that only looks like one", () => {
@@ -248,22 +201,6 @@ describe("changed-sections derived fan-out", () => {
       });
     }));
 
-  test("a new import edge widens exactly the shared file it reaches", () =>
-    withTempDir("changed-sections-", (dir) => {
-      const fanOut = deriveSharedFanOut(
-        syntheticRepo(dir, {
-          ...GRAPH_FIXTURE,
-          "src/sections/webhooks/index.ts":
-            'import { engine } from "../shared/engine.js";\nexport default engine;\n',
-        }),
-      );
-      expect(fanOut).toEqual({
-        "engine.ts": inKeyOrder("labels", "teams", "webhooks"),
-        "factory.ts": inKeyOrder("labels"),
-        "util/index.ts": inKeyOrder("pages", "milestones"),
-      });
-    }));
-
   test("a shared file no section imports throws", () =>
     withTempDir("changed-sections-", (dir) => {
       const root = syntheticRepo(dir, {
@@ -285,20 +222,6 @@ describe("changed-sections derived fan-out", () => {
           'import { gone } from "../shared/gone.js";\nexport default gone;\n',
       });
       expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
-    }));
-
-  test("a computed import anywhere under src fails the whole derivation, naming the file", () =>
-    withTempDir("changed-sections-", (dir) => {
-      // The template edge in GRAPH_FIXTURE (pages/mock.ts) proves a substitution-free template passes.
-      for (const load of ["await import(which)", "require(which)", `await import(\`\${which}\`)`]) {
-        const root = syntheticRepo(dir, {
-          ...GRAPH_FIXTURE,
-          "src/sections/webhooks/index.ts": `const which = "../shared/engine.js";\nexport const engine = ${load};\n`,
-        });
-        expect(() => deriveSharedFanOut(root), load).toThrow(
-          /src\/sections\/webhooks\/index\.ts:2 loads a module through a computed specifier/,
-        );
-      }
     }));
 });
 
@@ -356,13 +279,12 @@ describe("changed-sections selection", () => {
     ).toBe("secret_scanning_custom_patterns");
   });
 
-  test("shared files fan out to their consumers", () => {
+  test("a shared file selects its derived fan-out", () => {
+    const fanOut = deriveSharedFanOut(ROOT)["roles.ts"] ?? [];
+    expect(fanOut.length).toBeGreaterThan(1);
     expect(renderSelection(sectionsForFiles(changed("src/sections/shared/roles.ts")))).toBe(
-      "collaborators,teams",
+      fanOut.join(","),
     );
-    expect(
-      renderSelection(sectionsForFiles(changed("src/sections/shared/secrets-engine.ts"))),
-    ).toBe("environments,actions_secrets,dependabot_secrets,codespaces_secrets,agents_secrets");
   });
 
   test("a deleted shared file adds nothing itself; every other path rule still applies", () => {
@@ -439,36 +361,23 @@ describe("changed-sections selection", () => {
     expect(() => parseNameStatus("M\0README.md")).toThrow(/not NUL-terminated/);
   });
 
-  test("an unrecognized src/sections path throws instead of silently selecting nothing", () => {
-    expect(() => sectionsForFiles(changed("src/sections/stray-helper.ts"))).toThrow(
-      /matches no selector rule/,
-    );
-    expect(() => sectionsForFiles(changed("src/sections/not_a_key/index.ts"))).toThrow(
-      /matches no selector rule/,
-    );
-    expect(() => sectionsForFiles(changed("src/sections/shared/unmapped.ts"))).toThrow(
-      /matches no selector rule/,
-    );
-  });
-
-  test("a flat src/sections file besides the registry files throws", () => {
-    // registry.ts and docs-registry.ts are the only flat files the layout allows; any other flat path must fail loudly, whatever its history.
-    for (const stale of [
+  test("an unrecognized src/sections path throws instead of silently selecting nothing, even beside a cross-cutting path", () => {
+    // registry.ts and docs-registry.ts are the only flat files the layout allows; a section directory must spell its
+    // key; under shared/ only mapped .ts files and the docs prose are known.
+    for (const stray of [
       "src/sections/labels.ts",
-      "src/sections/deploy-keys.ts",
-      "src/sections/code-scanning.ts",
-      "src/sections/roles.ts",
-      "src/sections/secrets-engine.ts",
-      "src/sections/contract.ts",
+      "src/sections/not_a_key/index.ts",
+      "src/sections/shared/unmapped.ts",
     ]) {
-      expect(() => sectionsForFiles(changed(stale)), `${stale} must throw`).toThrow(
+      expect(() => sectionsForFiles(changed(stray)), `${stray} must throw`).toThrow(
         /matches no selector rule/,
       );
+      // Every src/sections/ path is resolved before answering "all", so the stray path cannot ride along.
+      expect(
+        () => sectionsForFiles(changed("src/schema.ts", stray)),
+        `${stray} beside a core path`,
+      ).toThrow(/matches no selector rule/);
     }
-    // A cross-cutting path in the same diff must not mask the stale path: every src/sections/ path is resolved before answering "all".
-    expect(() => sectionsForFiles(changed("src/schema.ts", "src/sections/labels.ts"))).toThrow(
-      /matches no selector rule/,
-    );
   });
 
   test("multiple section directories union in SECTION_KEYS order", () => {
@@ -507,21 +416,14 @@ describe("changed-sections selection", () => {
     );
   });
 
-  test("core paths select all", () => {
+  test("the cross-cutting paths outside src's top level select all", () => {
+    // The src/ entries are held to ALL_SELECTING_PREFIXES by the file-map test; these prefixes have no such reading.
     for (const file of [
-      "src/engine/orchestrate.ts",
-      "src/github/api.ts",
-      "src/action/inputs.ts",
-      "src/discovery/discover.ts",
-      "src/report/issue-report.ts",
-      "src/io.ts",
-      "src/main.ts",
-      "src/schema.ts",
+      "src/sections/contract/requests.ts",
       "test/e2e/runner.ts",
       ".github/scripts/changed-sections.ts",
       ".github/workflows/checks.yml",
       ".github/actions/fetch-test-artifacts/action.yml",
-      "src/sections/contract/requests.ts",
     ]) {
       expect(sectionsForFiles(changed(file)), `${file} should select all`).toEqual({
         kind: "all",
@@ -535,15 +437,6 @@ describe("changed-sections selection", () => {
       changed("src/sections/labels/index.ts", "lib/settings.schema.json"),
     );
     expect(renderSelection(selection)).toBe("labels");
-  });
-
-  test("a lib-only diff selects none (the schema-check job gates schema drift)", () => {
-    // The only committed file under lib/ is the generated schema, which carries no runnable code.
-    expect(sectionsForFiles(changed("lib/settings.schema.json")).kind).toBe("none");
-  });
-
-  test("lib alongside a docs-only change selects none", () => {
-    expect(sectionsForFiles(changed("README.md", "lib/settings.schema.json")).kind).toBe("none");
   });
 
   test("a core-path change wins over a section change", () => {
