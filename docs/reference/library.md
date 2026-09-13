@@ -63,7 +63,7 @@ The examples continue from one another and form one program (the docs tests comp
 
 | Name | Kind | Says |
 |---|---|---|
-| `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes |
+| `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a top-level `null` is a fold marker, not a document value (except on `pages` and `interaction_limits`, whose null is the section's value), so `validateSettings({ labels: null })` refuses where `mergeSettings([{ name, doc: { labels: null } }])` accepts and drops the section |
 | `ValidateOptions` | type | `source`, `sections`, `io` |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |

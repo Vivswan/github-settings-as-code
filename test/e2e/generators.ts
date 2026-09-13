@@ -1424,8 +1424,10 @@ export const MERGE_FEATURES = [
   "null-nested",
   /** A null field inside a ruleset entry. */
   "null-entry-field",
-  /** A top-level null over a section the fold does not hold. */
+  /** A top-level null over a section the fold does not hold, where null is the section's value (NULLABLE_SECTIONS). */
   "null-stays",
+  /** A top-level null over a section the fold does not hold and whose value null is not: it drops. */
+  "null-drops",
   "wrapper-undeclared",
   "wrapper-layering-merge",
   "wrapper-layering-replace",
@@ -1467,8 +1469,15 @@ const UNKEYED_KNOBBED_SECTIONS: readonly SectionKey[] = UNDECLARED_POLICY_SECTIO
   (key) => !KEYED_MERGE_SECTIONS.has(key),
 );
 
-/** The sections whose value may be null on its own (the clear/opt-out spelling). */
-const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
+/** The sections whose top-level null is the section's value; on every other section a null over nothing drops. */
+export const NULLABLE_SECTIONS = [
+  "pages",
+  "interaction_limits",
+] as const satisfies readonly SectionKey[];
+
+export function isNullValued(key: string): boolean {
+  return (NULLABLE_SECTIONS as readonly string[]).includes(key);
+}
 
 function isKnobbedSection(key: string): key is (typeof UNDECLARED_POLICY_SECTIONS)[number] {
   return (UNDECLARED_POLICY_SECTIONS as readonly string[]).includes(key);
@@ -1744,7 +1753,9 @@ export function mergeFeaturesOf(
     for (const key of keys) {
       const value = doc[key];
       if (value === null) {
-        features.add(present.has(key) ? "null-deletes" : "null-stays");
+        features.add(
+          present.has(key) ? "null-deletes" : isNullValued(key) ? "null-stays" : "null-drops",
+        );
         present.delete(key);
         if (key === "labels" || key === "rulesets") {
           advanceHeld(held, key, null, false);
@@ -2107,7 +2118,7 @@ function placeNulls(
   const doc = draft.doc;
   const attempts = rng.int(2) + 1;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const roll = rng.int(4);
+    const roll = rng.int(5);
     if (roll === 0) {
       const candidates = [...present];
       if (candidates.length > 0) {
@@ -2115,9 +2126,10 @@ function placeNulls(
       }
       continue;
     }
-    if (roll === 1) {
-      const candidates = NULLABLE_SECTIONS.filter(
-        (key) => pool.includes(key) && !present.has(key) && doc[key] === undefined,
+    if (roll === 1 || roll === 4) {
+      // 1 draws a null that stays (null-stays), 4 one that drops (null-drops).
+      const candidates = pool.filter(
+        (key) => isNullValued(key) === (roll === 1) && !present.has(key) && doc[key] === undefined,
       );
       if (candidates.length > 0) {
         doc[rng.pick(candidates)] = null;
