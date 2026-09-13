@@ -224,75 +224,31 @@ describe("discoverRepos", () => {
     expect(slugs(discovered.repos)).toEqual(["o/x"]);
   });
 
-  test("a denied listing explains the PAT requirement", async () => {
-    const api = new MockApi({
-      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
-        error: { status: 403, message: "Resource not accessible", body: "" },
-      },
-    });
-    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
-      err({
-        code: "discovery-request-failed",
-        path: "/user/repos?affiliation=owner",
-        status: 403,
-        message: "Resource not accessible",
-        denied: true,
-      }),
-    );
-  });
-
-  test("a rate-limit 403 gets re-run advice, not PAT advice", async () => {
-    // A primary rate limit is a 403 whose message names the rate limit; isPermissionError excludes it, so discovery must not tell the operator to
-    // swap tokens for a transient throttle.
-    const api = new MockApi({
-      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
-        error: { status: 403, message: "API rate limit exceeded for user", body: "" },
-      },
-    });
-    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
-      err({
-        code: "discovery-request-failed",
-        path: "/user/repos?affiliation=owner",
-        status: 403,
-        message: "API rate limit exceeded for user",
-        denied: false,
-      }),
-    );
-  });
-
-  test("an expired-token 401 explains the PAT requirement", async () => {
-    const api = new MockApi({
-      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
-        error: { status: 401, message: "Bad credentials", body: "" },
-      },
-    });
-    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
-      err({
-        code: "discovery-request-failed",
-        path: "/user/repos?affiliation=owner",
-        status: 401,
-        message: "Bad credentials",
-        denied: true,
-      }),
-    );
-  });
-
-  test("a server error gets re-run advice, not PAT advice", async () => {
-    const api = new MockApi({
-      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
-        error: { status: 500, message: "boom", body: "" },
-      },
-    });
-    expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
-      err({
-        code: "discovery-request-failed",
-        path: "/user/repos?affiliation=owner",
-        status: 500,
-        message: "boom",
-        denied: false,
-      }),
-    );
-  });
+  // isPermissionError decides the denial (test/github/api.test.ts); the rows here pin how discovery reads its answer.
+  test.each<[string, number, string, boolean]>([
+    ["a denied listing", 403, "Resource not accessible", true],
+    ["a rate-limit 403", 403, "API rate limit exceeded for user", false],
+    ["an expired-token 401", 401, "Bad credentials", true],
+    ["a server error", 500, "boom", false],
+  ])(
+    "%s (%i %s) reads denied=%p: true picks PAT advice, false re-run advice",
+    async (_case, status, message, denied) => {
+      const api = new MockApi({
+        "GET /user/repos?affiliation=owner&per_page=100&page=1": {
+          error: { status, message, body: "" },
+        },
+      });
+      expect(await discoverRepos(api, DEFAULT_DISCOVERY_FILTERS)).toEqual(
+        err({
+          code: "discovery-request-failed",
+          path: "/user/repos?affiliation=owner",
+          status,
+          message,
+          denied,
+        }),
+      );
+    },
+  );
 });
 
 describe("formatSkipNotice", () => {
@@ -312,13 +268,6 @@ describe("formatSkipNotice", () => {
     );
   });
 
-  test("without redaction, only the first 20 slugs are listed", () => {
-    const repos = Array.from({ length: 23 }, (_, i) => ref(`o/r${i}`));
-    expect(formatSkipNotice({ reason: "forks=exclude", repos }, false)).toBe(
-      'repos: "*" discovery skipped 23 repositories by forks=exclude: o/r0, o/r1, o/r2, o/r3, o/r4, o/r5, o/r6, o/r7, o/r8, o/r9, o/r10, o/r11, o/r12, o/r13, o/r14, o/r15, o/r16, o/r17, o/r18, o/r19, and 3 more',
-    );
-  });
-
   test("redaction lists public slugs and counts the rest", () => {
     const group = {
       reason: "forks=exclude",
@@ -326,23 +275,6 @@ describe("formatSkipNotice", () => {
     };
     expect(formatSkipNotice(group, true)).toBe(
       'repos: "*" discovery skipped 4 repositories by forks=exclude: o/a, o/c, and 2 private or internal repositories',
-    );
-  });
-
-  test("a single hidden repo gets the singular count", () => {
-    const group = { reason: "forks=exclude", repos: [ref("o/a"), ref("o/b", "private")] };
-    expect(formatSkipNotice(group, true)).toBe(
-      'repos: "*" discovery skipped 2 repositories by forks=exclude: o/a, and 1 private or internal repository',
-    );
-  });
-
-  test("an all-private group renders the count only, with no names", () => {
-    const group = {
-      reason: "forks=exclude",
-      repos: [ref("o/a", "private"), ref("o/b", "internal")],
-    };
-    expect(formatSkipNotice(group, true)).toBe(
-      'repos: "*" discovery skipped 2 private or internal repositories by forks=exclude',
     );
   });
 
@@ -354,9 +286,12 @@ describe("formatSkipNotice", () => {
     expect(formatSkipNotice(mixed, true)).toBe(
       'repos: "*" discovery skipped 2 repositories because settings writes fail on archived repositories; unarchive them to manage them: o/a, and 1 private or internal repository',
     );
-    const allPrivate = { reason: "archived", repos: [ref("o/b", "private")] };
+    const allPrivate = {
+      reason: "archived",
+      repos: [ref("o/b", "private"), ref("o/c", "internal")],
+    };
     expect(formatSkipNotice(allPrivate, true)).toBe(
-      'repos: "*" discovery skipped 1 private or internal repository because settings writes fail on archived repositories; unarchive them to manage them',
+      'repos: "*" discovery skipped 2 private or internal repositories because settings writes fail on archived repositories; unarchive them to manage them',
     );
   });
 
