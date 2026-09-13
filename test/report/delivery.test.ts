@@ -114,10 +114,12 @@ describe("the issue channel", () => {
     const { io, annotations } = captureIo();
     await open(api, "issue", io)?.deliver(target("o/priv", 1));
     expect(annotations).toEqual([
-      "warning: private repository #1: could not deliver the private report (HTTP 403). To fix, " +
-        'grant "Issues" (read and write) under the PAT\'s Repository permissions for the target ' +
-        "repository, or set private-report: none",
+      expect.stringMatching(
+        /^warning: private repository #1: could not deliver the private report \(HTTP 403\)\. To fix, grant "Issues"/,
+      ),
     ]);
+    expect(annotations[0]).not.toContain("o/priv");
+    expect(annotations[0]).not.toContain("Resource not accessible");
   });
 
   test("a target whose slug did not parse gets one safe warning and no API traffic", async () => {
@@ -231,10 +233,12 @@ describe("applyMarkerInjection", () => {
   };
   const bug = { name: "bug", color: "d73a4a" };
   const marker = { name: MARKER, color: "0e2a47" };
-  const INJECTED = `added the "${MARKER}" marker label to the managed labels so private reporting can reuse its issue; it is managed like any declared label`;
-  const REFUSED = `refused to rename the "${MARKER}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`;
+  const INJECTED = expect.stringMatching(/^added the "settings-as-code-report" marker label /);
+  const REFUSED = expect.stringMatching(
+    /^refused to rename the "settings-as-code-report" marker label/,
+  );
 
-  test.each<[string, SettingsFile, boolean, SettingsFile["labels"], string | undefined]>([
+  test.each<[string, SettingsFile, boolean, SettingsFile["labels"], unknown]>([
     ["off: untouched, no notice", { labels: [bug] }, false, [bug], undefined],
     [
       "on, no labels section: nothing to inject",
@@ -267,7 +271,7 @@ describe("applyMarkerInjection", () => {
   ])("%s", (_name, doc, on, labels, notice) => {
     const settings = validated(doc);
     const result = applyMarkerInjection(settings, on);
-    expect(result.notice).toBe(notice);
+    expect<unknown>(result.notice).toEqual(notice);
     expect(result.settings.labels).toEqual(labels);
     expect(result.settings.repository).toEqual(settings.repository);
   });

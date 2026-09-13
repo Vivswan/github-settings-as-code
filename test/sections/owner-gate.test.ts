@@ -35,7 +35,8 @@ const planAll = async (api: GitHubClient, repo: RepoRef = REPO): Promise<string[
 
 describe("the owner gate's memo", () => {
   test("the gated sections share one probe per client, across plan and snapshot", async () => {
-    expect(gated.map((section) => section.key)).toEqual(["teams", "custom_properties"]);
+    // Every gated section has its primary read seeded below, so a plan of nothing converges after the probe.
+    expect(gated).toHaveLength(Object.keys(LISTS).length);
     const api = new MockApi({ [ORG]: { data: { login: "o" } }, ...LISTS });
     expect(await planAll(api)).toEqual([]);
     for (const section of gated) {

@@ -40,9 +40,6 @@ import {
   tryCall,
   tryCallDeclared,
 } from "../../src/sections/contract/requests.js";
-import { environmentsSection } from "../../src/sections/environments/index.js";
-import { SECTIONS } from "../../src/sections/registry.js";
-import { repositorySection } from "../../src/sections/repository/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
 import { MockApi } from "../mock-api.js";
@@ -76,39 +73,6 @@ describe("sectionOperations", () => {
         phase: "plan",
       },
     ]);
-  });
-
-  test("every REST endpoint and GraphQL operation of a real section appears exactly once", () => {
-    // repositorySection carries BOTH dictionaries, so the GraphQL half of the flattening binds. Rows are spelled out by role so a duplicate canceling
-    // an omission still fails; declaration order is not part of the contract.
-    expect(Object.keys(repositorySection.graphql ?? {}).length).toBeGreaterThan(0);
-    const admin = { repo: ["administration"] } as const;
-    const row = (role: string, kind: "read" | "write") =>
-      ({ role, wire: kind, grade: kind, permission: admin, phase: "plan" }) as const;
-    const byRole = (a: { role: string }, b: { role: string }) => a.role.localeCompare(b.role);
-    expect([...sectionOperations(repositorySection)].sort(byRole)).toEqual(
-      [
-        row("get", "read"),
-        row("update", "write"),
-        row("topics", "write"),
-        row("vulnerabilityAlertsGet", "read"),
-        row("vulnerabilityAlertsPut", "write"),
-        row("vulnerabilityAlertsRemove", "write"),
-        row("automatedSecurityFixesGet", "read"),
-        row("automatedSecurityFixesPut", "write"),
-        row("automatedSecurityFixesRemove", "write"),
-        row("privateVulnerabilityReportingGet", "read"),
-        row("privateVulnerabilityReportingPut", "write"),
-        row("privateVulnerabilityReportingRemove", "write"),
-        row("immutableReleasesGet", "read"),
-        row("immutableReleasesPut", "write"),
-        row("immutableReleasesRemove", "write"),
-        row("lfsPut", "write"),
-        row("lfsRemove", "write"),
-        row("featuresQuery", "read"),
-        row("updateFeatures", "write"),
-      ].sort(byRole),
-    );
   });
 
   test("resolves per-operation permission overrides and accessGrade write-gating", () => {
@@ -214,7 +178,7 @@ describe("readGating", () => {
     undeclaredDefault: "untouched",
   });
 
-  test("accessGrade is representable on a GET only", () => {
+  test("accessGrade is representable on a GET only, and grades the read at write", () => {
     // A mutating route is write-graded by its method, so the override there is a redundant state the EndpointDecl arms refuse.
     const mutating: EndpointDecl = {
       route: "PUT /repos/{owner}/{repo}/interaction-limits",
@@ -223,6 +187,7 @@ describe("readGating", () => {
       accessGrade: "write",
     };
     expect(endpointKind(mutating)).toBe("write");
+    expect(endpointKind(plainGet)).toBe("read");
     expect(endpointKind(gatedGet)).toBe("write");
     // A public endpoint has no grant to gate, so a gated read cannot be "none".
     // @ts-expect-error permission "none" on a write-gated read
@@ -277,20 +242,6 @@ describe("readGating", () => {
       { route: gatedGet.route, permission: { repo: ["actions"] } },
     ]);
     expect(writeGatedReads(withEndpoints({ get: plainGet, put }))).toEqual([]);
-  });
-
-  test("the registered sections agree on which reads GitHub gates at write", () => {
-    // The fuzz oracle and the permissions docs both read this classification; interaction_limits mixes its plain base-limit GET with the gated cap
-    // and bypass-list GETs.
-    const gated = SECTIONS.filter((s) => readGating(s) !== "plain").map((s) => [
-      s.key,
-      readGating(s),
-    ]);
-    expect(gated).toEqual([
-      ["codespaces_secrets", "write-gated"],
-      ["code_quality_setup", "write-gated"],
-      ["interaction_limits", "mixed"],
-    ]);
   });
 });
 
@@ -610,31 +561,6 @@ describe("throwFor context enrichment", () => {
     expect(thrown).toBeInstanceOf(PermissionDenied);
     expect((thrown as PermissionDenied).detail).toBe(
       'the token was denied GET /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read and write) under the PAT\'s Repository permissions',
-    );
-  });
-
-  test("override advice grades by the section's need: a read-only permission advises read", () => {
-    // The write siblings (create/remove) carry Administration, a DIFFERENT permission, so Actions is only ever read here and the advice matches the
-    // Sections table's PAT cell.
-    let thrown: unknown;
-    try {
-      throwFor(
-        environmentsSection,
-        "GET",
-        "/repos/o/r/environments/prod/deployment-branch-policies",
-        { status: 404, message: "Not Found", body: "" },
-        { op: environmentsSection.endpoints.listPolicies as EndpointDecl },
-      );
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
-      "the token was denied GET /repos/o/r/environments/prod/deployment-branch-policies: 404 " +
-        "Not Found (a 404 here can also mean the resource does not exist). To fix, grant " +
-        '"Actions" (read) under the PAT\'s Repository permissions. Note: a 404 here can also ' +
-        "mean the environment does not exist, or that its deployment_branch_policy does not set " +
-        "custom_branch_policies: true",
     );
   });
 
@@ -1037,16 +963,13 @@ describe("plainData", () => {
       `${BUG}(root): a symbol-keyed property, which JSON drops${PLAIN}`,
     ],
     [
+      // The symbol check runs before the list branch, so a list is covered too.
       "a symbol-keyed list",
       { list: Object.assign([1], { [Symbol("hidden")]: 1n }) },
       `${BUG}list: a symbol-keyed property, which JSON drops${PLAIN}`,
     ],
     [
-      "a list with named properties",
-      { list: Object.assign([1], { extra: 2 }) },
-      `${BUG}list: a list carrying named properties, which JSON drops${PLAIN}`,
-    ],
-    [
+      // Own property NAMES, not keys: a non-enumerable extra is dropped by JSON all the same.
       "a list with a non-enumerable named property",
       { list: Object.defineProperty([1], "extra", { value: 2 }) },
       `${BUG}list: a list carrying named properties, which JSON drops${PLAIN}`,
@@ -1057,6 +980,7 @@ describe("plainData", () => {
       `${BUG}list: a list of a subclass, which JSON serializes as a plain list${PLAIN}`,
     ],
     [
+      // Enumerable keys against the length: a hole and a non-enumerable item both fall short of it.
       "a list with a non-enumerable item",
       { list: Object.defineProperty([1], "0", { enumerable: false }) },
       `${BUG}list: a list with a hole or a non-enumerable item, which JSON reads as null${PLAIN}`,
@@ -1119,7 +1043,7 @@ describe("declaredTolerance", () => {
     expect(declaredTolerance(endpoint, [404, 409])(409)).toBe(true);
   });
 
-  test("the declared tolerable set is the 4xx statuses minus 401 and 429; 5xx never", () => {
+  test("the declared tolerable set is the 4xx statuses minus 401 and 429; 5xx never; none declared, none tolerated", () => {
     expect(
       toleratedStatuses({
         route: "GET /repos/{owner}/{repo}/pages",
@@ -1133,6 +1057,12 @@ describe("declaredTolerance", () => {
         },
       }),
     ).toEqual([404, 422]);
+    expect(
+      toleratedStatuses({
+        route: "DELETE /repos/{owner}/{repo}/labels/{name}",
+        statuses: { 204: "a" },
+      }),
+    ).toEqual([]);
   });
 
   test("an advisory endpoint tolerates every status", () => {

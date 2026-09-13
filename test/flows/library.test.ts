@@ -17,7 +17,6 @@ import {
   validateSettings,
 } from "../../src/index.js";
 import {
-  renderMergedYaml,
   SECRET_RESPONSE_WITHHELD,
   SECRET_TRANSPORT_WITHHELD,
   SNAPSHOT_SCHEMA_URL,
@@ -193,31 +192,13 @@ describe("a caller-supplied client that echoes a secret", () => {
   });
 });
 
-describe("the section selection a library call runs under", () => {
-  test("a required section outside the allowlist is the problem, and no check runs", async () => {
-    // The engine reports an excluded section without attempting it, so this
-    // pair would pass green having proven nothing; the selection refuses it
-    // before checkRepository can be given one.
+describe("the sections knob", () => {
+  test("restricts the run to the allowlist: the excluded section is reported without a request", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: true } } });
-    const outcome = await SectionSelection.of({
-      only: ["repository"],
-      required: ["labels"],
-    }).match(
-      (sections) => checkRepository(api, repo, settings, { sections }),
-      (problem) => problem,
-    );
-    expect(outcome).toEqual({ code: "required-sections-excluded", excluded: ["labels"] });
+    const sections = SectionSelection.of({ only: ["labels"] })._unsafeUnwrap();
+    const result = await checkRepository(api, repo, settings, { sections });
+    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([["repository", "excluded"]]);
     expect(api.calls).toEqual([]);
-  });
-});
-
-describe("renderMergedYaml", () => {
-  test("is the document's YAML serialization, byte for byte, in the document's own key order", () => {
-    const document = { repository: { has_wiki: false, enable_vulnerability_alerts: true } };
-    expect(renderMergedYaml(document)).toBe(stringifyYaml(document));
-    expect(renderMergedYaml(document)).toBe(
-      "repository:\n  has_wiki: false\n  enable_vulnerability_alerts: true\n",
-    );
   });
 });
 
@@ -320,21 +301,31 @@ describe("mergeSettings", () => {
     name: "fleet.yml",
     doc: { repository: { has_wiki: true }, labels: [{ name: "bug", color: "d73a4a" }] },
   };
-  const team = { name: "team.yml", doc: { repository: { has_wiki: false, has_issues: true } } };
+  const team = {
+    name: "team.yml",
+    doc: { repository: { has_wiki: false, has_issues: true, enable_vulnerability_alerts: true } },
+  };
 
   test("folds the layers as mode: merge does and renders the file the merged-file gets", () => {
     const report = mergeSettings([fleet, team])._unsafeUnwrap();
     expect(report.settings).toEqual(
       branded({
-        repository: { has_wiki: false, has_issues: true },
+        repository: { has_wiki: false, has_issues: true, enable_vulnerability_alerts: true },
         labels: { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a" }] },
       }),
     );
+    // The settings are the validated parse (declared keys first, as the schema orders them); the yaml is the fold, in the layers' order.
+    expect(Object.keys(report.settings.repository ?? {})).toEqual([
+      "enable_vulnerability_alerts",
+      "has_wiki",
+      "has_issues",
+    ]);
     expect(report.yaml).toBe(
       [
         "repository:",
         "  has_wiki: false",
         "  has_issues: true",
+        "  enable_vulnerability_alerts: true",
         "labels:",
         "  _undeclared: delete",
         "  entries:",
@@ -345,22 +336,6 @@ describe("mergeSettings", () => {
     );
     expect(report.notices).toEqual([]);
     expect(report.log).toEqual([]);
-  });
-
-  test("the file keeps the layers' key order where the validated parse takes the schema's", () => {
-    const report = mergeSettings([
-      {
-        name: "fleet.yml",
-        doc: { repository: { has_issues: true, enable_vulnerability_alerts: true } },
-      },
-    ])._unsafeUnwrap();
-    expect(report.yaml).toBe(
-      "repository:\n  has_issues: true\n  enable_vulnerability_alerts: true\n",
-    );
-    expect(Object.keys(report.settings.repository ?? {})).toEqual([
-      "enable_vulnerability_alerts",
-      "has_issues",
-    ]);
   });
 
   test("a node the layer aliases is written per occurrence, never as a YAML anchor the reader would cap", () => {

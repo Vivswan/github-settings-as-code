@@ -70,6 +70,7 @@ describe("the standard scenario set", () => {
         throw new Error("the labels section is registered");
       }
       const set = standardSet(labels);
+      // The control for the derivation itself: labels reads, snapshots, and carries the knob, so every class is demanded.
       expect(set).toEqual([
         "labels-apply-converges",
         "labels-check-drift",

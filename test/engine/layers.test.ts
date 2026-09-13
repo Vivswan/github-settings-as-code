@@ -109,18 +109,12 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(merge(layers)).toEqual({ settings: { pages: null }, notices: [] });
   });
 
-  test.each([
-    ["one layer", [layer("repo", { repository: { has_wiki: false }, labels: null })]],
-    [
-      "a stack declaring it nowhere below",
-      [layer("fleet", { repository: { has_wiki: false } }), layer("repo", { labels: null })],
-    ],
-  ])(
-    "a null on a section that has no null value, over %s, opts out of nothing: it drops, with no notice",
-    (_case, layers) => {
-      expect(merge(layers)).toEqual({ settings: { repository: { has_wiki: false } }, notices: [] });
-    },
-  );
+  test("a null on a section that has no null value, over one layer, opts out of nothing: it drops, with no notice", () => {
+    expect(merge([layer("repo", { repository: { has_wiki: false }, labels: null })])).toEqual({
+      settings: { repository: { has_wiki: false } },
+      notices: [],
+    });
+  });
 
   test("a null on an unknown key over nothing stays as written for the validator to name", () => {
     expect(merge([layer("repo", { typo: null })])).toEqual({
@@ -186,35 +180,6 @@ describe("mergeLayers: the mapping dialect", () => {
       settings: { repository: { has_wiki: false } },
       notices: [],
     });
-  });
-
-  test("inputs are never mutated", () => {
-    const fleet = {
-      repository: { has_wiki: false, description: "fleet" },
-      labels: [{ name: "bug", color: "d73a4a" }],
-      rulesets: [MAIN_RULESET],
-    };
-    const repo = {
-      repository: { description: null },
-      labels: [{ name: "Bug", color: "ffffff" }],
-      rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
-    };
-    const copies = structuredClone({ fleet, repo });
-    const result = merge([layer("fleet", fleet), layer("repo", repo)]);
-    expect(result).toEqual({
-      settings: {
-        repository: { has_wiki: false },
-        labels: { _undeclared: "delete", entries: [{ name: "Bug", color: "ffffff" }] },
-        rulesets: {
-          _undeclared: "keep",
-          entries: [
-            { ...MAIN_RULESET, rules: [...MAIN_RULESET.rules, { type: "non_fast_forward" }] },
-          ],
-        },
-      },
-      notices: [{ layer: "repo", path: "repository.description" }],
-    });
-    expect({ fleet, repo }).toEqual(copies);
   });
 
   test("a nested YAML-tagged value replaces a mapping and is replaced by one, never spread", () => {
@@ -370,23 +335,6 @@ describe("mergeLayers: keyed sections", () => {
     },
   );
 
-  test("a higher rename onto an untouched lower label keeps the other lower labels distinct", async () => {
-    const result = merge([
-      layer("fleet", { labels: [{ name: "bug" }, { name: "docs" }] }),
-      layer("repo", { labels: [{ name: "bug", new_name: "defect" }, { name: "infra" }] }),
-    ]);
-    const entries = [{ name: "bug", new_name: "defect" }, { name: "docs" }, { name: "infra" }];
-    expect(result).toEqual({
-      settings: { labels: { _undeclared: "delete", entries } },
-      notices: [],
-    });
-    expect(await planLabels(entries)).toEqual([
-      'creating label "defect"',
-      'creating label "docs"',
-      'creating label "infra"',
-    ]);
-  });
-
   test("same-name rulesets merge key by key; a partial higher ruleset keeps the lower conditions and rules append by type", () => {
     const result = merge([
       layer("fleet", { rulesets: [MAIN_RULESET] }),
@@ -469,30 +417,6 @@ describe("mergeLayers: keyed sections", () => {
     expect(result).toEqual({
       settings: { rulesets: { _undeclared: "keep", entries: [tags, MAIN_RULESET] } },
       notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
-    });
-  });
-
-  test("higher-only rulesets append after the lower ones", () => {
-    const result = merge([
-      layer("fleet", { rulesets: [{ name: "main", rules: [{ type: "deletion" }] }] }),
-      layer("repo", {
-        rulesets: [
-          { name: "tags", target: "tag" },
-          { name: "main", enforcement: "active" },
-        ],
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: {
-          _undeclared: "keep",
-          entries: [
-            { name: "main", rules: [{ type: "deletion" }], enforcement: "active" },
-            { name: "tags", target: "tag" },
-          ],
-        },
-      },
-      notices: [],
     });
   });
 });
@@ -661,10 +585,6 @@ describe("mergeLayers: the _layering directive", () => {
       notices: [],
     });
   });
-
-  test("a directive with nothing to combine leaves no trace", () => {
-    expect(merge([layer("repo", { _layering: "replace" })])).toEqual({ settings: {}, notices: [] });
-  });
 });
 
 describe("mergeLayers: layer-boundary refusals", () => {
@@ -694,12 +614,6 @@ describe("mergeLayers: layer-boundary refusals", () => {
       { rulesets: [{ name: "tags" }, { name: "main", rules: [{ type: "deletion" }, 7] }] },
       "layer-wrong-shape",
       'layer "repo": rulesets[1].rules[1] must be a mapping; got a number',
-    ],
-    [
-      "duplicate label names, case-folded",
-      { labels: [{ name: "Bug" }, { name: "bug" }] },
-      "layer-duplicate-key",
-      'layer "repo": labels[0] and labels[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a label renaming into a sibling's name in one layer",

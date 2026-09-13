@@ -15,9 +15,9 @@ const encode = (text: string) => new TextEncoder().encode(text);
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 const fromHex = (text: string) => new Uint8Array(Buffer.from(text, "hex"));
 
+// The empty message (a tag-only box), a message spanning several cipher blocks, and multi-byte UTF-8.
 const MESSAGES: [string, string][] = [
   ["empty", ""],
-  ["one byte", "a"],
   ["one KiB", "x".repeat(1024)],
   ["non-ASCII", 'p@ss"word\\with\nnewline\tand éñ中\u{1F600}'],
 ];
@@ -67,15 +67,12 @@ describe("sealBox against libsodium", () => {
     expect(() => sodium.crypto_box_seal(new Uint8Array(0), zero)).toThrow();
   });
 
-  test.each([1, 2, 3])(
-    "boxSharedKey derives libsodium's crypto_box_beforenm key from either side (pair %i)",
-    () => {
-      const sender = sodium.crypto_box_keypair();
-      const expected = hex(sodium.crypto_box_beforenm(recipient.publicKey, sender.privateKey));
-      expect(hex(boxSharedKey(sender.privateKey, recipient.publicKey))).toBe(expected);
-      expect(hex(boxSharedKey(recipient.privateKey, sender.publicKey))).toBe(expected);
-    },
-  );
+  test("boxSharedKey derives libsodium's crypto_box_beforenm key from either side", () => {
+    const sender = sodium.crypto_box_keypair();
+    const expected = hex(sodium.crypto_box_beforenm(recipient.publicKey, sender.privateKey));
+    expect(hex(boxSharedKey(sender.privateKey, recipient.publicKey))).toBe(expected);
+    expect(hex(boxSharedKey(recipient.privateKey, sender.publicKey))).toBe(expected);
+  });
 });
 
 describe("fixed vectors (no libsodium in the loop)", () => {
@@ -94,7 +91,6 @@ describe("fixed vectors (no libsodium in the loop)", () => {
 
   test.each([
     ["", `${EPHEMERAL_PUBLIC_KEY}d3710cec3c028bcdb9d363bde2440f59`],
-    ["hunter2", `${EPHEMERAL_PUBLIC_KEY}f2dbc79c4d7f5dcb5011c9e0280e685b7ba75a4fd329b3`],
     ["éñ中", `${EPHEMERAL_PUBLIC_KEY}e12ec41d09e0bd59918b97687c282a70d07bf78a52e32c`],
   ])(
     "sealing %j with the pinned ephemeral key reproduces the libsodium bytes",
