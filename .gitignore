@@ -13,6 +13,8 @@ test/e2e/graphql/schema.docs.graphql
 .worktrees/
 # Review tooling scratch directory.
 .rubber-duck-tmp/
+# A settings write's staging file, left behind only by a hard crash (src/flows/settings-write.ts).
+.gsac-*.tmp
 # The bundled entrypoint is built, not committed: CI jobs and release tags
 # build it with `bun run build:bundle`; only lib/settings.schema.json is
 # committed under lib/. A release job that commits the bundle onto a tag

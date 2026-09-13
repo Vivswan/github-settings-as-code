@@ -62,7 +62,7 @@ The third is to have the run deliver a private report, described next.
 
 ## Delivering a private report
 
-`private-report` sends the full unredacted report for each redacted target through a channel whose access control is not the public run. It defaults to `private-report: none`, which delivers nothing. Any other channel applies only to redacted targets, and only to those the visibility probe proves private or internal: an unknown visibility is redacted from the public view but excluded from delivery, so the report never reaches a repository that might be public. It is rejected alongside `private-repos: show`. The report mirrors the run's log, delivery stays live in `mode: check`, and a delivery failure only warns; it never changes the target's or the run's result.
+`private-report` sends the full unredacted report for each redacted target through a channel whose access control is not the public run; the default, `private-report: none`, sends nothing. Any other channel applies only to redacted targets, and only to those the visibility probe proves private or internal: an unknown visibility is redacted from the public view but excluded from delivery, so the report never reaches a repository that might be public. It is rejected alongside `private-repos: show`. The report mirrors the run's log, delivery stays live in `mode: check`, and a delivery failure only warns; it never changes the target's or the run's result.
 
 `private-report: issue` posts each target's report to a reused issue on that target repository, where the repository's own access control protects it. Prefer this channel unless your readers lack GitHub access to the targets.
 
@@ -83,9 +83,9 @@ Access control on the artifact channel is key possession, so the key setup matte
 age-keygen -o key.txt
 ```
 
-`key.txt` holds the secret identity; keep it off GitHub. The command also prints the public recipient (`age1...`), which is safe to commit. Pass that recipient as `report-public-key`. It is required when `private-report` is `artifact` and rejected otherwise; a malformed recipient fails the run at startup.
+`key.txt` holds the secret identity; keep it off GitHub. The command also prints the public recipient (`age1...`), safe to commit: pass it as `report-public-key`. It is required when `private-report` is `artifact` and rejected otherwise; a malformed recipient fails the run at startup.
 
-To read a report, download and decrypt. The browser "Download" button gives a ZIP; unzip it, then decrypt with the identity file (or use `gh run download`, which extracts the artifact for you):
+To read a report, download the artifact (the browser gives a ZIP to unzip; `gh run download` extracts it) and decrypt it with the identity file:
 
 ```bash
 gh run download <run-id> -n settings-as-code-private-report

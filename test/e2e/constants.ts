@@ -3,6 +3,12 @@
  * these exact strings. Scenario .yml fixtures cannot import them, so the curated scenarios that seed them spell them out.
  */
 
+import { join } from "node:path";
+import { ROOT } from "../root.js";
+
+/** Where the runner dumps a failing scenario's replay bundle; the nightlies upload this directory and the filed issue cites it. */
+export const ARTIFACTS_DIR = join(ROOT, "test", "e2e", ".artifacts");
+
 export const ADMIN_OWNER = "e2e-owner";
 export const ADMIN_REPO = "e2e-repo";
 export const ADMIN_SLUG = `${ADMIN_OWNER}/${ADMIN_REPO}`;

@@ -19,6 +19,7 @@ import { readAction, type Step, type Workflow, workflowText } from "./workflow-l
 const COMPOSITE_DIR = ".github/actions/fetch-test-artifacts";
 const PATHS_TS = "test/e2e/openapi/paths.ts";
 const TRIM_TS = ".github/scripts/trim-openapi.ts";
+const FETCH_GRAPHQL_TS = ".github/scripts/fetch-graphql-schema.ts";
 
 /** A fetched, gitignored test artifact the composite restores from its cache. */
 interface FetchedArtifact {
@@ -31,20 +32,18 @@ const FETCHED_ARTIFACTS: readonly FetchedArtifact[] = [
   {
     label: "trimmed OpenAPI spec",
     path: "test/e2e/openapi/github-openapi.trimmed.json",
-    // The imports under src/ and test/ decide which paths and which API version are trimmed; the script's own lib/ helpers only carry the fetch.
+    // Every import of the scripts: the paths and the API version trimmed, and the fetch helper the bytes come through.
     hashInputs: () => [
       TRIM_TS,
       PATHS_TS,
-      ...[...relativeImportsOf(TRIM_TS), ...relativeImportsOf(PATHS_TS)].filter((file) =>
-        /^(?:src|test)\//.test(file),
-      ),
+      ...relativeImportsOf(TRIM_TS),
+      ...relativeImportsOf(PATHS_TS),
     ],
   },
   {
-    // The fetch script carries the pinned UPSTREAM_REF, the sole input that changes the output.
     label: "GraphQL schema",
     path: "test/e2e/graphql/schema.docs.graphql",
-    hashInputs: () => [".github/scripts/fetch-graphql-schema.ts"],
+    hashInputs: () => [FETCH_GRAPHQL_TS, ...relativeImportsOf(FETCH_GRAPHQL_TS)],
   },
 ];
 const [OPENAPI, GRAPHQL] = FETCHED_ARTIFACTS as [FetchedArtifact, FetchedArtifact];
@@ -152,7 +151,10 @@ describe("the fetch-test-artifacts cache keys", () => {
   test("each key hashes every input its artifact depends on", () => {
     // The import walk found the scripts' own imports, so the coverage below is not vacuous.
     expect(OPENAPI.hashInputs().length).toBeGreaterThan(2);
-    expect(OPENAPI.hashInputs()).toContain("src/github/api.ts");
+    expect(OPENAPI.hashInputs()).toEqual(
+      expect.arrayContaining(["src/github/api.ts", ".github/scripts/lib/fetch-retry.ts"]),
+    );
+    expect(GRAPHQL.hashInputs()).toContain(".github/scripts/lib/fetch-retry.ts");
     // Every call in the key contributes, wherever the expression puts it.
     expect(
       hashFilesPatterns(

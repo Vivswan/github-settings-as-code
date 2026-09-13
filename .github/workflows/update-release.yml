@@ -64,7 +64,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.source.outputs.sha }}
-          # The script names the build tag by the merge commit's position on main and judges latest's source against its history; a shallow checkout can do neither.
+          # The script proves the merge commit sits on main, compares it with latest's source (latest only moves forward), and on a
+          # new version tag names the build tag by the commit's position; a shallow checkout can do none of that.
           fetch-depth: 0
       - uses: ./.github/actions/setup
       - name: Build the bundle and the schema

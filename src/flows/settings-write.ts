@@ -6,7 +6,8 @@
  * or written through: an existing path there fails the write instead. A destination that is a symlink is replaced by
  * the rename, the link itself, never its referent, so the written document is always a regular file at `path`. The
  * guards over the writer hold one promise: an input layer is never the destination, under any name the read follows
- * or the rename reaches; deliberate evasion (hardlinks, mounts, races) is out of scope.
+ * or the rename reaches; deliberate evasion (hardlinks, mounts, races) is out of scope. A hard crash mid-write leaves
+ * the staging file for the user to remove (.gitignore hides it); no run sweeps a file another process may be writing.
  */
 
 import { randomBytes } from "node:crypto";
@@ -51,6 +52,17 @@ export function canonicalPath(path: string): string {
 }
 
 const SEGMENT = sep === "\\" ? /[\\/]/ : sep;
+const SEPARATORS = sep === "\\" ? "\\/" : "/";
+
+/** `path` without its trailing separators, the root's own kept: basename ignores them, so slicing its length off `out.yml/` would leave `o`. */
+function withoutTrailingSeparators(path: string): string {
+  const floor = parse(path).root.length;
+  let end = path.length;
+  while (end > floor && SEPARATORS.includes(path[end - 1] ?? "")) {
+    end--;
+  }
+  return path.slice(0, end);
+}
 
 /** An entry's identity on its filesystem, the same under every name it has. */
 function entryId(stat: { dev: number | bigint; ino: number | bigint }): string {
@@ -168,12 +180,14 @@ function isSymlink(path: string): boolean {
 
 /**
  * The error is the filesystem's own reason; each caller names the input that chose the path. The staging file sits in
- * the destination's directory, spelled as the caller spelled it (a `link/..` segment is the OS's to resolve, the same
- * way for both names), under a short name of its own (the destination's leaf may already be at NAME_MAX), and takes
- * an existing regular destination's mode, so a replaced 0600 file stays 0600.
+ * the destination's directory, spelled as the caller spelled it up to the leaf (a `link/..` segment is the OS's to
+ * resolve, the same way for both names; a drive-relative `C:x` stays on that drive's current directory, which dirname
+ * or join would turn into the drive root), under a short name of its own (the destination's leaf may already be at
+ * NAME_MAX), and takes an existing regular destination's mode, so a replaced 0600 file stays 0600.
  */
 export function writeReplacing(path: string, text: string): Result<void, string> {
-  const directory = path.slice(0, path.length - basename(path).length);
+  const spelled = withoutTrailingSeparators(path);
+  const directory = spelled.slice(0, spelled.length - basename(spelled).length);
   const staging = `${directory}.gsac-${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
   // Set once the exclusive open succeeded: only a staging file THIS write made is removed on failure, never one
   // another writer got there first with (`wx` fails on it, and that failure is the one reported).
