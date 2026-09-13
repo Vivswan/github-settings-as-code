@@ -1,14 +1,8 @@
-# The bun setup and the dependency install of every repo-owned workflow job (checks.yml, post-green.yml, the release
-# hooks, the nightlies, auto-fix, auto-format, copilot-setup-steps). The caller keeps its own checkout (ref, depth,
-# and token differ per job) and its own setup-node where a step needs node.
-#   bun               -> the version in .bun-version, never latest
-#   install           -> bun install --frozen-lockfile --ignore-scripts: scripts.prepare installs lefthook, a git hook
-#                        no runner uses, and no dependency here needs a lifecycle script (the whole gate runs without them)
-#   install: "false"  -> bun alone, for a job that runs a bare .github/scripts entry or resolves the lockfile itself;
-#                        any other value installs (GitHub compares without regard to letter case), so a typo can only
-#                        add an install, never lose one
-#   yamllint: "true"  -> the pinned yamllint behind `bun run lint:yaml`, which fails a CI run where it is missing
-# Timeouts: every job of a repo-owned workflow carries timeout-minutes: 15 unless its comment says why it needs more.
+# The bun setup and the dependency install of every repo-owned workflow job; the caller keeps its own checkout and
+# setup-node, whose options differ per job.
+#   install  -> --ignore-scripts: scripts.prepare installs lefthook, a git hook no runner uses; "false" (any letter
+#               case, as GitHub compares) skips the install for a job that runs a bare script or resolves the lockfile itself
+#   yamllint -> "true" installs the pinned yamllint behind `bun run lint:yaml`, which fails a CI run where it is missing
 name: Set up bun
 description: The pinned bun, the locked dependencies unless told not to, and yamllint for the jobs that lint YAML
 

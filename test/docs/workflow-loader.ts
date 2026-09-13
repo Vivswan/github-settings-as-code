@@ -11,8 +11,8 @@ export const ROOT = join(import.meta.dir, "..", "..");
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 /** The setup composite (bun, the locked install, yamllint on request), as a job's `uses:` spells it. */
 export const SETUP_USES = "./.github/actions/setup";
-/** The header line of a file the platform sync overwrites; every other workflow is repo-owned. */
-const MANAGED_HEADER = "managed by Vivswan/repo-platform";
+/** A leading comment block naming the platform sync: such a file is overwritten on every sync, every other is repo-owned. */
+const MANAGED = /^(?:\s*#.*\n)*?\s*#.*managed by Vivswan\/repo-platform/;
 
 export interface Step {
   name?: string;
@@ -38,40 +38,23 @@ export interface Job {
   "timeout-minutes"?: number;
   permissions?: Record<string, string>;
   concurrency?: Concurrency;
-  strategy?: unknown;
-  outputs?: Record<string, string>;
   steps?: Step[];
   uses?: string;
   with?: Record<string, unknown>;
   secrets?: unknown;
 }
-interface TriggerInput {
-  description?: string;
-  required?: boolean;
-  type?: string;
-  default?: unknown;
-}
 interface Trigger {
-  inputs?: Record<string, TriggerInput>;
+  inputs?: Record<string, { required?: boolean; type?: string; default?: unknown }>;
   secrets?: Record<string, { required?: boolean }>;
   [key: string]: unknown;
 }
 export interface Workflow {
-  name?: string;
   on: Record<string, Trigger | null>;
   permissions?: Record<string, string>;
   concurrency?: Concurrency;
   jobs: Record<string, Job>;
 }
-interface ActionInput {
-  description?: string;
-  required?: boolean;
-  default?: string;
-}
 export interface CompositeAction {
-  name?: string;
-  description?: string;
-  inputs?: Record<string, ActionInput>;
   runs: { using?: string; steps?: Step[] };
 }
 
@@ -88,31 +71,14 @@ export function readAction(dir: string): CompositeAction {
   return parseYaml(readFileSync(join(ROOT, dir, "action.yml"), "utf8")) as CompositeAction;
 }
 
-/** Every workflow file, sorted. */
 export function workflowFiles(): string[] {
   return readdirSync(WORKFLOWS_DIR)
     .filter((file) => /\.ya?ml$/.test(file))
     .sort();
 }
 
-/** True when the file's leading comment block carries the managed-by header. */
-export function isManaged(text: string): boolean {
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") {
-      continue;
-    }
-    if (!line.startsWith("#")) {
-      return false;
-    }
-    if (line.includes(MANAGED_HEADER)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function repoOwnedWorkflowFiles(): string[] {
-  return workflowFiles().filter((file) => !isManaged(workflowText(file)));
+  return workflowFiles().filter((file) => !MANAGED.test(workflowText(file)));
 }
 
 /** The run scalar's lines with every heredoc body (`<<TAG` through its terminator) removed: what the shell executes. */
@@ -157,7 +123,6 @@ export function setupInstalls(step: Step): boolean {
   return step.uses === SETUP_USES && install !== undefined && install !== "false";
 }
 
-/** The setup composite step when it installs yamllint. */
 export function setupYamllint(step: Step): boolean {
   return step.uses === SETUP_USES && setupInput(step, "yamllint", "false") === "true";
 }
