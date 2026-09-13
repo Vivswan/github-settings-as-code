@@ -30,30 +30,37 @@ describe("the commit-back push jobs", () => {
       expect(push?.permissions?.contents).toBe("write");
       expect((push?.steps ?? []).filter(runsCheckoutCode)).toEqual([]);
       // A plain --force would overwrite a commit that landed after the patch was cut; the lease names the sha the job verified.
-      const pushes = (push?.steps ?? []).filter((step) => /\bgit push\b/.test(step.run ?? ""));
-      expect(pushes.length, `${file} has no git push step`).toBe(1);
-      const [step] = pushes;
-      expect(step?.env?.HEAD_SHA).toBeDefined();
-      // The command's words with continuations joined and shell quotes removed, as git receives them; --force or -f beside the lease
-      // defeats it (git overrides the stale check).
-      const words = (step?.run ?? "")
-        .replace(/\\\n/g, " ")
-        .split("\n")
-        .filter((line) => /\bgit push\b/.test(line))
-        .flatMap((line) => line.split(/[\s;&|()]+/))
-        .map((word) => word.replace(/["']/g, ""));
-      // Git honors the first lease word, so an earlier, looser lease would override this one; exactly one, and it is this one.
-      expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
-        `--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`,
-      ]);
-      // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
-      const forced = words.filter(
-        (word) =>
-          /^-[^-]*f/.test(word) ||
-          /^--(?:no-)?force(?!-with-lease=|-if-includes$)/.test(word) ||
-          word.startsWith("+"),
+      // Every push line of the job is judged (a second, unleased push beside the leased one is a write the lease does not cover),
+      // as words with continuations joined and shell quotes removed, as git receives them.
+      const pushLines = (push?.steps ?? []).flatMap((step) =>
+        (step.run ?? "")
+          .replace(/\\\n/g, " ")
+          .split("\n")
+          .filter((line) => /\bgit push\b/.test(line))
+          .map((line) => ({
+            step,
+            words: line.split(/[\s;&|()]+/).map((w) => w.replace(/["']/g, "")),
+          })),
       );
-      expect(forced).toEqual([]);
+      expect(pushLines.length, `${file} has no git push`).toBeGreaterThan(0);
+      for (const { step, words } of pushLines) {
+        expect(
+          step.env?.HEAD_SHA,
+          `${file}: a push step without HEAD_SHA in its env`,
+        ).toBeDefined();
+        // Git honors the first lease word, so an earlier, looser lease would override this one; exactly one, and it is this one.
+        expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
+          `--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`,
+        ]);
+        // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
+        const forced = words.filter(
+          (word) =>
+            /^-[^-]*f/.test(word) ||
+            /^--(?:no-)?force(?!-with-lease=|-if-includes$)/.test(word) ||
+            word.startsWith("+"),
+        );
+        expect(forced).toEqual([]);
+      }
     },
   );
 });

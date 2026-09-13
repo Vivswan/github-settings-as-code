@@ -64,6 +64,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     const read = steps.flatMap((s) =>
       [
         s.if ?? "",
+        s.run ?? "",
         ...Object.values(s.env ?? {}),
         ...Object.values(s.with ?? {}).map(String),
       ].flatMap((text) => [...text.matchAll(/\bsteps\.([\w-]+)\./g)].map((m) => m[1] ?? "")),
