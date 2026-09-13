@@ -689,6 +689,108 @@ describe("the commit-back push jobs", () => {
     expect(format?.outputs?.head).toBe(`\${{ steps.format.outputs.head }}`);
     const step = format?.steps?.find((candidate) => candidate.id === "format");
     expect(step?.run).toContain('echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"');
+    // Tracked modifications alone reach the patch; the push side re-checks, since the formatter can stage anything.
+    expect(step?.run).toContain("git reset -q\ngit add -u\n");
+  });
+});
+
+/** The push step's staged-path check, from its comment to the loop's end: what runs between the apply and the commit. */
+const PATH_CHECK =
+  /^# The patch was cut on a runner PR code ran on[\s\S]*?^done < <\(git diff --cached --no-renames --name-status -z\)$/m;
+
+/**
+ * The check under `bash -e` in a scratch repository whose index holds `stage`; git's user identity is stubbed through
+ * the environment so no global config is read. The scratch directory is removed on every path.
+ */
+function runPathCheck(stage: (repo: string) => void): { status: number; lines: string[] } {
+  const step = readWorkflow("auto-format.yml").jobs.push?.steps?.find(
+    (candidate) => candidate.name === "Commit and push the formatting",
+  );
+  const check = (step?.run ?? "").match(PATH_CHECK)?.[0];
+  expect(check, "auto-format.yml's push step has no staged-path check").toBeDefined();
+  const dir = mkdtempSync(join(tmpdir(), "auto-format-check-"));
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@example.invalid",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@example.invalid",
+  };
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, env, stdio: "pipe" });
+  try {
+    git("init", "-q");
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(dir, "a.ts"), "const a = 1\n");
+    writeFileSync(join(dir, "b.ts"), "const b = 1\n");
+    writeFileSync(join(dir, ".github", "workflows", "ci.yml"), "name: x\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    stage(dir);
+    git("add", "-A");
+    let status = 0;
+    let stdout = "";
+    try {
+      stdout = execFileSync("bash", ["-e", "-c", check ?? ""], {
+        cwd: dir,
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      status = (error as { status?: number }).status ?? -1;
+      stdout = String((error as { stdout?: string }).stdout ?? "");
+    }
+    return { status, lines: stdout.split("\n").filter(Boolean) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("auto-format's staged-path check under bash", () => {
+  test("modifications of tracked files pass silently", () => {
+    const run = runPathCheck((repo) => {
+      writeFileSync(join(repo, "a.ts"), "const a = 1;\n");
+      writeFileSync(join(repo, "b.ts"), "const b = 1;\n");
+    });
+    expect(run).toEqual({ status: 0, lines: [] });
+  });
+
+  test.each<[string, (repo: string) => void, string]>([
+    [
+      "an added file",
+      (repo) => writeFileSync(join(repo, "extra.ts"), "export {};\n"),
+      "::error::the format patch stages a 'A' for 'extra.ts'; a formatting patch modifies tracked files only; refusing to push",
+    ],
+    [
+      "a deleted file",
+      (repo) => rmSync(join(repo, "b.ts")),
+      "::error::the format patch stages a 'D' for 'b.ts'; a formatting patch modifies tracked files only; refusing to push",
+    ],
+    [
+      "a renamed file (its delete half is refused first)",
+      (repo) => {
+        rmSync(join(repo, "b.ts"));
+        writeFileSync(join(repo, "c.ts"), "const b = 1\n");
+      },
+      "::error::the format patch stages a 'D' for 'b.ts'; a formatting patch modifies tracked files only; refusing to push",
+    ],
+    [
+      "a workflow modification",
+      (repo) => writeFileSync(join(repo, ".github", "workflows", "ci.yml"), "name: y\n"),
+      "::error::the format patch touches '.github/workflows/ci.yml'; workflows are never formatted here; refusing to push",
+    ],
+    [
+      "an added workflow",
+      (repo) => writeFileSync(join(repo, ".github", "workflows", "extra.yml"), "name: y\n"),
+      "::error::the format patch stages a 'A' for '.github/workflows/extra.yml'; a formatting patch modifies tracked files only; refusing to push",
+    ],
+  ])("%s is refused with the path named (negative control)", (_, stage, message) => {
+    const run = runPathCheck((repo) => {
+      writeFileSync(join(repo, "a.ts"), "const a = 1;\n");
+      stage(repo);
+    });
+    expect(run).toEqual({ status: 1, lines: [message] });
   });
 });
 

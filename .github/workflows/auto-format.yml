@@ -44,7 +44,10 @@ jobs:
           # The patch belongs to this commit alone; the push job refuses any other head.
           echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           bun run lint:fix
-          git add -A
+          # Anything the formatter left staged is not this workflow's fix: start from an empty index, then stage
+          # modifications of tracked files alone (a formatter adds, deletes, and renames nothing).
+          git reset -q
+          git add -u
           git diff --cached --binary > "$RUNNER_TEMP/format.patch"
           if [ -s "$RUNNER_TEMP/format.patch" ]; then
             git diff --cached --stat
@@ -96,6 +99,24 @@ jobs:
             exit 0
           fi
           git apply --index --binary "$RUNNER_TEMP/format/format.patch"
+          # The patch was cut on a runner PR code ran on, so it is untrusted: a formatting patch modifies tracked
+          # files and never touches a workflow; anything else staged is refused. --no-renames lists a rename as its
+          # delete and add halves, so neither can hide behind an allowed modification.
+          while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+            case "$status" in
+              M) ;;
+              *)
+                echo "::error::the format patch stages a '$status' for '$path'; a formatting patch modifies tracked files only; refusing to push"
+                exit 1
+                ;;
+            esac
+            case "$path" in
+              .github/workflows/*)
+                echo "::error::the format patch touches '$path'; workflows are never formatted here; refusing to push"
+                exit 1
+                ;;
+            esac
+          done < <(git diff --cached --no-renames --name-status -z)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit --no-verify -m "style: apply automated formatting"
