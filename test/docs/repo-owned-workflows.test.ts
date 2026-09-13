@@ -673,11 +673,11 @@ describe("the commit-back push jobs", () => {
   test.each([
     [
       "a guard that only warns",
-      'if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then\n  echo "::notice::head moved"\nfi',
+      'if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then\n  echo "::notice::head moved since the format"\nfi',
     ],
     [
       "a guard on the wrong variable",
-      'if [ "$(git rev-parse HEAD)" != "$BASE_SHA" ]; then\n  echo "::notice::head moved"\n  exit 0\nfi',
+      'if [ "$(git rev-parse HEAD)" != "$BASE_SHA" ]; then\n  echo "::notice::head moved since the format"\n  exit 0\nfi',
     ],
     ["no guard", 'git apply --index --binary "$RUNNER_TEMP/format/format.patch"'],
   ])("%s fails the guard pin (negative control)", (_, run) => {
