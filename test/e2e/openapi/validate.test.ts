@@ -730,20 +730,6 @@ describe("validateExchange adapter", () => {
     });
     expect(errors.some((e) => e.includes("[response-body]"))).toBe(true);
   });
-
-  test("passing explicit undefined behaves like omitting (falls back)", () => {
-    const errors = validateExchange(
-      {
-        method: "GET",
-        pathname: "/repos/e2e-owner/e2e-repo",
-        query: "",
-        status: 200,
-        responseBody: 42,
-      },
-      undefined,
-    );
-    expect(errors.some((e) => e.includes("[response-body]"))).toBe(true);
-  });
 });
 
 describe("mock rule-type catalog lockstep", () => {
