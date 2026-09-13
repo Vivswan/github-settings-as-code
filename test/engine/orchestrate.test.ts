@@ -165,13 +165,26 @@ describe("runForRepo", () => {
     expect(desired.extra).toBe(raw.pages.extra);
   });
 
-  test("a knobbed list section receives zod's parsed copy: a fresh list, own __proto__ dropped on each entry", async () => {
+  test("a knobbed list section receives zod's parsed copy in both forms: a fresh list or wrapper, own __proto__ dropped on each entry", async () => {
     const plain = JSON.parse('{"rulesets":[{"name":"r","__proto__":{"planted":1}}]}');
+    const wrapped = JSON.parse(
+      '{"rulesets":{"_undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
+    );
     expect(Object.hasOwn(plain.rulesets[0], "__proto__")).toBe(true);
-    const [desired] = (await receivedBy(rulesetsSection, plain)) as [object[]];
-    expect(desired).not.toBe(plain.rulesets);
-    expect(desired).toEqual([{ name: "r" }]);
-    prototypeClean(desired[0] as object);
+    expect(Object.hasOwn(wrapped.rulesets.entries[0], "__proto__")).toBe(true);
+
+    const [plainDesired] = (await receivedBy(rulesetsSection, plain)) as [object[]];
+    expect(plainDesired).not.toBe(plain.rulesets);
+    expect(plainDesired).toEqual([{ name: "r" }]);
+    prototypeClean(plainDesired[0] as object);
+
+    const [wrappedDesired] = (await receivedBy(rulesetsSection, wrapped)) as [
+      { _undeclared: string; entries: object[] },
+    ];
+    expect(wrappedDesired).not.toBe(wrapped.rulesets);
+    expect(wrappedDesired).toEqual({ _undeclared: "keep", entries: [{ name: "r" }] });
+    prototypeClean(wrappedDesired);
+    prototypeClean(wrappedDesired.entries[0] as object);
   });
 
   test("pages: null is an active section, not an omitted one", async () => {

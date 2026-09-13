@@ -646,6 +646,12 @@ describe("mergeLayers: layer-boundary refusals", () => {
       'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
     ],
     [
+      "a YAML-tagged value where a list belongs",
+      { milestones: new Date(0) },
+      "layer-wrong-shape",
+      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date value',
+    ],
+    [
       "a non-mapping entry in a section without a layering key",
       { milestones: [{ title: "v1" }, "v2"] },
       "layer-wrong-shape",
