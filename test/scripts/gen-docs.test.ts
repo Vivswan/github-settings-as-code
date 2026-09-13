@@ -472,7 +472,8 @@ describe("the committed COVERAGE.md", () => {
     expect(() => renderCoverageFile(coverage.replace("# Coverage\n", "# Inventory\n"))).toThrow(
       exact,
     );
-    // Whitespace past the END marker regenerates as a no-op, so it is refused too.
+    // Whitespace past the END marker regenerates as a no-op, so it is refused too; so is the final newline missing.
+    expect(() => renderCoverageFile(coverage.trimEnd())).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage}\n`)).toThrow(exact);
     expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
     // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.

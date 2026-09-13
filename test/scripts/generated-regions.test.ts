@@ -408,6 +408,12 @@ describe("assertRegionPlacement", () => {
       "the table region's END marker sits on a line indented as code in doc.md",
     ],
     [
+      "an inline region on a line indented four spaces, text ahead of its marker",
+      PAGE.replace("Result: (", "    Result: ("),
+      LIST,
+      "the list region's BEGIN marker sits on a line indented as code in doc.md",
+    ],
+    [
       "a table whose BEGIN marker carries the quote prefix of the paragraph above it",
       PAGE.replace(
         "## Inputs\n\n<!-- BEGIN GENERATED: table",
