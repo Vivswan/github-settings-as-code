@@ -1,5 +1,10 @@
 name: rulesets-snapshot-roundtrip
-description: "mode: snapshot reads the live rulesets back into snapshot.yml and writes nothing to GitHub. Each repository-owned ruleset reads back as a keep entry with its target, enforcement, ref conditions, rules, and the bypass_actors the write-grade token sees; ids, the source fields, links, and timestamps fall away, and the organization's inherited ruleset is a note, not an entry. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live rulesets back into snapshot.yml and writes nothing to GitHub. Each
+  repository-owned ruleset reads back as a keep entry with its target, enforcement, ref conditions,
+  rules, and the bypass_actors the write-grade token sees; ids, the source fields, links, and
+  timestamps fall away, and the organization's inherited ruleset is a note, not an entry. The
+  written file, fed back to a check run against the same state, reads clean.
 settings: {}
 live_state:
   rulesets:

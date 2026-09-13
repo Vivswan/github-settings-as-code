@@ -1,5 +1,10 @@
 name: snapshot-unsupported-and-denied
-description: "A snapshot under on-missing-permission: warn with a section the token cannot read and one GitHub exposes no read endpoint for. The denied section is skipped (a warning, the skipped-sections output, the header line) and the run ends partial with exit 0; the unsupported one is a notice and a header line, never a failure; the file carries the section that read back. The document itself never reaches stdout or the summary."
+description: >-
+  A snapshot under on-missing-permission: warn with a section the token cannot read and one GitHub
+  exposes no read endpoint for. The denied section is skipped (a warning, the skipped-sections
+  output, the header line) and the run ends partial with exit 0; the unsupported one is a notice and
+  a header line, never a failure; the file carries the section that read back. The document itself
+  never reaches stdout or the summary.
 settings: {}
 live_state:
   labels:

@@ -1,5 +1,8 @@
 name: milestones-snapshot-roundtrip
-description: "mode: snapshot reads the live milestones back into snapshot.yml and writes nothing to GitHub. Open and closed milestones read back by title, description, and state; a null description is omitted. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live milestones back into snapshot.yml and writes nothing to GitHub. Open
+  and closed milestones read back by title, description, and state; a null description is omitted.
+  The written file, fed back to a check run against the same state, reads clean.
 settings: {}
 live_state:
   milestones:

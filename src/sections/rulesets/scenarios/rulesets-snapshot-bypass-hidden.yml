@@ -1,5 +1,10 @@
 name: rulesets-snapshot-bypass-hidden
-description: "mode: snapshot under a read-grade token, whose ruleset GETs omit bypass_actors. An entry without that key would clear the bypass list on the next full-payload update, so every repository ruleset is left out with a note and the section writes the empty keep wrapper, never a false 'nothing exists'; the organization's inherited ruleset is a note too. The written file, fed back to a check run against the same state, reads clean without a write."
+description: >-
+  mode: snapshot under a read-grade token, whose ruleset GETs omit bypass_actors. An entry without
+  that key would clear the bypass list on the next full-payload update, so every repository ruleset
+  is left out with a note and the section writes the empty keep wrapper, never a false 'nothing
+  exists'; the organization's inherited ruleset is a note too. The written file, fed back to a check
+  run against the same state, reads clean without a write.
 settings: {}
 live_state:
   rulesets:

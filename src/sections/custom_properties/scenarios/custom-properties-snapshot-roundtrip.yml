@@ -1,5 +1,8 @@
 name: custom-properties-snapshot-roundtrip
-description: "mode: snapshot reads the live custom_properties back into snapshot.yml and writes nothing to GitHub. Set property values read back; a property with a null value is unset and omitted. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live custom_properties back into snapshot.yml and writes nothing to
+  GitHub. Set property values read back; a property with a null value is unset and omitted. The
+  written file, fed back to a check run against the same state, reads clean.
 settings: {}
 live_state:
   custom_property_values:

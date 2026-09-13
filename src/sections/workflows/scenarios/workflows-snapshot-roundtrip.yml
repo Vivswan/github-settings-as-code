@@ -1,5 +1,9 @@
 name: workflows-snapshot-roundtrip
-description: "mode: snapshot reads the live workflows back into snapshot.yml and writes nothing to GitHub. Active and manually disabled workflows read back by path and state; a deleted one has no file to speak for and is omitted. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live workflows back into snapshot.yml and writes nothing to GitHub.
+  Active and manually disabled workflows read back by path and state; a deleted one has no file to
+  speak for and is omitted. The written file, fed back to a check run against the same state, reads
+  clean.
 settings: {}
 live_state:
   workflows:

@@ -1,5 +1,10 @@
 name: webhooks-snapshot-roundtrip
-description: "mode: snapshot reads the live webhooks back into snapshot.yml and writes nothing to GitHub. Live webhooks read back with their config, events, and active flag; the secret GitHub never reveals becomes a $SECRET_WEBHOOK_<hook id> reference with a note, and the value comes from the environment when the snapshot is checked back. The written file, fed back to a check run against the same state, reads clean."
+description: >-
+  mode: snapshot reads the live webhooks back into snapshot.yml and writes nothing to GitHub. Live
+  webhooks read back with their config, events, and active flag; the secret GitHub never reveals
+  becomes a $SECRET_WEBHOOK_<hook id> reference with a note, and the value comes from the
+  environment when the snapshot is checked back. The written file, fed back to a check run against
+  the same state, reads clean.
 settings: {}
 live_state:
   hooks:
