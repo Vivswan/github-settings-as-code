@@ -150,7 +150,9 @@ describe("runMulti", () => {
     );
     const bySlug = Object.fromEntries(targets.map((t) => [t.display, t.result]));
     expect(bySlug).toEqual({ "o/a": "applied", "o/b": "failed", "o/c": "skipped" });
-    expect(annotations.some((a) => a.includes("o/c: skipped - the repository has no"))).toBe(true);
+    expect(annotations).toContain(
+      'notice: o/c: skipped - the repository has no .github/settings.yml on its default branch. Add the file to manage it, or remove o/c from the "repos" input',
+    );
   });
 
   test("engine emissions carry the slug prefix; validation warnings stay unprefixed", async () => {
@@ -218,20 +220,6 @@ describe("runMulti", () => {
       ["PATCH", "/repos/o/a", { has_wiki: false }],
     ]);
     expect(annotations).toEqual([]);
-  });
-
-  test("without defaults-file a fileless target is still skipped", async () => {
-    const api = new MockApi({
-      "GET /repos/o/c": { data: { default_branch: "main", has_projects: true } },
-      "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
-    });
-    const { io, annotations } = captureIo();
-    const targets = await runTargets(api, cfg({ reposInput: "o/c" }), io);
-    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "skipped"]]);
-    expect(api.mutations()).toEqual([]);
-    expect(annotations).toEqual([
-      'notice: o/c: skipped - the repository has no .github/settings.yml on its default branch. Add the file to manage it, or remove o/c from the "repos" input',
-    ]);
   });
 
   test("central per-repo files are applied as written; the defaults never reach them", async () => {

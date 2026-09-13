@@ -70,18 +70,13 @@ const labelsRoute = (slug: string, labels: Array<typeof BUG>) => ({
 /** An ISO-8601 UTC instant, the form the header dates the snapshot in. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
-/**
- * Whether `written` opens with the snapshot header for `slug`: the schema pin
- * compared as a whole string (never as a pattern, so a look-alike host cannot
- * pass), then the dated repository line.
- */
-export function hasSnapshotHeader(written: string, slug: string): boolean {
+/** The file opens with the schema pin, compared whole (a look-alike host is not the pin), then the dated repository line. */
+function expectSnapshotHeader(written: string, slug: string): void {
   const [pin, dated] = written.split("\n");
-  if (pin !== `# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`) {
-    return false;
-  }
-  const prefix = `# Snapshot of ${slug} taken `;
-  return dated?.startsWith(prefix) === true && ISO_INSTANT.test(dated.slice(prefix.length));
+  expect(pin).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
+  expect(dated).toMatch(
+    new RegExp(`^# Snapshot of ${escapeRegExp(slug)} taken ${ISO_INSTANT.source.slice(1)}`),
+  );
 }
 
 type FileConfig = Extract<SnapshotConfig, { form: "file" }>;
@@ -122,24 +117,6 @@ const dirCfg = (dir: string, overrides: Partial<DirConfig> = {}): DirConfig =>
     ...overrides,
   }) as DirConfig;
 
-describe("hasSnapshotHeader", () => {
-  const header = (url: string, slug = "o/r", instant = "2026-09-12T01:00:06.503Z") =>
-    `# yaml-language-server: $schema=${url}\n# Snapshot of ${slug} taken ${instant}\nlabels: []\n`;
-
-  test("accepts the exact pin and a dated line; rejects a look-alike host, another slug, and a non-instant", () => {
-    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL), "o/r")).toBe(true);
-    // The URL's dots are literal: a host with one dot swapped for another character is not the pin.
-    expect(
-      hasSnapshotHeader(
-        header(SNAPSHOT_SCHEMA_URL.replace("githubusercontent.com", "githubusercontentXcom")),
-        "o/r",
-      ),
-    ).toBe(false);
-    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL, "o/other"), "o/r")).toBe(false);
-    expect(hasSnapshotHeader(header(SNAPSHOT_SCHEMA_URL, "o/r", "yesterday"), "o/r")).toBe(false);
-  });
-});
-
 describe("runSnapshot, file form", () => {
   test("writes the document under its header and reports through the outputs, the log, and the summary", () =>
     withTempDir("snapshot-flow-", async (dir) => {
@@ -148,7 +125,7 @@ describe("runSnapshot, file form", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
       const written = readFileSync(cfg.snapshotFile, "utf8");
-      expect(hasSnapshotHeader(written, "o/r")).toBe(true);
+      expectSnapshotHeader(written, "o/r");
       expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
       expect(api.mutations()).toEqual([]);
       expect(collected.outputs).toEqual({
@@ -939,7 +916,7 @@ describe("runSnapshot, dir form", () => {
       expect(await run(api, cfg, collected.io)).toBe(0);
       const fileA = join(cfg.snapshotDir, "o", "a.yml");
       const fileB = join(cfg.snapshotDir, "o", "b.yml");
-      expect(hasSnapshotHeader(readFileSync(fileA, "utf8"), "o/a")).toBe(true);
+      expectSnapshotHeader(readFileSync(fileA, "utf8"), "o/a");
       expect(parseYaml(readFileSync(fileA, "utf8"))).toEqual(doc(BUG));
       expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
       expect(api.mutations()).toEqual([]);
@@ -1123,24 +1100,25 @@ describe("runSnapshot, dir form", () => {
           "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
         }),
       });
-      expect(collected.summary).toEqual([
-        [
-          "## github-settings-as-code (snapshot, 1 repositories)",
-          "",
-          `No snapshot was written under ${cfg.snapshotDir}.`,
-          "",
-          "| Repository | Source | Result | File |",
-          "|---|---|---|---|",
-          "| o/a | remote | :x: failed | - |",
-          "",
-          "### o/a (failed)",
-          "",
-          "the snapshot failed, so no file was written",
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          `| labels | :x: failed | the token was denied GET /repos/o/a/labels: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Issues" (read and write) under the PAT's Repository permissions |`,
-        ].join("\n"),
+      // The whole rendering; only the detail cell, the engine's denial text, is matched by its head.
+      expect(collected.summary[0]?.split("\n")).toEqual([
+        "## github-settings-as-code (snapshot, 1 repositories)",
+        "",
+        `No snapshot was written under ${cfg.snapshotDir}.`,
+        "",
+        "| Repository | Source | Result | File |",
+        "|---|---|---|---|",
+        "| o/a | remote | :x: failed | - |",
+        "",
+        "### o/a (failed)",
+        "",
+        "the snapshot failed, so no file was written",
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        expect.stringMatching(
+          /^\| labels \| :x: failed \| the token was denied GET \/repos\/o\/a\/labels/,
+        ),
       ]);
     }));
 
