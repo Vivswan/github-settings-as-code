@@ -46,7 +46,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     // upload-artifact refuses a duplicate name, so a re-run attempt uploads under its own: the name carries the attempt number.
     const name = upload?.with?.name;
     expect(
-      typeof name === "string" && name.includes("github.run_attempt"),
+      typeof name === "string" && /\$\{\{[^}]*\bgithub\.run_attempt\b[^}]*\}\}/.test(name),
       `the upload name ${JSON.stringify(name)} does not vary by run attempt`,
     ).toBe(true);
     expect(report?.with?.["artifact-name"]).toBe(name);

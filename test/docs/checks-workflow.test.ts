@@ -92,18 +92,20 @@ function relativeImportsOf(file: string): string[] {
   const source = readFileSync(join(ROOT, file), "utf8");
   const specifiers: string[] = [];
   for (const line of source.split("\n")) {
-    const call = /\b(?:import|require)\s*\(/.test(line);
-    if (!call && !/^\s*import[\s{"]/.test(line)) {
+    const calls = [...line.matchAll(/\b(?:import|require)\s*\(([^)]*)\)/g)];
+    if (calls.length === 0 && !/^\s*import[\s{"]/.test(line)) {
       continue;
     }
-    const match = call
-      ? (line.match(/\b(?:import|require)\s*\(\s*(["'])([^"']+)\1\s*\)/)?.slice(1) ?? null)
-      : line.match(/^import [^"]*from "([^"]+)";$/);
+    // Every call on the line is read; one whose argument is not a quoted literal is the unsupported form.
+    const found =
+      calls.length > 0
+        ? calls.map((call) => (call[1] ?? "").trim().match(/^(["'])([^"']+)\1$/)?.[2] ?? null)
+        : [line.match(/^import [^"]*from "([^"]+)";$/)?.[1] ?? null];
     expect(
-      match,
+      found.every((spec) => spec !== null),
       `unrecognized import form in ${file}: "${line.trim()}" - teach relativeImportsOf() to parse it`,
-    ).not.toBeNull();
-    specifiers.push(match?.[1] ?? "");
+    ).toBe(true);
+    specifiers.push(...found.map((spec) => spec ?? ""));
   }
   return specifiers
     .filter((spec) => spec.startsWith("."))

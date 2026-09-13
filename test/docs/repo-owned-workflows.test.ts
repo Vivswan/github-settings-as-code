@@ -38,7 +38,7 @@ describe("the commit-back push jobs", () => {
         (step.run ?? "")
           .replace(/\\\n/g, " ")
           .split("\n")
-          .filter((line) => /\bgit push\b/.test(line))
+          .filter((line) => /\bgit\s+push\b/.test(line))
           .map((line) => ({
             step,
             // Quotes removed and `${NAME}` written `$NAME`: the word as git receives it, whichever spelling the script used.
