@@ -179,11 +179,13 @@ describe("the CLI under GitHub Actions", () => {
       expect(rest.join("\n")).toBe(
         "token *** in a log line\n::error::401 *** for *** at 100%25\nresult=failed ***\n",
       );
-      const everything = rest.join("\n") + cli.stderr() + cli.output() + cli.summary();
+      // The step outputs carry the raw value, as under the action: a later step reads them back, and the runner masks
+      // their display through the add-mask command above. Every rendered channel is redacted.
+      const everything = rest.join("\n") + cli.stderr() + cli.summary();
       expect(everything).not.toContain("ghp_secret");
       expect(cli.stderr()).toBe("debug: Authorization: token ***\n");
       expect(sameDelimiters(cli.output())).toBe(
-        "result<<ghadelimiter_<uuid>\nfailed ***\nghadelimiter_<uuid>\n",
+        "result<<ghadelimiter_<uuid>\nfailed ghp_secret\nghadelimiter_<uuid>\n",
       );
       expect(cli.summary()).toBe("# run by ***\n");
     }));

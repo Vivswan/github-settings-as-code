@@ -186,7 +186,8 @@ export function cliIo(options: CliIoOptions): CliIo {
       output: (name, value) => {
         outputs.set(name, value);
         if (runner?.outputFile !== undefined) {
-          appendFileSync(runner.outputFile, outputRecord(name, streams.redact(value)));
+          // The raw value, as the action writes it: a later step reads it back, and the runner masks the log display.
+          appendFileSync(runner.outputFile, outputRecord(name, value));
         }
       },
       mask: streams.mask,
