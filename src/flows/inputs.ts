@@ -114,8 +114,8 @@ export const INPUT_DECLS = {
       "mode: merge only, and required there: the path the merged settings document is written to " +
       "(parent directories are created). The file holds exactly what apply would run: every " +
       "section validated, each section that takes an undeclared policy in its policy-wrapper form " +
-      "with the policy made explicit, the other sections in their own shape, and private " +
-      "underscore keys and the _layering directives dropped. Feed it to a later apply or check " +
+      "with the policy made explicit, the other sections in their own shape, and the _layering " +
+      "directives dropped. Feed it to a later apply or check " +
       "step as its settings-file. Must not name one of the settings-file layers (the merge would " +
       "overwrite it). Fails when set in apply or check.",
     default: "",

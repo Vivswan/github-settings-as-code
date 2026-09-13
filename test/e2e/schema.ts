@@ -310,7 +310,7 @@ const DiscoverySchema = z
  * failures the permission and handler layers cannot:
  *
  *   rate_limit_403   -> 403 with "rate limit" in the body; the client must read it as throttling, not a denial
- *   429_then_200     -> the secondary-rate-limit shape; the throttling plugin honors its Retry-After (in RETRY_BASE_MS units under the runner)
+ *   429_then_200     -> the secondary-rate-limit shape; the throttling plugin honors its Retry-After (in GSAC_RETRY_BASE_MS units under the runner)
  *   server_error     -> 5xx rotating 500/502/503 per firing; times 1 recovers, times >= 3 (1 + MAX_RETRIES) fails
  *   connection_drop  -> the socket dies before any response, a network failure surfaced after the retries
  *   echo_422         -> a validation rejection quoting the request body verbatim; a secret-carrying request must surface none of it
@@ -327,7 +327,7 @@ const FaultSchema = z
  * Names a scenario's `env` map may not set: the runner builds the child environment from scratch
  * and these are its own controls. The prefixes are the SAME set secret references refuse.
  */
-const RESERVED_ENV_NAMES = new Set(["PATH", "HOME", "RETRY_BASE_MS"]);
+const RESERVED_ENV_NAMES = new Set(["PATH", "HOME", "GSAC_RETRY_BASE_MS"]);
 
 function reservedEnvKey(name: string): boolean {
   return RESERVED_ENV_NAMES.has(name) || RESERVED_REF_PREFIXES.some((p) => name.startsWith(p));

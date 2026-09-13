@@ -1,20 +1,30 @@
-/** `teams:` section: team repository access. Organization repos only, so a personal account no-ops with a note. */
+/**
+ * `teams:` section: team repository access. Organization repos only, so a personal account no-ops with a note. An
+ * undeclared team keeps its access by default (a team is often granted by the org, for reasons outside one
+ * repository's file); `_undeclared: delete` revokes the direct grants the file does not name.
+ */
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
+  defaultUndeclaredPolicy,
   loosen,
   type SectionMeta,
   type SectionModule,
   sectionGrant,
+  undeclaredDrift,
+  undeclaredNote,
+  undeclaredPolicy,
   valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { DEFAULT_ROLE, permissionForRole, roleForPermission } from "../shared/roles.js";
-import { type TeamConfig, TeamsConfig } from "./schema.js";
+import { knobbed } from "../shared/schema-helpers.js";
+import { knobbedSnapshot } from "../shared/snapshot-helpers.js";
+import { TeamConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"], org: "members" };
 
@@ -38,6 +48,10 @@ const ENDPOINTS = {
     route: "PUT /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}",
     statuses: { 204: "team access granted" },
   },
+  revoke: {
+    route: "DELETE /orgs/{org}/teams/{team_slug}/repos/{owner}/{repo}",
+    statuses: { 204: "team access revoked" },
+  },
 } as const satisfies Record<string, EndpointDecl>;
 
 type TeamsContext = PlanContext<typeof ENDPOINTS>;
@@ -51,6 +65,14 @@ const LiveTeamRepo = z.looseObject({ role_name: z.string().optional() }).nullish
  * (present only in a repository listing; absent reads as direct).
  */
 const LiveTeam = z.looseObject({ slug: z.string(), access_source: z.string().optional() });
+type LiveTeam = z.infer<typeof LiveTeam>;
+
+/** Access granted above the repository (the organization, the enterprise), which no repository call revokes. */
+function inheritedAccess(team: LiveTeam): string | undefined {
+  return team.access_source !== undefined && team.access_source !== "direct"
+    ? team.access_source
+    : undefined;
+}
 
 /** The probe plan() and snapshot() share, under the media type LiveTeamRepo describes. */
 async function probeTeamRole(
@@ -75,19 +97,20 @@ function personalAccountNote(owner: string): string {
 
 export const teamsSection = {
   key: "teams",
-  undeclaredDefault: "untouched",
+  undeclaredDefault: "keep",
   permission,
   // Teams exist only under an organization owner; the org probe below implements the no-op this declares.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(TeamsConfig),
+  shape: loosen(knobbed(TeamConfig)),
   // The grant PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { name: true, permission: true },
     describe: (t) => t.name,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
-  async plan(ctx, desired) {
+  async plan(ctx, declared) {
+    const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     rejectDuplicates(
       this,
       desired,
@@ -103,6 +126,10 @@ export const teamsSection = {
       );
       return plan;
     }
+    // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
+    // below start from; a declared team's role still comes from the probe, which names a custom role.
+    const live = parseLive(this, ENDPOINTS.list, z.array(LiveTeam), await ctx.read.list.listAll());
+    const declaredSlugs = new Set(desired.map((team) => team.name.toLowerCase()));
     for (const team of desired) {
       const role = team.permission ?? DEFAULT_ROLE;
       const params = { org: ctx.repo.owner, team_slug: team.name };
@@ -132,12 +159,51 @@ export const teamsSection = {
         change: `granted team "${team.name}" ${role}`,
       });
     }
+
+    for (const team of live) {
+      if (declaredSlugs.has(team.slug.toLowerCase())) {
+        continue;
+      }
+      const inherited = inheritedAccess(team);
+      if (inherited !== undefined) {
+        // Only a revocation would act on it, so only the policy that would revoke is told it cannot.
+        if (policy === "delete") {
+          plan.notes.push(
+            `teams[${team.slug}]: access to ${ctx.repo.slug} is granted at the ${inherited} level, not on the repository, so "_undeclared: delete" cannot revoke it; left untouched`,
+          );
+        }
+        continue;
+      }
+      if (policy === "keep") {
+        plan.notes.push(
+          undeclaredNote({
+            subject: `team "${team.slug}"`,
+            state: "has access but is not declared",
+            manage: "its access",
+            action: "REVOKE its access",
+          }),
+        );
+        continue;
+      }
+      plan.ops.push({
+        role: "revoke",
+        params: { org: ctx.repo.owner, team_slug: team.slug },
+        drift: [
+          undeclaredDrift(defaultUndeclaredPolicy(this), {
+            label: `teams[${team.slug}]`,
+            action: "REVOKE its access",
+            keep: "its access",
+          }),
+        ],
+        change: `REVOKED undeclared team "${team.slug}"`,
+      });
+    }
     return plan;
   },
   /**
    * The role comes from the probe, not the listing's `permission`:
    * the listing reports a custom role as its base role, role_name names it.
-   * Omitted with a note, each a no-op since the section never removes an undeclared team:
+   * Omitted with a note, each a no-op under the keep default and never revocable:
    * non-direct access (declaring it would grant direct access), a probe 404 (no access, or a
    * concealed denial), an unreadable role, a role no declaration plans as.
    */
@@ -151,9 +217,10 @@ export const teamsSection = {
     const entries: TeamConfig[] = [];
     for (const team of teams) {
       const label = `teams[${team.slug}]`;
-      if (team.access_source !== undefined && team.access_source !== "direct") {
+      const inherited = inheritedAccess(team);
+      if (inherited !== undefined) {
         notes.push(
-          `${label}: access to ${ctx.repo.slug} is granted at the ${team.access_source} level, not on the repository; not declared, since declaring it would grant direct access`,
+          `${label}: access to ${ctx.repo.slug} is granted at the ${inherited} level, not on the repository; not declared, since declaring it would grant direct access`,
         );
         continue;
       }
@@ -182,6 +249,6 @@ export const teamsSection = {
       }
       entries.push({ name: team.slug, permission });
     }
-    return { value: entries.length === 0 ? undefined : entries, notes };
+    return { value: entries.length === 0 ? undefined : knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"teams", typeof ENDPOINTS>;

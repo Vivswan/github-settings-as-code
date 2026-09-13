@@ -199,6 +199,10 @@ export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> =
     caveat: "owner always exempt",
     override: "manage listed people without removing others",
   },
+  teams: {
+    caveat: "a grant made at the organization level is never touched",
+    override: "make the file the complete inventory of direct team grants, revoking the rest",
+  },
   actions_variables: { override: "declare the managed variables, tolerate the rest" },
   agents_variables: { override: "declare the managed variables, tolerate the rest" },
   rulesets: { override: "make the file the complete ruleset inventory" },

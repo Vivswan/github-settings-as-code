@@ -5,7 +5,7 @@ order: 150
 # The undeclared policy
 
 <!-- BEGIN GENERATED: policy-count-sentence (bun run build:action-docs; derived from UNDECLARED_POLICY_SECTIONS) -->
-Fifteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, and `secret_scanning_custom_patterns`.
+Sixteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, `teams`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, and `secret_scanning_custom_patterns`.
 <!-- END GENERATED: policy-count-sentence -->
 
 Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it travels through a layered merge. The [Sections table](sections.md) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
@@ -51,6 +51,7 @@ Before v3 the policy key was spelled `undeclared`. A file still writing it fails
 | `dependabot_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `codespaces_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
 | `agents_secrets` | keep | `delete`: prune stale secrets - a deleted secret's value is unrecoverable |
+| `teams` | keep (a grant made at the organization level is never touched) | `delete`: make the file the complete inventory of direct team grants, revoking the rest |
 | `milestones` | keep | `delete`: prune stale milestones, with the caveat below |
 | `webhooks` | keep (integrations create their own hooks) | `delete`: make the file the complete hook inventory |
 | `custom_properties` | keep (an unset can revert to an org default the file does not model) | `delete`: make the file the complete property-value inventory, unsetting the rest |

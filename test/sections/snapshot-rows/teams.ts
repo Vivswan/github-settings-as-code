@@ -2,7 +2,7 @@ import { teamsSection } from "../../../src/sections/teams/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
 // A null access entry is a team without access, which the listing omits; a custom role named
-// "push" has no declaration that plans as itself, and the section never removes an undeclared team.
+// "push" has no declaration that plans as itself. The wrapper spells the section's keep default out.
 export const row: Row = {
   section: teamsSection,
   live: {
@@ -15,11 +15,14 @@ export const row: Row = {
     },
   },
   expected: {
-    value: [
-      { name: "platform", permission: "push" },
-      { name: "auditors", permission: "security-auditor" },
-      { name: "readers", permission: "pull" },
-    ],
+    value: {
+      _undeclared: "keep",
+      entries: [
+        { name: "platform", permission: "push" },
+        { name: "auditors", permission: "security-auditor" },
+        { name: "readers", permission: "pull" },
+      ],
+    },
     notes: [
       'teams[pushy]: the live role "push" has no declaration that plans as itself ("push" in a settings file means the "write" role); not declared',
     ],

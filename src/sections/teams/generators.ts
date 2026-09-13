@@ -5,9 +5,9 @@
 
 import { generatorFromSlice, type Json, uniqueBy } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
-import { TeamsConfig } from "./schema.js";
+import { TeamConfig } from "./schema.js";
 
-const genTeam = generatorFromSlice(TeamsConfig.element, {
+const genTeam = generatorFromSlice(TeamConfig, {
   fields: {
     name: (rng) => rng.pick(["core", "reviewers", "ops"]),
     permission: (rng) => rng.pick(["pull", "push", "maintain", "admin"]),

@@ -15,12 +15,33 @@ const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "Undeclared
  */
 export const LayeringSchema = z.enum(["merge", "replace"]);
 
-const wrapperKeyError = renamedKeyError(
+const renamedPolicyKeyError = renamedKeyError(
   "wrapper's policy",
   "undeclared",
   "_undeclared",
   "in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete",
 );
+
+/**
+ * The wrapper's unrecognized keys: the pre-v3 policy spelling names its rename, and any other underscore key names
+ * the two directives, since a wrapper takes no private notes either (the document level says the same in
+ * src/problem.ts). A misspelled entry field is the strict object's own line.
+ */
+function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+  const renamed = renamedPolicyKeyError(issue);
+  if (renamed !== undefined) {
+    return renamed;
+  }
+  if (issue.code !== "unrecognized_keys" || !issue.keys.some((key) => key.startsWith("_"))) {
+    return undefined;
+  }
+  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
+  return (
+    `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${keys}; the wrapper's directives are ` +
+    '"_undeclared" and, on a top-level section, "_layering", and nothing else - there are no ' +
+    "private-note keys. Remove the key, or keep the note as a YAML comment"
+  );
+}
 
 /**
  * loosen() (../contract/module.ts) recognizes this union and rewraps it with the routed check that keeps

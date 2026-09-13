@@ -1,0 +1,32 @@
+name: teams-undeclared-delete
+description: >-
+  Under "_undeclared: delete" an organization repo's team the settings file does
+  not name loses its direct access: apply DELETEs that team's repository grant,
+  leaves the declared team's converged access alone, and a check rerun over the
+  mutated state converges.
+settings:
+  teams:
+    _undeclared: delete
+    entries:
+      - name: platform
+        permission: push
+owner_kind: org
+live_state:
+  teams:
+    platform:
+      role_name: write
+    legacy:
+      role_name: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    teams: applied
+  mutations:
+    - "DELETE /orgs/e2e-owner/teams/legacy/repos/{repo}"
+  never:
+    - "PUT /orgs/e2e-owner/teams/platform/repos/{repo}"
+    - "DELETE /orgs/e2e-owner/teams/platform/repos/{repo}"
+  stdout_contains:
+    - "REVOKED undeclared team \"legacy\""
+  fixpoint: converges

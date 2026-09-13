@@ -112,7 +112,7 @@ describe("changed-sections derived fan-out", () => {
       "repo-variables.ts": inKeyOrder("actions_variables", "agents_variables"),
       "setup-section.ts": inKeyOrder("code_scanning_default_setup", "code_quality_setup"),
       // The snapshot projection and knobbed wrapper: every section with a snapshot() except
-      // workflows and teams, whose two-field entries are spelled by hand.
+      // workflows, whose two-field entries are spelled by hand.
       "snapshot-helpers.ts": inKeyOrder(
         "repository",
         "labels",
@@ -128,6 +128,7 @@ describe("changed-sections derived fan-out", () => {
         "code_scanning_default_setup",
         "code_quality_setup",
         "collaborators",
+        "teams",
         "milestones",
         "interaction_limits",
         "actions_variables",

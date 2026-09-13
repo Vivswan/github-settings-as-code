@@ -340,6 +340,23 @@ describe("validateSettingsDoc", () => {
     );
   });
 
+  test("an unknown underscore key is a problem under every allowlist, and it outranks the unknown sections; the document directive passes", () => {
+    const { io, annotations } = captureIo();
+    const doc = { _notes: "private", _layerin: "replace", labls: [], repository: {} };
+    const refused = err({
+      code: "settings-unknown-directives" as const,
+      source: "f.yml",
+      unknown: ["_notes", "_layerin"],
+    });
+    expect(validateSettingsDoc(doc, "f.yml", new Set(), io)).toEqual(refused);
+    // Outside a `sections` allowlist an unknown SECTION only warns; the underscore rule has no such downgrade.
+    expect(validateSettingsDoc(doc, "f.yml", new Set(["repository"]), io)).toEqual(refused);
+    expect(annotations).toEqual([]);
+    expect(
+      validateSettingsDoc({ _layering: "replace", repository: {} }, "f.yml", new Set(), io).isOk(),
+    ).toBe(true);
+  });
+
   test.each<[what: string, doc: unknown, shape: TopLevelShape]>([
     ["a list", [], "list"],
     ["null", null, "null"],

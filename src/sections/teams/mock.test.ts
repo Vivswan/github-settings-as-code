@@ -46,7 +46,7 @@ describe("teams.probe answers by Accept media type, like GitHub", () => {
       drift: [],
     });
     expect(await teamsSection.snapshot(snapshotContext(teamsSection, api, REPO, "fail"))).toEqual({
-      value: [{ name: "platform", permission: "push" }],
+      value: { _undeclared: "keep", entries: [{ name: "platform", permission: "push" }] },
       notes: [],
     });
     expect(api.writes).toEqual([]);

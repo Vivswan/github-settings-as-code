@@ -37,7 +37,7 @@ import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
 import { knobbed, LayeringSchema } from "./sections/shared/schema-helpers.js";
-import { TeamsConfig } from "./sections/teams/schema.js";
+import { TeamConfig } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
 import { WorkflowsConfig } from "./sections/workflows/schema.js";
 import type { MustBeNever } from "./types.js";
@@ -63,7 +63,7 @@ export const SettingsFile = z
     code_scanning_default_setup: CodeScanningDefaultSetupConfig.optional(),
     code_quality_setup: CodeQualitySetupConfig.optional(),
     collaborators: knobbed(CollaboratorConfig).optional(),
-    teams: TeamsConfig.optional(),
+    teams: knobbed(TeamConfig).optional(),
     milestones: knobbed(MilestoneConfig).optional(),
     interaction_limits: InteractionLimitsConfig.optional(),
     actions_variables: knobbed(ActionsVariableConfig).optional(),
@@ -125,6 +125,7 @@ export const UNDECLARED_POLICY_SECTIONS = [
   "codespaces_secrets",
   "agents_secrets",
   "collaborators",
+  "teams",
   "milestones",
   "actions_variables",
   "agents_variables",
@@ -198,7 +199,7 @@ type SliceDerivation = {
   code_scanning_default_setup: typeof CodeScanningDefaultSetupConfig;
   code_quality_setup: typeof CodeQualitySetupConfig;
   collaborators: ReturnType<typeof knobbed<typeof CollaboratorConfig>>;
-  teams: typeof TeamsConfig;
+  teams: ReturnType<typeof knobbed<typeof TeamConfig>>;
   milestones: ReturnType<typeof knobbed<typeof MilestoneConfig>>;
   interaction_limits: typeof InteractionLimitsConfig;
   actions_variables: ReturnType<typeof knobbed<typeof ActionsVariableConfig>>;

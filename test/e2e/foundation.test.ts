@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { ROOT } from "../root.js";
@@ -323,6 +323,15 @@ describe("scenario schema", () => {
 });
 
 describe("scenario corpus loader (collectYmlFiles)", () => {
+  test("every scenario file name is dashed lowercase, so a section key's underscore never leaks into the corpus", () => {
+    const files = scenarioRoots().flatMap((root) => collectYmlFiles(root));
+    expect(files.length).toBeGreaterThan(0);
+    const offenders = files.filter(
+      (path) => !/^[a-z0-9]+(?:-[a-z0-9]+)*\.yml$/.test(basename(path)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   function withTempRoot(body: (root: string) => void): void {
     const root = mkdtempSync(join(tmpdir(), "e2e-corpus-"));
     try {

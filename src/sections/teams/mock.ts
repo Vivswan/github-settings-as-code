@@ -92,4 +92,8 @@ export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
     state.teams[slug] = teamRepoFromPut(asObject(body));
     return noContent();
   },
+  "teams.revoke": ({ state, param }) => {
+    state.teams[param("team_slug")] = null;
+    return noContent();
+  },
 };

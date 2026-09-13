@@ -8,7 +8,12 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { SettingsProblem, TopLevelShape } from "../problem.js";
-import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
+import {
+  DOCUMENT_DIRECTIVE_KEYS,
+  SECTION_KEYS,
+  type SectionKey,
+  type SettingsFile,
+} from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import {
   type ExecTools,
@@ -85,7 +90,8 @@ export function skippedSectionKeys(
 
 /**
  * The ONE boundary that turns a raw parsed document into the ValidatedSettings the engine accepts. Unknown top-level
- * keys are errors, except outside a non-empty `sections` allowlist, where they downgrade to a warning.
+ * keys are errors, except outside a non-empty `sections` allowlist, where they downgrade to a warning; an unknown
+ * underscore key is an error under every allowlist, since the underscore names this action's directives and nothing else.
  */
 export function validateSettingsDoc(
   settings: unknown,
@@ -107,12 +113,22 @@ export function validateSettingsDoc(
     return err({ code: "settings-not-plain-mapping", source: sourceLabel });
   }
   const knownSections = new Set<string>(SECTION_KEYS);
+  const directives = new Set<string>(DOCUMENT_DIRECTIVE_KEYS);
   const allowed: ReadonlySet<string> = onlySections;
-  // A misspelled section silently doing nothing would break the loud-failure promise; underscore-prefixed keys are the
-  // sanctioned place for private notes.
-  const unknownKeys = Object.keys(settings).filter(
-    (key) => !knownSections.has(key) && !key.startsWith("_"),
+  // A misspelled section silently doing nothing would break the loud-failure promise, and so would a misspelled
+  // directive: `_layerin: replace` dropped as a private note would merge a layer the author meant to replace.
+  const strangers = Object.keys(settings).filter(
+    (key) => !knownSections.has(key) && !directives.has(key),
   );
+  const unknownDirectives = strangers.filter((key) => key.startsWith("_"));
+  if (unknownDirectives.length > 0) {
+    return err({
+      code: "settings-unknown-directives",
+      source: sourceLabel,
+      unknown: unknownDirectives,
+    });
+  }
+  const unknownKeys = strangers.filter((key) => !key.startsWith("_"));
   if (unknownKeys.length > 0) {
     if (onlySections.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
       return err({

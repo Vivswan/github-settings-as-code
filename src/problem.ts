@@ -138,6 +138,11 @@ export type Problem =
       readonly known: readonly string[];
     }
   | {
+      readonly code: "settings-unknown-directives";
+      readonly source: string;
+      readonly unknown: readonly string[];
+    }
+  | {
       readonly code: "settings-malformed-sections";
       readonly source: string;
       readonly issues: readonly string[];
@@ -243,12 +248,22 @@ export type SettingsProblem = ProblemOf<
   | "settings-not-mapping"
   | "settings-not-plain-mapping"
   | "settings-unknown-sections"
+  | "settings-unknown-directives"
   | "settings-malformed-sections"
 >;
 
 const PAT_ADVICE =
   "Discovery needs a user PAT; the workflow GITHUB_TOKEN and GitHub App installation tokens " +
   'cannot enumerate a user\'s repositories. List the target repositories explicitly in the "repos" input';
+
+/**
+ * The underscore rule at the document level; the wrapper's line (src/sections/shared/schema-helpers.ts) says the
+ * same in the wrapper's terms. The two directives are all the underscore ever means.
+ */
+const DIRECTIVES_ADVICE =
+  "The underscore marks this action's directives, \"_layering\" (a file's top level or a list section's {entries} " +
+  'wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or ' +
+  "keep the note as a YAML comment";
 
 const PASSTHROUGH_ADVICE =
   "Fix these values in the settings file (only the named keys are validated; extra fields pass " +
@@ -459,7 +474,9 @@ export function describeProblem(problem: Problem): string {
     case "settings-not-plain-mapping":
       return `${problem.source} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`;
     case "settings-unknown-sections":
-      return `unknown top-level section(s) in ${problem.source}: ${problem.unknown.join(", ")} (known: ${problem.known.join(", ")}). Fix the typo, or prefix private keys with "_", or set the "sections" input to limit processing`;
+      return `unknown top-level section(s) in ${problem.source}: ${problem.unknown.join(", ")} (known: ${problem.known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
+    case "settings-unknown-directives":
+      return `unknown underscore key(s) in ${problem.source}: ${problem.unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
     case "settings-malformed-sections":
       return `${problem.source} has malformed section entries: ${problem.issues.join("; ")}. ${PASSTHROUGH_ADVICE}`;
     case "yaml-invalid":

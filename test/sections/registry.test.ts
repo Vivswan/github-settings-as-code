@@ -135,6 +135,7 @@ describe("section permissions", () => {
       codespaces_secrets: "keep",
       agents_secrets: "keep",
       collaborators: "delete",
+      teams: "keep",
       milestones: "keep",
       actions_variables: "delete",
       agents_variables: "delete",
@@ -168,7 +169,10 @@ describe("section permissions", () => {
     }).toEqual({
       topLevel: Object.fromEntries(UNDECLARED_POLICY_SECTIONS.map((key) => [key, true])),
       nested: Object.keys(nested)
-        .map((list) => [`0.${list}`, 'Unrecognized key: "_layering"'])
+        .map((list) => [
+          `0.${list}`,
+          'Unrecognized key: "_layering"; the wrapper\'s directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment',
+        ])
         .sort(),
     });
   });
@@ -752,6 +756,7 @@ describe("allEndpoints", () => {
       "teams.list",
       "teams.org",
       "teams.probe",
+      "teams.revoke",
       "webhooks.create",
       "webhooks.list",
       "webhooks.remove",
