@@ -431,14 +431,29 @@ describe("listGraphqlConnection", () => {
   });
 
   test("hasNextPage without a fresh endCursor fails instead of looping", async () => {
-    const api = pagedApi([page(["a"], null, true)]);
-    await expect(
-      listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
-    ).rejects.toThrow(
-      new Error(
-        'repository: GRAPHQL RepoRules reported hasNextPage without a new endCursor at "repository.rules", so the pagination cannot advance. The operation\'s query must select pageInfo{hasNextPage, endCursor}',
-      ),
-    );
+    // A null endCursor on the first page or a later one, and a repeated one, all leave the walk unable to advance; one request past the
+    // fixture is the loop the guard stops.
+    for (const pages of [
+      [page(["a"], null, true)],
+      [page(["a"], "CUR1", true), page(["b"], null, true)],
+      [page(["a"], "CUR1", true), page(["b"], "CUR1", true)],
+    ]) {
+      const api = pagedApi(pages);
+      const serve = api.tryGraphql;
+      api.tryGraphql = async (op, variables, slug, mark) => {
+        if (api.calls.length >= pages.length) {
+          throw new Error("the walk requested a page past the fixture instead of failing");
+        }
+        return serve(op, variables, slug, mark);
+      };
+      await expect(
+        listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
+      ).rejects.toThrow(
+        new Error(
+          'repository: GRAPHQL RepoRules reported hasNextPage without a new endCursor at "repository.rules", so the pagination cannot advance. The operation\'s query must select pageInfo{hasNextPage, endCursor}',
+        ),
+      );
+    }
   });
 
   test("errors inside the loop classify through throwFor", async () => {
