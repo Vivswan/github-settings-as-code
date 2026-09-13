@@ -12,7 +12,7 @@ import type { SnapshotContext } from "../contract/plan.js";
 import { secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, readOrNote } from "../shared/snapshot-helpers.js";
 import { variableKey } from "../shared/variables-engine.js";
-import { listBranchPolicies } from "./branch-policies.js";
+import { listBranchPolicies, livePolicyName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import {
   listEnvironmentSecrets,
@@ -135,7 +135,7 @@ export async function snapshotNested(
     );
     if ("value" in policies && policies.value.length > 0) {
       liveByIdentity(section, "deployment branch policy", policies.value, (policy) =>
-        String(policy.name),
+        livePolicyName(policy, envName),
       );
       nested.deployment_branch_policies = wrapped(
         "deployment_branch_policies",

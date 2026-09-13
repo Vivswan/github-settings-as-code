@@ -45,7 +45,7 @@ function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
   return String(policy.id);
 }
 
-function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
+export function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
   if (typeof policy.name !== "string") {
     throw new Error(
       `environments: the deployment branch-policy list for environment "${envName}" returned a policy without a name, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,

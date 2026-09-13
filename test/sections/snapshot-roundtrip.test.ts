@@ -200,6 +200,25 @@ describe("snapshot round trip", () => {
     );
   });
 
+  test("a deployment branch policy without a name fails the environments snapshot as a malformed response, not as a duplicate", async () => {
+    // Two nameless rows would otherwise collide under the literal identity "undefined"; plan and snapshot classify the input the same way.
+    const nested = registryFake({
+      environments: {
+        prod: {
+          name: "prod",
+          protection_rules: [],
+          deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+        },
+      },
+      environment_branch_policies: { prod: [{ id: 1 }, { id: 2 }] },
+    });
+    await expect(
+      environmentsSection.snapshot(snapshotContext(environmentsSection, nested, REPO, "fail")),
+    ).rejects.toThrow(
+      'environments: the deployment branch-policy list for environment "prod" returned a policy without a name, so it cannot be reconciled',
+    );
+  });
+
   test.each([
     [
       { enabled: "yes", max_open_pull_requests: 1 },
