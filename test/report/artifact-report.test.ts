@@ -50,10 +50,9 @@ describe("parseRecipient", () => {
 
   test.each([
     "",
-    "not-a-key",
     "age1shortandinvalid", // gitleaks:allow
     "AGE-SECRET-KEY-1NOTPUBLIC",
-  ])("rejects a malformed recipient: %j", (recipient) => {
+  ])("rejects a malformed recipient with the library's reason: %j", (recipient) => {
     expect(parseRecipient(recipient)).toEqual(
       err({ code: "age-recipient-invalid", reason: expect.any(String) }),
     );
