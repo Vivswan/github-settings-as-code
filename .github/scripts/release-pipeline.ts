@@ -13,9 +13,9 @@
  * per workflow step:
  *
  *   advance-build                  post-green.yml          GITHUB_SHA, RUN_URL (optional)
- *   prerelease-version             post-green.yml          GITHUB_SHA, GITHUB_RUN_NUMBER
- *   npm-verdict next               post-green.yml          GITHUB_SHA, GITHUB_RUN_NUMBER, NPM_REGISTRY_URL (optional)
- *   npm-confirm next               post-green.yml          GITHUB_SHA, GITHUB_RUN_NUMBER, NPM_REGISTRY_URL (optional)
+ *   prerelease-version             post-green.yml          GITHUB_SHA
+ *   npm-verdict next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
+ *   npm-confirm next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
  *   verify                         update-release.yml      TAG, GITHUB_SHA
@@ -1152,19 +1152,41 @@ function manifestVersionAt(cwd: string, treeish: string): string {
   return String(manifest["."]);
 }
 
+/** Where a commit sits on main, read from a full checkout: the two identifiers that order its pre-release
+ * version. Both are the commit's own, so every run for one commit mints one version string. */
+export interface MainPosition {
+  /** Commits reachable from it along first parents: one more per merge to main, whatever a merged PR's branch held. */
+  count: number;
+  /** Its committer date in UTC, YYYYMMDD. */
+  date: string;
+}
+
+/** Refused on a shallow checkout: it would count to its boundary and mint a truncated count, so the version would
+ * sort below ones minted from the full history for older commits. Count 0 is never minted here; it marks the
+ * hand-published bootstrap (docs/reference/library.md). */
+export function mainPosition(cwd: string, sourceSha: string): MainPosition {
+  if (git(cwd, "rev-parse", "--is-shallow-repository") === "true") {
+    throw new Error(
+      "the pre-release version needs the full history (fetch-depth: 0) and this checkout is shallow: the count of commits under the source would stop at the shallow boundary.",
+    );
+  }
+  const count = Number(git(cwd, "rev-list", "--count", "--first-parent", sourceSha));
+  const committed = Number(git(cwd, "show", "-s", "--format=%ct", sourceSha));
+  const date = new Date(committed * 1000).toISOString().slice(0, 10).replaceAll("-", "");
+  return { count, date };
+}
+
 /**
- * The npm version a green main commit's library build publishes under the
- * `next` dist-tag: the manifest version's next patch, then a pre-release
- * suffix of the workflow run number and the source's short sha. That sorts
- * above the last release, below the next one whatever its bump, forward
- * across runs (run numbers only grow), and once per run. The sha carries a
- * `g` prefix, as git describe writes it: npm reads an all-digit identifier
- * as a number and drops its leading zero, so a bare sha7 such as 0123456
- * would be rewritten to 123456 and name no commit.
+ * The npm version a green main commit's library build publishes under the `next` dist-tag: the manifest version's
+ * next patch, then `main`, the source's position on main, and its short sha. That sorts above the last release,
+ * below the next one whatever its bump, and along main: npm compares the count first, and it grows by one with
+ * each merge (the date is for the reader; two merges on one day share it). The sha carries a `g` prefix, as git
+ * describe writes it: npm reads an all-digit identifier as a number and drops its leading zero, so a bare sha7
+ * such as 0123456 would be rewritten to 123456 and name no commit.
  */
 export function prereleaseVersion(
   manifestVersion: string,
-  runNumber: string,
+  position: MainPosition,
   sourceSha: string,
 ): string {
   const version = manifestVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
@@ -1173,9 +1195,14 @@ export function prereleaseVersion(
       `the manifest version ${JSON.stringify(manifestVersion)} is not X.Y.Z; refusing to derive a pre-release version from it.`,
     );
   }
-  if (!/^(0|[1-9]\d*)$/.test(runNumber)) {
+  if (!Number.isInteger(position.count) || position.count < 1) {
     throw new Error(
-      `the run number ${JSON.stringify(runNumber)} is not a decimal integer; refusing to mint a pre-release version from it.`,
+      `the commit count ${JSON.stringify(position.count)} is not a positive integer; refusing to mint a pre-release version from it.`,
+    );
+  }
+  if (!/^\d{8}$/.test(position.date)) {
+    throw new Error(
+      `the commit date ${JSON.stringify(position.date)} is not YYYYMMDD; refusing to mint a pre-release version from it.`,
     );
   }
   if (!FULL_SHA.test(sourceSha)) {
@@ -1184,15 +1211,13 @@ export function prereleaseVersion(
     );
   }
   const [, major, minor, patch] = version;
-  return `${major}.${minor}.${Number(patch) + 1}-main.${runNumber}.g${sourceSha.slice(0, 7)}`;
+  return `${major}.${minor}.${Number(patch) + 1}-main.${position.count}.${position.date}.g${sourceSha.slice(0, 7)}`;
 }
 
 export interface PrereleaseVersionOptions {
   cwd: string;
   /** The green main commit this run judged; the checkout must be at it. */
   sourceSha: string;
-  /** The workflow run number, the pre-release's forward-moving component. */
-  runNumber: string;
 }
 
 /** The checkout must be at the source whose build is published: the manifest and package.json are read there. */
@@ -1207,28 +1232,33 @@ function assertCheckoutAt(cwd: string, sourceSha: string): void {
 
 /** prereleaseVersion for the checkout: the manifest is read at sourceSha, which HEAD must be. */
 export function prereleaseVersionOf(options: PrereleaseVersionOptions): string {
-  const { cwd, sourceSha, runNumber } = options;
+  const { cwd, sourceSha } = options;
   assertCheckoutAt(cwd, sourceSha);
-  return prereleaseVersion(manifestVersionAt(cwd, sourceSha), runNumber, sourceSha);
+  return prereleaseVersion(
+    manifestVersionAt(cwd, sourceSha),
+    mainPosition(cwd, sourceSha),
+    sourceSha,
+  );
 }
 
-/** A version this pipeline mints, parsed for ordering: a release, or a pre-release of one. */
+/** A version this pipeline mints, parsed: a release, or a pre-release carrying its source's short sha. The
+ * identifiers between `main` and the sha are not read back: a published pre-release is placed by its source's
+ * ancestry, never by comparing them. */
 interface MintedVersion {
   release: [number, number, number];
-  pre: { run: number; sha: string } | null;
+  sha7: string | null;
 }
 
 /** The two version shapes this pipeline mints, or null for anything else (a hand-published 2.0.1-beta.1). */
 function mintedVersion(version: string): MintedVersion | null {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-main\.(0|[1-9]\d*)\.g([0-9a-f]{7}))?$/);
+  const match = version.match(
+    /^(\d+)\.(\d+)\.(\d+)(?:-main\.(?:(?:0|[1-9]\d*)\.)+g([0-9a-f]{7}))?$/,
+  );
   if (!match) {
     return null;
   }
-  const [, major = "", minor = "", patch = "", run, sha = ""] = match;
-  return {
-    release: [Number(major), Number(minor), Number(patch)],
-    pre: run === undefined ? null : { run: Number(run), sha },
-  };
+  const [, major = "", minor = "", patch = "", sha7 = null] = match;
+  return { release: [Number(major), Number(minor), Number(patch)], sha7 };
 }
 
 /** A version a dist-tag names must be one this pipeline mints; anything else stops the run rather than being guessed at. */
@@ -1236,40 +1266,24 @@ function parseMinted(version: string): MintedVersion {
   const minted = mintedVersion(version);
   if (minted === null) {
     throw new Error(
-      `${JSON.stringify(version)} is not a version this pipeline mints (X.Y.Z or X.Y.Z-main.<run>.g<sha7>); refusing to order it.`,
+      `${JSON.stringify(version)} is not a version this pipeline mints (X.Y.Z or X.Y.Z-main.<position>.g<sha7>); refusing to order it.`,
     );
   }
   return minted;
 }
 
-/**
- * How npm orders two minted versions: by release first; a pre-release sorts
- * below its own release; pre-releases of one release sort by run number, then
- * by the sha as npm compares identifiers (lexically).
- */
-export function versionOrder(a: string, b: string): "newer" | "same" | "older" {
-  const left = parseMinted(a);
-  const right = parseMinted(b);
+/** How npm orders two releases: by major, minor, patch. */
+export function releaseOrder(a: string, b: string): "newer" | "same" | "older" {
+  const left = parseMinted(a).release;
+  const right = parseMinted(b).release;
   for (let i = 0; i < 3; i++) {
-    const l = left.release[i] ?? 0;
-    const r = right.release[i] ?? 0;
+    const l = left[i] ?? 0;
+    const r = right[i] ?? 0;
     if (l !== r) {
       return l > r ? "newer" : "older";
     }
   }
-  if (left.pre === null || right.pre === null) {
-    if (left.pre === right.pre) {
-      return "same";
-    }
-    return left.pre === null ? "newer" : "older";
-  }
-  if (left.pre.run !== right.pre.run) {
-    return left.pre.run > right.pre.run ? "newer" : "older";
-  }
-  if (left.pre.sha === right.pre.sha) {
-    return "same";
-  }
-  return left.pre.sha > right.pre.sha ? "newer" : "older";
+  return "same";
 }
 
 /** What the registry holds for the package: every published version, and where each dist-tag points. */
@@ -1278,23 +1292,101 @@ export interface Packument {
   "dist-tags": Record<string, string>;
 }
 
-export type PublishVerdict =
-  | { publish: true; version: string }
-  | { publish: false; version: string; reason: string };
+export type PublishVerdict = {
+  /** Published pre-releases the verdict set aside, one line each: a source the checkout cannot place. */
+  notices: string[];
+} & ({ publish: true; version: string } | { publish: false; version: string; reason: string });
 
-/** The newest version in `versions` this pipeline minted that `keep` admits, or null when there is none;
- * versions the pipeline never minted cannot be ordered and are none of its concern. */
-function newestMinted(
+/** Where a published pre-release's source sits relative to this run's, as the checkout knows it. */
+type Placement =
+  | { kind: "unresolved" }
+  | { kind: "same" | "ancestor" | "descendant" | "unrelated"; sha: string };
+
+/** The commit a name resolves to in the checkout, or null when it names none (a sha the checkout lacks, or a short
+ * one naming more than one object): rev-parse exits 1 for both. Any other failure is thrown, so a checkout git
+ * cannot read never passes for one without the commit (that "absent" would publish over a descendant). */
+function resolveCommit(cwd: string, name: string): string | null {
+  const args = ["rev-parse", "--verify", "--quiet", `${name}^{commit}`];
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 1) {
+      return null;
+    }
+    throw gitFailure(args, error);
+  }
+}
+
+function placeAgainst(cwd: string, sourceSha: string, sha7: string): Placement {
+  const sha = resolveCommit(cwd, sha7);
+  if (sha === null) {
+    return { kind: "unresolved" };
+  }
+  if (sha === sourceSha) {
+    return { kind: "same", sha };
+  }
+  if (gitYesNo(cwd, "merge-base", "--is-ancestor", sourceSha, sha)) {
+    return { kind: "descendant", sha };
+  }
+  return {
+    kind: gitYesNo(cwd, "merge-base", "--is-ancestor", sha, sourceSha) ? "ancestor" : "unrelated",
+    sha,
+  };
+}
+
+/** A published pre-release whose source is a strict descendant of this run's: newer on main, whatever its numbers say. */
+interface Descendant {
+  version: string;
+  /** The full sha the version's sha7 resolved to. */
+  sha: string;
+}
+
+/** The published pre-releases placed against this run's source: the descendants, and a notice for each one the
+ * checkout cannot place (a sha it lacks, or one off the source's line of main). */
+function placePublished(
+  cwd: string,
+  sourceSha: string,
   packument: Packument,
-  keep: (minted: MintedVersion) => boolean,
-): string | null {
-  let newest: string | null = null;
-  for (const candidate of Object.keys(packument.versions)) {
-    const minted = mintedVersion(candidate);
+): { descendants: Descendant[]; notices: string[] } {
+  const descendants: Descendant[] = [];
+  const notices: string[] = [];
+  for (const published of Object.keys(packument.versions)) {
+    const sha7 = mintedVersion(published)?.sha7;
+    if (sha7 === null || sha7 === undefined) {
+      continue;
+    }
+    const placement = placeAgainst(cwd, sourceSha, sha7);
+    switch (placement.kind) {
+      case "descendant":
+        descendants.push({ version: published, sha: placement.sha });
+        break;
+      case "unresolved":
+        notices.push(`${published} names ${sha7}, which is no commit in this checkout; ignored`);
+        break;
+      case "unrelated":
+        notices.push(
+          `${published} names ${sha7}, which is neither an ancestor nor a descendant of ${sourceSha.slice(0, 7)} on main; ignored`,
+        );
+        break;
+      default:
+        break;
+    }
+  }
+  return { descendants, notices };
+}
+
+/** The descendant furthest along main: the one no other descendant follows. Every sha here resolved, so the
+ * ancestry probe alone is asked. */
+function furthest(cwd: string, descendants: Descendant[]): Descendant | null {
+  let newest: Descendant | null = null;
+  for (const candidate of descendants) {
     if (
-      minted !== null &&
-      keep(minted) &&
-      (newest === null || versionOrder(candidate, newest) === "newer")
+      newest === null ||
+      gitYesNo(cwd, "merge-base", "--is-ancestor", newest.sha, candidate.sha)
     ) {
       newest = candidate;
     }
@@ -1303,39 +1395,39 @@ function newestMinted(
 }
 
 /**
- * Both dist-tags are consulted, not only `next`: `npm publish --tag next`
- * moves next to whatever it publishes, so a stale run's version must be newer
- * than what next AND latest name, or next would step back behind a release.
- * The versions are consulted too: a newer one the registry holds while its
- * dist-tags lag says the same. Null is a package the registry has never
- * seen: the bootstrap publishes.
+ * Every published pre-release is placed by its source's ancestry, so a run for an older commit publishes nothing
+ * once a newer commit's pre-release is on the registry, whatever order the two runs finished in (`npm publish --tag
+ * next` moves next to whatever it publishes). The dist-tags need no separate read: whatever next names is among
+ * the versions. Null is a package the registry has never seen: the bootstrap publishes.
  */
-export function nextPublishVerdict(version: string, packument: Packument | null): PublishVerdict {
+export function nextPublishVerdict(
+  cwd: string,
+  sourceSha: string,
+  version: string,
+  packument: Packument | null,
+): PublishVerdict {
   if (packument === null) {
-    return { publish: true, version };
+    return { publish: true, version, notices: [] };
   }
   if (version in packument.versions) {
-    return { publish: false, version, reason: `${version} is already on the registry` };
-  }
-  for (const tag of ["next", "latest"]) {
-    const current = packument["dist-tags"][tag];
-    if (current !== undefined && versionOrder(version, current) !== "newer") {
-      return {
-        publish: false,
-        version,
-        reason: `the registry's ${tag} is ${current}, not older than ${version}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
-      };
-    }
-  }
-  const newest = newestMinted(packument, () => true);
-  if (newest !== null && versionOrder(version, newest) !== "newer") {
     return {
       publish: false,
       version,
-      reason: `the registry already holds ${newest}, not older than ${version}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      reason: `${version} is already on the registry`,
+      notices: [],
     };
   }
-  return { publish: true, version };
+  const { descendants, notices } = placePublished(cwd, sourceSha, packument);
+  const newer = furthest(cwd, descendants);
+  if (newer !== null) {
+    return {
+      publish: false,
+      version,
+      reason: `the registry already holds ${newer.version}, whose source ${newer.sha.slice(0, 7)} is a descendant of ${sourceSha.slice(0, 7)} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      notices,
+    };
+  }
+  return { publish: true, version, notices };
 }
 
 /**
@@ -1346,10 +1438,15 @@ export function nextPublishVerdict(version: string, packument: Packument | null)
  */
 export function stablePublishVerdict(version: string, packument: Packument | null): PublishVerdict {
   if (packument === null) {
-    return { publish: true, version };
+    return { publish: true, version, notices: [] };
   }
   if (version in packument.versions) {
-    return { publish: false, version, reason: `${version} is already on the registry` };
+    return {
+      publish: false,
+      version,
+      reason: `${version} is already on the registry`,
+      notices: [],
+    };
   }
   const latest = packument["dist-tags"].latest;
   // The hand bootstrap leaves a pre-release on latest: a packument always carries that key (npm/registry
@@ -1357,16 +1454,17 @@ export function stablePublishVerdict(version: string, packument: Packument | nul
   // --tag asked for. A release must take latest over from it, so only a newer RELEASE holds one back.
   if (
     latest !== undefined &&
-    parseMinted(latest).pre === null &&
-    versionOrder(version, latest) === "older"
+    parseMinted(latest).sha7 === null &&
+    releaseOrder(version, latest) === "older"
   ) {
     return {
       publish: false,
       version,
       reason: `the registry's latest is ${latest}, newer than ${version}, so this rerun of an older release publishes nothing (npm publish would move latest back)`,
+      notices: [],
     };
   }
-  return { publish: true, version };
+  return { publish: true, version, notices: [] };
 }
 
 /** The registry's record of `name`, or null while it has never been published; any other answer than 200 or 404 throws.
@@ -1432,7 +1530,7 @@ export type NpmVerdictOptions = {
   sourceSha: string;
   /** The registry's base URL, where the package's record is read. */
   registry: string;
-} & ({ channel: "next"; runNumber: string } | { channel: "stable"; tag: string });
+} & ({ channel: "next" } | { channel: "stable"; tag: string });
 
 /** The publish decision for the checkout, against what the registry holds.
  * The version is settled before the registry is asked, so a checkout that
@@ -1441,31 +1539,29 @@ export async function npmVerdict(options: NpmVerdictOptions): Promise<PublishVer
   const { cwd, sourceSha, registry } = options;
   let version: string;
   if (options.channel === "next") {
-    version = prereleaseVersionOf({ cwd, sourceSha, runNumber: options.runNumber });
+    version = prereleaseVersionOf({ cwd, sourceSha });
   } else {
     assertCheckoutAt(cwd, sourceSha);
     version = releaseVersionAt(cwd, "HEAD", options.tag);
   }
   const packument = await fetchPackument(registry, packageFieldAt(cwd, "HEAD", "name"));
   return options.channel === "next"
-    ? nextPublishVerdict(version, packument)
+    ? nextPublishVerdict(cwd, sourceSha, version, packument)
     : stablePublishVerdict(version, packument);
 }
 
 export type ConfirmVerdict =
-  /** The registry's record shows the version this run published, and next names the newest pre-release. */
+  /** The registry's record shows the version this run published, and next names no older pre-release than it should. */
   | { outcome: "settled"; version: string; reads: number }
   /** The record still lacks the version after every read: a following run may read one without it. */
   | { outcome: "unsettled"; version: string; reason: string }
-  /** The record shows the version, and next names an older pre-release than the newest it holds. */
+  /** The record shows the version and a pre-release of a descendant, and next names neither that nor a later one. */
   | { outcome: "behind"; version: string; reason: string };
 
 export interface NpmConfirmOptions {
   cwd: string;
   /** The commit whose build this run published; the checkout must be at it. */
   sourceSha: string;
-  /** The workflow run number the published version carries. */
-  runNumber: string;
   /** The registry's base URL, where the package's record is read. */
   registry: string;
   /** How many times the record is read while it lacks the version, and the pause between reads. */
@@ -1478,19 +1574,20 @@ export interface NpmConfirmOptions {
  * version, so the job holds the npm-publish lane until the next holder's
  * verdict can see this publish (npm makes a publish readable asynchronously;
  * a verdict read in that gap would move next back). Once it shows, next is
- * checked against the newest pre-release the record holds. A drift is
- * reported, not repaired: trusted publishing (OIDC) authenticates `npm publish`
- * alone, not `npm dist-tag add` (npm/cli#8547); the next green push's version
- * is newer than every pre-release before it, so its publish moves next forward.
- * A rerun of the run that reported it publishes nothing (its version is on the
+ * checked: a pre-release of a descendant on the record means this run was
+ * stale, and next must name one such or it moved back. A drift is reported,
+ * not repaired: trusted publishing (OIDC) authenticates `npm publish` alone,
+ * not `npm dist-tag add` (npm/cli#8547); the next green push's source
+ * descends from every published one, so its publish moves next forward. A
+ * rerun of the run that reported it publishes nothing (its version is on the
  * registry), so it never reaches this step and passes: a blocked release can go on.
  */
 export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVerdict> {
-  const { cwd, sourceSha, runNumber, registry, attempts, delayMs } = options;
+  const { cwd, sourceSha, registry, attempts, delayMs } = options;
   if (!Number.isInteger(attempts) || attempts < 1) {
     throw new Error(`the read attempts must be a positive integer, not ${attempts}`);
   }
-  const version = prereleaseVersionOf({ cwd, sourceSha, runNumber });
+  const version = prereleaseVersionOf({ cwd, sourceSha });
   const name = packageFieldAt(cwd, "HEAD", "name");
   for (let read = 1; ; read++) {
     // A read that fails counts as a read that did not show the version: the lane is held through the budget
@@ -1506,13 +1603,17 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
       continue;
     }
     if (packument !== null && version in packument.versions) {
-      const newest = newestMinted(packument, (minted) => minted.pre !== null) ?? version;
+      const { descendants } = placePublished(cwd, sourceSha, packument);
+      const newest = furthest(cwd, descendants);
       const next = packument["dist-tags"].next;
-      if (next === undefined || versionOrder(next, newest) === "older") {
+      if (newest !== null && !descendants.some((descendant) => descendant.version === next)) {
         return {
           outcome: "behind",
           version,
-          reason: `the registry's next is ${next ?? "unset"} while it holds ${newest}; this stale run moved next back, and the next green push moves it forward (npm dist-tag add ${name}@${newest} next repairs it by hand)`,
+          reason:
+            `the registry's next is ${next ?? "unset"} while it holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} ` +
+            `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next green push ` +
+            `moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
         };
       }
       return { outcome: "settled", version, reads: read };
@@ -1594,15 +1695,9 @@ async function main(): Promise<void> {
       console.error(result.reason);
       break;
     }
-    // The subcommands whose result is their stdout: the workflow captures it.
+    // The subcommands whose result is their stdout: the workflow captures it. Notices go to stderr, beside it.
     case "prerelease-version": {
-      console.log(
-        prereleaseVersionOf({
-          cwd,
-          sourceSha: env("GITHUB_SHA"),
-          runNumber: env("GITHUB_RUN_NUMBER"),
-        }),
-      );
+      console.log(prereleaseVersionOf({ cwd, sourceSha: env("GITHUB_SHA") }));
       break;
     }
     case "npm-verdict": {
@@ -1615,10 +1710,11 @@ async function main(): Promise<void> {
         cwd,
         sourceSha: env("GITHUB_SHA"),
         registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
-        ...(argument === "next"
-          ? { channel: argument, runNumber: env("GITHUB_RUN_NUMBER") }
-          : { channel: argument, tag: env("TAG") }),
+        ...(argument === "next" ? { channel: argument } : { channel: argument, tag: env("TAG") }),
       });
+      for (const notice of verdict.notices) {
+        console.error(notice);
+      }
       console.log(verdict.publish ? `publish ${verdict.version}` : `skip ${verdict.reason}`);
       break;
     }
@@ -1631,14 +1727,13 @@ async function main(): Promise<void> {
       const confirmed = await npmConfirm({
         cwd,
         sourceSha: env("GITHUB_SHA"),
-        runNumber: env("GITHUB_RUN_NUMBER"),
         registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
         attempts: CONFIRM_READS,
         delayMs: CONFIRM_PAUSE_MS,
       });
       console.log(
         confirmed.outcome === "settled"
-          ? `settled ${confirmed.version} is on the registry after ${confirmed.reads} read(s), and next names the newest pre-release`
+          ? `settled ${confirmed.version} is on the registry after ${confirmed.reads} read(s); next is not behind a descendant's pre-release`
           : `${confirmed.outcome} ${confirmed.reason}`,
       );
       break;

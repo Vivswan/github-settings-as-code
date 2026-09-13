@@ -275,7 +275,7 @@ const CALLER_EXPECTED: CallerContract = {
           if: OIDC_PROCEED,
           run: undefined,
           env: undefined,
-          with: { ref: `\${{ inputs.sha }}`, "persist-credentials": false },
+          with: { ref: `\${{ inputs.sha }}`, "fetch-depth": 0, "persist-credentials": false },
         },
         {
           name: undefined,
@@ -547,6 +547,14 @@ describe("post-green.yml publishes the build branch", () => {
       "a shallow checkout, which advance-build refuses (fetch-depth gone)",
       (w) => {
         const step = must(w.jobs.build, "build job").steps?.[0];
+        delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
+      },
+      "jobs",
+    ],
+    [
+      "a shallow publish-next checkout, which prerelease-version refuses (fetch-depth gone)",
+      (w) => {
+        const step = must(w.jobs["publish-next"], "publish-next job").steps?.[1];
         delete must(must(step, "checkout step").with, "checkout with")["fetch-depth"];
       },
       "jobs",

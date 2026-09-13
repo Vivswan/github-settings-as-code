@@ -16,7 +16,7 @@ npm install @vivswan/github-settings-as-code@next     # the newest green main co
 npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packaged commit of the build branch
 ```
 
-`bun add` takes the same three forms. A pre-release version looks like `2.0.1-main.412.gb8df084`; the [Versioning](#versioning) section says how the three relate. The `github:` form works for every commit packaged since the library joined the packaged branch: such a commit carries `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built from its source commit by the workflow run named in its message, and its `package.json` carries none of the scripts npm's git fetcher takes as a reason to install devDependencies and run a prepare step (`prepare`, `prepack`, `build`, the install hooks), so nothing is built or installed on your side. Packaged commits minted before that carry the action bundle alone, and the tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits at all. To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at.
+`bun add` takes the same three forms. A pre-release version looks like `2.0.1-main.446.20260913.g95d081d`; the [Versioning](#versioning) section says how the three relate. The `github:` form works for every commit packaged since the library joined the packaged branch: such a commit carries `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built from its source commit by the workflow run named in its message, and its `package.json` carries none of the scripts npm's git fetcher takes as a reason to install devDependencies and run a prepare step (`prepare`, `prepack`, `build`, the install hooks), so nothing is built or installed on your side. Packaged commits minted before that carry the action bundle alone, and the tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits at all. To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/index.js` and `lib/pkg/index.d.ts`, the files the manifest's `exports` point at.
 
 The package exports three paths: the entry (`.`), the committed settings.yml JSON Schema (`./settings.schema.json`), and its own manifest (`./package.json`).
 
@@ -185,29 +185,48 @@ The package and the action share one version, the one in `.release-please-manife
 
 | npm dist-tag | Publishes on | Version | Install |
 |---|---|---|---|
-| `next` | Every green push to `main` | The manifest's next patch, then `-main.<run number>.g<sha7>`: `2.0.1-main.412.gb8df084` | `npm install @vivswan/github-settings-as-code@next` |
+| `next` | Every green push to `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next` |
 | `latest` | Every release cut | The released version: `2.1.0`. Until the first release it names the bootstrap pre-release: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so a first publish gets it whatever `--tag` asked for | `npm install @vivswan/github-settings-as-code` |
 | none | Every packaged commit on the `build` branch since the library joined it | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
 The npm dist-tag `latest` is not the git tag `latest`: the git tag names the newest packaged commit on the `build` branch (every green push moves it), the dist-tag names the newest release on the registry.
 
-- A pre-release sorts above the last release and below the next one whatever its bump, and later runs sort later: run numbers only grow, and the sha makes each run's version its own. The one pre-release that sorts above a release is the release merge commit's own: its manifest already carries the new version, so `next` moves to `2.1.1-main.<run>.g<sha7>` in the same run that publishes `2.1.0`, which is the order the two channels are meant to keep (next above latest).
-- The `g` before the short sha marks a git object id, as `git describe` writes it; a bare all-digit sha such as `0123456` would be read by npm as the number 123456.
-- `next` publishes nothing when its version is already on the registry (a rerun of that run), when the registry already holds a newer version, or when the dist-tag `next` or `latest` names a version that is not older (a retry of an old run after newer ones published, or after a release). `latest` publishes nothing when the version is already there or when the dist-tag `latest` names a newer release (a rerun of an older release's job); it does not look at `next`.
-- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a `next` publish job holds the npm-publish lane until the registry's record shows its version (up to 5 reads, 20 s apart), so the run after it judges against a record that carries it. Neither dist-tag moves backward on what its run could see.
-- The residual window: a publish the registry has not made readable within that bound is invisible to the run after it, which then moves `next` back to its older version. That run fails with an error naming the drift once the record shows both versions (it warns if its own never shows within the bound, and passes without naming the drift if its own shows while the overtaken one still does not), a rerun of it publishes nothing and passes, and the next green push moves `next` forward again (its version is newer than every pre-release before it). No run moves a dist-tag by hand: trusted publishing authenticates `npm publish` alone, not `npm dist-tag add`.
-- Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere, and npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it. The one hand-published version is the bootstrap pre-release below, recognizable by its run number 0.
+- A pre-release version is a pure function of its main commit. `2.0.1-main.446.20260913.g95d081d` reads:
+  - `446`: the commits reachable from it along first parents (`git rev-list --count --first-parent <sha>`), one more per merge to main.
+  - `20260913`: its committer date in UTC.
+  - `g95d081d`: its short sha; the `g` marks a git object id, as `git describe` writes it (a bare all-digit sha such as `0123456` would be read by npm as the number 123456).
+  - Two runs for one commit mint the same string, whenever they run.
+- A pre-release sorts above the last release and below the next one whatever its bump, and later commits on main sort later: npm compares the count first, and it grows by one with each merge (the date is for the reader; two merges on one day share it).
+  - The one pre-release that sorts above a release is the release merge commit's own: its manifest already carries the new version.
+  - So `next` moves to `2.1.1-main.<count>.<date>.g<sha7>` in the same run that publishes `2.1.0`, the order the two channels are meant to keep (next above latest).
+- `next` moves only to a descendant. The publish verdict resolves the sha in every published `-main.` version in its full checkout and places it against this run's commit:
+  - a pre-release whose source is a strict descendant: this run is stale and publishes nothing, whatever order the two runs finished in;
+  - a sha the checkout cannot resolve, or one that is neither ancestor nor descendant (off main): ignored, with a notice in the log;
+  - the run's own version already on the registry (a rerun of that commit): publishes nothing.
+- `latest` publishes nothing when the version is already there or when the dist-tag `latest` names a newer release (a rerun of an older release's job); it does not look at `next`.
+- Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a `next` publish job holds the npm-publish lane until the registry's record shows its version (up to 5 reads, 20 s apart).
+  - So the run after it judges against a record that carries it. Neither dist-tag moves backward on what its run could see.
+- The residual window: a publish the registry has not made readable within that bound is invisible to the run after it, which then moves `next` back to its older version.
+  - That run fails with an error naming the drift once the record shows both versions; it warns if its own never shows within the bound.
+  - It passes without naming the drift if its own shows while the overtaken one still does not.
+  - A rerun of it publishes nothing and passes, and the next green push moves `next` forward again (its commit descends from every published one).
+  - No run moves a dist-tag by hand: trusted publishing authenticates `npm publish` alone, not `npm dist-tag add`.
+- Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere.
+  - npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it.
+  - The one hand-published version is the bootstrap pre-release below, recognizable by its count of 0 (`-main.0.g<sha7>`), which CI never mints.
 - The `github:` form installs a packaged commit's `lib/pkg/`, built from its source commit by the same workflow run that built its `lib/index.js`, with no registry and no build step on your side.
 
 ## One-time publishing setup
 
 For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication; it is the only publish a person ever makes.
 
-1. From a clean checkout of `main`, build the library (the tarball ships `lib/pkg/`, which is built, not committed), stamp the bootstrap pre-release version, drop the `prepare` script from the manifest as both CI publishers do, and publish under the `next` dist-tag:
+1. From a clean checkout of `main`, build the library (`lib/pkg/` is built, not committed), stamp the version by hand, drop the `prepare` script as both CI publishers do, and publish under `next`.
+   The version is the manifest's next patch, then `-main.0.g<sha7>`: the count 0 marks a publish without provenance (`.github/SECURITY.md` recognizes the hand publish by it), and the verdict places it by its sha like every other pre-release.
 
 ```bash
 bun install --frozen-lockfile && bun run build:lib
-version="$(GITHUB_SHA="$(git rev-parse HEAD)" GITHUB_RUN_NUMBER=0 bun .github/scripts/release-pipeline.ts prerelease-version)"
+next_patch="$(bun -e 'const v = require("./.release-please-manifest.json")["."]; console.log(v.replace(/\d+$/, (p) => Number(p) + 1));')"
+version="${next_patch}-main.0.g$(git rev-parse --short=7 HEAD)"
 npm version "$version" --no-git-tag-version && npm pkg delete scripts.prepare
 npm publish --access public --tag next
 git checkout -- package.json

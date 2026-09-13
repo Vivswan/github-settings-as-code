@@ -5,7 +5,7 @@
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -13,6 +13,8 @@ import {
   anchorCheck,
   anchorReleasePr,
   boundaryCheck,
+  type MainPosition,
+  mainPosition,
   nextPublishVerdict,
   npmConfirm,
   npmVerdict,
@@ -21,10 +23,10 @@ import {
   packageRelease,
   prereleaseVersion,
   prereleaseVersionOf,
+  releaseOrder,
   retagMajor,
   stablePublishVerdict,
   verifyPublishedRefs,
-  versionOrder,
 } from "../../.github/scripts/release-pipeline.js";
 import {
   ANCHOR_PUSH,
@@ -1377,40 +1379,112 @@ const SEMVER =
 
 describe("prereleaseVersion", () => {
   const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
-  const minted: [string, string, string, string][] = [
-    ["2.0.0", "412", sha, "2.0.1-main.412.gb8df084"],
-    ["2.9.9", "7", sha, "2.9.10-main.7.gb8df084"],
-    ["0.0.0", "0", sha, "0.0.1-main.0.gb8df084"],
+  const at = (count: number, date = "20260913"): MainPosition => ({ count, date });
+  const minted: [string, MainPosition, string, string][] = [
+    ["2.0.0", at(446), sha, "2.0.1-main.446.20260913.gb8df084"],
+    ["2.9.9", at(7, "20250101"), sha, "2.9.10-main.7.20250101.gb8df084"],
+    ["0.0.0", at(1), sha, "0.0.1-main.1.20260913.gb8df084"],
     // The sha7 that would be rewritten to 123456 as a bare identifier.
-    ["2.0.0", "412", "0123456789abcdef0123456789abcdef01234567", "2.0.1-main.412.g0123456"],
+    [
+      "2.0.0",
+      at(446),
+      "0123456789abcdef0123456789abcdef01234567",
+      "2.0.1-main.446.20260913.g0123456",
+    ],
   ];
-  test.each(minted)("manifest %s at run %s of %s mints %s", (manifest, run, source, expected) => {
-    const version = prereleaseVersion(manifest, run, source);
+  test.each(minted)("manifest %s at %j of %s mints %s", (manifest, position, source, expected) => {
+    const version = prereleaseVersion(manifest, position, source);
     expect(version).toBe(expected);
     expect(version).toMatch(SEMVER);
   });
 
-  const refusedInputs: [string, [string, string, string], RegExp][] = [
-    ["a manifest version with a pre-release", ["2.0.0-rc.1", "412", sha], /is not X\.Y\.Z/],
-    ["a manifest version missing its patch", ["2.0", "412", sha], /is not X\.Y\.Z/],
-    ["a run number with a leading zero", ["2.0.0", "0412", sha], /not a decimal integer/],
-    ["an empty run number", ["2.0.0", "", sha], /not a decimal integer/],
-    ["a short sha", ["2.0.0", "412", "b8df084"], /not a full commit sha/],
-    ["an upper-case sha", ["2.0.0", "412", sha.toUpperCase()], /not a full commit sha/],
+  const refusedInputs: [string, [string, MainPosition, string], RegExp][] = [
+    ["a manifest version with a pre-release", ["2.0.0-rc.1", at(446), sha], /is not X\.Y\.Z/],
+    ["a manifest version missing its patch", ["2.0", at(446), sha], /is not X\.Y\.Z/],
+    ["a commit count of zero", ["2.0.0", at(0), sha], /not a positive integer/],
+    ["a fractional commit count", ["2.0.0", at(1.5), sha], /not a positive integer/],
+    ["a dashed commit date", ["2.0.0", at(446, "2026-09-13"), sha], /not YYYYMMDD/],
+    ["a short sha", ["2.0.0", at(446), "b8df084"], /not a full commit sha/],
+    ["an upper-case sha", ["2.0.0", at(446), sha.toUpperCase()], /not a full commit sha/],
   ];
   test.each(refusedInputs)("%s is refused", (_name, args, error) => {
     expect(() => prereleaseVersion(...args)).toThrow(error);
   });
 
-  test("the checkout's version names the manifest at HEAD and the source it was told, which HEAD must be", () => {
+  /** A commit's committer date as UTC YYYYMMDD, by git's own formatter: the pipeline computes it from %ct instead. */
+  function utcDate(cwd: string, sha: string): string {
+    return execFileSync("git", ["log", "-1", "--format=%cd", "--date=format-local:%Y%m%d", sha], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, TZ: "UTC" },
+    }).trim();
+  }
+
+  /** The version the fixture's 2.1.0 manifest mints for a main commit at the given first-parent count. */
+  const versionOf = (cwd: string, sha: string, count: number): string =>
+    `2.1.1-main.${count}.${utcDate(cwd, sha)}.g${sha.slice(0, 7)}`;
+
+  /** Late on the 13th in New York is the 14th in UTC: the merge commit below is stamped with it. */
+  const COMMITTED = "2026-09-13T23:30:00-04:00";
+
+  /** A two-commit topic branch merged into main with a merge commit, pushed, and fetched into the work clone:
+   * the one shape of main history where the first-parent count and the plain count differ. */
+  function mergeTopicOnMain(fx: Fixture): string {
+    const later = clone(fx.root, fx.origin, "later");
+    git(later, "checkout", "--quiet", "-b", "topic");
+    write(later, "src/topic.ts", "export const topic = 1;\n");
+    commitAll(later, "feat: topic, part one");
+    write(later, "src/topic.ts", "export const topic = 2;\n");
+    commitAll(later, "feat: topic, part two");
+    git(later, "checkout", "--quiet", "main");
+    execFileSync("git", ["merge", "--quiet", "--no-ff", "--no-edit", "topic"], {
+      cwd: later,
+      env: { ...process.env, GIT_COMMITTER_DATE: COMMITTED },
+    });
+    const merged = git(later, "rev-parse", "HEAD");
+    git(later, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    git(fx.work, "fetch", "--quiet", "origin");
+    return merged;
+  }
+
+  test("the position counts main's commits along first parents under the source, and dates it in UTC", () => {
     const fx = seedFixture();
-    expect(prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.mergeSha, runNumber: "412" })).toBe(
-      `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
+    const merged = mergeTopicOnMain(fx);
+    // Five commits are reachable from the merge; three lie on main's first-parent line.
+    expect(git(fx.work, "rev-list", "--count", merged)).toBe("5");
+    expect(mainPosition(fx.work, fx.seedSha)).toEqual({
+      count: 1,
+      date: utcDate(fx.work, fx.seedSha),
+    });
+    expect(mainPosition(fx.work, fx.mergeSha)).toEqual({
+      count: 2,
+      date: utcDate(fx.work, fx.mergeSha),
+    });
+    expect(mainPosition(fx.work, merged)).toEqual({ count: 3, date: "20260914" });
+  });
+
+  test("the checkout's version names the manifest at HEAD and the source's position, which HEAD must be; a rerun mints the same string", () => {
+    const fx = seedFixture();
+    expect(prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.mergeSha })).toBe(
+      versionOf(fx.work, fx.mergeSha, 2),
     );
-    expect(() =>
-      prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.seedSha, runNumber: "412" }),
-    ).toThrow(
+    expect(() => prereleaseVersionOf({ cwd: fx.work, sourceSha: fx.seedSha })).toThrow(
       `the checkout is at ${fx.mergeSha}, not the source commit ${fx.seedSha} whose build is published.`,
+    );
+    const merged = mergeTopicOnMain(fx);
+    const judge = checkoutOf(fx, "judge", merged, "packaged-bundle-bytes-2\n");
+    const first = prereleaseVersionOf({ cwd: judge, sourceSha: merged });
+    expect(first).toBe(`2.1.1-main.3.20260914.g${merged.slice(0, 7)}`);
+    const rerun = checkoutOf(fx, "judge-rerun", merged, "packaged-bundle-bytes-3\n");
+    expect(prereleaseVersionOf({ cwd: rerun, sourceSha: merged })).toBe(first);
+  });
+
+  test("a shallow checkout is refused: its count would stop at the shallow boundary", () => {
+    const fx = seedFixture();
+    const checker = shallowChecker(fx, "shallow");
+    const head = git(checker, "rev-parse", "HEAD");
+    expect(() => prereleaseVersionOf({ cwd: checker, sourceSha: head })).toThrow(
+      "the pre-release version needs the full history (fetch-depth: 0) and this checkout is shallow: the count of commits under the source would stop at the shallow boundary.",
     );
   });
 
@@ -1440,52 +1514,36 @@ describe("prereleaseVersion", () => {
     return { stdout, stderr, status };
   }
 
-  test("the subcommand prints the version alone on stdout, and nothing there when it fails", async () => {
+  test("the subcommand prints the version alone on stdout from GITHUB_SHA alone, and nothing there when it fails", async () => {
     const fx = seedFixture();
-    expect(
-      await subcommand(
-        fx.work,
-        { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: "412" },
-        "prerelease-version",
-      ),
-    ).toEqual({
-      stdout: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}\n`,
+    expect(await subcommand(fx.work, { GITHUB_SHA: fx.mergeSha }, "prerelease-version")).toEqual({
+      stdout: `${versionOf(fx.work, fx.mergeSha, 2)}\n`,
       stderr: "",
       status: 0,
     });
-    const failed = await subcommand(
-      fx.work,
-      { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: undefined },
-      "prerelease-version",
-    );
-    expect(failed).toEqual({
+    expect(await subcommand(fx.work, { GITHUB_SHA: undefined }, "prerelease-version")).toEqual({
       stdout: "",
       stderr:
-        'release-pipeline prerelease-version: GITHUB_RUN_NUMBER is required for "prerelease-version"\n',
+        'release-pipeline prerelease-version: GITHUB_SHA is required for "prerelease-version"\n',
       status: 1,
     });
   });
 
-  const sha7 = "b8df084";
   const orderings: [string, string, "newer" | "same" | "older"][] = [
     ["2.1.0", "2.0.9", "newer"],
-    ["2.0.1", "2.0.1-main.412.gb8df084", "newer"],
-    ["2.0.1-main.412.gb8df084", "2.0.1", "older"],
-    ["2.0.1-main.412.gb8df084", "2.1.0", "older"],
-    ["2.0.1-main.413.g0000000", "2.0.1-main.412.gffffff0", "newer"],
-    ["2.0.1-main.412.gb8df084", "2.0.1-main.412.gb8df084", "same"],
-    ["2.0.1-main.412.gb8df085", "2.0.1-main.412.gb8df084", "newer"],
     ["2.0.10", "2.0.9", "newer"],
+    ["2.1.0", "2.1.0", "same"],
+    ["2.0.9", "2.1.0", "older"],
   ];
-  test.each(orderings)("%s is %s than %s", (a, b, expected) => {
-    expect(versionOrder(a, b)).toBe(expected);
+  test.each(orderings)("release %s is %s than %s", (a, b, expected) => {
+    expect(releaseOrder(a, b)).toBe(expected);
   });
 
   test("a version this pipeline never mints is refused, not ordered", () => {
-    expect(() => versionOrder("2.0.1-beta.1", "2.0.1")).toThrow(
+    expect(() => releaseOrder("2.0.1-beta.1", "2.0.1")).toThrow(
       /not a version this pipeline mints/,
     );
-    expect(() => versionOrder("2.0.1", "2.0.1-main.412.b8df084")).toThrow(
+    expect(() => releaseOrder("2.0.1", "2.0.1-main.412.b8df084")).toThrow(
       /not a version this pipeline mints/,
     );
   });
@@ -1494,108 +1552,152 @@ describe("prereleaseVersion", () => {
     versions: Object.fromEntries(versions.map((v) => [v, {}])),
     "dist-tags": tags,
   });
-  const nextVerdicts: [string, string, Packument | null, PublishVerdict][] = [
-    [
-      "a package the registry has never seen",
-      `2.0.1-main.412.g${sha7}`,
-      null,
-      { publish: true, version: `2.0.1-main.412.g${sha7}` },
-    ],
-    [
-      "the first pre-release after a release",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0"], { latest: "2.0.0" }),
-      { publish: true, version: `2.0.1-main.412.g${sha7}` },
-    ],
-    [
-      "a later run",
-      `2.0.1-main.413.g${sha7}`,
-      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
-        latest: "2.0.0",
-        next: "2.0.1-main.412.g1111111",
-      }),
-      { publish: true, version: `2.0.1-main.413.g${sha7}` },
-    ],
-    [
-      "the release merge's own run (next stays above the stable that follows)",
-      `2.1.1-main.500.g${sha7}`,
-      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
-        latest: "2.0.0",
-        next: "2.0.1-main.412.g1111111",
-      }),
-      { publish: true, version: `2.1.1-main.500.g${sha7}` },
-    ],
-    [
-      "a rerun of a run that already published",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0", `2.0.1-main.412.g${sha7}`], {
-        latest: "2.0.0",
-        next: `2.0.1-main.412.g${sha7}`,
-      }),
-      {
-        publish: false,
-        version: `2.0.1-main.412.g${sha7}`,
-        reason: `2.0.1-main.412.g${sha7} is already on the registry`,
-      },
-    ],
-    [
-      "a retry of an old run after a newer run published",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0", "2.0.1-main.413.g2222222"], {
-        latest: "2.0.0",
-        next: "2.0.1-main.413.g2222222",
-      }),
-      {
-        publish: false,
-        version: `2.0.1-main.412.g${sha7}`,
-        reason: `the registry's next is 2.0.1-main.413.g2222222, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
-      },
-    ],
-    [
-      "a retry of an old run after a release shipped",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0", "2.1.0"], { latest: "2.1.0" }),
-      {
-        publish: false,
-        version: `2.0.1-main.412.g${sha7}`,
-        reason: `the registry's latest is 2.1.0, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
-      },
-    ],
-    [
-      "a retry of an old run while the dist-tags lag behind a newer version the registry holds",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0", "2.0.1-main.411.g0000000", "2.0.1-main.413.g2222222"], {
-        latest: "2.0.0",
-        next: "2.0.1-main.411.g0000000",
-      }),
-      {
-        publish: false,
-        version: `2.0.1-main.412.g${sha7}`,
-        reason: `the registry already holds 2.0.1-main.413.g2222222, not older than 2.0.1-main.412.g${sha7}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
-      },
-    ],
-    [
-      "a hand-published version this pipeline never minted, which no dist-tag names",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.0", "2.0.1-beta.1"], { latest: "2.0.0" }),
-      { publish: true, version: `2.0.1-main.412.g${sha7}` },
-    ],
-    [
-      "the first CI run after the hand bootstrap, whatever dist-tag the registry gave it",
-      `2.0.1-main.412.g${sha7}`,
-      registry(["2.0.1-main.0.g0000000"], {
-        latest: "2.0.1-main.0.g0000000",
-        next: "2.0.1-main.0.g0000000",
-      }),
-      { publish: true, version: `2.0.1-main.412.g${sha7}` },
-    ],
-  ];
-  test.each(nextVerdicts)("next: %s", (_name, version, packument, expected) => {
-    expect(nextPublishVerdict(version, packument)).toEqual(expected);
+
+  /** The registry states a next verdict meets, around one source: the fixture's release merge, judged from the
+   * work clone after main grew two commits past it and a branch left it unmerged. */
+  function mainAround(fx: Fixture): {
+    own: string;
+    ancestor: string;
+    descendant: string;
+    further: string;
+    unrelated: string;
+  } {
+    const after = pushGreenCommit(fx, "after", "packaged-bundle-bytes-2\n");
+    const further = pushGreenCommit(fx, "further", "packaged-bundle-bytes-3\n");
+    const side = clone(fx.root, fx.origin, "side");
+    git(side, "checkout", "--quiet", fx.seedSha);
+    write(side, "src/side.ts", "export const side = 1;\n");
+    const sideSha = commitAll(side, "feat: off main");
+    git(side, "push", "--quiet", "origin", "HEAD:refs/heads/side");
+    git(fx.work, "fetch", "--quiet", "origin");
+    return {
+      own: versionOf(fx.work, fx.mergeSha, 2),
+      ancestor: versionOf(fx.work, fx.seedSha, 1),
+      descendant: versionOf(fx.work, after.sha, 3),
+      further: versionOf(fx.work, further.sha, 4),
+      unrelated: versionOf(fx.work, sideSha, 2),
+    };
+  }
+
+  test("next: a published pre-release is placed by its source's ancestry, and only a descendant's holds the run back", () => {
+    const fx = seedFixture();
+    const main = mainAround(fx);
+    const source7 = fx.mergeSha.slice(0, 7);
+    const sha7 = (version: string): string => version.slice(-7);
+    const stale = (version: string): PublishVerdict => ({
+      publish: false,
+      version: main.own,
+      reason: `the registry already holds ${version}, whose source ${sha7(version)} is a descendant of ${source7} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      notices: [],
+    });
+    const unresolved = "2.1.1-main.9.20260901.g0000000";
+    const cases: [string, Packument | null, PublishVerdict][] = [
+      [
+        "a package the registry has never seen",
+        null,
+        { publish: true, version: main.own, notices: [] },
+      ],
+      [
+        "the first pre-release after a release",
+        registry(["2.1.0"], { latest: "2.1.0" }),
+        { publish: true, version: main.own, notices: [] },
+      ],
+      [
+        "an ancestor's pre-release on next",
+        registry(["2.1.0", main.ancestor], { latest: "2.1.0", next: main.ancestor }),
+        { publish: true, version: main.own, notices: [] },
+      ],
+      [
+        "a descendant's pre-release with other position identifiers (the hand bootstrap's shape): the sha alone places it",
+        registry([`2.1.1-main.0.g${sha7(main.descendant)}`], {
+          latest: `2.1.1-main.0.g${sha7(main.descendant)}`,
+          next: `2.1.1-main.0.g${sha7(main.descendant)}`,
+        }),
+        stale(`2.1.1-main.0.g${sha7(main.descendant)}`),
+      ],
+      [
+        "a rerun of a run that already published",
+        registry(["2.1.0", main.own], { latest: "2.1.0", next: main.own }),
+        {
+          publish: false,
+          version: main.own,
+          reason: `${main.own} is already on the registry`,
+          notices: [],
+        },
+      ],
+      [
+        "a descendant's pre-release, whatever the dist-tags name",
+        registry(["2.1.0", main.ancestor, main.descendant], {
+          latest: "2.1.0",
+          next: main.ancestor,
+        }),
+        stale(main.descendant),
+      ],
+      [
+        "two descendants' pre-releases: the furthest along main is named",
+        registry(["2.1.0", main.further, main.descendant], { latest: "2.1.0", next: main.further }),
+        stale(main.further),
+      ],
+      [
+        "a release that shipped after this commit, with no pre-release of its merge",
+        registry(["2.1.0", "2.2.0"], { latest: "2.2.0" }),
+        { publish: true, version: main.own, notices: [] },
+      ],
+      [
+        "a pre-release naming a commit this checkout lacks",
+        registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved }),
+        {
+          publish: true,
+          version: main.own,
+          notices: [`${unresolved} names 0000000, which is no commit in this checkout; ignored`],
+        },
+      ],
+      [
+        "a pre-release naming a commit off this source's line of main",
+        registry(["2.1.0", main.unrelated], { latest: "2.1.0", next: main.unrelated }),
+        {
+          publish: true,
+          version: main.own,
+          notices: [
+            `${main.unrelated} names ${sha7(main.unrelated)}, which is neither an ancestor nor a descendant of ${source7} on main; ignored`,
+          ],
+        },
+      ],
+      [
+        "a hand-published version this pipeline never minted, which no dist-tag names",
+        registry(["2.1.0", "2.1.1-beta.1"], { latest: "2.1.0" }),
+        { publish: true, version: main.own, notices: [] },
+      ],
+    ];
+    for (const [name, packument, expected] of cases) {
+      expect({ name, ...nextPublishVerdict(fx.work, fx.mergeSha, main.own, packument) }).toEqual({
+        name,
+        ...expected,
+      });
+    }
+    // A checkout git cannot read is not a checkout without the commit: the same record that skipped above stops
+    // the verdict from a directory that is no repository, instead of publishing over the descendant.
+    const nowhere = join(fx.root, "not-a-repository");
+    mkdirSync(nowhere);
+    expect(() =>
+      nextPublishVerdict(
+        nowhere,
+        fx.mergeSha,
+        main.own,
+        registry(["2.1.0", main.descendant], { latest: "2.1.0", next: main.descendant }),
+      ),
+    ).toThrow(
+      /^git rev-parse --verify --quiet [0-9a-f]{7}\^\{commit\} failed: fatal: not a git repository/,
+    );
   });
 
   const stableVerdicts: [string, string, Packument | null, PublishVerdict][] = [
-    ["a package the registry has never seen", "2.1.0", null, { publish: true, version: "2.1.0" }],
+    [
+      "a package the registry has never seen",
+      "2.1.0",
+      null,
+      { publish: true, version: "2.1.0", notices: [] },
+    ],
     [
       "the release after the bootstrap pre-release",
       "2.1.0",
@@ -1603,22 +1705,27 @@ describe("prereleaseVersion", () => {
         latest: "2.0.1-main.0.g0000000",
         next: "2.0.1-main.0.g0000000",
       }),
-      { publish: true, version: "2.1.0" },
+      { publish: true, version: "2.1.0", notices: [] },
     ],
     [
       "a newer release",
       "2.1.0",
-      registry(["2.0.0", "2.0.1-main.412.g1111111"], {
+      registry(["2.0.0", "2.0.1-main.412.20260901.g1111111"], {
         latest: "2.0.0",
-        next: "2.0.1-main.412.g1111111",
+        next: "2.0.1-main.412.20260901.g1111111",
       }),
-      { publish: true, version: "2.1.0" },
+      { publish: true, version: "2.1.0", notices: [] },
     ],
     [
       "a rerun of the release's job",
       "2.1.0",
       registry(["2.0.0", "2.1.0"], { latest: "2.1.0" }),
-      { publish: false, version: "2.1.0", reason: "2.1.0 is already on the registry" },
+      {
+        publish: false,
+        version: "2.1.0",
+        reason: "2.1.0 is already on the registry",
+        notices: [],
+      },
     ],
     [
       "a release taking latest over from a bootstrap pre-release that sorts above it",
@@ -1627,7 +1734,7 @@ describe("prereleaseVersion", () => {
         latest: "2.1.1-main.0.g0000000",
         next: "2.1.1-main.0.g0000000",
       }),
-      { publish: true, version: "2.1.0" },
+      { publish: true, version: "2.1.0", notices: [] },
     ],
     [
       "a rerun of an older release's job after a newer release",
@@ -1638,6 +1745,7 @@ describe("prereleaseVersion", () => {
         version: "2.1.0",
         reason:
           "the registry's latest is 2.2.0, newer than 2.1.0, so this rerun of an older release publishes nothing (npm publish would move latest back)",
+        notices: [],
       },
     ],
   ];
@@ -1694,14 +1802,14 @@ describe("prereleaseVersion", () => {
         cwd: fx.work,
         channel: "next",
         sourceSha: fx.mergeSha,
-        runNumber: "412",
         registry,
       });
       return { result, requests };
     });
     expect(verdict.result).toEqual({
       publish: true,
-      version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
+      version: versionOf(fx.work, fx.mergeSha, 2),
+      notices: [],
     });
     // A query string no earlier request carried: the CDN caches a packument by URL for up to 300 s and misses on it.
     expect(verdict.requests).toEqual([
@@ -1711,7 +1819,11 @@ describe("prereleaseVersion", () => {
 
   test("the verdict skips what the registry already holds on both channels", async () => {
     const fx = seedFixture();
-    const held = { versions: { "2.1.0": {}, "2.2.0": {} }, "dist-tags": { latest: "2.2.0" } };
+    const own = versionOf(fx.work, fx.mergeSha, 2);
+    const held = {
+      versions: { "2.1.0": {}, "2.2.0": {}, [own]: {} },
+      "dist-tags": { latest: "2.2.0", next: own },
+    };
     await withRegistry({ status: 200, body: held }, async (registry) => {
       expect(
         await npmVerdict({
@@ -1725,19 +1837,15 @@ describe("prereleaseVersion", () => {
         publish: false,
         version: "2.1.0",
         reason: "2.1.0 is already on the registry",
+        notices: [],
       });
       expect(
-        await npmVerdict({
-          cwd: fx.work,
-          channel: "next",
-          sourceSha: fx.mergeSha,
-          runNumber: "412",
-          registry,
-        }),
+        await npmVerdict({ cwd: fx.work, channel: "next", sourceSha: fx.mergeSha, registry }),
       ).toEqual({
         publish: false,
-        version: `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`,
-        reason: `the registry's latest is 2.2.0, not older than 2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+        version: own,
+        reason: `${own} is already on the registry`,
+        notices: [],
       });
     });
   });
@@ -1787,21 +1895,18 @@ describe("prereleaseVersion", () => {
     });
   });
 
-  test("the npm-verdict subcommand prints publish or skip on stdout, and the channel is required", async () => {
+  test("the npm-verdict subcommand prints publish or skip alone on stdout, its notices on stderr, and the channel is required", async () => {
     const fx = seedFixture();
+    const own = versionOf(fx.work, fx.mergeSha, 2);
     await withRegistry({ status: 404 }, async (registry) => {
       expect(
         await subcommand(
           fx.work,
-          { GITHUB_SHA: fx.mergeSha, GITHUB_RUN_NUMBER: "412", NPM_REGISTRY_URL: registry },
+          { GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: registry },
           "npm-verdict",
           "next",
         ),
-      ).toEqual({
-        stdout: `publish 2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}\n`,
-        stderr: "",
-        status: 0,
-      });
+      ).toEqual({ stdout: `publish ${own}\n`, stderr: "", status: 0 });
       expect(
         await subcommand(
           fx.work,
@@ -1811,6 +1916,27 @@ describe("prereleaseVersion", () => {
         ),
       ).toEqual({ stdout: "publish 2.1.0\n", stderr: "", status: 0 });
     });
+    const unresolved = "2.1.1-main.9.20260901.g0000000";
+    await withRegistry(
+      {
+        status: 200,
+        body: registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved }),
+      },
+      async (url) => {
+        expect(
+          await subcommand(
+            fx.work,
+            { GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url },
+            "npm-verdict",
+            "next",
+          ),
+        ).toEqual({
+          stdout: `publish ${own}\n`,
+          stderr: `${unresolved} names 0000000, which is no commit in this checkout; ignored\n`,
+          status: 0,
+        });
+      },
+    );
     await withRegistry(
       { status: 200, body: { versions: { "2.1.0": {} }, "dist-tags": { latest: "2.1.0" } } },
       async (registry) => {
@@ -1833,24 +1959,27 @@ describe("prereleaseVersion", () => {
   });
 
   describe("npm-confirm after a next publish", () => {
-    /** The fixture's published version, the older pre-release next named before it, and a newer run's. */
-    const published = (fx: { mergeSha: string }) => `2.1.1-main.412.g${fx.mergeSha.slice(0, 7)}`;
-    const older = "2.1.1-main.411.g0000000";
-    const newer = "2.1.1-main.413.g2222222";
-    const confirm = (fx: { work: string; mergeSha: string }, registry: string, attempts = 5) =>
-      npmConfirm({
-        cwd: fx.work,
-        sourceSha: fx.mergeSha,
-        runNumber: "412",
-        registry,
-        attempts,
-        delayMs: 0,
-      });
+    /** The fixture's published version, and an ancestor's pre-release next named before it. */
+    const published = (fx: Fixture) => versionOf(fx.work, fx.mergeSha, 2);
+    const older = (fx: Fixture) => versionOf(fx.work, fx.seedSha, 1);
+    /** A descendant's pre-release: main grew one commit past the source, fetched into the work clone. */
+    function newer(fx: Fixture): string {
+      const after = pushGreenCommit(fx, "after", "packaged-bundle-bytes-2\n");
+      git(fx.work, "fetch", "--quiet", "origin");
+      return versionOf(fx.work, after.sha, 3);
+    }
+    const confirm = (fx: Fixture, registry: string, attempts = 5) =>
+      npmConfirm({ cwd: fx.work, sourceSha: fx.mergeSha, registry, attempts, delayMs: 0 });
+    /** The drift the confirmation reports when next stayed on this run's version while a descendant's is on the record. */
+    const behind = (fx: Fixture, ahead: string): string =>
+      `the registry's next is ${published(fx)} while it holds ${ahead}, whose source ${ahead.slice(-7)} is a descendant ` +
+      `of ${fx.mergeSha.slice(0, 7)} on main; this stale run moved next back, and the next green push moves it forward ` +
+      `(npm dist-tag add @scope/pkg@${ahead} next repairs it by hand)`;
 
     test("a record that lags the publish is read again until it shows the version, each read past the CDN cache", async () => {
       const fx = seedFixture();
-      const lagging = registry(["2.1.0", older], { latest: "2.1.0", next: older });
-      const caughtUp = registry(["2.1.0", older, published(fx)], {
+      const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });
+      const caughtUp = registry(["2.1.0", older(fx), published(fx)], {
         latest: "2.1.0",
         next: published(fx),
       });
@@ -1869,7 +1998,7 @@ describe("prereleaseVersion", () => {
 
     test("a record that already shows the version settles on the first read", async () => {
       const fx = seedFixture();
-      const converged = registry(["2.1.0", older, published(fx)], {
+      const converged = registry(["2.1.0", older(fx), published(fx)], {
         latest: "2.1.0",
         next: published(fx),
       });
@@ -1886,7 +2015,7 @@ describe("prereleaseVersion", () => {
 
     test("the reads stop at the bound while the record still lacks the version, whether it lags or is 404", async () => {
       const fx = seedFixture();
-      const lagging = registry(["2.1.0", older], { latest: "2.1.0", next: older });
+      const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });
       const unsettled = {
         outcome: "unsettled" as const,
         version: published(fx),
@@ -1906,9 +2035,10 @@ describe("prereleaseVersion", () => {
       expect(missing.requests).toHaveLength(3);
     });
 
-    test("next behind a newer pre-release the record holds is reported, never moved", async () => {
+    test("next behind a descendant's pre-release the record holds is reported, never moved", async () => {
       const fx = seedFixture();
-      const drifted = registry(["2.1.0", older, newer, published(fx)], {
+      const ahead = newer(fx);
+      const drifted = registry(["2.1.0", older(fx), ahead, published(fx)], {
         latest: "2.1.0",
         next: published(fx),
       });
@@ -1916,7 +2046,23 @@ describe("prereleaseVersion", () => {
         expect(await confirm(fx, url)).toEqual({
           outcome: "behind",
           version: published(fx),
-          reason: `the registry's next is ${published(fx)} while it holds ${newer}; this stale run moved next back, and the next green push moves it forward (npm dist-tag add @scope/pkg@${newer} next repairs it by hand)`,
+          reason: behind(fx, ahead),
+        });
+      });
+    });
+
+    test("next already on a descendant's pre-release is no drift: a later run moved it forward past this one", async () => {
+      const fx = seedFixture();
+      const ahead = newer(fx);
+      const overtaken = registry(["2.1.0", published(fx), ahead], {
+        latest: "2.1.0",
+        next: ahead,
+      });
+      await withRegistry({ status: 200, body: overtaken }, async (url) => {
+        expect(await confirm(fx, url)).toEqual({
+          outcome: "settled",
+          version: published(fx),
+          reads: 1,
         });
       });
     });
@@ -1960,7 +2106,6 @@ describe("prereleaseVersion", () => {
         npmConfirm({
           cwd: fx.work,
           sourceSha: fx.mergeSha,
-          runNumber: "412",
           registry: "http://127.0.0.1:9",
           attempts: 0,
           delayMs: 0,
@@ -1970,29 +2115,26 @@ describe("prereleaseVersion", () => {
 
     test("the npm-confirm subcommand prints settled, unsettled, or behind on stdout, and takes the next channel alone", async () => {
       const fx = seedFixture();
+      const ahead = newer(fx);
       const converged = registry(["2.1.0", published(fx)], {
         latest: "2.1.0",
         next: published(fx),
       });
-      const drifted = registry(["2.1.0", newer, published(fx)], {
+      const drifted = registry(["2.1.0", ahead, published(fx)], {
         latest: "2.1.0",
         next: published(fx),
       });
-      const env = (url: string) => ({
-        GITHUB_SHA: fx.mergeSha,
-        GITHUB_RUN_NUMBER: "412",
-        NPM_REGISTRY_URL: url,
-      });
+      const env = (url: string) => ({ GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url });
       await withRegistry({ status: 200, body: converged }, async (url) => {
         expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: `settled ${published(fx)} is on the registry after 1 read(s), and next names the newest pre-release\n`,
+          stdout: `settled ${published(fx)} is on the registry after 1 read(s); next is not behind a descendant's pre-release\n`,
           stderr: "",
           status: 0,
         });
       });
       await withRegistry({ status: 200, body: drifted }, async (url) => {
         expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: `behind the registry's next is ${published(fx)} while it holds ${newer}; this stale run moved next back, and the next green push moves it forward (npm dist-tag add @scope/pkg@${newer} next repairs it by hand)\n`,
+          stdout: `behind ${behind(fx, ahead)}\n`,
           stderr: "",
           status: 0,
         });
