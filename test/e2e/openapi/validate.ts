@@ -2,7 +2,7 @@
  * Validates the mock's traffic against GitHub's published OpenAPI contract: the mock stands in for
  * GitHub, so drift between what it serves and what GitHub documents is a mock bug (or a stale spec).
  * The trimmed spec is a fetched, gitignored artifact read from disk, never the network, so the runner
- * keeps validation always on; a missing spec fails with the fetch command (see load()).
+ * keeps validation always on; a missing spec fails with the fetch command (see readSpecText()).
  */
 
 import { readFileSync } from "node:fs";
@@ -23,6 +23,23 @@ import type { LoggedRequest } from "../mock/contract.js";
 type Json = Record<string, unknown>;
 
 const SPEC_PATH = join(import.meta.dir, "github-openapi.trimmed.json");
+
+/**
+ * The trimmed spec's text from disk: the one read every consumer goes through, so a missing file fails once,
+ * naming the command that fetches it, instead of as a bare ENOENT from whichever test read it first.
+ */
+export function readSpecText(specPath = SPEC_PATH): string {
+  try {
+    return readFileSync(specPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `the trimmed OpenAPI spec is missing at ${specPath}. It is a fetched, gitignored artifact: bun run test:artifacts fetches it (bun .github/scripts/trim-openapi.ts --when-stale), and bun run test runs that first.`,
+      );
+    }
+    throw error;
+  }
+}
 
 function segments(path: string): string[] {
   return path.split("/").filter((s) => s.length > 0);
@@ -164,19 +181,7 @@ export class OpenApiValidator {
 
   /** load() against an explicit path; the missing-file branch is testable this way. */
   static loadFrom(specPath: string): OpenApiValidator {
-    let raw: string;
-    try {
-      raw = readFileSync(specPath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `the trimmed OpenAPI spec is missing at ${specPath}. It is a fetched, gitignored artifact - generate it with:\n  bun .github/scripts/trim-openapi.ts\nthen re-run. (CI restores it from cache or fetches on a miss.)`,
-        );
-      }
-      throw error;
-    }
-    const spec = JSON.parse(raw) as OpenApiSpec;
-    return new OpenApiValidator(spec);
+    return new OpenApiValidator(JSON.parse(readSpecText(specPath)) as OpenApiSpec);
   }
 
   private matchTemplate(pathname: string): string | null {
