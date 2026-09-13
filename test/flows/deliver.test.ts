@@ -21,6 +21,7 @@ import {
 } from "../../src/flows/redact.js";
 import type { Io } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
+import { describeProblem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import type { PrivateReportChannel } from "../../src/report/delivery.js";
@@ -397,11 +398,12 @@ describe("concludeRun", () => {
 
   test("failRun: the problem's line, then the conclusion a failed target gets, with no summary", () => {
     const { io, events, outputs } = captureIo();
-    expect(failRun(io, { code: "input-token-missing" })).toBe(1);
+    const problem = { code: "input-token-missing" } as const;
+    expect(failRun(io, problem)).toBe(1);
     expect(outputs).toEqual({ result: "failed", "skipped-sections": "", "repos-result": "{}" });
-    // The wording is describeProblem's (test/problem.test.ts); here only the line's place before the outputs matters.
+    // The line is describeProblem's text, whole (its wording: test/problem.test.ts), placed before the outputs.
     expect(events).toEqual([
-      expect.stringMatching(/^annotate error: cannot call the GitHub API: no token was provided/),
+      `annotate error: ${describeProblem(problem)}`,
       "output result=failed",
       "output skipped-sections=",
       "output repos-result={}",

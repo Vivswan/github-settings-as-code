@@ -286,6 +286,11 @@ describe("formatSkipNotice", () => {
     expect(formatSkipNotice(mixed, true)).toBe(
       'repos: "*" discovery skipped 2 repositories because settings writes fail on archived repositories; unarchive them to manage them: o/a, and 1 private or internal repository',
     );
+    // The count-only branch at both of its boundaries: one hidden repository and more than one.
+    const onePrivate = { reason: "archived", repos: [ref("o/b", "private")] };
+    expect(formatSkipNotice(onePrivate, true)).toBe(
+      'repos: "*" discovery skipped 1 private or internal repository because settings writes fail on archived repositories; unarchive them to manage them',
+    );
     const allPrivate = {
       reason: "archived",
       repos: [ref("o/b", "private"), ref("o/c", "internal")],
