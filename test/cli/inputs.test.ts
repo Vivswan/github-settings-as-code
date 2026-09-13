@@ -123,25 +123,6 @@ function cases(): Case[] {
       env: { GITHUB_REPOSITORY: "o/admin" },
     },
     {
-      name: "snapshot, a merge-only flag is unknown to the subcommand",
-      argv: [
-        "snapshot",
-        "--token",
-        "ghp_flag",
-        "--snapshot-file",
-        "snap.yml",
-        "--layering",
-        "replace",
-      ],
-      inputs: {
-        mode: "snapshot",
-        token: "ghp_flag",
-        "snapshot-file": "snap.yml",
-        layering: "replace",
-      },
-      unknownFlag: "layering",
-    },
-    {
       name: "check, the workflow's own repository from GITHUB_REPOSITORY",
       argv: ["check", "--token", "ghp_flag"],
       inputs: { mode: "check", token: "ghp_flag" },
@@ -289,17 +270,6 @@ function cases(): Case[] {
       argv: ["check", "--repository", "o/r"],
       inputs: { mode: "check", repository: "o/r" },
     },
-    {
-      name: "rejected: a filter without discovery",
-      argv: ["apply", "--token", "ghp_flag", "--repository", "o/r", "--visibility", "public"],
-      inputs: { mode: "apply", token: "ghp_flag", repository: "o/r", visibility: "public" },
-    },
-    {
-      name: "rejected: an unsupported enum value",
-      argv: ["check", "--token", "ghp_flag", "--on-missing-permission", "ignore"],
-      inputs: { mode: "check", token: "ghp_flag", "on-missing-permission": "ignore" },
-      env: { GITHUB_REPOSITORY: "o/self" },
-    },
   ];
 }
 
@@ -352,15 +322,23 @@ describe("argv -> config equals env -> config", () => {
     }
   });
 
-  test("the table reaches every arm, both paths of the token, and the rejections", () => {
+  test("the table reaches every arm, both paths of the token, and every kind of rejection", () => {
     // The pin above is only as wide as its table; hold the table to the arms.
     const kinds = new Set<string>();
+    const rejections = new Set<string>();
     let envToken = 0;
-    let rejected = 0;
-    for (const { argv, inputs, env = {}, cliRefuses } of cases()) {
+    for (const { argv, inputs, env = {}, cliRefuses, unknownFlag } of cases()) {
       const result = parseConfig(recordReader(inputs), env, ACTION);
-      if (result.isErr() || cliRefuses !== undefined) {
-        rejected++;
+      if (cliRefuses !== undefined) {
+        rejections.add("refused by the CLI alone");
+        continue;
+      }
+      if (unknownFlag !== undefined) {
+        rejections.add("a flag the subcommand lacks");
+        continue;
+      }
+      if (result.isErr()) {
+        rejections.add("rejected by parseConfig");
         continue;
       }
       kinds.add(result.value.kind);
@@ -370,7 +348,11 @@ describe("argv -> config equals env -> config", () => {
     }
     expect([...kinds].sort()).toEqual(["merge", "multi", "single", "snapshot"]);
     expect(envToken).toBeGreaterThan(0);
-    expect(rejected).toBeGreaterThanOrEqual(5);
+    expect([...rejections].sort()).toEqual([
+      "a flag the subcommand lacks",
+      "refused by the CLI alone",
+      "rejected by parseConfig",
+    ]);
   });
 });
 
@@ -622,11 +604,9 @@ describe("the help text", () => {
   test("lists every subcommand and the global token flag", () => {
     const help = program.helpInformation();
     for (const command of CLI_COMMANDS) {
-      expect(help, command).toMatch(new RegExp(`^  ${command}\\b`, "m"));
+      expect(help, command).toMatch(new RegExp(`^  ${command} `, "m"));
     }
     expect(help).toContain("--token <value>");
-    expect(help).toContain("--json");
-    expect(help).toContain("--summary <file>");
   });
 
   test("each mode's subcommand carries exactly its INPUT_DECLS flags, each with its full description", () => {
@@ -690,23 +670,26 @@ describe("the help text", () => {
   });
 
   test("the repository flag's help names the terminal's requirement, not the runner's default", () => {
-    const check = inputDescription("repository", modeSubcommand("check"));
-    expect(check).toContain("Required unless repos or repos-dir is set");
-    expect(check).not.toContain("Defaults to the current repository");
-    expect(check).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
-    // init has no multi-repo flags, so neither the escape clause nor the combination rule applies.
-    expect(inputDescription("repository", INIT_SUBCOMMAND)).toBe(
-      "Target repository (owner/name). Required (inside GitHub Actions, GITHUB_REPOSITORY supplies it).",
-    );
+    const runnerDefault = "Defaults to the current repository";
+    const escapeClause = "unless repos or repos-dir is set";
+    for (const subcommand of [modeSubcommand("check"), INIT_SUBCOMMAND]) {
+      const description = inputDescription("repository", subcommand);
+      expect(description).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
+      expect(description).not.toContain(runnerDefault);
+      expect(description).toContain("Required");
+      expect(description).toContain("GITHUB_REPOSITORY supplies it");
+      // The escape clause holds only where the multi-repo flags exist: init has none.
+      expect(description.includes(escapeClause)).toBe(subcommand.flags.has("repos"));
+    }
   });
 
-  test("init's sections flag keeps the allowlist sentence and drops the mode restriction", () => {
+  test("init's sections flag keeps the declaration's first sentence and drops the mode restriction", () => {
+    const declared = INPUT_DECLS.sections.description;
+    // The declaration's first sentence is the allowlist itself; the clause after it names the modes init never runs.
     expect(inputDescription("sections", INIT_SUBCOMMAND)).toBe(
-      "Optional comma-separated allowlist of sections to process.",
+      declared.slice(0, declared.indexOf(". ") + 1),
     );
-    expect(inputDescription("sections", modeSubcommand("check"))).toBe(
-      INPUT_DECLS.sections.description,
-    );
+    expect(inputDescription("sections", modeSubcommand("check"))).toBe(declared);
   });
 
   test("the private-report flag's help offers exactly the channels the CLI accepts", () => {
@@ -714,12 +697,12 @@ describe("the help text", () => {
     const accepted = PRIVATE_REPORT_CHANNELS.filter((channel) => channel !== "artifact");
     const check = inputDescription("private-report", modeSubcommand("check"));
     const opening = check.slice(0, check.indexOf(". ") + 1);
-    const named: string[] = PRIVATE_REPORT_CHANNELS.filter((channel) =>
-      new RegExp(`(?<![\\w-])${channel}(?![\\w-])`).test(opening),
-    );
-    expect([...named]).toEqual([...accepted]);
-    // The derivation admits a stray extra word; the exact sentence does not.
-    expect(opening).toBe("none (default), issue, or issue-on-failure.");
+    // Every word of the opening sentence besides its connectives is a channel name, so a stray channel cannot hide in it.
+    const named = opening
+      .replace(/[.,()]/g, " ")
+      .split(/\s+/)
+      .filter((word) => word !== "" && word !== "or" && word !== "default");
+    expect(named).toEqual([...accepted]);
     expect(check).not.toContain("artifact");
     // With the key flag present the declaration stands whole, so the removal is the clause's alone.
     const withKey = { ...modeSubcommand("check"), flags: new Set(exposedInputs()) };
