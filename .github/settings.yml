@@ -15,9 +15,12 @@ repository:
       status: enabled
     secret_scanning_push_protection:
       status: enabled
-  description: "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement."
+  description: "GitHub Action applying declarative repository settings: rulesets,
+    labels, branch protection, and more. A loud, stateless Probot Settings
+    replacement."
   homepage: ""
-  topics: github-action, repository-settings, settings-as-code, configuration-as-code, probot-settings, rulesets, branch-protection, labels
+  topics: github-action, repository-settings, settings-as-code,
+    configuration-as-code, probot-settings, rulesets, branch-protection, labels
   private: false
   allow_squash_merge: true
   allow_merge_commit: false
@@ -27,6 +30,7 @@ repository:
   allow_auto_merge: true
   enable_vulnerability_alerts: true
 labels:
+  _undeclared: delete
   entries:
     - name: dependencies
       color: 0366d6
@@ -60,7 +64,8 @@ labels:
       description: release-please release PR has been tagged
     - name: release-blocker
       color: B60205
-      description: Blocks releases while open - release-health fails release PRs and the release pipeline
+      description: Blocks releases while open - release-health fails release PRs and
+        the release pipeline
     - name: release-override
       color: FBCA04
       description: "On a release PR: bypass release-health gates for this release"
@@ -76,8 +81,8 @@ labels:
     - name: nightly-failure
       color: D93F0B
       description: Automated nightly CI failure
-  _undeclared: delete
 rulesets:
+  _undeclared: keep
   entries:
     - name: pr-title
       target: branch
@@ -185,9 +190,21 @@ rulesets:
       rules:
         - type: deletion
       bypass_actors: []
+    - name: build-tags
+      target: tag
+      enforcement: active
+      conditions:
+        ref_name:
+          include:
+            - build/*
+          exclude: []
+      rules:
+        - type: update
+        - type: non_fast_forward
+      bypass_actors: []
     - name: build
       target: branch
-      enforcement: active
+      enforcement: disabled
       conditions:
         ref_name:
           include:
@@ -209,6 +226,5 @@ rulesets:
         - type: deletion
         - type: required_linear_history
       bypass_actors: []
-  _undeclared: keep
 pages:
   build_type: workflow
