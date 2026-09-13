@@ -4,8 +4,8 @@
 # wrapped "_undeclared: delete" form turns ITS undeclared rule into drift
 # (apply would disable it), and the qa environment does not exist, so its
 # declared rules are not verifiable - a note, while the missing environment
-# itself is drift. The available-Apps listing is an apply-time resolver and
-# is never read in check mode.
+# itself is drift. The available-Apps listing resolves production's missing
+# rule at plan time; qa does not exist yet, so its listing is not read.
 name: environment-protection-rules-check
 settings:
   environments:
@@ -78,3 +78,4 @@ expect:
     - "DELETE /repos/{repo}/environments"
   requests_contain:
     - "GET /repos/e2e-owner/e2e-repo/environments/staging/deployment_protection_rules"
+    - "GET /repos/e2e-owner/e2e-repo/environments/production/deployment_protection_rules/apps"

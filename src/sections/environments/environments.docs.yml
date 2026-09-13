@@ -50,10 +50,11 @@ coverage:
       GET/POST .../environments/{name}/deployment_protection_rules (the list documents NO
       pagination, so it is fetched in one call; the POST body is {integration_id}) and DELETE
       .../deployment_protection_rules/{protection_rule_id}: enable/disable ONLY, since GitHub offers
-      no update call. Rules are declared by App slug and resolved to the integration id at apply
-      time via ONE GET .../deployment_protection_rules/apps fetch (issued inside the enabling POST,
-      only when a declared rule is missing, so check mode never reads it; a slug the listing does
-      not carry is a hard error naming the available slugs).
+      no update call. Rules are declared by App slug and resolved to the integration id via ONE
+      GET .../deployment_protection_rules/apps fetch per environment with a missing rule: at plan
+      time for an environment that exists (so a slug the listing does not carry, or two Apps under
+      one slug, fails before any write, naming the available slugs), inside the enabling POST for
+      an environment the run creates (the listing 404s until the environment's PUT lands).
       Undeclared rules within a declared key are KEPT by default - Apps can enable themselves as
       gates, and silently disabling a deployment gate is security-relevant - with `_undeclared:
       delete` opting into disabling; these endpoints also sit outside the Environments PAT

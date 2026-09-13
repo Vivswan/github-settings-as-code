@@ -43,9 +43,15 @@ interface Seed {
       };
 }
 
-/** A section whose plan() and snapshot() read no live list, and why. */
+/**
+ * A section whose plan() and snapshot() read no live list, and why. The claim is checked, not
+ * trusted: both handlers run against the fake with `declared`, and a paginated read (a GET carrying
+ * `per_page`, a GraphQL connection) fails the section's exemption.
+ */
 interface NoLiveList {
   readonly noLiveList: string;
+  /** The declared value plan() runs against for the check. */
+  readonly declared: unknown;
 }
 
 function refusal(section: SectionKey, plural: string, one: string, pair: string): string {
@@ -96,7 +102,7 @@ function variablesSeed(key: SectionKey, family: keyof LiveState, noun: string): 
 }
 
 const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
-  repository: { noLiveList: "one repository object and one probe per toggle" },
+  repository: { noLiveList: "one repository object and one probe per toggle", declared: {} },
   labels: [
     {
       list: "labels",
@@ -296,7 +302,7 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
       ),
     },
   ],
-  actions: { noLiveList: "single-resource GETs, one per routed key" },
+  actions: { noLiveList: "single-resource GETs, one per routed key", declared: {} },
   actions_secrets: secretsSeed("actions_secrets", "actions_secrets", "Actions secret"),
   dependabot_secrets: secretsSeed("dependabot_secrets", "dependabot_secrets", "Dependabot secret"),
   codespaces_secrets: secretsSeed("codespaces_secrets", "codespaces_secrets", "Codespaces secret"),
@@ -319,10 +325,13 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
       ),
     },
   ],
-  check_suite_preferences: { noLiveList: "write-only: GitHub exposes no read endpoint" },
-  pages: { noLiveList: "one site probe" },
-  code_scanning_default_setup: { noLiveList: "one setup object" },
-  code_quality_setup: { noLiveList: "one setup object" },
+  check_suite_preferences: {
+    noLiveList: "write-only: GitHub exposes no read endpoint",
+    declared: { auto_trigger_checks: [] },
+  },
+  pages: { noLiveList: "one site probe", declared: null },
+  code_scanning_default_setup: { noLiveList: "one setup object", declared: {} },
+  code_quality_setup: { noLiveList: "one setup object", declared: {} },
   collaborators: [
     {
       list: "collaborators",
@@ -386,6 +395,7 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
   interaction_limits: {
     noLiveList:
       "one limit object and one cap; the bypass list is reconciled as a set of logins, which GitHub holds unique",
+    declared: null,
   },
   actions_variables: variablesSeed("actions_variables", "actions_variables", "Actions variable"),
   agents_variables: variablesSeed(
@@ -489,6 +499,36 @@ function isSeeded(entry: readonly Seed[] | NoLiveList): entry is readonly Seed[]
   return Array.isArray(entry);
 }
 
+/**
+ * The exemption's check: plan() and snapshot() run against the default state, and neither may issue
+ * a paginated read (a GET carrying `per_page`, the page loop's signature, or a GraphQL call carrying
+ * the connection loop's `cursor` variable). An unpaginated list read through `call` is the one
+ * shape this cannot see; the seed table covers it.
+ */
+async function proveNoLiveList(section: SectionModule, declared: unknown): Promise<void> {
+  const fake = registryFake({});
+  const reads: string[] = [];
+  const api: GitHubClient = {
+    tryRequest: (method, path, payload, options) => {
+      if (method === "GET" && path.includes("per_page=")) {
+        reads.push(`GET ${path}`);
+      }
+      return fake.tryRequest(method, path, payload, options);
+    },
+    tryGraphql: (op, variables, slug, mark) => {
+      if (Object.hasOwn(variables, "cursor")) {
+        reads.push(`GRAPHQL ${op.name}`);
+      }
+      return fake.tryGraphql(op, variables, slug, mark);
+    },
+  };
+  await section.plan(planContext(section, api, REPO), declared as never);
+  if (section.snapshot !== undefined) {
+    await section.snapshot(snapshotContext(section, api, REPO, "fail"));
+  }
+  expect(reads, `${section.key} claims no live list`).toEqual([]);
+}
+
 describe("duplicate live identities", () => {
   test("every section is seeded with a pair or names why it reads no live list", () => {
     expect(Object.keys(SEEDS).sort()).toEqual(SECTIONS.map((section) => section.key).sort());
@@ -504,6 +544,20 @@ describe("duplicate live identities", () => {
         expect(seed.declared !== undefined || section.snapshot !== undefined, seed.list).toBe(true);
       }
     }
+  });
+
+  const exempt = SECTIONS.flatMap((section) => {
+    const entry = SEEDS[section.key];
+    return isSeeded(entry) ? [] : [{ section, entry }];
+  });
+
+  test.each(exempt.map(({ section, entry }) => [section.key, section, entry] as const))(
+    "%s claims no live list, and neither handler issues a paginated read",
+    (_key, section: SectionModule, entry: NoLiveList) => proveNoLiveList(section, entry.declared),
+  );
+
+  test("the negative control: a section that lists fails the exemption's own assertion", async () => {
+    await expect(proveNoLiveList(labelsSection, [])).rejects.toThrow(/claims no live list/);
   });
 
   const seeded = SECTIONS.flatMap((section) => {

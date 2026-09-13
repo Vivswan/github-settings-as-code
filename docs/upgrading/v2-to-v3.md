@@ -200,13 +200,13 @@ Snapshot targets ride the same seal now: a private target's notes, file path, an
 
 ## 11. Two live items under one identity fail the section
 
-v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed; workflows matched the first; teams acted on both). v3 refuses every live list the same way, whether or not the settings file declares the pair: the list sections, the teams and workflows listings, the environment listing and every nested environment list, and the protected-branch listing a snapshot reads. Each pair is named the same way, the key first and the server id beside it when one exists:
+v2 picked one silently (the factory sections refused only a claimed pair; milestones, rulesets, webhooks, custom properties, secret scanning patterns, environment secrets and variables kept the last one listed; workflows matched the first; teams acted on both). v3 refuses every live list the same way, whether or not the settings file declares the pair: the list sections, the nested environment lists, and the seven reads that had no guard before (the teams listing, the workflows listing, the environment listing, the pinned environments, the protected-branch listing, the GraphQL protection rules, and the protection-rule Apps an environment can enable). Each pair is named the same way, the key first and the server id beside it when one exists:
 
 ```text
 webhooks: GitHub holds webhooks that resolve to one identity: "https://ci.example.com/hook (hook id 11)" and "https://ci.example.com/hook (hook id 12)". This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again
 ```
 
-Snapshot says the same. Delete the duplicates on GitHub, then re-run.
+Snapshot says the same. Delete the duplicates on GitHub, then re-run. The protection-rule Apps list is the one read whose refusal can follow a write: for an environment the run creates, GitHub serves the list only once the environment's PUT has landed, so that refusal lands after it; for an existing environment it lands at plan, before any write.
 
 ## 12. The webhook snapshot placeholder leads with SECRET_
 

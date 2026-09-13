@@ -1285,7 +1285,7 @@ describe("handler contracts", () => {
     });
     expect(Object.fromEntries(byLateReads)).toEqual({
       branches: ["appLookup", "repoLookup", "actorUser", "actorTeam"],
-      environments: ["secretsPublicKey", "listProtectionRuleApps"],
+      environments: ["secretsPublicKey"],
       actions_secrets: ["publicKey"],
       dependabot_secrets: ["publicKey"],
       codespaces_secrets: ["publicKey"],
