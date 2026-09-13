@@ -1161,7 +1161,9 @@ export interface MainPosition {
   date: string;
 }
 
-/** A shallow checkout counts to its boundary and mints a small count that sorts below every published one. */
+/** Refused on a shallow checkout: it would count to its boundary and mint a truncated count, so the version would
+ * sort below ones minted from the full history for older commits. Count 0 is never minted here; it marks the
+ * hand-published bootstrap (docs/reference/library.md). */
 export function mainPosition(cwd: string, sourceSha: string): MainPosition {
   if (git(cwd, "rev-parse", "--is-shallow-repository") === "true") {
     throw new Error(

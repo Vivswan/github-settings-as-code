@@ -213,18 +213,20 @@ The npm dist-tag `latest` is not the git tag `latest`: the git tag names the new
   - No run moves a dist-tag by hand: trusted publishing authenticates `npm publish` alone, not `npm dist-tag add`.
 - Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere.
   - npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it.
-  - The one hand-published version is the bootstrap pre-release below.
+  - The one hand-published version is the bootstrap pre-release below, recognizable by its count of 0 (`-main.0.g<sha7>`), which CI never mints.
 - The `github:` form installs a packaged commit's `lib/pkg/`, built from its source commit by the same workflow run that built its `lib/index.js`, with no registry and no build step on your side.
 
 ## One-time publishing setup
 
 For the owner, once. npm adds a trusted publisher only to a package that already exists, so the first version is published by hand from a maintainer machine with two-factor authentication; it is the only publish a person ever makes.
 
-1. From a clean checkout of `main`, build the library (the tarball ships `lib/pkg/`, which is built, not committed), stamp the bootstrap pre-release version, drop the `prepare` script from the manifest as both CI publishers do, and publish under the `next` dist-tag:
+1. From a clean checkout of `main`, build the library (`lib/pkg/` is built, not committed), stamp the version by hand, drop the `prepare` script as both CI publishers do, and publish under `next`.
+   The version is the manifest's next patch, then `-main.0.g<sha7>`: the count 0 marks a publish without provenance (`.github/SECURITY.md` recognizes the hand publish by it), and the verdict places it by its sha like every other pre-release.
 
 ```bash
 bun install --frozen-lockfile && bun run build:lib
-version="$(GITHUB_SHA="$(git rev-parse HEAD)" bun .github/scripts/release-pipeline.ts prerelease-version)"
+next_patch="$(bun -e 'const v = require("./.release-please-manifest.json")["."]; console.log(v.replace(/\d+$/, (p) => Number(p) + 1));')"
+version="${next_patch}-main.0.g$(git rev-parse --short=7 HEAD)"
 npm version "$version" --no-git-tag-version && npm pkg delete scripts.prepare
 npm publish --access public --tag next
 git checkout -- package.json
