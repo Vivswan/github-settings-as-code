@@ -20,7 +20,7 @@ Fifteen breaks (the ninth is for library consumers). One is silent (the fallback
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
 | Two live items under one identity fail the section | The last one listed won silently in most sections | Every list section refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
 | The webhook snapshot placeholder | `$WEBHOOK_SECRET_<id>` | `$SECRET_WEBHOOK_<id>` | No error: an old reference keeps resolving from its old export; a new snapshot writes the new name, so move both together; [section 12](#12-the-webhook-snapshot-placeholder-leads-with-secret_) |
-| One wording per concept in drift lines and notes | Six spellings of "cannot verify", seven of "left out", quoted webhook labels | One template each | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
+| One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each on the converted sites | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
 | A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
 
@@ -213,7 +213,12 @@ Every snapshot secret now leads with `SECRET_`, the store name second. A file ho
 
 ## 13. One wording per concept in drift lines and notes
 
-Anything that greps the check output for these lines needs the new spelling:
+Anything that greps the check output for these lines needs the new spelling. Two templates reach only the sites this release converts:
+
+- the cannot-verify line: the webhook secret and the write-only `check_suite_preferences` note;
+- the left-out line: rulesets, webhooks, and the secondary snapshot reads (actions, environments, repository) a denied grant skips under `on-missing-permission: warn`; a denied primary read still says `skipped`.
+
+The other cannot-verify and omission notes (interaction_limits, teams, collaborators) keep their v2 line until a later release.
 
 | Line | v2 | v3 |
 |---|---|---|
@@ -221,7 +226,7 @@ Anything that greps the check output for these lines needs the new spelling:
 | A field mismatch (milestones, rulesets, collaborators, teams, every list section) | `milestones[v1].state: "closed" != "open"` and `teams[platform]: live role "read" != declared "write"` | `milestones[v1].state: declared "closed" != live "open"; apply will set the declared value` |
 | A webhook's events | `... declared [...] != live [...] (compared order-insensitively)` | one line per element: `webhooks[<url>].events: missing "release"` |
 | A value check mode cannot compare | `... so the declared value cannot be verified; apply re-sends it on every run so rotations propagate` | `<label>: <why>, so check mode cannot verify <what>; apply <re-sends it> on every run` |
-| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` and `teams[x]: ...; not declared` | `<label>: left out of the snapshot - <reason>` |
+| A resource a snapshot reads but does not declare | `rulesets[x]: inherited from the organization ..., so it is not part of the repository's snapshot` | `<label>: left out of the snapshot - <reason>` |
 | A ruleset update's change line | `updated ruleset "main" (id 42)` | `updated ruleset "main"` |
 | A milestone delete's change line | `DELETED undeclared milestone "v0.9" (detached from every issue that carried it)` | `DELETED undeclared milestone "v0.9"` (the drift line beside it still names the detaching) |
 
