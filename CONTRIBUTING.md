@@ -18,14 +18,14 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 
 ## Code conventions
 
-- Line caps: code wraps at biome's `lineWidth` of 100; comments, YAML, and prose stay under the fleet's 256-character cap, and a comment block is at most 10 lines.
+- Line caps: code wraps at biome's `lineWidth` of 100. The fleet's check-file-size caps source, test, workflow, and shell lines at 256 characters; markdown prose has no width cap. A comment block is at most 10 lines.
 - Markdown keeps one source line per paragraph or list item, so a long item is split into items, never wrapped.
 - A source file under `src/` or `.github/scripts/` opens with a one-paragraph header comment saying what the file owns; test files need none.
 - Tests live in two places: a section's unit tests sit beside it in `src/sections/<key>/`; everything else is under `test/`, mirroring `src/`.
 
 ## Tests
 
-- A test's temp directory lives inside the test body: `withTempDir()` or `tempDirTest()` from `test/temp-dir.ts` (try/finally, removed on every exit path); no afterEach or afterAll hook cleans up.
+- Every temp directory a test creates is removed on every exit path, failure included: `withTempDir()` or `tempDirTest()` from `test/temp-dir.ts`, or a try/finally of its own; only a suite-scoped fixture (`test/scripts/release-pipeline-fixture.ts`) cleans in afterAll.
 - An Io a test records through is `captureIo()` from `test/io/capture.ts`: every channel in its own list and in one ordered event log.
 - A repository-relative path in a test resolves from `ROOT` in `test/root.ts`; a file beside the test resolves from `import.meta.dir`.
 
