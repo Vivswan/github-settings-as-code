@@ -49,6 +49,7 @@ export interface Workflow {
   on: Record<string, Trigger | null>;
   permissions?: Record<string, string>;
   concurrency?: Concurrency;
+  env?: Record<string, string>;
   jobs: Record<string, Job>;
 }
 interface CompositeAction {

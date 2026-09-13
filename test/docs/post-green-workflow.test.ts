@@ -474,7 +474,8 @@ describe("post-green.yml", () => {
     const judged = `\${{ inputs.${input} }}`;
     const steps = Object.values(workflow.jobs).flatMap((job) => job.steps ?? []);
     const checkouts = steps.filter((step) => (step.uses ?? "").startsWith("actions/checkout@"));
-    const sources = steps.filter((step) => step.env?.SOURCE_SHA !== undefined);
+    // The steps that pass a source to the pipeline or to npm, found by the script that reads the variable, not by the env that sets it.
+    const sources = steps.filter((step) => /\$SOURCE_SHA\b/.test(step.run ?? ""));
     expect(checkouts.length).toBeGreaterThan(1);
     expect(sources.length).toBeGreaterThan(1);
     for (const step of checkouts) {
@@ -589,6 +590,8 @@ describe("the push probe under bash", () => {
     expect(after[0]).toMatch(/^::error::/);
     for (const line of inner) {
       expect(line.startsWith("  ")).toBe(true);
+      // The error after the fence is static text: none of git's words reach a line the runner reads as a command.
+      expect(after[0]).not.toContain(line.trim());
     }
     return token;
   }

@@ -63,10 +63,16 @@ const setupNode = (job: RunJob): Step =>
 
 const STABLE_FILE = "update-release.yml";
 const STABLE_JOB = "publish-npm";
-const publishers = () => ({
-  next: runJob(readWorkflow("post-green.yml").jobs["publish-next"], "publish-next job"),
-  stableWorkflow: readWorkflow(STABLE_FILE),
-});
+const NEXT_FILE = "post-green.yml";
+const NEXT_JOB = "publish-next";
+const publishers = () => {
+  const nextWorkflow = readWorkflow(NEXT_FILE);
+  return {
+    nextWorkflow,
+    next: runJob(nextWorkflow.jobs[NEXT_JOB], `${NEXT_JOB} job`),
+    stableWorkflow: readWorkflow(STABLE_FILE),
+  };
+};
 
 /** The `owner/name` the manifest's repository URL names: the one repository whose CI is the trusted publisher. */
 function manifestSlug(): string {
@@ -101,7 +107,8 @@ function sharedSteps(next: RunJob, stable: RunJob): Array<[string, Step, Step]> 
 const body = ({ if: _gate, id: _id, ...rest }: Step): Omit<Step, "if" | "id"> => rest;
 
 /** Every way the two publishers break their shared contract; the assertions and the negative controls read this one list. */
-function publisherProblems(next: RunJob, stableWorkflow: Workflow): string[] {
+function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): string[] {
+  const next = runJob(nextWorkflow.jobs[NEXT_JOB], `${NEXT_JOB} job`);
   const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
   const problems: string[] = [];
   const guard = `github.repository == '${manifestSlug()}'`;
@@ -123,7 +130,11 @@ function publisherProblems(next: RunJob, stableWorkflow: Workflow): string[] {
   if (JSON.stringify([stable.needs ?? []].flat().sort()) !== JSON.stringify(others)) {
     problems.push(`${STABLE_JOB} does not run after every other job (${others.join(", ")})`);
   }
-  for (const value of [...runnerInputs(next), ...runnerInputs(stable)]) {
+  // A workflow-level env reaches every step of every job, the publishers' included.
+  const workflowEnv = [nextWorkflow, stableWorkflow].flatMap((w) =>
+    Object.entries(w.env ?? {}).flat(),
+  );
+  for (const value of [...workflowEnv, ...runnerInputs(next), ...runnerInputs(stable)]) {
     if (/secrets\.|NODE_AUTH_TOKEN|NPM_TOKEN/.test(value))
       problems.push(`a token reaches npm: ${value}`);
     // npm reads its config from the environment too, so a stray NPM_CONFIG_* can move the dist-tag or the registry.
@@ -142,7 +153,7 @@ function publisherProblems(next: RunJob, stableWorkflow: Workflow): string[] {
 }
 
 describe("the npm publish jobs", () => {
-  const { next, stableWorkflow } = publishers();
+  const { nextWorkflow, next, stableWorkflow } = publishers();
   const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
 
   test("both are guarded to the manifest's repository, take one lane, hand npm no token, share their steps' text, and name one registry; the stable one runs last", () => {
@@ -153,10 +164,10 @@ describe("the npm publish jobs", () => {
     // workflow has jobs for the publish to wait on.
     expect(sharedSteps(next, stable).length).toBeGreaterThan(3);
     expect(Object.keys(stableWorkflow.jobs).length).toBeGreaterThan(2);
-    expect(publisherProblems(next, stableWorkflow)).toEqual([]);
+    expect(publisherProblems(nextWorkflow, stableWorkflow)).toEqual([]);
   });
 
-  test.each<[string, (next: RunJob, stableWorkflow: Workflow) => void, RegExp]>([
+  test.each<[string, (nextWorkflow: Workflow, stableWorkflow: Workflow) => void, RegExp]>([
     [
       "a stable publish open to forks",
       (_n, w) => delete must(w.jobs[STABLE_JOB], "stable").if,
@@ -164,7 +175,8 @@ describe("the npm publish jobs", () => {
     ],
     [
       "a pre-release publish on a lane of its own",
-      (n) => {
+      (w) => {
+        const n = must(w.jobs[NEXT_JOB], "next");
         n.concurrency = { ...n.concurrency, group: "publish-next" };
       },
       /different lanes/,
@@ -178,8 +190,10 @@ describe("the npm publish jobs", () => {
     ],
     [
       "a token handed to setup-node",
-      (n) => {
-        setupNode(n).env = { NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}` };
+      (w) => {
+        setupNode(runJob(w.jobs[NEXT_JOB], "next")).env = {
+          NODE_AUTH_TOKEN: `\${{ secrets.NPM_TOKEN }}`,
+        };
       },
       /a token reaches npm: NODE_AUTH_TOKEN/,
     ],
@@ -198,9 +212,19 @@ describe("the npm publish jobs", () => {
       /npm is configured through the environment: NPM_CONFIG_TAG/,
     ],
     [
+      "a token in the workflow's own env, reaching every job",
+      (w) => {
+        w.env = { NODE_AUTH_TOKEN: `\${{ github.token }}` };
+      },
+      /a token reaches npm: NODE_AUTH_TOKEN/,
+    ],
+    [
       "a floor guard fixed in one job only",
-      (n) => {
-        const guard = stepNamed(n, "Require an npm that publishes through OIDC");
+      (w) => {
+        const guard = stepNamed(
+          runJob(w.jobs[NEXT_JOB], "next"),
+          "Require an npm that publishes through OIDC",
+        );
         guard.run = guard.run?.replace("11.5.1", "11.6.0");
       },
       /"Require an npm that publishes through OIDC" diverged/,
@@ -213,10 +237,10 @@ describe("the npm publish jobs", () => {
       /different registries|diverged/,
     ],
   ])("%s fails its relation (negative control)", (_case, mutate, message) => {
-    const driftedNext = structuredClone(next);
-    const driftedWorkflow = structuredClone(stableWorkflow);
-    mutate(driftedNext, driftedWorkflow);
-    expect(publisherProblems(driftedNext, driftedWorkflow).join("\n")).toMatch(message);
+    const driftedNext = structuredClone(nextWorkflow);
+    const driftedStable = structuredClone(stableWorkflow);
+    mutate(driftedNext, driftedStable);
+    expect(publisherProblems(driftedNext, driftedStable).join("\n")).toMatch(message);
   });
 });
 
