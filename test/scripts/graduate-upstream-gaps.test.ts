@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   camelCaseGapName,
@@ -15,6 +16,7 @@ import {
   toSpecOnlyGapSource,
 } from "../../.github/scripts/graduate-upstream-gaps.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 const TRIPWIRE_MESSAGE =
   "Type '\"GET /repos/{owner}/{repo}/merge-queue\"' does not satisfy the constraint 'never'.";
@@ -210,6 +212,29 @@ describe("generateIndex", () => {
     expect(none).toContain("export type SupplementalRoute");
     expect(none).toContain("export const UNDOCUMENTED_ROUTES");
   });
+
+  test("the empty index type-checks beside gap.ts: the derivations must not index into an empty tuple", () =>
+    withTempDir("gaps-index-empty-", (dir) => {
+      // The committed index compiles under the project typecheck only while a gap file exists; a derivation
+      // written for a populated GAPS (say `(typeof GAPS)[0]`) would first break the day the last gap graduates.
+      symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+      copyFileSync(join(ROOT, "src", "upstream-gaps", "gap.ts"), join(dir, "gap.ts"));
+      writeFileSync(join(dir, "index.ts"), generateIndex([]));
+      writeFileSync(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({ extends: join(ROOT, "tsconfig.json"), include: [], files: ["index.ts"] }),
+      );
+      const tsc = spawnSync(
+        join(ROOT, "node_modules", ".bin", "tsc"),
+        ["-p", dir, "--pretty", "false"],
+        { cwd: dir, encoding: "utf8" },
+      );
+      if (tsc.error) {
+        throw tsc.error;
+      }
+      expect(tsc.stdout + tsc.stderr).toBe("");
+      expect(tsc.status).toBe(0);
+    }));
 });
 
 describe("isSpecPinned", () => {
