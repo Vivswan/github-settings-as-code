@@ -71,14 +71,14 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
   });
 
   test("every workflow it dispatches declares every input it passes", () => {
-    // The dispatch command runs to the next shell separator, so every -f on it is read, wherever the other options sit.
+    // The dispatch command runs to the next shell separator (continuations joined), so every field on it is read, wherever the other options sit.
     const dispatches = steps.flatMap((s) => [
-      ...(s.run ?? "").matchAll(/gh workflow run (\S+\.yml)([^;&|\n]*)/g),
+      ...(s.run ?? "").replace(/\\\n/g, " ").matchAll(/gh workflow run (\S+\.yml)([^;&|\n]*)/g),
     ]);
     expect(dispatches.length, "no gh workflow run dispatch").toBeGreaterThan(0);
     for (const [, target = "", rest = ""] of dispatches) {
       const passed = [
-        ...rest.matchAll(/(?:^|\s)(?:-f|--raw-field|-F|--field)[\s=]+"?([\w-]+)=/g),
+        ...rest.matchAll(/(?:^|\s)(?:-f|--raw-field|-F|--field)[\s=]+["']?([\w-]+)=/g),
       ].map((m) => m[1] ?? "");
       expect(passed.length, `the ${target} dispatch passes no input`).toBeGreaterThan(0);
       const declared = Object.keys(readWorkflow(target).on.workflow_dispatch?.inputs ?? {});

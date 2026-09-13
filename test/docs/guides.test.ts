@@ -138,12 +138,15 @@ function decodeAttribute(raw: string): string {
  * Every `href` and `src` value in the rendered page. Rendering first means every CommonMark destination form (entities, backslash escapes, angle
  * brackets, multi-line labels, raw HTML) resolves as a site build would.
  */
-async function linkDestinations(markdown: string): Promise<string[]> {
+async function linkDestinations(
+  markdown: string,
+  attributes: readonly string[] = ["href", "src"],
+): Promise<string[]> {
   const destinations: string[] = [];
   await new HTMLRewriter()
-    .on("[href], [src]", {
+    .on(attributes.map((attribute) => `[${attribute}]`).join(", "), {
       element(element) {
-        for (const attribute of ["href", "src"]) {
+        for (const attribute of attributes) {
           const value = element.getAttribute(attribute);
           if (value !== null) {
             destinations.push(decodeAttribute(value));
@@ -343,7 +346,8 @@ describe("docs/ guide pages", () => {
     // A reader reaches a docs/ page only through a link, so a page nothing links to is dead weight nobody can find.
     const linked = new Set<string>();
     for (const file of linkScanFiles()) {
-      for (const destination of await linkDestinations(readFileSync(file.path, "utf8"))) {
+      // href only: an image or embed shows the file but takes the reader nowhere.
+      for (const destination of await linkDestinations(readFileSync(file.path, "utf8"), ["href"])) {
         const path = destination.split("#")[0] ?? "";
         if (path === "" || /^[a-z]+:/.test(path)) {
           continue;
