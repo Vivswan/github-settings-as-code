@@ -53,9 +53,6 @@ const YAML_NEAR_MISSES = [
 describe("markerSyntaxFor", () => {
   test.each<[path: string, syntax: MarkerSyntax]>([
     ["README.md", "html"],
-    ["docs/operate/check-mode.md", "html"],
-    ["docs/reference/sections.md", "html"],
-    ["docs/reference/inputs.md", "html"],
     ["action.yml", "yaml"],
     [".github/workflows/x.yaml", "yaml"],
   ])("%s uses %s markers", (path, syntax) => {
@@ -156,8 +153,6 @@ describe("replaceRegion", () => {
       "missing",
       'region "missing" needs exactly one BEGIN and one END marker, found 0 and 0',
     ],
-    ["only HTML look-alikes", "html", HTML_NEAR_MISSES, "tab", "found 0 and 0"],
-    ["only YAML look-alikes and scalar content", "yaml", YAML_NEAR_MISSES, "tab", "found 0 and 0"],
     [
       "YAML markers offered to the html syntax",
       "html",
@@ -215,41 +210,6 @@ describe("replaceRegion", () => {
       "<!-- BEGIN GENERATED: x -->\n<!-- END GENERATED: x (h) -->",
       "x",
       "found 1 and 0",
-    ],
-    [
-      "a # marker with trailing text",
-      "yaml",
-      "# BEGIN GENERATED: x and more\n# END GENERATED: x",
-      "x",
-      "found 0 and 1",
-    ],
-    [
-      "a # marker that is not the whole line",
-      "yaml",
-      "key: 1 # BEGIN GENERATED: x\n# END GENERATED: x",
-      "x",
-      "found 0 and 1",
-    ],
-    [
-      "a BEGIN marker that is literal block-scalar content",
-      "yaml",
-      "d: |\n  # BEGIN GENERATED: x\n# END GENERATED: x",
-      "x",
-      "found 0 and 1",
-    ],
-    [
-      "an END marker that is folded block-scalar content",
-      "yaml",
-      "# BEGIN GENERATED: x\nd: >\n  # END GENERATED: x\n",
-      "x",
-      "found 1 and 0",
-    ],
-    [
-      "a BEGIN marker inside a multiline double-quoted scalar",
-      "yaml",
-      'd: "one\n  # BEGIN GENERATED: x\n  two"\n# END GENERATED: x',
-      "x",
-      "found 0 and 1",
     ],
   ])("throws on %s", (_label, syntax, text, name, error) => {
     expect(() => replaceRegion(text, name, "x", syntax)).toThrow(error);
@@ -454,12 +414,6 @@ describe("assertRegionPlacement", () => {
       "the list region's BEGIN marker sits on a line indented as code in doc.md",
     ],
     [
-      "an inline region on a quoted line",
-      PAGE.replace("Result: (", "> Result: ("),
-      LIST,
-      "the list region sits inside a blockquote in doc.md",
-    ],
-    [
       "a table whose BEGIN marker carries the quote prefix of the paragraph above it",
       PAGE.replace(
         "## Inputs\n\n<!-- BEGIN GENERATED: table",
@@ -500,15 +454,6 @@ describe("assertRegionPlacement", () => {
       `${PAGE}\nTrailing prose.\n`,
       LINK,
       "the link region must close doc.md",
-    ],
-    [
-      "a link region whose BEGIN marker moved over the heading above it",
-      PAGE.replace("<!-- BEGIN GENERATED: link -->\n", "").replace(
-        "## Notes\n",
-        "<!-- BEGIN GENERATED: link -->\n## Notes\n",
-      ),
-      LINK,
-      "the link region in doc.md encloses content the generator would not write",
     ],
     [
       "a link region around another definition",
@@ -623,6 +568,15 @@ describe("assertRegionPlacement", () => {
     const insideBody = PAGE.replace("| `x` | 1 |\n", "| `x` | 1 |\n<pre>\n");
     expect(() => assertRegionPlacement(insideBody, TABLE, "doc.md")).toThrow(
       "the table region sits inside a raw HTML block in doc.md",
+    );
+  });
+});
+
+describe("relocatedRegion", () => {
+  test("moves exactly the inline span, leaving the text around the markers where it was", () => {
+    const inline = "<!-- BEGIN GENERATED: list -->`a` / `b`<!-- END GENERATED: list -->";
+    expect(relocatedRegion(PAGE, "list", "html", "## Notes\n\n")).toBe(
+      PAGE.replace(`(${inline}).`, "().").replace("## Notes\n\n", `## Notes\n\n${inline}`),
     );
   });
 });

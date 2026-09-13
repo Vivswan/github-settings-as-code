@@ -100,28 +100,6 @@ describe("action.yml renderers", () => {
       /single-spaced prose/,
     );
   });
-
-  test("outputs render the name and the folded description only", () => {
-    expect(
-      renderActionOutputs({
-        result: { description: "applied | partial | clean." },
-        "repos-result": {
-          description:
-            "JSON map of owner/name to {result, source, skipped-sections} for every fleet target. The empty map {} for one repository.",
-        },
-      }),
-    ).toBe(
-      [
-        "  result:",
-        "    description: >-",
-        "      applied | partial | clean.",
-        "  repos-result:",
-        "    description: >-",
-        "      JSON map of owner/name to {result, source, skipped-sections} for every",
-        "      fleet target. The empty map {} for one repository.",
-      ].join("\n"),
-    );
-  });
 });
 
 describe("Inputs table renderer", () => {

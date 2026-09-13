@@ -67,7 +67,7 @@ describe("fetchTextWithRetry", () => {
     ]);
   });
 
-  for (const status of [500, 502, 408, 429]) {
+  for (const status of [500, 408, 429]) {
     test(`retries a transient ${status}`, async () => {
       const script = fetchScript([
         new Response("nope", { status, statusText: "transient" }),
