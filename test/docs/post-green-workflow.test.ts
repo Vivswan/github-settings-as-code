@@ -6,40 +6,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-
-const ROOT = join(import.meta.dir, "..", "..");
-
-interface Step {
-  name?: string;
-  id?: string;
-  uses?: string;
-  if?: string;
-  run?: string;
-  env?: Record<string, string>;
-  with?: Record<string, unknown>;
-}
-interface Input {
-  required?: boolean;
-  type?: string;
-  default?: unknown;
-}
-interface Trigger {
-  inputs?: Record<string, Input>;
-}
+import { readWorkflow, SETUP_USES, type Workflow } from "./workflow-loader.js";
 
 function must<T>(value: T | undefined, what: string): T {
   if (value === undefined) throw new Error(`post-green.yml has no ${what}`);
   return value;
-}
-
-interface CallerJob {
-  uses?: string;
-  with?: Record<string, unknown>;
-  secrets?: unknown;
-  permissions?: Record<string, string>;
-  steps?: Step[];
-  [key: string]: unknown;
 }
 
 interface PinnedStep {
@@ -50,14 +21,6 @@ interface PinnedStep {
   run: string | undefined;
   env: Record<string, string> | undefined;
   with: Record<string, unknown> | undefined;
-}
-interface CallTrigger extends Trigger {
-  secrets?: Record<string, { required?: boolean }>;
-}
-interface Caller {
-  on: Record<string, Trigger | null> & { workflow_call?: CallTrigger | null };
-  jobs: Record<string, CallerJob>;
-  [key: string]: unknown;
 }
 
 interface CallerContract {
@@ -222,18 +185,18 @@ const CALLER_EXPECTED: CallerContract = {
         {
           name: undefined,
           id: undefined,
-          uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+          uses: SETUP_USES,
           if: PROCEED,
           run: undefined,
           env: undefined,
-          with: { "bun-version-file": ".bun-version" },
+          with: undefined,
         },
         {
           name: "Build the bundle and the library",
           id: undefined,
           uses: undefined,
           if: PROCEED,
-          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:bundle\nbun run build:lib\n",
+          run: "bun run build:bundle\nbun run build:lib\n",
           env: undefined,
           with: undefined,
         },
@@ -280,11 +243,11 @@ const CALLER_EXPECTED: CallerContract = {
         {
           name: undefined,
           id: undefined,
-          uses: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+          uses: SETUP_USES,
           if: OIDC_PROCEED,
           run: undefined,
           env: undefined,
-          with: { "bun-version-file": ".bun-version" },
+          with: undefined,
         },
         {
           name: undefined,
@@ -309,7 +272,7 @@ const CALLER_EXPECTED: CallerContract = {
           id: undefined,
           uses: undefined,
           if: OIDC_PROCEED,
-          run: "bun install --frozen-lockfile --ignore-scripts\nbun run build:lib\n",
+          run: "bun run build:lib",
           env: undefined,
           with: undefined,
         },
@@ -336,7 +299,7 @@ const CALLER_EXPECTED: CallerContract = {
   ],
 };
 
-function callerContractOf(wf: Caller): CallerContract {
+function callerContractOf(wf: Workflow): CallerContract {
   const call = wf.on.workflow_call;
   return {
     topLevel: Object.keys(wf).sort(),
@@ -368,20 +331,18 @@ function callerContractOf(wf: Caller): CallerContract {
   };
 }
 
-function expectCallerContract(wf: Caller): void {
+function expectCallerContract(wf: Workflow): void {
   expect(callerContractOf(wf)).toEqual(CALLER_EXPECTED);
 }
 
 describe("post-green.yml publishes the build branch", () => {
-  const wf = parseYaml(
-    readFileSync(join(ROOT, ".github", "workflows", "post-green.yml"), "utf8"),
-  ) as Caller;
+  const wf = readWorkflow("post-green.yml");
 
   test("two self-contained jobs, each gated on its probe, with the judged sha as the only input", () => {
     expectCallerContract(wf);
   });
 
-  const REGRESSIONS: Array<[string, (w: Caller) => void, keyof CallerContract]> = [
+  const REGRESSIONS: Array<[string, (w: Workflow) => void, keyof CallerContract]> = [
     [
       "an undeclared job beside the publisher",
       (w) => (w.jobs.extra = { "runs-on": "ubuntu-latest", steps: [{ run: "echo" }] }),
@@ -614,11 +575,7 @@ describe("post-green.yml publishes the build branch", () => {
         }),
       "secrets",
     ],
-    [
-      "a push trigger of its own",
-      (w) => (w.on.push = { branches: ["main"] } as Trigger),
-      "triggers",
-    ],
+    ["a push trigger of its own", (w) => (w.on.push = { branches: ["main"] }), "triggers"],
     [
       "a dispatch that could reach the publisher outside the gate",
       (w) => (w.on.workflow_dispatch = null),
@@ -694,9 +651,7 @@ const STATIC_ERROR =
 const FENCE_OPEN = /^::stop-commands::([0-9a-f]{32})$/;
 
 describe("the push probe under bash", () => {
-  const wf = parseYaml(
-    readFileSync(join(ROOT, ".github", "workflows", "post-green.yml"), "utf8"),
-  ) as Caller;
+  const wf = readWorkflow("post-green.yml");
   const run = must(must(must(wf.jobs.build, "build job").steps?.[1], "probe step").run, "run");
 
   function expectFenced(lines: string[], inner: string[]): void {

@@ -12,37 +12,19 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { type Job, readWorkflow, type Step } from "./workflow-loader.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
-
-interface Step {
-  name?: string;
-  id?: string;
-  uses?: string;
-  if?: string;
-  run?: string;
-  env?: Record<string, string>;
-  with?: Record<string, unknown>;
-}
-interface Job {
-  if?: string;
-  needs?: string[];
-  concurrency?: { group?: string; queue?: string; "cancel-in-progress"?: boolean };
-  permissions?: Record<string, string>;
-  steps: Step[];
-}
-interface Workflow {
-  jobs: Record<string, Job>;
-}
-
-function workflow(file: string): Workflow {
-  return parseYaml(readFileSync(join(ROOT, ".github", "workflows", file), "utf8")) as Workflow;
-}
+/** A job that runs steps (the publishers are never reusable-workflow calls). */
+type RunJob = Job & { steps: Step[] };
 
 function must<T>(value: T | undefined, what: string): T {
   if (value === undefined) throw new Error(`no ${what}`);
   return value;
+}
+
+function runJob(job: Job | undefined, what: string): RunJob {
+  const found = must(job, what);
+  return { ...found, steps: must(found.steps, `${what} steps`) };
 }
 
 /** Every string a step hands the runner beyond its script: env values, with values, the gate. */
@@ -54,12 +36,12 @@ function stepInputs(step: Step): string[] {
   ];
 }
 
-const stepNamed = (job: Job, name: string): Step =>
+const stepNamed = (job: RunJob, name: string): Step =>
   must(
     job.steps.find((step) => step.name === name),
     `step ${name}`,
   );
-const setupNode = (job: Job): Step =>
+const setupNode = (job: RunJob): Step =>
   must(
     job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")),
     "setup-node step",
@@ -117,7 +99,7 @@ const EXPECTED: Contract = {
   ],
 };
 
-function contractOf(next: Job, stable: Job): Contract {
+function contractOf(next: RunJob, stable: RunJob): Contract {
   const probe = next.steps.findIndex((step) => step.id === "oidc");
   if (probe < 0) throw new Error("publish-next has no oidc probe");
   const publishLines = (step: Step): string[] =>
@@ -130,7 +112,7 @@ function contractOf(next: Job, stable: Job): Contract {
     nextPermissions: next.permissions,
     repositoryGuards: [next.if, stable.if],
     lanes: [next.concurrency, stable.concurrency],
-    stableNeeds: [...(stable.needs ?? [])].sort(),
+    stableNeeds: [stable.needs ?? []].flat().sort(),
     ungatedNextSteps: next.steps
       .slice(probe + 1)
       .filter((step) => step.if !== OIDC_GATE && step.if !== PUBLISHED_GATE)
@@ -153,16 +135,14 @@ function contractOf(next: Job, stable: Job): Contract {
 }
 
 describe("the npm publish jobs", () => {
-  const postGreen = workflow("post-green.yml");
-  const updateRelease = workflow("update-release.yml");
-  const next = must(postGreen.jobs["publish-next"], "publish-next job");
-  const stable = must(updateRelease.jobs["publish-npm"], "publish-npm job");
+  const next = runJob(readWorkflow("post-green.yml").jobs["publish-next"], "publish-next job");
+  const stable = runJob(readWorkflow("update-release.yml").jobs["publish-npm"], "publish-npm job");
 
   test("both publish through OIDC alone, with the same guard and build, and publish-next skips whole without a token", () => {
     expect(contractOf(next, stable)).toEqual(EXPECTED);
   });
 
-  const REGRESSIONS: Array<[string, (next: Job, stable: Job) => void, keyof Contract]> = [
+  const REGRESSIONS: Array<[string, (next: RunJob, stable: RunJob) => void, keyof Contract]> = [
     [
       "a stable publish without the OIDC grant",
       (_next, stable) => (stable.permissions = { contents: "read" }),
@@ -240,7 +220,7 @@ describe("the npm publish jobs", () => {
       "a library build that diverged between the jobs",
       (_next, stable) => {
         const build = stepNamed(stable, "Build the library");
-        build.run = build.run?.replace("--ignore-scripts", "");
+        build.run = build.run?.replace("build:lib", "build");
       },
       "sameBuild",
     ],
@@ -321,7 +301,7 @@ function runStep(
 }
 
 describe("the OIDC probe under bash", () => {
-  const next = must(workflow("post-green.yml").jobs["publish-next"], "publish-next job");
+  const next = runJob(readWorkflow("post-green.yml").jobs["publish-next"], "publish-next job");
   const run = must(must(next.steps[0], "probe step").run, "probe run");
 
   test("a runner that minted a token URL proceeds silently", () => {
@@ -342,7 +322,7 @@ describe("the OIDC probe under bash", () => {
 });
 
 describe("the npm floor guard under bash", () => {
-  const stable = must(workflow("update-release.yml").jobs["publish-npm"], "publish-npm job");
+  const stable = runJob(readWorkflow("update-release.yml").jobs["publish-npm"], "publish-npm job");
   const run = must(
     stepNamed(stable, "Require an npm that publishes through OIDC").run,
     "guard run",
@@ -398,8 +378,8 @@ describe("the npm floor guard under bash", () => {
 });
 
 describe("the publish blocks under bash", () => {
-  const next = must(workflow("post-green.yml").jobs["publish-next"], "publish-next job");
-  const stable = must(workflow("update-release.yml").jobs["publish-npm"], "publish-npm job");
+  const next = runJob(readWorkflow("post-green.yml").jobs["publish-next"], "publish-next job");
+  const stable = runJob(readWorkflow("update-release.yml").jobs["publish-npm"], "publish-npm job");
   const nextRun = must(
     stepNamed(next, "Publish the pre-release under the next dist-tag").run,
     "next publish run",
