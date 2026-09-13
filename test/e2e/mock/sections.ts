@@ -105,10 +105,24 @@ function mergeFragments<H>(
   return merged;
 }
 
+/**
+ * The one lookup behind both tables. The mapped type above makes a missing fragment a compile error; a test run
+ * skips the compiler, so a section registered without one fails here by name instead of at `.rest` of undefined.
+ */
+function fragmentFor<K extends SectionKey>(key: K): SectionMockFragment<K> {
+  const fragment: SectionMockFragment<K> | undefined = FRAGMENTS[key];
+  if (fragment === undefined) {
+    throw new Error(
+      `E2E MOCK: section "${key}" is registered without a mock fragment; add \`${key}: { rest: <its mock.ts handlers> }\` to FRAGMENTS in test/e2e/mock/sections.ts`,
+    );
+  }
+  return fragment;
+}
+
 export function sectionHandlerFragments(): Record<string, Handler> {
   return mergeFragments(
     "REST",
-    SECTION_KEYS.map((key) => FRAGMENTS[key].rest),
+    SECTION_KEYS.map((key) => fragmentFor(key).rest),
   );
 }
 
@@ -116,7 +130,7 @@ export function sectionGraphqlHandlerFragments(): Record<string, GraphqlHandler>
   return mergeFragments(
     "GraphQL",
     SECTION_KEYS.flatMap((key) => {
-      const graphql: Record<string, GraphqlHandler> | undefined = FRAGMENTS[key].graphql;
+      const graphql: Record<string, GraphqlHandler> | undefined = fragmentFor(key).graphql;
       return graphql ? [graphql] : [];
     }),
   );

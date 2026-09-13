@@ -1,4 +1,4 @@
-name: invitations-keep
+name: invitations-undeclared-keep-note
 description: >-
   Under the wrapped `_undeclared: keep` form an undeclared pending invitation
   is kept as a note, never cancelled; a declared user's matching pending

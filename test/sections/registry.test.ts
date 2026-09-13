@@ -39,6 +39,7 @@ import {
   allGraphqlOps,
   type MisdeclaredPlanModule,
   type MisdeclaredSnapshotModule,
+  type ReadingModuleWithoutSnapshot,
   SECTIONS,
   sectionModule,
   sectionShape,
@@ -1236,6 +1237,16 @@ describe("handler contracts", () => {
     type Misdeclared = typeof misdeclaredSnapshot;
     // @ts-expect-error a snapshot() over workflows' dictionary is not exact for labels
     type _WrongSnapshot = MustBeNever<MisdeclaredSnapshotModule<"labels", Misdeclared>>;
+  });
+
+  test("the door tripwire names a reading module registered without snapshot(); a write-only module passes", () => {
+    type _WriteOnly = MustBeNever<
+      ReadingModuleWithoutSnapshot<"check_suite_preferences", typeof checkSuitePreferencesSection>
+    >;
+    type _Reading = MustBeNever<ReadingModuleWithoutSnapshot<"labels", typeof labelsSection>>;
+    const { snapshot: _dropped, ...withoutSnapshot } = labelsSection;
+    // @ts-expect-error labels declares a GET, so registering it without snapshot() is flagged by name
+    type _Flagged = MustBeNever<ReadingModuleWithoutSnapshot<"labels", typeof withoutSnapshot>>;
   });
 
   test("every reading section declares exactly one primaryRead, and its 404 posture derives from it", () => {

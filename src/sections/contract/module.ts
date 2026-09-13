@@ -390,7 +390,8 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
  * Modules register in ../registry.ts.
  *
  *   snapshot() required  -> the section declares a read (a GET or a GraphQL query), so the live state it
- *                           compares against can be read back; the compiler flags a reading section without one
+ *                           compares against can be read back; SnapshotFacet flags a module annotated over its
+ *                           literal dictionaries without one, and ../registry.ts flags every registrant without one
  *   snapshot() absent    -> only a write-only section (no read at all), which snapshot reports unsupported
  *                           (snapshotUnsupportedNote)
  */
@@ -409,7 +410,7 @@ export type SectionModule<
   };
 
 /** Whether a LITERAL dictionary pair declares any read; the erased pair (the engine's view) keeps snapshot optional. */
-type DeclaresRead<E extends EndpointDict, G extends GraphqlDict> = string extends keyof E
+export type DeclaresRead<E extends EndpointDict, G extends GraphqlDict> = string extends keyof E
   ? false
   : [
         | { [R in keyof E]: E[R]["route"] extends `GET ${string}` ? true : never }[keyof E]

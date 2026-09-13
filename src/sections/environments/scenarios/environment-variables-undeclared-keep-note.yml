@@ -3,7 +3,7 @@
 # a note instead of being deleted. The declared variable still updates, apply
 # stays green, and a check rerun converges (the kept variable is a note, not
 # drift).
-name: environment-variables-undeclared-keep
+name: environment-variables-undeclared-keep-note
 settings:
   environments:
     - name: production
