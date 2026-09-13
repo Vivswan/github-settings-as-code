@@ -202,18 +202,6 @@ rulesets:
         - type: update
         - type: non_fast_forward
       bypass_actors: []
-    - name: build
-      target: branch
-      enforcement: disabled
-      conditions:
-        ref_name:
-          include:
-            - build
-          exclude: []
-      rules:
-        - type: deletion
-        - type: non_fast_forward
-      bypass_actors: []
     - name: non-bypassable
       target: branch
       enforcement: active
