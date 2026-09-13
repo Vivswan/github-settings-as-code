@@ -261,8 +261,8 @@ describe("listSection", () => {
     listSection({ ...hooks, mapping: "config", secrets: ["config.secret"] });
     listSection({
       ...hooks,
-      // @ts-expect-error the mapping names an entry field; a misspelling is refused
-      mapping: "cofnig",
+      // @ts-expect-error the mapping names an ENTRY field; a nested field (config.url) is refused
+      mapping: "url",
     });
     // One literal only: a union would admit a path under a mapping the declaration does not have, and
     // `string` would admit any path, so the runtime would route a secret through the general update.
