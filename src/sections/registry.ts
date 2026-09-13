@@ -24,6 +24,7 @@ import { collaboratorsSection } from "./collaborators/index.js";
 import type { EndpointDecl } from "./contract/endpoints.js";
 import type { GraphqlOpDecl } from "./contract/graphql.js";
 import {
+  type DeclaresRead,
   deepFreeze,
   type EndpointDict,
   freezeDeclarations,
@@ -139,6 +140,28 @@ type MisdeclaredSnapshotModules = {
 
 /** Compile-time lockstep: a snapshot() over another section's dictionaries fails here by name. */
 type _SnapshotModulesAreExact = MustBeNever<MisdeclaredSnapshotModules>;
+
+/**
+ * `K` when module `M` declares a read (a GET or a GraphQL read) but no snapshot(). SnapshotFacet
+ * (contract/module.ts) measures this only on a module annotated over its literal dictionaries, and the
+ * factories' modules arrive under their own interfaces, so the door measures every registrant.
+ */
+export type ReadingModuleWithoutSnapshot<K extends SectionKey, M> =
+  SnapshotTypedOver<M> extends "absent"
+    ? DeclaresRead<
+        ExpectedPlanDeclarations<K, M>["endpoints"],
+        ExpectedPlanDeclarations<K, M>["graphql"]
+      > extends true
+      ? K
+      : never
+    : never;
+
+type ReadingModulesWithoutSnapshot = {
+  [K in SectionKey]: ReadingModuleWithoutSnapshot<K, SectionModules[K]>;
+}[SectionKey];
+
+/** A reading section registered without snapshot() fails here by name; only a write-only section may lack one. */
+type _ReadingModulesSnapshot = MustBeNever<ReadingModulesWithoutSnapshot>;
 
 /**
  * A module flagged `ownerSensitivity: "org"` without the owner probe under its `org` role fails here by
