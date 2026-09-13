@@ -526,6 +526,55 @@ describe("action pins across the repo-owned files", () => {
   });
 });
 
+/** A composite step as the pin reads it: every field the runner acts on, so a masked failure or a new gate shows. */
+interface StepShape {
+  uses: string | undefined;
+  with: Record<string, unknown> | undefined;
+  if: string | undefined;
+  shell: string | undefined;
+  run: string | undefined;
+  "continue-on-error": boolean | undefined;
+}
+
+function shapeOf(steps: Step[]): StepShape[] {
+  return steps.map((step) => ({
+    uses: step.uses,
+    with: step.with,
+    if: step.if,
+    shell: step.shell,
+    run: step.run,
+    "continue-on-error": step["continue-on-error"],
+  }));
+}
+
+/** The composite's three steps: none may mask its failure, since a job relies on each one it asks for. */
+const SETUP_SHAPE: StepShape[] = [
+  {
+    uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/) as unknown as string,
+    with: { "bun-version-file": ".bun-version" },
+    if: undefined,
+    shell: undefined,
+    run: undefined,
+    "continue-on-error": undefined,
+  },
+  {
+    uses: undefined,
+    with: undefined,
+    if: "inputs.install != 'false'",
+    shell: "bash",
+    run: "bun install --frozen-lockfile --ignore-scripts",
+    "continue-on-error": undefined,
+  },
+  {
+    uses: undefined,
+    with: undefined,
+    if: "inputs.yamllint == 'true'",
+    shell: "bash",
+    run: `pipx install yamllint==${YAMLLINT_VERSION}`,
+    "continue-on-error": undefined,
+  },
+];
+
 describe("the setup composite", () => {
   const action = readAction(SETUP_DIR);
 
@@ -535,37 +584,25 @@ describe("the setup composite", () => {
       install: { description: expect.any(String), default: "true" },
       yamllint: { description: expect.any(String), default: "false" },
     });
-    expect(
-      (action.runs.steps ?? []).map(({ uses, with: inputs, if: gate, shell, run }) => ({
-        uses,
-        with: inputs,
-        if: gate,
-        shell,
-        run,
-      })),
-    ).toEqual([
-      {
-        uses: expect.stringMatching(/^oven-sh\/setup-bun@[0-9a-f]{40}$/),
-        with: { "bun-version-file": ".bun-version" },
-        if: undefined,
-        shell: undefined,
-        run: undefined,
-      },
-      {
-        uses: undefined,
-        with: undefined,
-        if: "inputs.install != 'false'",
-        shell: "bash",
-        run: "bun install --frozen-lockfile --ignore-scripts",
-      },
-      {
-        uses: undefined,
-        with: undefined,
-        if: "inputs.yamllint == 'true'",
-        shell: "bash",
-        run: `pipx install yamllint==${YAMLLINT_VERSION}`,
-      },
-    ]);
+    expect(shapeOf(action.runs.steps ?? [])).toEqual(SETUP_SHAPE);
+  });
+
+  test.each<[string, (step: Step) => Step]>([
+    ["an install allowed to fail", (step) => ({ ...step, "continue-on-error": true })],
+    ["an install with its lockfile unfrozen", (step) => ({ ...step, run: "bun install" })],
+    [
+      "an install that runs lifecycle scripts",
+      (step) => ({ ...step, run: "bun install --frozen-lockfile" }),
+    ],
+    [
+      "an install gated on a different spelling",
+      (step) => ({ ...step, if: "inputs.install == 'true'" }),
+    ],
+  ])("%s inside the composite fails the shape pin (negative control)", (_, mutate) => {
+    const steps = (action.runs.steps ?? []).map((step) =>
+      step.run?.startsWith("bun install") ? mutate(step) : step,
+    );
+    expect(() => expect(shapeOf(steps)).toEqual(SETUP_SHAPE)).toThrow();
   });
 
   test("every run step of every composite names its shell (the runner rejects one without at job start)", () => {
