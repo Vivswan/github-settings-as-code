@@ -75,35 +75,20 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Graduate upstream gaps octokit now ships
         shell: bash
-        # Old branches cut before the graduate script landed lack it; the schema regeneration below still runs for them.
-        run: |
-          if [ -f .github/scripts/graduate-upstream-gaps.ts ]; then
-            bun .github/scripts/graduate-upstream-gaps.ts
-          else
-            echo "graduate script not on this branch; skipping"
-          fi
+        run: bun .github/scripts/graduate-upstream-gaps.ts
       - name: Regenerate the schema and docs and stage the fix patch
         id: rebuild
         shell: bash
         run: |
           bun run build:schema
-          # Old branches cut before the docs generators landed lack them.
-          if [ -f .github/scripts/gen-docs.ts ]; then
-            bun run build:docs
-          fi
-          if [ -f .github/scripts/gen-action-docs.ts ]; then
-            bun run build:action-docs
-          fi
+          bun run build:docs
+          bun run build:action-docs
           # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
           # patch holds exactly the allowed paths.
           git reset -q
           git add -A -- lib/settings.schema.json README.md COVERAGE.md action.yml \
             docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md \
-            docs/reference/sections.md docs/reference/inputs.md docs/start/getting-started.md
-          # Old branches lack the gaps directory, and an unmatched pathspec would fail the add.
-          if [ -d src/upstream-gaps ]; then
-            git add -A -- src/upstream-gaps/
-          fi
+            docs/reference/sections.md docs/reference/inputs.md docs/start/getting-started.md src/upstream-gaps/
           git diff --cached --binary > "$RUNNER_TEMP/autofix.patch"
           if [ ! -s "$RUNNER_TEMP/autofix.patch" ]; then
             echo "schema and upstream gaps already fresh"
