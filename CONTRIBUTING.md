@@ -35,6 +35,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 The end-to-end tests build the bundle to a temp path and run it as a subprocess against a mock GitHub API, so they exercise the same single-file bundle a release ships.
 
 - `bun run test:e2e` runs the curated scenario corpus.
+- Every section ships the standard scenario set under `src/sections/<key>/scenarios/`, named after the section's dashed key: `<slug>-apply-converges`, `<slug>-check-drift` (a section with a planning read), `<slug>-snapshot-roundtrip` (a section with snapshot()), and for a section under the undeclared policy `<slug>-undeclared-delete` and `<slug>-undeclared-keep-note`; `test/sections/scenario-set.test.ts` derives the set from the registry.
 - `bun run fuzz` runs seeded property fuzzing: random scenarios, each checked against an oracle that predicts the outcome class from the token mask, policy, and mode.
 - The mock serves the section endpoints plus the core routes the action calls outside the sections. A request that matches no registered route fails loudly; the mock never invents a response.
 - PR CI runs the sections a pull request changed. Two nightly workflows run the full corpus and the full fuzz, filing issues labeled `e2e-fuzz` and `fuzz-nightly` that carry a replay command.

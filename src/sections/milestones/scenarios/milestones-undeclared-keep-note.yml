@@ -1,4 +1,4 @@
-name: milestones-keep-undeclared
+name: milestones-undeclared-keep-note
 description: >-
   A live milestone the settings file does not declare is KEPT (the
   plain-array form uses the milestone default of keep), surfaced as a note;

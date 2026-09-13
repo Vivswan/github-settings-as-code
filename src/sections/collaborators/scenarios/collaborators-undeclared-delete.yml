@@ -1,0 +1,29 @@
+name: collaborators-undeclared-delete
+description: >-
+  The section's delete default: a collaborator the plain-array form does not
+  name loses access (apply DELETEs the collaboration), the declared
+  collaborator already at the declared role is untouched, apply stays green,
+  and a check rerun over the mutated state converges.
+settings:
+  collaborators:
+    - username: e2e-existing
+      permission: admin
+live_state:
+  collaborators:
+    - login: e2e-existing
+      role_name: admin
+    - login: e2e-stale
+      role_name: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    collaborators: applied
+  mutations:
+    - "DELETE /repos/{repo}/collaborators/e2e-stale"
+  never:
+    - "PUT /repos/{repo}/collaborators/"
+    - "DELETE /repos/{repo}/collaborators/e2e-existing"
+  stdout_contains:
+    - 'REMOVED undeclared collaborator "e2e-stale"'
+  fixpoint: converges

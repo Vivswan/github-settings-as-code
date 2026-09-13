@@ -5,7 +5,7 @@
 # match their declared state, so a check rerun converges. (The deleted-state
 # 'treated as absent' case lives in workflows-check-drift, because a declared
 # workflow with no file is persistent drift and cannot converge.)
-name: workflows-paginate-toggle-converges
+name: workflows-apply-converges
 settings:
   workflows:
     - path: .github/workflows/ci.yml

@@ -1,4 +1,4 @@
-name: agents-variables-undeclared-keep
+name: agents-variables-undeclared-keep-note
 description: >-
   The wrapped agents_variables form with "_undeclared: keep" softens the
   section's delete default: a live variable the settings file does not
@@ -30,6 +30,8 @@ expect:
     - "PATCH /repos/{repo}/agents/variables/AGENT_MODEL"
   never:
     - "DELETE /repos/{repo}/agents/variables"
+    - "PATCH /repos/{repo}/agents/variables/RETIRED_FLAG"
+    - "POST /repos/{repo}/agents/variables"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
     - RETIRED_FLAG

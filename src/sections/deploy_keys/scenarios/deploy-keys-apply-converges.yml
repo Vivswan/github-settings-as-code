@@ -1,4 +1,4 @@
-name: deploy-keys
+name: deploy-keys-apply-converges
 description: >-
   Deploy keys converge under apply: a declared-but-missing key is created, a
   declared key whose material rotated is replaced (deploy keys are immutable

@@ -1,4 +1,4 @@
-name: code-scanning-apply-202
+name: code-scanning-default-setup-apply-converges
 description: >-
   The settings file changes the default-setup languages. The PATCH answers
   202 with a run_id (GitHub starts an async configuration run), and the

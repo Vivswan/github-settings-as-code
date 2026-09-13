@@ -1,4 +1,4 @@
-name: labels-undeclared-keep
+name: labels-undeclared-keep-note
 description: >-
   The wrapped labels form with "_undeclared: keep" softens the section's
   delete default: a live label the settings file does not declare is KEPT
@@ -29,6 +29,8 @@ expect:
     - "PATCH /repos/{repo}/labels/bug"
   never:
     - "DELETE /repos/{repo}/labels"
+    - "PATCH /repos/{repo}/labels/wontfix"
+    - "POST /repos/{repo}/labels"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
     - wontfix

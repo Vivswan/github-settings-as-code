@@ -1,0 +1,33 @@
+name: actions-variables-undeclared-delete
+description: >-
+  The section's delete default: a live variable the plain-array form does not
+  declare is DELETED while the declared variable updates. Apply stays green,
+  and a check rerun over the mutated state converges.
+settings:
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: eu-west-1
+live_state:
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: us-east-1
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+    - name: RETIRED_FLAG
+      value: "off"
+      created_at: "2026-01-01T00:00:00Z"
+      updated_at: "2026-01-01T00:00:00Z"
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions_variables: applied
+  mutations:
+    - "PATCH /repos/{repo}/actions/variables/DEPLOY_REGION"
+    - "DELETE /repos/{repo}/actions/variables/RETIRED_FLAG"
+  never:
+    - "DELETE /repos/{repo}/actions/variables/DEPLOY_REGION"
+    - "POST /repos/{repo}/actions/variables"
+  stdout_contains:
+    - 'DELETED undeclared Actions variable "RETIRED_FLAG"'
+  fixpoint: converges

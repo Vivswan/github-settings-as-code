@@ -1,0 +1,25 @@
+# Check mode over the repository-level actions permissions: the settings file
+# declares allowed_actions "local_only" while live is "all", so the run reports
+# the field's drift, exits 1, and writes nothing.
+name: actions-check-drift
+settings:
+  actions:
+    enabled: true
+    allowed_actions: local_only
+inputs:
+  mode: check
+live_state:
+  actions_permissions:
+    enabled: true
+    allowed_actions: all
+token_permissions:
+  administration: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  summary_contains:
+    - 'actions.permissions.allowed_actions: "local_only" != "all"'
+  never:
+    - "PUT /repos/{repo}/actions/permissions"

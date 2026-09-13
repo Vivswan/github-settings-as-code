@@ -1,4 +1,4 @@
-name: custom-properties-check
+name: custom-properties-check-drift
 description: >
   Check mode surfaces every custom-property drift kind at once: a declared
   value the repo has never set, a drifted true_false value, and a declared
@@ -8,6 +8,8 @@ description: >
   policy, not drift. The run reports drift, exits 1, and writes nothing.
 settings:
   custom_properties:
+    - property_name: owner
+      value: platform
     - property_name: team
       value: null
     - property_name: pilot
@@ -34,6 +36,7 @@ expect:
   never:
     - PATCH /repos/{repo}/properties/values
   summary_contains:
+    - 'custom_properties[owner]: declared "platform" != live unset; apply will set the declared value'
     - "custom_properties[team]: declared null but the live value is"
     - "apply will unset it (reverting to the org default, if any)"
     - 'custom_properties[pilot]: declared "true" != live "false"'

@@ -1,4 +1,4 @@
-name: code-scanning-check-drift
+name: code-scanning-default-setup-check-drift
 description: >-
   Check mode over a default-setup whose query_suite diverges from the
   settings file reports drift and exits 1, writing nothing.

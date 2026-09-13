@@ -37,8 +37,9 @@ export function mockFragmentFor<
   Live extends object,
   F extends string,
   Key extends string,
+  M extends string,
 >(
-  section: ListSectionModule<K, Ends, Live, F, Key>,
+  section: ListSectionModule<K, Ends, Live, F, Key, M>,
   spec: ListMockSpec,
 ): Record<`${K}.${ListRole<Ends>}`, Handler> {
   const { identity, address, endpoints, listing } = section.decl;

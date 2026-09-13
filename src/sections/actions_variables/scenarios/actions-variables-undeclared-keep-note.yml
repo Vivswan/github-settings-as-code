@@ -1,4 +1,4 @@
-name: actions-variables-undeclared-keep
+name: actions-variables-undeclared-keep-note
 description: >-
   The wrapped actions_variables form with "_undeclared: keep" softens the
   section's delete default: a live variable the settings file does not
@@ -30,6 +30,8 @@ expect:
     - "PATCH /repos/{repo}/actions/variables/DEPLOY_REGION"
   never:
     - "DELETE /repos/{repo}/actions/variables"
+    - "PATCH /repos/{repo}/actions/variables/RETIRED_FLAG"
+    - "POST /repos/{repo}/actions/variables"
   stdout_contains:
     - "kept under \"_undeclared: keep\""
     - RETIRED_FLAG

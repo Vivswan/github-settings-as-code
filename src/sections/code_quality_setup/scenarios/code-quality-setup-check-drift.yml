@@ -1,4 +1,4 @@
-name: code-quality-check-drift
+name: code-quality-setup-check-drift
 description: >-
   Check mode over a code quality setup whose ai_findings_option diverges from
   the settings file reports drift and exits 1, writing nothing.

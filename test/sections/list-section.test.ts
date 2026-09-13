@@ -231,28 +231,61 @@ describe("listSection", () => {
 
   test("secret fields demand the unverifiable facet on the roles that carry them, and a dotted path sits under the mapping", () => {
     expect(labelsSection.secretValues).toBeUndefined();
-    // Without the facet the write would recur with empty drift, which the plan contract forbids: the path type admits none,
-    // and the runtime refuses a path no mapping carries.
-    expect(() =>
+    // Without the facet the write would recur with empty drift, which the plan contract forbids: the path type admits none.
+    listSection({
+      ...base,
+      // @ts-expect-error neither create nor updateConfig declares unverifiable: true, so no secret path is declarable
+      secrets: ["description"],
+    });
+    listSection({
+      ...base,
+      endpoints: IMMUTABLE_ENDPOINTS,
+      // @ts-expect-error a resource GitHub cannot edit has no carrier: a recreate would re-send the value on every run
+      secrets: ["description"],
+    });
+    // The path type is `${mapping}.${string}`: a dotted path outside the mapping the updateConfig role writes is refused.
+    const { mapping: _mapping, secrets: _secrets, ...hooks } = webhooksSection.decl;
+    listSection({
+      ...hooks,
+      mapping: "config",
+      // @ts-expect-error "events.secret" sits outside the "config" mapping, so no role carries it under the unverifiable facet
+      secrets: ["events.secret"],
+    });
+    listSection({
+      ...hooks,
+      mapping: "config",
+      // @ts-expect-error a top-level field is not under any mapping
+      secrets: ["config"],
+    });
+    // The control: the shipped path under the shipped mapping compiles, and the mapping must name an entry field.
+    listSection({ ...hooks, mapping: "config", secrets: ["config.secret"] });
+    listSection({
+      ...hooks,
+      // @ts-expect-error the mapping names an entry field; a misspelling is refused
+      mapping: "cofnig",
+    });
+    // One literal only: a union would admit a path under a mapping the declaration does not have, and
+    // `string` would admit any path, so the runtime would route a secret through the general update.
+    for (const mapping of ["config", "events"] as const) {
       listSection({
-        ...base,
-        // @ts-expect-error neither create nor updateConfig declares unverifiable: true, so no secret path is declarable
-        secrets: ["description"],
-      }),
-    ).toThrow(/declares the secret field "description" without a mapping/);
-    expect(() =>
-      listSection({
-        ...base,
-        endpoints: IMMUTABLE_ENDPOINTS,
-        // @ts-expect-error a resource GitHub cannot edit has no carrier: a recreate would re-send the value on every run
-        secrets: ["description"],
-      }),
-    ).toThrow(/declares the secret field "description" without a mapping/);
-    // The fact the types cannot see: a dotted path must sit under the mapping the updateConfig role writes.
-    const { mapping: _mapping, ...hooks } = webhooksSection.decl;
-    expect(() => listSection({ ...hooks, mapping: "config", secrets: ["events.secret"] })).toThrow(
-      /declares the secret field "events.secret" outside its "config" mapping/,
-    );
+        ...hooks,
+        // @ts-expect-error a union mapping is refused
+        mapping,
+        secrets: ["config.secret"],
+      });
+    }
+    listSection({
+      ...hooks,
+      // @ts-expect-error a mapping widened to string is refused
+      mapping: "config" as string,
+      secrets: ["config.secret"],
+    });
+    listSection({
+      ...hooks,
+      // @ts-expect-error a pattern type is not one literal either: "events" would satisfy it beside a config.* path
+      mapping: "config" as Lowercase<string>,
+      secrets: ["config.secret"],
+    });
     // The carrier facet is the type's: an updateConfig without `unverifiable: true` admits no secret path.
     const { updateConfig, ...others } = webhooksSection.decl.endpoints;
     // @ts-expect-error the config write would recur with empty drift, which the plan contract forbids
@@ -408,7 +441,11 @@ describe("listSection listing", () => {
       { name: "a", color: "ffffff", description: null },
       { name: "b", color: "ffffff", description: null },
     ];
-    const served = async (section: typeof labelsSection): Promise<number> => {
+    // Generic over the variant: a spread-built module infers its endpoints as `Ends & OnlyListRoles<Ends>`, which no
+    // longer compares to the shipped module's type by variance alone once the declaration carries its mapping literal.
+    const served = async <Ends extends ListEndpoints, Live extends object, Key extends string>(
+      section: ListSectionModule<"labels", Ends, Live, "name", Key>,
+    ): Promise<number> => {
       const result = await fakeFor(section, live).tryRequest("GET", "/repos/o/r/labels?per_page=1");
       return "data" in result ? (result.data as unknown[]).length : -1;
     };

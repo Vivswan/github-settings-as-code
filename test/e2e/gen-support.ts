@@ -242,8 +242,9 @@ export interface LensWitnessSpec<
   Live extends object,
   F extends string,
   Key extends string,
+  M extends string,
 > {
-  readonly section: ListSectionModule<K, Ends, Live, F, Key>;
+  readonly section: ListSectionModule<K, Ends, Live, F, Key, M>;
   /** Per write field, the value a drift-update witness stores instead; each disjoint from every generator pool. */
   readonly sentinels: Readonly<Record<string, unknown>>;
   /** The live item an extra-undeclared witness adds; absent when the section models no such kind. */
@@ -260,8 +261,9 @@ export function lensWitness<
   Live extends object,
   F extends string,
   Key extends string,
+  M extends string,
 >(
-  spec: LensWitnessSpec<K, Ends, Live, F, Key>,
+  spec: LensWitnessSpec<K, Ends, Live, F, Key, M>,
   rng: Rng,
   declared: Json[],
   kind: LiveWitnessKind,

@@ -1,0 +1,27 @@
+# Autolinks cannot be edited, so a declared autolink whose live url_template
+# differs is replaced (DELETE then POST). After apply the declared autolink
+# matches, so a check rerun converges with no further writes. The undeclared
+# branch (the section's delete default) lives in autolinks-undeclared-delete.
+name: autolinks-apply-converges
+settings:
+  autolinks:
+    - key_prefix: "TICKET-"
+      url_template: "https://example.com/TICKET?q=<num>"
+      is_alphanumeric: true
+live_state:
+  autolinks:
+    - id: 10
+      key_prefix: "TICKET-"
+      url_template: "https://old.example.com/<num>"
+      is_alphanumeric: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    autolinks: applied
+  mutations:
+    - "DELETE /repos/{repo}/autolinks/10"
+    - "POST /repos/{repo}/autolinks"
+  fixpoint: converges

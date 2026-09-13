@@ -1,0 +1,22 @@
+# The repository-level actions permissions. Live allowed_actions is "all" while
+# the settings file declares "local_only", so apply PUTs the permissions body.
+# The convergence rerun reads it back (GET permissions) and finds it matching.
+name: actions-apply-converges
+settings:
+  actions:
+    enabled: true
+    allowed_actions: local_only
+live_state:
+  actions_permissions:
+    enabled: true
+    allowed_actions: all
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/permissions"
+  fixpoint: converges
