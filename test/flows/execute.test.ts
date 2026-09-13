@@ -18,7 +18,7 @@ import {
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
-import { tempDirTest } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 
@@ -41,8 +41,6 @@ const single = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
   ...overrides,
 });
 
-const tempTest = tempDirTest("gsac-execute-");
-
 /** Deps over a collecting Io and one stub client; `createClient` records whether the run asked for it. */
 function deps(api: MockApi, overrides: Partial<RunDeps> = {}) {
   const collected = collectingIo();
@@ -59,36 +57,36 @@ function deps(api: MockApi, overrides: Partial<RunDeps> = {}) {
 }
 
 describe("executeRun", () => {
-  tempTest("a merge opens no client and ends at the merge conclusion", async (dir) => {
-    const mergedFile = join(dir, "merged.yml");
-    const api = new MockApi({});
-    const d = deps(api);
-    const code = await executeRun(
-      {
-        kind: "merge",
-        settingsFiles: [join(LAYERS, "fleet.yml"), join(LAYERS, "team.yml")],
-        mergedFile,
-        layering: "merge",
-      },
-      d.run,
-    );
-    expect(code).toBe(0);
-    expect(d.opened()).toBe(0);
-    expect(api.calls).toEqual([]);
-    expect(d.collected.outputs).toEqual({
-      result: "merged",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(d.collected.lines.slice(-2)).toEqual([
-      { line: `merged 2 layer(s) into ${mergedFile}` },
-      { line: "result: merged" },
-    ]);
-  });
+  test("a merge opens no client and ends at the merge conclusion", () =>
+    withTempDir("gsac-execute-", async (dir) => {
+      const mergedFile = join(dir, "merged.yml");
+      const api = new MockApi({});
+      const d = deps(api);
+      const code = await executeRun(
+        {
+          kind: "merge",
+          settingsFiles: [join(LAYERS, "fleet.yml"), join(LAYERS, "team.yml")],
+          mergedFile,
+          layering: "merge",
+        },
+        d.run,
+      );
+      expect(code).toBe(0);
+      expect(d.opened()).toBe(0);
+      expect(api.calls).toEqual([]);
+      expect(d.collected.outputs).toEqual({
+        result: "merged",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(d.collected.lines.slice(-2)).toEqual([
+        { line: `merged 2 layer(s) into ${mergedFile}` },
+        { line: "result: merged" },
+      ]);
+    }));
 
-  tempTest(
-    "a fatal problem raised after the parse is worded by the face's describe",
-    async (dir) => {
+  test("a fatal problem raised after the parse is worded by the face's describe", () =>
+    withTempDir("gsac-execute-", async (dir) => {
       const settingsFile = join(dir, "missing.yml");
       const api = new MockApi({});
       const d = deps(api, { describe: (problem) => `worded: ${problem.code}` });
@@ -104,8 +102,7 @@ describe("executeRun", () => {
         { level: "error", line: "worded: settings-file-unreadable" },
         { line: "result: failed" },
       ]);
-    },
-  );
+    }));
 
   test("the artifact channel is the uploader dep's: absent it fails before any API call, present the run reaches the API", async () => {
     const reportPublicKey = await identityToRecipient(await generateX25519Identity());

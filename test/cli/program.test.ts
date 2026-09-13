@@ -14,14 +14,12 @@ import { CLI_COMMANDS, main } from "../../src/cli/program.js";
 import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
-import { tempDirTest, withTempDir } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 import { memoryStream, runCli } from "./streams.js";
 
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 const TOKEN = "ghp_cli_test_token";
-
-const tempTest = tempDirTest("gsac-cli-");
 
 const cli = runCli;
 
@@ -230,60 +228,62 @@ describe("check and apply", () => {
       }),
   );
 
-  tempTest("--summary appends the run's markdown to the named file", async (dir) => {
-    const summary = join(dir, "summary.md");
-    const result = await cli(
-      ["check", ...target, "--summary", summary],
-      new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
-    );
-    expect(result.code).toBe(0);
-    expect(readFileSync(summary, "utf8")).toContain("clean");
-  });
+  test("--summary appends the run's markdown to the named file", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const summary = join(dir, "summary.md");
+      const result = await cli(
+        ["check", ...target, "--summary", summary],
+        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
+      );
+      expect(result.code).toBe(0);
+      expect(readFileSync(summary, "utf8")).toContain("clean");
+    }));
 });
 
 describe("merge", () => {
-  tempTest("folds the layers into the merged file, exits 0, and reports merged", async (dir) => {
-    const out = join(dir, "merged.yml");
-    const result = await cli([
-      "merge",
-      "--settings-file",
-      join(LAYERS, "fleet.yml"),
-      "--settings-file",
-      join(LAYERS, "team.yml"),
-      "--merged-file",
-      out,
-    ]);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toEndWith(
-      "result: merged\nresult=merged\nskipped-sections=\nrepos-result={}\n",
-    );
-    // The whole document only the fold produces: team.yml's label and rule join
-    // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
-    // fleet.yml's key, and pages passes through untouched.
-    expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
-      repository: { has_wiki: false },
-      labels: {
-        _undeclared: "delete",
-        entries: [
-          { name: "bug", color: "d73a4a" },
-          { name: "docs", color: "0075ca" },
-          { name: "team", color: "00ff00" },
-        ],
-      },
-      rulesets: {
-        _undeclared: "keep",
-        entries: [
-          {
-            name: "main",
-            target: "branch",
-            enforcement: "active",
-            rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
-          },
-        ],
-      },
-      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
-    });
-  });
+  test("folds the layers into the merged file, exits 0, and reports merged", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const out = join(dir, "merged.yml");
+      const result = await cli([
+        "merge",
+        "--settings-file",
+        join(LAYERS, "fleet.yml"),
+        "--settings-file",
+        join(LAYERS, "team.yml"),
+        "--merged-file",
+        out,
+      ]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toEndWith(
+        "result: merged\nresult=merged\nskipped-sections=\nrepos-result={}\n",
+      );
+      // The whole document only the fold produces: team.yml's label and rule join
+      // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
+      // fleet.yml's key, and pages passes through untouched.
+      expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
+        repository: { has_wiki: false },
+        labels: {
+          _undeclared: "delete",
+          entries: [
+            { name: "bug", color: "d73a4a" },
+            { name: "docs", color: "0075ca" },
+            { name: "team", color: "00ff00" },
+          ],
+        },
+        rulesets: {
+          _undeclared: "keep",
+          entries: [
+            {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+            },
+          ],
+        },
+        pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+      });
+    }));
 
   test("a merge without merged-file fails with the action's line", async () => {
     const result = await cli(["merge", "--settings-file", join(LAYERS, "fleet.yml")]);
@@ -298,9 +298,8 @@ describe("merge", () => {
 describe("snapshot", () => {
   const LABEL = { name: "bug", color: "d73a4a", description: "Something is broken" };
 
-  tempTest(
-    "writes the live settings to the snapshot file, exits 0, and reports snapshot",
-    async (dir) => {
+  test("writes the live settings to the snapshot file, exits 0, and reports snapshot", () =>
+    withTempDir("gsac-cli-", async (dir) => {
       const out = join(dir, "out", "snapshot.yml");
       const api = new MockApi({
         "GET /repos/o/r": { data: { private: false } },
@@ -329,8 +328,7 @@ describe("snapshot", () => {
       expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
         labels: { _undeclared: "delete", entries: [LABEL] },
       });
-    },
-  );
+    }));
 
   test("a snapshot without a destination fails before any API call, the action's line on stderr", async () => {
     const api = new MockApi({});
@@ -363,30 +361,31 @@ describe("validate and permissions", () => {
     });
   });
 
-  tempTest("validate: an invalid file exits 1 with the validator's line", async (dir) => {
-    const file = join(dir, "bad.yml");
-    writeFileSync(file, "labels:\n  - color: d73a4a\n");
-    const result = await cli(["validate", file]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toStartWith(`error: ${file} has malformed section entries:`);
-    // The same message, once on stderr and once as the object's problem.
-    const problem = result.stderr.slice("error: ".length, -1);
-    const json = await cli(["validate", file, "--json"]);
-    expect(json.code).toBe(1);
-    expect(json.stderr).toBe(result.stderr);
-    expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
-  });
+  test("validate: an invalid file exits 1 with the validator's line", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const file = join(dir, "bad.yml");
+      writeFileSync(file, "labels:\n  - color: d73a4a\n");
+      const result = await cli(["validate", file]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toStartWith(`error: ${file} has malformed section entries:`);
+      // The same message, once on stderr and once as the object's problem.
+      const problem = result.stderr.slice("error: ".length, -1);
+      const json = await cli(["validate", file, "--json"]);
+      expect(json.code).toBe(1);
+      expect(json.stderr).toBe(result.stderr);
+      expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
+    }));
 
-  tempTest("validate: an unreadable file exits 1 naming the path", async (dir) => {
-    const result = await cli(["validate", join(dir, "missing.yml")]);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toStartWith("error: cannot read settings from ");
-  });
+  test("validate: an unreadable file exits 1 naming the path", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const result = await cli(["validate", join(dir, "missing.yml")]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toStartWith("error: cannot read settings from ");
+    }));
 
-  tempTest(
-    "permissions prints one grant per declared section, from the section declarations",
-    async (dir) => {
+  test("permissions prints one grant per declared section, from the section declarations", () =>
+    withTempDir("gsac-cli-", async (dir) => {
       const file = join(dir, "settings.yml");
       writeFileSync(
         file,
@@ -409,8 +408,7 @@ describe("validate and permissions", () => {
           labels: sectionGrant(sectionModule("labels")),
         },
       });
-    },
-  );
+    }));
 });
 
 describe("the --json failure envelope", () => {

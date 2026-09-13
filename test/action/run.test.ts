@@ -10,7 +10,7 @@ import { REPORT_HEADING } from "../../src/report/composer.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
-import { tempDirTest, withTempDir } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 
 // A capturing Io replaces the @actions/core sink, so a green suite prints no raw workflow commands and the failure-path tests assert the exact
 // captured text.
@@ -545,8 +545,6 @@ describe("run in mode: merge", () => {
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
   const FIXTURES = join(ROOT, "test", "fixtures", "layers");
   const layer = (name: string) => join(FIXTURES, name);
-  const tempTest = tempDirTest("merge-mode-");
-
   afterEach(() => {
     for (const [key, value] of saved) {
       if (value === undefined) {
@@ -607,9 +605,8 @@ describe("run in mode: merge", () => {
     },
   };
 
-  tempTest(
-    "three layers fold into the merged file with no token and no API call; nulls opt out with notices",
-    async (dir) => {
+  test("three layers fold into the merged file with no token and no API call; nulls opt out with notices", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const layers = [layer("fleet.yml"), layer("team.yml"), layer("repo.yml")];
       const mergedFile = setMergeEnv(dir, layers);
       const api = new MockApi({});
@@ -636,12 +633,10 @@ describe("run in mode: merge", () => {
           `Merged document written to ${mergedFile}.`,
         ].join("\n"),
       ]);
-    },
-  );
+    }));
 
-  tempTest(
-    "a layer that is invalid on its own fails the run naming the layer, before any merge or write",
-    async (dir) => {
+  test("a layer that is invalid on its own fails the run naming the layer, before any merge or write", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const broken = tempLayer(dir, "broken.yml", { labels: [{ color: "ffffff" }] });
       const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), broken]);
       const api = new MockApi({});
@@ -654,21 +649,20 @@ describe("run in mode: merge", () => {
       expect(errors[0]).toStartWith(
         `error: ${broken} has malformed section entries: labels[0].name:`,
       );
-    },
-  );
+    }));
 
-  tempTest("an unreadable layer fails the run naming the path and the input", async (dir) => {
-    const missing = join(dir, "nope.yml");
-    setMergeEnv(dir, [layer("fleet.yml"), missing]);
-    expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
-    expect(captured.filter((line) => line.startsWith("error: "))).toEqual([
-      `error: cannot read the settings layer ${missing}: Error: ENOENT: no such file or directory, open '${missing}'. Check that every path in the "settings-file" input exists and is valid YAML`,
-    ]);
-  });
+  test("an unreadable layer fails the run naming the path and the input", () =>
+    withTempDir("merge-mode-", async (dir) => {
+      const missing = join(dir, "nope.yml");
+      setMergeEnv(dir, [layer("fleet.yml"), missing]);
+      expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
+      expect(captured.filter((line) => line.startsWith("error: "))).toEqual([
+        `error: cannot read the settings layer ${missing}: Error: ENOENT: no such file or directory, open '${missing}'. Check that every path in the "settings-file" input exists and is valid YAML`,
+      ]);
+    }));
 
-  tempTest(
-    "layering: replace lets the higher layer's keyed lists win while mappings still merge",
-    async (dir) => {
+  test("layering: replace lets the higher layer's keyed lists win while mappings still merge", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
         layering: "replace",
       });
@@ -678,12 +672,10 @@ describe("run in mode: merge", () => {
         labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
         rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
       });
-    },
-  );
+    }));
 
-  tempTest(
-    "a wrapper _layering: replace under a merge run replaces that section alone, and never reaches the file",
-    async (dir) => {
+  test("a wrapper _layering: replace under a merge run replaces that section alone, and never reaches the file", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const top = tempLayer(dir, "top.yml", {
         labels: { _layering: "replace", entries: [{ name: "only", color: "000000" }] },
         rulesets: [{ name: "tags", target: "tag" }],
@@ -699,12 +691,10 @@ describe("run in mode: merge", () => {
         },
         pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
       });
-    },
-  );
+    }));
 
-  tempTest(
-    "a top-level _layering: replace governs every keyed section of its layer and is consumed",
-    async (dir) => {
+  test("a top-level _layering: replace governs every keyed section of its layer and is consumed", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const top = tempLayer(dir, "top.yml", {
         _layering: "replace",
         labels: [{ name: "only", color: "000000" }],
@@ -721,12 +711,10 @@ describe("run in mode: merge", () => {
         },
         pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
       });
-    },
-  );
+    }));
 
-  tempTest(
-    "a null inside a keyed entry is a merge marker too, announced against its layer",
-    async (dir) => {
+  test("a null inside a keyed entry is a merge marker too, announced against its layer", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
       const fleet = tempLayer(dir, "fleet.yml", {
         rulesets: [{ ...FLEET_RULESET, bypass_actors: bypass }],
@@ -742,8 +730,7 @@ describe("run in mode: merge", () => {
         `merged 2 layer(s) into ${mergedFile}`,
         "result: merged",
       ]);
-    },
-  );
+    }));
 
   test.each([
     ["a mapping", { setting: true }],
@@ -767,9 +754,8 @@ describe("run in mode: merge", () => {
       }),
   );
 
-  tempTest(
-    "a sections allowlist is rejected before any layer is read, so the written document is never narrower than the fold",
-    async (dir) => {
+  test("a sections allowlist is rejected before any layer is read, so the written document is never narrower than the fold", () =>
+    withTempDir("merge-mode-", async (dir) => {
       // An allowlist naming one of the three folded sections is refused up front rather than narrowing the file; the nonexistent layer path proves the
       // refusal precedes the read.
       const mergedFile = setMergeEnv(dir, [
@@ -787,12 +773,10 @@ describe("run in mode: merge", () => {
           "them to the apply or check step that runs the merged document",
         "result: failed",
       ]);
-    },
-  );
+    }));
 
-  tempTest(
-    "a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer",
-    async (dir) => {
+  test("a cyclic layer (a YAML anchor that includes itself) is refused by the fold, naming the layer", () =>
+    withTempDir("merge-mode-", async (dir) => {
       // A self-referencing anchor under a private key parses to a cyclic object; standalone validation ignores the key, so the engine's boundary is
       // what refuses the layer.
       const top = join(dir, "top.yml");
@@ -804,12 +788,10 @@ describe("run in mode: merge", () => {
         `error: layer "${top}": the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees`,
         "result: failed",
       ]);
-    },
-  );
+    }));
 
-  tempTest(
-    "merge then apply: the written file applies exactly like the expected merged document",
-    async (dir) => {
+  test("merge then apply: the written file applies exactly like the expected merged document", () =>
+    withTempDir("merge-mode-", async (dir) => {
       const mergedFile = setMergeEnv(dir, [
         layer("fleet.yml"),
         layer("team.yml"),
@@ -844,8 +826,7 @@ describe("run in mode: merge", () => {
         "POST /repos/o/r/labels",
         "POST /repos/o/r/labels",
       ]);
-    },
-  );
+    }));
 });
 
 describe("run in mode: snapshot", () => {
@@ -859,8 +840,6 @@ describe("run in mode: snapshot", () => {
     "GITHUB_REPOSITORY",
   ];
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
-  const tempTest = tempDirTest("snapshot-mode-");
-
   afterEach(() => {
     for (const [key, value] of saved) {
       if (value === undefined) {
@@ -892,9 +871,8 @@ describe("run in mode: snapshot", () => {
   const labelsApi = () =>
     new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: LABELS } });
 
-  tempTest(
-    "writes the live settings to snapshot-file and publishes the snapshot result",
-    async (dir) => {
+  test("writes the live settings to snapshot-file and publishes the snapshot result", () =>
+    withTempDir("snapshot-mode-", async (dir) => {
       const snapshotFile = setSnapshotEnv(dir);
       const api = labelsApi();
       expect(await run({ api, io: testIo })).toBe(0);
@@ -904,12 +882,10 @@ describe("run in mode: snapshot", () => {
       });
       expect(outputs).toEqual({ result: "snapshot", "skipped-sections": "", "repos-result": "{}" });
       expect(captured).toEqual([`snapshot written to ${snapshotFile}`, "result: snapshot"]);
-    },
-  );
+    }));
 
-  tempTest(
-    "an apply-time input is rejected before any API call, and no file is written",
-    async (dir) => {
+  test("an apply-time input is rejected before any API call, and no file is written", () =>
+    withTempDir("snapshot-mode-", async (dir) => {
       const snapshotFile = setSnapshotEnv(dir);
       process.env["INPUT_SETTINGS-FILE"] = "other.yml";
       const api = labelsApi();
@@ -923,12 +899,10 @@ describe("run in mode: snapshot", () => {
           "the apply, check, or merge step they belong to",
         "result: failed",
       ]);
-    },
-  );
+    }));
 
-  tempTest(
-    "snapshot then check: the written file checks clean against the live state it was read from",
-    async (dir) => {
+  test("snapshot then check: the written file checks clean against the live state it was read from", () =>
+    withTempDir("snapshot-mode-", async (dir) => {
       const snapshotFile = setSnapshotEnv(dir);
       expect(await run({ api: labelsApi(), io: testIo })).toBe(0);
       for (const key of ENV_KEYS) {
@@ -944,6 +918,5 @@ describe("run in mode: snapshot", () => {
       expect(await run({ api, io: testIo })).toBe(0);
       expect(api.mutations()).toEqual([]);
       expect(outputs.result).toBe("clean");
-    },
-  );
+    }));
 });

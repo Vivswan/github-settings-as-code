@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
 import { writeSummary } from "../../src/flows/summary.js";
 import { ROOT } from "../root.js";
-import { tempDirTest } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 
 /** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
 function namesActionsCore(source: string): boolean {
@@ -63,11 +63,8 @@ describe("actionsIo", () => {
       }
     }
   });
-  const tempTest = tempDirTest("sac-io-");
-
-  tempTest(
-    "summary appends each block with one trailing newline, and skips when the runner file is unset",
-    (dir) => {
+  test("summary appends each block with one trailing newline, and skips when the runner file is unset", () =>
+    withTempDir("sac-io-", (dir) => {
       const file = join(dir, "summary.md");
       delete process.env.GITHUB_STEP_SUMMARY;
       actionsIo.summary("dropped");
@@ -90,24 +87,24 @@ describe("actionsIo", () => {
           "",
         ].join("\n"),
       );
-    },
-  );
+    }));
 
-  tempTest("output writes the runner's output file only when it is set", (dir) => {
-    // The runner creates the file; @actions/core refuses to append to a missing one.
-    const file = join(dir, "output.txt");
-    writeFileSync(file, "");
-    delete process.env.GITHUB_OUTPUT;
-    actionsIo.output("result", "dropped");
-    // @ts-expect-error a misspelled output name fails to compile at the port
-    actionsIo.output("reslut", "dropped");
-    process.env.GITHUB_OUTPUT = file;
-    actionsIo.output("result", "clean");
-    // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
-    const written = readFileSync(file, "utf8");
-    expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
-    expect(written).not.toContain("dropped");
-  });
+  test("output writes the runner's output file only when it is set", () =>
+    withTempDir("sac-io-", (dir) => {
+      // The runner creates the file; @actions/core refuses to append to a missing one.
+      const file = join(dir, "output.txt");
+      writeFileSync(file, "");
+      delete process.env.GITHUB_OUTPUT;
+      actionsIo.output("result", "dropped");
+      // @ts-expect-error a misspelled output name fails to compile at the port
+      actionsIo.output("reslut", "dropped");
+      process.env.GITHUB_OUTPUT = file;
+      actionsIo.output("result", "clean");
+      // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
+      const written = readFileSync(file, "utf8");
+      expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
+      expect(written).not.toContain("dropped");
+    }));
 
   test("mask registers the value in the readable registry", () => {
     actionsIo.mask("o/private");

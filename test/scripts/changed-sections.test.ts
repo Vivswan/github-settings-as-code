@@ -13,7 +13,7 @@ import {
 } from "../../.github/scripts/changed-sections.js";
 import { SECTION_KEYS, type SectionKey, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { ROOT } from "../root.js";
-import { tempDirTest } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 
 const SRC_DIR = join(ROOT, "src");
 const SECTIONS_DIR = join(SRC_DIR, "sections");
@@ -45,8 +45,6 @@ function inKeyOrder(...keys: SectionKey[]): SectionKey[] {
   const wanted = new Set<SectionKey>(keys);
   return SECTION_KEYS.filter((key) => wanted.has(key));
 }
-
-const tempTest = tempDirTest("changed-sections-");
 
 /** `root` filled as a repo holding `files` (repo-relative path -> text). */
 function syntheticRepo(root: string, files: Record<string, string>): string {
@@ -201,9 +199,8 @@ describe("changed-sections derived fan-out", () => {
     ).toEqual(["./cli/program.js"]);
   });
 
-  tempTest(
-    "resolveImport maps .js to .ts, a directory to its index, and .json to itself, and throws on a dangling one",
-    (dir) => {
+  test("resolveImport maps .js to .ts, a directory to its index, and .json to itself, and throws on a dangling one", () =>
+    withTempDir("changed-sections-", (dir) => {
       const root = syntheticRepo(dir, {
         "src/sections/shared/engine.ts": "",
         "src/sections/shared/util/index.ts": "",
@@ -229,12 +226,10 @@ describe("changed-sections derived fan-out", () => {
       expect(() => resolveImport(importer, "../../../lib/missing.json")).toThrow(
         /imports "\.\.\/\.\.\/\.\.\/lib\/missing\.json", which resolves to no file/,
       );
-    },
-  );
+    }));
 
-  tempTest(
-    "the fan-out follows the graph through intermediates and ignores non-section importers",
-    (dir) => {
+  test("the fan-out follows the graph through intermediates and ignores non-section importers", () =>
+    withTempDir("changed-sections-", (dir) => {
       const fanOut = deriveSharedFanOut(syntheticRepo(dir, GRAPH_FIXTURE));
       expect(fanOut).toEqual({
         // src/schema.ts imports engine directly and registry.ts reaches it through teams; neither adds a key, and pages' type-only import is no edge.
@@ -243,48 +238,49 @@ describe("changed-sections derived fan-out", () => {
         // labels' unit test imports util too and is not an edge.
         "util/index.ts": inKeyOrder("pages", "milestones"),
       });
-    },
-  );
+    }));
 
-  tempTest("a new import edge widens exactly the shared file it reaches", (dir) => {
-    const fanOut = deriveSharedFanOut(
-      syntheticRepo(dir, {
-        ...GRAPH_FIXTURE,
-        "src/sections/webhooks/index.ts":
-          'import { engine } from "../shared/engine.js";\nexport default engine;\n',
-      }),
-    );
-    expect(fanOut).toEqual({
-      "engine.ts": inKeyOrder("labels", "teams", "webhooks"),
-      "factory.ts": inKeyOrder("labels"),
-      "util/index.ts": inKeyOrder("pages", "milestones"),
-    });
-  });
+  test("a new import edge widens exactly the shared file it reaches", () =>
+    withTempDir("changed-sections-", (dir) => {
+      const fanOut = deriveSharedFanOut(
+        syntheticRepo(dir, {
+          ...GRAPH_FIXTURE,
+          "src/sections/webhooks/index.ts":
+            'import { engine } from "../shared/engine.js";\nexport default engine;\n',
+        }),
+      );
+      expect(fanOut).toEqual({
+        "engine.ts": inKeyOrder("labels", "teams", "webhooks"),
+        "factory.ts": inKeyOrder("labels"),
+        "util/index.ts": inKeyOrder("pages", "milestones"),
+      });
+    }));
 
-  tempTest("a shared file no section imports throws", (dir) => {
-    const root = syntheticRepo(dir, {
-      "src/sections/shared/live.ts": "export const live = 1;\n",
-      "src/sections/shared/dead.ts": "export const dead = 1;\n",
-      "src/sections/labels/index.ts":
-        'import { live } from "../shared/live.js";\nexport default live;\n',
-    });
-    expect(() => deriveSharedFanOut(root)).toThrow(
-      /no section imports src\/sections\/shared\/dead\.ts/,
-    );
-  });
+  test("a shared file no section imports throws", () =>
+    withTempDir("changed-sections-", (dir) => {
+      const root = syntheticRepo(dir, {
+        "src/sections/shared/live.ts": "export const live = 1;\n",
+        "src/sections/shared/dead.ts": "export const dead = 1;\n",
+        "src/sections/labels/index.ts":
+          'import { live } from "../shared/live.js";\nexport default live;\n',
+      });
+      expect(() => deriveSharedFanOut(root)).toThrow(
+        /no section imports src\/sections\/shared\/dead\.ts/,
+      );
+    }));
 
-  tempTest("a dangling relative import anywhere under src throws", (dir) => {
-    const root = syntheticRepo(dir, {
-      "src/sections/shared/engine.ts": "export const engine = 1;\n",
-      "src/sections/labels/index.ts":
-        'import { gone } from "../shared/gone.js";\nexport default gone;\n',
-    });
-    expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
-  });
+  test("a dangling relative import anywhere under src throws", () =>
+    withTempDir("changed-sections-", (dir) => {
+      const root = syntheticRepo(dir, {
+        "src/sections/shared/engine.ts": "export const engine = 1;\n",
+        "src/sections/labels/index.ts":
+          'import { gone } from "../shared/gone.js";\nexport default gone;\n',
+      });
+      expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
+    }));
 
-  tempTest(
-    "a computed import anywhere under src fails the whole derivation, naming the file",
-    (dir) => {
+  test("a computed import anywhere under src fails the whole derivation, naming the file", () =>
+    withTempDir("changed-sections-", (dir) => {
       // The template edge in GRAPH_FIXTURE (pages/mock.ts) proves a substitution-free template passes.
       for (const load of ["await import(which)", "require(which)", `await import(\`\${which}\`)`]) {
         const root = syntheticRepo(dir, {
@@ -295,8 +291,7 @@ describe("changed-sections derived fan-out", () => {
           /src\/sections\/webhooks\/index\.ts:2 loads a module through a computed specifier/,
         );
       }
-    },
-  );
+    }));
 });
 
 describe("changed-sections file map", () => {
@@ -383,9 +378,8 @@ describe("changed-sections selection", () => {
     );
   });
 
-  tempTest(
-    "a deleted shared file whose importers now resolve to its sibling spelling selects that sibling's sections",
-    (dir) => {
+  test("a deleted shared file whose importers now resolve to its sibling spelling selects that sibling's sections", () =>
+    withTempDir("changed-sections-", (dir) => {
       // foo.ts and foo/index.ts are interchangeable to an importer of "./foo.js", so deleting one leaves the importers unchanged and typecheck green.
       const fanOut = deriveSharedFanOut(
         syntheticRepo(dir, {
@@ -406,8 +400,7 @@ describe("changed-sections selection", () => {
       expect(() => select(removed("src/sections/shared/notes.md"))).toThrow(
         /matches no selector rule/,
       );
-    },
-  );
+    }));
 
   test("parseNameStatus reads NUL-delimited records raw and throws on any other shape", () => {
     // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the src/sections/ prefix would go unmatched.

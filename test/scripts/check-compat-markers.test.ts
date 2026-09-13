@@ -4,11 +4,9 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { checkCompatMarkers } from "../../.github/scripts/check-compat-markers.js";
 import { ROOT } from "../root.js";
-import { tempDirTest, withTempDir } from "../temp-dir.js";
+import { withTempDir } from "../temp-dir.js";
 
 const SCRIPT = join(ROOT, ".github", "scripts", "check-compat-markers.ts");
-
-const tempTest = tempDirTest("compat-markers-");
 
 /** `root` filled as a git repository holding `files`, its package.json at `version`. Its own .gitignore is the only
  * excludes source: the machine's global excludes file would otherwise hide fixture files. */
@@ -34,9 +32,8 @@ function due(where: string, major: number, dueLine: string): string {
 }
 
 describe("checkCompatMarkers", () => {
-  tempTest(
-    "lists well-formed markers by removal major across file types and passes under the due line",
-    (dir) => {
+  test("lists well-formed markers by removal major across file types and passes under the due line", () =>
+    withTempDir("compat-markers-", (dir) => {
       const cwd = repo(dir, "2.0.0", {
         "src/inputs.ts":
           'const dir = input("repos_dir"); // COMPAT(v3): accept the pre-2.1 "repos_dir" input name; delete this branch and the alias\n',
@@ -72,12 +69,10 @@ describe("checkCompatMarkers", () => {
         ].join("\n"),
         stderr: "",
       });
-    },
-  );
+    }));
 
-  tempTest(
-    "names every malformed occurrence by file and line, and still lists the well-formed ones",
-    (dir) => {
+  test("names every malformed occurrence by file and line, and still lists the well-formed ones", () =>
+    withTempDir("compat-markers-", (dir) => {
       const cwd = repo(dir, "2.0.0", {
         "src/m.ts": [
           "// COMPAT(v3) accept the old key",
@@ -126,8 +121,7 @@ describe("checkCompatMarkers", () => {
           "",
         ].join("\n"),
       });
-    },
-  );
+    }));
 
   // The due line is package.json's major, or the major a release PR cuts; a marker at or below it fails.
   test.each<[string, string, number, number | undefined, string | undefined]>([
@@ -168,9 +162,8 @@ describe("checkCompatMarkers", () => {
     }),
   );
 
-  tempTest(
-    "skips built output, dependencies, the fetched spec, the changelog, ignored files, symlinks, deleted tracked files, and its own two files",
-    (dir) => {
+  test("skips built output, dependencies, the fetched spec, the changelog, ignored files, symlinks, deleted tracked files, and its own two files", () =>
+    withTempDir("compat-markers-", (dir) => {
       const marker = "// COMPAT(v3): kept; delete it\n";
       const cwd = repo(dir, "2.0.0", {
         ".gitignore": "scratch/\n",
@@ -203,17 +196,17 @@ describe("checkCompatMarkers", () => {
         ].join("\n"),
         stderr: "",
       });
-    },
-  );
+    }));
 
-  tempTest("a tree without markers says so", (dir) => {
-    const cwd = repo(dir, "2.0.0", { "src/x.ts": "export {};\n" });
-    expect(checkCompatMarkers({ cwd })).toEqual({
-      code: 0,
-      stdout: "no COMPAT markers (package.json 2.0.0)\n",
-      stderr: "",
-    });
-  });
+  test("a tree without markers says so", () =>
+    withTempDir("compat-markers-", (dir) => {
+      const cwd = repo(dir, "2.0.0", { "src/x.ts": "export {};\n" });
+      expect(checkCompatMarkers({ cwd })).toEqual({
+        code: 0,
+        stdout: "no COMPAT markers (package.json 2.0.0)\n",
+        stderr: "",
+      });
+    }));
 
   test.each<[string, string, number | undefined, string]>([
     [
@@ -235,17 +228,15 @@ describe("checkCompatMarkers", () => {
     }),
   );
 
-  tempTest(
-    "a listed path that cannot be inspected for any reason but absence stops the scan",
-    (dir) => {
+  test("a listed path that cannot be inspected for any reason but absence stops the scan", () =>
+    withTempDir("compat-markers-", (dir) => {
       const cwd = repo(dir, "2.0.0", { "dir/file.ts": "export {};\n" });
       execFileSync("git", ["add", "dir/file.ts"], { cwd });
       // The tracked path's parent is now a regular file: lstat fails with ENOTDIR, not ENOENT.
       rmSync(join(cwd, "dir"), { recursive: true });
       writeFileSync(join(cwd, "dir"), "");
       expect(() => checkCompatMarkers({ cwd })).toThrow(/ENOTDIR/);
-    },
-  );
+    }));
 });
 
 describe("the CLI", () => {
