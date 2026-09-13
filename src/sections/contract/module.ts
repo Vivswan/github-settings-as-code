@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GithubClient } from "../../github/api.js";
 import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
-import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import type {
+  DeepReadonly,
+  MustBeNever,
+  UndeclaredPolicy,
+  UndeclaredPolicyList,
+} from "../../types.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -361,6 +366,52 @@ export interface SectionModule<
   snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>>;
   /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
   run?: never;
+}
+
+/**
+ * Freezes in place through every nested object and array; functions are left as they are (nothing
+ * reads their properties). The registry views freeze the tagged copies they build with it.
+ */
+export function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (typeof value === "object" && value !== null) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+  }
+  return value as DeepReadonly<T>;
+}
+
+/** Every SectionMeta field plus closedSurface (its `known` map gates validation); the pin below fails on a module field sorted into neither list. */
+const DECLARATION_FIELDS = [
+  "key",
+  "permission",
+  "grantCaveat",
+  "ownerSensitivity",
+  "endpoints",
+  "graphql",
+  "undeclaredDefault",
+  "layering",
+  "closedSurface",
+] as const satisfies readonly (keyof SectionModule)[];
+
+/** `shape` stays as zod built it; the rest are handlers. */
+type HandlerField = "shape" | "plan" | "snapshot" | "secretValues" | "run";
+
+type _EveryModuleFieldSorted = MustBeNever<
+  Exclude<keyof SectionModule, (typeof DECLARATION_FIELDS)[number] | HandlerField>
+>;
+
+/**
+ * Called once per module as ../registry.ts registers it, so a route, status, hint, permission, GraphQL
+ * outcome, or closed-surface key cannot move after that in the action, the CLI, or the library alike; the
+ * readonly types stop only compiled assignments. The module object itself is frozen shallowly.
+ */
+export function freezeDeclarations<M extends SectionModule>(module: M): M {
+  for (const field of DECLARATION_FIELDS) {
+    deepFreeze(module[field]);
+  }
+  return Object.freeze(module);
 }
 
 /** Write-only is derived from the operations, as writeOnlyCheckNote does, so the two notes cannot disagree. */

@@ -15,8 +15,9 @@ import type { Io } from "../../src/io.js";
 import { maskRegistry, prefixedIo } from "../../src/io.js";
 import { describeProblem, type TopLevelShape } from "../../src/problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
-import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
+import { interactionLimitsSection } from "../../src/sections/interaction_limits/index.js";
 import { pagesSection } from "../../src/sections/pages/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
@@ -556,17 +557,16 @@ describe("runForRepo plan sections", () => {
   });
 
   describe("a stubbed plan", () => {
-    // The workflows plan is stubbed through the erased view so the tests can hand the orchestrator tolerate, facet, and response-rendering ops
-    // directly.
-    let stubbed: ReturnType<typeof spyOn<typeof workflowsSection, "plan">> | undefined;
-    const disable = workflowsSection.endpoints.disable;
+    // A section's plan is stubbed through the erased view so the tests can hand the orchestrator tolerate, facet, and response-rendering ops
+    // directly. Declarations are frozen at registration, so a tolerance rides an endpoint that already declares the status: interaction_limits'
+    // put and remove both declare 409.
+    let stubbed: { mockRestore(): void } | undefined;
     afterEach(() => {
       stubbed?.mockRestore();
-      (workflowsSection.endpoints as Record<string, EndpointDecl>).disable = disable;
     });
-    const stub = (...ops: SectionPlan["ops"]) => {
+    const stub = (section: SectionModule, ...ops: SectionPlan["ops"]) => {
       // A restored spy no longer intercepts, so each test arms its own.
-      stubbed = spyOn(workflowsSection, "plan").mockResolvedValue({
+      stubbed = spyOn(section, "plan").mockResolvedValue({
         ops: ops as never,
         notes: [],
         drift: [],
@@ -579,29 +579,32 @@ describe("runForRepo plan sections", () => {
       change: `disabled workflow ${workflowId}`,
     });
     const tolerating = (
-      workflowId: string,
+      role: "put" | "remove",
       outcome: (error: { status: number }) => { note: string } | { failure: string },
-    ): SectionPlan["ops"][number] => {
-      // The tolerance must be declared: the disable endpoint gains a 409.
-      (workflowsSection.endpoints as Record<string, EndpointDecl>).disable = {
-        ...disable,
-        statuses: { ...disable.statuses, 409: "a run holds the workflow" },
-      };
-      return { ...disabling(workflowId), tolerate: { statuses: [409], outcome } };
-    };
-    const NOTE = "a run holds ci.yml, so it was not disabled (409)";
-    const FAILURE = "old.yml is busy (409); re-run after it finishes";
+    ): SectionPlan["ops"][number] => ({
+      role,
+      params: {},
+      drift: ["interaction_limits.limit: drifted"],
+      change: `${role} the interaction limit`,
+      tolerate: { statuses: [409], outcome },
+    });
+    const limited = validated({ interaction_limits: { limit: "collaborators_only" } });
+    const NOTE = "an organization limit overrides this one, so it was not set (409)";
+    const FAILURE = "an organization limit holds (409); clear it first";
     const busy = () =>
       new MockApi({
-        [WORKFLOWS_LIST]: { data: live },
-        "PUT /repos/o/r/actions/workflows/*": {
+        "GET /repos/o/r/interaction-limits": { data: {} },
+        "PUT /repos/o/r/interaction-limits": {
+          error: { status: 409, message: "Conflict", body: "" },
+        },
+        "DELETE /repos/o/r/interaction-limits": {
           error: { status: 409, message: "Conflict", body: "" },
         },
       });
 
     test("an unverifiable facet is a check-mode note beside a clean drift list, and apply renders only the change", async () => {
       const REASON = "GitHub never echoes the workflow token back, so check cannot verify it";
-      stub({
+      stub(workflowsSection, {
         role: "disable",
         params: { workflow_id: "1" },
         drift: { unverifiable: REASON, lines: [] },
@@ -632,36 +635,47 @@ describe("runForRepo plan sections", () => {
 
     test("a tolerated note reaches the applied outcome's detail and the annotations", async () => {
       stub(
-        tolerating("1", (error) => ({
-          note: `a run holds ci.yml, so it was not disabled (${error.status})`,
+        interactionLimitsSection,
+        tolerating("put", (error) => ({
+          note: `an organization limit overrides this one, so it was not set (${error.status})`,
         })),
       );
       const { io, annotations, logs } = captureIo();
-      const result = await runForRepo(busy(), opts({ settings: drifting }), io);
+      const result = await runForRepo(busy(), opts({ settings: limited }), io);
       expect(result.result).toBe("applied");
       expect(logs).toEqual([]);
-      expect(annotations).toEqual([`notice: workflows: ${NOTE}`]);
-      expect(result.outcomes).toEqual([{ key: "workflows", status: "applied", detail: [NOTE] }]);
+      expect(annotations).toEqual([`notice: interaction_limits: ${NOTE}`]);
+      expect(result.outcomes).toEqual([
+        { key: "interaction_limits", status: "applied", detail: [NOTE] },
+      ]);
     });
 
     test("a tolerated note survives a failure, beside the outcome's own failure text", async () => {
       stub(
-        tolerating("1", () => ({ note: NOTE })),
-        tolerating("2", () => ({ failure: FAILURE })),
+        interactionLimitsSection,
+        tolerating("put", () => ({ note: NOTE })),
+        tolerating("remove", () => ({ failure: FAILURE })),
       );
       const { io, annotations } = captureIo();
-      const result = await runForRepo(busy(), opts({ settings: drifting }), io);
+      const result = await runForRepo(busy(), opts({ settings: limited }), io);
       expect(result.result).toBe("failed");
       // Both requests were refused, so nothing landed and no partial-mutation suffix renders.
-      expect(annotations).toEqual([`notice: workflows: ${NOTE}`, `error: workflows: ${FAILURE}`]);
+      expect(annotations).toEqual([
+        `notice: interaction_limits: ${NOTE}`,
+        `error: interaction_limits: ${FAILURE}`,
+      ]);
       expect(result.outcomes).toEqual([
-        { key: "workflows", status: "failed", detail: [NOTE, `workflows: ${FAILURE}`] },
+        {
+          key: "interaction_limits",
+          status: "failed",
+          detail: [NOTE, `interaction_limits: ${FAILURE}`],
+        },
       ]);
     });
 
     test("a change thunk failing after its request landed reports a partial mutation, not a clean failure", async () => {
       // The PUT landed, then the thunk threw: the repository changed, and the failure must say so instead of reading as "nothing was written".
-      stub({
+      stub(workflowsSection, {
         ...disabling("1"),
         change: () => {
           throw new Error("the echo still reads active");

@@ -23,7 +23,13 @@ import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
 import { collaboratorsSection } from "./collaborators/index.js";
 import type { EndpointDecl } from "./contract/endpoints.js";
 import type { GraphqlOpDecl } from "./contract/graphql.js";
-import type { EndpointDict, GraphqlDict, SectionModule } from "./contract/module.js";
+import {
+  deepFreeze,
+  type EndpointDict,
+  freezeDeclarations,
+  type GraphqlDict,
+  type SectionModule,
+} from "./contract/module.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";
 import { customPropertiesSection } from "./custom_properties/index.js";
 import { dependabotSecretsSection } from "./dependabot_secrets/index.js";
@@ -193,10 +199,14 @@ function hasSnapshot<K extends SectionKey>(
 
 /**
  * The one door out of src/sections: the engine, the library, and the roster below all reach a module
- * through it, so the foreign-context refusal is applied here once and not in 26 handlers.
+ * through it, so the foreign-context refusal is applied here once and not in 26 handlers, and so is the
+ * freeze (freezeDeclarations): the wrapper shares its declaration objects with the source module, so those
+ * are deep-frozen in place, while only the wrapper object is shallow-frozen (a test can still stub the
+ * source's handlers). The freeze lives here rather than in a definition helper because the modules arrive
+ * by several routes (literal objects, listSection, the secrets, variables, and setup factories).
  */
 const guarded: { [K in SectionKey]: SectionModule<K> } = Object.fromEntries(
-  SECTION_KEYS.map((key) => [key, refusingForeignContexts(byKeyErased[key])]),
+  SECTION_KEYS.map((key) => [key, freezeDeclarations(refusingForeignContexts(byKeyErased[key]))]),
 ) as { [K in SectionKey]: SectionModule<K> };
 
 export const SECTIONS: readonly SectionModule[] = SECTION_KEYS.map((key) => guarded[key]);
@@ -230,23 +240,9 @@ function assertScopeFree(kind: "section key" | "role", value: string): void {
 }
 
 /**
- * Freezes in place through every nested object and array, so the declarations the tagged views share
- * cannot mutate under any consumer; functions are left as they are (nothing reads their properties).
- */
-function deepFreeze<T>(value: T): DeepReadonly<T> {
-  if (typeof value === "object" && value !== null) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) {
-      deepFreeze(child);
-    }
-  }
-  return value as DeepReadonly<T>;
-}
-
-/**
  * The single view the e2e mock's route table and USED_PATHS iterate, keyed by the exact SectionEndpointKey
- * union so an undeclared lookup does not compile. Deep-frozen, and the source declaration with it: the
- * entries reference the declarations, which must never mutate. `sections` is injectable so the scope-free
+ * union so an undeclared lookup does not compile. The tagged entries are deep-frozen as they are built;
+ * their source declarations were frozen at registration. `sections` is injectable so the scope-free
  * assert is testable; an injected list keeps string keys.
  */
 export function allEndpoints(): Readonly<Record<SectionEndpointKey, TaggedEndpoint>>;
@@ -261,11 +257,7 @@ export function allEndpoints(
     assertScopeFree("section key", section.key);
     for (const [role, endpoint] of Object.entries(section.endpoints)) {
       assertScopeFree("role", role);
-      out[`${section.key}.${role}`] = deepFreeze({
-        ...deepFreeze(endpoint),
-        section: section.key,
-        role,
-      });
+      out[`${section.key}.${role}`] = deepFreeze({ ...endpoint, section: section.key, role });
     }
   }
   return Object.freeze(out);
@@ -280,7 +272,7 @@ export type TaggedGraphqlOp = DeepReadonly<
 
 /**
  * The allEndpoints() sibling for the mock's dispatch table, the coverage tripwire, and the fault-key
- * universe; deep-frozen for the same reason. Operation NAMES must be globally unique (the wire dispatch key),
+ * universe; frozen the same way. Operation NAMES must be globally unique (the wire dispatch key),
  * and a role never collides with a REST role in the same section (fault directives share one "section.role" key space).
  */
 export function allGraphqlOps(): Readonly<Record<SectionGraphqlKey, TaggedGraphqlOp>>;
@@ -309,7 +301,7 @@ export function allGraphqlOps(
         );
       }
       byName.set(op.name, key);
-      out[key] = deepFreeze({ ...deepFreeze(op), section: section.key, role });
+      out[key] = deepFreeze({ ...op, section: section.key, role });
     }
   }
   return Object.freeze(out);
