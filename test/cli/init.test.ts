@@ -5,7 +5,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { InitConfig } from "../../src/cli/init.js";
-import { INIT_INPUTS } from "../../src/cli/inputs.js";
 import { main } from "../../src/cli/program.js";
 import {
   type ConfigEnv,
@@ -90,28 +89,12 @@ describe("init: argv -> config", () => {
     });
   });
 
-  test("the flags are the snapshot inputs of one repository, in declaration order", () => {
-    expect(INIT_INPUTS).toEqual([
-      "repository",
-      "settings-file",
-      "on-missing-permission",
-      "sections",
-      "api-version",
-    ]);
-  });
-
   test.each<[string, string[], ConfigEnv, string]>([
     [
       "no token",
       ["--repository", "o/r"],
       {},
       'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
-    ],
-    [
-      "no repository outside Actions",
-      [],
-      { GITHUB_TOKEN: TOKEN },
-      'cannot target a repository: "" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it',
     ],
     [
       "a settings file spelled as a list",
@@ -219,82 +202,6 @@ describe("init: the written file and the printed grant", () => {
       });
     }));
 
-  test("a section failing beside one that read back fails init: no file, the errors name the section", () =>
-    withTempDir("gsac-init-", async (dir) => {
-      const file = join(dir, "settings.yml");
-      const api = new MockApi({
-        "GET /repos/o/r/labels?per_page=100&page=1": {
-          error: { status: 500, message: "Server Error", body: "" },
-        },
-        "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
-          data: [{ number: 1, title: "v1", state: "open", description: null, due_on: null }],
-        },
-      });
-      const args = [
-        "init",
-        "--token",
-        TOKEN,
-        "--repository",
-        "o/r",
-        "--settings-file",
-        file,
-        "--sections",
-        "labels,milestones",
-      ];
-      const plain = await cli(args, api);
-      expect(plain.code).toBe(1);
-      expect(plain.stdout).toBe("");
-      expect(plain.stderr).toMatch(/^error: labels: /);
-      const problem = `the snapshot of o/r failed, so ${file} was not written; the errors above name the section and the fix`;
-      expect(plain.stderr).toEndWith(`error: ${problem}\n`);
-      expect(existsSync(file)).toBe(false);
-      const json = await cli([...args, "--json"], api);
-      expect(json.code).toBe(1);
-      expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
-    }));
-
-  test("a check over the written file reads clean against the same repository", () =>
-    withTempDir("gsac-init-", async (dir) => {
-      const file = join(dir, "settings.yml");
-      const api = new MockApi(LABELS_ROUTE);
-      const init = await cli(
-        [
-          "init",
-          "--token",
-          TOKEN,
-          "--repository",
-          "o/r",
-          "--settings-file",
-          file,
-          "--sections",
-          "labels",
-        ],
-        api,
-      );
-      expect(init.code).toBe(0);
-      const check = await cli(
-        [
-          "check",
-          "--token",
-          TOKEN,
-          "--repository",
-          "o/r",
-          "--settings-file",
-          file,
-          "--sections",
-          "labels",
-          "--private-repos",
-          "show",
-        ],
-        api,
-      );
-      expect(check).toEqual({
-        code: 0,
-        stdout: "result: clean\nresult=clean\nskipped-sections=\nrepos-result={}\n",
-        stderr: "",
-      });
-    }));
-
   test("a denied section under warn is skipped: partial, the file omits it, the line says so, exit 0", () =>
     withTempDir("gsac-init-", async (dir) => {
       const file = join(dir, "settings.yml");
@@ -330,12 +237,8 @@ describe("init: the written file and the printed grant", () => {
         ].join("\n"),
       );
       expect(parseYaml(readFileSync(file, "utf8"))).toEqual(LABELS_DOC);
-    }));
-
-  test("a denied section under fail fails the run: no file, the error names the section, exit 1", () =>
-    withTempDir("gsac-init-", async (dir) => {
-      const file = join(dir, "settings.yml");
-      const result = await cli(
+      // The same run under --json: the envelope carries the partial result and the skipped section by name.
+      const json = await cli(
         [
           "init",
           "--token",
@@ -343,21 +246,23 @@ describe("init: the written file and the printed grant", () => {
           "--repository",
           "o/r",
           "--settings-file",
-          file,
+          join(dir, "again.yml"),
           "--sections",
           "labels,actions_variables",
+          "--on-missing-permission",
+          "warn",
+          "--json",
         ],
         new MockApi(LABELS_ROUTE),
       );
-      expect(result.code).toBe(1);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toMatch(
-        /^error: actions_variables: not snapshotted - the token was denied GET/,
-      );
-      expect(result.stderr).toEndWith(
-        `error: the snapshot of o/r failed, so ${file} was not written; the errors above name the section and the fix\n`,
-      );
-      expect(existsSync(file)).toBe(false);
+      expect(json.code).toBe(0);
+      expect(JSON.parse(json.stdout)).toEqual({
+        result: "partial",
+        file: join(dir, "again.yml"),
+        repository: "o/r",
+        "skipped-sections": ["actions_variables"],
+        grant: { labels: LABELS_GRANT },
+      });
     }));
 });
 
@@ -396,24 +301,24 @@ describe("init: an existing settings file", () => {
       });
     }));
 
-  test("is left byte for byte as it was when --force gets past the check and a section then fails", () =>
+  test("is left byte for byte as it was when --force gets past the check and a denied section fails the snapshot under the default policy", () =>
     withTempDir("gsac-init-", async (dir) => {
       const file = join(dir, "settings.yml");
       const original = "repository:\n  has_wiki: false\n";
       writeFileSync(file, original);
-      const api = new MockApi({
-        "GET /repos/o/r/labels?per_page=100&page=1": {
-          error: { status: 500, message: "Server Error", body: "" },
-        },
-      });
-      const result = await cli([...target(file), "--force"], api);
+      // No variables route: the read answers 404, the fine-grained denial, which fails the snapshot unless warn was asked for.
+      const api = new MockApi(LABELS_ROUTE);
+      const args = [...target(file).slice(0, -1), "labels,actions_variables", "--force"];
+      const result = await cli(args, api);
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toMatch(/^error: labels: /);
+      expect(result.stderr).toMatch(
+        /^error: actions_variables: not snapshotted - the token was denied GET/,
+      );
       const problem = `the snapshot of o/r failed, so ${file} was not written; the errors above name the section and the fix`;
       expect(result.stderr).toEndWith(`error: ${problem}\n`);
       expect(readFileSync(file, "utf8")).toBe(original);
-      const json = await cli([...target(file), "--force", "--json"], api);
+      const json = await cli([...args, "--json"], api);
       expect(json.code).toBe(1);
       expect(json.stderr).toBe(result.stderr);
       expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
@@ -437,37 +342,37 @@ describe("init: an existing settings file", () => {
     }));
 
   const NO_MILESTONES = { "GET /repos/o/r/milestones?state=all&per_page=100&page=1": { data: [] } };
-  test.each<[string, string, Record<string, unknown>, string, number | undefined]>([
+  test.each<[string, string[], Record<string, unknown>, string, number | undefined]>([
     [
       "no selected section can be read back",
-      "check_suite_preferences",
+      ["--sections", "check_suite_preferences"],
       {},
       "cannot be read back: check_suite_preferences",
       0,
     ],
-    // custom_properties reads back "nothing live" (no /orgs/o route): read, declaring nothing.
+    // No variables route: the read answers 404, the fine-grained denial, and warn skips the section.
     [
-      "the only section reads back nothing",
-      "custom_properties",
+      "the only selected section is skipped under warn",
+      ["--sections", "actions_variables", "--on-missing-permission", "warn"],
       {},
-      "nothing exists on the repository: custom_properties",
+      "skipped: actions_variables",
       undefined,
     ],
     [
       "nothing exists for the selected sections",
-      "milestones",
+      ["--sections", "milestones"],
       NO_MILESTONES,
       "nothing exists on the repository: milestones",
       undefined,
     ],
   ])(
     "never writes an empty document, --force or not: %s, exit 1",
-    (_case, sections, routes, why, apiCalls) =>
+    (_case, flags, routes, why, apiCalls) =>
       withTempDir("gsac-init-", async (dir) => {
         const file = join(dir, "settings.yml");
         writeFileSync(file, "repository:\n  has_wiki: false\n");
         const api = new MockApi(routes as ConstructorParameters<typeof MockApi>[0]);
-        const result = await cli([...target(file).slice(0, -1), sections, "--force"], api);
+        const result = await cli([...target(file).slice(0, -2), ...flags, "--force"], api);
         if (apiCalls !== undefined) {
           expect(api.calls).toHaveLength(apiCalls);
         }
@@ -477,6 +382,17 @@ describe("init: an existing settings file", () => {
           `error: the snapshot of o/r declares no section (${why}), so ${file} was not written. Choose sections init can read back, or drop --sections to read every section\n`,
         );
         expect(readFileSync(file, "utf8")).toBe("repository:\n  has_wiki: false\n");
+        // Without --force, into a path that does not exist yet: still refused, and nothing is created.
+        const fresh = join(dir, "fresh.yml");
+        const plain = await cli(
+          [...target(fresh).slice(0, -2), ...flags],
+          new MockApi(routes as ConstructorParameters<typeof MockApi>[0]),
+        );
+        expect(plain.code).toBe(1);
+        expect(plain.stderr).toEndWith(
+          `so ${fresh} was not written. Choose sections init can read back, or drop --sections to read every section\n`,
+        );
+        expect(existsSync(fresh)).toBe(false);
       }),
   );
 

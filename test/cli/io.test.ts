@@ -1,7 +1,8 @@
 /**
- * The CLI's Io: where each channel lands, the `level: message` shape, the
- * json routing, the summary file, the debug gate, and the masking every
- * channel goes through (no runner masks for a terminal).
+ * The CLI's Io on a terminal: where each channel lands, the `level: message`
+ * shape, the json routing, the summary file, and the debug gate. The
+ * redaction every channel goes through is pinned beside the runner face in
+ * test/cli/actions.test.ts.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -82,24 +83,6 @@ describe("the CLI Io", () => {
     io.annotate("error", "boom");
     expect(stderr()).toBe("[31merror[39m: boom\n");
   });
-
-  test("a masked value is redacted on every channel, the outputs included", () =>
-    withTempDir("gsac-io-", (dir) => {
-      const summary = join(dir, "summary.md");
-      const { io, flush, stdout, stderr } = open({ summaryFile: summary, verbose: true });
-      io.mask("ghp_secret");
-      io.log("token ghp_secret in a log line");
-      io.annotate("error", "401 for ghp_secret");
-      io.debug("Authorization: token ghp_secret");
-      io.summary("# run by ghp_secret");
-      io.output("result", "failed ghp_secret");
-      flush();
-      const everything = stdout() + stderr() + readFileSync(summary, "utf8");
-      expect(everything).not.toContain("ghp_secret");
-      expect(stdout()).toBe("token *** in a log line\nresult=failed ***\n");
-      expect(stderr()).toBe("error: 401 for ***\ndebug: Authorization: token ***\n");
-      expect(readFileSync(summary, "utf8")).toBe("# run by ***\n");
-    }));
 
   test("summary blocks append to the named file and are dropped without one", () =>
     withTempDir("gsac-io-", async (dir) => {

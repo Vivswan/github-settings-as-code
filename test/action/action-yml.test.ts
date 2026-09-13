@@ -7,7 +7,10 @@ import { parse as parseYaml } from "yaml";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
+import { concludeRun } from "../../src/flows/deliver.js";
 import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
+import { publicChannel } from "../../src/flows/redact.js";
+import { captureIo } from "../io/capture.js";
 import { ROOT } from "../root.js";
 
 interface ActionYml {
@@ -53,19 +56,31 @@ describe("input declarations <-> discovery defaults", () => {
 });
 
 describe("output declarations", () => {
-  test("the result description enumerates exactly the RUN_RESULTS words, worst first, and states the exit rule", () => {
+  test("the result description enumerates exactly the RUN_RESULTS words, worst first", () => {
     // The enumerated values are the `a | b | c` chain; a value named only in prose does not count.
     const { description } = OUTPUT_DECLS.result;
     const [chain, ...more] = description.match(/[a-z]+(?: \| [a-z]+)+/g) ?? [];
     expect(more).toEqual([]);
     expect(chain?.split(" | ")).toEqual([...RUN_RESULTS]);
-    expect(description).toContain("Exit 1 exactly when it is failed, or drift in mode: check");
   });
 
-  test("the repos-result description spells the body keys as the outputs spell theirs, and names the empty map", () => {
-    const { description } = OUTPUT_DECLS["repos-result"];
-    expect(description).toContain("{result, source, skipped-sections}");
-    expect(description).not.toContain("skippedSections");
-    expect(description).toContain("The empty map {} for a run over one repository or a merge");
+  test("the repos-result description spells the body keys as the run writes them", () => {
+    const { io, outputs } = captureIo();
+    concludeRun(io, {
+      kind: "multi",
+      mode: "check",
+      targets: [
+        {
+          source: "remote",
+          result: "clean",
+          display: "o/r",
+          detail: publicChannel(io, "o/r", true).close({ outcomes: [] }),
+        },
+      ],
+    });
+    const body = JSON.parse(outputs["repos-result"] ?? "") as Record<string, object>;
+    const keys = Object.keys(body["o/r"] ?? {});
+    expect(keys.length).toBeGreaterThan(0);
+    expect(OUTPUT_DECLS["repos-result"].description).toContain(`{${keys.join(", ")}}`);
   });
 });

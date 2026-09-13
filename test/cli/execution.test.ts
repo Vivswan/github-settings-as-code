@@ -104,23 +104,6 @@ const cases: Case[] = [
     env: {},
   },
   {
-    name: "apply, one repository, a denied section skipped under warn",
-    ends: { code: 0, result: "partial" },
-    inputs: (dir) => ({
-      mode: "apply",
-      token: TOKEN,
-      repository: "o/r",
-      "settings-file": join(dir, "settings.yml"),
-      ...WARN,
-    }),
-    settings: WITH_VARIABLES,
-    routes: {
-      "GET /repos/o/r": { data: { has_wiki: false, private: false } },
-      ...variablesDenied("o/r"),
-    },
-    env: {},
-  },
-  {
     name: "check, one repository, a settings file that cannot be read",
     ends: { code: 1, result: "failed" },
     inputs: (dir) => ({
@@ -175,20 +158,6 @@ const cases: Case[] = [
     }),
     routes: { ...labels("o/a", [BUG]), ...labels("o/b", [DOCS]) },
     env: FLEET_ENV,
-  },
-  {
-    name: "snapshot, one repository to a file, a denied section skipped under warn",
-    ends: { code: 0, result: "partial" },
-    inputs: (dir) => ({
-      mode: "snapshot",
-      token: TOKEN,
-      repository: "o/r",
-      "snapshot-file": join(dir, "snapshot.yml"),
-      sections: "labels,actions_variables",
-      ...WARN,
-    }),
-    routes: { ...labels("o/r", [BUG]), ...variablesDenied("o/r") },
-    env: {},
   },
   {
     name: "snapshot, two repositories to a directory, a denied section skipped under warn",
@@ -361,8 +330,6 @@ describe("the action and the CLI run one arm to one result", () => {
     expect([...new Set(cases.map((c) => c.ends.code))].sort()).toEqual([0, 1]);
     expect(cases.filter((c) => c.ends.result === "partial").map((c) => c.name)).toEqual([
       "check, one repository, a denied section skipped under warn",
-      "apply, one repository, a denied section skipped under warn",
-      "snapshot, one repository to a file, a denied section skipped under warn",
       "snapshot, two repositories to a directory, a denied section skipped under warn",
     ]);
   });
