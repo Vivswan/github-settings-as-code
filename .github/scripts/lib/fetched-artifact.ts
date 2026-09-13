@@ -1,6 +1,6 @@
 /**
  * The "is the fetched artifact on disk current?" decision behind `--when-stale` in trim-openapi.ts and
- * fetch-graphql-schema.ts: `bun run test` runs both scripts in that mode first, so a fresh checkout fetches the
+ * fetch-graphql-schema.ts: the test, test:e2e, and fuzz scripts run both in that mode first, so a fresh checkout fetches the
  * gitignored artifacts once and a current file costs no network. Each artifact records the URL it was fetched from,
  * which carries the pinned ref (and, for the spec, the API version), so a bumped pin regenerates it on the next run.
  * Mtimes cannot carry this decision: actions/cache restores yesterday's mtime under today's checkout, so every CI

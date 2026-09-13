@@ -2,7 +2,7 @@
  * Fetches GitHub's public GraphQL schema to disk, the GraphQL sibling of trim-openapi.ts. This script is the ONLY
  * thing that touches the network; the output is a fetched, gitignored artifact.
  *   test/sections/graphql-queries.test.ts  -> loads it from disk
- *   bun run test                           -> runs this with --when-stale first: a fetch only when the file is absent
+ *   test, test:e2e, fuzz scripts           -> run this with --when-stale first: a fetch only when the file is absent
  *                                             or fetched from another ref, so a fresh checkout fetches once
  *   CI                                     -> restores it from cache, re-fetches on a miss, then the same bun run test
  *   UPSTREAM_REF                           -> PINNED to a github/docs commit, so two runs months apart write
