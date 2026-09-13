@@ -34,7 +34,7 @@ describe("the generated-output table", () => {
   });
 
   test("the scan reads the shared marker grammar: an inline HTML marker counts, a marker-shaped scalar does not", () => {
-    // inputs.md's outputs-list marker sits mid-line; a line-anchored scan would drop that page from the pin.
+    // A page whose only marker sits mid-line (inputs.md's outputs-list is the tree's inline case) would slip a line-anchored scan.
     expect(
       hasGeneratedRegion(
         "- `result`: <!-- BEGIN GENERATED: a (h) -->x<!-- END GENERATED: a -->",
