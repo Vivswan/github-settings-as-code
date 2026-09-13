@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
   type ApiError,
-  GithubApi,
+  GitHubApi,
   isPermissionError,
   isRateLimitError,
   MAX_RETRIES,
@@ -165,7 +165,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
 
   /** Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned e2e bundle does. */
   const envKnobClient = (io: ReturnType<typeof traceIo>["io"]) =>
-    new GithubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
+    new GitHubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
 
   test("many writes complete without the write limiter's ~1s spacing", async () => {
     process.env.RETRY_BASE_MS = "1";
@@ -213,7 +213,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
     const served: string[] = [];
     const issueCreate = async (name: string) => {
       stubFetch([() => new Response('{"number":1}', { status: 201 })]);
-      const client = new GithubApi({
+      const client = new GitHubApi({
         token: "t",
         io: traceIo().io,
         baseUrl: "https://api.test",
@@ -242,7 +242,7 @@ describe("RETRY_BASE_MS: millisecond units and the immediate scheduler, same plu
       const state = stubFetch([secondaryLimit(retryAfter), okJson]);
       const trace = traceIo();
       const started = Date.now();
-      const client = new GithubApi({
+      const client = new GitHubApi({
         token: "t",
         io: trace.io,
         baseUrl: "https://api.test",
@@ -1397,7 +1397,7 @@ describe("DELETE request bodies reach the wire", () => {
       },
     });
     try {
-      const client = new GithubApi({
+      const client = new GitHubApi({
         token: "t",
         io: traceIo().io,
         baseUrl: `http://localhost:${server.port}`,

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { CliHost } from "../../src/cli/commands.js";
 import { CLI_COMMANDS, main } from "../../src/cli/program.js";
-import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
+import { type ConfigEnv, type GitHubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -29,8 +29,8 @@ describe("check and apply", () => {
   test("a host written as a method keeps its receiver through the executor", async () => {
     class MethodHost implements CliHost {
       readonly env = {};
-      constructor(private readonly api: GithubClient) {}
-      createClient(): GithubClient {
+      constructor(private readonly api: GitHubClient) {}
+      createClient(): GitHubClient {
         return this.api;
       }
     }

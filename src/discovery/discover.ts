@@ -6,7 +6,7 @@
 
 import type { components } from "@octokit/openapi-types";
 import { err, ok, ResultAsync } from "neverthrow";
-import { type GithubClient, isPermissionError } from "../github/api.js";
+import { type GitHubClient, isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
@@ -103,7 +103,7 @@ export type DiscoveryProblem = ProblemOf<
 >;
 
 export function discoverRepos(
-  api: GithubClient,
+  api: GitHubClient,
   filters: DiscoveryFilters,
 ): ResultAsync<DiscoveryResult, DiscoveryProblem> {
   const params = [`affiliation=${filters.affiliation.join(",")}`];

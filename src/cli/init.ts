@@ -13,17 +13,15 @@ import { dirname } from "node:path";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import {
   type ConfigEnv,
-  DEFAULT_SETTINGS_FILE,
   type InputReader,
   type Io,
   type Problem,
-  parseSnapshotFileConfig,
   type RepoRef,
   type SectionSelection,
   type SnapshotReport,
-  skippedSectionKeys,
   snapshotRepository,
 } from "../index.js";
+import { DEFAULT_SETTINGS_FILE, parseSnapshotFileConfig, skippedSectionKeys } from "../internal.js";
 import {
   type CliHost,
   describeCliProblem,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GithubApi } from "../../../src/github/api.js";
+import { GitHubApi } from "../../../src/github/api.js";
 import { maskRegistry } from "../../../src/io.js";
 import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
@@ -1018,7 +1018,7 @@ describe("429 fault production parity", () => {
     const h = await start(scenario({ live_state: { labels: [{ id: 1, name: "bug" }] } }), {
       faults: [{ key: "labels.list", kind: "429_then_200" }],
     });
-    const api = new GithubApi({
+    const api = new GitHubApi({
       token: "e2e-token",
       io: silentTrace,
       baseUrl: h.url,

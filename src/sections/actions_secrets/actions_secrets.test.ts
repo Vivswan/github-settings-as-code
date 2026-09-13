@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
-import { type GithubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
+import { type GitHubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -52,11 +52,11 @@ function tools(resolved: Record<string, string> = {}): ExecTools & { lookups: st
   };
 }
 
-const plan = (api: GithubClient, declared: Declared) =>
+const plan = (api: GitHubClient, declared: Declared) =>
   actionsSecretsSection.plan(planContext(actionsSecretsSection, api, REPO), declared);
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
-async function apply(api: GithubClient, declared: Declared, exec: ExecTools = tools()) {
+async function apply(api: GitHubClient, declared: Declared, exec: ExecTools = tools()) {
   const planned = await plan(api, declared);
   const execution = await executePlan(planned, actionsSecretsSection, api, REPO, exec);
   if (execution.status === "failed") {
@@ -71,7 +71,7 @@ function sealedPayload(call: { payload?: unknown } | undefined) {
 }
 
 /** A stateful fake: the list reflects every PUT and DELETE, so a re-plan sees converged state. */
-function liveRepo(names: string[]): GithubClient & { writes: string[] } {
+function liveRepo(names: string[]): GitHubClient & { writes: string[] } {
   return {
     writes: [],
     async tryRequest(method, path, payload) {

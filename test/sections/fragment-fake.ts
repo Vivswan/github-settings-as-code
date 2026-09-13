@@ -1,5 +1,5 @@
 /**
- * A stateful GithubClient over a section's e2e mock fragment, so a unit idempotence proof runs against the mock's own transformers, not a second
+ * A stateful GitHubClient over a section's e2e mock fragment, so a unit idempotence proof runs against the mock's own transformers, not a second
  * hand-written inverse.
  *
  *   fragmentFake(section, ...)  -> that section's handlers; a request outside them is refused
@@ -7,7 +7,7 @@
  *   GraphQL                     -> dispatched by operation name onto the mock's GraphQL handlers
  */
 
-import type { ApiError, GithubClient } from "../../src/github/api.js";
+import type { ApiError, GitHubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
@@ -17,7 +17,7 @@ import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/s
 import type { Handler, Json } from "../e2e/mock/support.js";
 import { REPO } from "./section-run.js";
 
-export interface FragmentFake extends GithubClient {
+export interface FragmentFake extends GitHubClient {
   readonly state: MockState;
   /** Every write that reached a handler: "METHOD /path", or "GRAPHQL <opName>" for a mutation. */
   readonly writes: string[];

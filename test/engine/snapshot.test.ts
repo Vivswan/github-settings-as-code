@@ -12,7 +12,7 @@ import {
   renderSnapshotYaml,
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
-import type { GithubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
 import {
   endpointPermission,
   type SectionMeta,
@@ -29,7 +29,7 @@ import { REPO } from "../sections/section-run.js";
 import type { Row } from "../sections/snapshot-roundtrip.js";
 
 /** A client that answers `status` (the fine-grained denial is 404) to GETs whose path matches `denied`. */
-function denying(api: GithubClient, denied: RegExp, status: 403 | 404 = 404): GithubClient {
+function denying(api: GitHubClient, denied: RegExp, status: 403 | 404 = 404): GitHubClient {
   return {
     tryRequest: (method, path, payload, options) =>
       method === "GET" && denied.test(path)
@@ -42,7 +42,7 @@ function denying(api: GithubClient, denied: RegExp, status: 403 | 404 = 404): Gi
 }
 
 /** A client that records every read it forwards, as "GET <path>" or "GRAPHQL <opName>". */
-function recording(api: GithubClient, reads: Set<string>): GithubClient {
+function recording(api: GitHubClient, reads: Set<string>): GitHubClient {
   return {
     tryRequest: (method, path, payload, options) => {
       if (method === "GET") {
@@ -60,7 +60,7 @@ function recording(api: GithubClient, reads: Set<string>): GithubClient {
 }
 
 /** A client that answers one recorded read with the classic 403 (FORBIDDEN for a GraphQL read). */
-function denyingRead(api: GithubClient, read: string): GithubClient {
+function denyingRead(api: GitHubClient, read: string): GitHubClient {
   const forbidden = {
     status: 403,
     message: "Resource not accessible by personal access token",
@@ -305,7 +305,7 @@ describe("snapshotRepository", () => {
     async (key) => {
       const { row } = (await import(`../sections/snapshot-rows/${key}.ts`)) as { row: Row };
       const only = SectionSelection.of({ only: [key] })._unsafeUnwrap();
-      const run = (api: GithubClient, policy: "fail" | "warn") => {
+      const run = (api: GitHubClient, policy: "fail" | "warn") => {
         const { io, annotations } = captureIo();
         return snapshotRepository(api, { ...opts(policy), sections: only }, io).then((result) => ({
           result,
@@ -398,7 +398,7 @@ describe("snapshotRepository", () => {
 describe("snapshotRepository shape guard", () => {
   test("a null 200 body on a whole-section read fails the section as a body outside the shape, never an omitted section", async () => {
     const fake = registryFake(LIVE);
-    const nulling: GithubClient = {
+    const nulling: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         method === "GET" && path === "/repos/o/r/code-scanning/default-setup"
           ? Promise.resolve({ data: null })
@@ -432,7 +432,7 @@ describe("snapshotRepository shape guard", () => {
 describe("pages null body", () => {
   test("a null 200 on the Pages GET fails the section as a body outside the shape, never `pages: null`", async () => {
     const fake = registryFake(LIVE);
-    const nulling: GithubClient = {
+    const nulling: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         method === "GET" && path === "/repos/o/r/pages"
           ? Promise.resolve({ data: null })

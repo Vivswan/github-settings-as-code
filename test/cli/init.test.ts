@@ -10,14 +10,13 @@ import { main } from "../../src/cli/program.js";
 import {
   type ConfigEnv,
   DEFAULT_API_VERSION,
-  DEFAULT_SETTINGS_FILE,
   parseRepoSlug,
   SectionSelection,
-  SNAPSHOT_SCHEMA_URL,
   sectionGrant,
   sectionModule,
   validateSettings,
 } from "../../src/index.js";
+import { DEFAULT_SETTINGS_FILE, SNAPSHOT_SCHEMA_URL } from "../../src/internal.js";
 import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 import { memoryStream, runCli } from "./streams.js";

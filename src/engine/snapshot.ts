@@ -5,7 +5,7 @@
 
 import { stringify as stringifyYaml } from "yaml";
 import type { RepoRef } from "../discovery/targets.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { describeProblem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
@@ -21,14 +21,14 @@ import {
   type SectionSnapshot,
   snapshotUnsupportedNote,
 } from "../sections/contract/module.js";
-import { type MissingPermissionPolicy, snapshotContext } from "../sections/contract/plan.js";
+import { type OnMissingPermission, snapshotContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
 import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { RunOutcome } from "./outcome.js";
 import type { SectionSelection } from "./section-selection.js";
 
-export interface SnapshotOptions {
+export interface SnapshotRunOptions {
   /** The target repository, parsed at the caller's validated boundary. */
   repo: RepoRef;
   /**
@@ -36,7 +36,7 @@ export interface SnapshotOptions {
    * a snapshot never writes, so a denial classifies on onMissingPermission alone.
    */
   sections: SectionSelection;
-  onMissingPermission: MissingPermissionPolicy;
+  onMissingPermission: OnMissingPermission;
 }
 
 /**
@@ -82,10 +82,10 @@ function underKey(key: SectionKey, line: string): string {
  * answered 404 (the observation the concealed-absence note is keyed on). Null passes through.
  */
 function watchingNotFound(
-  api: GithubClient,
+  api: GitHubClient,
   read: EndpointDecl | null,
   seen: { notFound: boolean },
-): GithubClient {
+): GitHubClient {
   if (read === null) {
     return api;
   }
@@ -109,8 +109,8 @@ function watchingNotFound(
 
 /** Read one repository's supported sections back into a validated settings document. */
 export async function snapshotRepository(
-  api: GithubClient,
-  opts: SnapshotOptions,
+  api: GitHubClient,
+  opts: SnapshotRunOptions,
   io: Io,
 ): Promise<SnapshotResult> {
   const outcomes: SectionSnapshotOutcome[] = [];

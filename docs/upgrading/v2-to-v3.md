@@ -16,7 +16,7 @@ Ten breaks (the ninth is for library consumers). One is silent (the fallback), s
 | The three outputs are always set | `repos-result` existed only in multi-repo runs and the `snapshot-dir` form; unset elsewhere | `result`, `skipped-sections`, and `repos-result` are set on every run; `repos-result` is `{}` outside a fleet | No error. A step testing `repos-result != ''` to detect a fleet run now always passes; [section 6](#6-the-three-outputs-are-always-set) |
 | One `--json` envelope on the command line | `validate` printed `{file, valid, sections}`, `permissions` a bare grant map, `init` `skippedSections` | Every subcommand prints `{result, ...}`; `permissions` puts its grants under `grant`, lists are lists | A `jq` filter on the old keys reads `null`; [section 7](#7-one---json-envelope) |
 | A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
-| Library: one `RUN_RESULTS` | `REPO_RESULTS`, `SNAPSHOT_RESULTS`, `MERGE_RESULT`, `SnapshotRunResult`; `worstOf(results, check)` | `RUN_RESULTS`, `RunOutcome`; `worstOf(results)` | The import fails to compile, naming the missing export; [section 9](#9-library-one-run_results) |
+| Library: a documented public entry, an internal one, and the v3 names | One entry, 192 names; `GithubApi`, `RepoRunReport`, `validateSettings` returning `warnings` | `.` holds the 118 documented names, `./internal` the rest; `GitHubApi`, `CheckReport`, every report carries `log` | The old import fails to compile, naming the missing export; every rename is in [section 9](#9-library-the-public-entry-and-the-v3-names) |
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
 
 ## 1. The defaults-file fallback
@@ -111,18 +111,65 @@ Every mode now applies one crash rule: a section whose read throws (an API error
 
 `gsac init` follows: a failed section refuses to write the settings file, with the errors above naming the section and the fix.
 
-## 9. Library: one RUN_RESULTS
+## 9. Library: the public entry and the v3 names
 
-For `@vivswan/github-settings-as-code` consumers. Every result word of every mode is one `RunOutcome`, ranked once:
+For `@vivswan/github-settings-as-code` consumers. Before and after, one program:
+
+```text
+v2   import { GithubApi, checkRepository, validateSettings, runForRepo } from "@vivswan/github-settings-as-code";
+     const { settings, warnings } = validateSettings(doc)._unsafeUnwrap();
+     await checkRepository(client, { repo, settings, onMissingPermission: "fail", sections: SectionSelection.ALL });
+
+v3   import { GitHubApi, checkRepository, validateSettings } from "@vivswan/github-settings-as-code";
+     import { runForRepo } from "@vivswan/github-settings-as-code/internal";
+     const { settings, log } = validateSettings(doc)._unsafeUnwrap();
+     await checkRepository(client, repo, settings);
+```
+
+The package now has two entries, and one naming family per layer:
+
+| | v2 | v3 |
+|---|---|---|
+| The entry | One, 192 names, all pinned | `.`: the 118 names the [library page](../reference/library.md#the-api-by-group) tables document, under semver. `./internal`: everything else the action, the CLI, and the tests import, with no promise |
+| The verbs | `checkRepository`, `applyRepository`, `snapshotRepository`, `snapshotRepositories`, `validateSettings`, plus `foldLayers` and `mergeLayers` for a merge | The same five, plus `mergeSettings`; every verb takes its inputs positionally and one options object of the same knobs (`sections`, `onMissingPermission`, `io`, ...), each defaulted as the action's input |
+| The reports | `RepoRunReport` (`log`), `SnapshotReport` (`log`), `validateSettings` (`warnings: string[]`) | `CheckReport`, `ApplyReport`, `SnapshotReport`, `MergeReport`, `ValidateReport`: one `log: CollectedLine[]` on every report, the annotation level kept beside each line |
+
+Every rename, old to new. An old name fails to compile, naming the missing export; the new name is in the same package unless the row says `./internal`:
 
 | v2 | v3 |
 |---|---|
+| `GithubApi` | `GitHubApi` |
+| `GithubClient` | `GitHubClient` |
+| `MissingPermissionPolicy` | `OnMissingPermission` (the input's name) |
+| `checkRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `checkRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretSource?, secretEnv? })` |
+| `applyRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `applyRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretSource?, secretEnv? })` |
+| `RepoRunReport` | `CheckReport`, `ApplyReport` |
+| `RepoRunOptions` | `CheckOptions`, `ApplyOptions` (the knobs alone); the engine's `RepoRunOptions` is in `./internal` |
+| `snapshotRepository(client, repo, { sections?, onMissingPermission?, io? })` | Unchanged call; its options type is `SnapshotOptions` |
+| `SnapshotLibraryOptions` | `SnapshotOptions` |
+| `validateSettings(doc, { source?, sections?: ReadonlySet<SectionKey> })` returning `{ settings, warnings: string[] }` | `validateSettings(doc, { source?, sections?: SectionSelection, io? })` returning `{ settings, log: CollectedLine[] }` (`ValidateOptions`, `ValidateReport`) |
+| `foldLayers(layers, sourceLabel, layering, io)` | `mergeSettings(layers, { source?, layering?, io? })` returning `{ settings, notices, yaml, log }` (`MergeOptions`, `MergeReport`); `foldLayers` itself is in `./internal` |
+| `mergeLayers`, `renderMergedYaml`, `renderSnapshotYaml` | `./internal`; `MergeReport.yaml` and `SnapshotReport.yaml` carry the rendered file |
+| `validateSettingsDoc` | `./internal`: the engine's boundary, which prints its warnings to an `Io`; `validateSettings` collects them into `log` |
+| `runForRepo`, `preflightProbe`, `skippedSectionKeys`, `RepoRunResult`, `RepoResult` | `./internal` |
+| `SnapshotResult`, `RenderableSnapshot`, `SNAPSHOT_SCHEMA_URL` | `./internal`; `SnapshotReport.yaml` already carries the schema pin in its header |
 | `REPO_RESULTS`, `SNAPSHOT_RESULTS`, `MERGE_RESULT` | `RUN_RESULTS` (worst first: `failed`, `drift`, `partial`, `skipped`, `applied`, `clean`, `snapshot`, `merged`) |
-| `RepoResult` (still exported, the engine's per-repository subset), `SnapshotRunResult` | `RunOutcome` |
+| `SnapshotRunResult` | `RunOutcome` |
 | `worstOf(results, check)`, with `check` picking the floor of an empty list | `worstOf(results)`; an empty list throws, since every run concludes over at least one target |
+| `INPUT_DECLS`, `InputDecl`, `InputName`, `MODES`, `Mode`, `FILTER_INPUTS`, `MERGE_INPUTS`, `MERGE_ONLY_INPUTS`, `MERGE_REJECTED_INPUTS`, `SNAPSHOT_INPUTS`, `SNAPSHOT_ONLY_INPUTS`, `SNAPSHOT_REJECTED_INPUTS`, `parseSnapshotFileConfig`, `SnapshotFileConfig`, `DEFAULT_PRIVATE_REPOS`, `DEFAULT_SETTINGS_FILE` | `./internal` |
+| `resolveTargets`, `ResolvedTargets`, `TargetsConfig`, `RunFlowConfig` | `./internal` |
+| `capturingIo`, `planRedaction`, `publicDetail`, `toPublicView`, `PublicTargetView`, `PRIVATE_REPOS_POLICIES`, `PrivateReposPolicy` | `./internal` |
+| `getRepoFile`, `createVisibilityResolver`, `RepoVisibility`, `SECRET_RESPONSE_WITHHELD`, `SECRET_TRANSPORT_WITHHELD`, `TraceIo` | `./internal` |
+| `applyMarkerInjection`, `PRIVATE_REPORT_CHANNELS`, `ISSUE_TITLE`, `MARKER_LABEL`, `MARKER_LABEL_CONFIG` | `./internal` |
+| `AFFILIATIONS`, `ARCHIVED_FILTERS`, `FORKS_FILTERS`, `VISIBILITY_FILTERS`, `DiscoveryProblem` | `./internal` |
+| `stripNulls`, `describeOptOut` | `stripNulls` in `./internal`; `describeOptOut` stays public |
+| `quoteList`, `RERUN_ADVICE`, `ProblemOf`, `SettingsProblem`, `LayerProblem`, `CentralFileProblem`, `TopLevelShape` | `./internal` |
+| `DOCUMENT_DIRECTIVE_KEYS`, `PROBOT_PARITY_KEYS`, `UndeclaredPolicy`, `UndeclaredPolicyList`, `MustBeNever` | `./internal`; `UNDECLARED_POLICY_SECTIONS` and `UndeclaredPolicySection` stay public |
+| `denialPosture`, `readGating`, `writeGatedReads`, `sectionOperations`, `SectionMeta`, `KeyedListLayering`, `grantFor`, `PatResource`, `SectionPermission` | `./internal` |
+| `Justification`, `PlannedOpBase`, `Tolerance`, `Unverifiable` | `./internal` |
 | `concludeSnapshot` set `repos-result` only in the dir form; `concludeMerge` set no `repos-result` | Every conclude sets the three outputs |
 | `FinishedSnapshot` carried `view` / `views`: each target already projected into a `SnapshotTargetView` | `FinishedSnapshot` carries `target` / `targets`: each a `TargetOutcome` whose `detail` is sealed for a hidden target; `concludeSnapshot` opens it through `publicDetail` / `toPublicView` |
-| `SnapshotTargetView` (snapshot's own public projection) | Removed; the public shape of every mode's target is `PublicTargetView`, which now carries the snapshot `file` |
+| `SnapshotTargetView` (snapshot's own redacted projection) | Removed; the shared redaction-safe projection is `PublicTargetView` in `./internal`, which now carries the snapshot `file` |
 
 ## 10. One redacted label in every mode
 

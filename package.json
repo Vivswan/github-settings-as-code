@@ -17,6 +17,10 @@
       "types": "./lib/pkg/index.d.ts",
       "default": "./lib/pkg/index.js"
     },
+    "./internal": {
+      "types": "./lib/pkg/internal.d.ts",
+      "default": "./lib/pkg/internal.js"
+    },
     "./settings.schema.json": "./lib/settings.schema.json",
     "./package.json": "./package.json"
   },

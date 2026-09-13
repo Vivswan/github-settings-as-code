@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -9,7 +9,7 @@ import { pagesSection } from "./index.js";
 const GET = "GET /repos/o/r/pages";
 
 /** A stateful fake of the Pages API, so a plan over executed state sees the converged site. */
-function liveRepo(site: Record<string, unknown> | null): GithubClient & { writes: string[] } {
+function liveRepo(site: Record<string, unknown> | null): GitHubClient & { writes: string[] } {
   let live = site;
   return {
     writes: [],

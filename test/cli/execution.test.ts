@@ -8,14 +8,8 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "../../src/action/run.js";
-import {
-  type ConfigEnv,
-  collectingIo,
-  INPUT_DECLS,
-  type InputName,
-  type OutputName,
-  parseConfig,
-} from "../../src/index.js";
+import { type ConfigEnv, collectingIo, type OutputName, parseConfig } from "../../src/index.js";
+import { INPUT_DECLS, type InputName } from "../../src/internal.js";
 import { MockApi, type Route } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";

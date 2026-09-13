@@ -15,7 +15,7 @@ import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { SectionSelection } from "../engine/section-selection.js";
 import { renderSnapshotYaml, snapshotRepository } from "../engine/snapshot.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import { closeTarget, conclude, failedTarget, type TargetResult } from "./deliver.js";
@@ -166,7 +166,7 @@ function destinationCollision(cfg: SnapshotConfig): Result<void, Problem> {
  * slug, so it travels in the result for the channel to seal.
  */
 async function snapshotTarget(ctx: {
-  api: GithubClient;
+  api: GitHubClient;
   repo: RepoRef;
   cfg: SnapshotConfigBase;
   path: string;
@@ -283,7 +283,7 @@ function snapshotFilePath(
  * concludeSnapshot turns into the summary, the outputs, and the exit code.
  */
 export function runSnapshot(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: SnapshotConfig,
   io: Io,
 ): ResultAsync<FinishedSnapshot, Problem> {
@@ -296,7 +296,7 @@ export function runSnapshot(
 
 /** The file form: one target, opened as the single-repo flow opens its own and closed through the same seal. */
 async function snapshotFile(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: Extract<SnapshotConfig, { form: "file" }>,
   io: Io,
 ): Promise<FinishedSnapshot> {
@@ -320,7 +320,7 @@ async function snapshotFile(
 
 /** The dir form: every resolved target, each through the channel the redaction plan opens for it. */
 async function snapshotDir(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
   io: Io,
   resolved: ResolvedTargets,

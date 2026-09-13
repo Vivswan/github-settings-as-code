@@ -3,7 +3,7 @@
  * summary through `deps.io`. The two faces differ only in what they hand in, so the arm dispatch cannot drift.
  */
 
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
@@ -18,7 +18,7 @@ import { concludeSnapshot, runSnapshot } from "./snapshot.js";
 export interface RunDeps {
   readonly io: Io;
   /** Opens the client a config's token authorizes; a merge never asks for one. */
-  readonly createClient: (token: string, io: Io, apiVersion: string) => GithubClient;
+  readonly createClient: (token: string, io: Io, apiVersion: string) => GitHubClient;
   /** The artifact channel's uploader: only the Actions runner has one, and without it that channel fails before any API call. */
   readonly uploader?: ArtifactUploader;
   /** Words a fatal problem for the face; the action's wording unless the face words a remedy differently. */

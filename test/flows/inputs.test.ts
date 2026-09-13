@@ -3,15 +3,13 @@ import { ok } from "neverthrow";
 import {
   type ConfigEnv,
   DEFAULT_DISCOVERY_FILTERS,
-  INPUT_DECLS,
-  type InputName,
   type Problem,
   parseConfig,
   type RunConfig,
   SECTION_KEYS,
   SectionSelection,
-  SNAPSHOT_REJECTED_INPUTS,
 } from "../../src/index.js";
+import { INPUT_DECLS, type InputName, SNAPSHOT_REJECTED_INPUTS } from "../../src/internal.js";
 
 /** Parse a step's inputs (unset ones read as empty, as the runner reports them) under `env`. */
 function parse(inputs: Partial<Record<InputName, string>>, env: ConfigEnv = {}) {

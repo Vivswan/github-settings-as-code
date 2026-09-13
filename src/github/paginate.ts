@@ -4,12 +4,12 @@
  * check matches what GitHub serves.
  */
 
-import type { ApiError, GithubClient } from "./api.js";
+import type { ApiError, GitHubClient } from "./api.js";
 
 export type PageResult = { items: unknown[] } | { error: ApiError } | { malformed: true };
 
 export async function paginate(
-  api: GithubClient,
+  api: GitHubClient,
   path: string,
   extract: (data: unknown) => unknown[] | null = (data) => (Array.isArray(data) ? data : null),
   stop?: (items: unknown[]) => boolean,

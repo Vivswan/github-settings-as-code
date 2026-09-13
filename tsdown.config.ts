@@ -12,7 +12,7 @@ import { defineConfig } from "tsdown";
 import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
-  entry: { index: "src/index.ts", cli: "src/cli.ts" },
+  entry: { index: "src/index.ts", internal: "src/internal.ts", cli: "src/cli.ts" },
   format: "esm",
   platform: "node",
   dts: true,

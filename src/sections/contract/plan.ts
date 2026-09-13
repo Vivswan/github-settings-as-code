@@ -5,7 +5,7 @@
  */
 
 import type { RepoRef } from "../../discovery/targets.js";
-import type { ApiError, GithubClient } from "../../github/api.js";
+import type { ApiError, GitHubClient } from "../../github/api.js";
 import type { SectionKey } from "../../schema.js";
 import {
   type DeclaredErrorStatus,
@@ -285,9 +285,9 @@ export type KeyErasedPlan<P> = P extends (
   : never;
 
 /** The run's on-missing-permission input: how a read the token is denied classifies. */
-export type MissingPermissionPolicy = "fail" | "warn";
+export type OnMissingPermission = "fail" | "warn";
 
-let mintPolicy: (input: MissingPermissionPolicy) => DenialPolicy;
+let mintPolicy: (input: OnMissingPermission) => DenialPolicy;
 
 /**
  * The policy as a snapshot() sees it. Only snapshotContext() mints one: the constructor is private
@@ -295,7 +295,7 @@ let mintPolicy: (input: MissingPermissionPolicy) => DenialPolicy;
  * run should fail on into a note.
  */
 export class DenialPolicy {
-  private constructor(private readonly input: MissingPermissionPolicy) {}
+  private constructor(private readonly input: OnMissingPermission) {}
 
   static {
     mintPolicy = (input) => new DenialPolicy(input);
@@ -504,7 +504,7 @@ function snapshot<T>(value: T): T {
  */
 function boundReads<E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<SectionKey, E, G>,
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
 ): BoundReads<E, G> {
   // Reads are the check arm's whole capability, so that is the arm the helpers get.
@@ -548,7 +548,7 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
 /** `K`, `E`, and `G` infer from the module, so a caller cannot ask for a port the section never declared. */
 export function planContext<K extends SectionKey, E extends EndpointDict, G extends GraphqlDict>(
   meta: SectionMeta<K, E, G>,
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
 ): PlanContext<E, G, K> {
   return { section: meta.key, repo, read: boundReads(meta, api, repo) };
@@ -560,9 +560,9 @@ export function snapshotContext<
   G extends GraphqlDict,
 >(
   meta: SectionMeta<K, E, G>,
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
-  onMissingPermission: MissingPermissionPolicy,
+  onMissingPermission: OnMissingPermission,
 ): SnapshotContext<E, G, K> {
   return { ...planContext(meta, api, repo), onMissingPermission: mintPolicy(onMissingPermission) };
 }

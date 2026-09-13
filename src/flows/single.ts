@@ -7,7 +7,7 @@
 import { ResultAsync } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
@@ -38,7 +38,7 @@ export interface SingleConfig extends RunFlowConfig {
 
 /** Redaction fails closed: the target is hidden unless the probe proves it public (the self repository and the `show` policy skip the probe). */
 export async function openSingleRepoChannel(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: Pick<SingleConfig, "privateRepos" | "repo" | "selfSlug">,
   io: Io,
 ): Promise<{ channel: TargetChannel; exposure: Exposure }> {
@@ -67,7 +67,7 @@ export async function openSingleRepoChannel(
 export type SingleOutcome = Omit<TargetOutcome, "source">;
 
 export function runSingle(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: SingleConfig,
   io: Io,
   uploader?: ArtifactUploader,
@@ -81,7 +81,7 @@ export function runSingle(
 }
 
 async function runTarget(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: SingleConfig,
   io: Io,
   settings: ValidatedSettings,

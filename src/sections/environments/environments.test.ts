@@ -21,7 +21,7 @@ import {
 } from "../../../test/sections/section-run.js";
 import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import { executePlan } from "../../engine/execute.js";
-import type { GithubClient } from "../../github/api.js";
+import type { GitHubClient } from "../../github/api.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
 import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
@@ -1211,9 +1211,9 @@ describe("environments deployment protection rules validation and shape", () => 
 // --- Convergence over the e2e mock's own handlers ------------------------------
 
 /**
- * A stateful GithubClient over the section's e2e mock fragment and seeded MockState, so the idempotence proof runs against the scenarios' own model.
+ * A stateful GitHubClient over the section's e2e mock fragment and seeded MockState, so the idempotence proof runs against the scenarios' own model.
  */
-function liveRepo(liveState: LiveState): GithubClient & { writes: string[] } {
+function liveRepo(liveState: LiveState): GitHubClient & { writes: string[] } {
   const state = buildState(liveState, "org", REPO.slug);
   const graphqlRoles = Object.entries(GRAPHQL_OPS);
   return {
@@ -1564,7 +1564,7 @@ describe("environments snapshot", () => {
       },
     });
     const actionsGated = /\/(deployment-branch-policies|deployment_protection_rules)(\?|$)/;
-    const api: GithubClient = {
+    const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         actionsGated.test(path)
           ? Promise.resolve({
@@ -1655,7 +1655,7 @@ describe("environments snapshot", () => {
     const inner = fragmentFake(environmentsSection, environmentsMockHandlers, {
       environments: { qa: { name: "qa", protection_rules: [] } },
     });
-    const api: GithubClient = {
+    const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         inner.tryRequest(method, path, payload, options),
       tryGraphql: () =>

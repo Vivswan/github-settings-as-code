@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { parseActionConfig } from "../../src/action/inputs.js";
-import { INPUT_DECLS, SectionSelection } from "../../src/index.js";
+import { SectionSelection } from "../../src/index.js";
+import { INPUT_DECLS } from "../../src/internal.js";
 
 // @actions/core keeps the dashes in INPUT_* names.
 const ENV_KEYS = [

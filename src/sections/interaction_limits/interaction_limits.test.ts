@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -21,11 +21,11 @@ const TOOLS = { resolveSecret: () => "" };
 
 type Desired = Parameters<typeof interactionLimitsSection.plan>[1];
 
-const plan = (api: GithubClient, desired: Desired) =>
+const plan = (api: GitHubClient, desired: Desired) =>
   interactionLimitsSection.plan(planContext(interactionLimitsSection, api, REPO), desired);
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
-async function apply(api: GithubClient, desired: Desired) {
+async function apply(api: GitHubClient, desired: Desired) {
   return executePlan(await plan(api, desired), interactionLimitsSection, api, REPO, TOOLS);
 }
 
@@ -34,7 +34,7 @@ function liveRepo(seed: {
   limit?: Record<string, unknown> | null;
   cap?: Record<string, unknown>;
   bypass?: string[];
-}): GithubClient & { writes: string[] } {
+}): GitHubClient & { writes: string[] } {
   let limit = seed.limit ?? null;
   let cap = seed.cap ?? CAP_LIVE;
   let bypass = seed.bypass ?? [];

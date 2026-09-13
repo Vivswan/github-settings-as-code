@@ -1,4 +1,4 @@
-import type { ApiError, GithubClient, GraphqlOp, RequestMark } from "../src/github/api.js";
+import type { ApiError, GitHubClient, GraphqlOp, RequestMark } from "../src/github/api.js";
 
 export type Route = { data?: unknown; error?: ApiError };
 
@@ -9,10 +9,10 @@ function markOf(options: RequestMark | undefined): { carriesSecret?: true } {
 }
 
 /**
- * Duck-typed GithubClient over a route table. GraphQL operations route under `GRAPHQL <opName>` and record their declared kind, since every GraphQL
+ * Duck-typed GitHubClient over a route table. GraphQL operations route under `GRAPHQL <opName>` and record their declared kind, since every GraphQL
  * call shares the POST method and mutations() could not tell a read from a write otherwise.
  */
-export class MockApi implements GithubClient {
+export class MockApi implements GitHubClient {
   calls: Array<{
     method: string;
     path: string;

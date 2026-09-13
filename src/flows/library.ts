@@ -1,6 +1,13 @@
+/**
+ * The library verbs: what a program calls where the action runs a mode. Every verb takes its inputs positionally and
+ * one options object of knobs, each defaulted as the action's input of the same name; `io` is the one knob they all
+ * share, and without it the lines the verb prints come back as the report's `log`.
+ */
+
 import type { Result } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
 import type { RepoRef } from "../discovery/targets.js";
+import type { Layer, Layering, OptOutNotice } from "../engine/layers.js";
 import {
   type RepoRunOptions,
   type RepoRunResult,
@@ -15,56 +22,82 @@ import {
   renderSnapshotYaml,
   type SnapshotResult,
 } from "../engine/snapshot.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import { type CollectedLine, collectingIo, type Io } from "../io.js";
-import type { SettingsProblem } from "../problem.js";
-import type { SectionKey } from "../schema.js";
+import type { LayerProblem, SettingsProblem } from "../problem.js";
+import { foldLayers } from "./layers.js";
 import { SNAPSHOT_SCHEMA_URL } from "./snapshot.js";
 
 const UNNAMED_SOURCE = "the settings document";
 
-const NO_ALLOWLIST: ReadonlySet<SectionKey> = new Set();
+const MERGED_SOURCE = "the merged settings document";
 
+/** The Io a verb prints through, and the lines the report carries: the caller's own Io leaves the log empty. */
+function sink(io: Io | undefined): { io: Io; log: () => CollectedLine[] } {
+  if (io !== undefined) {
+    return { io, log: () => [] };
+  }
+  const collected = collectingIo();
+  return { io: collected.io, log: () => collected.lines };
+}
+
+/** The knobs every verb over a document takes. */
+export interface ValidateOptions {
+  /** How the document is named in problems and warnings; a file path, usually. */
+  source?: string;
+  /** The `sections` allowlist: an unknown top-level key outside a non-empty one is a warning, not an error. */
+  sections?: SectionSelection;
+  /** Where the warnings print; without one they come back as the report's `log`. */
+  io?: Io;
+}
+
+export interface ValidateReport {
+  settings: ValidatedSettings;
+  log: CollectedLine[];
+}
+
+/** Validate a parsed document into the branded settings every other verb takes. */
 export function validateSettings(
   doc: unknown,
-  options: { source?: string; sections?: ReadonlySet<SectionKey> } = {},
-): Result<{ settings: ValidatedSettings; warnings: string[] }, SettingsProblem> {
-  const collected = collectingIo();
+  options: ValidateOptions = {},
+): Result<ValidateReport, SettingsProblem> {
+  const out = sink(options.io);
   return validateSettingsDoc(
     doc,
     options.source ?? UNNAMED_SOURCE,
-    options.sections ?? NO_ALLOWLIST,
-    collected.io,
-  ).map((settings) => ({ settings, warnings: collected.lines.map((entry) => entry.line) }));
+    (options.sections ?? SectionSelection.ALL).only,
+    out.io,
+  ).map((settings) => ({ settings, log: out.log() }));
 }
 
-export type RepoRunReport = RepoRunResult & { log: CollectedLine[] };
-
-async function runMode(
-  client: GithubClient,
-  opts: Omit<RepoRunOptions, "mode">,
-  mode: RepoRunOptions["mode"],
-  io: Io | undefined,
-): Promise<RepoRunReport> {
-  const collected = collectingIo();
-  const result = await runForRepo(client, { ...opts, mode }, io ?? collected.io);
-  return { ...result, log: io === undefined ? collected.lines : [] };
+export interface MergeOptions {
+  /** How the merged document is named in problems and warnings. */
+  source?: string;
+  /** How the list sections fold across layers; the action's `layering` input, "merge" unless set. */
+  layering?: Layering;
+  io?: Io;
 }
 
-export function checkRepository(
-  client: GithubClient,
-  opts: Omit<RepoRunOptions, "mode">,
-  io?: Io,
-): Promise<RepoRunReport> {
-  return runMode(client, opts, "check", io);
+/** The fold's result: the merged document, its opt-out notices, and the file text mode: merge writes. */
+export interface MergeReport {
+  settings: ValidatedSettings;
+  notices: OptOutNotice[];
+  yaml: string;
+  log: CollectedLine[];
 }
 
-export function applyRepository(
-  client: GithubClient,
-  opts: Omit<RepoRunOptions, "mode">,
-  io?: Io,
-): Promise<RepoRunReport> {
-  return runMode(client, opts, "apply", io);
+/** Fold an ordered list of layers into one validated document, as mode: merge does. */
+export function mergeSettings(
+  layers: readonly Layer[],
+  options: MergeOptions = {},
+): Result<MergeReport, SettingsProblem | LayerProblem> {
+  const out = sink(options.io);
+  return foldLayers(
+    layers,
+    options.source ?? MERGED_SOURCE,
+    options.layering ?? "merge",
+    out.io,
+  ).map((folded) => ({ ...folded, yaml: renderMergedYaml(folded.settings), log: out.log() }));
 }
 
 /** The merged document exactly as mode: merge writes it to merged-file. */
@@ -72,10 +105,76 @@ export function renderMergedYaml(settings: ValidatedSettings): string {
   return stringifyYaml(settings);
 }
 
-/** What a library snapshot may narrow: the selection, the denial policy, and the Io the lines go to. */
-export interface SnapshotLibraryOptions {
+/** The knobs a run over one repository takes, each defaulted as the action's input of the same name. */
+interface RepositoryOptions {
   sections?: SectionSelection;
-  onMissingPermission?: "fail" | "warn";
+  onMissingPermission?: RepoRunOptions["onMissingPermission"];
+  io?: Io;
+  secretSource?: RepoRunOptions["secretSource"];
+  secretEnv?: RepoRunOptions["secretEnv"];
+}
+
+export type CheckOptions = RepositoryOptions;
+
+export type ApplyOptions = RepositoryOptions;
+
+/** The engine's result plus every line the run printed when the caller brought no Io of their own. */
+interface RepositoryReport extends RepoRunResult {
+  log: CollectedLine[];
+}
+
+export type CheckReport = RepositoryReport;
+
+export type ApplyReport = RepositoryReport;
+
+async function runMode(
+  client: GitHubClient,
+  repo: RepoRef,
+  settings: ValidatedSettings,
+  mode: RepoRunOptions["mode"],
+  options: RepositoryOptions,
+): Promise<RepositoryReport> {
+  const out = sink(options.io);
+  const result = await runForRepo(
+    client,
+    {
+      repo,
+      settings,
+      mode,
+      onMissingPermission: options.onMissingPermission ?? "fail",
+      sections: options.sections ?? SectionSelection.ALL,
+      secretSource: options.secretSource,
+      secretEnv: options.secretEnv,
+    },
+    out.io,
+  );
+  return { ...result, log: out.log() };
+}
+
+/** Plan and diff every active section without writing. */
+export function checkRepository(
+  client: GitHubClient,
+  repo: RepoRef,
+  settings: ValidatedSettings,
+  options: CheckOptions = {},
+): Promise<CheckReport> {
+  return runMode(client, repo, settings, "check", options);
+}
+
+/** Execute the plan: the repository converges on the document. */
+export function applyRepository(
+  client: GitHubClient,
+  repo: RepoRef,
+  settings: ValidatedSettings,
+  options: ApplyOptions = {},
+): Promise<ApplyReport> {
+  return runMode(client, repo, settings, "apply", options);
+}
+
+/** The knobs a snapshot takes: the same three, since a snapshot never writes. */
+export interface SnapshotOptions {
+  sections?: SectionSelection;
+  onMissingPermission?: RepoRunOptions["onMissingPermission"];
   io?: Io;
 }
 
@@ -91,11 +190,11 @@ export type SnapshotReport = (
 
 /** Read one repository's supported sections back as a settings document and its rendered file. */
 export async function snapshotRepository(
-  client: GithubClient,
+  client: GitHubClient,
   repo: RepoRef,
-  options: SnapshotLibraryOptions = {},
+  options: SnapshotOptions = {},
 ): Promise<SnapshotReport> {
-  const collected = collectingIo();
+  const out = sink(options.io);
   const result = await readSnapshot(
     client,
     {
@@ -103,9 +202,9 @@ export async function snapshotRepository(
       sections: options.sections ?? SectionSelection.ALL,
       onMissingPermission: options.onMissingPermission ?? "fail",
     },
-    options.io ?? collected.io,
+    out.io,
   );
-  const log = options.io === undefined ? collected.lines : [];
+  const log = out.log();
   if (result.result === "failed") {
     return { ...result, log };
   }
@@ -118,12 +217,12 @@ export async function snapshotRepository(
 
 /** Snapshot several repositories in order, one report each; a failed target never stops the rest. */
 export async function snapshotRepositories(
-  client: GithubClient,
-  targets: readonly RepoRef[],
-  options: SnapshotLibraryOptions = {},
+  client: GitHubClient,
+  repos: readonly RepoRef[],
+  options: SnapshotOptions = {},
 ): Promise<SnapshotReport[]> {
   const reports: SnapshotReport[] = [];
-  for (const repo of targets) {
+  for (const repo of repos) {
     reports.push(await snapshotRepository(client, repo, options));
   }
   return reports;

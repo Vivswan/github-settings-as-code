@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { GithubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
@@ -105,7 +105,7 @@ function client(secrets: Array<{ name: string }>): MockApi {
 }
 
 /** A stateful fake: the secrets list reflects every PUT it accepts; any other request is refused. */
-function liveSecrets(): GithubClient {
+function liveSecrets(): GitHubClient {
   const secrets: Array<{ name: string }> = [];
   return {
     async tryRequest(method, path) {

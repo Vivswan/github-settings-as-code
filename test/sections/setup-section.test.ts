@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
-import type { GithubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
 import type { SettingsFile } from "../../src/schema.js";
 import { codeQualitySetupSection } from "../../src/sections/code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "../../src/sections/code_scanning_default_setup/index.js";
@@ -105,7 +105,7 @@ type DeclaredOf<K extends SetupKey> = Parameters<SetupSectionModule<K>["plan"]>[
 function liveSetup(
   path: string,
   seed: Record<string, unknown>,
-): GithubClient & { writes: string[] } {
+): GitHubClient & { writes: string[] } {
   let live = seed;
   return {
     writes: [],
@@ -143,7 +143,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       conflict409,
       denied403,
     } = facts;
-    const plan = (api: GithubClient, declared: Declared) =>
+    const plan = (api: GitHubClient, declared: Declared) =>
       section.plan(planContext(section, api, REPO), declared);
 
     test("plans the verbatim PATCH on declared-keys-only drift, languages as a set", async () => {

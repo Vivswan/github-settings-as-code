@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { GithubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
 import { snapshotContext } from "../../src/sections/contract/plan.js";
@@ -174,7 +174,7 @@ describe("snapshot round trip", () => {
     "a creation-cap body off the shape (%j) fails the snapshot instead of reading as no cap",
     async (body, issue) => {
       const fake = registryFake({});
-      const api: GithubClient = {
+      const api: GitHubClient = {
         tryRequest: (method, path, payload, options) =>
           method === "GET" && path === "/repos/o/r/interaction-limits/pulls/creation-cap"
             ? Promise.resolve({ data: body })
@@ -195,7 +195,7 @@ describe("snapshot round trip", () => {
 
   test("a hook whose config.secret is not a string fails the snapshot instead of minting a reference", async () => {
     const fake = registryFake({});
-    const api: GithubClient = {
+    const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         method === "GET" && path.startsWith("/repos/o/r/hooks?")
           ? Promise.resolve({

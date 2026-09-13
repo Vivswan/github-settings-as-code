@@ -37,7 +37,7 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
 
 /**
  * A request the executor marked as carrying a resolved secret has its failure rebuilt HERE, on the engine's side of
- * the client port, so the guarantee holds for a library caller's own GithubClient: such a client's 422 body echoing a
+ * the client port, so the guarantee holds for a library caller's own GitHubClient: such a client's 422 body echoing a
  * webhook secret would otherwise render through throwFor into outcomes[].detail and a delivered report. A throw is
  * replaced too, since a transport error is free text that can quote the request body.
  *

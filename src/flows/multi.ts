@@ -25,7 +25,7 @@ import {
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { SettingsSource } from "../engine/secret-refs.js";
-import { type GithubClient, isPermissionError } from "../github/api.js";
+import { type GitHubClient, isPermissionError } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import type { Io } from "../io.js";
@@ -77,7 +77,7 @@ export interface MultiConfig extends RunFlowConfig, TargetsConfig {
 
 /** The channel is the only sink in scope, so a redacted target's text lands only in its report. */
 async function processTarget(ctx: {
-  api: GithubClient;
+  api: GitHubClient;
   target: Target;
   repo: RepoRef;
   /** Validated once before any target ran; null when no `defaults-file` was given. */
@@ -183,7 +183,7 @@ export function openTarget(
  * into itself). `missing` means a remote target is PROVEN to have no file; an absence that could not be proven is `error`.
  */
 async function readTargetSettings(
-  api: GithubClient,
+  api: GitHubClient,
   target: Target,
 ): Promise<
   | { raw: string; sourceLabel: string; source: SettingsSource }
@@ -237,7 +237,7 @@ export interface ResolvedTargets {
  * a target when it does.
  */
 export function resolveTargets(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: TargetsConfig,
   io: Io,
 ): ResultAsync<ResolvedTargets, Problem> {
@@ -383,7 +383,7 @@ export function resolveTargets(
  * skipped and never stop the others.
  */
 export function runMulti(
-  api: GithubClient,
+  api: GitHubClient,
   cfg: MultiConfig,
   io: Io,
   uploader?: ArtifactUploader,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import {
   type PlannedOp,
   planContext,
@@ -46,7 +46,7 @@ type LiveRuleset = Record<string, unknown> & { id: number; name: string; source_
 function liveRepo(
   rulesets: LiveRuleset[],
   ignoredKeys: readonly string[] = [],
-): GithubClient & { writes: string[] } {
+): GitHubClient & { writes: string[] } {
   let nextId = 1000;
   const stored = (body: unknown): Record<string, unknown> =>
     Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => !ignoredKeys.includes(key)));
@@ -552,7 +552,7 @@ describe("rulesets", () => {
 });
 
 describe("rulesets snapshot", () => {
-  const snapshot = (api: GithubClient) =>
+  const snapshot = (api: GitHubClient) =>
     rulesetsSection.snapshot(snapshotContext(rulesetsSection, api, REPO, "fail"));
 
   /** A live ruleset as the by-id GET returns it, server fields included. */

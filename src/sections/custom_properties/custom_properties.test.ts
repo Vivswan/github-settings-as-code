@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
@@ -32,7 +32,7 @@ function orgFake(values: Array<{ property_name: string; value: unknown }>) {
   const fake = fragmentFake(customPropertiesSection, customPropertiesMockHandlers, {
     custom_property_values: values,
   });
-  const api: GithubClient = {
+  const api: GitHubClient = {
     ...fake,
     tryRequest: (method, path, payload) =>
       path === "/orgs/o"

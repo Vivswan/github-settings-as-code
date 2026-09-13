@@ -4,7 +4,7 @@
 
 import { expect } from "bun:test";
 import { executePlan } from "../../src/engine/execute.js";
-import type { GithubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
 import { type ExecTools, planContext, type SectionPlan } from "../../src/sections/contract/plan.js";
 import { NO_SECRETS, REPO } from "./section-run.js";
@@ -70,7 +70,7 @@ export function unconvergedOps(section: SectionModule, plan: SectionPlan): Secti
  */
 export async function provePlanIdempotent<M extends SectionModule>(
   section: M,
-  api: GithubClient,
+  api: GitHubClient,
   desired: Parameters<M["plan"]>[1],
   tools: ExecTools = NO_SECRETS,
 ): Promise<{

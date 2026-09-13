@@ -11,15 +11,13 @@ import pc from "picocolors";
 import {
   executeRun,
   failRun,
-  GithubApi,
-  INPUT_DECLS,
+  GitHubApi,
   type Io,
-  type Mode,
-  type MustBeNever,
   type Problem,
   parseConfig,
   type RunConfig,
 } from "../index.js";
+import { INPUT_DECLS, type Mode, type MustBeNever } from "../internal.js";
 import {
   ARTIFACT_REFUSED,
   type CliHost,
@@ -104,7 +102,7 @@ export interface ProgramOptions {
 export function processHost(): CliHost {
   return {
     env: process.env,
-    createClient: (token, io, apiVersion) => new GithubApi({ token, io, apiVersion }),
+    createClient: (token, io, apiVersion) => new GitHubApi({ token, io, apiVersion }),
   };
 }
 

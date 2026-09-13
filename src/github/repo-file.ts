@@ -9,10 +9,10 @@
  * A failed ref read leaves the proof inconclusive: a denied grant, or an empty repository whose branch has no commit.
  */
 
-import { type ApiError, type GithubClient, isRateLimitError } from "./api.js";
+import { type ApiError, type GitHubClient, isRateLimitError } from "./api.js";
 
 export async function getRepoFile(
-  api: GithubClient,
+  api: GitHubClient,
   slug: string,
   filePath: string,
 ): Promise<{ content: string } | { missing: true } | { unproven: string } | { error: ApiError }> {

@@ -4,7 +4,7 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import { endpointMethod } from "../sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
@@ -76,7 +76,7 @@ function secretRecorder(tools: ExecTools): { exec: ExecTools; resolved: () => bo
 export async function executePlan(
   plan: SectionPlan,
   section: SectionMeta,
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
   tools: ExecTools,
 ): Promise<PlanExecution> {

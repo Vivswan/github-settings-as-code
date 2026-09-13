@@ -5,13 +5,14 @@
 
 import { err, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
-import type { GithubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { SettingsProblem, TopLevelShape } from "../problem.js";
 import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
 import {
   type ExecTools,
+  type OnMissingPermission,
   planCheckNotes,
   planContext,
   planDrift,
@@ -55,7 +56,7 @@ export interface RepoRunOptions {
   repo: RepoRef;
   settings: ValidatedSettings;
   mode: "apply" | "check";
-  onMissingPermission: "fail" | "warn";
+  onMissingPermission: OnMissingPermission;
   sections: SectionSelection;
   /** Omitted, "operator". The multi-repo flow passes "target" for a target's own settings.yml, so its secret references are refused. */
   secretSource?: SettingsSource;
@@ -143,7 +144,7 @@ function nonMappingShape(value: unknown): TopLevelShape {
 
 /** A plan section has no write capability, so planning IS the read-only probe; `active` is injectable for tests. */
 export async function preflightProbe(
-  api: GithubClient,
+  api: GitHubClient,
   repo: RepoRef,
   active: typeof SECTIONS,
   settings: ValidatedSettings,
@@ -170,7 +171,7 @@ export async function preflightProbe(
 }
 
 export async function runForRepo(
-  api: GithubClient,
+  api: GitHubClient,
   opts: RepoRunOptions,
   io: Io,
 ): Promise<RepoRunResult> {

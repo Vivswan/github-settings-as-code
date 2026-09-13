@@ -26,6 +26,11 @@ import { buildProgram, CLI_COMMANDS, main } from "../../src/cli/program.js";
 import {
   type ConfigEnv,
   describeProblem,
+  parseConfig,
+  parseReposInput,
+  type RunConfig,
+} from "../../src/index.js";
+import {
   FILTER_INPUTS,
   INPUT_DECLS,
   type InputDecl,
@@ -33,10 +38,7 @@ import {
   MODES,
   type Mode,
   PRIVATE_REPORT_CHANNELS,
-  parseConfig,
-  parseReposInput,
-  type RunConfig,
-} from "../../src/index.js";
+} from "../../src/internal.js";
 import { MockApi } from "../mock-api.js";
 import { memoryStream } from "./streams.js";
 

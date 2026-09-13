@@ -1,4 +1,4 @@
-import { GithubApi, type TraceIo } from "../../src/github/api.js";
+import { GitHubApi, type TraceIo } from "../../src/github/api.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 
 const realFetch = globalThis.fetch;
@@ -37,7 +37,7 @@ export function traceIo(): { io: TraceIo & Pick<Io, "mask">; lines: string[] } {
 
 // retryAfterBaseValue: 1 turns every plugin wait into milliseconds.
 export const api = (io: TraceIo = traceIo().io) =>
-  new GithubApi({
+  new GitHubApi({
     token: "t",
     io,
     baseUrl: "https://api.test",

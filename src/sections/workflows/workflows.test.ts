@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GithubClient } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -15,7 +15,7 @@ interface LiveWorkflow {
 }
 
 /** A stateful fake of the workflows API, so a plan over executed state sees the converged repository. */
-function liveRepo(workflows: LiveWorkflow[]): GithubClient & { writes: string[] } {
+function liveRepo(workflows: LiveWorkflow[]): GitHubClient & { writes: string[] } {
   return {
     writes: [],
     async tryRequest(method, path) {
