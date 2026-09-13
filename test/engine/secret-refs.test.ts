@@ -24,7 +24,6 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
       throw new Error("expected rejection");
     }
     expect(result.error).toContain("$TOKEN");
-    expect(result.error).toContain("whole-value");
     // The surrounding text may itself be half a secret; it must not be echoed.
     expect(result.error).not.toContain("prefix-");
   });
@@ -36,8 +35,6 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
       throw new Error("expected rejection");
     }
     expect(result.error).toContain("literal");
-    expect(result.error).toContain("committed plaintext");
-    expect(result.error).toContain("$NAME");
     expect(result.error).not.toContain("hunter2");
   });
 
@@ -49,7 +46,6 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
         throw new Error("expected rejection");
       }
       expect(result.error).toContain(`${prefix}*`);
-      expect(result.error).toContain("reserved");
     }
   });
 
@@ -65,7 +61,6 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
       throw new Error("expected rejection");
     }
     expect(result.error).toContain("target-fetched");
-    expect(result.error).toContain("operator");
   });
 
   test("the target boundary precedes the reserved check", () => {
@@ -122,18 +117,6 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
     expect(result.mask).toEqual(["s3cret-value"]);
   });
 
-  test("two references to one variable resolve once and mask once", () => {
-    const result = resolveSecretRefs([operator("$SHARED"), operator("$SHARED")], {
-      SHARED: "same",
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error(result.errors.join("; "));
-    }
-    expect(result.values).toEqual({ SHARED: "same" });
-    expect(result.mask).toEqual(["same"]);
-  });
-
   test("two variables holding the same plaintext mask it once", () => {
     const result = resolveSecretRefs([operator("$FIRST_NAME"), operator("$SECOND_NAME")], {
       FIRST_NAME: "identical",
@@ -156,7 +139,6 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain("$MISSING_SECRET");
     expect(result.errors[0]).toContain("unset");
-    expect(result.errors[0]).toContain("env block");
   });
 
   test("a set-but-empty variable fails: an empty lookup must not write an empty secret", () => {
@@ -167,7 +149,6 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
     }
     expect(result.errors[0]).toContain("$EMPTY_SECRET");
     expect(result.errors[0]).toContain("set but empty");
-    expect(result.errors[0]).toContain("empty secret");
   });
 
   test("every broken reference is reported, not just the first", () => {

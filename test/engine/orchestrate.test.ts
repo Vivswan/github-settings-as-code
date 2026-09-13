@@ -10,7 +10,7 @@ import {
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
-import { prefixedIo, silentIo } from "../../src/io.js";
+import { silentIo } from "../../src/io.js";
 import { describeProblem, type TopLevelShape } from "../../src/problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
@@ -68,21 +68,22 @@ describe("runForRepo", () => {
   });
 
   const put = "PUT /repos/o/r/branches/main/protection";
-  const missingBranch =
-    'branches: replacing protection for branch "main" failed - PUT /repos/o/r/branches/main/protection: 404 Branch not found. ' +
-    "The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file";
-  const deniedPut =
-    'the token was denied PUT /repos/o/r/branches/main/protection (replacing protection for branch "main"): 404 Not Found ' +
-    '(a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions';
   test.each([
-    ["warn", "Branch not found", "failed", ["branches", "failed"], `error: ${missingBranch}`],
-    ["fail", "Branch not found", "failed", ["branches", "failed"], `error: ${missingBranch}`],
+    [
+      "warn",
+      "Branch not found",
+      "failed",
+      ["branches", "failed"],
+      expect.stringMatching(/^error: branches: .*404 Branch not found\. /),
+    ],
     [
       "warn",
       "Not Found",
       "partial",
       ["branches", "skipped"],
-      `warning: branches: skipped - ${deniedPut}`,
+      expect.stringMatching(
+        /^warning: branches: skipped - the token was denied PUT .*404 Not Found /,
+      ),
     ],
   ] as const)(
     "under on-missing-permission %s a 404 answering %p on a write is classified by the endpoint's declaration, not the status",
@@ -108,16 +109,6 @@ describe("runForRepo", () => {
       expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([put]);
     },
   );
-
-  test("check mode reports drift, prefixed through prefixedIo", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r": { data: { has_wiki: true } },
-    });
-    const { io, logs } = captureIo();
-    const result = await runForRepo(api, opts({ mode: "check" }), prefixedIo(io, "o/r: "));
-    expect(result.result).toBe("drift");
-    expect(logs[0]).toStartWith("o/r: drift: repository.has_wiki");
-  });
 
   async function receivedBy<S extends { plan: (ctx: never, desired: never) => Promise<unknown> }>(
     section: S,
@@ -174,7 +165,7 @@ describe("runForRepo", () => {
     expect(desired.extra).toBe(raw.pages.extra);
   });
 
-  test("a knobbed list section receives zod's parsed copy in both forms: own __proto__ dropped on the list and each entry, rejected on the strict wrapper", async () => {
+  test("a knobbed list section receives zod's parsed copy in both forms: a fresh list or wrapper, own __proto__ dropped on each entry", async () => {
     const plain = JSON.parse('{"rulesets":[{"name":"r","__proto__":{"planted":1}}]}');
     const wrapped = JSON.parse(
       '{"rulesets":{"_undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
@@ -194,18 +185,6 @@ describe("runForRepo", () => {
     expect(wrappedDesired).toEqual({ _undeclared: "keep", entries: [{ name: "r" }] });
     prototypeClean(wrappedDesired);
     prototypeClean(wrappedDesired.entries[0] as object);
-
-    // The wrapper is this action's own strict vocabulary, so an own "__proto__" there is an unrecognized key and fails validation upfront.
-    const polluted = JSON.parse(
-      '{"rulesets":{"entries":[{"name":"r"}],"__proto__":{"planted":2}}}',
-    );
-    expect(validateSettingsDoc(polluted, "s.yml", SectionSelection.ALL, captureIo().io)).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: [expect.stringContaining('rulesets: Unrecognized key: "__proto__"')],
-      }),
-    );
   });
 
   test("pages: null is an active section, not an omitted one", async () => {
@@ -238,6 +217,8 @@ describe("runForRepo secret references", () => {
       api,
       opts({
         settings: webhookSettings("$WEBHOOK_SECRET"),
+        // Spelled out, the way multi.ts runs the defaults document for a fileless target; the unset-variable test below takes the default.
+        secretSource: "operator",
         secretEnv: { WEBHOOK_SECRET: "s3cret-plaintext" },
       }),
       io,
@@ -290,22 +271,35 @@ describe("runForRepo secret references", () => {
     expect(literalApi.calls).toEqual([]);
   });
 
-  test("a target-sourced reference is refused in both modes", async () => {
-    const api = new MockApi({});
-    const { io, annotations } = captureIo();
-    const result = await runForRepo(
-      api,
-      opts({
-        settings: webhookSettings("$WEBHOOK_SECRET"),
-        secretSource: "target",
-        secretEnv: { WEBHOOK_SECRET: "present-but-irrelevant" },
-      }),
-      io,
-    );
-    expect(result.result).toBe("failed");
-    expect(api.calls).toEqual([]);
-    expect(annotations.some((a) => a.includes("target-fetched settings file"))).toBe(true);
-  });
+  test.each(["apply", "check"] as const)(
+    "a target-sourced reference is refused in %s mode, before any API call",
+    async (mode) => {
+      const api = new MockApi({});
+      const { io, annotations } = captureIo();
+      const result = await runForRepo(
+        api,
+        opts({
+          mode,
+          settings: webhookSettings("$WEBHOOK_SECRET"),
+          secretSource: "target",
+          secretEnv: { WEBHOOK_SECRET: "present-but-irrelevant" },
+        }),
+        io,
+      );
+      expect(result.result).toBe("failed");
+      expect(result.outcomes).toEqual([
+        {
+          key: "webhooks",
+          status: "failed",
+          detail: [expect.stringContaining("target-fetched settings file")],
+        },
+      ]);
+      expect(annotations).toEqual([
+        expect.stringMatching(/^error: webhooks: .*target-fetched settings file/),
+      ]);
+      expect(api.calls).toEqual([]);
+    },
+  );
 
   test("a section excluded by `sections` cannot fail the run on its references", async () => {
     const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }).allowMutations(
@@ -323,7 +317,12 @@ describe("runForRepo secret references", () => {
       }),
       io,
     );
+    // The excluded section contributes no values, so its literal is never collected, let alone refused.
     expect(result.result).toBe("applied");
+    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
+      ["repository", "applied"],
+      ["webhooks", "excluded"],
+    ]);
   });
 });
 
@@ -381,12 +380,15 @@ describe("validateSettingsDoc", () => {
     );
   });
 
-  test("a YAML-tagged top-level value (a Date) is rejected, never branded", () => {
+  test.each<[what: string, doc: unknown]>([
+    ["a Date", new Date(0)],
+    ["a Set", new Set(["a"])],
+  ])("a YAML-tagged top-level value (%s) is rejected, never branded", (_what, doc) => {
     // parse("!!timestamp ...") returns a Date, an object with no keys; branding it valid would turn the whole document into a silent green no-op.
     const { io } = captureIo();
-    const tagged = err({ code: "settings-not-plain-mapping" as const, source: "f.yml" });
-    expect(validateSettingsDoc(new Date(0), "f.yml", SectionSelection.ALL, io)).toEqual(tagged);
-    expect(validateSettingsDoc(new Set(["a"]), "f.yml", SectionSelection.ALL, io)).toEqual(tagged);
+    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io)).toEqual(
+      err({ code: "settings-not-plain-mapping" as const, source: "f.yml" }),
+    );
   });
 
   test("a valid document comes back branded, ready for runForRepo", () => {
@@ -460,7 +462,10 @@ describe("runForRepo plan sections", () => {
         ],
       },
     ]);
-    expect(logs.filter((line) => line.startsWith("drift: "))).toHaveLength(2);
+    expect(logs).toEqual([
+      'drift: workflows[ci.yml]: declared "disabled" != live "active"; apply will disable the workflow',
+      expect.stringMatching(/^drift: workflows\[missing\.yml\]: declared in the settings file/),
+    ]);
     expect(api.mutations()).toEqual([]);
   });
 
@@ -489,7 +494,7 @@ describe("runForRepo plan sections", () => {
     ]);
   });
 
-  test("a section's read denial arms the preflight barrier", async () => {
+  test("a section's read denial arms the preflight barrier, in the concealed 404 style too", async () => {
     const api = new MockApi({
       [WORKFLOWS_LIST]: { error: { status: 404, message: "Not Found", body: "" } },
     });

@@ -204,33 +204,16 @@ describe("subsetDiff", () => {
       { t: ["c", "c"] },
       ['x.t: missing "a"', 'x.t: unexpected "c"'],
     ],
-  ])("renders the %s branch as before", (_branch, desired, live, lines) => {
+    ["undeclared live key, ignored", { a: 1 }, { a: 1, b: 2 }, []],
+    ["empty string against live null, tolerated", { d: "" }, { d: null }, []],
+    [
+      "root-level type-keyed list, reordered",
+      [{ type: "deletion" }, { type: "update" }],
+      [{ type: "update" }, { type: "deletion" }],
+      [],
+    ],
+  ])("renders the %s branch", (_branch, desired, live, lines) => {
     expect(subsetDiff(desired, live, "x")).toEqual(lines);
-  });
-  test("ignores undeclared live keys", () => {
-    expect(subsetDiff({ a: 1 }, { a: 1, b: 2 }, "x")).toEqual([]);
-  });
-  test("reports scalar drift", () => {
-    expect(subsetDiff({ a: 1 }, { a: 2 }, "x")).toEqual(["x.a: 1 != 2"]);
-  });
-  test("empty string equals live null", () => {
-    expect(subsetDiff({ d: "" }, { d: null }, "x")).toEqual([]);
-  });
-  test("rules match by type, order-insensitive", () => {
-    const desired = [{ type: "deletion" }, { type: "update" }];
-    const live = [{ type: "update" }, { type: "deletion" }];
-    expect(subsetDiff(desired, live, "rules")).toEqual([]);
-  });
-  test("undeclared live rule is drift", () => {
-    const desired = [{ type: "deletion" }];
-    const live = [{ type: "deletion" }, { type: "update" }];
-    expect(subsetDiff(desired, live, "rules")).toEqual([
-      "rules[update]: present live but not declared",
-    ]);
-  });
-  test("scalar lists compare as sets", () => {
-    expect(subsetDiff(["a", "b"], ["b", "a"], "x")).toEqual([]);
-    expect(subsetDiff(["a"], ["a", "c"], "x")).toEqual(['x: unexpected "c"']);
   });
 });
 

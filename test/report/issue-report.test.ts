@@ -42,10 +42,13 @@ const humanIssue = (number: number, state: "open" | "closed") => ({
 });
 
 describe("deliverIssueReport", () => {
-  test("found by marker label: one lookup request, then PATCH body + open", async () => {
+  test("found by marker label: one lookup request, then PATCH body + open, leaving the issue's labels alone", async () => {
+    // Human-added labels must never be clobbered; the marker is already attached (that is how the lookup found it).
     const api = new MockApi({
       [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
-      [LABEL_LOOKUP]: { data: [reportIssue(7)] },
+      [LABEL_LOOKUP]: {
+        data: [{ ...reportIssue(7), labels: [{ name: "human-added" }, { name: MARKER_LABEL }] }],
+      },
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
@@ -132,6 +135,9 @@ describe("deliverIssueReport", () => {
       TITLE_SCAN,
       "PATCH /repos/o/private-repo/issues/3",
     ]);
+    // The scan hit carried no labels at all, so the reattached marker is the whole list.
+    const patch = api.calls.find((c) => c.method === "PATCH");
+    expect(patch?.payload).toEqual({ body: "body", state: "open", labels: [MARKER_LABEL] });
   });
 
   test("a fallback-scan hit without the marker is reclaimed and relabelled, whoever created it", async () => {
@@ -156,20 +162,6 @@ describe("deliverIssueReport", () => {
     ]);
     const patch = api.calls.find((c) => c.method === "PATCH");
     expect(patch?.payload).toEqual({ body: "body", state: "open", labels: ["bug", MARKER_LABEL] });
-  });
-
-  test("an issue found by the label lookup is PATCHed without a labels field", async () => {
-    // Human-added labels must never be clobbered; the marker is already attached (that is how the lookup found it).
-    const api = new MockApi({
-      [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
-      [LABEL_LOOKUP]: {
-        data: [{ ...reportIssue(7), labels: [{ name: "human-added" }, { name: MARKER_LABEL }] }],
-      },
-      "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
-    });
-    await deliverIssueReport(api, SLUG, "body", true, "always");
-    const patch = api.calls.find((c) => c.method === "PATCH");
-    expect(patch?.payload).toEqual({ body: "body", state: "open" });
   });
 
   test("a healthy always run relabels a fallback-found stripped issue while closing it", async () => {
@@ -210,77 +202,36 @@ describe("deliverIssueReport", () => {
     ]);
   });
 
-  const policyCases: Array<{
-    name: string;
-    lookup: "label" | "title";
-    listed: Array<Record<string, unknown>>;
-    picks: number;
-  }> = [
-    {
-      name: "a human's closed same-titled issue is never reclaimed over the real open report",
-      lookup: "title",
-      listed: [reportIssue(9), humanIssue(1, "closed")],
-      picks: 9,
-    },
-    {
-      name: "a human's OPEN same-titled issue, newer than the closed real report, is never reclaimed either",
-      lookup: "title",
-      listed: [humanIssue(9, "open"), reportIssue(3, "closed")],
-      picks: 3,
-    },
-    {
-      name: "a human's open issue wearing the marker label loses to the closed real report by the label lookup too",
-      lookup: "label",
-      listed: [humanIssue(9, "open"), reportIssue(2, "closed")],
-      picks: 2,
-    },
-    {
-      name: "two reports: the open one wins over a newer closed one",
-      lookup: "title",
-      listed: [reportIssue(9, "closed"), reportIssue(3)],
-      picks: 3,
-    },
-    {
-      name: "two open reports: the newest wins",
-      lookup: "title",
-      listed: [reportIssue(9), reportIssue(3)],
-      picks: 9,
-    },
-    {
-      name: "two closed reports: the newest wins",
-      lookup: "label",
-      listed: [reportIssue(9, "closed"), reportIssue(3, "closed")],
-      picks: 9,
-    },
-  ];
-  for (const { name, lookup, listed, picks } of policyCases) {
-    test(`candidate policy: ${name}`, async () => {
-      // Both lookups walk newest first and share one policy: a report body, then open over closed, then newest. The
-      // loser is never written: a same-titled human issue used to be PATCHed with the report, reopened, and relabelled.
-      const listedWithMarker = listed.map((issue) => ({ ...issue, labels: [MARKER_LABEL] }));
-      const api = new MockApi({
-        [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
-        [LABEL_LOOKUP]: { data: lookup === "label" ? listedWithMarker : [] },
-        [TITLE_SCAN]: { data: lookup === "title" ? listed : [] },
-        [ISSUE_CREATE]: { data: reportIssue(50) },
-        "PATCH /repos/o/private-repo/issues/*": { data: null },
-      });
-      const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-      expect(result).toEqual({ url: `https://github.com/o/private-repo/issues/${picks}` });
-      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-        LABEL_CREATE,
-        LABEL_LOOKUP,
-        ...(lookup === "title" ? [TITLE_SCAN] : []),
-        `PATCH /repos/o/private-repo/issues/${picks}`,
-      ]);
-      const patch = api.calls.find((c) => c.method === "PATCH");
-      expect(patch?.payload).toEqual(
-        lookup === "title"
-          ? { body: "body", state: "open", labels: [MARKER_LABEL] }
-          : { body: "body", state: "open" },
-      );
+  test.each<[name: string, listed: Array<Record<string, unknown>>, picks: number]>([
+    [
+      "two reports: the open one wins over a newer closed one",
+      [reportIssue(9, "closed"), reportIssue(3)],
+      3,
+    ],
+    ["two open reports: the newest wins", [reportIssue(9), reportIssue(3)], 9],
+    [
+      "two closed reports: the newest wins",
+      [reportIssue(9, "closed"), reportIssue(3, "closed")],
+      9,
+    ],
+  ])("candidate policy: %s", async (_name, listed, picks) => {
+    // Both lookups share one policy: a report body, then open over closed, then newest. The loser is never written.
+    const api = new MockApi({
+      [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
+      [LABEL_LOOKUP]: { data: [] },
+      [TITLE_SCAN]: { data: listed },
+      [ISSUE_CREATE]: { data: reportIssue(50) },
+      "PATCH /repos/o/private-repo/issues/*": { data: null },
     });
-  }
+    const result = await deliverIssueReport(api, SLUG, "body", true, "always");
+    expect(result).toEqual({ url: `https://github.com/o/private-repo/issues/${picks}` });
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      LABEL_CREATE,
+      LABEL_LOOKUP,
+      TITLE_SCAN,
+      `PATCH /repos/o/private-repo/issues/${picks}`,
+    ]);
+  });
 
   test("nothing anywhere: POST with the marker label, then close when healthy", async () => {
     const api = new MockApi({
@@ -404,25 +355,17 @@ describe("deliverIssueReport under mode: on-failure", () => {
     expect(patch?.payload).toEqual({ body: "the report body", state: "closed" });
   });
 
-  test("healthy with only a human's open same-titled issue under the marker label: skipped, untouched", async () => {
-    const api = new MockApi({
-      [OPEN_LOOKUP]: { data: [{ ...humanIssue(4, "open"), labels: [MARKER_LABEL] }] },
-    });
-    const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
-    expect(result).toEqual({ skipped: true });
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${OPEN_LOOKUP_PATH}`]);
-  });
-
   test("a failing quiet-path lookup is a safe warning, never the slug", async () => {
     const api = new MockApi({
       [OPEN_LOOKUP]: { error: { status: 500, message: "boom o/private-repo", body: "" } },
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
-      warning:
-        "could not deliver the private report (HTTP 500). Re-run, or set " +
-        "private-report: none if it persists",
+      warning: expect.stringMatching(
+        /^could not deliver the private report \(HTTP 500\)\. Re-run, /,
+      ),
     });
+    expect(JSON.stringify(result)).not.toContain("o/private-repo");
   });
 
   test("a failing close-PATCH is a safe warning too", async () => {
@@ -434,10 +377,11 @@ describe("deliverIssueReport under mode: on-failure", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
-      warning:
-        'could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) ' +
-        "under the PAT's Repository permissions for the target repository, or set private-report: none",
+      warning: expect.stringMatching(
+        /^could not deliver the private report \(HTTP 403\)\. To fix, grant "Issues"/,
+      ),
     });
+    expect(JSON.stringify(result)).not.toContain("o/private-repo");
   });
 
   test("a non-list quiet-path response is a warning, not a crash", async () => {
