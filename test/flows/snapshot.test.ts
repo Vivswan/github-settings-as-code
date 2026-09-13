@@ -7,7 +7,7 @@
  * targets) ends as the documented result.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   existsSync,
   lstatSync,
@@ -36,6 +36,7 @@ import { collectingIo, type Io } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
 import type { SectionKey } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
+import { withTempDir } from "../temp-dir.js";
 
 const repo = parseRepoSlug("o/r")._unsafeUnwrap();
 
@@ -78,18 +79,10 @@ export function hasSnapshotHeader(written: string, slug: string): boolean {
   return dated?.startsWith(prefix) === true && ISO_INSTANT.test(dated.slice(prefix.length));
 }
 
-let dir: string;
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "snapshot-flow-"));
-});
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
-});
-
 type FileConfig = Extract<SnapshotConfig, { form: "file" }>;
 type DirConfig = Extract<SnapshotConfig, { form: "dir" }>;
 
-const fileCfg = (overrides: Partial<FileConfig> = {}): FileConfig =>
+const fileCfg = (dir: string, overrides: Partial<FileConfig> = {}): FileConfig =>
   ({
     form: "file",
     repo,
@@ -101,7 +94,7 @@ const fileCfg = (overrides: Partial<FileConfig> = {}): FileConfig =>
     ...overrides,
   }) as FileConfig;
 
-const dirCfg = (overrides: Partial<DirConfig> = {}): DirConfig =>
+const dirCfg = (dir: string, overrides: Partial<DirConfig> = {}): DirConfig =>
   ({
     form: "dir",
     snapshotDir: join(dir, "snapshots"),
@@ -143,155 +136,165 @@ describe("hasSnapshotHeader", () => {
 });
 
 describe("runSnapshot, file form", () => {
-  test("writes the document under its header and reports through the outputs, the log, and the summary", async () => {
-    const api = new MockApi(labelsRoute("o/r", [BUG, DOCS]));
-    const cfg = fileCfg();
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    const written = readFileSync(cfg.snapshotFile, "utf8");
-    expect(hasSnapshotHeader(written, "o/r")).toBe(true);
-    expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
-    expect(api.mutations()).toEqual([]);
-    expect(collected.outputs).toEqual({
-      result: "snapshot",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines).toEqual([
-      { line: `snapshot written to ${cfg.snapshotFile}` },
-      { line: "result: snapshot" },
-    ]);
-    expect(collected.summary).toEqual([
-      [
-        "## github-settings-as-code (snapshot)",
-        "",
-        `:white_check_mark: snapshot - written to ${cfg.snapshotFile}`,
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        "| labels | :white_check_mark: snapshot | - |",
-      ].join("\n"),
-    ]);
-  });
+  test("writes the document under its header and reports through the outputs, the log, and the summary", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi(labelsRoute("o/r", [BUG, DOCS]));
+      const cfg = fileCfg(dir);
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      const written = readFileSync(cfg.snapshotFile, "utf8");
+      expect(hasSnapshotHeader(written, "o/r")).toBe(true);
+      expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
+      expect(api.mutations()).toEqual([]);
+      expect(collected.outputs).toEqual({
+        result: "snapshot",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines).toEqual([
+        { line: `snapshot written to ${cfg.snapshotFile}` },
+        { line: "result: snapshot" },
+      ]);
+      expect(collected.summary).toEqual([
+        [
+          "## github-settings-as-code (snapshot)",
+          "",
+          `:white_check_mark: snapshot - written to ${cfg.snapshotFile}`,
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          "| labels | :white_check_mark: snapshot | - |",
+        ].join("\n"),
+      ]);
+    }));
 
-  test("a private target other than the run's own closes through the fleet's seal: the summary hides the note, the log says nothing", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r": { data: { private: true, visibility: "private" } },
-      ...labelsRoute("o/r", [BUG]),
-    });
-    const cfg = fileCfg({ privateRepos: "redact", selfSlug: "admin/fleet" });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-    expect([...collected.io.masked()]).toEqual(["o/r"]);
-    expect(collected.lines).toEqual([{ line: "result: snapshot" }]);
-    expect(collected.summary).toEqual([
-      [
-        "## github-settings-as-code (snapshot)",
-        "",
-        `:white_check_mark: snapshot - ${REDACTED_NOTE}`,
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        "| labels | :white_check_mark: snapshot | hidden (private repository) |",
-      ].join("\n"),
-    ]);
-    expect(collected.summary[0]).not.toContain(cfg.snapshotFile);
-  });
+  test("a private target other than the run's own closes through the fleet's seal: the summary hides the note, the log says nothing", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+        ...labelsRoute("o/r", [BUG]),
+      });
+      const cfg = fileCfg(dir, { privateRepos: "redact", selfSlug: "admin/fleet" });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+      expect([...collected.io.masked()]).toEqual(["o/r"]);
+      expect(collected.lines).toEqual([{ line: "result: snapshot" }]);
+      expect(collected.summary).toEqual([
+        [
+          "## github-settings-as-code (snapshot)",
+          "",
+          `:white_check_mark: snapshot - ${REDACTED_NOTE}`,
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          "| labels | :white_check_mark: snapshot | hidden (private repository) |",
+        ].join("\n"),
+      ]);
+      expect(collected.summary[0]).not.toContain(cfg.snapshotFile);
+    }));
 
-  test("a private target that fails gets the fleet's one closed-value line, numbered as a fleet of one", async () => {
-    // No labels route: the read answers 404, the denial that fails the target under the fail policy.
-    const api = new MockApi({
-      "GET /repos/o/r": { data: { private: true, visibility: "private" } },
-    });
-    const cfg = fileCfg({ privateRepos: "redact", selfSlug: "admin/fleet" });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(existsSync(cfg.snapshotFile)).toBe(false);
-    expect(collected.lines).toEqual([
-      { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
-      { line: "result: failed" },
-    ]);
-    expect(collected.summary[0]).toContain("| labels | :x: failed | hidden (private repository) |");
-    expect(collected.summary[0]).not.toContain("/repos/o/r/labels");
-  });
+  test("a private target that fails gets the fleet's one closed-value line, numbered as a fleet of one", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // No labels route: the read answers 404, the denial that fails the target under the fail policy.
+      const api = new MockApi({
+        "GET /repos/o/r": { data: { private: true, visibility: "private" } },
+      });
+      const cfg = fileCfg(dir, { privateRepos: "redact", selfSlug: "admin/fleet" });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(existsSync(cfg.snapshotFile)).toBe(false);
+      expect(collected.lines).toEqual([
+        { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+        { line: "result: failed" },
+      ]);
+      expect(collected.summary[0]).toContain(
+        "| labels | :x: failed | hidden (private repository) |",
+      );
+      expect(collected.summary[0]).not.toContain("/repos/o/r/labels");
+    }));
 
-  test("a denied section is skipped under warn: partial, the file omits it, the header and the outputs say so", async () => {
-    // No variables route: the read answers 404, the fine-grained denial.
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    const cfg = fileCfg({
-      onMissingPermission: "warn",
-      sections: only("labels", "actions_variables", "check_suite_preferences"),
-    });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    const written = readFileSync(cfg.snapshotFile, "utf8");
-    expect(parseYaml(written)).toEqual(doc(BUG));
-    expect(written).toContain(
-      "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run\n",
-    );
-    expect(written).toMatch(
-      /^# actions_variables: the token was denied GET \/repos\/o\/r\/actions\/variables/m,
-    );
-    expect(collected.outputs).toEqual({
-      result: "partial",
-      "skipped-sections": "actions_variables",
-      "repos-result": "{}",
-    });
-    expect(collected.lines.map((entry) => `${entry.level ?? "log"}: ${entry.line}`)).toEqual([
-      expect.stringMatching(/^warning: actions_variables: skipped - the token was denied GET/),
-      "notice: not snapshotted: check_suite_preferences - snapshot does not read these sections back, so the file omits them (the header says why); declare them by hand if they should be managed",
-      `log: snapshot written to ${cfg.snapshotFile}`,
-      "log: result: partial",
-    ]);
-    expect(collected.summary[0]).toContain(":warning: partial - written to");
-    expect(collected.summary[0]).toContain("| actions_variables | :fast_forward: skipped |");
-    expect(collected.summary[0]).toContain(
-      "| check_suite_preferences | :fast_forward: unsupported |",
-    );
-  });
+  test("a denied section is skipped under warn: partial, the file omits it, the header and the outputs say so", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // No variables route: the read answers 404, the fine-grained denial.
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      const cfg = fileCfg(dir, {
+        onMissingPermission: "warn",
+        sections: only("labels", "actions_variables", "check_suite_preferences"),
+      });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      const written = readFileSync(cfg.snapshotFile, "utf8");
+      expect(parseYaml(written)).toEqual(doc(BUG));
+      expect(written).toContain(
+        "# check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run\n",
+      );
+      expect(written).toMatch(
+        /^# actions_variables: the token was denied GET \/repos\/o\/r\/actions\/variables/m,
+      );
+      expect(collected.outputs).toEqual({
+        result: "partial",
+        "skipped-sections": "actions_variables",
+        "repos-result": "{}",
+      });
+      expect(collected.lines.map((entry) => `${entry.level ?? "log"}: ${entry.line}`)).toEqual([
+        expect.stringMatching(/^warning: actions_variables: skipped - the token was denied GET/),
+        "notice: not snapshotted: check_suite_preferences - snapshot does not read these sections back, so the file omits them (the header says why); declare them by hand if they should be managed",
+        `log: snapshot written to ${cfg.snapshotFile}`,
+        "log: result: partial",
+      ]);
+      expect(collected.summary[0]).toContain(":warning: partial - written to");
+      expect(collected.summary[0]).toContain("| actions_variables | :fast_forward: skipped |");
+      expect(collected.summary[0]).toContain(
+        "| check_suite_preferences | :fast_forward: unsupported |",
+      );
+    }));
 
-  test("a denied section under fail fails the run and writes no file", async () => {
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    const cfg = fileCfg({ sections: only("labels", "actions_variables") });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(existsSync(cfg.snapshotFile)).toBe(false);
-    expect(collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines).toEqual([
-      {
-        level: "error",
-        line: expect.stringMatching(
-          /^actions_variables: not snapshotted - the token was denied GET/,
-        ),
-      },
-      { line: "result: failed" },
-    ]);
-    expect(collected.summary[0]).toContain(
-      ":x: failed - the snapshot failed, so no file was written",
-    );
-  });
+  test("a denied section under fail fails the run and writes no file", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      const cfg = fileCfg(dir, { sections: only("labels", "actions_variables") });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(existsSync(cfg.snapshotFile)).toBe(false);
+      expect(collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines).toEqual([
+        {
+          level: "error",
+          line: expect.stringMatching(
+            /^actions_variables: not snapshotted - the token was denied GET/,
+          ),
+        },
+        { line: "result: failed" },
+      ]);
+      expect(collected.summary[0]).toContain(
+        ":x: failed - the snapshot failed, so no file was written",
+      );
+    }));
 
-  test("an unwritable snapshot-file fails the run naming the input", async () => {
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    writeFileSync(join(dir, "blocker"), "");
-    const cfg = fileCfg({ snapshotFile: join(dir, "blocker", "snapshot.yml") });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(collected.outputs.result).toBe("failed");
-    const [first] = collected.lines;
-    expect(first?.level).toBe("error");
-    // The path is compared as text, never as a pattern; the OS error code sits between.
-    expect(first?.line.startsWith(`cannot write the snapshot to ${cfg.snapshotFile}: `)).toBe(true);
-    expect(first?.line).toMatch(/E(EXIST|NOTDIR)/);
-    expect(
-      first?.line.endsWith('. Check that the "snapshot-file" input names a writable path'),
-    ).toBe(true);
-  });
+  test("an unwritable snapshot-file fails the run naming the input", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      writeFileSync(join(dir, "blocker"), "");
+      const cfg = fileCfg(dir, { snapshotFile: join(dir, "blocker", "snapshot.yml") });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(collected.outputs.result).toBe("failed");
+      const [first] = collected.lines;
+      expect(first?.level).toBe("error");
+      // The path is compared as text, never as a pattern; the OS error code sits between.
+      expect(first?.line.startsWith(`cannot write the snapshot to ${cfg.snapshotFile}: `)).toBe(
+        true,
+      );
+      expect(first?.line).toMatch(/E(EXIST|NOTDIR)/);
+      expect(
+        first?.line.endsWith('. Check that the "snapshot-file" input names a writable path'),
+      ).toBe(true);
+    }));
 });
 
 function settingsRefusal(snapshotFile: string): string {
@@ -318,151 +321,156 @@ describe("runSnapshot writes through a staging file", () => {
     line: `cannot write the snapshot to ${path}: ${os}. Check that the "${input}" input names a writable path`,
   });
 
-  test("a staging write that fails leaves the previous snapshot intact and reports the write's error", async () => {
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    const cfg = fileCfg();
-    const staging = `${cfg.snapshotFile}.tmp`;
-    mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
-    writeFileSync(cfg.snapshotFile, "labels: []\n");
-    // A directory at the staging path fails the run before the rename; the run must not remove it either.
-    mkdirSync(staging);
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines).toEqual([
-      unwritable(
-        cfg.snapshotFile,
-        "snapshot-file",
-        `SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${staging}`,
-      ),
-      { line: "result: failed" },
-    ]);
-    expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
-    rmSync(staging, { recursive: true });
-    expect(await run(api, cfg, collectingIo().io)).toBe(0);
-    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-    expect(existsSync(staging)).toBe(false);
-  });
+  test("a staging write that fails leaves the previous snapshot intact and reports the write's error", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      const cfg = fileCfg(dir);
+      const staging = `${cfg.snapshotFile}.tmp`;
+      mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
+      writeFileSync(cfg.snapshotFile, "labels: []\n");
+      // A directory at the staging path fails the run before the rename; the run must not remove it either.
+      mkdirSync(staging);
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines).toEqual([
+        unwritable(
+          cfg.snapshotFile,
+          "snapshot-file",
+          `SystemError [ERR_FS_EISDIR]: Path is a directory: rm returned EISDIR (is a directory) ${staging}`,
+        ),
+        { line: "result: failed" },
+      ]);
+      expect(readFileSync(cfg.snapshotFile, "utf8")).toBe("labels: []\n");
+      rmSync(staging, { recursive: true });
+      expect(await run(api, cfg, collectingIo().io)).toBe(0);
+      expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+      expect(existsSync(staging)).toBe(false);
+    }));
 
-  test("a leftover link at the staging path is unlinked, never written through: the destination becomes a regular file", async () => {
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    const cfg = fileCfg();
-    const staging = `${cfg.snapshotFile}.tmp`;
-    mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
-    writeFileSync(cfg.snapshotFile, "labels: []\n");
-    symlinkSync("snapshot.yml", staging);
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    expect(collected.outputs).toEqual({
-      result: "snapshot",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines).toEqual([
-      { line: `snapshot written to ${cfg.snapshotFile}` },
-      { line: "result: snapshot" },
-    ]);
-    expect(lstatSync(cfg.snapshotFile).isSymbolicLink()).toBe(false);
-    expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
-    expect(existsSync(staging)).toBe(false);
-  });
+  test("a leftover link at the staging path is unlinked, never written through: the destination becomes a regular file", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      const cfg = fileCfg(dir);
+      const staging = `${cfg.snapshotFile}.tmp`;
+      mkdirSync(dirname(cfg.snapshotFile), { recursive: true });
+      writeFileSync(cfg.snapshotFile, "labels: []\n");
+      symlinkSync("snapshot.yml", staging);
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      expect(collected.outputs).toEqual({
+        result: "snapshot",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines).toEqual([
+        { line: `snapshot written to ${cfg.snapshotFile}` },
+        { line: "result: snapshot" },
+      ]);
+      expect(lstatSync(cfg.snapshotFile).isSymbolicLink()).toBe(false);
+      expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
+      expect(existsSync(staging)).toBe(false);
+    }));
 
-  test("a rename that fails removes the staging file, fails only that target, and leaves the destination as it was", async () => {
-    const api = new MockApi({
-      "GET /repos/o/a": { data: { private: false } },
-      "GET /repos/o/b": { data: { private: false } },
-      ...labelsRoute("o/a", [BUG]),
-      ...labelsRoute("o/b", [DOCS]),
-    });
-    const cfg = dirCfg();
-    const fileA = join(cfg.snapshotDir, "o", "a.yml");
-    const fileB = join(cfg.snapshotDir, "o", "b.yml");
-    // A directory holding a file at o/a's destination lets the staging write succeed and the rename fail.
-    mkdirSync(fileA, { recursive: true });
-    writeFileSync(join(fileA, "keep"), "authored\n");
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(collected.outputs).toEqual({
-      "skipped-sections": "",
-      result: "failed",
-      "repos-result": JSON.stringify({
-        "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
-        "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
-      }),
-    });
-    const { level, line } = unwritable(
-      fileA,
-      "snapshot-dir",
-      `Error: EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
-    );
-    expect(collected.lines).toEqual([
-      { level, line: `o/a: ${line}` },
-      { line: `o/b: snapshot written to ${fileB}` },
-      { line: "result: failed" },
-    ]);
-    expect(existsSync(`${fileA}.tmp`)).toBe(false);
-    expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
-    expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
-    expect(existsSync(`${fileB}.tmp`)).toBe(false);
-    expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
-      "## github-settings-as-code (snapshot, 2 repositories)",
-      "",
-      `1 of 2 snapshots written under ${cfg.snapshotDir}.`,
-      "",
-      "| Repository | Source | Result | File |",
-      "|---|---|---|---|",
-      "| o/a | remote | :x: failed | - |",
-      `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
-    ]);
-  });
+  test("a rename that fails removes the staging file, fails only that target, and leaves the destination as it was", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/a": { data: { private: false } },
+        "GET /repos/o/b": { data: { private: false } },
+        ...labelsRoute("o/a", [BUG]),
+        ...labelsRoute("o/b", [DOCS]),
+      });
+      const cfg = dirCfg(dir);
+      const fileA = join(cfg.snapshotDir, "o", "a.yml");
+      const fileB = join(cfg.snapshotDir, "o", "b.yml");
+      // A directory holding a file at o/a's destination lets the staging write succeed and the rename fail.
+      mkdirSync(fileA, { recursive: true });
+      writeFileSync(join(fileA, "keep"), "authored\n");
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "failed",
+        "repos-result": JSON.stringify({
+          "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
+          "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      const { level, line } = unwritable(
+        fileA,
+        "snapshot-dir",
+        `Error: EISDIR: illegal operation on a directory, rename '${fileA}.tmp' -> '${fileA}'`,
+      );
+      expect(collected.lines).toEqual([
+        { level, line: `o/a: ${line}` },
+        { line: `o/b: snapshot written to ${fileB}` },
+        { line: "result: failed" },
+      ]);
+      expect(existsSync(`${fileA}.tmp`)).toBe(false);
+      expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
+      expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
+      expect(existsSync(`${fileB}.tmp`)).toBe(false);
+      expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
+        "## github-settings-as-code (snapshot, 2 repositories)",
+        "",
+        `1 of 2 snapshots written under ${cfg.snapshotDir}.`,
+        "",
+        "| Repository | Source | Result | File |",
+        "|---|---|---|---|",
+        "| o/a | remote | :x: failed | - |",
+        `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
+      ]);
+    }));
 });
 
 describe("runSnapshot refuses a destination that would overwrite an authored file", () => {
-  test.each([
+  test.each<[string, (dir: string) => SnapshotConfig, string]>([
     [
       "snapshot-file naming the settings file apply reads",
-      () => fileCfg({ snapshotFile: "./.github/settings.yml" }),
+      (dir) => fileCfg(dir, { snapshotFile: "./.github/settings.yml" }),
       settingsRefusal("./.github/settings.yml"),
     ],
     [
       "snapshot-dir equal to the repos-dir",
-      () => dirCfg({ snapshotDir: "./repos", reposDir: "repos" }),
+      (dir) => dirCfg(dir, { snapshotDir: "./repos", reposDir: "repos" }),
       disjointRefusal("./repos", "repos"),
     ],
     [
       "snapshot-dir above the repos-dir, where a bare <name>.yml would be overwritten",
-      () => dirCfg({ snapshotDir: "central", reposDir: "central/acme" }),
+      (dir) => dirCfg(dir, { snapshotDir: "central", reposDir: "central/acme" }),
       disjointRefusal("central", "central/acme"),
     ],
     [
       "snapshot-dir below the repos-dir under a name starting with two dots, which is still below it",
-      () => dirCfg({ snapshotDir: "central/..snapshots", reposDir: "central" }),
+      (dir) => dirCfg(dir, { snapshotDir: "central/..snapshots", reposDir: "central" }),
       disjointRefusal("central/..snapshots", "central"),
     ],
     [
       "snapshot-dir below the repos-dir, where the next run would read the snapshots as central files",
-      () => dirCfg({ snapshotDir: "central/snapshots", reposDir: "central" }),
+      (dir) => dirCfg(dir, { snapshotDir: "central/snapshots", reposDir: "central" }),
       disjointRefusal("central/snapshots", "central"),
     ],
-  ])("%s fails before any API call or write", async (_case, cfg, message) => {
-    const api = new MockApi({});
-    const collected = collectingIo();
-    expect(await run(api, cfg(), collected.io)).toBe(1);
-    expect(api.calls).toEqual([]);
-    expect(collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines).toEqual([
-      { level: "error", line: message },
-      { line: "result: failed" },
-    ]);
-  });
+  ])("%s fails before any API call or write", (_case, cfg, message) =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({});
+      const collected = collectingIo();
+      expect(await run(api, cfg(dir), collected.io)).toBe(1);
+      expect(api.calls).toEqual([]);
+      expect(collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines).toEqual([
+        { level: "error", line: message },
+        { line: "result: failed" },
+      ]);
+    }),
+  );
 });
 
 function tempFoldsCase(): boolean {
@@ -482,12 +490,12 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
     authored: string;
     /** Makes the alias reach the authored path; a case alias needs nothing. */
     link?: (dir: string) => void;
-    cfg: () => SnapshotConfig;
+    cfg: (dir: string) => SnapshotConfig;
     message: string;
   };
 
   /** Runs in `dir`, since the inputs and the settings-file constant resolve against the working directory. */
-  async function refuses({ authored, link, cfg, message }: Alias): Promise<void> {
+  async function refuses(dir: string, { authored, link, cfg, message }: Alias): Promise<void> {
     const authoredPath = join(dir, authored);
     mkdirSync(dirname(authoredPath), { recursive: true });
     writeFileSync(authoredPath, AUTHORED);
@@ -500,7 +508,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
     const previous = process.cwd();
     process.chdir(dir);
     try {
-      expect(await run(api, cfg(), collected.io)).toBe(1);
+      expect(await run(api, cfg(dir), collected.io)).toBe(1);
     } finally {
       process.chdir(previous);
     }
@@ -526,7 +534,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         "snapshot-file spelled .GITHUB/settings.yml",
         {
           authored: settingsFile,
-          cfg: () => fileCfg({ snapshotFile: join(".GITHUB", "settings.yml") }),
+          cfg: (dir) => fileCfg(dir, { snapshotFile: join(".GITHUB", "settings.yml") }),
           message: settingsRefusal(join(".GITHUB", "settings.yml")),
         },
       ],
@@ -534,7 +542,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         "snapshot-dir spelled CENTRAL over the repos-dir central",
         {
           authored: central,
-          cfg: () => dirCfg({ snapshotDir: "CENTRAL", reposDir: "central" }),
+          cfg: (dir) => dirCfg(dir, { snapshotDir: "CENTRAL", reposDir: "central" }),
           message: disjointRefusal("CENTRAL", "central"),
         },
       ],
@@ -542,11 +550,12 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         "a snapshot-dir that does not exist yet below the case-aliased repos-dir",
         {
           authored: central,
-          cfg: () => dirCfg({ snapshotDir: join("CENTRAL", "snapshots"), reposDir: "central" }),
+          cfg: (dir) =>
+            dirCfg(dir, { snapshotDir: join("CENTRAL", "snapshots"), reposDir: "central" }),
           message: disjointRefusal(join("CENTRAL", "snapshots"), "central"),
         },
       ],
-    ])("%s", (_case, alias) => refuses(alias));
+    ])("%s", (_case, alias) => withTempDir("snapshot-flow-", (dir) => refuses(dir, alias)));
   });
 
   test.each<[string, Alias]>([
@@ -555,7 +564,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
       {
         authored: settingsFile,
         link: (cwd) => symlinkSync(join(cwd, settingsFile), join(cwd, "snapshot.yml")),
-        cfg: () => fileCfg({ snapshotFile: "snapshot.yml" }),
+        cfg: (dir) => fileCfg(dir, { snapshotFile: "snapshot.yml" }),
         message: settingsRefusal("snapshot.yml"),
       },
     ],
@@ -564,7 +573,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
       {
         authored: central,
         link: (cwd) => symlinkSync(join(cwd, "central"), join(cwd, "mirror")),
-        cfg: () => dirCfg({ snapshotDir: "mirror", reposDir: "central" }),
+        cfg: (dir) => dirCfg(dir, { snapshotDir: "mirror", reposDir: "central" }),
         message: disjointRefusal("mirror", "central"),
       },
     ],
@@ -573,8 +582,8 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
       {
         authored: central,
         link: (cwd) => symlinkSync(join(cwd, "central"), join(cwd, "mirror")),
-        cfg: () =>
-          dirCfg({ snapshotDir: ["missing", "..", "mirror"].join(sep), reposDir: "central" }),
+        cfg: (dir) =>
+          dirCfg(dir, { snapshotDir: ["missing", "..", "mirror"].join(sep), reposDir: "central" }),
         message: disjointRefusal(["missing", "..", "mirror"].join(sep), "central"),
       },
     ],
@@ -586,8 +595,12 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
           mkdirSync(join(cwd, "out"));
           symlinkSync(join("..", "authored"), join(cwd, "out", "central"));
         },
-        cfg: () =>
-          dirCfg({ snapshotDir: "out", reposDir: join("out", "central"), adminOwner: "central" }),
+        cfg: (dir) =>
+          dirCfg(dir, {
+            snapshotDir: "out",
+            reposDir: join("out", "central"),
+            adminOwner: "central",
+          }),
         message: disjointRefusal("out", join("out", "central")),
       },
     ],
@@ -599,16 +612,16 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
           mkdirSync(join(cwd, ".github", "inner"));
           symlinkSync(join(".github", "inner"), join(cwd, "link"));
         },
-        cfg: () => fileCfg({ snapshotFile: ["link", "..", "settings.yml"].join(sep) }),
+        cfg: (dir) => fileCfg(dir, { snapshotFile: ["link", "..", "settings.yml"].join(sep) }),
         message: settingsRefusal(["link", "..", "settings.yml"].join(sep)),
       },
     ],
-  ])("%s", (_case, alias) => refuses(alias));
+  ])("%s", (_case, alias) => withTempDir("snapshot-flow-", (dir) => refuses(dir, alias)));
 
   type Carried = {
     authored: string;
     link: (cwd: string) => void;
-    cfg: () => DirConfig;
+    cfg: (dir: string) => DirConfig;
     /** Every target the run resolves, central first, with the file it would write and why it must not. */
     targets: Array<{
       slug: string;
@@ -634,8 +647,8 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
           symlinkSync("out", join(cwd, "outlink"));
           symlinkSync(join("..", "authored"), join(cwd, "out", "central"));
         },
-        cfg: () =>
-          dirCfg({
+        cfg: (dir) =>
+          dirCfg(dir, {
             snapshotDir: "outlink",
             reposInput: "",
             reposDir: join("out", "central"),
@@ -657,8 +670,8 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
       {
         authored: settingsFile,
         link: () => {},
-        cfg: () =>
-          dirCfg({ snapshotDir: ".", reposInput: ".github/settings", privateRepos: "show" }),
+        cfg: (dir) =>
+          dirCfg(dir, { snapshotDir: ".", reposInput: ".github/settings", privateRepos: "show" }),
         targets: [
           {
             slug: ".github/settings",
@@ -677,8 +690,13 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
           mkdirSync(join(cwd, "central"));
           symlinkSync(join("..", "out", "o"), join(cwd, "central", "o"));
         },
-        cfg: () =>
-          dirCfg({ snapshotDir: "out", reposDir: "central", reposInput: "", privateRepos: "show" }),
+        cfg: (dir) =>
+          dirCfg(dir, {
+            snapshotDir: "out",
+            reposDir: "central",
+            reposInput: "",
+            privateRepos: "show",
+          }),
         targets: [
           {
             slug: "o/r",
@@ -697,8 +715,8 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
           mkdirSync(join(cwd, "out"));
           symlinkSync(join("..", "central", "o"), join(cwd, "out", "o"));
         },
-        cfg: () =>
-          dirCfg({
+        cfg: (dir) =>
+          dirCfg(dir, {
             snapshotDir: "out",
             reposDir: "central",
             reposInput: "o/x",
@@ -720,315 +738,328 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         ],
       },
     ],
-  ])("%s: those targets fail alone, before any read", async (_case, carried) => {
-    const authoredPath = join(dir, carried.authored);
-    mkdirSync(dirname(authoredPath), { recursive: true });
-    writeFileSync(authoredPath, AUTHORED);
-    carried.link(dir);
-    const api = new MockApi({});
-    const collected = collectingIo();
-    const previous = process.cwd();
-    process.chdir(dir);
-    try {
-      expect(await run(api, carried.cfg(), collected.io)).toBe(1);
-    } finally {
-      process.chdir(previous);
-    }
-    expect(api.calls).toEqual([]);
-    expect(collected.outputs).toEqual({
-      "skipped-sections": "",
-      result: "failed",
-      "repos-result": JSON.stringify(
-        Object.fromEntries(
-          carried.targets.map((t) => [
-            t.slug,
-            { result: "failed", source: t.source, "skipped-sections": [] },
-          ]),
+  ])("%s: those targets fail alone, before any read", (_case, carried) =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const authoredPath = join(dir, carried.authored);
+      mkdirSync(dirname(authoredPath), { recursive: true });
+      writeFileSync(authoredPath, AUTHORED);
+      carried.link(dir);
+      const api = new MockApi({});
+      const collected = collectingIo();
+      const previous = process.cwd();
+      process.chdir(dir);
+      try {
+        expect(await run(api, carried.cfg(dir), collected.io)).toBe(1);
+      } finally {
+        process.chdir(previous);
+      }
+      expect(api.calls).toEqual([]);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "failed",
+        "repos-result": JSON.stringify(
+          Object.fromEntries(
+            carried.targets.map((t) => [
+              t.slug,
+              { result: "failed", source: t.source, "skipped-sections": [] },
+            ]),
+          ),
         ),
-      ),
-    });
-    expect(collected.lines).toEqual([
-      ...carried.targets.map((t) => ({
-        level: "error" as const,
-        line: `${t.slug}: cannot write the snapshot to ${t.path}: ${t.reason(dir)}`,
-      })),
-      { line: "result: failed" },
-    ]);
-    expect(readFileSync(authoredPath, "utf8")).toBe(AUTHORED);
-    for (const t of carried.targets) {
-      expect(existsSync(join(dir, `${t.path}.tmp`))).toBe(false);
-    }
-  });
+      });
+      expect(collected.lines).toEqual([
+        ...carried.targets.map((t) => ({
+          level: "error" as const,
+          line: `${t.slug}: cannot write the snapshot to ${t.path}: ${t.reason(dir)}`,
+        })),
+        { line: "result: failed" },
+      ]);
+      expect(readFileSync(authoredPath, "utf8")).toBe(AUTHORED);
+      for (const t of carried.targets) {
+        expect(existsSync(join(dir, `${t.path}.tmp`))).toBe(false);
+      }
+    }),
+  );
 });
 
 describe("runSnapshot, dir form", () => {
-  test("a snapshot-dir spelled through a link and .. lands where join puts it, beside the link, and is not refused", async () => {
-    // The write collapses "link/.." before the OS sees it; the guard must judge the same place, not link's target.
-    mkdirSync(join(dir, "central", "o"), { recursive: true });
-    mkdirSync(join(dir, "central", "inner"));
-    writeFileSync(join(dir, "central", "o", "r.yml"), "labels: []\n");
-    symlinkSync(join("central", "inner"), join(dir, "link"));
-    const api = new MockApi(labelsRoute("o/r", [BUG]));
-    const cfg = dirCfg({
-      snapshotDir: ["link", "..", "snapshots"].join(sep),
-      reposDir: "central",
-      reposInput: "",
-      privateRepos: "show",
-    });
-    const collected = collectingIo();
-    const previous = process.cwd();
-    process.chdir(dir);
-    try {
+  test("a snapshot-dir spelled through a link and .. lands where join puts it, beside the link, and is not refused", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // The write collapses "link/.." before the OS sees it; the guard must judge the same place, not link's target.
+      mkdirSync(join(dir, "central", "o"), { recursive: true });
+      mkdirSync(join(dir, "central", "inner"));
+      writeFileSync(join(dir, "central", "o", "r.yml"), "labels: []\n");
+      symlinkSync(join("central", "inner"), join(dir, "link"));
+      const api = new MockApi(labelsRoute("o/r", [BUG]));
+      const cfg = dirCfg(dir, {
+        snapshotDir: ["link", "..", "snapshots"].join(sep),
+        reposDir: "central",
+        reposInput: "",
+        privateRepos: "show",
+      });
+      const collected = collectingIo();
+      const previous = process.cwd();
+      process.chdir(dir);
+      try {
+        expect(await run(api, cfg, collected.io)).toBe(0);
+      } finally {
+        process.chdir(previous);
+      }
+      expect(parseYaml(readFileSync(join(dir, "snapshots", "o", "r.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+      expect(existsSync(join(dir, "central", "snapshots"))).toBe(false);
+      expect(readFileSync(join(dir, "central", "o", "r.yml"), "utf8")).toBe("labels: []\n");
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "snapshot",
+        "repos-result": JSON.stringify({
+          "o/r": { result: "snapshot", source: "central", "skipped-sections": [] },
+        }),
+      });
+      expect(collected.lines).toEqual([
+        { line: `o/r: snapshot written to ${join(cfg.snapshotDir, "o", "r.yml")}` },
+        { line: "result: snapshot" },
+      ]);
+    }));
+
+  test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/a": { data: { private: false } },
+        "GET /repos/o/b": { data: { private: false } },
+        ...labelsRoute("o/a", [BUG]),
+        ...labelsRoute("o/b", [DOCS]),
+      });
+      const cfg = dirCfg(dir);
+      const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
-    } finally {
-      process.chdir(previous);
-    }
-    expect(parseYaml(readFileSync(join(dir, "snapshots", "o", "r.yml"), "utf8"))).toEqual(doc(BUG));
-    expect(existsSync(join(dir, "central", "snapshots"))).toBe(false);
-    expect(readFileSync(join(dir, "central", "o", "r.yml"), "utf8")).toBe("labels: []\n");
-    expect(collected.outputs).toEqual({
-      "skipped-sections": "",
-      result: "snapshot",
-      "repos-result": JSON.stringify({
-        "o/r": { result: "snapshot", source: "central", "skipped-sections": [] },
-      }),
-    });
-    expect(collected.lines).toEqual([
-      { line: `o/r: snapshot written to ${join(cfg.snapshotDir, "o", "r.yml")}` },
-      { line: "result: snapshot" },
-    ]);
-  });
+      const fileA = join(cfg.snapshotDir, "o", "a.yml");
+      const fileB = join(cfg.snapshotDir, "o", "b.yml");
+      expect(hasSnapshotHeader(readFileSync(fileA, "utf8"), "o/a")).toBe(true);
+      expect(parseYaml(readFileSync(fileA, "utf8"))).toEqual(doc(BUG));
+      expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
+      expect(api.mutations()).toEqual([]);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "snapshot",
+        "repos-result": JSON.stringify({
+          "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+          "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      expect(collected.lines).toEqual([
+        { line: `o/a: snapshot written to ${fileA}` },
+        { line: `o/b: snapshot written to ${fileB}` },
+        { line: "result: snapshot" },
+      ]);
+      expect(collected.summary).toEqual([
+        [
+          "## github-settings-as-code (snapshot, 2 repositories)",
+          "",
+          `Snapshots written under ${cfg.snapshotDir}.`,
+          "",
+          "| Repository | Source | Result | File |",
+          "|---|---|---|---|",
+          `| o/a | remote | :white_check_mark: snapshot | ${fileA} |`,
+          `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
+          "",
+          "### o/a (snapshot)",
+          "",
+          `written to ${fileA}`,
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          "| labels | :white_check_mark: snapshot | - |",
+          "",
+          "### o/b (snapshot)",
+          "",
+          `written to ${fileB}`,
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          "| labels | :white_check_mark: snapshot | - |",
+        ].join("\n"),
+      ]);
+    }));
 
-  test("writes one <owner>/<name>.yml per resolved target and publishes the per-target rollup", async () => {
-    const api = new MockApi({
-      "GET /repos/o/a": { data: { private: false } },
-      "GET /repos/o/b": { data: { private: false } },
-      ...labelsRoute("o/a", [BUG]),
-      ...labelsRoute("o/b", [DOCS]),
-    });
-    const cfg = dirCfg();
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    const fileA = join(cfg.snapshotDir, "o", "a.yml");
-    const fileB = join(cfg.snapshotDir, "o", "b.yml");
-    expect(hasSnapshotHeader(readFileSync(fileA, "utf8"), "o/a")).toBe(true);
-    expect(parseYaml(readFileSync(fileA, "utf8"))).toEqual(doc(BUG));
-    expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
-    expect(api.mutations()).toEqual([]);
-    expect(collected.outputs).toEqual({
-      "skipped-sections": "",
-      result: "snapshot",
-      "repos-result": JSON.stringify({
-        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
-        "o/b": { result: "snapshot", source: "remote", "skipped-sections": [] },
-      }),
-    });
-    expect(collected.lines).toEqual([
-      { line: `o/a: snapshot written to ${fileA}` },
-      { line: `o/b: snapshot written to ${fileB}` },
-      { line: "result: snapshot" },
-    ]);
-    expect(collected.summary).toEqual([
-      [
-        "## github-settings-as-code (snapshot, 2 repositories)",
-        "",
-        `Snapshots written under ${cfg.snapshotDir}.`,
-        "",
-        "| Repository | Source | Result | File |",
-        "|---|---|---|---|",
-        `| o/a | remote | :white_check_mark: snapshot | ${fileA} |`,
-        `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
-        "",
-        "### o/a (snapshot)",
-        "",
-        `written to ${fileA}`,
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        "| labels | :white_check_mark: snapshot | - |",
-        "",
-        "### o/b (snapshot)",
-        "",
-        `written to ${fileB}`,
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        "| labels | :white_check_mark: snapshot | - |",
-      ].join("\n"),
-    ]);
-  });
+  test("a redacted target's values reach its file and nothing else: the slug is masked, the public view shows the placeholder", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/o/a": { data: { private: false } },
+        "GET /repos/o/p": { data: { private: true, visibility: "private" } },
+        ...labelsRoute("o/a", [BUG]),
+        ...labelsRoute("o/p", [{ name: "secret-project", color: "000000", description: "hush" }]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "o/a,o/p" });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(0);
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "o", "p.yml"), "utf8"))).toEqual(
+        doc({ name: "secret-project", color: "000000", description: "hush" }),
+      );
+      expect([...collected.io.masked()]).toEqual(["o/p"]);
+      const publicText = [
+        ...collected.lines.map((entry) => entry.line),
+        ...collected.summary,
+        ...Object.values(collected.outputs),
+      ].join("\n");
+      for (const needle of ["o/p", "p.yml", "secret-project", "hush"]) {
+        expect(publicText, `"${needle}" reached a public surface`).not.toContain(needle);
+      }
+      expect(collected.outputs).toEqual({
+        result: "snapshot",
+        "skipped-sections": "",
+        "repos-result": JSON.stringify({
+          "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+          "private repository #1": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      expect(collected.summary[0]).toContain(
+        "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |",
+      );
+      expect(collected.summary[0]).toContain(
+        "### private repository #1 (snapshot)\n\ndetails hidden: the repository is private or internal.",
+      );
+      expect(collected.summary[0]).toContain(
+        "| labels | :white_check_mark: snapshot | hidden (private repository) |",
+      );
+    }));
 
-  test("a redacted target's values reach its file and nothing else: the slug is masked, the public view shows the placeholder", async () => {
-    const api = new MockApi({
-      "GET /repos/o/a": { data: { private: false } },
-      "GET /repos/o/p": { data: { private: true, visibility: "private" } },
-      ...labelsRoute("o/a", [BUG]),
-      ...labelsRoute("o/p", [{ name: "secret-project", color: "000000", description: "hush" }]),
-    });
-    const cfg = dirCfg({ reposInput: "o/a,o/p" });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(0);
-    expect(parseYaml(readFileSync(join(cfg.snapshotDir, "o", "p.yml"), "utf8"))).toEqual(
-      doc({ name: "secret-project", color: "000000", description: "hush" }),
-    );
-    expect([...collected.io.masked()]).toEqual(["o/p"]);
-    const publicText = [
-      ...collected.lines.map((entry) => entry.line),
-      ...collected.summary,
-      ...Object.values(collected.outputs),
-    ].join("\n");
-    for (const needle of ["o/p", "p.yml", "secret-project", "hush"]) {
-      expect(publicText, `"${needle}" reached a public surface`).not.toContain(needle);
-    }
-    expect(collected.outputs).toEqual({
-      result: "snapshot",
-      "skipped-sections": "",
-      "repos-result": JSON.stringify({
-        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
-        "private repository #1": { result: "snapshot", source: "remote", "skipped-sections": [] },
-      }),
-    });
-    expect(collected.summary[0]).toContain(
-      "| private repository #1 | remote | :white_check_mark: snapshot | hidden (private repository) |",
-    );
-    expect(collected.summary[0]).toContain(
-      "### private repository #1 (snapshot)\n\ndetails hidden: the repository is private or internal.",
-    );
-    expect(collected.summary[0]).toContain(
-      "| labels | :white_check_mark: snapshot | hidden (private repository) |",
-    );
-  });
+  test("a redacted target that fails closes sealed with its transcript and speaks the fleet's one closed-value line", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // No labels route for o/p: the read answers 404, the denial that fails the target under the fail policy.
+      const api = new MockApi({
+        "GET /repos/o/a": { data: { private: false } },
+        "GET /repos/o/p": { data: { private: true, visibility: "private" } },
+        ...labelsRoute("o/a", [BUG]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "o/a,o/p" });
+      const collected = collectingIo();
+      const finished = (await runSnapshot(api, cfg, collected.io))._unsafeUnwrap();
+      const hidden = finished.form === "dir" ? finished.targets[1] : undefined;
+      expect(hidden?.display).toBe("private repository #1");
+      expect(isPrivate(hidden?.detail)).toBe(true);
+      // The engine's denial line was captured, not emitted: it travels sealed beside the outcome and the note.
+      expect(hidden?.detail).toEqual(
+        markPrivate({
+          slug: "o/p",
+          outcomes: [
+            {
+              key: "labels",
+              status: "failed",
+              detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/p\/labels/)],
+            },
+          ],
+          note: "the snapshot failed, so no file was written",
+          file: undefined,
+          transcript: [
+            {
+              level: "error",
+              line: expect.stringMatching(
+                /^labels: not snapshotted - the token was denied GET \/repos\/o\/p\/labels/,
+              ),
+            },
+          ],
+        }),
+      );
+      expect(concludeSnapshot(collected.io, finished)).toBe(1);
+      expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
+      expect(collected.lines).toEqual([
+        { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
+        { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
+        { line: "result: failed" },
+      ]);
+      // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
+      expect(collected.summary[0]).toContain("| private repository #1 | remote | :x: failed | - |");
+      expect(collected.summary[0]).toContain(
+        "| labels | :x: failed | hidden (private repository) |",
+      );
+      const publicText = [
+        ...collected.lines.map((entry) => entry.line),
+        ...collected.summary,
+        ...Object.values(collected.outputs),
+      ].join("\n");
+      expect(publicText).not.toContain("/repos/o/p/labels");
+      expect(publicText).not.toContain("o/p.yml");
+    }));
 
-  test("a redacted target that fails closes sealed with its transcript and speaks the fleet's one closed-value line", async () => {
-    // No labels route for o/p: the read answers 404, the denial that fails the target under the fail policy.
-    const api = new MockApi({
-      "GET /repos/o/a": { data: { private: false } },
-      "GET /repos/o/p": { data: { private: true, visibility: "private" } },
-      ...labelsRoute("o/a", [BUG]),
-    });
-    const cfg = dirCfg({ reposInput: "o/a,o/p" });
-    const collected = collectingIo();
-    const finished = (await runSnapshot(api, cfg, collected.io))._unsafeUnwrap();
-    const hidden = finished.form === "dir" ? finished.targets[1] : undefined;
-    expect(hidden?.display).toBe("private repository #1");
-    expect(isPrivate(hidden?.detail)).toBe(true);
-    // The engine's denial line was captured, not emitted: it travels sealed beside the outcome and the note.
-    expect(hidden?.detail).toEqual(
-      markPrivate({
-        slug: "o/p",
-        outcomes: [
-          {
-            key: "labels",
-            status: "failed",
-            detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/p\/labels/)],
-          },
-        ],
-        note: "the snapshot failed, so no file was written",
-        file: undefined,
-        transcript: [
-          {
-            level: "error",
-            line: expect.stringMatching(
-              /^labels: not snapshotted - the token was denied GET \/repos\/o\/p\/labels/,
-            ),
-          },
-        ],
-      }),
-    );
-    expect(concludeSnapshot(collected.io, finished)).toBe(1);
-    expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
-    expect(collected.lines).toEqual([
-      { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
-      { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
-      { line: "result: failed" },
-    ]);
-    // Nothing was written, so the File column says so in the clear: an absent file is not a value the seal hides.
-    expect(collected.summary[0]).toContain("| private repository #1 | remote | :x: failed | - |");
-    expect(collected.summary[0]).toContain("| labels | :x: failed | hidden (private repository) |");
-    const publicText = [
-      ...collected.lines.map((entry) => entry.line),
-      ...collected.summary,
-      ...Object.values(collected.outputs),
-    ].join("\n");
-    expect(publicText).not.toContain("/repos/o/p/labels");
-    expect(publicText).not.toContain("o/p.yml");
-  });
+  test("a name that would leave the directory fails its target alone; the rest of the fleet is written", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({ ...labelsRoute("o/a", [BUG]) });
+      const cfg = dirCfg(dir, { reposInput: "../escape,o/a", privateRepos: "show" });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(existsSync(join(dir, "escape.yml"))).toBe(false);
+      expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
+      expect(collected.lines[0]).toEqual({
+        level: "error",
+        line: `../escape: the repository name "../escape" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
+      });
+      expect(collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": JSON.stringify({
+          "../escape": { result: "failed", source: "remote", "skipped-sections": [] },
+          "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+        }),
+      });
+    }));
 
-  test("a name that would leave the directory fails its target alone; the rest of the fleet is written", async () => {
-    const api = new MockApi({ ...labelsRoute("o/a", [BUG]) });
-    const cfg = dirCfg({ reposInput: "../escape,o/a", privateRepos: "show" });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(existsSync(join(dir, "escape.yml"))).toBe(false);
-    expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
-    expect(collected.lines[0]).toEqual({
-      level: "error",
-      line: `../escape: the repository name "../escape" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
-    });
-    expect(collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": JSON.stringify({
-        "../escape": { result: "failed", source: "remote", "skipped-sections": [] },
-        "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
-      }),
-    });
-  });
+  test("a fleet whose every target fails writes nothing and the summary says so", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      // No labels route: the read answers 404, the denial that fails the target under the fail policy.
+      const api = new MockApi({});
+      const cfg = dirCfg(dir, { reposInput: "o/a", privateRepos: "show" });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(existsSync(cfg.snapshotDir)).toBe(false);
+      expect(collected.outputs).toEqual({
+        "skipped-sections": "",
+        result: "failed",
+        "repos-result": JSON.stringify({
+          "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
+        }),
+      });
+      expect(collected.summary).toEqual([
+        [
+          "## github-settings-as-code (snapshot, 1 repositories)",
+          "",
+          `No snapshot was written under ${cfg.snapshotDir}.`,
+          "",
+          "| Repository | Source | Result | File |",
+          "|---|---|---|---|",
+          "| o/a | remote | :x: failed | - |",
+          "",
+          "### o/a (failed)",
+          "",
+          "the snapshot failed, so no file was written",
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          `| labels | :x: failed | the token was denied GET /repos/o/a/labels: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Issues" (read and write) under the PAT's Repository permissions |`,
+        ].join("\n"),
+      ]);
+    }));
 
-  test("a fleet whose every target fails writes nothing and the summary says so", async () => {
-    // No labels route: the read answers 404, the denial that fails the target under the fail policy.
-    const api = new MockApi({});
-    const cfg = dirCfg({ reposInput: "o/a", privateRepos: "show" });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(existsSync(cfg.snapshotDir)).toBe(false);
-    expect(collected.outputs).toEqual({
-      "skipped-sections": "",
-      result: "failed",
-      "repos-result": JSON.stringify({
-        "o/a": { result: "failed", source: "remote", "skipped-sections": [] },
-      }),
-    });
-    expect(collected.summary).toEqual([
-      [
-        "## github-settings-as-code (snapshot, 1 repositories)",
-        "",
-        `No snapshot was written under ${cfg.snapshotDir}.`,
-        "",
-        "| Repository | Source | Result | File |",
-        "|---|---|---|---|",
-        "| o/a | remote | :x: failed | - |",
-        "",
-        "### o/a (failed)",
-        "",
-        "the snapshot failed, so no file was written",
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        `| labels | :x: failed | the token was denied GET /repos/o/a/labels: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Issues" (read and write) under the PAT's Repository permissions |`,
-      ].join("\n"),
-    ]);
-  });
-
-  test("a fleet that resolves to no targets is fatal before any file is written", async () => {
-    const empty = join(dir, "repos");
-    mkdirSync(empty);
-    const api = new MockApi({});
-    const cfg = dirCfg({ reposInput: "", reposDir: empty });
-    const collected = collectingIo();
-    expect(await run(api, cfg, collected.io)).toBe(1);
-    expect(api.calls).toEqual([]);
-    expect(existsSync(join(dir, "snapshots"))).toBe(false);
-    expect(collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(collected.lines[0]).toEqual({
-      level: "error",
-      line: expect.stringMatching(
-        /^multi-repo mode found no targets: repos-dir yielded no settings files/,
-      ),
-    });
-  });
+  test("a fleet that resolves to no targets is fatal before any file is written", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const empty = join(dir, "repos");
+      mkdirSync(empty);
+      const api = new MockApi({});
+      const cfg = dirCfg(dir, { reposInput: "", reposDir: empty });
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(api.calls).toEqual([]);
+      expect(existsSync(join(dir, "snapshots"))).toBe(false);
+      expect(collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(collected.lines[0]).toEqual({
+        level: "error",
+        line: expect.stringMatching(
+          /^multi-repo mode found no targets: repos-dir yielded no settings files/,
+        ),
+      });
+    }));
 });

@@ -15,6 +15,10 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
 - A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first: with 3.0.0 in preparation, every v3-marked path goes before v3 cuts.
 
+## Tests
+
+- A test's temp directory lives inside the test body: `withTempDir()` or `tempDirTest()` from `test/temp-dir.ts` (try/finally, removed on every exit path); no afterEach or afterAll hook cleans up.
+
 ## End-to-end tests
 
 The end-to-end tests build the bundle to a temp path and run it as a subprocess against a mock GitHub API, so they exercise the same single-file bundle a release ships.

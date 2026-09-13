@@ -4,19 +4,14 @@
  * channel goes through (no runner masks for a terminal).
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type CliIoOptions, cliIo, maskedStreams } from "../../src/cli/io.js";
+import { tempDirTest, withTempDir } from "../temp-dir.js";
 import { memoryStream } from "./streams.js";
 
-const scratch: string[] = [];
-afterEach(() => {
-  for (const dir of scratch.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+const tempTest = tempDirTest("gsac-io-");
 
 function open(options: Partial<Omit<CliIoOptions, "streams">> = {}) {
   const stdout = memoryStream();
@@ -90,9 +85,7 @@ describe("the CLI Io", () => {
     expect(stderr()).toBe("[31merror[39m: boom\n");
   });
 
-  test("a masked value is redacted on every channel, the outputs included", () => {
-    const dir = mkdtempSync(join(tmpdir(), "gsac-io-"));
-    scratch.push(dir);
+  tempTest("a masked value is redacted on every channel, the outputs included", (dir) => {
     const summary = join(dir, "summary.md");
     const { io, flush, stdout, stderr } = open({ summaryFile: summary, verbose: true });
     io.mask("ghp_secret");
@@ -109,9 +102,7 @@ describe("the CLI Io", () => {
     expect(readFileSync(summary, "utf8")).toBe("# run by ***\n");
   });
 
-  test("summary blocks append to the named file and are dropped without one", () => {
-    const dir = mkdtempSync(join(tmpdir(), "gsac-io-"));
-    scratch.push(dir);
+  tempTest("summary blocks append to the named file and are dropped without one", async (dir) => {
     const summary = join(dir, "summary.md");
     const named = open({ summaryFile: summary });
     named.io.summary("## first");
@@ -119,18 +110,18 @@ describe("the CLI Io", () => {
     expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
     // Without a file the block goes nowhere: no stream carries it, and the working
     // directory (where a defaulted path would land) stays empty.
-    const cwd = mkdtempSync(join(tmpdir(), "gsac-io-cwd-"));
-    scratch.push(cwd);
-    const previous = process.cwd();
-    process.chdir(cwd);
-    try {
-      const unnamed = open();
-      unnamed.io.summary("## dropped");
-      expect(unnamed.stdout() + unnamed.stderr()).toBe("");
-      expect(readdirSync(cwd)).toEqual([]);
-    } finally {
-      process.chdir(previous);
-    }
+    await withTempDir("gsac-io-cwd-", (cwd) => {
+      const previous = process.cwd();
+      process.chdir(cwd);
+      try {
+        const unnamed = open();
+        unnamed.io.summary("## dropped");
+        expect(unnamed.stdout() + unnamed.stderr()).toBe("");
+        expect(readdirSync(cwd)).toEqual([]);
+      } finally {
+        process.chdir(previous);
+      }
+    });
     expect(readdirSync(dir)).toEqual(["summary.md"]);
     expect(readFileSync(summary, "utf8")).toBe("## first\n## second\n");
   });

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
@@ -17,6 +16,7 @@ import {
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
+import { withTempDir } from "../temp-dir.js";
 
 /** True when the target closed sealed: the redaction decision, read from the brand. */
 const redacted = (target: TargetOutcome | undefined): boolean =>
@@ -69,16 +69,13 @@ describe("runMulti", () => {
     layout: Record<string, string>,
     body: (dir: string) => Promise<T>,
   ): Promise<T> {
-    const dir = mkdtempSync(join(tmpdir(), "sac-multi-"));
-    try {
+    return withTempDir("sac-multi-", (dir) => {
       for (const [rel, content] of Object.entries(layout)) {
         mkdirSync(join(dir, rel, ".."), { recursive: true });
         writeFileSync(join(dir, rel), content);
       }
-      return await body(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      return body(dir);
+    });
   }
 
   test("a remote target's own settings.yml is target-authored: its $NAME reference is refused", async () => {
