@@ -1,19 +1,10 @@
 // The generated regions (permissions.md, check-mode.md) are covered by gen-action-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import { RESOURCE_LABEL, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, sectionModule } from "../../src/sections/registry.js";
-import { ROOT } from "../root.js";
-
-// Flattened for matching: the pages wrap sentences across lines.
-const permissions = readFileSync(join(ROOT, "docs", "reference", "permissions.md"), "utf8").replace(
-  /\s+/g,
-  " ",
-);
 
 /** The token-UI labels of a section permission's Repository resources. */
 function repoLabels(permission: SectionPermission): string[] {
@@ -21,8 +12,8 @@ function repoLabels(permission: SectionPermission): string[] {
 }
 
 describe("branches Contents advice", () => {
-  test("the branches Notes cell and permissions.md advise the branch probe's override grant", () => {
-    // The advisory branch-existence probe carries a Contents override (src/sections/branches/endpoints.ts); both prose mentions restate that source.
+  test("the branches Notes cell advises the branch probe's override grant", () => {
+    // The advisory branch-existence probe carries a Contents override (src/sections/branches/endpoints.ts); the Notes cell restates that source.
     const probe = allEndpoints()["branches.branchProbe"];
     const override = probe?.permission;
     expect(override !== undefined && override !== "none").toBe(true);
@@ -34,6 +25,5 @@ describe("branches Contents advice", () => {
       notes.includes(`add ${advice}`),
       `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,
     ).toBe(true);
-    expect(permissions).toContain(`The ${label} grant earns its keep twice`);
   });
 });

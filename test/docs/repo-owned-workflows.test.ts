@@ -18,9 +18,11 @@ const SCRIPTS = (
 ).scripts;
 /** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs what it finds there. */
 const RUNS_CHECKOUT = /(?:^|[\s;&|(])(?:bun|bunx|node|npm|npx|pnpm|yarn|deno|tsx)(?=\s|$)/m;
+/** The script with its quoted strings blanked, so a word inside an echo is not read as a command. */
+const commandsOf = (run: string) => run.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
 /** A step that runs code from the checkout: a run step invoking a runtime, or any local action (its action.yml is PR-editable). */
 const runsCheckoutCode = (step: Step) =>
-  RUNS_CHECKOUT.test(step.run ?? "") || (step.uses ?? "").startsWith("./");
+  RUNS_CHECKOUT.test(commandsOf(step.run ?? "")) || (step.uses ?? "").startsWith("./");
 
 describe("the commit-back push jobs", () => {
   test.each(["auto-fix.yml", "auto-format.yml"])(
@@ -39,7 +41,10 @@ describe("the commit-back push jobs", () => {
           .filter((line) => /\bgit push\b/.test(line))
           .map((line) => ({
             step,
-            words: line.split(/[\s;&|()]+/).map((w) => w.replace(/["']/g, "")),
+            // Quotes removed and `${NAME}` written `$NAME`: the word as git receives it, whichever spelling the script used.
+            words: line
+              .split(/[\s;&|()]+/)
+              .map((w) => w.replace(/["']/g, "").replace(/\$\{(\w+)\}/g, "$$$1")),
           })),
       );
       expect(pushLines.length, `${file} has no git push`).toBeGreaterThan(0);
@@ -50,7 +55,7 @@ describe("the commit-back push jobs", () => {
         ).toBeDefined();
         // Git honors the first lease word, so an earlier, looser lease would override this one; exactly one, and it is this one.
         expect(words.filter((word) => word.startsWith("--force-with-lease"))).toEqual([
-          `--force-with-lease=refs/heads/\${HEAD_REF}:\${HEAD_SHA}`,
+          "--force-with-lease=refs/heads/$HEAD_REF:$HEAD_SHA",
         ]);
         // A forced update hides in a short-option cluster (-vf, -f4), a +refspec, or a --no-force-with-lease that cancels the lease.
         const forced = words.filter(

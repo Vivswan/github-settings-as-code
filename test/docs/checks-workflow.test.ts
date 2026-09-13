@@ -69,9 +69,12 @@ function cacheKeyOf(step: Step, path: string): string {
   return key as string;
 }
 
-/** The quoted file patterns inside the key's hashFiles(...) call; outside `${{ }}` the call is literal text and the key a constant. */
+/** The quoted file patterns of the key's hashFiles(...) call inside a `${{ }}` expression; outside one the call is literal text and the key a constant. */
 function hashFilesPatterns(key: string): string[] {
-  const match = key.match(/\$\{\{\s*hashFiles\(([^)]*)\)\s*\}\}/);
+  const expressions = [...key.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1] ?? "");
+  const match =
+    expressions.map((expression) => expression.match(/\bhashFiles\(([^)]*)\)/)).find((m) => m) ??
+    null;
   expect(match, `cache key has no hashFiles expression: ${key}`).not.toBeNull();
   return (match?.[1] ?? "")
     .split(",")
@@ -142,6 +145,11 @@ describe("the fetch-test-artifacts cache keys", () => {
     // The import walk found the scripts' own imports, so the coverage below is not vacuous.
     expect(OPENAPI.hashInputs().length).toBeGreaterThan(2);
     expect(OPENAPI.hashInputs()).toContain("src/github/api.ts");
+    // The call is read wherever the expression puts it, a format() wrapper included.
+    expect(hashFilesPatterns(`k-\${{ format('{0}', hashFiles('a.ts', 'b/**')) }}`)).toEqual([
+      "a.ts",
+      "b/**",
+    ]);
     for (const artifact of FETCHED_ARTIFACTS) {
       expectKeyHashesInputs(keyOf(artifact), artifact);
     }

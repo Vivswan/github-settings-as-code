@@ -23,8 +23,16 @@ const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [
 const filerIn = (steps: Step[], mode: string) =>
   steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
 
+/** A step condition as the runner evaluates it: with or without the `${{ }}` wrapper, whitespace aside. */
+const condition = (raw: unknown): string =>
+  String(raw ?? "")
+    .trim()
+    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, "$1")
+    .trim();
+
 describe.each(NIGHTLIES)("%s failure path", (file, job) => {
-  const steps = readWorkflow(file).jobs[job]?.steps ?? [];
+  const workflow = readWorkflow(file);
+  const steps = workflow.jobs[job]?.steps ?? [];
   const report = filerIn(steps, "report");
   const resolve = filerIn(steps, "resolve");
 
@@ -33,8 +41,8 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(report, "no reporting fuzz-issue step").toBeDefined();
     expect(upload, "no upload-artifact step").toBeDefined();
     // A step without a condition runs on success() only, so a dropped `if:` files nothing on the night that fails.
-    expect(report?.if).toBe("failure()");
-    expect(upload?.if).toBe(report?.if);
+    expect(condition(report?.if)).toBe("failure()");
+    expect(condition(upload?.if)).toBe(condition(report?.if));
     // upload-artifact refuses a duplicate name, so a re-run attempt uploads under its own: the name carries the attempt number.
     const name = upload?.with?.name;
     expect(
@@ -55,26 +63,48 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
 
   test("on success, the resolve step closes the label the report step files under", () => {
     expect(resolve, "no resolving fuzz-issue step").toBeDefined();
-    expect(resolve?.if).toBe("success()");
+    expect(condition(resolve?.if)).toBe("success()");
     expect(String(resolve?.with?.label)).toBe(String(report?.with?.label));
   });
 
-  test("every steps.<id> the job's expressions read names a step of the job", () => {
-    const ids = new Set(steps.map((s) => s.id).filter((id) => id !== undefined));
-    const read = steps.flatMap((s) =>
+  test("every steps.<id> a step reads names a step that precedes it", () => {
+    // An output read from a later step is empty, not an error: a gate on it is quietly false.
+    const reads = steps.flatMap((s, index) =>
       [
         s.if ?? "",
         s.run ?? "",
         ...Object.values(s.env ?? {}),
         ...Object.values(s.with ?? {}).map(String),
-      ].flatMap((text) => [...text.matchAll(/\bsteps\.([\w-]+)\./g)].map((m) => m[1] ?? "")),
+      ].flatMap((text) =>
+        [...text.matchAll(/\bsteps\.([\w-]+)\./g)].map((m) => ({ index, id: m[1] ?? "" })),
+      ),
     );
     // The dispatch is gated on the filer's output, so a zero here means the walk went blind, not that the job reads nothing.
-    expect(read.length).toBeGreaterThan(0);
+    expect(reads.length).toBeGreaterThan(0);
+    const unresolved = reads.filter(
+      ({ index, id }) => !steps.slice(0, index).some((earlier) => earlier.id === id),
+    );
     expect(
-      read.filter((id) => !ids.has(id)),
-      `${file}#${job} reads steps that do not exist`,
+      unresolved.map(
+        ({ index, id }) => `step ${index + 1} reads steps.${id}, which no earlier step defines`,
+      ),
+      `${file}#${job}`,
     ).toEqual([]);
+  });
+
+  test("the job holds the grant each step consumes", () => {
+    // A missing grant is not loud: the fuzz-issue action files nothing, and the dispatch's 403 is swallowed by its `|| echo ::warning`.
+    const grants = workflow.jobs[job]?.permissions ?? workflow.permissions ?? {};
+    const consumers = steps.flatMap((s) => [
+      ...(s.uses === FUZZ_ISSUE_ACTION ? [["issues", `the ${s.with?.mode} fuzz-issue step`]] : []),
+      ...(/\bgh workflow run\b/.test(s.run ?? "")
+        ? [["actions", "the gh workflow run dispatch"]]
+        : []),
+    ]);
+    expect(consumers.length).toBeGreaterThan(1);
+    for (const [scope, why] of consumers) {
+      expect(grants[scope as string], `${file}#${job}: ${why} needs ${scope}: write`).toBe("write");
+    }
   });
 
   test("the dispatched issue is the one the report step filed, and only when it filed one", () => {
@@ -88,7 +118,7 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
     expect(variable, "the issue field is not filled from a $VARIABLE").not.toBe("");
     expect(dispatch?.env?.[variable]).toBe(`\${{ ${output} }}`);
     // Gated on a non-empty number, so the dispatch never expands to a bare `issue=`.
-    expect(dispatch?.if).toBe(`failure() && ${output} != ''`);
+    expect(condition(dispatch?.if)).toBe(`failure() && ${output} != ''`);
   });
 
   test("every workflow it dispatches declares every input it passes", () => {

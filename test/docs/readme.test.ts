@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
-import { DEFAULT_PRIVATE_REPOS } from "../../src/flows/inputs.js";
+import { DEFAULT_PRIVATE_REPOS, INPUT_DECLS } from "../../src/flows/inputs.js";
 import { REDACTED_DETAIL } from "../../src/flows/redact.js";
 import { SNAPSHOT_SCHEMA_URL } from "../../src/flows/snapshot.js";
 import { ARTIFACT_FILE, ARTIFACT_NAME } from "../../src/report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
 import { ISSUE_REPORT_PERMISSION } from "../../src/report/issue-report.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
-import { RESOURCE_LABEL } from "../../src/sections/contract/permissions.js";
+import { grantFor } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
@@ -56,6 +56,28 @@ describe("README example settings.yml blocks", () => {
       validated++;
     }
     expect(validated, "no settings.yml example block was found in the README").toBeGreaterThan(0);
+  });
+});
+
+describe("README quick-start mode", () => {
+  test("the workflow step runs in the mode the prose beside it names", () => {
+    // The input defaults to apply, so a dropped `mode:` line turns the copied first run into the apply the prose says it is not.
+    const prose = sectionLines(readme, "Quick start", "README.md").join("\n");
+    const named = prose.match(/Keep `mode: ([a-z]+)` for the first run/)?.[1];
+    expect(
+      named,
+      'the quick start lost its "Keep `mode: ...` for the first run" line',
+    ).toBeDefined();
+    const workflow = fencedBlocks(readme, "yaml").find((block) => block.includes("uses:"));
+    expect(workflow, "README lost its workflow example").toBeDefined();
+    const doc = parseYaml(workflow ?? "") as {
+      jobs: Record<string, { steps: Array<{ uses?: string; with?: Record<string, string> }> }>;
+    };
+    const step = Object.values(doc.jobs)
+      .flatMap((job) => job.steps)
+      .find((candidate) => candidate.uses?.startsWith("Vivswan/github-settings-as-code@"));
+    expect(step, "the workflow example has no github-settings-as-code step").toBeDefined();
+    expect(step?.with?.mode ?? INPUT_DECLS.mode.default).toBe(named ?? "");
   });
 });
 
@@ -189,9 +211,13 @@ describe("private repositories guide", () => {
     expect(section).toContain(ARTIFACT_FILE);
   });
 
-  test("the issue-channel PAT advice names the resource the issue report declares", () => {
-    const labels = ISSUE_REPORT_PERMISSION.repo.map((resource) => `"${RESOURCE_LABEL[resource]}"`);
-    expect(section).toContain(`the PAT needs \`${labels.join(" or ")}\` (read and write)`);
+  test("the issue-channel PAT advice names the grant the issue report asks for", () => {
+    // The same grantFor() call the failed delivery prints (src/report/issue-report.ts): its resource labels and access level.
+    const grant = grantFor(ISSUE_REPORT_PERMISSION).match(
+      /^grant ("[^"]+"(?: or "[^"]+")*) \(([a-z ]+)\)/,
+    );
+    expect(grant, "grantFor() no longer opens with the quoted labels and the level").not.toBeNull();
+    expect(section).toContain(`the PAT needs \`${grant?.[1]}\` (${grant?.[2]})`);
   });
 
   test("the overall-result enumeration names exactly the per-target RUN_RESULTS words", () => {
