@@ -6,8 +6,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { ROOT } from "../root.js";
 
-export const ROOT = join(import.meta.dir, "..", "..");
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 /** The setup composite (bun, the locked install, yamllint on request), as a job's `uses:` spells it. */
 export const SETUP_USES = "./.github/actions/setup";

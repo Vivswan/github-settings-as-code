@@ -23,9 +23,8 @@ import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
+import { ROOT } from "../root.js";
 import { relocatedRegion } from "./relocated-region.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
 
 describe("action.yml renderers", () => {
   test("inputs fold long descriptions, quote every default, and parse back verbatim", () => {

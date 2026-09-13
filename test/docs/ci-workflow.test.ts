@@ -10,9 +10,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
+import { ROOT } from "../root.js";
 import { headRefPrefixes } from "./head-ref.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
 
 // Outside the gate on purpose: a red run flags template-convention drift the next sync PR heals; mirrors the central CI's validator
 // (docs/all-green.md in the platform repository).

@@ -32,7 +32,8 @@ export function markerSyntaxFor(path: string): MarkerSyntax {
 }
 
 // The name is spliced into a regex unescaped, so the grammar admits only regex-literal characters.
-const REGION_NAME = /^[a-z0-9-]+$/;
+const REGION_NAME_CLASS = "[a-z0-9-]+";
+const REGION_NAME = new RegExp(`^${REGION_NAME_CLASS}$`);
 
 function markerText(kind: "BEGIN" | "END", name: string): string {
   const hint = kind === "BEGIN" ? String.raw`(?: \([^)\n]*\))?` : "";
@@ -91,6 +92,11 @@ function markerSpans(
     }
     return [[offset, offset + source.length]];
   });
+}
+
+/** True when `text` carries a BEGIN marker of any region in `syntax`: the scan the generated-output table is pinned against. */
+export function hasGeneratedRegion(text: string, syntax: MarkerSyntax): boolean {
+  return markerSpans(text, "BEGIN", REGION_NAME_CLASS, syntax).length > 0;
 }
 
 /** Region `name`'s marker spans: exactly one BEGIN and one END, in that order, else a throw. */

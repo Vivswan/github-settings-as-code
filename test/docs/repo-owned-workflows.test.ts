@@ -10,9 +10,9 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isAlias, isMap, isScalar, parseDocument, visit } from "yaml";
+import { ROOT } from "../root.js";
 import {
   type Job,
-  ROOT,
   readAction,
   readWorkflow,
   repoOwnedWorkflowFiles,

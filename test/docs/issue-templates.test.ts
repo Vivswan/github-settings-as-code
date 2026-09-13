@@ -4,8 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { ROOT } from "../root.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const TEMPLATES = join(ROOT, ".github", "ISSUE_TEMPLATE");
 
 interface LabelEntry {

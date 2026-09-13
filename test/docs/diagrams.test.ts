@@ -10,9 +10,9 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ROOT } from "../root.js";
 import { fencedBlocks } from "./markdown.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const DOCS = join(ROOT, "docs");
 
 /** The URL prefix docs/ pages use to reach a repository file (relative links may not leave docs/). */

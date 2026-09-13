@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
 import type { TargetOutcome } from "../../src/flows/redact.js";
-import { type Io, maskRegistry } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import {
@@ -16,43 +14,9 @@ import {
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
-
-function captureIo(): {
-  io: Io;
-  annotations: string[];
-  logs: string[];
-  masks: string[];
-  events: string[];
-} {
-  const annotations: string[] = [];
-  const logs: string[] = [];
-  const masks: string[] = [];
-  const events: string[] = [];
-  return {
-    io: {
-      annotate: (level, message) => {
-        annotations.push(`${level}: ${message}`);
-        events.push(`annotate ${level}: ${message}`);
-      },
-      log: (line) => {
-        logs.push(line);
-        events.push(`log: ${line}`);
-      },
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry((value) => {
-        masks.push(value);
-        events.push(`mask: ${value}`);
-      }),
-    },
-    annotations,
-    logs,
-    masks,
-    events,
-  };
-}
+import { withTempDir } from "../temp-dir.js";
 
 /** True when the target closed sealed: the redaction decision, read from the brand. */
 const redacted = (target: TargetOutcome | undefined): boolean =>
@@ -105,16 +69,13 @@ describe("runMulti", () => {
     layout: Record<string, string>,
     body: (dir: string) => Promise<T>,
   ): Promise<T> {
-    const dir = mkdtempSync(join(tmpdir(), "sac-multi-"));
-    try {
+    return withTempDir("sac-multi-", (dir) => {
       for (const [rel, content] of Object.entries(layout)) {
         mkdirSync(join(dir, rel, ".."), { recursive: true });
         writeFileSync(join(dir, rel), content);
       }
-      return await body(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      return body(dir);
+    });
   }
 
   test("a remote target's own settings.yml is target-authored: its $NAME reference is refused", async () => {

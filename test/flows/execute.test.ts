@@ -3,9 +3,7 @@
  * conclusions. The two faces running the same arms to the same result is pinned in test/cli/execution.test.ts.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
@@ -19,8 +17,9 @@ import {
   SectionSelection,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
+import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 
 type SingleConfig = Extract<RunConfig, { kind: "single" }>;
@@ -42,19 +41,6 @@ const single = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
   ...overrides,
 });
 
-const scratch: string[] = [];
-afterEach(() => {
-  for (const dir of scratch.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gsac-execute-"));
-  scratch.push(dir);
-  return dir;
-}
-
 /** Deps over a collecting Io and one stub client; `createClient` records whether the run asked for it. */
 function deps(api: MockApi, overrides: Partial<RunDeps> = {}) {
   const collected = collectingIo();
@@ -71,50 +57,52 @@ function deps(api: MockApi, overrides: Partial<RunDeps> = {}) {
 }
 
 describe("executeRun", () => {
-  test("a merge opens no client and ends at the merge conclusion", async () => {
-    const mergedFile = join(tempDir(), "merged.yml");
-    const api = new MockApi({});
-    const d = deps(api);
-    const code = await executeRun(
-      {
-        kind: "merge",
-        settingsFiles: [join(LAYERS, "fleet.yml"), join(LAYERS, "team.yml")],
-        mergedFile,
-        layering: "merge",
-      },
-      d.run,
-    );
-    expect(code).toBe(0);
-    expect(d.opened()).toBe(0);
-    expect(api.calls).toEqual([]);
-    expect(d.collected.outputs).toEqual({
-      result: "merged",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(d.collected.lines.slice(-2)).toEqual([
-      { line: `merged 2 layer(s) into ${mergedFile}` },
-      { line: "result: merged" },
-    ]);
-  });
+  test("a merge opens no client and ends at the merge conclusion", () =>
+    withTempDir("gsac-execute-", async (dir) => {
+      const mergedFile = join(dir, "merged.yml");
+      const api = new MockApi({});
+      const d = deps(api);
+      const code = await executeRun(
+        {
+          kind: "merge",
+          settingsFiles: [join(LAYERS, "fleet.yml"), join(LAYERS, "team.yml")],
+          mergedFile,
+          layering: "merge",
+        },
+        d.run,
+      );
+      expect(code).toBe(0);
+      expect(d.opened()).toBe(0);
+      expect(api.calls).toEqual([]);
+      expect(d.collected.outputs).toEqual({
+        result: "merged",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(d.collected.lines.slice(-2)).toEqual([
+        { line: `merged 2 layer(s) into ${mergedFile}` },
+        { line: "result: merged" },
+      ]);
+    }));
 
-  test("a fatal problem raised after the parse is worded by the face's describe", async () => {
-    const settingsFile = join(tempDir(), "missing.yml");
-    const api = new MockApi({});
-    const d = deps(api, { describe: (problem) => `worded: ${problem.code}` });
-    expect(await executeRun(single({ settingsFile }), d.run)).toBe(1);
-    expect(d.opened()).toBe(1);
-    expect(api.calls).toEqual([]);
-    expect(d.collected.outputs).toEqual({
-      result: "failed",
-      "skipped-sections": "",
-      "repos-result": "{}",
-    });
-    expect(d.collected.lines).toEqual([
-      { level: "error", line: "worded: settings-file-unreadable" },
-      { line: "result: failed" },
-    ]);
-  });
+  test("a fatal problem raised after the parse is worded by the face's describe", () =>
+    withTempDir("gsac-execute-", async (dir) => {
+      const settingsFile = join(dir, "missing.yml");
+      const api = new MockApi({});
+      const d = deps(api, { describe: (problem) => `worded: ${problem.code}` });
+      expect(await executeRun(single({ settingsFile }), d.run)).toBe(1);
+      expect(d.opened()).toBe(1);
+      expect(api.calls).toEqual([]);
+      expect(d.collected.outputs).toEqual({
+        result: "failed",
+        "skipped-sections": "",
+        "repos-result": "{}",
+      });
+      expect(d.collected.lines).toEqual([
+        { level: "error", line: "worded: settings-file-unreadable" },
+        { line: "result: failed" },
+      ]);
+    }));
 
   test("the artifact channel is the uploader dep's: absent it fails before any API call, present the run reaches the API", async () => {
     const reportPublicKey = await identityToRecipient(await generateX25519Identity());

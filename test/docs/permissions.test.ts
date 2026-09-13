@@ -7,8 +7,8 @@ import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import { RESOURCE_LABEL, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, sectionModule } from "../../src/sections/registry.js";
+import { ROOT } from "../root.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 // Flattened for matching: the pages wrap sentences across lines.
 const permissions = readFileSync(join(ROOT, "docs", "reference", "permissions.md"), "utf8").replace(
   /\s+/g,

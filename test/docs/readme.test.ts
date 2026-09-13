@@ -12,12 +12,12 @@ import { PRIVATE_REPORT_CHANNELS } from "../../src/report/delivery.js";
 import { PROBOT_PARITY_KEYS, SECTION_KEYS } from "../../src/schema.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { ROOT } from "../root.js";
 import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const readme = readFileSync(join(ROOT, "README.md"), "utf8");
 
 function assertBacktickedEnumeration(

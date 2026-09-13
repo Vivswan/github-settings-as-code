@@ -14,12 +14,12 @@ import { SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
+import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
 import { stalePins } from "./version-pins.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const DOCS = join(ROOT, "docs");
 
 const REQUIRED_PAGES = [

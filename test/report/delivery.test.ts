@@ -8,7 +8,7 @@ import {
 } from "../../src/engine/orchestrate.js";
 import { runOutcome } from "../../src/flows/deliver.js";
 import { redactedChannel } from "../../src/flows/redact.js";
-import { type Io, maskRegistry, silentIo } from "../../src/io.js";
+import { type Io, silentIo } from "../../src/io.js";
 import { isPrivate, type Private } from "../../src/private.js";
 import { describeProblem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
@@ -22,6 +22,7 @@ import {
 } from "../../src/report/delivery.js";
 import { MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import type { SettingsFile } from "../../src/schema.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
 
 const MARKER = "settings-as-code-report";
@@ -35,18 +36,6 @@ const META: ReportRunMeta = {
 const DRIFT: SectionOutcome[] = [
   { key: "repository", status: "drift", detail: ["description: CANARY-live -> CANARY-want"] },
 ];
-
-function recordingIo(): { io: Io; annotations: string[] } {
-  const annotations: string[] = [];
-  return {
-    io: {
-      ...silentIo(),
-      annotate: (level, message) => annotations.push(`${level}: ${message}`),
-      ...maskRegistry(() => {}),
-    },
-    annotations,
-  };
-}
 
 /** A redacted target's sealed detail, closed through the real channel so the transcript is genuine. */
 function sealed(slug: string, outcomes: SectionOutcome[]): Private<RedactedDetail> {
@@ -99,7 +88,7 @@ function open(api: MockApi, channel: PrivateReportChannel, io: Io, uploader?: Ar
 describe("the issue channel", () => {
   test("delivers the full unredacted report into the target's issue and opens it when the target's exit is 1", async () => {
     const api = issueApi();
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     const channel = open(api, "issue", io);
     await channel?.deliver(target("o/priv", 1));
     await channel?.flush();
@@ -121,7 +110,7 @@ describe("the issue channel", () => {
         error: { status: 403, message: "Resource not accessible", body: "" },
       },
     });
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     await open(api, "issue", io)?.deliver(target("o/priv", 1));
     expect(annotations).toEqual([
       "warning: private repository #1: could not deliver the private report (HTTP 403). To fix, " +
@@ -132,7 +121,7 @@ describe("the issue channel", () => {
 
   test("a target whose slug did not parse gets one safe warning and no API traffic", async () => {
     const api = issueApi();
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     await open(api, "issue", io)?.deliver({ ...target("o/priv", 1), repo: null });
     expect(api.calls).toEqual([]);
     expect(annotations).toEqual([
@@ -144,7 +133,7 @@ describe("the issue channel", () => {
     const api = issueApi({
       [`GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
     });
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     await open(api, "issue-on-failure", io)?.deliver({
       ...target("o/priv", 0),
       conclusion: runOutcome([{ result: "clean" }], true),
@@ -177,7 +166,7 @@ describe("the artifact channel", () => {
 
   test("accumulates every report and uploads ONE document on flush, each report under its placeholder heading", async () => {
     const { recipient, uploader, uploads, decrypt } = await harness();
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     const channel = openReportChannel(new MockApi({}), "artifact", META, recipient, io, uploader);
     await channel?.deliver(target("o/a", 1));
     // The channel never addresses the target repository, so it mirrors even a target whose slug failed to parse.
@@ -218,7 +207,7 @@ describe("the artifact channel", () => {
         throw new Error("Unable to get the ACTIONS_RUNTIME_TOKEN env variable");
       },
     };
-    const { io, annotations } = recordingIo();
+    const { io, annotations } = captureIo();
     const channel = openReportChannel(new MockApi({}), "artifact", META, recipient, io, uploader);
     await channel?.deliver(target("o/priv", 1));
     await channel?.flush();

@@ -14,6 +14,7 @@ import {
   planGraduation,
   toSpecOnlyGapSource,
 } from "../../.github/scripts/graduate-upstream-gaps.js";
+import { ROOT } from "../root.js";
 
 const TRIPWIRE_MESSAGE =
   "Type '\"GET /repos/{owner}/{repo}/merge-queue\"' does not satisfy the constraint 'never'.";
@@ -383,7 +384,7 @@ describe("toSpecOnlyGapSource", () => {
 });
 
 describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
-  const GAPS_DIR = join(import.meta.dir, "..", "..", "src", "upstream-gaps");
+  const GAPS_DIR = join(ROOT, "src", "upstream-gaps");
   const realIndex = readFileSync(join(GAPS_DIR, "index.ts"), "utf8");
   const realGapFiles = readdirSync(GAPS_DIR)
     .filter((f) => f.endsWith(".ts"))
@@ -396,7 +397,7 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
 
   test("spec-pinned detection agrees with each gap's actual kind and flag", async () => {
     for (const gap of realGapFiles) {
-      const abs = join(import.meta.dir, "..", "..", gap);
+      const abs = join(ROOT, gap);
       const { GAP } = (await import(abs)) as {
         GAP: { kind: "octokit"; documentedInSpec: boolean } | { kind: "spec-only" };
       };
@@ -409,7 +410,7 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
     // The sweep is legitimately empty once every octokit-kind gap has graduated, so the corpus is not pinned here; the synthetic fixtures pin the
     // transform.
     for (const gap of realGapFiles) {
-      const abs = join(import.meta.dir, "..", "..", gap);
+      const abs = join(ROOT, gap);
       const source = readFileSync(abs, "utf8");
       if (!isSpecPinned(source)) {
         continue;

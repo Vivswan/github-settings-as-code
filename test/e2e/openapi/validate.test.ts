@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
@@ -116,7 +117,7 @@ describe("toJsonSchema", () => {
   test("leaves primitives untouched", () => {
     expect(toJsonSchema("s")).toBe("s");
     expect(toJsonSchema(3)).toBe(3);
-    expect(toJsonSchema(null)).toBe(null);
+    expect(toJsonSchema(null)).toBeNull();
   });
 
   test("relaxed variant rewrites oneOf to anyOf (widened branches may overlap)", () => {
@@ -308,7 +309,7 @@ describe("OpenApiValidator against the fetched spec", () => {
     // oversized per_page and the page loop stops on a short page, so an undeclared sub-100 cap
     // silently truncates after page one (the variables family is capped at 30).
     const spec = JSON.parse(
-      readFileSync(new URL("./github-openapi.trimmed.json", import.meta.url), "utf8"),
+      readFileSync(join(import.meta.dir, "github-openapi.trimmed.json"), "utf8"),
     ) as {
       paths?: Record<
         string,

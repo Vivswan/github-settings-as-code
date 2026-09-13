@@ -22,7 +22,7 @@ import {
 } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const COVERAGE_PATH = "COVERAGE.md";
+export const COVERAGE_PATH = "COVERAGE.md";
 
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";

@@ -11,8 +11,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { ROOT } from "../root.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const PAGE = "docs/reference/library.md";
 const PACKAGE = "@vivswan/github-settings-as-code";
 

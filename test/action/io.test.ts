@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionsIo } from "../../src/action/io.js";
 import { writeSummary } from "../../src/flows/summary.js";
+import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 /** A static import, a re-export, a dynamic import(), or a require() all quote the specifier; a comment mentioning it bare does not. */
 function namesActionsCore(source: string): boolean {
@@ -25,7 +26,7 @@ describe("the Io port boundary", () => {
 
   test("only src/action/ names @actions/core", () => {
     // Every other layer reaches the runner through the Io port, so redaction and capture have one place to stand.
-    const srcDir = join(import.meta.dir, "..", "..", "src");
+    const srcDir = join(ROOT, "src");
     const files = readdirSync(srcDir, { recursive: true }) as string[];
     const offenders: string[] = [];
     let scanned = 0;
@@ -50,7 +51,6 @@ describe("actionsIo", () => {
     summary: process.env.GITHUB_STEP_SUMMARY,
     output: process.env.GITHUB_OUTPUT,
   };
-  const dirs: string[] = [];
   afterEach(() => {
     for (const [key, value] of [
       ["GITHUB_STEP_SUMMARY", saved.summary],
@@ -62,56 +62,49 @@ describe("actionsIo", () => {
         process.env[key] = value;
       }
     }
-    for (const dir of dirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
-  const scratch = (): string => {
-    const dir = mkdtempSync(join(tmpdir(), "sac-io-"));
-    dirs.push(dir);
-    return dir;
-  };
+  test("summary appends each block with one trailing newline, and skips when the runner file is unset", () =>
+    withTempDir("sac-io-", (dir) => {
+      const file = join(dir, "summary.md");
+      delete process.env.GITHUB_STEP_SUMMARY;
+      actionsIo.summary("dropped");
+      process.env.GITHUB_STEP_SUMMARY = file;
+      writeSummary(
+        actionsIo,
+        { outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true -> false"] }] },
+        "check",
+        "drift",
+      );
+      actionsIo.summary("## second block");
+      expect(readFileSync(file, "utf8")).toBe(
+        [
+          "## github-settings-as-code (check)",
+          "",
+          "| Section | Status | Detail |",
+          "|---|---|---|",
+          "| repository | :warning: drift | has_wiki: true -> false |",
+          "## second block",
+          "",
+        ].join("\n"),
+      );
+    }));
 
-  test("summary appends each block with one trailing newline, and skips when the runner file is unset", () => {
-    const file = join(scratch(), "summary.md");
-    delete process.env.GITHUB_STEP_SUMMARY;
-    actionsIo.summary("dropped");
-    process.env.GITHUB_STEP_SUMMARY = file;
-    writeSummary(
-      actionsIo,
-      { outcomes: [{ key: "repository", status: "drift", detail: ["has_wiki: true -> false"] }] },
-      "check",
-      "drift",
-    );
-    actionsIo.summary("## second block");
-    expect(readFileSync(file, "utf8")).toBe(
-      [
-        "## github-settings-as-code (check)",
-        "",
-        "| Section | Status | Detail |",
-        "|---|---|---|",
-        "| repository | :warning: drift | has_wiki: true -> false |",
-        "## second block",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  test("output writes the runner's output file only when it is set", () => {
-    // The runner creates the file; @actions/core refuses to append to a missing one.
-    const file = join(scratch(), "output.txt");
-    writeFileSync(file, "");
-    delete process.env.GITHUB_OUTPUT;
-    actionsIo.output("result", "dropped");
-    // @ts-expect-error a misspelled output name fails to compile at the port
-    actionsIo.output("reslut", "dropped");
-    process.env.GITHUB_OUTPUT = file;
-    actionsIo.output("result", "clean");
-    // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
-    const written = readFileSync(file, "utf8");
-    expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
-    expect(written).not.toContain("dropped");
-  });
+  test("output writes the runner's output file only when it is set", () =>
+    withTempDir("sac-io-", (dir) => {
+      // The runner creates the file; @actions/core refuses to append to a missing one.
+      const file = join(dir, "output.txt");
+      writeFileSync(file, "");
+      delete process.env.GITHUB_OUTPUT;
+      actionsIo.output("result", "dropped");
+      // @ts-expect-error a misspelled output name fails to compile at the port
+      actionsIo.output("reslut", "dropped");
+      process.env.GITHUB_OUTPUT = file;
+      actionsIo.output("result", "clean");
+      // @actions/core writes outputs in heredoc form: name<<DELIM / value / DELIM
+      const written = readFileSync(file, "utf8");
+      expect(written).toMatch(/^result<<[^\n]+\nclean\n[^\n]+\n$/);
+      expect(written).not.toContain("dropped");
+    }));
 
   test("mask registers the value in the readable registry", () => {
     actionsIo.mask("o/private");

@@ -8,8 +8,7 @@ import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import { FILTER_INPUTS, INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 interface ActionYml {
   name: string;

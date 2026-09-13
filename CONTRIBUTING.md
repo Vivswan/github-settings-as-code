@@ -5,7 +5,8 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 ## Toolchain
 
 - `src/` is TypeScript built with [bun](https://bun.com). The scripts in `package.json` are the commands; `bun run check` is the whole local gate.
-- `lib/settings.schema.json` is the one committed generated artifact; `bun run build:check` fails when it or the generated docs drift.
+- Committed generated output is the table in `.github/scripts/generated.ts`: `lib/settings.schema.json`, `src/upstream-gaps/index.ts`, and the generated regions of `action.yml`, `COVERAGE.md`, and the docs pages.
+- `bun run build:check` regenerates every table entry and fails on drift.
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into them.
 - [COVERAGE.md](COVERAGE.md) is the inventory of the supported API surface. A change that adds or extends a section keeps it in step.
 
@@ -14,6 +15,19 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - A compat path that stays (an alias, a retired input still accepted, an arm for an older artifact) carries a comment `COMPAT(vN): <what stays working and what to delete>`, N the major that deletes it: compat kept today for a pre-3 shape is marked v3; compat introduced during 3.x for a 3.0 shape is marked v4. JSON takes no comments, so compat in a JSON file is marked in the code that reads it. A path that must work forever is not compat and gets no marker.
 - `bun run check:compat` (in `bun run check` and in CI) rejects a malformed marker and any marker whose major is at or below `package.json`'s, and prints the remaining markers grouped by major.
 - A release PR's tree already carries the version it cuts, so the same check makes a major release PR unmergeable until every marker for that major is deleted on `main` first: with 3.0.0 in preparation, every v3-marked path goes before v3 cuts.
+
+## Code conventions
+
+- Line caps: code wraps at biome's `lineWidth` of 100. The fleet's check-file-size caps source, test, workflow, and shell lines at 256 characters; markdown prose has no width cap. A comment block is at most 10 lines.
+- Markdown keeps one source line per paragraph or list item, so a long item is split into items, never wrapped.
+- A source file under `src/` or `.github/scripts/` opens with a one-paragraph header comment saying what the file owns; test files need none.
+- Tests live in two places: a section's unit tests sit beside it in `src/sections/<key>/`; everything else is under `test/`, mirroring `src/`.
+
+## Tests
+
+- Every temp directory a test creates is removed on every exit path, failure included: `withTempDir()` from `test/temp-dir.ts`, or a try/finally of its own. A fixture that outlives one test removes its dir when it ends (the release-pipeline fixture in afterAll, the e2e bundle on process exit).
+- An Io a test records through is `captureIo()` from `test/io/capture.ts`: every channel in its own list and in one ordered event log.
+- A repository-relative path in a test resolves from `ROOT` in `test/root.ts`; a file beside the test resolves from `import.meta.dir`.
 
 ## End-to-end tests
 

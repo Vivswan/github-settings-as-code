@@ -5,8 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 /** One stale workflow-snippet pin: where it sits and what it names. */
 export interface StalePin {

@@ -7,8 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL, NONE } from "../../.github/scripts/changed-sections.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 describe("checks.yml e2e-smoke section-selection sentinels", () => {
   const workflow = readFileSync(join(ROOT, ".github", "workflows", "checks.yml"), "utf8");

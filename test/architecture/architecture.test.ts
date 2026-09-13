@@ -4,7 +4,6 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
 import {
   ARCHITECTURE_PATH,
   importSpecifiers,
@@ -12,8 +11,7 @@ import {
   readArchitecture,
   renderArchitectureMermaid,
 } from "../../.github/scripts/arch-lint.js";
-
-const ROOT = join(import.meta.dir, "..", "..");
+import { ROOT } from "../root.js";
 
 describe("architecture.yml against src/", () => {
   const arch = readArchitecture(ROOT);

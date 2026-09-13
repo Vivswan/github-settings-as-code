@@ -14,6 +14,7 @@ import { SECTION_KEYS } from "../../src/schema.js";
 import type { PatResource } from "../../src/sections/contract/permissions.js";
 import { renamedKeyError } from "../../src/sections/shared/renamed-key.js";
 import type { MustBeNever } from "../../src/types.js";
+import { ROOT } from "../root.js";
 import { LAYER_FILE_PREFIX, RUNNER_ROOT_FILES } from "./constants.js";
 import type { LiveState } from "./mock/state.js";
 import { LIVE_STATE_KEYS } from "./mock/state.js";
@@ -601,9 +602,7 @@ export function collectYmlFiles(dir: string): string[] {
  *   test/e2e/scenarios/             -> multi-section flows; a scenario exercising ONE section lives with that section
  *   <sectionsDir>/<key>/scenarios/  -> every registered section, so a new section's first scenario needs no list edit
  */
-export function scenarioRoots(
-  sectionsDir: string = join(import.meta.dir, "..", "..", "src", "sections"),
-): string[] {
+export function scenarioRoots(sectionsDir: string = join(ROOT, "src", "sections")): string[] {
   return [
     join(import.meta.dir, "scenarios"),
     ...SECTION_KEYS.map((key) => join(sectionsDir, key, "scenarios")),

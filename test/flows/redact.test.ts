@@ -15,6 +15,7 @@ import {
 } from "../../src/flows/redact.js";
 import { type Io, maskRegistry, prefixedIo, silentIo } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
+import { captureIo } from "../io/capture.js";
 
 /** A private-set predicate from a lowercase-keyed slug list. */
 function privateSet(...slugs: string[]): (slug: string) => boolean {
@@ -119,18 +120,6 @@ describe("planRedaction", () => {
   });
 });
 
-/** An Io recording every public emission, for the channel and projection tests. */
-function recordingIo(): { io: Io; emitted: string[] } {
-  const emitted: string[] = [];
-  const io: Io = {
-    ...silentIo(),
-    ...maskRegistry((v) => emitted.push(`mask ${v}`)),
-    annotate: (level, message) => emitted.push(`${level}: ${message}`),
-    log: (line) => emitted.push(line),
-  };
-  return { io, emitted };
-}
-
 const outcomes = [
   {
     key: "repository" as const,
@@ -143,7 +132,7 @@ const outcomes = [
 
 describe("target channels", () => {
   test("a public channel emits in the clear with the slug prefix and closes with its detail open", () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const channel = publicChannel(io, "o/pub", true);
     channel.io.annotate("error", "boom");
     channel.io.log("changed");
@@ -151,10 +140,10 @@ describe("target channels", () => {
       "warning",
       "ignoring unknown section in o/pub:.github/settings.yml",
     );
-    expect(emitted).toEqual([
-      "error: o/pub: boom",
-      "o/pub: changed",
-      "warning: ignoring unknown section in o/pub:.github/settings.yml",
+    expect(events).toEqual([
+      "annotate error: o/pub: boom",
+      "log: o/pub: changed",
+      "annotate warning: ignoring unknown section in o/pub:.github/settings.yml",
     ]);
     const detail = channel.close({ outcomes, note: "n" });
     expect(isPrivate(detail)).toBe(false);
@@ -163,13 +152,13 @@ describe("target channels", () => {
   });
 
   test("a redacted channel captures every line and closes sealed with a transcript snapshot", () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const channel = redactedChannel(io, "o/priv", "private repository #1");
     channel.io.annotate("error", "boom SECRET");
     channel.unprefixed.annotate("warning", "ignoring SECRET");
     channel.io.log("changed SECRET");
     channel.io.mask("o/priv");
-    expect(emitted).toEqual(["mask o/priv"]);
+    expect(events).toEqual(["mask: o/priv"]);
     const detail = channel.close({ outcomes });
     // A line written after the close never reaches the sealed transcript.
     channel.io.log("late SECRET");
@@ -190,12 +179,12 @@ describe("target channels", () => {
 
   test("the plan opens a redacted channel for a hidden slug and a prefixed public one otherwise", () => {
     const plan = planRedaction("redact", ["o/pub", "o/priv"], [], privateSet("o/priv"), "a/r");
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const pub = openTargetChannel(plan, io, "o/pub");
     const priv = openTargetChannel(plan, io, "o/priv");
     pub.io.log("visible");
     priv.io.log("hidden");
-    expect(emitted).toEqual(["o/pub: visible"]);
+    expect(events).toEqual(["log: o/pub: visible"]);
     expect(pub.display).toBe("o/pub");
     expect(priv.display).toBe("private repository #1");
     expect(isPrivate(pub.close({ outcomes: [] }))).toBe(false);
@@ -209,10 +198,10 @@ describe("attempt", () => {
   const failed = (message: string) => ({ result: "failed" as const, message });
 
   test("a crash on a redacted target is captured into its transcript and never emitted", async () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const channel = redactedChannel(io, "o/priv", "private repository #1");
     expect(await attempt(channel, crash, failed)).toEqual({ result: "failed", message: violation });
-    expect(emitted).toEqual([]);
+    expect(events).toEqual([]);
     expect(channel.close({ outcomes: [] })).toEqual(
       markPrivate({
         slug: "o/priv",
@@ -224,17 +213,17 @@ describe("attempt", () => {
   });
 
   test("the same crash in the clear is annotated in full, and a success passes through", async () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const channel = publicChannel(io, "o/priv", true);
     await attempt(channel, crash, failed);
-    expect(emitted).toEqual([`error: o/priv: ${violation}`]);
+    expect(events).toEqual([`annotate error: o/priv: ${violation}`]);
     const ok = (): Promise<ReturnType<typeof failed>> =>
       Promise.resolve({ result: "failed", message: "not a crash" });
     expect(await attempt(channel, ok, failed)).toEqual({
       result: "failed",
       message: "not a crash",
     });
-    expect(emitted).toHaveLength(1);
+    expect(events).toHaveLength(1);
   });
 });
 
@@ -287,7 +276,7 @@ describe("public projections", () => {
     const rows = [
       { key: "labels" as const, status: "snapshot" as const, detail: ["labels[hush]"] },
     ];
-    const { io } = recordingIo();
+    const { io } = captureIo();
     const hidden = redactedChannel(io, "o/priv", privatePlaceholder(1));
     expect(
       publicDetail(hidden.close({ outcomes: rows, note: "written", file: "out/o/priv.yml" })),
@@ -313,20 +302,20 @@ describe("public projections", () => {
     ["drift", "warning: private repository #1: drift - rulesets. "],
     ["skipped", "notice: private repository #1: skipped. "],
   ] as const)("emitRedactedResult on %s names only closed values", (result, head) => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     emitRedactedResult(io, "private repository #1", result, sealed);
-    expect(emitted).toEqual([`${head}${REDACTED_NOTE}`]);
+    expect(events).toEqual([`annotate ${head}${REDACTED_NOTE}`]);
   });
 
   test("emitRedactedResult says nothing for a healthy result", () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     emitRedactedResult(io, "private repository #1", "applied", sealed);
     emitRedactedResult(io, "private repository #1", "clean", sealed);
-    expect(emitted).toEqual([]);
+    expect(events).toEqual([]);
   });
 
   test("a sealed value cannot reach a public sink or a string template without a projection", () => {
-    const { io, emitted } = recordingIo();
+    const { io, events } = captureIo();
     const slug = markPrivate("o/priv");
     // @ts-expect-error a Private<string> is not a string: io.log cannot take it
     io.log(slug);
@@ -338,23 +327,18 @@ describe("public projections", () => {
     io.summary(slug);
     // The runtime shape is an opaque box: even forced through, the slug text is not what a sink would print.
     expect(`${slug}`).not.toContain("o/priv");
-    expect(emitted.join("\n")).not.toContain("o/priv");
+    expect(events.join("\n")).not.toContain("o/priv");
   });
 });
 
 describe("capturingIo", () => {
   test("suppresses public annotate/log but records them in order", () => {
-    const emitted: string[] = [];
-    const base: Io = {
-      ...silentIo(),
-      annotate: (level, message) => emitted.push(`annotate ${level}: ${message}`),
-      log: (line) => emitted.push(`log: ${line}`),
-    };
+    const { io: base, events } = captureIo();
     const { io, drain } = capturingIo(base);
     io.log("first");
     io.annotate("warning", "second");
     io.log("third");
-    expect(emitted).toEqual([]);
+    expect(events).toEqual([]);
     expect(drain()).toEqual([
       { line: "first" },
       { level: "warning", line: "second" },
@@ -388,18 +372,11 @@ describe("capturingIo", () => {
   test("composes as capturingIo(prefixedIo(io, display)): capture is per-target, mask stays raw", () => {
     // capturingIo suppresses the wrapped sink entirely, so the prefix never reaches the base; each target owns its own buffer, so recorded lines need
     // no prefix.
-    const masks: string[] = [];
-    const emitted: string[] = [];
-    const base: Io = {
-      ...silentIo(),
-      ...maskRegistry((v) => masks.push(v)),
-      annotate: (l, m) => emitted.push(`${l}: ${m}`),
-      log: (line) => emitted.push(line),
-    };
+    const { io: base, events, masks } = captureIo();
     const { io, drain } = capturingIo(prefixedIo(base, "private repository #1: "));
     io.log("changed a label");
     io.mask("o/secret");
-    expect(emitted).toEqual([]);
+    expect(events).toEqual(["mask: o/secret"]);
     expect(drain()).toEqual([{ line: "changed a label" }]);
     expect(masks).toEqual(["o/secret"]);
   });

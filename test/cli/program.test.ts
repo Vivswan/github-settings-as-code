@@ -5,34 +5,21 @@
  * what the CLI prints.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { CliHost } from "../../src/cli/commands.js";
 import { CLI_COMMANDS, main } from "../../src/cli/program.js";
 import { type ConfigEnv, type GithubClient, sectionGrant, sectionModule } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
+import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 import { memoryStream, runCli } from "./streams.js";
 
-const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 const TOKEN = "ghp_cli_test_token";
-
-const scratch: string[] = [];
-afterEach(() => {
-  for (const dir of scratch.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gsac-cli-"));
-  scratch.push(dir);
-  return dir;
-}
 
 const cli = runCli;
 
@@ -210,90 +197,93 @@ describe("check and apply", () => {
 
   test.each([false, true])(
     "a failure after the parse is reported through the mask boundary, exit 1 (verbose: %p)",
-    async (verbose) => {
-      // The summary file's directory does not exist, so the write throws inside
-      // the run; the path carries the token, and the report must not. Without
-      // --verbose the remedy asks for it; with it the stack is the report.
-      const summary = join(tempDir(), "missing", `${TOKEN}.md`);
-      const masked = summary.replaceAll(TOKEN, "***");
-      const result = await cli(
-        ["check", ...target, "--summary", summary, ...(verbose ? ["--verbose"] : [])],
-        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
-      );
-      expect(result.code).toBe(1);
-      expect(result.stdout + result.stderr).not.toContain(TOKEN);
-      const message = `Error: ENOENT: no such file or directory, open '${masked}'`;
-      if (!verbose) {
-        expect(result.stderr).toBe(
-          `error: github-settings-as-code stopped unexpectedly: ${message}. Re-run with --verbose for the stack; if it recurs, file a bug with that output attached\n`,
+    (verbose) =>
+      withTempDir("gsac-cli-", async (dir) => {
+        // The summary file's directory does not exist, so the write throws inside
+        // the run; the path carries the token, and the report must not. Without
+        // --verbose the remedy asks for it; with it the stack is the report.
+        const summary = join(dir, "missing", `${TOKEN}.md`);
+        const masked = summary.replaceAll(TOKEN, "***");
+        const result = await cli(
+          ["check", ...target, "--summary", summary, ...(verbose ? ["--verbose"] : [])],
+          new MockApi({ "GET /repos/o/r": { data: { has_wiki: false, private: false } } }),
         );
-        return;
-      }
-      // The stack's frames carry this machine's paths, so the line is pinned around them.
-      expect(result.stderr).toStartWith(
-        `error: github-settings-as-code stopped unexpectedly: ${message}\n    at `,
-      );
-      expect(result.stderr).toEndWith(
-        ". The stack above is the report: if it recurs, file a bug with it attached\n",
-      );
-      expect(result.stderr).not.toContain("Re-run with --verbose");
-    },
+        expect(result.code).toBe(1);
+        expect(result.stdout + result.stderr).not.toContain(TOKEN);
+        const message = `Error: ENOENT: no such file or directory, open '${masked}'`;
+        if (!verbose) {
+          expect(result.stderr).toBe(
+            `error: github-settings-as-code stopped unexpectedly: ${message}. Re-run with --verbose for the stack; if it recurs, file a bug with that output attached\n`,
+          );
+          return;
+        }
+        // The stack's frames carry this machine's paths, so the line is pinned around them.
+        expect(result.stderr).toStartWith(
+          `error: github-settings-as-code stopped unexpectedly: ${message}\n    at `,
+        );
+        expect(result.stderr).toEndWith(
+          ". The stack above is the report: if it recurs, file a bug with it attached\n",
+        );
+        expect(result.stderr).not.toContain("Re-run with --verbose");
+      }),
   );
 
-  test("--summary appends the run's markdown to the named file", async () => {
-    const summary = join(tempDir(), "summary.md");
-    const result = await cli(
-      ["check", ...target, "--summary", summary],
-      new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
-    );
-    expect(result.code).toBe(0);
-    expect(readFileSync(summary, "utf8")).toContain("clean");
-  });
+  test("--summary appends the run's markdown to the named file", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const summary = join(dir, "summary.md");
+      const result = await cli(
+        ["check", ...target, "--summary", summary],
+        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
+      );
+      expect(result.code).toBe(0);
+      expect(readFileSync(summary, "utf8")).toContain("clean");
+    }));
 });
 
 describe("merge", () => {
-  test("folds the layers into the merged file, exits 0, and reports merged", async () => {
-    const out = join(tempDir(), "merged.yml");
-    const result = await cli([
-      "merge",
-      "--settings-file",
-      join(LAYERS, "fleet.yml"),
-      "--settings-file",
-      join(LAYERS, "team.yml"),
-      "--merged-file",
-      out,
-    ]);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toEndWith(
-      "result: merged\nresult=merged\nskipped-sections=\nrepos-result={}\n",
-    );
-    // The whole document only the fold produces: team.yml's label and rule join
-    // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
-    // fleet.yml's key, and pages passes through untouched.
-    expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
-      repository: { has_wiki: false },
-      labels: {
-        _undeclared: "delete",
-        entries: [
-          { name: "bug", color: "d73a4a" },
-          { name: "docs", color: "0075ca" },
-          { name: "team", color: "00ff00" },
-        ],
-      },
-      rulesets: {
-        _undeclared: "keep",
-        entries: [
-          {
-            name: "main",
-            target: "branch",
-            enforcement: "active",
-            rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
-          },
-        ],
-      },
-      pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
-    });
-  });
+  test("folds the layers into the merged file, exits 0, and reports merged", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const out = join(dir, "merged.yml");
+      const result = await cli([
+        "merge",
+        "--settings-file",
+        join(LAYERS, "fleet.yml"),
+        "--settings-file",
+        join(LAYERS, "team.yml"),
+        "--merged-file",
+        out,
+      ]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toEndWith(
+        "result: merged\nresult=merged\nskipped-sections=\nrepos-result={}\n",
+      );
+      // The whole document only the fold produces: team.yml's label and rule join
+      // fleet.yml's under explicit policy wrappers, its `has_projects: null` removes
+      // fleet.yml's key, and pages passes through untouched.
+      expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
+        repository: { has_wiki: false },
+        labels: {
+          _undeclared: "delete",
+          entries: [
+            { name: "bug", color: "d73a4a" },
+            { name: "docs", color: "0075ca" },
+            { name: "team", color: "00ff00" },
+          ],
+        },
+        rulesets: {
+          _undeclared: "keep",
+          entries: [
+            {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+            },
+          ],
+        },
+        pages: { build_type: "workflow", source: { branch: "main", path: "/" } },
+      });
+    }));
 
   test("a merge without merged-file fails with the action's line", async () => {
     const result = await cli(["merge", "--settings-file", join(LAYERS, "fleet.yml")]);
@@ -308,36 +298,37 @@ describe("merge", () => {
 describe("snapshot", () => {
   const LABEL = { name: "bug", color: "d73a4a", description: "Something is broken" };
 
-  test("writes the live settings to the snapshot file, exits 0, and reports snapshot", async () => {
-    const out = join(tempDir(), "out", "snapshot.yml");
-    const api = new MockApi({
-      "GET /repos/o/r": { data: { private: false } },
-      "GET /repos/o/r/labels?per_page=100&page=1": { data: [LABEL] },
-    });
-    const result = await cli(
-      [
-        "snapshot",
-        "--token",
-        TOKEN,
-        "--repository",
-        "o/r",
-        "--snapshot-file",
-        out,
-        "--sections",
-        "labels",
-      ],
-      api,
-    );
-    expect(result).toEqual({
-      code: 0,
-      stdout: `snapshot written to ${out}\nresult: snapshot\nresult=snapshot\nskipped-sections=\nrepos-result={}\n`,
-      stderr: "",
-    });
-    expect(api.mutations()).toEqual([]);
-    expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
-      labels: { _undeclared: "delete", entries: [LABEL] },
-    });
-  });
+  test("writes the live settings to the snapshot file, exits 0, and reports snapshot", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const out = join(dir, "out", "snapshot.yml");
+      const api = new MockApi({
+        "GET /repos/o/r": { data: { private: false } },
+        "GET /repos/o/r/labels?per_page=100&page=1": { data: [LABEL] },
+      });
+      const result = await cli(
+        [
+          "snapshot",
+          "--token",
+          TOKEN,
+          "--repository",
+          "o/r",
+          "--snapshot-file",
+          out,
+          "--sections",
+          "labels",
+        ],
+        api,
+      );
+      expect(result).toEqual({
+        code: 0,
+        stdout: `snapshot written to ${out}\nresult: snapshot\nresult=snapshot\nskipped-sections=\nrepos-result={}\n`,
+        stderr: "",
+      });
+      expect(api.mutations()).toEqual([]);
+      expect(parseYaml(readFileSync(out, "utf8"))).toEqual({
+        labels: { _undeclared: "delete", entries: [LABEL] },
+      });
+    }));
 
   test("a snapshot without a destination fails before any API call, the action's line on stderr", async () => {
     const api = new MockApi({});
@@ -370,51 +361,54 @@ describe("validate and permissions", () => {
     });
   });
 
-  test("validate: an invalid file exits 1 with the validator's line", async () => {
-    const file = join(tempDir(), "bad.yml");
-    writeFileSync(file, "labels:\n  - color: d73a4a\n");
-    const result = await cli(["validate", file]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toStartWith(`error: ${file} has malformed section entries:`);
-    // The same message, once on stderr and once as the object's problem.
-    const problem = result.stderr.slice("error: ".length, -1);
-    const json = await cli(["validate", file, "--json"]);
-    expect(json.code).toBe(1);
-    expect(json.stderr).toBe(result.stderr);
-    expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
-  });
+  test("validate: an invalid file exits 1 with the validator's line", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const file = join(dir, "bad.yml");
+      writeFileSync(file, "labels:\n  - color: d73a4a\n");
+      const result = await cli(["validate", file]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toStartWith(`error: ${file} has malformed section entries:`);
+      // The same message, once on stderr and once as the object's problem.
+      const problem = result.stderr.slice("error: ".length, -1);
+      const json = await cli(["validate", file, "--json"]);
+      expect(json.code).toBe(1);
+      expect(json.stderr).toBe(result.stderr);
+      expect(JSON.parse(json.stdout)).toEqual({ result: "failed", file, problem });
+    }));
 
-  test("validate: an unreadable file exits 1 naming the path", async () => {
-    const result = await cli(["validate", join(tempDir(), "missing.yml")]);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toStartWith("error: cannot read settings from ");
-  });
+  test("validate: an unreadable file exits 1 naming the path", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const result = await cli(["validate", join(dir, "missing.yml")]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toStartWith("error: cannot read settings from ");
+    }));
 
-  test("permissions prints one grant per declared section, from the section declarations", async () => {
-    const file = join(tempDir(), "settings.yml");
-    writeFileSync(
-      file,
-      "labels:\n  - name: bug\n    color: d73a4a\nrepository:\n  has_wiki: false\n",
-    );
-    const result = await cli(["permissions", file]);
-    expect(result).toEqual({
-      code: 0,
-      stdout: `repository: ${sectionGrant(sectionModule("repository"))}\nlabels: ${sectionGrant(sectionModule("labels"))}\n`,
-      stderr: "",
-    });
-    const json = await cli(["permissions", file, "--json"]);
-    expect(json.code).toBe(0);
-    expect(json.stderr).toBe("");
-    expect(JSON.parse(json.stdout)).toEqual({
-      result: "valid",
-      file,
-      grant: {
-        repository: sectionGrant(sectionModule("repository")),
-        labels: sectionGrant(sectionModule("labels")),
-      },
-    });
-  });
+  test("permissions prints one grant per declared section, from the section declarations", () =>
+    withTempDir("gsac-cli-", async (dir) => {
+      const file = join(dir, "settings.yml");
+      writeFileSync(
+        file,
+        "labels:\n  - name: bug\n    color: d73a4a\nrepository:\n  has_wiki: false\n",
+      );
+      const result = await cli(["permissions", file]);
+      expect(result).toEqual({
+        code: 0,
+        stdout: `repository: ${sectionGrant(sectionModule("repository"))}\nlabels: ${sectionGrant(sectionModule("labels"))}\n`,
+        stderr: "",
+      });
+      const json = await cli(["permissions", file, "--json"]);
+      expect(json.code).toBe(0);
+      expect(json.stderr).toBe("");
+      expect(JSON.parse(json.stdout)).toEqual({
+        result: "valid",
+        file,
+        grant: {
+          repository: sectionGrant(sectionModule("repository")),
+          labels: sectionGrant(sectionModule("labels")),
+        },
+      });
+    }));
 });
 
 describe("the --json failure envelope", () => {

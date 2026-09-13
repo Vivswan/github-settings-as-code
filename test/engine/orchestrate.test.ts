@@ -10,8 +10,7 @@ import {
   validateSettingsDoc,
 } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
-import type { Io } from "../../src/io.js";
-import { maskRegistry, prefixedIo } from "../../src/io.js";
+import { prefixedIo, silentIo } from "../../src/io.js";
 import { describeProblem, type TopLevelShape } from "../../src/problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
@@ -20,38 +19,12 @@ import { interactionLimitsSection } from "../../src/sections/interaction_limits/
 import { pagesSection } from "../../src/sections/pages/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import { workflowsSection } from "../../src/sections/workflows/index.js";
+import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
-
-function captureIo(): { io: Io; annotations: string[]; logs: string[]; masked: string[] } {
-  const annotations: string[] = [];
-  const logs: string[] = [];
-  const masked: string[] = [];
-  return {
-    io: {
-      annotate: (level, message) => annotations.push(`${level}: ${message}`),
-      log: (line) => logs.push(line),
-      debug: () => {},
-      summary: () => {},
-      output: () => {},
-      ...maskRegistry((value) => masked.push(value)),
-    },
-    annotations,
-    logs,
-    masked,
-  };
-}
 
 /** Brand fixtures through the REAL boundary: an invalid fixture fails here instead of riding a cast into runForRepo. */
 function validated(doc: SettingsFile): ValidatedSettings {
-  const silent: Io = {
-    annotate: () => {},
-    log: () => {},
-    debug: () => {},
-    summary: () => {},
-    output: () => {},
-    ...maskRegistry(() => {}),
-  };
-  return validateSettingsDoc(doc, "test fixture", new Set(), silent).match(
+  return validateSettingsDoc(doc, "test fixture", new Set(), silentIo()).match(
     (settings) => settings,
     (problem) => {
       throw new Error(`test fixture failed validation: ${describeProblem(problem)}`);
@@ -259,25 +232,18 @@ describe("runForRepo secret references", () => {
 
   test("apply resolves up front, masks before the first mutation, and hands handlers plaintext", async () => {
     const api = new MockApi({ [HOOKS_LIST]: { data: [] } }).allowMutations("POST /repos/o/r/hooks");
-    const { io, masked } = captureIo();
     const mutationsAtMaskTime: number[] = [];
-    const trackingIo: Io = {
-      ...io,
-      ...maskRegistry((value) => {
-        mutationsAtMaskTime.push(api.mutations().length);
-        io.mask(value);
-      }),
-    };
+    const { io, masks } = captureIo(() => mutationsAtMaskTime.push(api.mutations().length));
     const result = await runForRepo(
       api,
       opts({
         settings: webhookSettings("$WEBHOOK_SECRET"),
         secretEnv: { WEBHOOK_SECRET: "s3cret-plaintext" },
       }),
-      trackingIo,
+      io,
     );
     expect(result.result).toBe("applied");
-    expect(masked).toEqual(["s3cret-plaintext"]);
+    expect(masks).toEqual(["s3cret-plaintext"]);
     expect(mutationsAtMaskTime).toEqual([0]);
     const post = api.mutations()[0]?.payload as { config?: { secret?: string } };
     expect(post?.config?.secret).toBe("s3cret-plaintext");

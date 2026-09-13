@@ -8,12 +8,12 @@ import {
   transitiveDependents,
 } from "../../.github/scripts/changed-sections.js";
 import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
+import { ROOT } from "../root.js";
 import { headRefPrefixes, headRefPrefixesIn } from "./head-ref.js";
 import {
   type CompositeAction,
   executedLines,
   installs,
-  ROOT,
   readAction,
   readWorkflow,
   SETUP_USES,

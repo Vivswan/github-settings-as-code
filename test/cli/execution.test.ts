@@ -4,9 +4,8 @@
  * same set spelled as flags, an equality test/cli/inputs.test.ts pins on its own.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "../../src/action/run.js";
 import {
@@ -18,6 +17,8 @@ import {
   parseConfig,
 } from "../../src/index.js";
 import { MockApi, type Route } from "../mock-api.js";
+import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 import { runCli } from "./streams.js";
 
 type Inputs = Partial<Record<InputName, string>>;
@@ -36,7 +37,6 @@ interface Case {
   readonly ends: { readonly code: number; readonly result: string };
 }
 
-const ROOT = join(import.meta.dir, "..", "..");
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
 const LAYERS = join(ROOT, "test", "fixtures", "layers");
 const TOKEN = "ghp_equivalence_token";
@@ -234,19 +234,6 @@ const OUTPUT_LINE = new RegExp(`^(${OUTPUT_NAMES.join("|")})=(.*)$`);
 const CONTEXT_KEYS = ["GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID", "GITHUB_TOKEN"];
 const INPUT_KEYS = Object.keys(INPUT_DECLS).map((name) => `INPUT_${name.toUpperCase()}`);
 
-const scratch: string[] = [];
-afterEach(() => {
-  for (const dir of scratch.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gsac-equivalence-"));
-  scratch.push(dir);
-  return dir;
-}
-
 function api(c: Case): MockApi {
   return new MockApi({ ...c.routes }).allowMutations(...(c.mutations ?? []));
 }
@@ -256,8 +243,8 @@ const fold = (dir: string) => (line: string) => line.replaceAll(dir, "<dir>");
 /** The two faces write their snapshots at different instants; the header line is the one byte range that may differ. */
 const SNAPSHOT_INSTANT = /^(# Snapshot of \S+ taken )\S+$/m;
 
-function scratchFor(c: Case): string {
-  const dir = tempDir();
+/** `dir` holding the case's settings file, when it has one. */
+function scratchFor(dir: string, c: Case): string {
   if (c.settings !== undefined) {
     writeFileSync(join(dir, "settings.yml"), c.settings);
   }
@@ -276,77 +263,81 @@ function writtenFiles(dir: string): Record<string, string> {
 }
 
 /** The action's face: the inputs as the runner's INPUT_* variables, the run over a collecting Io. */
-async function throughEnv(c: Case): Promise<Observed> {
-  const dir = scratchFor(c);
-  const inputs = c.inputs(dir);
-  const keys = [...INPUT_KEYS, ...CONTEXT_KEYS];
-  const saved = new Map(keys.map((key) => [key, process.env[key]]));
-  for (const key of keys) {
-    delete process.env[key];
-  }
-  for (const [name, value] of Object.entries(inputs)) {
-    process.env[`INPUT_${name.toUpperCase()}`] = value;
-  }
-  for (const [key, value] of Object.entries(c.env)) {
-    process.env[key] = value;
-  }
-  const collected = collectingIo();
-  let code: number;
-  try {
-    code = await run({ api: api(c), io: collected.io });
-  } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
+function throughEnv(c: Case): Promise<Observed> {
+  return withTempDir("gsac-equivalence-", async (dir) => {
+    scratchFor(dir, c);
+    const inputs = c.inputs(dir);
+    const keys = [...INPUT_KEYS, ...CONTEXT_KEYS];
+    const saved = new Map(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) {
+      delete process.env[key];
+    }
+    for (const [name, value] of Object.entries(inputs)) {
+      process.env[`INPUT_${name.toUpperCase()}`] = value;
+    }
+    for (const [key, value] of Object.entries(c.env)) {
+      process.env[key] = value;
+    }
+    const collected = collectingIo();
+    let code: number;
+    try {
+      code = await run({ api: api(c), io: collected.io });
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
       }
     }
-  }
-  const at = fold(dir);
-  return {
-    code,
-    outputs: Object.fromEntries(
-      Object.entries(collected.outputs).map(([name, value]) => [name, at(value)]),
-    ),
-    logs: collected.lines.filter((l) => l.level === undefined).map((l) => at(l.line)),
-    annotations: collected.lines
-      .filter((l) => l.level !== undefined)
-      .map((l) => at(`${l.level}: ${l.line}`)),
-    files: writtenFiles(dir),
-  };
+    const at = fold(dir);
+    return {
+      code,
+      outputs: Object.fromEntries(
+        Object.entries(collected.outputs).map(([name, value]) => [name, at(value)]),
+      ),
+      logs: collected.lines.filter((l) => l.level === undefined).map((l) => at(l.line)),
+      annotations: collected.lines
+        .filter((l) => l.level !== undefined)
+        .map((l) => at(`${l.level}: ${l.line}`)),
+      files: writtenFiles(dir),
+    };
+  });
 }
 
 /** The CLI's face: the same inputs as the subcommand's flags, the run over the program's streams. */
-async function throughArgv(c: Case): Promise<Observed> {
-  const dir = scratchFor(c);
-  const { mode, ...flags } = c.inputs(dir);
-  const argv = [
-    mode ?? "",
-    ...Object.entries(flags).flatMap(([name, value]) => [`--${name}`, value ?? ""]),
-  ];
-  const result = await runCli(argv, api(c), c.env);
-  const at = fold(dir);
-  const outputs: Partial<Record<OutputName, string>> = {};
-  const logs: string[] = [];
-  for (const line of result.stdout.split("\n").filter((l) => l !== "")) {
-    const output = OUTPUT_LINE.exec(line);
-    if (output === null) {
-      logs.push(at(line));
-    } else {
-      outputs[output[1] as OutputName] = at(output[2] ?? "");
+function throughArgv(c: Case): Promise<Observed> {
+  return withTempDir("gsac-equivalence-", async (dir) => {
+    scratchFor(dir, c);
+    const { mode, ...flags } = c.inputs(dir);
+    const argv = [
+      mode ?? "",
+      ...Object.entries(flags).flatMap(([name, value]) => [`--${name}`, value ?? ""]),
+    ];
+    const result = await runCli(argv, api(c), c.env);
+    const at = fold(dir);
+    const outputs: Partial<Record<OutputName, string>> = {};
+    const logs: string[] = [];
+    for (const line of result.stdout.split("\n").filter((l) => l !== "")) {
+      const output = OUTPUT_LINE.exec(line);
+      if (output === null) {
+        logs.push(at(line));
+      } else {
+        outputs[output[1] as OutputName] = at(output[2] ?? "");
+      }
     }
-  }
-  return {
-    code: result.code,
-    outputs,
-    logs,
-    annotations: result.stderr
-      .split("\n")
-      .filter((l) => l !== "")
-      .map(at),
-    files: writtenFiles(dir),
-  };
+    return {
+      code: result.code,
+      outputs,
+      logs,
+      annotations: result.stderr
+        .split("\n")
+        .filter((l) => l !== "")
+        .map(at),
+      files: writtenFiles(dir),
+    };
+  });
 }
 
 describe("the action and the CLI run one arm to one result", () => {
