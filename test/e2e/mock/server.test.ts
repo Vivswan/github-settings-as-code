@@ -115,6 +115,16 @@ describe("permission gate grades", () => {
     expect(h.requests[0]?.deniedBy).toBe("org_members");
   });
 
+  test("the custom property values GET needs no permission while the PATCH beside it is gated", async () => {
+    const h = await start(scenario({ token_permissions: { custom_properties: "none" } }));
+    const path = `/repos/${OWNER}/${REPO}/properties/values`;
+    const read = await call(h, "GET", path);
+    expect(read.status).toBe(200);
+    const write = await call(h, "PATCH", path, { body: { properties: [] } });
+    expect(write.status).not.toBe(204);
+    expect(h.requests.find((r) => r.method === "PATCH")?.deniedBy).toBe("custom_properties");
+  });
+
   test("the org endpoint needs no permission (permission: none)", async () => {
     const h = await start(scenario({ token_permissions: { administration: "none" } }));
     const org = await call(h, "GET", `/orgs/${OWNER}`);
