@@ -52,7 +52,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
+    expect(result).toEqual({ delivered: "updated", number: 7 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -78,7 +78,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
+    expect(result).toEqual({ delivered: "updated", number: 7 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -114,7 +114,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/9" });
+    expect(result).toEqual({ delivered: "created", number: 9 });
     const create = api.calls.find((c) => `${c.method} ${c.path}` === ISSUE_CREATE);
     expect(create?.payload).toEqual({ title: ISSUE_TITLE, body: "body", labels: [MARKER_LABEL] });
   });
@@ -128,7 +128,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/3" });
+    expect(result).toEqual({ delivered: "updated", number: 3 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -153,7 +153,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/3" });
+    expect(result).toEqual({ delivered: "updated", number: 3 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -192,7 +192,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/150": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/150" });
+    expect(result).toEqual({ delivered: "updated", number: 150 });
     // A full page came back, but the match stops the walk: no page=2 request.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
@@ -224,7 +224,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/*": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: `https://github.com/o/private-repo/issues/${picks}` });
+    expect(result).toEqual({ delivered: "updated", number: picks });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -242,7 +242,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/9": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/9" });
+    expect(result).toEqual({ delivered: "created", number: 9 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -262,13 +262,32 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/9" });
+    expect(result).toEqual({ delivered: "created", number: 9 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
       TITLE_SCAN,
       ISSUE_CREATE,
     ]);
+  });
+
+  test("a create response without an issue number is a malformed-response warning, whatever the state", async () => {
+    const routes: Record<string, Route> = {
+      [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
+      [LABEL_LOOKUP]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
+      [ISSUE_CREATE]: { data: { html_url: "https://github.com/o/private-repo/issues/9" } },
+    };
+    for (const needsAttention of [true, false]) {
+      const api = new MockApi(routes);
+      const result = await deliverIssueReport(api, SLUG, "body", needsAttention, "always");
+      expect(result).toEqual({
+        warning: expect.stringMatching(
+          /^could not deliver the private report: the report issue was created but its response carried no issue number/,
+        ),
+      });
+      expect(api.calls.filter((c) => c.method === "PATCH")).toEqual([]);
+    }
   });
 
   test("a denied marker-label create is a safe warning and stops everything", async () => {
@@ -346,7 +365,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", false, "on-failure");
-    expect(result).toEqual({ url: "https://github.com/o/private-repo/issues/7" });
+    expect(result).toEqual({ delivered: "updated", number: 7 });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       `GET ${OPEN_LOOKUP_PATH}`,
       "PATCH /repos/o/private-repo/issues/7",

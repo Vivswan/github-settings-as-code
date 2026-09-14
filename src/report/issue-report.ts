@@ -57,8 +57,16 @@ export const ISSUE_REPORT_ENDPOINTS = {
 
 export type IssueReportMode = "always" | "on-failure";
 
-/** `skipped` is on-failure's healthy path: no open issue needed closing, so nothing was written. */
-export type IssueDelivery = { url: string } | { skipped: true } | { warning: string };
+/**
+ * A delivery names the issue it landed on and how: `created` is a first delivery (the POST, and the close a healthy
+ * one follows it with), `updated` is a reuse of the found issue. Both facts reach the run log. `skipped` is
+ * on-failure's healthy path: no open issue needed closing, so nothing was written. The issue URL is never returned;
+ * it carries the slug.
+ */
+export type IssueDelivery =
+  | { delivered: "created" | "updated"; number: number }
+  | { skipped: true }
+  | { warning: string };
 
 /** Public-safe by construction: the HTTP status and generic advice only. The slug, the path, or the API message would land in public logs. */
 function deliveryWarning(error: ApiError): { warning: string } {
@@ -75,7 +83,7 @@ function malformedWarning(what: string): { warning: string } {
   };
 }
 
-type ReportIssue = { number: number; url: string; labels: string[]; open: boolean };
+type ReportIssue = { number: number; labels: string[]; open: boolean };
 
 /**
  * A candidate is one of the action's own reports: an issue (the list includes pull requests) with the exact title and
@@ -108,7 +116,6 @@ function reportCandidatesIn(items: unknown[]): ReportIssue[] {
       : [];
     candidates.push({
       number: issue.number,
-      url: typeof issue.html_url === "string" ? issue.html_url : "",
       labels,
       open: issue.state === "open",
     });
@@ -201,7 +208,7 @@ async function closeIfOpen(
   if ("error" in closed) {
     return deliveryWarning(closed.error);
   }
-  return { url: found.url };
+  return { delivered: "updated", number: found.number };
 }
 
 async function deliver(
@@ -257,7 +264,7 @@ async function deliver(
     if ("error" in updated) {
       return deliveryWarning(updated.error);
     }
-    return { url: found.url };
+    return { delivered: "updated", number: found.number };
   }
   const created = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.create, ref), {
     title: ISSUE_TITLE,
@@ -267,15 +274,14 @@ async function deliver(
   if ("error" in created) {
     return deliveryWarning(created.error);
   }
-  const issue = created.data as { number?: unknown; html_url?: unknown } | null;
-  const url = typeof issue?.html_url === "string" ? issue.html_url : "";
+  const issue = created.data as { number?: unknown } | null;
+  if (typeof issue?.number !== "number") {
+    return malformedWarning(
+      "the report issue was created but its response carried no issue number, so the delivery could not be confirmed",
+    );
+  }
   if (state === "closed") {
     // Creation cannot set the state, so a healthy first run closes right after.
-    if (typeof issue?.number !== "number") {
-      return malformedWarning(
-        "the report issue was created but carried no issue number, so it could not be closed for this healthy run",
-      );
-    }
     const closed = await api.tryRequest(
       "PATCH",
       expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
@@ -285,7 +291,7 @@ async function deliver(
       return deliveryWarning(closed.error);
     }
   }
-  return { url };
+  return { delivered: "created", number: issue.number };
 }
 
 /**

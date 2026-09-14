@@ -226,6 +226,7 @@ describe("withDelivery", () => {
           "api POST /repos/o/priv/labels",
           `api GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",
+          "log: report: updated issue #7 in private repository #1",
           `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
         ]);
 

@@ -208,7 +208,15 @@ function issueChannel(
       );
       if ("warning" in delivery) {
         io.annotate("warning", `${target.display}: ${delivery.warning}`);
+        return;
       }
+      // The report issue is the one write a run lands outside the settings apply, so the log names it like every other
+      // write, and names the decision not to write, so silence never has to be read as a delivery.
+      if ("skipped" in delivery) {
+        io.log(`report: nothing to deliver for ${target.display}`);
+        return;
+      }
+      io.log(`report: ${delivery.delivered} issue #${delivery.number} in ${target.display}`);
     },
     flush: async () => {},
   };
