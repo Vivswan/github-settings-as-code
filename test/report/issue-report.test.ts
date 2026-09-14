@@ -24,6 +24,8 @@ const LABEL_LOOKUP_PAGE_2 =
 const ISSUE_CREATE = "POST /repos/o/private-repo/issues";
 const TITLE_SCAN =
   "GET /repos/o/private-repo/issues?state=all&sort=created&direction=desc&per_page=100&page=1";
+/** No write reached the target: what a failure before its first write carries. */
+const NOTHING_LANDED = { labelCreated: false, createdIssue: null };
 
 /** An issue the action itself wrote: the exact title over a body opening with the report heading. */
 const reportIssue = (number: number, state: "open" | "closed" = "open") => ({
@@ -52,7 +54,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: 7 });
+    expect(result).toEqual({ delivered: "updated", number: 7, labelCreated: false });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -78,7 +80,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: 7 });
+    expect(result).toEqual({ delivered: "updated", number: 7, labelCreated: false });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -114,7 +116,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "created", number: 9 });
+    expect(result).toEqual({ delivered: "created", number: 9, labelCreated: true });
     const create = api.calls.find((c) => `${c.method} ${c.path}` === ISSUE_CREATE);
     expect(create?.payload).toEqual({ title: ISSUE_TITLE, body: "body", labels: [MARKER_LABEL] });
   });
@@ -128,7 +130,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/3": { data: reportIssue(3) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: 3 });
+    expect(result).toEqual({ delivered: "updated", number: 3, labelCreated: true });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -153,7 +155,7 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(8) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: 3 });
+    expect(result).toEqual({ delivered: "updated", number: 3, labelCreated: true });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -192,7 +194,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/150": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: 150 });
+    expect(result).toEqual({ delivered: "updated", number: 150, labelCreated: true });
     // A full page came back, but the match stops the walk: no page=2 request.
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
@@ -224,7 +226,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/*": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "updated", number: picks });
+    expect(result).toEqual({ delivered: "updated", number: picks, labelCreated: true });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -242,7 +244,7 @@ describe("deliverIssueReport", () => {
       "PATCH /repos/o/private-repo/issues/9": { data: null },
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "always");
-    expect(result).toEqual({ delivered: "created", number: 9 });
+    expect(result).toEqual({ delivered: "created", number: 9, labelCreated: true });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
@@ -262,13 +264,39 @@ describe("deliverIssueReport", () => {
       [ISSUE_CREATE]: { data: reportIssue(9) },
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
-    expect(result).toEqual({ delivered: "created", number: 9 });
+    expect(result).toEqual({ delivered: "created", number: 9, labelCreated: true });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       LABEL_CREATE,
       LABEL_LOOKUP,
       TITLE_SCAN,
       ISSUE_CREATE,
     ]);
+  });
+
+  test("a write that landed before a later failure rides on the warning: the created label, the created issue", async () => {
+    // Label created, then the lookup fails: the label is the landed write.
+    const afterLabel = new MockApi({
+      [LABEL_CREATE]: { data: MARKER_LABEL_CONFIG },
+      [LABEL_LOOKUP]: { error: { status: 500, message: "boom", body: "" } },
+    });
+    expect(await deliverIssueReport(afterLabel, SLUG, "body", true, "always")).toEqual({
+      landed: { labelCreated: true, createdIssue: null },
+      warning: expect.stringMatching(/^could not deliver the private report \(HTTP 500\)/),
+    });
+    // Issue created (the label existed), then the healthy close fails: the issue is the landed write.
+    const afterCreate = new MockApi({
+      [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
+      [LABEL_LOOKUP]: { data: [] },
+      [TITLE_SCAN]: { data: [] },
+      [ISSUE_CREATE]: { data: reportIssue(9) },
+      "PATCH /repos/o/private-repo/issues/9": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    expect(await deliverIssueReport(afterCreate, SLUG, "body", false, "always")).toEqual({
+      landed: { labelCreated: false, createdIssue: 9 },
+      warning: expect.stringMatching(/^could not deliver the private report \(HTTP 403\)/),
+    });
   });
 
   test("a create response without an issue number is a malformed-response warning, whatever the state", async () => {
@@ -282,6 +310,7 @@ describe("deliverIssueReport", () => {
       const api = new MockApi(routes);
       const result = await deliverIssueReport(api, SLUG, "body", needsAttention, "always");
       expect(result).toEqual({
+        landed: { labelCreated: true, createdIssue: null },
         warning: expect.stringMatching(
           /^could not deliver the private report: the report issue was created but its response carried no issue number/,
         ),
@@ -298,6 +327,7 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning:
         'could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) ' +
         "under the PAT's Repository permissions for the target repository, or set private-report: none",
@@ -315,6 +345,7 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning:
         "could not deliver the private report (HTTP 500). Re-run, or set " +
         "private-report: none if it persists",
@@ -326,6 +357,7 @@ describe("deliverIssueReport", () => {
     const api = new MockApi({});
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning:
         "could not deliver the private report: the request failed before an HTTP response " +
         "arrived. Re-run, or set private-report: none if it persists",
@@ -339,6 +371,7 @@ describe("deliverIssueReport", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning:
         "could not deliver the private report: the report-issue lookup returned a non-list " +
         'page. Check the "api-version" input, or set private-report: none',
@@ -365,7 +398,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
       "PATCH /repos/o/private-repo/issues/7": { data: reportIssue(7) },
     });
     const result = await deliverIssueReport(api, SLUG, "the report body", false, "on-failure");
-    expect(result).toEqual({ delivered: "updated", number: 7 });
+    expect(result).toEqual({ delivered: "updated", number: 7, labelCreated: false });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       `GET ${OPEN_LOOKUP_PATH}`,
       "PATCH /repos/o/private-repo/issues/7",
@@ -380,6 +413,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning: expect.stringMatching(
         /^could not deliver the private report \(HTTP 500\)\. Re-run, /,
       ),
@@ -396,6 +430,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning: expect.stringMatching(
         /^could not deliver the private report \(HTTP 403\)\. To fix, grant "Issues"/,
       ),
@@ -407,6 +442,7 @@ describe("deliverIssueReport under mode: on-failure", () => {
     const api = new MockApi({ [OPEN_LOOKUP]: { data: { message: "unexpected" } } });
     const result = await deliverIssueReport(api, SLUG, "body", false, "on-failure");
     expect(result).toEqual({
+      landed: NOTHING_LANDED,
       warning:
         "could not deliver the private report: the open-issue lookup returned a non-list " +
         'page. Check the "api-version" input, or set private-report: none',

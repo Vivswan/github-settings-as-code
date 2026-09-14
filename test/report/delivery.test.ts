@@ -139,6 +139,46 @@ describe("the issue channel", () => {
     expect(created.logs).toEqual(["report: created issue #12 in private repository #1"]);
   });
 
+  test("a marker label the run creates gets its own line, ahead of the issue line; an existing label (422) gets none", async () => {
+    const created = captureIo();
+    await open(
+      issueApi({ "POST /repos/o/priv/labels": { data: { name: MARKER } } }),
+      "issue",
+      created.io,
+    )?.deliver(target("o/priv", 1));
+    expect(created.logs).toEqual([
+      `report: created label "${MARKER}" in private repository #1`,
+      "report: updated issue #7 in private repository #1",
+    ]);
+
+    const existed = captureIo();
+    await open(issueApi(), "issue", existed.io)?.deliver(target("o/priv", 1));
+    expect(existed.logs).toEqual(["report: updated issue #7 in private repository #1"]);
+  });
+
+  test("a write that landed before a later failure is announced before the warning, so no landed write is silent", async () => {
+    // The issue is created (#9), then the healthy close PATCH is denied.
+    const api = issueApi({
+      [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
+      "GET /repos/o/priv/issues?state=all&sort=created&direction=desc&per_page=100&page=1": {
+        data: [],
+      },
+      "POST /repos/o/priv/issues": { data: { number: 9 } },
+      "PATCH /repos/o/priv/issues/9": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    const { io, events } = captureIo();
+    await open(api, "issue", io)?.deliver(target("o/priv", 0));
+    expect(events).toEqual([
+      "log: report: created issue #9 in private repository #1",
+      expect.stringMatching(
+        /^annotate warning: private repository #1: could not deliver the private report \(HTTP 403\)/,
+      ),
+    ]);
+    expect(events.join("\n")).not.toContain("o/priv");
+  });
+
   test("the delivery line names the target by its placeholder, never by its slug", async () => {
     const { io, logs } = captureIo();
     await open(issueApi(), "issue", io)?.deliver(target("o/priv", 1));

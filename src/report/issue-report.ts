@@ -58,28 +58,44 @@ export const ISSUE_REPORT_ENDPOINTS = {
 export type IssueReportMode = "always" | "on-failure";
 
 /**
+ * The writes a delivery landed on the target before it returned, whether it then succeeded or failed; each one is
+ * announced in the run log, so a failure after a landed write never leaves that write silent.
+ */
+export interface LandedWrites {
+  /** The marker label was created on the target this run (the ensure-create answered 2xx rather than 422). */
+  labelCreated: boolean;
+  /** The report issue this run created before a later step failed; a delivery that succeeds names its issue itself. */
+  createdIssue: number | null;
+}
+
+/**
  * A delivery names the issue it landed on and how: `created` is a first delivery (the POST, and the close a healthy
- * one follows it with), `updated` is a reuse of the found issue. Both facts reach the run log. `skipped` is
- * on-failure's healthy path: no open issue needed closing, so nothing was written. The issue URL is never returned;
- * it carries the slug.
+ * one follows it with), `updated` is a reuse of the found issue. `skipped` is on-failure's healthy path: no open
+ * issue needed closing, so nothing was written. The issue URL is never returned; it carries the slug.
  */
 export type IssueDelivery =
-  | { delivered: "created" | "updated"; number: number }
+  | { delivered: "created" | "updated"; number: number; labelCreated: boolean }
   | { skipped: true }
-  | { warning: string };
+  | { warning: string; landed: LandedWrites };
+
+type Failure = Extract<IssueDelivery, { warning: string }>;
 
 /** Public-safe by construction: the HTTP status and generic advice only. The slug, the path, or the API message would land in public logs. */
-function deliveryWarning(error: ApiError): { warning: string } {
+function deliveryWarning(error: ApiError, landed: LandedWrites): Failure {
   const advice = isPermissionError(error)
     ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
     : "Re-run, or set private-report: none if it persists";
-  return { warning: `could not deliver the private report (HTTP ${error.status}). ${advice}` };
+  return {
+    warning: `could not deliver the private report (HTTP ${error.status}). ${advice}`,
+    landed,
+  };
 }
 
 /** Under the same public-safety rule: `what` is a route template or a structural fact, never the expanded path or response content. */
-function malformedWarning(what: string): { warning: string } {
+function malformedWarning(what: string, landed: LandedWrites): Failure {
   return {
     warning: `could not deliver the private report: ${what}. Check the "api-version" input, or set private-report: none`,
+    landed,
   };
 }
 
@@ -146,7 +162,8 @@ async function findReportIssue(
   ref: { repo: RepoRef },
   query: Readonly<Record<string, string>>,
   lookup: string,
-): Promise<{ found: ReportIssue | null } | { warning: string }> {
+  landed: LandedWrites,
+): Promise<{ found: ReportIssue | null } | Failure> {
   const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, query);
   const page = await paginate(
     api,
@@ -155,10 +172,10 @@ async function findReportIssue(
     (items) => reportCandidatesIn(items).length > 0,
   );
   if ("error" in page) {
-    return deliveryWarning(page.error);
+    return deliveryWarning(page.error, landed);
   }
   if ("malformed" in page) {
-    return malformedWarning(`${lookup} returned a non-list page`);
+    return malformedWarning(`${lookup} returned a non-list page`, landed);
   }
   return { found: pickReportIssue(reportCandidatesIn(page.items)) };
 }
@@ -169,12 +186,13 @@ async function findReportIssue(
  * creator-scoped scan under it would miss the issue and open a second one. The sort is GitHub's default, spelled out
  * so the scan walks the same end of the list as the label lookup.
  */
-function fallbackScan(api: GitHubClient, ref: { repo: RepoRef }) {
+function fallbackScan(api: GitHubClient, ref: { repo: RepoRef }, landed: LandedWrites) {
   return findReportIssue(
     api,
     ref,
     { state: "all", sort: "created", direction: "desc" },
     "the issue list (title scan)",
+    landed,
   );
 }
 
@@ -186,12 +204,14 @@ async function closeIfOpen(
   api: GitHubClient,
   ref: { repo: RepoRef },
   body: string,
+  landed: LandedWrites,
 ): Promise<IssueDelivery> {
   const listed = await findReportIssue(
     api,
     ref,
     { state: "open", labels: MARKER_LABEL },
     "the open-issue lookup",
+    landed,
   );
   if ("warning" in listed) {
     return listed;
@@ -206,21 +226,23 @@ async function closeIfOpen(
     { body, state: "closed" },
   );
   if ("error" in closed) {
-    return deliveryWarning(closed.error);
+    return deliveryWarning(closed.error, landed);
   }
-  return { delivered: "updated", number: found.number };
+  return { delivered: "updated", number: found.number, labelCreated: landed.labelCreated };
 }
 
+/** `landed` is owned by the caller and records each write as it lands, so a failure of any kind can still report them. */
 async function deliver(
   api: GitHubClient,
   repo: RepoRef,
   body: string,
   needsAttention: boolean,
   mode: IssueReportMode,
+  landed: LandedWrites,
 ): Promise<IssueDelivery> {
   const ref = { repo };
   if (mode === "on-failure" && !needsAttention) {
-    return closeIfOpen(api, ref, body);
+    return closeIfOpen(api, ref, body, landed);
   }
   // A 422 means the marker label already exists.
   const label = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.createLabel, ref), {
@@ -229,13 +251,15 @@ async function deliver(
     description: MARKER_LABEL_CONFIG.description,
   });
   if ("error" in label && label.error.status !== 422) {
-    return deliveryWarning(label.error);
+    return deliveryWarning(label.error, landed);
   }
+  landed.labelCreated = !("error" in label);
   const listed = await findReportIssue(
     api,
     ref,
     { state: "all", labels: MARKER_LABEL },
     "the report-issue lookup",
+    landed,
   );
   if ("warning" in listed) {
     return listed;
@@ -245,7 +269,7 @@ async function deliver(
   // marker stripped: without reattaching it, every label-filtered lookup, the on-failure close included, misses forever.
   let relabel: string[] | undefined;
   if (!found) {
-    const scanned = await fallbackScan(api, ref);
+    const scanned = await fallbackScan(api, ref, landed);
     if ("warning" in scanned) {
       return scanned;
     }
@@ -262,9 +286,9 @@ async function deliver(
       relabel ? { body, state, labels: relabel } : { body, state },
     );
     if ("error" in updated) {
-      return deliveryWarning(updated.error);
+      return deliveryWarning(updated.error, landed);
     }
-    return { delivered: "updated", number: found.number };
+    return { delivered: "updated", number: found.number, labelCreated: landed.labelCreated };
   }
   const created = await api.tryRequest("POST", expand(ISSUE_REPORT_ENDPOINTS.create, ref), {
     title: ISSUE_TITLE,
@@ -272,14 +296,16 @@ async function deliver(
     labels: [MARKER_LABEL],
   });
   if ("error" in created) {
-    return deliveryWarning(created.error);
+    return deliveryWarning(created.error, landed);
   }
   const issue = created.data as { number?: unknown } | null;
   if (typeof issue?.number !== "number") {
     return malformedWarning(
       "the report issue was created but its response carried no issue number, so the delivery could not be confirmed",
+      landed,
     );
   }
+  landed.createdIssue = issue.number;
   if (state === "closed") {
     // Creation cannot set the state, so a healthy first run closes right after.
     const closed = await api.tryRequest(
@@ -288,10 +314,10 @@ async function deliver(
       { state },
     );
     if ("error" in closed) {
-      return deliveryWarning(closed.error);
+      return deliveryWarning(closed.error, landed);
     }
   }
-  return { delivered: "created", number: issue.number };
+  return { delivered: "created", number: issue.number, labelCreated: landed.labelCreated };
 }
 
 /**
@@ -306,13 +332,15 @@ export async function deliverIssueReport(
   needsAttention: boolean,
   mode: IssueReportMode,
 ): Promise<IssueDelivery> {
+  const landed: LandedWrites = { labelCreated: false, createdIssue: null };
   try {
-    return await deliver(api, repo, body, needsAttention, mode);
+    return await deliver(api, repo, body, needsAttention, mode, landed);
   } catch {
     // A throw is a network-level failure whose message embeds the request path (the private slug), so nothing from it may escape.
     return {
       warning:
         "could not deliver the private report: the request failed before an HTTP response arrived. Re-run, or set private-report: none if it persists",
+      landed,
     };
   }
 }
