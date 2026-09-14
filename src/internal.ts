@@ -106,4 +106,5 @@ export type {
   Tolerance,
   Unverifiable,
 } from "./sections/contract/plan.js";
+export { countNoun } from "./text.js";
 export type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "./types.js";

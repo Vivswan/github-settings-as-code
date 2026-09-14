@@ -16,6 +16,7 @@ import {
   type ValidatedSettings,
   validateSettings,
 } from "../index.js";
+import { countNoun } from "../internal.js";
 
 /** What the CLI needs from its process: the environment and a client factory tests can stub. */
 export interface CliHost {
@@ -66,7 +67,7 @@ export function validateFile(file: string, io: Io): Rendered {
       return {
         code: 0,
         lines: [
-          `${file} is valid: ${sections.length} section(s) declared (${sections.join(", ")})`,
+          `${file} is valid: ${countNoun(sections.length, "section", "sections")} declared (${sections.join(", ")})`,
         ],
         json: { result: "valid", file, sections },
       };

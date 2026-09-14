@@ -683,7 +683,7 @@ describe("runForRepo plan sections", () => {
       expect(api.mutations()).toHaveLength(1);
       expect(logs).toEqual([]);
       const partial =
-        "error: workflows: the echo still reads active (1 request(s) landed before this failure, so the repository is partially applied)";
+        "error: workflows: the echo still reads active (1 request landed before this failure, so the repository is partially applied)";
       expect(annotations).toEqual([partial]);
       expect(result.outcomes).toEqual([
         { key: "workflows", status: "failed", detail: [partial.slice("error: ".length)] },
@@ -719,7 +719,7 @@ describe("runForRepo plan sections", () => {
     expect(logs).toEqual(['workflows: disabled workflow ".github/workflows/ci.yml"']);
     expect(annotations).toEqual([
       expect.stringMatching(
-        /^error: workflows: partially applied \(1 request\(s\) landed before the denial/,
+        /^error: workflows: partially applied \(1 request landed before the denial/,
       ),
     ]);
     expect(result.outcomes).toEqual([

@@ -43,27 +43,31 @@ describe("validateSettings", () => {
     );
   });
 
-  test("an unknown key outside the sections allowlist is a returned warning, not a printed one", () => {
-    expect(
-      validateSettings(
-        { repository: { has_wiki: false }, typo: 1 },
-        {
-          source: "fleet.yml",
-          sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
-        },
-      ),
-    ).toEqual(
-      ok({
-        settings,
-        log: [
+  test.each<[what: string, unknown: Record<string, unknown>, line: string]>([
+    [
+      "one unknown key",
+      { typo: 1 },
+      'ignoring unknown top-level section outside the "sections" allowlist: typo. Upgrade the action to a version that knows it, or remove it from fleet.yml',
+    ],
+    [
+      "two unknown keys",
+      { typo: 1, tpyo: 2 },
+      'ignoring unknown top-level sections outside the "sections" allowlist: typo, tpyo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+    ],
+  ])(
+    "%s outside the sections allowlist is a returned warning, not a printed one",
+    (_what, unknown, line) => {
+      expect(
+        validateSettings(
+          { repository: { has_wiki: false }, ...unknown },
           {
-            level: "warning",
-            line: 'ignoring unknown top-level section(s) outside the "sections" allowlist: typo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+            source: "fleet.yml",
+            sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
           },
-        ],
-      }),
-    );
-  });
+        ),
+      ).toEqual(ok({ settings, log: [{ level: "warning", line }] }));
+    },
+  );
 
   test("an invalid document comes back as its problem, naming the default source", () => {
     expect(validateSettings([1])).toEqual(

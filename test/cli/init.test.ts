@@ -148,7 +148,7 @@ describe("init: the written file and the printed grant", () => {
       expect(result).toEqual({
         code: 0,
         stdout: [
-          `${file} written from o/r: 1 section(s) declared (labels)`,
+          `${file} written from o/r: 1 section declared (labels)`,
           "Token permissions the file needs:",
           `  labels: ${LABELS_GRANT}`,
           "",
@@ -228,7 +228,7 @@ describe("init: the written file and the printed grant", () => {
       );
       expect(result.stdout).toBe(
         [
-          `${file} written from o/r: 1 section(s) declared (labels)`,
+          `${file} written from o/r: 1 section declared (labels)`,
           "not read back: check_suite_preferences (the file's header says why; declare them by hand to manage them)",
           "skipped: actions_variables (the file omits them; the warnings above say why)",
           "Token permissions the file needs:",

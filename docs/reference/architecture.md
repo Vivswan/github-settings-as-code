@@ -244,6 +244,7 @@ graph TD
   problem["src/problem.ts"]
   types["src/types.ts"]
   plain_data["src/plain-data.ts"]
+  text["src/text.ts"]
   private["src/private.ts<br>src/private-open.ts"]
   upstream_gaps["src/upstream-gaps/"]
   main --> action
@@ -267,6 +268,7 @@ graph TD
   internal --> report
   internal --> schema
   internal --> sections
+  internal --> text
   internal --> types
   flows --> discovery
   flows --> engine
@@ -277,6 +279,7 @@ graph TD
   flows --> problem
   flows --> report
   flows --> schema
+  flows --> text
   flows --> types
   engine --> discovery
   engine --> github
@@ -285,11 +288,13 @@ graph TD
   engine --> problem
   engine --> schema
   engine --> sections
+  engine --> text
   engine --> types
   sections --> discovery
   sections --> engine
   sections --> github
   sections --> schema
+  sections --> text
   sections --> types
   sections --> upstream_gaps
   github --> io
@@ -308,6 +313,7 @@ graph TD
   report --> types
   problem --> plain_data
   problem --> schema
+  problem --> text
   schema --> sections
   schema --> types
   upstream_gaps --> types

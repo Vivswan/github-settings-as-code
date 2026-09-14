@@ -175,7 +175,7 @@ describe("runMulti", () => {
     expect(targets[0]?.result).toBe("failed");
     // validateSettingsDoc runs on the plain sink, before prefixedIo wraps it.
     const validation = annotations.find((a) => a.includes("unknown top-level section"));
-    expect(validation).toStartWith("warning: ignoring unknown top-level section(s)");
+    expect(validation).toStartWith("warning: ignoring unknown top-level section outside");
     // The section failure is emitted by the engine through the wrapped sink.
     expect(annotations.some((a) => a.startsWith("error: o/a: repository:"))).toBe(true);
   });

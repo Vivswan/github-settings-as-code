@@ -121,7 +121,7 @@ describe("permission gate grades", () => {
     const read = await call(h, "GET", path);
     expect(read.status).toBe(200);
     const write = await call(h, "PATCH", path, { body: { properties: [] } });
-    expect(write.status).not.toBe(204);
+    expect(write.status).toBeGreaterThanOrEqual(400);
     expect(h.requests.find((r) => r.method === "PATCH")?.deniedBy).toBe("custom_properties");
   });
 

@@ -263,7 +263,7 @@ The fold itself refuses what only a merge can judge (`layer ".github/settings/re
 That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and these message families can name what they find:
 
 - An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`. A type mismatch prints only the type received, except a non-finite number, which prints as itself: `actions.cache.max_cache_size_gb: .inf` gives `Invalid input: expected number, received Infinity` (the vocabulary is Infinity, -Infinity, and NaN).
-- An unknown top-level section, by its name: `unknown top-level section(s) in repo.yml: lables`.
+- An unknown top-level section, by its name: `unknown top-level section in repo.yml: lables`.
 - A key path through keys you chose, wherever a section accepts arbitrary ones: `repository.private_project is not plain YAML data`, and under `interaction_limits` the unknown keys themselves: `interaction_limits.limit: key(s) [private_project] ride the base interaction-limits PUT`.
 - A closed section's entry, by its identity, with the key it does not know: `collaborators[octocat]: declares "permision", which this section does not recognize`.
 - A section-worded error that prints the rejected value:

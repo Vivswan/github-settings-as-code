@@ -28,6 +28,7 @@ import {
   type RunConclusion,
 } from "../report/delivery.js";
 import type { SectionKey } from "../schema.js";
+import { countNoun } from "../text.js";
 import {
   emitRedactedResult,
   isPrivateVisibility,
@@ -39,7 +40,7 @@ import {
   toPublicView,
   WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
-import { countNoun, writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
+import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
 /** One target's end state as its flow hands it over: the result word plus everything the channel seals. */
 export interface TargetResult {

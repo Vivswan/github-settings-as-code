@@ -149,7 +149,7 @@ describe("validate and permissions", () => {
     const plain = await cli(["validate", SINGLE]);
     expect(plain).toEqual({
       code: 0,
-      stdout: `${SINGLE} is valid: 1 section(s) declared (repository)\n`,
+      stdout: `${SINGLE} is valid: 1 section declared (repository)\n`,
       stderr: "",
     });
     const json = await cli(["validate", SINGLE, "--json"]);

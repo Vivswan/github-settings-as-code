@@ -23,6 +23,7 @@ import {
   planDrift,
 } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
+import { agree, countNoun } from "../text.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
 import type { RunOutcome } from "./outcome.js";
@@ -139,9 +140,11 @@ export function validateSettingsDoc(
       });
     }
     // A `sections` allowlist lets an older action version coexist with a config written for a newer one.
+    const them = agree(unknownKeys.length, "it", "them");
     io.annotate(
       "warning",
-      `ignoring unknown top-level section(s) outside the "sections" allowlist: ${unknownKeys.join(", ")}. Upgrade the action to a version that knows them, or remove them from ${sourceLabel}`,
+      `ignoring unknown top-level ${agree(unknownKeys.length, "section", "sections")} outside the "sections" allowlist: ${unknownKeys.join(", ")}. ` +
+        `Upgrade the action to a version that knows ${them}, or remove ${them} from ${sourceLabel}`,
     );
   }
   return validateSectionShapes(settings as Record<string, unknown>, sourceLabel).map(
@@ -376,7 +379,7 @@ export async function runForRepo(
         }
         const why =
           landed > 0
-            ? ` (${landed} request(s) landed before the denial, so this fails the run whatever the on-missing-permission policy)`
+            ? ` (${countNoun(landed, "request", "requests")} landed before the denial, so this fails the run whatever the on-missing-permission policy)`
             : required
               ? " (listed in required-sections, so this fails the run)"
               : "";
@@ -401,7 +404,7 @@ export async function runForRepo(
         : `${section.key}: ${message}`;
       const annotated =
         produced.landed > 0
-          ? `${prefixed} (${produced.landed} request(s) landed before this failure, so the repository is partially applied)`
+          ? `${prefixed} (${countNoun(produced.landed, "request", "requests")} landed before this failure, so the repository is partially applied)`
           : prefixed;
       io.annotate("error", annotated);
       outcomes.push({ key: section.key, status: "failed", detail: [...before, annotated] });

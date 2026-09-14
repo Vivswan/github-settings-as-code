@@ -536,7 +536,7 @@ describe("run in mode: merge", () => {
         expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
         expect(existsSync(mergedFile)).toBe(false);
         expect(captured).toEqual([
-          `error: unknown top-level section(s) in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or set the "sections" input to limit processing`,
+          `error: unknown top-level section in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or set the "sections" input to limit processing`,
           "result: failed",
         ]);
       }),

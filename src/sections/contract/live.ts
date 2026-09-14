@@ -5,6 +5,7 @@
  */
 
 import type { z } from "zod";
+import { countNoun } from "../../text.js";
 import { endpointMethod, endpointPath } from "./endpoints.js";
 import type { FailingOp, SectionMeta } from "./module.js";
 import { collidingPairs } from "./requests.js";
@@ -86,7 +87,8 @@ export function parseLive<T>(
       .join("");
     return `${path.replace(/^\./, "") || "(body)"}: ${issue.message}`;
   });
-  const more = issues.length > 3 ? `; and ${issues.length - 3} more issue(s)` : "";
+  const more =
+    issues.length > 3 ? `; and ${countNoun(issues.length - 3, "more issue", "more issues")}` : "";
   const where = describe === undefined ? "" : ` (${describe})`;
   const request =
     "route" in op ? `${endpointMethod(op.route)} ${endpointPath(op.route)}` : `GRAPHQL ${op.name}`;
