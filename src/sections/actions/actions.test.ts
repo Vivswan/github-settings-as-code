@@ -167,9 +167,9 @@ describe("actions", () => {
     const api = new MockApi({ [PERMISSIONS]: { data: { enabled: true } } });
     const result = await plan(api, { some_added_key: "x" } as ActionsConfig);
     expect(result.notes).toEqual([
-      "key(s) [some_added_key] are not recognized by this action; they ride verbatim in PUT " +
+      "key [some_added_key] is not recognized by this action; it rides verbatim in PUT " +
         "/actions/permissions (a body that also sets enabled: true), where GitHub may ignore " +
-        'them - a "no such field" drift line for a key means GitHub does not return it, so it ' +
+        'it - a "no such field" drift line for a key means GitHub does not return it, so it ' +
         "can never be proven to have taken and apply would re-send the body on every run; remove " +
         "it from the actions section of the settings file",
     ]);
@@ -178,6 +178,11 @@ describe("actions", () => {
     ]);
     const off = await plan(api, { enabled: false, some_added_key: "x" } as ActionsConfig);
     expect(off.notes[0]).toContain("enabled: false");
+    const two = await plan(api, { some_added_key: "x", other_key: "y" } as ActionsConfig);
+    expect(two.notes[0]).toStartWith(
+      "keys [some_added_key, other_key] are not recognized by this action; they ride verbatim in PUT " +
+        "/actions/permissions (a body that also sets enabled: true), where GitHub may ignore them - ",
+    );
   });
 
   test("selected_actions implies allowed_actions: selected; a contradiction fails upfront shape validation", async () => {

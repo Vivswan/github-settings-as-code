@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
+import { agree } from "../../text.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
@@ -524,10 +525,12 @@ export const actionsSection = {
       // flip Actions on as a side effect; the note says so. JSON.stringify keeps a malformed quoted
       // "false" distinguishable from the boolean.
       const enabledValue = JSON.stringify(permissions.enabled);
+      const count = routed.length;
       plan.notes.push(
-        `key(s) [${routed.join(", ")}] are not recognized by this action; they ride verbatim ` +
+        `${agree(count, "key", "keys")} [${routed.join(", ")}] ${agree(count, "is", "are")} not recognized by this action; ` +
+          `${agree(count, "it rides", "they ride")} verbatim ` +
           `in PUT /actions/permissions (a body that also sets enabled: ${enabledValue}), where ` +
-          `GitHub may ignore them - a "no such field" drift line for a key means GitHub does not ` +
+          `GitHub may ignore ${agree(count, "it", "them")} - a "no such field" drift line for a key means GitHub does not ` +
           `return it, so it can never be proven to have taken and apply would re-send the body ` +
           `on every run; remove it from the actions section of the settings file`,
       );
