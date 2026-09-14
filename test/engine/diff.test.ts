@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type Delta, deltas, phantomKeys, renderDelta, subsetDiff } from "../../src/engine/diff.js";
+import {
+  type Delta,
+  deltas,
+  phantomKeys,
+  phantomNote,
+  renderDelta,
+  subsetDiff,
+} from "../../src/engine/diff.js";
 
 describe("deltas", () => {
   test("structures every divergence of an object: scalar mismatch, absent key, nested path, and the tolerated empties", () => {
@@ -214,6 +221,21 @@ describe("subsetDiff", () => {
     ],
   ])("renders the %s branch", (_branch, desired, live, lines) => {
     expect(subsetDiff(desired, live, "x")).toEqual(lines);
+  });
+});
+
+describe("phantomNote", () => {
+  test.each<[keys: string[], line: string]>([
+    [
+      ["colr"],
+      'labels[bug]: declared key "colr" does not exist on the live label, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+    ],
+    [
+      ["colr", "descr"],
+      'labels[bug]: declared keys "colr", "descr" do not exist on the live label, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+    ],
+  ])("%j reads with its noun, verb, and pronoun agreed to the count", (keys, line) => {
+    expect(phantomNote("labels[bug]", keys, "label", "this update will re-run")).toBe(line);
   });
 });
 

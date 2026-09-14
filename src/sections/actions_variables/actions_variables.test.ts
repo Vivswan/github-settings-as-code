@@ -260,7 +260,7 @@ describe("actions_variables", () => {
     ]);
     expect(result.notes).toEqual([
       expect.stringMatching(
-        /actions_variables\[DEPLOY_REGION\]: declared key\(s\) "vaule" do not exist on the live variable.*without converging/,
+        /actions_variables\[DEPLOY_REGION\]: declared key "vaule" does not exist on the live variable.*without converging/,
       ),
     ]);
   });

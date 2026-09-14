@@ -387,7 +387,7 @@ describe("environments variables shape", () => {
       extra_field: "y",
     });
     const phantom =
-      'environments[prod].variables[UPD]: declared key(s) "extra_field" do not exist on the live variable, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file';
+      'environments[prod].variables[UPD]: declared key "extra_field" does not exist on the live variable, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file';
     expect(result.notes).toEqual([phantom]);
     const checked = await check(api, [
       {

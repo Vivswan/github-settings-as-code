@@ -301,7 +301,7 @@ describe("deploy_keys reconcile", () => {
       ],
     ]);
     expect(result.notes).toEqual([
-      'deploy_keys[deploy-bot]: declared key(s) "material" do not exist on the live deploy key, so if GitHub ignores them this delete-and-recreate will repeat on every apply without converging. Fix the key name, or remove it from the settings file',
+      'deploy_keys[deploy-bot]: declared key "material" does not exist on the live deploy key, so if GitHub ignores it this delete-and-recreate will repeat on every apply without converging. Fix the key name, or remove it from the settings file',
     ]);
   });
 });

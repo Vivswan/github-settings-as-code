@@ -203,7 +203,7 @@ describe("rulesets", () => {
         },
       ],
       notes: [
-        'rulesets[main]: declared key(s) "enforcemant" do not exist on the live ruleset, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+        'rulesets[main]: declared key "enforcemant" does not exist on the live ruleset, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
       ],
       drift: [],
     });
@@ -245,7 +245,7 @@ describe("rulesets", () => {
         },
       ],
       notes: [
-        'rulesets[main]: declared key(s) "enforcemant" do not exist on the live ruleset, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+        'rulesets[main]: declared key "enforcemant" does not exist on the live ruleset, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
       ],
       drift: [],
     });
