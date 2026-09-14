@@ -12,23 +12,33 @@ type Stack = readonly string[];
 
 /**
  * A stack in no schema order: `labels` before `repository` (SECTION_KEYS lists them the other way), `has_issues` before
- * `enable_vulnerability_alerts` (zod declares them the other way), a wrapper opening with its entries, and a higher
- * layer opening with the section the schema lists last. The bytes pinned here are the fold's; the validated parse
- * would reorder every one of them.
+ * `enable_vulnerability_alerts` (the schema declares the toggle; has_issues is a passthrough key), a wrapper opening
+ * with its entries, and a higher layer opening with the section the schema lists last. The bytes pinned here are the
+ * canonical rendering of the fold; no layer's order survives into them.
  */
 const UNORDERED: Stack = [
   stringifyYaml({
-    labels: { entries: [{ name: "bug", color: "d73a4a" }], _undeclared: "keep" },
+    labels: {
+      entries: [
+        { name: "docs", color: "0075ca" },
+        { name: "bug", color: "d73a4a" },
+      ],
+      _undeclared: "keep",
+    },
     repository: { has_issues: true, enable_vulnerability_alerts: true, has_wiki: false },
   }),
   stringifyYaml({
-    secret_scanning_custom_patterns: [{ name: "token", pattern: "tok_[a-z]+" }],
+    secret_scanning_custom_patterns: [{ pattern: "tok_[a-z]+", name: "token" }],
     repository: { has_issues: false },
-    labels: [{ name: "docs", color: "0075ca" }],
+    labels: [{ color: "0075ca", name: "docs" }],
   }),
 ];
 
 const UNORDERED_MERGED = [
+  "repository:",
+  "  enable_vulnerability_alerts: true",
+  "  has_issues: false",
+  "  has_wiki: false",
   "labels:",
   "  _undeclared: keep",
   "  entries:",
@@ -36,10 +46,6 @@ const UNORDERED_MERGED = [
   "      color: d73a4a",
   "    - name: docs",
   "      color: 0075ca",
-  "repository:",
-  "  has_issues: false",
-  "  enable_vulnerability_alerts: true",
-  "  has_wiki: false",
   "secret_scanning_custom_patterns:",
   "  _undeclared: keep",
   "  entries:",
@@ -98,7 +104,7 @@ describe("mergeSettings writes the bytes mode: merge writes", () => {
     expect(SCENARIO_STACKS.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("the written file is the fold: the layers' key order, the knob leading its wrapper", () =>
+  test("the written file is the fold in the canonical order: sections by SECTION_KEYS, entries by name, the knob leading its wrapper", () =>
     withTempDir("merge-parity-", (dir) => {
       expect(actionMerge(dir, UNORDERED, "merge").written).toBe(UNORDERED_MERGED);
     }));

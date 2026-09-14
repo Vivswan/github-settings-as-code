@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Twenty-five breaks (the ninth, the twenty-third, and the twenty-fourth are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, and the merged file (it reorders once, and a top-level `null` over nothing drops), so run `mode: check` before the first v3 apply and diff the first v3 merged file. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
+Twenty-six breaks (the ninth, the twenty-third, and the twenty-fourth are for library consumers, the twenty-first for anyone pinning a sha). The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the merged file (it reorders once, and a top-level `null` over nothing drops), and the snapshot file (it reorders once and no longer dates itself), so run `mode: check` before the first v3 apply and diff the first v3 merged file. The changelog entry for 3.0.0 will carry the release-please footers in the [CHANGELOG](https://github.com/Vivswan/github-settings-as-code/blob/main/CHANGELOG.md).
 
 | Break | v2 | v3 | What the old form does now |
 |---|---|---|---|
@@ -31,8 +31,9 @@ Twenty-five breaks (the ninth, the twenty-third, and the twenty-fourth are for l
 | The `build` branch retires | Every green push appended a packaged commit to the `build` branch; `latest` and the release tags pointed into it | One packaged commit per `main` commit under the tag `build/<position>.<sha7>`, the ten newest kept; `latest`, `@v3`, and `vX.Y.Z` point at them; the branch was deleted on 2026-09-13 | A sha pin into the branch names a commit no ref keeps alive, so GitHub may collect it at any time; a pin taken from a build tag goes when ten newer commits have been packaged; [section 21](#21-the-build-branch-retires) says what to pin instead |
 | One wording for every face | The command line reworded two remedies and refused `private-report: artifact` on its own; other remedies said "re-run the workflow" | One problem renderer; remedies name the input and its flag; `parseConfig` refuses the artifact channel for a face without an upload (`input-artifact-unsupported`) | No error. A step or script matching an error line by its old text stops matching; [section 22](#22-one-wording-for-every-face) |
 | Library: one owner per refusal, one selection type | `parseConfig(read, env)`; `executeRun` returned a number and took `describe`; `artifact-uploader-missing`; `validateSettings` took a `Set` | `parseConfig(read, env, capabilities)`; `executeRun` returns `{exitCode, fatal?}`; `input-artifact-unsupported`; `SectionSelection` everywhere; `writeReplacing`, `snapshotFileDestination`, the `central-file` role | The call fails to compile, naming the missing argument or member; [section 23](#23-library-one-owner-per-refusal-one-selection-type) |
-| The merged file is the fold, and a null over nothing drops | `mode: merge` wrote the validated parse, keys in the schema's order; `labels: null` with nothing below failed the merge | The fold in the layers' key order, byte for byte what `mergeSettings` returns as `yaml`; the null drops without a notice | No error: a committed merged file reorders once, and a one-layer read of a fleet layer carrying `labels: null` succeeds; [section 24](#24-the-merged-file-is-the-fold-and-a-null-over-nothing-drops) |
+| The merged file is the fold in the canonical order, and a null over nothing drops | `mode: merge` wrote the validated parse, keys in the schema's order; `labels: null` with nothing below failed the merge | The fold rendered in the one canonical order (sections in execution order, keys as the schema declares them, list entries by identity), byte for byte what `mergeSettings` returns as `yaml`; the null drops without a notice | No error: a committed merged file reorders once, and a one-layer read of a fleet layer carrying `labels: null` succeeds; [section 24](#24-the-merged-file-is-the-fold-in-the-canonical-order-and-a-null-over-nothing-drops) |
 | Every live read is parsed at the port | A body off the documented shape flowed into the comparison (a null Actions body read as drift on every key) | Every read fails loudly naming the endpoint and the field | The section fails with `returned a body outside the documented shape`; [section 25](#25-every-live-read-is-parsed-at-the-port) |
+| The snapshot file is canonical and undated | The second header line read `# Snapshot of owner/name taken <instant>`; list entries sat in the order GitHub listed them | No dated line: the run's notice and the step summary say `snapshot taken <instant>`; the document renders in the canonical order the merged file shares | No error: a committed snapshot reorders once and its second line moves; a script reading the instant from the file reads the run's notice instead; [section 26](#26-the-snapshot-file-is-canonical-and-undated) |
 
 ## 1. The defaults-file fallback
 
@@ -164,7 +165,7 @@ Every rename, old to new. An old name fails to compile, naming the missing expor
 | `SnapshotLibraryOptions` | `SnapshotOptions` |
 | `validateSettings(doc, { source?, sections?: ReadonlySet<SectionKey> })` returning `{ settings, warnings: string[] }` | `validateSettings(doc, { source?, sections?: SectionSelection, io? })` returning `{ settings, log: CollectedLine[] }` (`ValidateOptions`, `ValidateReport`) |
 | `foldLayers(layers, sourceLabel, layering, io)` | `mergeSettings(layers, { source?, layering?, io? })` returning `{ settings, notices, yaml, log }` (`MergeOptions`, `MergeReport`); `foldLayers` itself is in `./internal` |
-| `mergeLayers`, `renderMergedYaml`, `renderSnapshotYaml` | `./internal`; `MergeReport.yaml` and `SnapshotReport.yaml` carry the rendered file |
+| `mergeLayers`, `renderCanonicalYaml`, `renderSnapshotYaml` | `./internal`; `MergeReport.yaml` and `SnapshotReport.yaml` carry the rendered file |
 | `validateSettingsDoc` | `./internal`: the engine's boundary, which prints its warnings to an `Io`; `validateSettings` collects them into `log` |
 | `runForRepo`, `preflightProbe`, `skippedSectionKeys`, `RepoRunResult`, `RepoResult` | `./internal` |
 | `SnapshotResult`, `RenderableSnapshot`, `SNAPSHOT_SCHEMA_URL` | `./internal`; `SnapshotReport.yaml` already carries the schema pin in its header |
@@ -345,7 +346,7 @@ For `@vivswan/github-settings-as-code` consumers.
 | `SettingsFileRole`: `settings-file`, `defaults-file`, `layer` | plus `central-file`, the repos-dir file a multi-repo target is read from |
 
 
-## 24. The merged file is the fold, and a null over nothing drops
+## 24. The merged file is the fold in the canonical order, and a null over nothing drops
 
 Two changes to the document `mode: merge` writes and `mergeSettings` returns as `yaml`; the number of this section may shift as v3 grows.
 
@@ -355,13 +356,13 @@ v2   repository:                         # zod's order: the schema declares enab
        has_issues: true
      labels: null                        # nothing below declares labels: "labels: ... parsed as null", the merge fails
 
-v3   repository:                         # the layers' order
-       has_issues: true
+v3   repository:                         # the canonical order: declared keys as the schema lists them, then the rest by code point
        enable_vulnerability_alerts: true
+       has_issues: true
                                          # no labels key: the null opted out of nothing and dropped, without a notice
 ```
 
-- The written file is the fold in the order the layers declared their keys; validation judges the fold and never re-serializes it. A merged file committed under v2 reorders once.
+- The written file is the fold in the canonical order every rendered document shares ([section 26](#26-the-snapshot-file-is-canonical-and-undated) names the rules); validation judges the fold and never re-serializes it. A merged file committed under v2 reorders once, and reordering keys, or the entries of a sorted list, in a layer changes nothing in the file; `branches`, the pinned environments, and scalar lists keep their written order, since it is content.
 - A top-level `null` on a section nothing below declares drops, on every section but `pages` and `interaction_limits`, where null is the section's value and stays. v2 refused the merge naming the section, so a one-layer read of a fleet layer carrying `labels: null` failed.
 
 ## 25. Every live read is parsed at the port
@@ -378,6 +379,44 @@ Two smaller moves ride along:
 
 - A section that reads anything must declare `snapshot()`; only the write-only `check_suite_preferences` reports `unsupported`, and the `snapshot is not implemented for this section yet` note is gone.
 - The organization-only sections (`teams`, `custom_properties`) are probed for the owner kind by the registry, ahead of their own plan and snapshot. The personal-account note is unchanged; a settings-file mistake in those sections (two entries naming one team) is now reported after that one public probe instead of before any request.
+
+## 26. The snapshot file is canonical and undated
+
+The file `mode: snapshot`, `gsac init`, and `snapshotRepository` write carries no timestamp, and its document renders in the one canonical order the merged file shares, so a snapshot of an unchanged repository is byte for byte the last one and a diff between two snapshots shows only what changed on GitHub.
+
+```text
+v2   # <the schema pin>
+     # Snapshot of octocat/hello-world taken 2026-09-11T06:17:00.000Z
+     labels:
+       _undeclared: delete
+       entries:
+         - name: docs                  # the order GitHub listed them
+         - name: bug
+
+v3   # <the schema pin>
+     labels:
+       _undeclared: delete
+       entries:
+         - name: bug                   # by name
+         - name: docs
+```
+
+The moment moves to the run: one `notice: snapshot taken 2026-09-11T06:17:00.000Z` annotation and a `Snapshot taken ...` line in the step summary. A script that read the instant from the file's second line reads the notice instead.
+
+The canonical order, the same for the snapshot and the merged file:
+
+| Node | Order |
+|---|---|
+| The top level | The sections in the order the action applies them (`SECTION_KEYS`), then `_layering`, then any other key by code point |
+| A mapping the schema declares | Its properties as the schema (and the published JSON schema) lists them; keys the schema does not declare follow by code point (an integer-like key such as `"10"` leads, in numeric order, as JavaScript enumerates it) |
+| A mapping the schema leaves open (a rule's `parameters`, a bypass actor) | Keys by code point |
+| A list of entries with an identity (labels by `name`, webhooks by `config.url`, milestones by `title`, collaborators by `username`, `rules` by `type`, and so on) | Sorted by the identity, ties by the entry's canonical JSON |
+| `environments` | The `pinned: true` entries first in their written order, since that order is the pin rank; the rest by `name` |
+| `branches` | As written: GitHub applies overlapping wildcard rules in creation order, and apply creates them in file order |
+| Any other list (`topics`, `include` patterns, `bypass_actors`, `reviewers`) | As written |
+| Each section's header notes | By code point within the section |
+
+The snapshot's notes are sorted the same way, in the file header and in the annotations. A snapshot committed under v2 reorders once.
 
 ## Order of operations
 

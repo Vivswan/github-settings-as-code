@@ -42,7 +42,6 @@ The token needs the same read grants a check run needs for the sections you want
 
 ```yaml settings
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
-# Snapshot of octocat/hello-world taken 2026-09-11T06:17:00.000Z
 # actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply
 # check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run
 # milestones: nothing exists on the repository, so the section is omitted
@@ -62,9 +61,9 @@ actions_secrets:
 Reading it top to bottom:
 
 - The first line pins the published schema, so an editor validates and autocompletes the file.
-- The second line names the repository and the moment the snapshot was taken.
-- Then one comment line per note: a secret whose value GitHub never reveals, a section the snapshot cannot read back, a section with nothing live to declare. The same notes appear as annotations on the run, exactly as a check run would print them, so a note names a secret or a webhook by its name or URL and never by a value.
-- The document follows in the same form `mode: merge` writes: every list section in its wrapper form with the section's default `_undeclared` policy spelled out (see [the undeclared policy](../reference/undeclared-policy.md)), so an apply from the file does exactly what the header says.
+- Then one comment line per note, in code-point order within each section: a secret whose value GitHub never reveals, a section the snapshot cannot read back, a section with nothing live to declare. The same notes appear as annotations on the run, exactly as a check run would print them, so a note names a secret or a webhook by its name or URL and never by a value.
+- The document follows in the one canonical order every rendered document has (`mode: merge` writes the same one): the sections in the order the action applies them, each section's keys as the schema declares them, list entries sorted by their identity (a label's `name`, a webhook's `config.url`, a deploy key's `title`; `branches` keep their order, since GitHub applies overlapping wildcard rules in creation order, and pinned environments keep theirs, since it is the pin rank), every list section in its wrapper form with the section's default `_undeclared` policy spelled out (see [the undeclared policy](../reference/undeclared-policy.md)). An apply from the file does exactly what the header says, and two snapshots of one repository are the same bytes.
+- Nothing in the file names the moment it was taken: the run's notice (`snapshot taken 2026-09-11T06:17:00.000Z`) and the step summary carry it, so a snapshot of an unchanged repository rewrites the file byte for byte and a diff between two snapshots shows only what changed on GitHub.
 
 ## The `$NAME` placeholders
 
@@ -114,6 +113,8 @@ jobs:
 ```
 
 The check reads `clean`: the round trip holds for every section the snapshot reads back. Commit the file as your `.github/settings.yml` when it says what you expect, or keep the artifact as the record of what was live before a change.
+
+A second snapshot after the apply diffs against the first with only the applied change showing: an unchanged repository re-snapshots to the same bytes, since the file carries no timestamp and every section, key, and list entry sits in the canonical order. A clean re-snapshot produces no diff at all, which makes a committed snapshot a drift detector of its own.
 
 ## The round trip and its exceptions
 

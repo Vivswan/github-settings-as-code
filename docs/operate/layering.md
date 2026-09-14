@@ -36,8 +36,8 @@ labels:
 
 ```yaml settings
 repository:
-  has_wiki: false
   description: mine
+  has_wiki: false
 labels:
   _undeclared: delete
   entries:
@@ -88,6 +88,8 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 | Any other list (`branches`, `environments`, `topics`, ...) | A list | Replaces, whatever the run's layering |
 
 Only `labels` and `rulesets` declare a layering key today. Every other list section can only be replaced, and `_layering: merge` on one is refused.
+
+The rules above decide the content; the written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes: sections in the order the action applies them, keys as the schema declares them, list entries sorted by their identity. Reordering keys, or the entries of a sorted list, in a layer changes nothing in the merged file. Three lists keep their written order because it is content: `branches` (GitHub applies overlapping wildcard rules in creation order), the `pinned: true` environments (their order is the pin rank), and every scalar list (`topics`, `include` patterns).
 
 The `_undeclared` knob across layers:
 
@@ -153,8 +155,8 @@ Merged under the default `layering: merge`, the written file is:
 
 ```yaml settings
 repository:
-  has_wiki: false
   description: mine
+  has_wiki: false
 labels:
   _undeclared: delete
   entries:

@@ -25,7 +25,7 @@ const HEADINGS: Array<[string, (views: PublicTargetView[]) => string]> = [
     "writeSnapshotDirSummary",
     (views) => {
       const { io, events } = captureIo();
-      writeSnapshotDirSummary(io, views, "snapshots");
+      writeSnapshotDirSummary(io, views, "snapshots", "2026-09-13T00:00:00.000Z");
       return events[0] ?? "";
     },
   ],

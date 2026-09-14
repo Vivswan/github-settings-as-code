@@ -30,10 +30,10 @@ expect:
     teams:
       _undeclared: keep
       entries:
-        - name: platform
-          permission: push
         - name: auditors
           permission: security-auditor
+        - name: platform
+          permission: push
         - name: readers
           permission: pull
   summary_contains:

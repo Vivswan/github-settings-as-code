@@ -430,15 +430,15 @@ describe("pages null body", () => {
 });
 
 describe("renderSnapshotYaml", () => {
-  test("pins the schema, dates the header, comments every outcome line (a multi-line message line by line), and writes the document", async () => {
+  test("pins the schema, comments every outcome line (a multi-line message line by line), dates nothing, and writes the document", async () => {
     // The labels note spans two physical lines (an API error body would) and a second note follows it: each line is
-    // commented on its own, every message of an outcome is kept, and the file still parses.
+    // commented on its own, every message of an outcome is kept in code-point order, and the file still parses.
     const original = labelsSection.snapshot;
     const stubbed = spyOn(labelsSection, "snapshot").mockImplementation(async (ctx) => {
       const snapshot = await original.call(labelsSection, ctx);
       return {
         ...snapshot,
-        notes: [...snapshot.notes, "502 Bad Gateway\nupstream unavailable", "retried once"],
+        notes: [...snapshot.notes, "retried once", "502 Bad Gateway\nupstream unavailable"],
       };
     });
     try {
@@ -453,14 +453,13 @@ describe("renderSnapshotYaml", () => {
         captureIo().io,
       );
       expect(result.result).toBe("snapshot");
-      const rendered = renderSnapshotYaml(result as RenderableSnapshot, {
-        schemaUrl: "https://example.test/settings.schema.json",
-        timestamp: "2026-09-11T00:00:00Z",
-      });
+      const rendered = renderSnapshotYaml(
+        result as RenderableSnapshot,
+        "https://example.test/settings.schema.json",
+      );
       expect(rendered).toBe(
         [
           "# yaml-language-server: $schema=https://example.test/settings.schema.json",
-          "# Snapshot of o/r taken 2026-09-11T00:00:00Z",
           "# labels: 502 Bad Gateway",
           "# labels: upstream unavailable",
           "# labels: retried once",
@@ -485,5 +484,65 @@ describe("renderSnapshotYaml", () => {
     } finally {
       stubbed.mockRestore();
     }
+  });
+});
+
+describe("the snapshot is canonical at its boundary", () => {
+  /** GitHub listing labels and secrets in no order of ours: the document and its notes must not follow it. */
+  const UNORDERED_LIVE: LiveState = {
+    labels: [
+      { name: "docs", color: "0075ca", description: "" },
+      { name: "bug", color: "d73a4a", description: "Something is broken" },
+    ],
+    actions_secrets: [
+      { name: "ZED", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+      { name: "ALPHA", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    ],
+  };
+  const selection = SectionSelection.of({ only: ["labels", "actions_secrets"] })._unsafeUnwrap();
+
+  async function snapshotOnce(): Promise<{
+    rendered: string;
+    result: RenderableSnapshot;
+    notices: string[];
+  }> {
+    const io = captureIo();
+    const result = await snapshotRepository(
+      registryFake(UNORDERED_LIVE),
+      { ...opts(), sections: selection },
+      io.io,
+    );
+    expect(result.result).toBe("snapshot");
+    return {
+      rendered: renderSnapshotYaml(
+        result as RenderableSnapshot,
+        "https://example.test/schema.json",
+      ),
+      result: result as RenderableSnapshot,
+      notices: io.annotations,
+    };
+  }
+
+  test("two snapshots over one state are the same bytes, with no line dating them", async () => {
+    const first = await snapshotOnce();
+    const second = await snapshotOnce();
+    expect(second.rendered).toBe(first.rendered);
+    expect(first.rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  test("the document's entries, its notes, and the annotations come out sorted whatever order GitHub listed", async () => {
+    const { rendered, result, notices } = await snapshotOnce();
+    const labels = result.settings.labels as { entries: Array<{ name: string }> };
+    expect(labels.entries.map((label) => label.name)).toEqual(["bug", "docs"]);
+    const secrets = result.settings.actions_secrets as { entries: Array<{ name: string }> };
+    expect(secrets.entries.map((secret) => secret.name)).toEqual(["ALPHA", "ZED"]);
+    const notes =
+      result.outcomes.find((outcome) => outcome.key === "actions_secrets")?.detail ?? [];
+    const entryOf = (line: string): string | undefined => /^(?:notice: )?(\S+):/.exec(line)?.[1];
+    expect(notes.map(entryOf)).toEqual(["actions_secrets[ALPHA]", "actions_secrets[ZED]"]);
+    expect(notices.map(entryOf)).toEqual(["actions_secrets[ALPHA]", "actions_secrets[ZED]"]);
+    expect(rendered.indexOf("# actions_secrets[ALPHA]")).toBeLessThan(
+      rendered.indexOf("# actions_secrets[ZED]"),
+    );
   });
 });

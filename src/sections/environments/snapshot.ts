@@ -4,6 +4,7 @@
  * the pin state read off the GraphQL pins connection folded onto the entries.
  */
 
+import { compareByCodePoint } from "../../engine/canonical.js";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionMeta } from "../contract/module.js";
@@ -188,7 +189,9 @@ export function sharedSecretNotes(entries: readonly EnvironmentConfig[]): string
   return [...owners]
     .filter(([, labels]) => labels.length > 1)
     .map(
+      // The owners in code-point order: the listing's order must not reach the note, or an unchanged repository
+      // would snapshot two different headers.
       ([variable, labels]) =>
-        `secrets: ${labels.join(", ")} all read their value from ${variable}; edit a reference to give one its own value`,
+        `secrets: ${[...labels].sort(compareByCodePoint).join(", ")} all read their value from ${variable}; edit a reference to give one its own value`,
     );
 }

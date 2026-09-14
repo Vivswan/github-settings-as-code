@@ -174,13 +174,16 @@ export interface SnapshotOptions {
 
 /**
  * The engine's snapshot result plus the file text mode: snapshot would write
- * (absent exactly when the result is failed, which carries no document) and
- * every line the run printed when the caller brought no Io of their own.
+ * (absent exactly when the result is failed, which carries no document), the
+ * moment the reads began (`takenAt`: the file carries no date, and the report
+ * is the library's summary, so it states the moment where the action's summary
+ * and notice do), and every line the run printed when the caller brought no Io
+ * of their own.
  */
 export type SnapshotReport = (
   | (RenderableSnapshot & { yaml: string })
   | (Extract<SnapshotResult, { result: "failed" }> & { yaml?: never })
-) & { log: CollectedLine[] };
+) & { takenAt: string; log: CollectedLine[] };
 
 /** Read one repository's supported sections back as a settings document and its rendered file. */
 export async function snapshotRepository(
@@ -189,6 +192,7 @@ export async function snapshotRepository(
   options: SnapshotOptions = {},
 ): Promise<SnapshotReport> {
   const out = sink(options.io);
+  const takenAt = new Date().toISOString();
   const result = await readSnapshot(
     client,
     {
@@ -200,13 +204,10 @@ export async function snapshotRepository(
   );
   const log = out.log();
   if (result.result === "failed") {
-    return { ...result, log };
+    return { ...result, takenAt, log };
   }
-  const yaml = renderSnapshotYaml(result, {
-    schemaUrl: SNAPSHOT_SCHEMA_URL,
-    timestamp: new Date().toISOString(),
-  });
-  return { ...result, yaml, log };
+  const yaml = renderSnapshotYaml(result, SNAPSHOT_SCHEMA_URL);
+  return { ...result, yaml, takenAt, log };
 }
 
 /** Snapshot several repositories in order, one report each; a failed target never stops the rest. */

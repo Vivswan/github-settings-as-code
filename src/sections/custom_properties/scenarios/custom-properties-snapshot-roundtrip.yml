@@ -27,12 +27,12 @@ expect:
     custom_properties:
       _undeclared: keep
       entries:
-        - property_name: tier
-          value: gold
         - property_name: compliance
           value:
             - soc2
             - hipaa
+        - property_name: tier
+          value: gold
   never:
     - POST /
     - PATCH /

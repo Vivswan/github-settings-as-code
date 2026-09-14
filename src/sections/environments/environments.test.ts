@@ -1561,22 +1561,22 @@ describe("environments snapshot", () => {
     expect(api.writes).toEqual([]);
   });
 
-  test("two environment names the reference fold collapses earn one shared-variable note", () => {
+  test("two environment names the reference fold collapses earn one shared-variable note, its owners in code-point order whatever the listing's", () => {
     const secrets = (names: string[]) => ({
       _undeclared: "keep" as const,
       entries: names.map((name) => ({ name, value: `$${name}` })),
     });
     expect(
       sharedSecretNotes([
-        { name: "prod-eu", secrets: secrets(["DEPLOY_TOKEN", "API_KEY"]) },
         { name: "prod_eu", secrets: secrets(["DEPLOY_TOKEN"]) },
+        { name: "prod-eu", secrets: secrets(["DEPLOY_TOKEN", "API_KEY"]) },
         { name: "prod.eu", secrets: secrets(["DEPLOY_TOKEN"]) },
         { name: "staging", secrets: secrets(["DEPLOY_TOKEN"]) },
         { name: "dev" },
       ]),
     ).toEqual([
-      "secrets: environments[prod-eu].secrets[DEPLOY_TOKEN], environments[prod_eu].secrets[DEPLOY_TOKEN], " +
-        "environments[prod.eu].secrets[DEPLOY_TOKEN] all read their value from " +
+      "secrets: environments[prod-eu].secrets[DEPLOY_TOKEN], environments[prod.eu].secrets[DEPLOY_TOKEN], " +
+        "environments[prod_eu].secrets[DEPLOY_TOKEN] all read their value from " +
         "SECRET_ENVIRONMENT_PROD_EU_DEPLOY_TOKEN; edit a reference to give one its own value",
     ]);
   });
