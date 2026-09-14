@@ -51,8 +51,8 @@ describe("validateSettings", () => {
     ],
     [
       "two unknown keys",
-      { typo: 1, tpyo: 2 },
-      'ignoring unknown top-level sections outside the "sections" allowlist: typo, tpyo. Upgrade the action to a version that knows them, or remove them from fleet.yml',
+      { typo: 1, bogus: 2 },
+      'ignoring unknown top-level sections outside the "sections" allowlist: typo, bogus. Upgrade the action to a version that knows them, or remove them from fleet.yml',
     ],
   ])(
     "%s outside the sections allowlist is a returned warning, not a printed one",
