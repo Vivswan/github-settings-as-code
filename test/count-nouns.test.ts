@@ -147,6 +147,16 @@ describe("count parentheticals", () => {
     expect(countParentheticals([["src/crlf.ts", crlf]])).toEqual([
       `src/crlf.ts:5: "cond\\r\\nthird\\r\\nfourth\\r\\nfile(s)" ${FIX}`,
     ]);
+    // oxc hands out UTF-16 offsets, the unit String.prototype.slice reads, so a multi-byte character before or inside a literal moves nothing.
+    const nonAscii = [
+      "// \u00e9",
+      'const a = "x(s)";',
+      `const b = \`\u65e5\u672c \${n} label(s)\`;`,
+    ].join("\n");
+    expect(countParentheticals([["src/non-ascii.ts", nonAscii]])).toEqual([
+      `src/non-ascii.ts:2: "x(s)" ${FIX}`,
+      `src/non-ascii.ts:3: "_ label(s)" ${FIX}`,
+    ]);
   });
 
   test("a lambda parameter, an escape before a lambda, a comment, and a BUG: invariant are not counts (controls)", () => {
