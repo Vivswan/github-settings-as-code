@@ -1,6 +1,7 @@
 /** The `interaction_limits:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
+import { agree } from "../../text.js";
 import type { MustBeNever } from "../../types.js";
 
 // Shared by the shape's base-key sweep below and the handler's strip. Pinned to the config type
@@ -47,10 +48,13 @@ const InteractionLimits = z
     if (baseKeys.length > 0 && record.limit === undefined) {
       // GitHub rejects the base PUT body without a limit, and a run that never issues the PUT would
       // silently drop the other base keys.
+      const them = agree(baseKeys.length, "it", "them");
       refineCtx.addIssue({
         code: "custom",
         path: ["limit"],
-        message: `key(s) [${baseKeys.join(", ")}] ride the base interaction-limits PUT, which requires a limit; declare limit alongside them, or remove them`,
+        message:
+          `${agree(baseKeys.length, "key", "keys")} [${baseKeys.join(", ")}] ${agree(baseKeys.length, "rides", "ride")} the base interaction-limits PUT, ` +
+          `which requires a limit; declare limit alongside ${them}, or remove ${them}`,
       });
     }
     const bypass = record.pull_request_creation_bypass;
