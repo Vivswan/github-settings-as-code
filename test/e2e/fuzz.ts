@@ -11,6 +11,7 @@
  * merge      -> a layered mode: merge stack whose written document the oracle's fold predicts whole
  */
 
+import { canonicalDocument } from "../../src/engine/canonical.js";
 import { describeOptOut } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
@@ -1026,7 +1027,9 @@ async function runMergePredicted(
           exit_code: 0,
           result: "merged",
           zero_requests: true,
-          merged: prediction.merged,
+          // The oracle predicts the fold's content; the file is that fold in the canonical order, whose rules
+          // test/engine/canonical.test.ts pins on its own, so this pin is content, never the layers' order.
+          merged: canonicalDocument(prediction.merged),
           stdout_contains: prediction.notices.map(describeOptOut),
           summary_contains: ["Merged document written to "],
         };
