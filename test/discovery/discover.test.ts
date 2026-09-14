@@ -266,6 +266,9 @@ describe("formatSkipNotice", () => {
     expect(formatSkipNotice(group, false)).toBe(
       'repos: "*" discovery skipped 3 repositories by forks=exclude: o/a, o/b, o/c',
     );
+    expect(formatSkipNotice({ reason: "forks=exclude", repos: [ref("o/a")] }, false)).toBe(
+      'repos: "*" discovery skipped 1 repository by forks=exclude: o/a',
+    );
   });
 
   test("redaction lists public slugs and counts the rest", () => {

@@ -11,6 +11,7 @@ import { paginate } from "../github/paginate.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
 import type { ProblemOf } from "../problem.js";
+import { countNoun } from "../text.js";
 
 type DiscoveredRepo = Pick<
   components["schemas"]["repository"],
@@ -233,7 +234,11 @@ export function formatSkipNotice(
     ? group.repos.flatMap((repo) => (repo.visibility === "public" ? [repo.slug] : []))
     : group.repos.map((repo) => (isPrivate(repo.slug) ? revealPrivate(repo.slug) : repo.slug));
   const hidden = group.repos.length - named.length;
-  const hiddenCount = `${hidden} private or internal ${hidden === 1 ? "repository" : "repositories"}`;
+  const hiddenCount = countNoun(
+    hidden,
+    "private or internal repository",
+    "private or internal repositories",
+  );
   const shown = named.slice(0, 20).join(", ");
   const more = named.length > 20 ? `, and ${named.length - 20} more` : "";
   const hiddenTail = hidden > 0 ? `, and ${hiddenCount}` : "";
@@ -241,7 +246,7 @@ export function formatSkipNotice(
   const count =
     named.length === 0 && hidden > 0
       ? hiddenCount
-      : `${group.repos.length} ${group.repos.length === 1 ? "repository" : "repositories"}`;
+      : countNoun(group.repos.length, "repository", "repositories");
   if (group.reason === ARCHIVED_REASON) {
     return `repos: "*" discovery skipped ${count} because settings writes fail on archived repositories; unarchive them to manage them${names}`;
   }

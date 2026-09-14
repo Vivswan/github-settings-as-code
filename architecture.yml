@@ -43,7 +43,7 @@ edges:
   engine: [discovery, github, io, plain-data, problem, schema, sections, text, types]
   sections: [discovery, engine, github, schema, text, types, upstream-gaps]
   github: [io, plain-data]
-  discovery: [github, private, problem]
+  discovery: [github, private, problem, text]
   report: [discovery, engine, github, io, private, problem, schema, sections, types]
   problem: [plain-data, schema, text]
   schema: [sections, types]
