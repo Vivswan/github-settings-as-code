@@ -11,6 +11,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type Node, parseSync } from "oxc-parser";
 import { parse as parseYaml } from "yaml";
+import { countNoun } from "../../src/text.js";
 import { resolveImport, scanImports } from "./changed-sections.js";
 
 export const ARCHITECTURE_PATH = "architecture.yml";
@@ -133,7 +134,9 @@ export function renderArchitectureMermaid(arch: Architecture): string {
 if (import.meta.main) {
   const problems = lintArchitecture(join(import.meta.dir, "..", ".."));
   if (problems.length > 0) {
-    console.error(`lint:arch: ${problems.length} problem(s)\n  ${problems.join("\n  ")}`);
+    console.error(
+      `lint:arch: ${countNoun(problems.length, "problem", "problems")}\n  ${problems.join("\n  ")}`,
+    );
     process.exit(1);
   }
   console.log(`lint:arch: src/ imports match ${ARCHITECTURE_PATH}`);

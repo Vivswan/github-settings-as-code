@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { exactName, type ListWrite, listSection } from "../shared/list-section.js";
 import { RulesetConfig } from "./schema.js";
@@ -61,7 +62,7 @@ function repeatedRuleTypes(
     return undefined;
   }
   const types = [...repeated].map((type) => `"${type}"`).join(", ");
-  return `rule type${repeated.size === 1 ? "" : "s"} ${types}`;
+  return `${agree(repeated.size, "rule type", "rule types")} ${types}`;
 }
 
 /**

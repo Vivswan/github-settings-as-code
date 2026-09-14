@@ -302,6 +302,7 @@ graph TD
   discovery --> github
   discovery --> private
   discovery --> problem
+  discovery --> text
   report --> discovery
   report --> engine
   report --> github

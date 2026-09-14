@@ -13,6 +13,7 @@
 
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { countNoun } from "../../src/text.js";
 import { isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -206,7 +207,7 @@ function main(): number {
   const plan = planGraduation(diagnostics);
   if (plan.foreign.length > 0) {
     abort(
-      `${plan.foreign.length} diagnostic(s) are not gap-file tripwires (TS2344 inside ${GAPS_DIR}/); something else is broken, fix it first`,
+      `${countNoun(plan.foreign.length, "diagnostic", "diagnostics")} outside the gap-file tripwires (TS2344 inside ${GAPS_DIR}/); something else is broken, fix it first`,
       first.stdout,
       first.stderr,
     );

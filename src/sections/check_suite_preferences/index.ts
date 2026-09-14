@@ -3,6 +3,7 @@
  * NO read endpoint, so the plan reads nothing and its one op is an alwaysRewrite PATCH.
  */
 
+import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { loosen, type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -49,7 +50,7 @@ export const checkSuitePreferencesSection = {
         const echoed = (response as { preferences?: { auto_trigger_checks?: unknown } } | null)
           ?.preferences?.auto_trigger_checks;
         const count = Array.isArray(echoed) ? echoed.length : desired.auto_trigger_checks.length;
-        return `applied check suite preferences (${count} auto_trigger_checks ${count === 1 ? "entry" : "entries"})`;
+        return `applied check suite preferences (${count} auto_trigger_checks ${agree(count, "entry", "entries")})`;
       },
     });
     return plan;

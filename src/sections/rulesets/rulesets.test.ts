@@ -414,6 +414,19 @@ describe("rulesets", () => {
     ).rejects.toThrow(
       'rulesets: the settings file declares conflicting rulesets: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once. Fix the settings file, then re-run',
     );
+    await expect(
+      plan(api, [
+        {
+          name: "main",
+          rules: [
+            { type: "deletion" },
+            { type: "deletion" },
+            { type: "creation" },
+            { type: "creation" },
+          ],
+        },
+      ]),
+    ).rejects.toThrow('lists the rule types "deletion", "creation" more than once');
     expect(api.calls).toHaveLength(0);
     await expect(plan(api, [{ name: "main", rules: [{ type: "deletion" }] }])).rejects.toThrow(
       'rulesets: GitHub returned the ruleset "main" (id 9) with the rule type "deletion" more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run',

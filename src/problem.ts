@@ -318,6 +318,11 @@ function describeCentralFile(file: CentralFileProblem): string {
   }
 }
 
+/** The files the entries name: an ownerless entry folds every top-level file into one bullet, and a duplicate pair has one surplus file. */
+function invalidFileCount(files: readonly CentralFileProblem[]): number {
+  return files.reduce((n, file) => n + (file.kind === "ownerless" ? file.files.length : 1), 0);
+}
+
 function describeUnreadable(problem: ProblemOf<"settings-file-unreadable">): string {
   switch (problem.role) {
     case "settings-file":
@@ -364,19 +369,19 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
   if (problem.invalid.length > 0) {
     parts.push(
       `${quoteList(problem.invalid)} ` +
-        `${problem.invalid.length === 1 ? "is not an owner/name slug" : "are not owner/name slugs"} ` +
+        `${agree(problem.invalid.length, "is not an owner/name slug", "are not owner/name slugs")} ` +
         '(use values like "octocat/hello-world", comma- or newline-separated)',
     );
   }
   if (problem.duplicated.length > 0) {
     parts.push(
       `${quoteList(problem.duplicated)} ` +
-        `${problem.duplicated.length === 1 ? "is" : "are"} listed more than once ` +
+        `${agree(problem.duplicated.length, "is", "are")} listed more than once ` +
         "(keep exactly one entry per repository)",
     );
   }
   const count = problem.invalid.length + problem.duplicated.length;
-  return `the "repos" input has ${count} invalid entr${count === 1 ? "y" : "ies"}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
+  return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
 }
 
 /**
@@ -549,8 +554,8 @@ export function describeProblem(problem: Problem): string {
       );
     case "no-targets":
       return problem.filteredOut > 0
-        ? `multi-repo mode found no targets: repos: "*" discovery found ${problem.filteredOut} ` +
-            `${problem.filteredOut === 1 ? "repository" : "repositories"}, but the discovery filters ` +
+        ? `multi-repo mode found no targets: repos: "*" discovery found ` +
+            `${countNoun(problem.filteredOut, "repository", "repositories")}, but the discovery filters ` +
             `removed all of them (see the notices above). Relax the filter inputs, or add per-repo ` +
             `files to the repos-dir`
         : `multi-repo mode found no targets: repos-dir yielded no settings files and the "repos" input resolved to no repositories. Add per-repo files to the repos-dir, or list repositories in the "repos" input`;
@@ -565,7 +570,7 @@ export function describeProblem(problem: Problem): string {
     case "repos-dir-unreadable":
       return `cannot read repos-dir "${problem.reposDir}": ${problem.reason}. Check that it is a readable directory of settings files`;
     case "repos-dir-invalid-files":
-      return `repos-dir "${problem.reposDir}" has ${countNoun(problem.files.length, "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
+      return `repos-dir "${problem.reposDir}" has ${countNoun(invalidFileCount(problem.files), "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
     case "discovery-request-failed":
       return `cannot discover repositories for repos: "*": GET ${problem.path} failed: ${problem.status} ${problem.message}. ${problem.denied ? PAT_ADVICE : RERUN_ADVICE}`;
     case "discovery-transport-failed":

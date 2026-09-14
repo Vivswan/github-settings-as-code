@@ -275,7 +275,7 @@ const SPECIMENS = {
         { kind: "ownerless", files: ["repos/api.yml", "repos/web.yml"] },
       ],
     },
-    'repos-dir "repos" has 3 invalid settings files:\n' +
+    'repos-dir "repos" has 4 invalid settings files:\n' +
       '- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes\n' +
       "- duplicate target o/x: defined by both repos/o/x.yml and repos/x.yml. Keep exactly one settings file per repository\n" +
       "- cannot resolve repos/api.yml, repos/web.yml: top-level repos-dir files use the current repository's owner, which is unknown outside GitHub Actions. Use the <owner>/<name>.yml layout instead",
@@ -430,6 +430,11 @@ describe("describeProblem", () => {
       "one invalid repos entry reads in the singular",
       { code: "repos-input-invalid-entries", invalid: ["not-a-slug"], duplicated: [] },
       'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
+    ],
+    [
+      "two duplicated repos entries read in the plural",
+      { code: "repos-input-invalid-entries", invalid: [], duplicated: ["o/a", "o/b"] },
+      'the "repos" input has 2 invalid entries: "o/a", "o/b" are listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
     ],
     [
       "a request failure that is not a denial gets re-run advice",

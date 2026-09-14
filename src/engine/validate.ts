@@ -5,7 +5,7 @@ import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
-import { countNoun } from "../text.js";
+import { agree, countNoun } from "../text.js";
 
 /**
  * zod's object schemas accept a Date, Set, or Uint8Array (YAML !!timestamp, !!set, !!binary) as an empty mapping, so a
@@ -129,7 +129,7 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
   if (problems.length > 5) {
     return [
       ...problems.slice(0, 5),
-      `${key}: ...and ${problems.length - 5} more entr${problems.length - 5 === 1 ? "y" : "ies"} with unrecognized keys in this section`,
+      `${key}: ...and ${problems.length - 5} more ${agree(problems.length - 5, "entry", "entries")} with unrecognized keys in this section`,
     ];
   }
   return problems;
