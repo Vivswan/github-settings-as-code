@@ -81,7 +81,7 @@ describe("secret_scanning_custom_patterns", () => {
           payload: {
             patterns: [{ name: "vendor-key", pattern: "key-[0-9]{6}", start_delimiter: "\\b" }],
           },
-          describe: 'creating secret scanning pattern(s) "vendor-key"',
+          describe: 'creating secret scanning pattern "vendor-key"',
           drift: [
             "secret_scanning_custom_patterns[vendor-key]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
@@ -171,6 +171,23 @@ describe("secret_scanning_custom_patterns", () => {
     ]);
   });
 
+  test("several creates and deletes name their patterns in the plural", async () => {
+    const api = new MockApi(
+      listRoute([livePattern({ id: 1, name: "old-a" }), livePattern({ id: 2, name: "old-b" })]),
+    );
+    const result = await plan(api, {
+      _undeclared: "delete",
+      entries: [
+        { name: "new-a", pattern: "a_[0-9]{4}" },
+        { name: "new-b", pattern: "b_[0-9]{4}" },
+      ],
+    });
+    expect(rendered(result).ops.map((op) => op.describe)).toEqual([
+      'creating secret scanning patterns "new-a", "new-b"',
+      'deleting undeclared secret scanning patterns "old-a", "old-b"',
+    ]);
+  });
+
   test("a rename is create plus bulk delete under _undeclared:delete, never a PATCH (no rename inference)", async () => {
     // The declared pattern carries the same fields as the live one, only the name differs: the name is the identity.
     const api = new MockApi(
@@ -184,7 +201,7 @@ describe("secret_scanning_custom_patterns", () => {
       {
         role: "create",
         payload: { patterns: [{ name: "new-name", pattern: "int_[a-z0-9]{8}" }] },
-        describe: 'creating secret scanning pattern(s) "new-name"',
+        describe: 'creating secret scanning pattern "new-name"',
         drift: [
           "secret_scanning_custom_patterns[new-name]: missing - declared in the settings file but not on the repo; apply will create it",
         ],
@@ -196,7 +213,7 @@ describe("secret_scanning_custom_patterns", () => {
           patterns: [{ pattern_id: 9, custom_pattern_version: "v7" }],
           post_delete_action: "resolve_alerts",
         },
-        describe: 'deleting undeclared secret scanning pattern(s) "old-name"',
+        describe: 'deleting undeclared secret scanning pattern "old-name"',
         drift: [
           'secret_scanning_custom_patterns[old-name]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it and resolve its alerts; add it to the settings file to keep it',
         ],

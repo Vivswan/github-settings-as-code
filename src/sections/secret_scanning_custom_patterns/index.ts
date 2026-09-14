@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
@@ -244,7 +245,7 @@ export const secretScanningPatternsSection = {
       plan.ops.push({
         role: "create",
         payload: { patterns: toCreate.map(createBody) },
-        describe: `creating secret scanning pattern(s) ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
+        describe: `creating secret scanning ${agree(toCreate.length, "pattern", "patterns")} ${toCreate.map((p) => `"${p.name}"`).join(", ")}`,
         drift: [missing(firstCreate), ...restCreate.map(missing)],
         change: () => [created(firstCreate), ...restCreate.map(created)] as const,
       });
@@ -264,7 +265,7 @@ export const secretScanningPatternsSection = {
       plan.ops.push({
         role: "remove",
         payload: { patterns: toDelete.map(deleteBody), post_delete_action: "resolve_alerts" },
-        describe: `deleting undeclared secret scanning pattern(s) ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
+        describe: `deleting undeclared secret scanning ${agree(toDelete.length, "pattern", "patterns")} ${toDelete.map((p) => `"${p.name}"`).join(", ")}`,
         drift: [undeclared(firstDelete), ...restDelete.map(undeclared)],
         change: () => [deleted(firstDelete), ...restDelete.map(deleted)] as const,
       });
