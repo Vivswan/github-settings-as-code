@@ -18,6 +18,7 @@ import {
   samePermission,
 } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { agree } from "../../src/text.js";
 import { countWord } from "./lib/count-word.js";
 import { escapeRe, type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
 
@@ -279,7 +280,7 @@ export function renderGrantSentence(sections: readonly SectionMeta[]): string {
     ...(readList.length > 0 ? [`${proseList(readList)} at read`] : []),
     ...(orgList.length > 0
       ? [
-          `(for org repos) the ${proseList(orgList)} organization permission${orgList.length === 1 ? "" : "s"} at read`,
+          `(for org repos) the ${proseList(orgList)} organization ${agree(orgList.length, "permission", "permissions")} at read`,
         ]
       : []),
   ];

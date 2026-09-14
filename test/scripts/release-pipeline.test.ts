@@ -1737,9 +1737,10 @@ describe("prereleaseVersion", () => {
       ).rejects.toThrow("the read attempts must be a positive integer, not 0");
     });
 
-    test("the npm-confirm subcommand prints settled, unsettled, or behind on stdout, and takes the next channel alone", async () => {
+    test("the npm-confirm subcommand prints settled, unsettled, or behind on stdout, counts its reads, and takes the next channel alone", async () => {
       const fx = seedFixture();
       const ahead = newer(fx);
+      const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });
       const converged = registry(["2.1.0", published(fx)], {
         latest: "2.1.0",
         next: published(fx),
@@ -1748,14 +1749,36 @@ describe("prereleaseVersion", () => {
         latest: "2.1.0",
         next: published(fx),
       });
-      const env = (url: string) => ({ GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url });
+      const env = (url: string, pause?: string) => ({
+        GITHUB_SHA: fx.mergeSha,
+        NPM_REGISTRY_URL: url,
+        NPM_CONFIRM_PAUSE_MS: pause,
+      });
+      const settled = (reads: string) =>
+        `settled ${published(fx)} is on the registry after ${reads}; next is not behind a descendant's pre-release\n`;
       await withRegistry({ status: 200, body: converged }, async (url) => {
         expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: `settled ${published(fx)} is on the registry after 1 read; next is not behind a descendant's pre-release\n`,
+          stdout: settled("1 read"),
           stderr: "",
           status: 0,
         });
       });
+      // The bound is the control: a run that ignored the variable would pause 20 s between its two reads.
+      await withRegistry(
+        [
+          { status: 200, body: lagging },
+          { status: 200, body: converged },
+        ],
+        async (url) => {
+          const started = performance.now();
+          expect(await subcommand(fx.work, env(url, "0"), "npm-confirm", "next")).toEqual({
+            stdout: settled("2 reads"),
+            stderr: "",
+            status: 0,
+          });
+          expect(performance.now() - started).toBeLessThan(10_000);
+        },
+      );
       await withRegistry({ status: 200, body: drifted }, async (url) => {
         expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
           stdout: `behind ${behind(fx, ahead)}\n`,
@@ -1771,6 +1794,14 @@ describe("prereleaseVersion", () => {
           status: 1,
         },
       );
+      expect(
+        await subcommand(fx.work, env("http://127.0.0.1:9", "soon"), "npm-confirm", "next"),
+      ).toEqual({
+        stdout: "",
+        stderr:
+          'release-pipeline npm-confirm: NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not "soon"\n',
+        status: 1,
+      });
     });
   });
 });
