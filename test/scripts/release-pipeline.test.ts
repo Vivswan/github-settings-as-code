@@ -1751,7 +1751,7 @@ describe("prereleaseVersion", () => {
       const env = (url: string) => ({ GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url });
       await withRegistry({ status: 200, body: converged }, async (url) => {
         expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: `settled ${published(fx)} is on the registry after 1 read(s); next is not behind a descendant's pre-release\n`,
+          stdout: `settled ${published(fx)} is on the registry after 1 read; next is not behind a descendant's pre-release\n`,
           stderr: "",
           status: 0,
         });

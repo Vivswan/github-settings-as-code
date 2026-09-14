@@ -1294,7 +1294,7 @@ async function main(): Promise<void> {
       });
       console.log(
         confirmed.outcome === "settled"
-          ? `settled ${confirmed.version} is on the registry after ${confirmed.reads} read(s); next is not behind a descendant's pre-release`
+          ? `settled ${confirmed.version} is on the registry after ${confirmed.reads} ${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`
           : `${confirmed.outcome} ${confirmed.reason}`,
       );
       break;
