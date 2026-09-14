@@ -30,8 +30,13 @@ interface SectionRow {
   detail: string[];
 }
 
+/** A count with its noun agreed to it ("1 repository", "2 sections"), for every count the run reports. */
+export function countNoun(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function repositoryCount(count: number): string {
-  return `${count} ${count === 1 ? "repository" : "repositories"}`;
+  return countNoun(count, "repository", "repositories");
 }
 
 function outcomeRows(outcomes: readonly SectionRow[]): string[] {

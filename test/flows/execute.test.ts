@@ -79,7 +79,7 @@ describe("executeRun", () => {
         "repos-result": "{}",
       });
       expect(d.collected.lines.slice(-2)).toEqual([
-        { line: `merged 2 layer(s) into ${mergedFile}` },
+        { line: `merged 2 layers into ${mergedFile}` },
         { line: "result: merged" },
       ]);
     }));

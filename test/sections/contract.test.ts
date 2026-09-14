@@ -20,6 +20,7 @@ import {
   readGating,
   type SectionMeta,
   type SectionModule,
+  sectionGrant,
   sectionOperations,
   writeGatedReads,
 } from "../../src/sections/contract/module.js";
@@ -40,6 +41,7 @@ import {
   tryCall,
   tryCallDeclared,
 } from "../../src/sections/contract/requests.js";
+import { customPropertiesSection } from "../../src/sections/custom_properties/index.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
 import { MockApi } from "../mock-api.js";
@@ -582,6 +584,25 @@ describe("throwFor context enrichment", () => {
     expect((thrown as Error).message).toBe(
       'rulesets: GET /repos/o/r/rulesets: 403 Forbidden. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
     );
+  });
+
+  test("the custom property values GET is public, so its denial asks for no grant the section itself needs", () => {
+    // The section is gated ("Custom properties"); only the endpoint's own "none" keeps that grant out of the advice.
+    expect(sectionGrant(customPropertiesSection)).toMatch(/^grant /);
+    let thrown: unknown;
+    try {
+      throwFor(
+        customPropertiesSection,
+        "GET",
+        "/repos/o/r/properties/values",
+        { status: 403, message: "Forbidden", body: "" },
+        { op: customPropertiesSection.endpoints.list },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBeInstanceOf(PermissionDenied);
+    expect((thrown as Error).message).not.toMatch(/grant/);
   });
 
   test("a no-override denial keeps the section grant's caveat", () => {

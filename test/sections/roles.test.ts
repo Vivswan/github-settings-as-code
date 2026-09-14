@@ -8,6 +8,8 @@ describe("permissionForRole", () => {
     ["write", "push"],
     ["admin", "admin"],
     ["constructor", "constructor"],
+    // A custom org role passes through as spelled: GitHub matches the name exactly, so lowercasing it would plan a rename.
+    ["Security-Team", "Security-Team"],
     // "push" and "pull" are the PUT vocabulary GitHub reads back as write and read, so a live role spelled that way maps nowhere.
     ["push", undefined],
     ["pull", undefined],

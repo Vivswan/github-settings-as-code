@@ -489,7 +489,7 @@ describe("run in mode: merge", () => {
       expect(captured).toEqual([
         `notice: ${layer("team.yml")}: null removed repository.has_projects declared by a lower layer`,
         `notice: ${layer("repo.yml")}: null removed pages declared by a lower layer`,
-        `merged 3 layer(s) into ${mergedFile}`,
+        `merged 3 layers into ${mergedFile}`,
         "result: merged",
       ]);
       expect(summaries).toEqual([

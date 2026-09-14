@@ -39,7 +39,7 @@ import {
   toPublicView,
   WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
-import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
+import { countNoun, writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
 
 /** One target's end state as its flow hands it over: the result word plus everything the channel seals. */
 export interface TargetResult {
@@ -69,12 +69,12 @@ export function engineOutcome(run: RepoRunResult, channelIo: Io): TargetResult {
   }
   channelIo.annotate(
     "error",
-    `preflight failed: the token cannot access ${denied} section(s), so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections`,
+    `preflight failed: the token cannot access ${countNoun(denied, "section", "sections")}, so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections`,
   );
   return {
     result: run.result,
     outcomes: run.outcomes,
-    note: `preflight denied ${denied} section(s); nothing was applied to this repository`,
+    note: `preflight denied ${countNoun(denied, "section", "sections")}; nothing was applied to this repository`,
   };
 }
 
@@ -236,7 +236,7 @@ export interface FinishedMerge {
 
 export function concludeMerge(io: Io, run: FinishedMerge): number {
   writeMergeSummary(io, run.layers, run.mergedFile);
-  io.log(`merged ${run.layers.length} layer(s) into ${run.mergedFile}`);
+  io.log(`merged ${countNoun(run.layers.length, "layer", "layers")} into ${run.mergedFile}`);
   return conclude(io, { result: "merged", outcomes: [] }, false);
 }
 

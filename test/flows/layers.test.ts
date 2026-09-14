@@ -2,8 +2,9 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
-import { readLayerFiles } from "../../src/flows/layers.js";
+import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
+import { silentIo } from "../../src/io.js";
 import { withTempDir } from "../temp-dir.js";
 
 describe("readLayerFiles", () => {
@@ -47,4 +48,32 @@ describe("readLayerFiles", () => {
         read.mockRestore();
       }
     }));
+});
+
+describe("foldLayers", () => {
+  test("a wrapper's malformed _layering is the fold's refusal, not the layer's own shape problem", () => {
+    // The standalone view hides the directive from the per-layer parse, so the fold, which owns it, is what names the fix;
+    // a well-formed one folds. Without the strip the parse would report a bare enum mismatch first.
+    const fold = (directive: string) =>
+      foldLayers(
+        [
+          {
+            name: "repo.yml",
+            doc: { labels: { _layering: directive, entries: [{ name: "mine" }] } },
+          },
+        ],
+        "merged",
+        "merge",
+        silentIo(),
+      );
+    expect(fold("union")).toEqual(
+      err({
+        layer: "repo.yml",
+        site: "labels._layering",
+        code: "layer-bad-directive",
+        actual: "union",
+      }),
+    );
+    expect(fold("merge").isOk()).toBe(true);
+  });
 });

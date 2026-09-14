@@ -220,11 +220,9 @@ describe("public projections", () => {
   const sealed = markPrivate({ slug: "o/priv", outcomes, note: "boom SECRET", transcript: [] });
 
   test("open detail passes through byte-identical", () => {
-    expect(
-      publicDetail({ slug: "o/pub", outcomes, note: "preflight denied 1 section(s)" }),
-    ).toEqual({
+    expect(publicDetail({ slug: "o/pub", outcomes, note: "preflight denied 1 section" })).toEqual({
       outcomes: outcomes.map((o) => ({ key: o.key, status: o.status, detail: o.detail })),
-      note: "preflight denied 1 section(s)",
+      note: "preflight denied 1 section",
     });
   });
 

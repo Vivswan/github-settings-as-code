@@ -28,12 +28,12 @@ describe("the action's uploader without a runtime token", () => {
         recipient,
       );
 
+      // The uploader's reason names the missing token; deliverArtifactReport's frame around it names the channel and the
+      // remedy (test/report/artifact-report.test.ts holds the frame itself).
       expect(result).toEqual({
-        warning:
-          "could not upload the private report artifact: the artifact service is unavailable: no " +
-          "ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or " +
-          "self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside " +
-          "Actions). Re-run, or set private-report: none if it persists",
+        warning: expect.stringMatching(
+          /^could not upload the private report artifact: .*no ACTIONS_RUNTIME_TOKEN in the environment.*private-report: none/,
+        ),
       });
       expect(uploadSpy).toHaveBeenCalledTimes(0);
     } finally {

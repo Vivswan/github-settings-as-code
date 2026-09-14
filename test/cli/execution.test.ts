@@ -29,6 +29,8 @@ interface Case {
   readonly env: ConfigEnv;
   /** Where the arm ends on both faces; without it, two faces failing alike would pass as equal. */
   readonly ends: { readonly code: number; readonly result: string };
+  /** The private targets both faces must key by placeholder and name nowhere, under the default private-repos: redact. */
+  readonly redacted?: readonly string[];
 }
 
 const SINGLE = join(ROOT, "test", "fixtures", "single.yml");
@@ -39,8 +41,12 @@ const DOCS = { name: "docs", color: "0075ca", description: "Documentation" };
 const FLEET_ENV: ConfigEnv = { GITHUB_REPOSITORY: "admin/fleet" };
 
 /** The settings.yml of a remote target, as the contents endpoint hands it back through getRepoFile. */
-const remoteSettings = (slug: string, hasWiki: boolean): Record<string, Route> => ({
-  [`GET /repos/${slug}`]: { data: { has_wiki: hasWiki, private: false } },
+const remoteSettings = (
+  slug: string,
+  hasWiki: boolean,
+  isPrivate = false,
+): Record<string, Route> => ({
+  [`GET /repos/${slug}`]: { data: { has_wiki: hasWiki, private: isPrivate } },
   [`GET /repos/${slug}/contents/.github/settings.yml`]: {
     data: `repository:\n  has_wiki: false\n`,
   },
@@ -121,6 +127,14 @@ const cases: Case[] = [
     inputs: () => ({ mode: "check", token: TOKEN, repos: "o/a,o/b" }),
     routes: { ...remoteSettings("o/a", false), ...remoteSettings("o/b", true) },
     env: FLEET_ENV,
+  },
+  {
+    name: "check, two repositories from a list, one private and drifting",
+    ends: { code: 1, result: "drift" },
+    inputs: () => ({ mode: "check", token: TOKEN, repos: "o/a,acme/vault" }),
+    routes: { ...remoteSettings("o/a", false), ...remoteSettings("acme/vault", true, true) },
+    env: FLEET_ENV,
+    redacted: ["acme/vault"],
   },
   {
     name: "merge, two layers",
@@ -309,6 +323,10 @@ describe("the action and the CLI run one arm to one result", () => {
     const cli = await throughArgv(c);
     expect(cli).toEqual(action);
     expect({ code: action.code, result: action.outputs.result }).toEqual(c.ends);
+    for (const slug of c.redacted ?? []) {
+      expect(action.outputs["repos-result"]).toContain("private repository #");
+      expect(JSON.stringify(action)).not.toContain(slug);
+    }
     // A writing arm wrote something on both sides, or the byte comparison above compared nothing.
     if (
       c.ends.result !== "failed" &&
