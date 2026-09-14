@@ -11,8 +11,11 @@ import { ROOT } from "./root.js";
 
 const SCANNED_DIRS = ["src", ".github/scripts"];
 
-/** A word then "(s)". A lambda parameter `(s) =>` has no word before its paren, so it never matches. */
-const COUNT_PARENTHETICAL = /\w\(s\)/g;
+/**
+ * A word then "(s)", read in the source text. A lambda parameter `(s) =>` has no word before its paren, and the `n` of a `\n` escape is
+ * not a word either, so neither matches.
+ */
+const COUNT_PARENTHETICAL = /(?<!\\)\w\(s\)/g;
 
 /**
  * A "BUG:" message names a programming error to the developer holding the stack: the list in brackets beside the noun carries the count,
@@ -20,7 +23,7 @@ const COUNT_PARENTHETICAL = /\w\(s\)/g;
  */
 const INVARIANT_PREFIX = "BUG:";
 
-/** Stands in for the `${expression}` hole before a template's later quasis, so `${noun}(s)` reads as a word before the paren. */
+/** Stands in for the `}` that closes the hole before a template's later quasis, so `${noun}(s)` reads as a word before the paren. */
 const HOLE = "_";
 
 const FIX =
@@ -33,7 +36,7 @@ const FIX =
 export function countParentheticals(files: Iterable<[path: string, text: string]>): string[] {
   const problems: string[] = [];
   for (const [path, text] of files) {
-    // `start` is the source offset of `value`'s first character, so a hit on a later line of a template names that line.
+    // `value` is the source text from offset `start`, so a hit's line is its own, whatever the escapes and line endings around it.
     const report = (start: number, value: string) => {
       for (const found of value.matchAll(COUNT_PARENTHETICAL)) {
         const line = text.slice(0, start + found.index).split("\n").length;
@@ -52,18 +55,27 @@ export function countParentheticals(files: Iterable<[path: string, text: string]
     }
     new Visitor({
       Literal(node) {
-        if (typeof node.value === "string" && !node.value.startsWith(INVARIANT_PREFIX)) {
-          report(node.start, node.value);
+        if (typeof node.value !== "string") {
+          return;
+        }
+        const body = text.slice(node.start + 1, node.end - 1);
+        if (!body.startsWith(INVARIANT_PREFIX)) {
+          report(node.start + 1, body);
         }
       },
       TemplateLiteral(node) {
-        if (node.quasis[0]?.value.raw.startsWith(INVARIANT_PREFIX)) {
+        // A quasi's span runs from the backtick or `}` before it to the `${` or backtick after it.
+        const body = (quasi: (typeof node.quasis)[number]) =>
+          text.slice(quasi.start + 1, quasi.end - (quasi.tail ? 1 : 2));
+        if (body(node.quasis[0] as (typeof node.quasis)[number]).startsWith(INVARIANT_PREFIX)) {
           return;
         }
-        // The raw text keeps each quasi's offsets aligned with the source.
         node.quasis.forEach((quasi, index) => {
-          const hole = index === 0 ? "" : HOLE;
-          report(quasi.start - hole.length, hole + quasi.value.raw);
+          if (index === 0) {
+            report(quasi.start + 1, body(quasi));
+          } else {
+            report(quasi.start, HOLE + body(quasi));
+          }
         });
       },
     }).visit(program);
@@ -89,7 +101,7 @@ describe("count parentheticals", () => {
     expect(countParentheticals(sourceFiles())).toEqual([]);
   });
 
-  test("every planted (s) fails naming its own line: a plain string, a template hole, two in one string, a later template line", () => {
+  test("every planted (s) fails naming its own line: a plain string, a template hole, two in one string, later template lines", () => {
     const text = [
       'import { x } from "./x.js";',
       "const plain = 'no file(s) here';",
@@ -97,7 +109,10 @@ describe("count parentheticals", () => {
       'const twice = "file(s) and repo(s)";',
       "const spanning = `first line",
       "  second line names the label(s)`;",
-      "export const all = plain + templated + twice + spanning;",
+      "const holeSpanning = `${",
+      "  noun",
+      "}(s) found`;",
+      "export const all = plain + templated + twice + spanning + holeSpanning;",
     ].join("\n");
     expect(countParentheticals([["src/planted.ts", text]])).toEqual([
       `src/planted.ts:2: "no file(s) here" ${FIX}`,
@@ -105,14 +120,20 @@ describe("count parentheticals", () => {
       `src/planted.ts:4: "file(s) and repo(s)" ${FIX}`,
       `src/planted.ts:4: "file(s) and repo(s)" ${FIX}`,
       `src/planted.ts:6: "cond line names the label(s)" ${FIX}`,
+      `src/planted.ts:9: "_(s) found" ${FIX}`,
+    ]);
+    const crlf = "const m = `first\r\nsecond\r\nthird\r\nfourth\r\nfile(s)`;";
+    expect(countParentheticals([["src/crlf.ts", crlf]])).toEqual([
+      `src/crlf.ts:5: "cond\\r\\nthird\\r\\nfourth\\r\\nfile(s)" ${FIX}`,
     ]);
   });
 
-  test("a lambda parameter, a comment, and a BUG: invariant are not counts (controls)", () => {
+  test("a lambda parameter, an escape before a lambda, a comment, and a BUG: invariant are not counts (controls)", () => {
     const text = [
       "// the file(s) this comment names are not a message",
       "/** neither is the key(s) note in this block */",
       "const trimmed = list.map((s) => s.trim());",
+      "const example = `Example:\\n(s) => s.trim()`;",
       `const bug = \`BUG: \${route} was given unused param(s) [\${list}]\`;`,
       'const plainBug = "BUG: base key(s) reached plan()";',
     ].join("\n");
