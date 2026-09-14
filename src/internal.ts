@@ -12,6 +12,7 @@ export {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "./discovery/discover.js";
+export { canonicalDocument, renderCanonicalYaml } from "./engine/canonical.js";
 export { mergeLayers, stripNulls } from "./engine/layers.js";
 export {
   preflightProbe,
@@ -47,7 +48,7 @@ export {
   type SnapshotFileConfig,
   snapshotFileDestination,
 } from "./flows/inputs.js";
-export { type FoldedLayers, foldLayers, renderMergedYaml } from "./flows/layers.js";
+export { type FoldedLayers, foldLayers } from "./flows/layers.js";
 export {
   DEFAULT_SETTINGS_FILE,
   type ResolvedTargets,

@@ -35,7 +35,7 @@ import {
 } from "./redact.js";
 import { canonicalPath, landingNames, renameTarget, writeReplacing } from "./settings-write.js";
 import { openSingleRepoChannel } from "./single.js";
-import { writeSnapshotDirSummary, writeSummary } from "./summary.js";
+import { snapshotTakenLine, writeSnapshotDirSummary, writeSummary } from "./summary.js";
 
 /**
  * The schema the written file's editor hint points at: the schema of this
@@ -69,11 +69,12 @@ export type SnapshotConfig =
 /**
  * A finished mode: snapshot run as runSnapshot hands it over: every target
  * closed through its channel, so a redacted one is sealed with its transcript
- * and concludeSnapshot opens only the public view.
+ * and concludeSnapshot opens only the public view. `takenAt` is the run's one
+ * moment (an ISO-8601 UTC instant), which the summary states and no file carries.
  */
 export type FinishedSnapshot =
-  | { form: "file"; target: Omit<TargetOutcome, "source"> }
-  | { form: "dir"; snapshotDir: string; targets: TargetOutcome[] };
+  | { form: "file"; takenAt: string; target: Omit<TargetOutcome, "source"> }
+  | { form: "dir"; takenAt: string; snapshotDir: string; targets: TargetOutcome[] };
 
 /** Whether `path` is `dir` itself or lies under it; both already named the same way. */
 function isWithin(path: string, dir: string): boolean {
@@ -143,7 +144,6 @@ async function snapshotTarget(ctx: {
   /** The input the path came from, named when the write fails. */
   pathInput: "snapshot-file" | "snapshot-dir";
   channel: TargetChannel;
-  timestamp: string;
 }): Promise<TargetResult> {
   const { api, repo, cfg, path, channel } = ctx;
   const result = await snapshotRepository(
@@ -165,10 +165,7 @@ async function snapshotTarget(ctx: {
       note: "the snapshot failed, so no file was written",
     };
   }
-  const written = writeReplacing(
-    path,
-    renderSnapshotYaml(result, { schemaUrl: SNAPSHOT_SCHEMA_URL, timestamp: ctx.timestamp }),
-  );
+  const written = writeReplacing(path, renderSnapshotYaml(result, SNAPSHOT_SCHEMA_URL));
   if (written.isErr()) {
     channel.io.annotate(
       "error",
@@ -263,12 +260,23 @@ export function runSnapshot(
   );
 }
 
+/**
+ * The run's one moment, announced once through `io` and returned for the summary: no file carries it, so a
+ * re-snapshot of an unchanged repository is byte-identical. The library verb states its own in its report instead.
+ */
+function takeMoment(io: Io): string {
+  const takenAt = new Date().toISOString();
+  io.annotate("notice", `snapshot taken ${takenAt}`);
+  return takenAt;
+}
+
 /** The file form: one target, opened as the single-repo flow opens its own and closed through the same seal. */
 async function snapshotFile(
   api: GitHubClient,
   cfg: Extract<SnapshotConfig, { form: "file" }>,
   io: Io,
 ): Promise<FinishedSnapshot> {
+  const takenAt = takeMoment(io);
   const { channel } = await openSingleRepoChannel(api, cfg, io);
   const outcome = await attempt(
     channel,
@@ -280,11 +288,10 @@ async function snapshotFile(
         path: cfg.snapshotFile,
         pathInput: "snapshot-file",
         channel,
-        timestamp: new Date().toISOString(),
       }),
     failedTarget,
   );
-  return { form: "file", target: await closeTarget(io, channel, outcome) };
+  return { form: "file", takenAt, target: await closeTarget(io, channel, outcome) };
 }
 
 /** The dir form: every resolved target, each through the channel the redaction plan opens for it. */
@@ -294,8 +301,7 @@ async function snapshotDir(
   io: Io,
   resolved: ResolvedTargets,
 ): Promise<FinishedSnapshot> {
-  // One timestamp for the whole run, so every file's header shares it.
-  const timestamp = new Date().toISOString();
+  const takenAt = takeMoment(io);
   // Every file the run reads as authored, as the filesystem names it.
   const authored: ReadonlySet<string> = new Set([
     canonicalPath(DEFAULT_SETTINGS_FILE),
@@ -337,14 +343,13 @@ async function snapshotDir(
                   path: located.path,
                   pathInput: "snapshot-dir",
                   channel,
-                  timestamp,
                 }),
               failedTarget,
             );
     }
     targets.push({ source: target.source, ...(await closeTarget(io, channel, outcome)) });
   }
-  return { form: "dir", snapshotDir: cfg.snapshotDir, targets };
+  return { form: "dir", takenAt, snapshotDir: cfg.snapshotDir, targets };
 }
 
 /**
@@ -354,10 +359,12 @@ async function snapshotDir(
 export function concludeSnapshot(io: Io, finished: FinishedSnapshot): number {
   if (finished.form === "file") {
     const view = publicDetail(finished.target.detail);
-    writeSummary(io, view, "snapshot", finished.target.result);
+    writeSummary(io, view, "snapshot", finished.target.result, [
+      snapshotTakenLine(finished.takenAt),
+    ]);
     return conclude(io, { ...view, result: finished.target.result }, false);
   }
   const views = finished.targets.map(toPublicView);
-  writeSnapshotDirSummary(io, views, finished.snapshotDir);
+  writeSnapshotDirSummary(io, views, finished.snapshotDir, finished.takenAt);
   return conclude(io, views, false);
 }

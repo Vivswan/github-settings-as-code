@@ -67,16 +67,25 @@ const labelsRoute = (slug: string, labels: Array<typeof BUG>) => ({
   [`GET /repos/${slug}/labels?per_page=100&page=1`]: { data: labels },
 });
 
-/** An ISO-8601 UTC instant, the form the header dates the snapshot in. */
+/** An ISO-8601 UTC instant, the form the run's one moment is stated in. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
-/** The file opens with the schema pin, compared whole (a look-alike host is not the pin), then the dated repository line. */
-function expectSnapshotHeader(written: string, slug: string): void {
-  const [pin, dated] = written.split("\n");
+/** The run's one notice with its moment: the file carries none, so a re-snapshot is byte-identical. */
+const TAKEN = {
+  level: "notice" as const,
+  line: expect.stringMatching(new RegExp(`^snapshot taken ${ISO_INSTANT.source.slice(1)}`)),
+};
+
+/** The summary's statement of the same moment. */
+const TAKEN_LINE = expect.stringMatching(
+  new RegExp(`^Snapshot taken ${ISO_INSTANT.source.slice(1, -1)}\\.$`),
+);
+
+/** The file opens with the schema pin, compared whole (a look-alike host is not the pin); no line dates it. */
+function expectSnapshotHeader(written: string): void {
+  const [pin, second] = written.split("\n");
   expect(pin).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
-  expect(dated).toMatch(
-    new RegExp(`^# Snapshot of ${escapeRegExp(slug)} taken ${ISO_INSTANT.source.slice(1)}`),
-  );
+  expect(second).not.toContain("taken");
 }
 
 type FileConfig = Extract<SnapshotConfig, { form: "file" }>;
@@ -125,7 +134,7 @@ describe("runSnapshot, file form", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
       const written = readFileSync(cfg.snapshotFile, "utf8");
-      expectSnapshotHeader(written, "o/r");
+      expectSnapshotHeader(written);
       expect(parseYaml(written)).toEqual(doc(BUG, DOCS));
       expect(api.mutations()).toEqual([]);
       expect(collected.outputs).toEqual({
@@ -134,19 +143,20 @@ describe("runSnapshot, file form", () => {
         "repos-result": "{}",
       });
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `snapshot written to ${cfg.snapshotFile}` },
         { line: "result: snapshot" },
       ]);
-      expect(collected.summary).toEqual([
-        [
-          "## github-settings-as-code (snapshot)",
-          "",
-          `:white_check_mark: snapshot - written to ${cfg.snapshotFile}`,
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          "| labels | :white_check_mark: snapshot | - |",
-        ].join("\n"),
+      expect(collected.summary[0]?.split("\n")).toEqual([
+        "## github-settings-as-code (snapshot)",
+        "",
+        `:white_check_mark: snapshot - written to ${cfg.snapshotFile}`,
+        "",
+        TAKEN_LINE,
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | :white_check_mark: snapshot | - |",
       ]);
     }));
 
@@ -161,17 +171,17 @@ describe("runSnapshot, file form", () => {
       expect(await run(api, cfg, collected.io)).toBe(0);
       expect(parseYaml(readFileSync(cfg.snapshotFile, "utf8"))).toEqual(doc(BUG));
       expect([...collected.io.masked()]).toEqual(["o/r"]);
-      expect(collected.lines).toEqual([{ line: "result: snapshot" }]);
-      expect(collected.summary).toEqual([
-        [
-          "## github-settings-as-code (snapshot)",
-          "",
-          `:white_check_mark: snapshot - ${REDACTED_NOTE}`,
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          "| labels | :white_check_mark: snapshot | hidden (private repository) |",
-        ].join("\n"),
+      expect(collected.lines).toEqual([TAKEN, { line: "result: snapshot" }]);
+      expect(collected.summary[0]?.split("\n")).toEqual([
+        "## github-settings-as-code (snapshot)",
+        "",
+        `:white_check_mark: snapshot - ${REDACTED_NOTE}`,
+        "",
+        TAKEN_LINE,
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | :white_check_mark: snapshot | hidden (private repository) |",
       ]);
       expect(collected.summary[0]).not.toContain(cfg.snapshotFile);
     }));
@@ -187,6 +197,7 @@ describe("runSnapshot, file form", () => {
       expect(await run(api, cfg, collected.io)).toBe(1);
       expect(existsSync(cfg.snapshotFile)).toBe(false);
       expect(collected.lines).toEqual([
+        TAKEN,
         { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
         { line: "result: failed" },
       ]);
@@ -220,6 +231,7 @@ describe("runSnapshot, file form", () => {
         "repos-result": "{}",
       });
       expect(collected.lines.map((entry) => `${entry.level ?? "log"}: ${entry.line}`)).toEqual([
+        expect.stringMatching(/^notice: snapshot taken /),
         expect.stringMatching(/^warning: actions_variables: skipped - the token was denied GET/),
         "notice: not snapshotted: check_suite_preferences - snapshot does not read these sections back, so the file omits them (the header says why); declare them by hand if they should be managed",
         `log: snapshot written to ${cfg.snapshotFile}`,
@@ -245,6 +257,7 @@ describe("runSnapshot, file form", () => {
         "repos-result": "{}",
       });
       expect(collected.lines).toEqual([
+        TAKEN,
         {
           level: "error",
           line: expect.stringMatching(
@@ -266,7 +279,8 @@ describe("runSnapshot, file form", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(1);
       expect(collected.outputs.result).toBe("failed");
-      const [first] = collected.lines;
+      // The run's moment leads; the write failure is the first line about the target.
+      const [, first] = collected.lines;
       expect(first?.level).toBe("error");
       // The path is compared as text, never as a pattern; the OS error code sits between.
       expect(first?.line.startsWith(`cannot write the snapshot to ${cfg.snapshotFile}: `)).toBe(
@@ -316,6 +330,7 @@ describe("runSnapshot writes through a staging file", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `snapshot written to ${cfg.snapshotFile}` },
         { line: "result: snapshot" },
       ]);
@@ -361,6 +376,7 @@ describe("runSnapshot writes through a staging file", () => {
       const [head = "", tail = ""] = line.split("<staging>");
       const stagingRe = `${escapeRegExp(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
       expect(collected.lines).toEqual([
+        TAKEN,
         {
           level,
           line: expect.stringMatching(
@@ -374,10 +390,12 @@ describe("runSnapshot writes through a staging file", () => {
       expect(readdirSync(join(cfg.snapshotDir, "o")).sort()).toEqual(["a.yml", "b.yml"]);
       expect(readFileSync(join(fileA, "keep"), "utf8")).toBe("authored\n");
       expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
-      expect(collected.summary[0]?.split("\n").slice(0, 8)).toEqual([
+      expect(collected.summary[0]?.split("\n").slice(0, 10)).toEqual([
         "## github-settings-as-code (snapshot, 2 repositories)",
         "",
         `1 of 2 snapshots written under ${cfg.snapshotDir}.`,
+        "",
+        TAKEN_LINE,
         "",
         "| Repository | Source | Result | File |",
         "|---|---|---|---|",
@@ -727,6 +745,7 @@ describe("runSnapshot refuses a destination that is an authored path under anoth
         ),
       });
       expect(collected.lines).toEqual([
+        TAKEN,
         ...carried.targets.map((t) => ({
           level: "error" as const,
           line: `${t.slug}: cannot write the snapshot to ${t.path}: ${t.reason(dir)}`,
@@ -777,6 +796,7 @@ describe("runSnapshot, dir form", () => {
         }),
       });
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `o/r: snapshot written to ${join(cfg.snapshotDir, "o", "r.yml")}` },
         { line: "result: snapshot" },
       ]);
@@ -802,6 +822,7 @@ describe("runSnapshot, dir form", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(1);
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
         {
           level: "error",
@@ -845,6 +866,7 @@ describe("runSnapshot, dir form", () => {
       const collected = collectingIo();
       expect(await run(api, cfg, collected.io)).toBe(0);
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `alice/r: snapshot written to ${join(cfg.snapshotDir, "alice", "r.yml")}` },
         { line: `old/r: snapshot written to ${join(cfg.snapshotDir, "old", "r.yml")}` },
         { line: "result: snapshot" },
@@ -885,7 +907,7 @@ describe("runSnapshot, dir form", () => {
         expect(await run(api, cfg, collected.io)).toBe(caseInsensitive ? 1 : 0);
         const written = readdirSync(join(cfg.snapshotDir, "alice"));
         if (caseInsensitive) {
-          expect(collected.lines[1]).toEqual({
+          expect(collected.lines[2]).toEqual({
             level: "error",
             line: expect.stringMatching(
               new RegExp(
@@ -916,7 +938,7 @@ describe("runSnapshot, dir form", () => {
       expect(await run(api, cfg, collected.io)).toBe(0);
       const fileA = join(cfg.snapshotDir, "o", "a.yml");
       const fileB = join(cfg.snapshotDir, "o", "b.yml");
-      expectSnapshotHeader(readFileSync(fileA, "utf8"), "o/a");
+      expectSnapshotHeader(readFileSync(fileA, "utf8"));
       expect(parseYaml(readFileSync(fileA, "utf8"))).toEqual(doc(BUG));
       expect(parseYaml(readFileSync(fileB, "utf8"))).toEqual(doc(DOCS));
       expect(api.mutations()).toEqual([]);
@@ -929,37 +951,38 @@ describe("runSnapshot, dir form", () => {
         }),
       });
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `o/a: snapshot written to ${fileA}` },
         { line: `o/b: snapshot written to ${fileB}` },
         { line: "result: snapshot" },
       ]);
-      expect(collected.summary).toEqual([
-        [
-          "## github-settings-as-code (snapshot, 2 repositories)",
-          "",
-          `Snapshots written under ${cfg.snapshotDir}.`,
-          "",
-          "| Repository | Source | Result | File |",
-          "|---|---|---|---|",
-          `| o/a | remote | :white_check_mark: snapshot | ${fileA} |`,
-          `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
-          "",
-          "### o/a (snapshot)",
-          "",
-          `written to ${fileA}`,
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          "| labels | :white_check_mark: snapshot | - |",
-          "",
-          "### o/b (snapshot)",
-          "",
-          `written to ${fileB}`,
-          "",
-          "| Section | Status | Detail |",
-          "|---|---|---|",
-          "| labels | :white_check_mark: snapshot | - |",
-        ].join("\n"),
+      expect(collected.summary[0]?.split("\n")).toEqual([
+        "## github-settings-as-code (snapshot, 2 repositories)",
+        "",
+        `Snapshots written under ${cfg.snapshotDir}.`,
+        "",
+        TAKEN_LINE,
+        "",
+        "| Repository | Source | Result | File |",
+        "|---|---|---|---|",
+        `| o/a | remote | :white_check_mark: snapshot | ${fileA} |`,
+        `| o/b | remote | :white_check_mark: snapshot | ${fileB} |`,
+        "",
+        "### o/a (snapshot)",
+        "",
+        `written to ${fileA}`,
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | :white_check_mark: snapshot | - |",
+        "",
+        "### o/b (snapshot)",
+        "",
+        `written to ${fileB}`,
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        "| labels | :white_check_mark: snapshot | - |",
       ]);
     }));
 
@@ -1045,6 +1068,7 @@ describe("runSnapshot, dir form", () => {
       expect(concludeSnapshot(collected.io, finished)).toBe(1);
       expect(existsSync(join(cfg.snapshotDir, "o", "p.yml"))).toBe(false);
       expect(collected.lines).toEqual([
+        TAKEN,
         { line: `o/a: snapshot written to ${join(cfg.snapshotDir, "o", "a.yml")}` },
         { level: "error", line: `private repository #1: failed - labels. ${REDACTED_NOTE}` },
         { line: "result: failed" },
@@ -1071,7 +1095,7 @@ describe("runSnapshot, dir form", () => {
       expect(await run(api, cfg, collected.io)).toBe(1);
       expect(existsSync(join(dir, "escape.yml"))).toBe(false);
       expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
-      expect(collected.lines[0]).toEqual({
+      expect(collected.lines[1]).toEqual({
         level: "error",
         line: `../escape: the repository name "../escape" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
       });
@@ -1105,6 +1129,8 @@ describe("runSnapshot, dir form", () => {
         "## github-settings-as-code (snapshot, 1 repository)",
         "",
         `No snapshot was written under ${cfg.snapshotDir}.`,
+        "",
+        TAKEN_LINE,
         "",
         "| Repository | Source | Result | File |",
         "|---|---|---|---|",

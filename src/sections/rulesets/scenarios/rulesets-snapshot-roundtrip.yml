@@ -95,8 +95,8 @@ expect:
               include: ["refs/tags/v*"]
               exclude: []
           rules:
-            - type: update
             - type: non_fast_forward
+            - type: update
           bypass_actors: []
   stdout_contains:
     - "rulesets[org-baseline]: left out of the snapshot - inherited from the organization"

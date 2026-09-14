@@ -634,8 +634,8 @@ const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
   "null",
 ]);
 
-/** The entry array plus the strict {_undeclared, entries} wrapper (knobbed() in ../shared/schema-helpers.ts). */
-function detectKnobUnion(
+/** The knobbed() union (../shared/schema-helpers.ts): the entry array beside the strict {_undeclared, entries} wrapper; engine/canonical.ts walks it by this detector too. */
+export function detectKnobUnion(
   options: readonly z.ZodType[],
 ): { list: z.ZodType; wrapper: z.ZodType } | null {
   if (options.length !== 2) {

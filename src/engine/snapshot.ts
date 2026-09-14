@@ -3,7 +3,6 @@
  * same rule.
  */
 
-import { stringify as stringifyYaml } from "yaml";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
@@ -24,6 +23,7 @@ import {
 import { type OnMissingPermission, snapshotContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";
+import { canonicalDocument, compareByCodePoint, renderCanonicalYaml } from "./canonical.js";
 import { type ValidatedSettings, validateSettingsDoc } from "./orchestrate.js";
 import type { RunOutcome } from "./outcome.js";
 import { SectionSelection } from "./section-selection.js";
@@ -166,7 +166,10 @@ export async function snapshotRepository(
       failed = true;
       continue;
     }
-    for (const note of snapshot.notes) {
+    // The section's notes in code-point order: a section notes its entries in the order GitHub listed them, and the
+    // file's header and the annotations must read the same on every run over the same repository.
+    const notes = [...snapshot.notes].sort(compareByCodePoint);
+    for (const note of notes) {
       io.annotate("notice", underKey(section.key, note));
     }
     if (snapshot.value === undefined) {
@@ -181,7 +184,7 @@ export async function snapshotRepository(
       outcomes.push({
         key: section.key,
         status: "snapshot",
-        detail: [...snapshot.notes, ...(concealed === null ? [] : [concealed]), NOTHING_TO_DECLARE],
+        detail: [...notes, ...(concealed === null ? [] : [concealed]), NOTHING_TO_DECLARE],
       });
       continue;
     }
@@ -196,21 +199,21 @@ export async function snapshotRepository(
     if (verdict.isErr()) {
       const detail = `BUG: ${section.key} produced a snapshot its own schema rejects - ${describeProblem(verdict.error)}`;
       io.annotate("error", detail);
-      outcomes.push({ key: section.key, status: "failed", detail: [...snapshot.notes, detail] });
+      outcomes.push({ key: section.key, status: "failed", detail: [...notes, detail] });
       failed = true;
       continue;
     }
     document[section.key] = verdict.value[section.key];
-    outcomes.push({ key: section.key, status: "snapshot", detail: [...snapshot.notes] });
+    outcomes.push({ key: section.key, status: "snapshot", detail: [...notes] });
   }
 
   if (failed) {
     return { repo: opts.repo.slug, result: "failed", outcomes };
   }
-  // The brand's one mint, over the already-parsed fragments: every section validated alone
-  // above, so the whole cannot fail.
+  // The brand's one mint, over the already-parsed fragments in the canonical order (so the document a library caller
+  // reads is ordered as the file is): every section validated alone above, so the whole cannot fail.
   const verdict = validateSettingsDoc(
-    document,
+    canonicalDocument(document),
     `the snapshot of ${opts.repo.slug}`,
     SectionSelection.ALL,
     io,
@@ -229,23 +232,20 @@ export async function snapshotRepository(
 }
 
 /**
- * The snapshot as a settings file: the language-server schema pin, a comment header naming the
- * repository, the moment (supplied by the caller, so the text is deterministic), and every
- * outcome line, then the document as the merge flow writes one. A message spanning several
- * physical lines (an API error body) is commented line by line, so no line escapes the header.
+ * The snapshot as a settings file: the language-server schema pin and every outcome line, then
+ * the document in the canonical order the merge flow writes too. Nothing in the file names the
+ * moment it was taken (the run summary and a notice carry that), so a snapshot of an unchanged
+ * repository is byte for byte the last one. A message spanning several physical lines (an API
+ * error body) is commented line by line, so no line escapes the header.
  */
-export function renderSnapshotYaml(
-  result: RenderableSnapshot,
-  opts: { schemaUrl: string; timestamp: string },
-): string {
+export function renderSnapshotYaml(result: RenderableSnapshot, schemaUrl: string): string {
   const header = [
-    `# yaml-language-server: $schema=${opts.schemaUrl}`,
-    `# Snapshot of ${result.repo} taken ${opts.timestamp}`,
+    `# yaml-language-server: $schema=${schemaUrl}`,
     ...result.outcomes.flatMap((outcome) =>
       outcome.detail.flatMap((message) =>
         message.split(/\r?\n/).map((line) => `# ${underKey(outcome.key, line)}`),
       ),
     ),
   ];
-  return `${header.join("\n")}\n${stringifyYaml(result.settings)}`;
+  return `${header.join("\n")}\n${renderCanonicalYaml(result.settings)}`;
 }

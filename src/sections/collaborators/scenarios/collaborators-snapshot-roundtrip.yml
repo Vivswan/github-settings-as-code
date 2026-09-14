@@ -37,10 +37,10 @@ expect:
       entries:
         - username: alice
           permission: push
-        - username: carol
-          permission: security-team
         - username: bob
           permission: pull
+        - username: carol
+          permission: security-team
   summary_contains:
     - "collaborators[e2e-owner]: left out of the snapshot - the repository owner's access is implicit and never managed"
     - "collaborators[invitation 502]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched"

@@ -159,7 +159,8 @@ describe("init: the written file and the printed grant", () => {
       const written = readFileSync(file, "utf8");
       // The first line is the editor's schema hint, the same URL the README's quick start pins.
       expect(written.split("\n")[0]).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
-      expect(written.split("\n")[1]).toStartWith("# Snapshot of o/r taken ");
+      // No line dates the file: the document follows the pin, so a re-run over the same repository rewrites the same bytes.
+      expect(written.split("\n")[1]).toBe("labels:");
       const doc = parseYaml(written);
       expect(doc).toEqual(LABELS_DOC);
       expect(validateSettings(doc).isOk()).toBe(true);

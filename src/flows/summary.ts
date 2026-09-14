@@ -42,16 +42,28 @@ function outcomeRows(outcomes: readonly SectionRow[]): string[] {
   return rows;
 }
 
-/** From the target's PUBLIC detail: statuses stay visible under redaction, the projection hides the cells. */
+/** The moment a snapshot run read its repositories, as the summary and the run's notice state it. */
+export function snapshotTakenLine(takenAt: string): string {
+  return `Snapshot taken ${takenAt}.`;
+}
+
+/**
+ * From the target's PUBLIC detail: statuses stay visible under redaction, the projection hides the cells. `facts`
+ * are the run-level lines a mode adds ahead of the table (a snapshot's moment).
+ */
 export function writeSummary(
   io: SummaryIo,
   view: PublicDetail,
   mode: string,
   result: RunOutcome,
+  facts: readonly string[] = [],
 ): void {
   const lines = [`## github-settings-as-code (${mode})`, ""];
   if (view.note !== undefined) {
     lines.push(`:${STATUS_ICON[result]}: ${result} - ${markdownCell(view.note)}`, "");
+  }
+  for (const fact of facts) {
+    lines.push(fact, "");
   }
   io.summary([...lines, ...outcomeRows(view.outcomes)].join("\n"));
 }
@@ -97,11 +109,12 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
   io.summary(lines.join("\n"));
 }
 
-/** The snapshot-dir summary: the fleet rollup with each target's file, then one section table per target. */
+/** The snapshot-dir summary: the fleet rollup with each target's file and the run's moment, then one section table per target. */
 export function writeSnapshotDirSummary(
   io: SummaryIo,
   views: readonly PublicTargetView[],
   snapshotDir: string,
+  takenAt: string,
 ): void {
   const written = views.filter((view) => view.file !== undefined).length;
   const lines = [
@@ -112,6 +125,8 @@ export function writeSnapshotDirSummary(
       : written === views.length
         ? `Snapshots written under ${markdownCell(snapshotDir)}.`
         : `${written} of ${views.length} snapshots written under ${markdownCell(snapshotDir)}.`,
+    "",
+    snapshotTakenLine(takenAt),
     "",
     "| Repository | Source | Result | File |",
     "|---|---|---|---|",

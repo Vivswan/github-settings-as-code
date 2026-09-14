@@ -38,7 +38,7 @@ describe("runMerge", () => {
       const merged = runMerge(config, collected.io);
       expect(merged).toEqual(ok({ layers: config.settingsFiles, mergedFile }));
       expect(readFileSync(mergedFile, "utf8")).toBe(
-        "repository:\n  has_wiki: false\n  has_issues: true\n",
+        "repository:\n  has_issues: true\n  has_wiki: false\n",
       );
       expect(concludeMerge(collected.io, merged._unsafeUnwrap())).toBe(0);
       expect(collected.outputs).toEqual({
@@ -87,7 +87,7 @@ describe("runMerge", () => {
       expect(merged).toEqual(ok({ layers: [join(dir, "fleet.yml"), owned], mergedFile }));
       expect(readFileSync(owned, "utf8")).toBe(REPO);
       expect(readFileSync(mergedFile, "utf8")).toBe(
-        "repository:\n  has_wiki: false\n  has_issues: true\n",
+        "repository:\n  has_issues: true\n  has_wiki: false\n",
       );
       expect(readdirSync(dir).sort()).toEqual(["fleet.yml", "merged.yml", "merged.yml.tmp"]);
     }));
@@ -99,7 +99,7 @@ describe("runMerge writes through the shared writer", () => {
     writeFileSync(join(dir, "repo.yml"), REPO);
     return [join(dir, "fleet.yml"), join(dir, "repo.yml")];
   };
-  const MERGED = "repository:\n  has_wiki: false\n  has_issues: true\n";
+  const MERGED = "repository:\n  has_issues: true\n  has_wiki: false\n";
   const merge = (layers: string[], mergedFile: string) =>
     runMerge({ settingsFiles: layers, mergedFile, layering: "merge" }, collectingIo().io);
 

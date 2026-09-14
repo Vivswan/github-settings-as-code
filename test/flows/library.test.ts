@@ -219,6 +219,8 @@ describe("snapshotRepository and snapshotRepositories", () => {
   const sections = SectionSelection.of({ only: ["labels", "actions_secrets"] })._unsafeUnwrap();
   const SECRET_NOTE =
     "actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply";
+  /** An ISO-8601 UTC instant, the form `takenAt` and its notice spell the moment in. */
+  const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
   test("reads the allowed sections back, renders the file, and returns the lines when no Io is given", async () => {
     const api = new MockApi(routes("o/r"));
@@ -242,17 +244,15 @@ describe("snapshotRepository and snapshotRepositories", () => {
         { key: "actions_secrets", status: "snapshot", detail: [SECRET_NOTE] },
       ],
       yaml: expect.any(String),
+      takenAt: expect.stringMatching(ISO_INSTANT),
       log: [{ level: "notice", line: SECRET_NOTE }],
     });
     if (report.yaml === undefined) {
       throw new Error("a snapshot result carries its file");
     }
-    // The header, line by line and by equality: the pin is a URL, never a pattern.
-    const [pin, dated, note, first] = report.yaml.split("\n");
+    // The header, line by line and by equality: the pin is a URL, never a pattern, and no line dates the file.
+    const [pin, note, first] = report.yaml.split("\n");
     expect(pin).toBe(`# yaml-language-server: $schema=${SNAPSHOT_SCHEMA_URL}`);
-    expect(dated).toMatch(
-      /^# Snapshot of o\/r taken \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
-    );
     expect([note, first]).toEqual([`# ${SECRET_NOTE}`, "labels:"]);
     expect(stringifyYaml(parseYamlDoc(report.yaml))).toBe(stringifyYaml(report.settings));
   });
@@ -274,6 +274,7 @@ describe("snapshotRepository and snapshotRepositories", () => {
           detail: [expect.stringMatching(/^the token was denied GET \/repos\/o\/r\/labels/)],
         },
       ],
+      takenAt: expect.stringMatching(ISO_INSTANT),
       log: [],
     });
     expect(collected.lines).toEqual([
@@ -318,7 +319,8 @@ describe("mergeSettings", () => {
         labels: { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a" }] },
       }),
     );
-    // The settings are the validated parse (declared keys first, as the schema orders them); the yaml is the fold, in the layers' order.
+    // The settings are the validated parse (declared keys first, as the schema orders them, unknown keys as the
+    // layers spelled them); the yaml is the fold in the canonical order, its unknown keys by code point.
     expect(Object.keys(report.settings.repository ?? {})).toEqual([
       "enable_vulnerability_alerts",
       "has_wiki",
@@ -327,9 +329,9 @@ describe("mergeSettings", () => {
     expect(report.yaml).toBe(
       [
         "repository:",
-        "  has_wiki: false",
-        "  has_issues: true",
         "  enable_vulnerability_alerts: true",
+        "  has_issues: true",
+        "  has_wiki: false",
         "labels:",
         "  _undeclared: delete",
         "  entries:",
@@ -347,6 +349,7 @@ describe("mergeSettings", () => {
     const branches = Array.from({ length: 101 }, (_, i) => ({ name: `b${i}`, protection }));
     const report = mergeSettings([{ name: "fleet.yml", doc: { branches } }])._unsafeUnwrap();
     expect(report.yaml).not.toMatch(/[&*]/);
+    // Branches keep their written order (it is the rules' priority), so the round trip is exact.
     expect(parseYamlDoc(report.yaml)).toEqual({ branches });
   });
 

@@ -200,7 +200,7 @@ interface Observed {
   readonly outputs: Partial<Record<OutputName, string>>;
   readonly logs: readonly string[];
   readonly annotations: readonly string[];
-  /** Every file under the side's scratch directory, by relative path, byte for byte except the snapshot header's instant. */
+  /** Every file under the side's scratch directory, by relative path, byte for byte: no snapshot line dates itself. */
   readonly files: Record<string, string>;
 }
 
@@ -217,8 +217,13 @@ function api(c: Case): MockApi {
 
 const fold = (dir: string) => (line: string) => line.replaceAll(dir, "<dir>");
 
-/** The two faces write their snapshots at different instants; the header line is the one byte range that may differ. */
-const SNAPSHOT_INSTANT = /^(# Snapshot of \S+ taken )\S+$/m;
+/** The two faces run at different instants; the run's one moment notice is the one line that may differ. */
+const SNAPSHOT_INSTANT = /^((?:notice: )?snapshot taken )\S+$/;
+
+/** An annotation with the run's moment folded to one spelling. */
+function atInstant(line: string): string {
+  return line.replace(SNAPSHOT_INSTANT, "$1<instant>");
+}
 
 /** `dir` holding the case's settings file, when it has one. */
 function scratchFor(dir: string, c: Case): string {
@@ -233,7 +238,7 @@ function writtenFiles(dir: string): Record<string, string> {
   for (const entry of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const path = join(dir, entry);
     if (statSync(path).isFile()) {
-      files[entry] = readFileSync(path, "utf8").replace(SNAPSHOT_INSTANT, "$1<instant>");
+      files[entry] = readFileSync(path, "utf8");
     }
   }
   return files;
@@ -277,7 +282,7 @@ function throughEnv(c: Case): Promise<Observed> {
       logs: collected.lines.filter((l) => l.level === undefined).map((l) => at(l.line)),
       annotations: collected.lines
         .filter((l) => l.level !== undefined)
-        .map((l) => at(`${l.level}: ${l.line}`)),
+        .map((l) => atInstant(at(`${l.level}: ${l.line}`))),
       files: writtenFiles(dir),
     };
   });
@@ -311,7 +316,7 @@ function throughArgv(c: Case): Promise<Observed> {
       annotations: result.stderr
         .split("\n")
         .filter((l) => l !== "")
-        .map(at),
+        .map((l) => atInstant(at(l))),
       files: writtenFiles(dir),
     };
   });
