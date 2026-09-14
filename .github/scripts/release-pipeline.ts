@@ -20,7 +20,7 @@
  *   package-commit                 post-green.yml          GITHUB_SHA, RUN_URL (optional)
  *   prerelease-version             post-green.yml          GITHUB_SHA
  *   npm-verdict next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
- *   npm-confirm next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
+ *   npm-confirm next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional), NPM_CONFIRM_PAUSE_MS (optional)
  *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
  *   anchor                         update-release-pr.yml   GITHUB_SHA
@@ -1203,6 +1203,19 @@ const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const CONFIRM_READS = 15;
 const CONFIRM_PAUSE_MS = 20_000;
 
+/** The pause between confirm reads: NPM_CONFIRM_PAUSE_MS when set (a test confirms against a local registry without the wait), else CONFIRM_PAUSE_MS. */
+function confirmPauseMs(value: string | undefined): number {
+  if (value === undefined || value === "") {
+    return CONFIRM_PAUSE_MS;
+  }
+  if (!/^\d+$/.test(value)) {
+    throw new Error(
+      `NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not ${JSON.stringify(value)}`,
+    );
+  }
+  return Number(value);
+}
+
 async function main(): Promise<void> {
   const cwd = process.cwd();
   const [command, argument] = process.argv.slice(2);
@@ -1290,7 +1303,7 @@ async function main(): Promise<void> {
         sourceSha: env("GITHUB_SHA"),
         registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
         attempts: CONFIRM_READS,
-        delayMs: CONFIRM_PAUSE_MS,
+        delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
       });
       console.log(
         confirmed.outcome === "settled"
