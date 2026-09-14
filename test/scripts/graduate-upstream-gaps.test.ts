@@ -6,6 +6,7 @@ import {
   camelCaseGapName,
   gapFileBases,
   generateIndex,
+  indexSummary,
 } from "../../.github/scripts/gen-gaps-index.js";
 import {
   isGapFile,
@@ -390,5 +391,14 @@ describe("spec-only sources never reach the deletion branch", () => {
       true,
     );
     expect(isSpecOnly("export const GAP = defineGap({ documentedInSpec: false });")).toBe(false);
+  });
+});
+
+describe("indexSummary", () => {
+  test.each<[count: number, tail: string]>([
+    [1, "(1 gap file)"],
+    [2, "(2 gap files)"],
+  ])("%i gap files end the line with %s", (count, tail) => {
+    expect(indexSummary(count)).toBe(`wrote src/upstream-gaps/index.ts ${tail}`);
   });
 });
