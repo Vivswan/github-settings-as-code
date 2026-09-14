@@ -432,6 +432,11 @@ describe("describeProblem", () => {
       'the "repos" input has 1 invalid entry: "not-a-slug" is not an owner/name slug (use values like "octocat/hello-world", comma- or newline-separated). Or use "*" alone to discover repositories',
     ],
     [
+      "two duplicated repos entries read in the plural",
+      { code: "repos-input-invalid-entries", invalid: [], duplicated: ["o/a", "o/b"] },
+      'the "repos" input has 2 invalid entries: "o/a", "o/b" are listed more than once (keep exactly one entry per repository). Or use "*" alone to discover repositories',
+    ],
+    [
       "a request failure that is not a denial gets re-run advice",
       {
         code: "discovery-request-failed",

@@ -4,10 +4,11 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parseSync, Visitor } from "oxc-parser";
 import { ROOT } from "./root.js";
+import { withTempDir } from "./temp-dir.js";
 
 const SCANNED_DIRS = ["src", ".github/scripts"];
 
@@ -83,23 +84,43 @@ export function countParentheticals(files: Iterable<[path: string, text: string]
   return problems;
 }
 
-function sourceFiles(): Array<[string, string]> {
-  return SCANNED_DIRS.flatMap((dir) =>
-    readdirSync(join(ROOT, dir), { recursive: true })
-      .map(String)
-      .filter((name) => name.endsWith(".ts"))
-      .sort()
-      .map((name): [string, string] => [
-        join(dir, name),
-        readFileSync(join(ROOT, dir, name), "utf8"),
-      ]),
+/** The hits across every .ts file under the scanned directories of `root`, the paths relative to it. */
+function treeParentheticals(root: string): string[] {
+  return countParentheticals(
+    SCANNED_DIRS.flatMap((dir) =>
+      readdirSync(join(root, dir), { recursive: true })
+        .map(String)
+        .filter((name) => name.endsWith(".ts"))
+        .sort()
+        .map((name): [string, string] => [
+          join(dir, name),
+          readFileSync(join(root, dir, name), "utf8"),
+        ]),
+    ),
   );
 }
 
 describe("count parentheticals", () => {
   test("no string under src/ or .github/scripts/ spells a count as (s)", () => {
-    expect(countParentheticals(sourceFiles())).toEqual([]);
+    expect(treeParentheticals(ROOT)).toEqual([]);
   });
+
+  test("a planted (s) in either scanned tree fails the same scan naming the file and line (negative control)", () =>
+    withTempDir("count-nouns-", (root) => {
+      const planted: Record<string, string> = {
+        "src/deep/planted.ts": 'export const a = 1;\nexport const plain = "no file(s) here";\n',
+        ".github/scripts/planted.ts": `export const templated = (n: number) => \`\${n} entr(y|ies) or entry(s)\`;\n`,
+        "src/clean.ts": 'export const clean = "no count here";\n',
+      };
+      for (const [name, text] of Object.entries(planted)) {
+        mkdirSync(dirname(join(root, name)), { recursive: true });
+        writeFileSync(join(root, name), text);
+      }
+      expect(treeParentheticals(root)).toEqual([
+        `src/deep/planted.ts:2: "no file(s) here" ${FIX}`,
+        `.github/scripts/planted.ts:1: "_ entr(y|ies) or entry(s)" ${FIX}`,
+      ]);
+    }));
 
   test("every planted (s) fails naming its own line: a plain string, a template hole, two in one string, later template lines", () => {
     const text = [
