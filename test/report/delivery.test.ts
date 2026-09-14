@@ -86,10 +86,18 @@ function open(api: MockApi, channel: PrivateReportChannel, io: Io, uploader?: Ar
   return openReportChannel(api, channel, META, "", io, uploader);
 }
 
+/** The writes that touched the report issue itself; the marker-label ensure-create is not one of them. */
+function issueWrites(api: MockApi): string[] {
+  return api
+    .mutations()
+    .filter((c) => c.path.startsWith("/repos/o/priv/issues"))
+    .map((c) => `${c.method} ${c.path}`);
+}
+
 describe("the issue channel", () => {
   test("delivers the full unredacted report into the target's issue and opens it when the target's exit is 1", async () => {
     const api = issueApi();
-    const { io, annotations } = captureIo();
+    const { io, annotations, logs } = captureIo();
     const channel = open(api, "issue", io);
     await channel?.deliver(target("o/priv", 1));
     await channel?.flush();
@@ -103,6 +111,80 @@ describe("the issue channel", () => {
     expect(payload.body).toContain("engine line for o/priv");
     expect(payload.body).toContain(META.runUrl);
     expect(annotations).toEqual([]);
+    expect(logs).toEqual(["report: updated issue #7 in private repository #1"]);
+  });
+
+  test("the log line carries the issue number the API answered and the verb of the write path: PATCH is updated, POST is created", async () => {
+    const patched = issueApi({
+      [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
+        data: [{ number: 41, title: ISSUE_TITLE, body: `${REPORT_HEADING} o/priv` }],
+      },
+      "PATCH /repos/o/priv/issues/41": { data: { number: 41 } },
+    });
+    const updated = captureIo();
+    await open(patched, "issue", updated.io)?.deliver(target("o/priv", 1));
+    expect(issueWrites(patched)).toEqual(["PATCH /repos/o/priv/issues/41"]);
+    expect(updated.logs).toEqual(["report: updated issue #41 in private repository #1"]);
+
+    const posted = issueApi({
+      [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
+      "GET /repos/o/priv/issues?state=all&sort=created&direction=desc&per_page=100&page=1": {
+        data: [],
+      },
+      "POST /repos/o/priv/issues": { data: { number: 12 } },
+    });
+    const created = captureIo();
+    await open(posted, "issue", created.io)?.deliver(target("o/priv", 1));
+    expect(issueWrites(posted)).toEqual(["POST /repos/o/priv/issues"]);
+    expect(created.logs).toEqual(["report: created issue #12 in private repository #1"]);
+  });
+
+  test("a marker label the run creates gets its own line, ahead of the issue line; an existing label (422) gets none", async () => {
+    const created = captureIo();
+    await open(
+      issueApi({ "POST /repos/o/priv/labels": { data: { name: MARKER } } }),
+      "issue",
+      created.io,
+    )?.deliver(target("o/priv", 1));
+    expect(created.logs).toEqual([
+      `report: created label "${MARKER}" in private repository #1`,
+      "report: updated issue #7 in private repository #1",
+    ]);
+
+    const existed = captureIo();
+    await open(issueApi(), "issue", existed.io)?.deliver(target("o/priv", 1));
+    expect(existed.logs).toEqual(["report: updated issue #7 in private repository #1"]);
+  });
+
+  test("a write that landed before a later failure is announced before the warning, so no landed write is silent", async () => {
+    // The issue is created (#9), then the healthy close PATCH is denied.
+    const api = issueApi({
+      [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
+      "GET /repos/o/priv/issues?state=all&sort=created&direction=desc&per_page=100&page=1": {
+        data: [],
+      },
+      "POST /repos/o/priv/issues": { data: { number: 9 } },
+      "PATCH /repos/o/priv/issues/9": {
+        error: { status: 403, message: "Resource not accessible", body: "" },
+      },
+    });
+    const { io, events } = captureIo();
+    await open(api, "issue", io)?.deliver(target("o/priv", 0));
+    expect(events).toEqual([
+      "log: report: created issue #9 in private repository #1",
+      expect.stringMatching(
+        /^annotate warning: private repository #1: could not deliver the private report \(HTTP 403\)/,
+      ),
+    ]);
+    expect(events.join("\n")).not.toContain("o/priv");
+  });
+
+  test("the delivery line names the target by its placeholder, never by its slug", async () => {
+    const { io, logs } = captureIo();
+    await open(issueApi(), "issue", io)?.deliver(target("o/priv", 1));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("private repository #1");
+    expect(logs.join("\n")).not.toContain("o/priv");
   });
 
   test("a delivery failure is one warning naming the placeholder and the HTTP status, never the slug or message", async () => {
@@ -111,7 +193,7 @@ describe("the issue channel", () => {
         error: { status: 403, message: "Resource not accessible", body: "" },
       },
     });
-    const { io, annotations } = captureIo();
+    const { io, annotations, logs } = captureIo();
     await open(api, "issue", io)?.deliver(target("o/priv", 1));
     expect(annotations).toEqual([
       expect.stringMatching(
@@ -120,23 +202,26 @@ describe("the issue channel", () => {
     ]);
     expect(annotations[0]).not.toContain("o/priv");
     expect(annotations[0]).not.toContain("Resource not accessible");
+    // Nothing landed, so nothing is announced as delivered.
+    expect(logs).toEqual([]);
   });
 
   test("a target whose slug did not parse gets one safe warning and no API traffic", async () => {
     const api = issueApi();
-    const { io, annotations } = captureIo();
+    const { io, annotations, logs } = captureIo();
     await open(api, "issue", io)?.deliver({ ...target("o/priv", 1), repo: null });
     expect(api.calls).toEqual([]);
     expect(annotations).toEqual([
       "warning: private repository #1: could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue",
     ]);
+    expect(logs).toEqual([]);
   });
 
-  test("issue-on-failure writes nothing for a healthy target with no open issue", async () => {
+  test("issue-on-failure writes nothing for a healthy target with no open issue, and says so in the log", async () => {
     const api = issueApi({
       [`GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`]: { data: [] },
     });
-    const { io, annotations } = captureIo();
+    const { io, annotations, logs } = captureIo();
     await open(api, "issue-on-failure", io)?.deliver({
       ...target("o/priv", 0),
       conclusion: runOutcome([{ result: "clean" }], true),
@@ -146,6 +231,7 @@ describe("the issue channel", () => {
       `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`,
     ]);
     expect(annotations).toEqual([]);
+    expect(logs).toEqual(["report: nothing to deliver for private repository #1"]);
   });
 });
 

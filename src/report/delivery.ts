@@ -19,6 +19,7 @@ import {
   deliverIssueReport,
   type IssueReportMode,
   injectMarkerLabel,
+  type LandedWrites,
   MARKER_LABEL,
 } from "./issue-report.js";
 
@@ -206,9 +207,28 @@ function issueChannel(
         target.conclusion.exitCode === 1,
         mode,
       );
+      // The marker label and the report issue are the writes a run lands outside the settings apply, so the log names
+      // each one like every other write, a failure after it included, and names the decision not to write, so silence
+      // never has to be read as a delivery.
+      const announce = (landed: LandedWrites): void => {
+        if (landed.labelCreated) {
+          io.log(`report: created label "${MARKER_LABEL}" in ${target.display}`);
+        }
+        if (landed.createdIssue !== null) {
+          io.log(`report: created issue #${landed.createdIssue} in ${target.display}`);
+        }
+      };
       if ("warning" in delivery) {
+        announce(delivery.landed);
         io.annotate("warning", `${target.display}: ${delivery.warning}`);
+        return;
       }
+      if ("skipped" in delivery) {
+        io.log(`report: nothing to deliver for ${target.display}`);
+        return;
+      }
+      announce({ labelCreated: delivery.labelCreated, createdIssue: null });
+      io.log(`report: ${delivery.delivered} issue #${delivery.number} in ${target.display}`);
     },
     flush: async () => {},
   };
