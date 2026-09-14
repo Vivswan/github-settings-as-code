@@ -12,7 +12,7 @@ import { ROOT } from "./root.js";
 const SCANNED_DIRS = ["src", ".github/scripts"];
 
 /** A word then "(s)". A lambda parameter `(s) =>` has no word before its paren, so it never matches. */
-const COUNT_PARENTHETICAL = /\w\(s\)/;
+const COUNT_PARENTHETICAL = /\w\(s\)/g;
 
 /**
  * A "BUG:" message names a programming error to the developer holding the stack: the list in brackets beside the noun carries the count,
@@ -20,7 +20,7 @@ const COUNT_PARENTHETICAL = /\w\(s\)/;
  */
 const INVARIANT_PREFIX = "BUG:";
 
-/** Stands in for a template's `${expression}` holes, so `${noun}(s)` reads as a word before the paren. */
+/** Stands in for the `${expression}` hole before a template's later quasis, so `${noun}(s)` reads as a word before the paren. */
 const HOLE = "_";
 
 const FIX =
@@ -33,17 +33,16 @@ const FIX =
 export function countParentheticals(files: Iterable<[path: string, text: string]>): string[] {
   const problems: string[] = [];
   for (const [path, text] of files) {
+    // `start` is the source offset of `value`'s first character, so a hit on a later line of a template names that line.
     const report = (start: number, value: string) => {
-      const found = COUNT_PARENTHETICAL.exec(value);
-      if (found === null || value.startsWith(INVARIANT_PREFIX)) {
-        return;
+      for (const found of value.matchAll(COUNT_PARENTHETICAL)) {
+        const line = text.slice(0, start + found.index).split("\n").length;
+        const context = value.slice(
+          Math.max(0, found.index - 24),
+          found.index + found[0].length + 24,
+        );
+        problems.push(`${path}:${line}: ${JSON.stringify(context)} ${FIX}`);
       }
-      const line = text.slice(0, start).split("\n").length;
-      const context = value.slice(
-        Math.max(0, found.index - 24),
-        found.index + found[0].length + 24,
-      );
-      problems.push(`${path}:${line}: ${JSON.stringify(context)} ${FIX}`);
     };
     const { program, errors } = parseSync(path, text);
     if (errors.length > 0) {
@@ -53,15 +52,19 @@ export function countParentheticals(files: Iterable<[path: string, text: string]
     }
     new Visitor({
       Literal(node) {
-        if (typeof node.value === "string") {
+        if (typeof node.value === "string" && !node.value.startsWith(INVARIANT_PREFIX)) {
           report(node.start, node.value);
         }
       },
       TemplateLiteral(node) {
-        report(
-          node.start,
-          node.quasis.map((quasi) => quasi.value.cooked ?? quasi.value.raw).join(HOLE),
-        );
+        if (node.quasis[0]?.value.raw.startsWith(INVARIANT_PREFIX)) {
+          return;
+        }
+        // The raw text keeps each quasi's offsets aligned with the source.
+        node.quasis.forEach((quasi, index) => {
+          const hole = index === 0 ? "" : HOLE;
+          report(quasi.start - hole.length, hole + quasi.value.raw);
+        });
       },
     }).visit(program);
   }
@@ -86,16 +89,22 @@ describe("count parentheticals", () => {
     expect(countParentheticals(sourceFiles())).toEqual([]);
   });
 
-  test("a planted (s) fails naming the file and line, in a plain string and in a template (negative control)", () => {
+  test("every planted (s) fails naming its own line: a plain string, a template hole, two in one string, a later template line", () => {
     const text = [
       'import { x } from "./x.js";',
       "const plain = 'no file(s) here';",
       `const templated = \`\${n} \${noun}(s) found\`;`,
-      "export const both = plain + templated;",
+      'const twice = "file(s) and repo(s)";',
+      "const spanning = `first line",
+      "  second line names the label(s)`;",
+      "export const all = plain + templated + twice + spanning;",
     ].join("\n");
     expect(countParentheticals([["src/planted.ts", text]])).toEqual([
       `src/planted.ts:2: "no file(s) here" ${FIX}`,
-      `src/planted.ts:3: "_ _(s) found" ${FIX}`,
+      `src/planted.ts:3: "_(s) found" ${FIX}`,
+      `src/planted.ts:4: "file(s) and repo(s)" ${FIX}`,
+      `src/planted.ts:4: "file(s) and repo(s)" ${FIX}`,
+      `src/planted.ts:6: "cond line names the label(s)" ${FIX}`,
     ]);
   });
 
