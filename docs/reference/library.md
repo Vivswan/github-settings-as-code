@@ -67,7 +67,7 @@ The examples continue from one another and form one program (the docs tests comp
 | `ValidateOptions` | type | `source`, `sections`, `io` |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
-| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: merge` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: merge` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, list entries by identity), so no layer's key order reaches the file |
+| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: merge` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: merge` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every keyed list by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
 | `MergeOptions` | type | `source`, `layering`, `io` |
 | `MergeReport` | type | `settings`, `notices` (one per null that deleted a lower declaration; a top-level null that met nothing drops without one, or stays where null is the section's value: `pages`, `interaction_limits`), `yaml` (the file text `merged-file` gets), `log` |
 | `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
