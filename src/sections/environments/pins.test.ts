@@ -175,8 +175,8 @@ describe("environments pinned apply mode", () => {
     const planned = await plan(api, [{ name: "prod", pinned: true }]);
     // u1 also earns the interleaving note: it leads the list the declared pin should lead.
     expect(planned.notes).toEqual([
-      'pinned environment(s) "u1" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
-      "apply will fail: pinning the 1 declared environment(s) not yet pinned would leave 11 " +
+      'pinned environment "u1" has no pinned declaration in the settings file; it stays pinned (only a pinned: false entry unpins) and apply moves it after the declared pins',
+      "apply will fail: pinning the 1 declared environment not yet pinned would leave 11 " +
         "environments pinned, but GitHub allows at most 10. Pins without a pinned declaration " +
         "are left untouched, so declare pinned: false on entries for some of the currently " +
         "pinned environments, or unpin them in the GitHub UI",
@@ -360,6 +360,36 @@ describe("environments pinned check mode", () => {
     expect(result.drift).toEqual([]);
   });
 
+  test("two undeclared pins ahead of the declared rank read in the plural", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/a": envBody("a"),
+      "GET /repos/o/r/environments/b": envBody("b"),
+      "GRAPHQL EnvironmentPins": pinsBody(["legacy", "older", "a", "b"]),
+    });
+    const checked = await check(api, [
+      { name: "a", pinned: true },
+      { name: "b", pinned: true },
+    ]);
+    expect(checked.notes).toEqual([
+      'pinned environments "legacy", "older" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+    ]);
+  });
+
+  test("two declared pins overflowing the cap are counted in the plural", async () => {
+    const api = new MockApi({
+      "PUT /repos/o/r/environments/prod": envBody("prod"),
+      "PUT /repos/o/r/environments/stage": envBody("stage"),
+      "GRAPHQL EnvironmentPins": pinsBody(["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"]),
+    }).allowMutations("GRAPHQL PinEnvironment");
+    const planned = await plan(api, [
+      { name: "prod", pinned: true },
+      { name: "stage", pinned: true },
+    ]);
+    expect(planned.notes.at(-1)).toStartWith(
+      "apply will fail: pinning the 2 declared environments not yet pinned would leave 11 environments pinned, but GitHub allows at most 10.",
+    );
+  });
+
   test("an undeclared pin among the declared ranks earns the interleaving note in both modes", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/a": envBody("a"),
@@ -367,7 +397,7 @@ describe("environments pinned check mode", () => {
     }).allowMutations("GRAPHQL ReorderEnvironment");
     const checked = await check(api, [{ name: "a", pinned: true }]);
     expect(checked.notes).toEqual([
-      'pinned environment(s) "legacy" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+      'pinned environment "legacy" has no pinned declaration in the settings file; it stays pinned (only a pinned: false entry unpins) and apply moves it after the declared pins',
     ]);
     const applied = await apply(api, [{ name: "a", pinned: true }]);
     expect(applied.notes).toEqual(checked.notes);
