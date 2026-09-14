@@ -165,7 +165,7 @@ Every rename, old to new. An old name fails to compile, naming the missing expor
 | `SnapshotLibraryOptions` | `SnapshotOptions` |
 | `validateSettings(doc, { source?, sections?: ReadonlySet<SectionKey> })` returning `{ settings, warnings: string[] }` | `validateSettings(doc, { source?, sections?: SectionSelection, io? })` returning `{ settings, log: CollectedLine[] }` (`ValidateOptions`, `ValidateReport`) |
 | `foldLayers(layers, sourceLabel, layering, io)` | `mergeSettings(layers, { source?, layering?, io? })` returning `{ settings, notices, yaml, log }` (`MergeOptions`, `MergeReport`); `foldLayers` itself is in `./internal` |
-| `mergeLayers`, `renderCanonicalYaml`, `renderSnapshotYaml` | `./internal`; `MergeReport.yaml` and `SnapshotReport.yaml` carry the rendered file |
+| `mergeLayers`, `canonicalDocument`, `renderCanonicalYaml`, `renderSnapshotYaml` | `./internal`; `MergeReport.yaml` and `SnapshotReport.yaml` carry the rendered file |
 | `validateSettingsDoc` | `./internal`: the engine's boundary, which prints its warnings to an `Io`; `validateSettings` collects them into `log` |
 | `runForRepo`, `preflightProbe`, `skippedSectionKeys`, `RepoRunResult`, `RepoResult` | `./internal` |
 | `SnapshotResult`, `RenderableSnapshot`, `SNAPSHOT_SCHEMA_URL` | `./internal`; `SnapshotReport.yaml` already carries the schema pin in its header |
