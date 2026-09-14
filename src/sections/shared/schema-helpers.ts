@@ -1,10 +1,11 @@
 /**
- * Imports ONLY zod and renamed-key.ts: a section schema importing src/schema.ts back would be a cycle
+ * Imports only zod, renamed-key.ts, and the text leaf: a section schema importing src/schema.ts back would be a cycle
  * whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
  * The smoke selector (.github/scripts/changed-sections.ts) derives this file's section fan-out from the import graph.
  */
 
 import { z } from "zod";
+import { agree } from "../../text.js";
 import { renamedKeyError } from "./renamed-key.js";
 
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
@@ -43,7 +44,7 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
     '"_undeclared" and, on a top-level section, "_layering", and nothing else - there are no ' +
     "private-note keys. Remove the key, or keep the note as a YAML comment";
   return renamed === undefined
-    ? `Unrecognized key${issue.keys.length === 1 ? "" : "s"}: ${quoted(issue.keys)}; ${clause}`
+    ? `${agree(issue.keys.length, "Unrecognized key", "Unrecognized keys")}: ${quoted(issue.keys)}; ${clause}`
     : `${renamed}; ${clause}`;
 }
 

@@ -364,19 +364,19 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
   if (problem.invalid.length > 0) {
     parts.push(
       `${quoteList(problem.invalid)} ` +
-        `${problem.invalid.length === 1 ? "is not an owner/name slug" : "are not owner/name slugs"} ` +
+        `${agree(problem.invalid.length, "is not an owner/name slug", "are not owner/name slugs")} ` +
         '(use values like "octocat/hello-world", comma- or newline-separated)',
     );
   }
   if (problem.duplicated.length > 0) {
     parts.push(
       `${quoteList(problem.duplicated)} ` +
-        `${problem.duplicated.length === 1 ? "is" : "are"} listed more than once ` +
+        `${agree(problem.duplicated.length, "is", "are")} listed more than once ` +
         "(keep exactly one entry per repository)",
     );
   }
   const count = problem.invalid.length + problem.duplicated.length;
-  return `the "repos" input has ${count} invalid entr${count === 1 ? "y" : "ies"}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
+  return `the "repos" input has ${countNoun(count, "invalid entry", "invalid entries")}: ${parts.join("; ")}. Or use "*" alone to discover repositories`;
 }
 
 /**
