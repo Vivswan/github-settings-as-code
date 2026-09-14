@@ -554,8 +554,8 @@ export function describeProblem(problem: Problem): string {
       );
     case "no-targets":
       return problem.filteredOut > 0
-        ? `multi-repo mode found no targets: repos: "*" discovery found ${problem.filteredOut} ` +
-            `${problem.filteredOut === 1 ? "repository" : "repositories"}, but the discovery filters ` +
+        ? `multi-repo mode found no targets: repos: "*" discovery found ` +
+            `${countNoun(problem.filteredOut, "repository", "repositories")}, but the discovery filters ` +
             `removed all of them (see the notices above). Relax the filter inputs, or add per-repo ` +
             `files to the repos-dir`
         : `multi-repo mode found no targets: repos-dir yielded no settings files and the "repos" input resolved to no repositories. Add per-repo files to the repos-dir, or list repositories in the "repos" input`;
