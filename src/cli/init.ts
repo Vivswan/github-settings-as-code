@@ -21,7 +21,12 @@ import {
   type SnapshotReport,
   snapshotRepository,
 } from "../index.js";
-import { parseSnapshotFileConfig, skippedSectionKeys, writeReplacing } from "../internal.js";
+import {
+  countNoun,
+  parseSnapshotFileConfig,
+  skippedSectionKeys,
+  writeReplacing,
+} from "../internal.js";
 import { type CliHost, failedEnvelope, grantTable, type Rendered } from "./commands.js";
 
 export interface InitConfig {
@@ -175,7 +180,7 @@ export function runInit(
         return {
           code: 0,
           lines: [
-            `${cfg.settingsFile} written from ${cfg.repo.slug}: ${grant.sections.length} section(s) declared (${grant.sections.join(", ")})`,
+            `${cfg.settingsFile} written from ${cfg.repo.slug}: ${countNoun(grant.sections.length, "section", "sections")} declared (${grant.sections.join(", ")})`,
             ...(unsupported.length === 0
               ? []
               : [

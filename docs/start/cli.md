@@ -85,7 +85,7 @@ gsac init --token "$ADMIN_TOKEN" --repository octocat/hello-world
 The adoption path in one command: the snapshot of the repository lands in `.github/settings.yml`, the file `check` and `apply` read, and the grant its sections need follows:
 
 ```text
-.github/settings.yml written from octocat/hello-world: 3 section(s) declared (labels, milestones, webhooks)
+.github/settings.yml written from octocat/hello-world: 3 sections declared (labels, milestones, webhooks)
 Token permissions the file needs:
   labels: grant "Issues" (read and write) under the PAT's Repository permissions
   milestones: grant "Issues" (read and write) under the PAT's Repository permissions

@@ -265,7 +265,7 @@ labels:
 A v2 file with `_owner: platform-team` at its top level now fails with:
 
 ```text
-unknown underscore key(s) in .github/settings.yml: _owner. The underscore marks this action's directives, "_layering" (a file's top level or a list section's {entries} wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or keep the note as a YAML comment
+unknown underscore key in .github/settings.yml: _owner. The underscore marks this action's directives, "_layering" (a file's top level or a list section's {entries} wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or keep the note as a YAML comment
 ```
 
 A `sections` allowlist does not soften it (an unknown plain section outside the allowlist still only warns). The reason is the loud-failure promise: a misspelled `_layerin: replace` dropped as a note would merge a layer its author meant to replace. Move each note into a YAML comment; the [layering guide](../operate/layering.md#three-knobs) states the rule beside the two directives.

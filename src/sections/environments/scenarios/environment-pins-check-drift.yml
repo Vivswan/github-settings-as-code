@@ -39,7 +39,7 @@ expect:
     - "environments[web].pinned"
     - "environments[api].pinned"
   stdout_contains:
-    - 'pinned environment(s) "legacy" have no pinned declaration'
+    - 'pinned environment "legacy" has no pinned declaration'
   requests_contain:
     - "GRAPHQL EnvironmentPins"
   never:

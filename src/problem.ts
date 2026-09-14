@@ -10,6 +10,7 @@
 
 import { isPlainObject } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
+import { agree, countNoun } from "./text.js";
 
 /**
  * The advice appended to a transient (non-permission) API failure: a network
@@ -24,6 +25,19 @@ export const RERUN_ADVICE =
 /** Names as an error message lists them: each quoted, comma-separated. */
 export function quoteList(names: readonly string[]): string {
   return names.map((name) => `"${name}"`).join(", ");
+}
+
+function inputsWording(names: readonly string[]) {
+  const count = names.length;
+  const inputs = agree(count, "input", "inputs");
+  return {
+    subject: `the ${quoteList(names)} ${inputs}`,
+    inputs,
+    verb: agree(count, "does", "do"),
+    applies: agree(count, "applies", "apply"),
+    them: agree(count, "it", "them"),
+    they: agree(count, "it", "they"),
+  };
 }
 
 /** The run modes that read exactly one settings file. */
@@ -320,16 +334,18 @@ function describeUnreadable(problem: ProblemOf<"settings-file-unreadable">): str
 function describeFiltersWithoutWildcard(
   problem: ProblemOf<"discovery-filters-without-wildcard">,
 ): string {
-  const named = quoteList(problem.filters);
+  const count = problem.filters.length;
+  const inputs = agree(count, "input", "inputs");
+  const named = `the discovery filter ${inputs} ${quoteList(problem.filters)} only ${agree(count, "applies", "apply")}`;
   switch (problem.targets) {
     case "single-repo":
-      return `the discovery filter input(s) ${named} only apply to repos: "*" discovery, but this run is in single-repo mode. Set repos: "*" to discover repositories, or remove the filter input(s)`;
+      return `${named} to repos: "*" discovery, but this run is in single-repo mode. Set repos: "*" to discover repositories, or remove the filter ${inputs}`;
     case "explicit-repos":
-      return `the discovery filter input(s) ${named} only apply when repos is "*", but the "repos" input lists explicit repositories. Set repos: "*", or remove the filter input(s)`;
+      return `${named} when repos is "*", but the "repos" input lists explicit repositories. Set repos: "*", or remove the filter ${inputs}`;
     case "repos-dir":
-      return `the discovery filter input(s) ${named} only apply to repos: "*" discovery, but targets come only from repos-dir files. Set repos: "*", or remove the filter input(s)`;
+      return `${named} to repos: "*" discovery, but targets come only from repos-dir files. Set repos: "*", or remove the filter ${inputs}`;
     case "snapshot-file":
-      return `the discovery filter input(s) ${named} only apply to repos: "*" discovery, but this snapshot targets one repository. Set repos: "*" with snapshot-dir to discover repositories, or remove the filter input(s)`;
+      return `${named} to repos: "*" discovery, but this snapshot targets one repository. Set repos: "*" with snapshot-dir to discover repositories, or remove the filter ${inputs}`;
   }
 }
 
@@ -385,10 +401,10 @@ export function describeProblem(problem: Problem): string {
         .map((unknown) => describeUnknownSectionInput(unknown, problem.known))
         .join("; ");
     case "required-sections-excluded": {
-      const one = problem.excluded.length === 1;
-      const [noun, pronoun] = one ? ["entry", "it"] : ["entries", "them"];
+      const count = problem.excluded.length;
+      const pronoun = agree(count, "it", "them");
       return (
-        `the "required-sections" ${noun} ${quoteList(problem.excluded)} ${one ? "is" : "are"} ` +
+        `the "required-sections" ${agree(count, "entry", "entries")} ${quoteList(problem.excluded)} ${agree(count, "is", "are")} ` +
         `excluded by the "sections" allowlist, so the run would pass without ever attempting ` +
         `${pronoun}. Add ${pronoun} to the "sections" input, or remove ${pronoun} from ` +
         `"required-sections"`
@@ -404,36 +420,44 @@ export function describeProblem(problem: Problem): string {
       );
     case "input-report-key-invalid":
       return `the "report-public-key" input is not a valid age recipient: ${problem.reason}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`;
-    case "input-rejected-in-merge":
+    case "input-rejected-in-merge": {
+      const { subject, verb, inputs, them } = inputsWording(problem.inputs);
       return (
-        `the ${quoteList(problem.inputs)} input(s) do not apply to mode: merge, which only folds ` +
+        `${subject} ${verb} not apply to mode: merge, which only folds ` +
         "the settings-file layers into merged-file: it never targets a repository, calls the GitHub " +
-        "API, delivers a report, or narrows the sections it writes. Remove the input(s), or move " +
-        "them to the apply or check step that runs the merged document"
+        `API, delivers a report, or narrows the sections it writes. Remove the ${inputs}, or move ` +
+        `${them} to the apply or check step that runs the merged document`
       );
+    }
     case "input-merged-file-missing":
       return 'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file';
     case "input-settings-file-empty":
       return `the "settings-file" input is "${problem.value}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`;
-    case "input-merge-only":
+    case "input-merge-only": {
+      const { subject, applies, inputs, they } = inputsWording(problem.inputs);
       return (
-        `the ${quoteList(problem.inputs)} input(s) only apply to mode: merge, but this run is in ` +
-        `${problem.mode} mode, so ${problem.inputs.length === 1 ? "it" : "they"} would never be ` +
-        "used. Remove the input(s), or set mode: merge to fold settings files"
+        `${subject} only ${applies} to mode: merge, but this run is in ` +
+        `${problem.mode} mode, so ${they} would never be ` +
+        `used. Remove the ${inputs}, or set mode: merge to fold settings files`
       );
-    case "input-snapshot-only":
+    }
+    case "input-snapshot-only": {
+      const { subject, applies, inputs, they } = inputsWording(problem.inputs);
       return (
-        `the ${quoteList(problem.inputs)} input(s) only apply to mode: snapshot, but this run is in ` +
-        `${problem.mode} mode, so ${problem.inputs.length === 1 ? "it" : "they"} would never be ` +
-        "used. Remove the input(s), or set mode: snapshot to write the live settings to a file"
+        `${subject} only ${applies} to mode: snapshot, but this run is in ` +
+        `${problem.mode} mode, so ${they} would never be ` +
+        `used. Remove the ${inputs}, or set mode: snapshot to write the live settings to a file`
       );
-    case "input-rejected-in-snapshot":
+    }
+    case "input-rejected-in-snapshot": {
+      const { subject, verb, inputs, them, they } = inputsWording(problem.inputs);
       return (
-        `the ${quoteList(problem.inputs)} input(s) do not apply to mode: snapshot, which only reads the ` +
+        `${subject} ${verb} not apply to mode: snapshot, which only reads the ` +
         "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
-        "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
-        "the apply, check, or merge step they belong to"
+        `document, folds no layers, and delivers no report. Remove the ${inputs}, or move ${them} to ` +
+        `the apply, check, or merge step ${they} ${agree(problem.inputs.length, "belongs", "belong")} to`
       );
+    }
     case "input-snapshot-destination-missing":
       return 'mode: snapshot needs exactly one of the "snapshot-file" input (one repository\'s settings written to that file) or the "snapshot-dir" input (one <owner>/<name>.yml per repos or repos-dir target under that directory). Set one of them';
     case "input-snapshot-destinations-both":
@@ -484,9 +508,9 @@ export function describeProblem(problem: Problem): string {
     case "settings-not-plain-mapping":
       return `${problem.source} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`;
     case "settings-unknown-sections":
-      return `unknown top-level section(s) in ${problem.source}: ${problem.unknown.join(", ")} (known: ${problem.known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
+      return `unknown top-level ${agree(problem.unknown.length, "section", "sections")} in ${problem.source}: ${problem.unknown.join(", ")} (known: ${problem.known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
     case "settings-unknown-directives":
-      return `unknown underscore key(s) in ${problem.source}: ${problem.unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
+      return `unknown underscore ${agree(problem.unknown.length, "key", "keys")} in ${problem.source}: ${problem.unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
     case "settings-malformed-sections":
       return `${problem.source} has malformed section entries: ${problem.issues.join("; ")}. ${PASSTHROUGH_ADVICE}`;
     case "yaml-invalid":
@@ -541,7 +565,7 @@ export function describeProblem(problem: Problem): string {
     case "repos-dir-unreadable":
       return `cannot read repos-dir "${problem.reposDir}": ${problem.reason}. Check that it is a readable directory of settings files`;
     case "repos-dir-invalid-files":
-      return `repos-dir "${problem.reposDir}" has ${problem.files.length} invalid settings file(s):\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
+      return `repos-dir "${problem.reposDir}" has ${countNoun(problem.files.length, "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
     case "discovery-request-failed":
       return `cannot discover repositories for repos: "*": GET ${problem.path} failed: ${problem.status} ${problem.message}. ${problem.denied ? PAT_ADVICE : RERUN_ADVICE}`;
     case "discovery-transport-failed":

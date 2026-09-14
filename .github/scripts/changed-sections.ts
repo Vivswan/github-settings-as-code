@@ -57,6 +57,7 @@ export const ALL_SELECTING_PREFIXES = [
   "src/private.ts",
   "src/problem.ts",
   "src/schema.ts",
+  "src/text.ts",
   "src/types.ts",
   "test/e2e/",
   // The selection machinery itself: a PR touching only these must not select "none" and skip the very job they configure.

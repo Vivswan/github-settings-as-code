@@ -8,6 +8,7 @@
 
 import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { countNoun } from "../../src/text.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
@@ -103,7 +104,10 @@ export function regenerateIndex(): number {
   return bases.length;
 }
 
+export function indexSummary(count: number): string {
+  return `wrote ${INDEX_PATH} (${countNoun(count, "gap file", "gap files")})`;
+}
+
 if (import.meta.main) {
-  const count = regenerateIndex();
-  console.log(`wrote ${INDEX_PATH} (${count} gap file(s))`);
+  console.log(indexSummary(regenerateIndex()));
 }

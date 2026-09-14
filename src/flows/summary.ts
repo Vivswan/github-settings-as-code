@@ -3,6 +3,7 @@ import type { RunOutcome } from "../engine/outcome.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
 import { markdownCell } from "../report/markdown.js";
+import { countNoun } from "../text.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
 
 type SummaryIo = Pick<Io, "summary">;
@@ -28,15 +29,6 @@ interface SectionRow {
   key: string;
   status: keyof typeof STATUS_ICON;
   detail: string[];
-}
-
-/** A count with its noun agreed to it ("1 repository", "2 sections"), for every count the run reports. */
-export function countNoun(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function repositoryCount(count: number): string {
-  return countNoun(count, "repository", "repositories");
 }
 
 function outcomeRows(outcomes: readonly SectionRow[]): string[] {
@@ -83,7 +75,7 @@ export function writeMergeSummary(
 
 export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode: string): void {
   const lines = [
-    `## github-settings-as-code (${mode}, ${repositoryCount(views.length)})`,
+    `## github-settings-as-code (${mode}, ${countNoun(views.length, "repository", "repositories")})`,
     "",
     "| Repository | Source | Result |",
     "|---|---|---|",
@@ -113,7 +105,7 @@ export function writeSnapshotDirSummary(
 ): void {
   const written = views.filter((view) => view.file !== undefined).length;
   const lines = [
-    `## github-settings-as-code (snapshot, ${repositoryCount(views.length)})`,
+    `## github-settings-as-code (snapshot, ${countNoun(views.length, "repository", "repositories")})`,
     "",
     written === 0
       ? `No snapshot was written under ${markdownCell(snapshotDir)}.`

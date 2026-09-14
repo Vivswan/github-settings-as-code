@@ -13,6 +13,7 @@ import {
 } from "../../src/sections/contract/endpoints.js";
 import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
+import { parseLive } from "../../src/sections/contract/live.js";
 import {
   denialPosture,
   freezeDeclarations,
@@ -940,6 +941,39 @@ describe("planContext read port", () => {
       "GateProbe",
       "/repos/o/r/branches",
     ]);
+  });
+});
+
+describe("parseLive", () => {
+  const strict = z.object({
+    id: z.number(),
+    name: z.string(),
+    url: z.string(),
+    active: z.boolean(),
+    events: z.array(z.string()),
+  });
+  const right = { id: 1, name: "n", url: "u", active: true, events: [] };
+  const wrong = { id: "1", name: 1, url: 1, active: "yes", events: "push" };
+  const wrongIn = (n: number) => ({
+    ...right,
+    ...Object.fromEntries(Object.entries(wrong).slice(0, n)),
+  });
+  const HEAD =
+    "^rulesets: POST /repos/\\{owner\\}/\\{repo\\}/rulesets returned a body outside the documented shape - ";
+
+  test.each<[hidden: number, tail: string]>([
+    [1, "; and 1 more issue"],
+    [2, "; and 2 more issues"],
+  ])("three issues shown and %i hidden: the remainder agrees with its count", (hidden, tail) => {
+    expect(() => parseLive(section, endpoint({}), strict, wrongIn(3 + hidden))).toThrow(
+      new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+${tail}\\. Check`),
+    );
+  });
+
+  test("three issues or fewer render whole, with no remainder", () => {
+    expect(() => parseLive(section, endpoint({}), strict, wrongIn(3))).toThrow(
+      new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+\\. Check`),
+    );
   });
 });
 

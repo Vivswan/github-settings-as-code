@@ -90,9 +90,9 @@ const SPECIMENS = {
   ],
   "input-rejected-in-merge": [
     { code: "input-rejected-in-merge", inputs: ["repos", "repos-dir"] },
-    'the "repos", "repos-dir" input(s) do not apply to mode: merge, which only folds the ' +
+    'the "repos", "repos-dir" inputs do not apply to mode: merge, which only folds the ' +
       "settings-file layers into merged-file: it never targets a repository, calls the GitHub API, " +
-      "delivers a report, or narrows the sections it writes. Remove the input(s), or move them to " +
+      "delivers a report, or narrows the sections it writes. Remove the inputs, or move them to " +
       "the apply or check step that runs the merged document",
   ],
   "input-settings-file-empty": [
@@ -101,17 +101,17 @@ const SPECIMENS = {
   ],
   "input-merge-only": [
     { code: "input-merge-only", inputs: ["merged-file", "layering"], mode: "check" },
-    'the "merged-file", "layering" input(s) only apply to mode: merge, but this run is in check mode, so they would never be used. Remove the input(s), or set mode: merge to fold settings files',
+    'the "merged-file", "layering" inputs only apply to mode: merge, but this run is in check mode, so they would never be used. Remove the inputs, or set mode: merge to fold settings files',
   ],
   "input-snapshot-only": [
     { code: "input-snapshot-only", inputs: ["snapshot-file"], mode: "check" },
-    'the "snapshot-file" input(s) only apply to mode: snapshot, but this run is in check mode, so it would never be used. Remove the input(s), or set mode: snapshot to write the live settings to a file',
+    'the "snapshot-file" input only applies to mode: snapshot, but this run is in check mode, so it would never be used. Remove the input, or set mode: snapshot to write the live settings to a file',
   ],
   "input-rejected-in-snapshot": [
     { code: "input-rejected-in-snapshot", inputs: ["settings-file", "layering"] },
-    'the "settings-file", "layering" input(s) do not apply to mode: snapshot, which only reads the ' +
+    'the "settings-file", "layering" inputs do not apply to mode: snapshot, which only reads the ' +
       "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
-      "document, folds no layers, and delivers no report. Remove the input(s), or move them to " +
+      "document, folds no layers, and delivers no report. Remove the inputs, or move them to " +
       "the apply, check, or merge step they belong to",
   ],
   "input-affiliation-unsupported": [
@@ -128,7 +128,7 @@ const SPECIMENS = {
   ],
   "discovery-filters-without-wildcard": [
     { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "single-repo" },
-    'the discovery filter input(s) "forks" only apply to repos: "*" discovery, but this run is in single-repo mode. Set repos: "*" to discover repositories, or remove the filter input(s)',
+    'the discovery filter input "forks" only applies to repos: "*" discovery, but this run is in single-repo mode. Set repos: "*" to discover repositories, or remove the filter input',
   ],
   "input-settings-file-is-list": [
     { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "apply" },
@@ -150,11 +150,11 @@ const SPECIMENS = {
   ],
   "settings-unknown-sections": [
     { code: "settings-unknown-sections", source: "f.yml", unknown: ["labls"], known: SECTION_KEYS },
-    `unknown top-level section(s) in f.yml: labls (known: ${KNOWN}). Fix the typo, or set the "sections" input to limit processing`,
+    `unknown top-level section in f.yml: labls (known: ${KNOWN}). Fix the typo, or set the "sections" input to limit processing`,
   ],
   "settings-unknown-directives": [
     { code: "settings-unknown-directives", source: "f.yml", unknown: ["_notes", "_layerin"] },
-    "unknown underscore key(s) in f.yml: _notes, _layerin. The underscore marks this action's " +
+    "unknown underscore keys in f.yml: _notes, _layerin. The underscore marks this action's " +
       "directives, \"_layering\" (a file's top level or a list section's {entries} wrapper) and " +
       '"_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, ' +
       "or keep the note as a YAML comment",
@@ -275,7 +275,7 @@ const SPECIMENS = {
         { kind: "ownerless", files: ["repos/api.yml", "repos/web.yml"] },
       ],
     },
-    'repos-dir "repos" has 3 invalid settings file(s):\n' +
+    'repos-dir "repos" has 3 invalid settings files:\n' +
       '- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes\n' +
       "- duplicate target o/x: defined by both repos/o/x.yml and repos/x.yml. Keep exactly one settings file per repository\n" +
       "- cannot resolve repos/api.yml, repos/web.yml: top-level repos-dir files use the current repository's owner, which is unknown outside GitHub Actions. Use the <owner>/<name>.yml layout instead",
@@ -316,9 +316,66 @@ describe("describeProblem", () => {
       'the "required-sections" entry "labels" is excluded by the "sections" allowlist, so the run would pass without ever attempting it. Add it to the "sections" input, or remove it from "required-sections"',
     ],
     [
+      "one rejected merge input reads in the singular",
+      { code: "input-rejected-in-merge", inputs: ["repos"] },
+      'the "repos" input does not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, ' +
+        "calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input, or move it to the apply or check step that runs the merged document",
+    ],
+    [
+      "two snapshot-only inputs read in the plural",
+      { code: "input-snapshot-only", inputs: ["snapshot-file", "snapshot-dir"], mode: "check" },
+      'the "snapshot-file", "snapshot-dir" inputs only apply to mode: snapshot, but this run is in check mode, so they would never be used. Remove the inputs, or set mode: snapshot to write the live settings to a file',
+    ],
+    [
+      "one rejected snapshot input reads in the singular",
+      { code: "input-rejected-in-snapshot", inputs: ["layering"] },
+      'the "layering" input does not apply to mode: snapshot, which only reads the target repositories\' live settings into snapshot-file or snapshot-dir: ' +
+        "it applies no document, folds no layers, and delivers no report. Remove the input, or move it to the apply, check, or merge step it belongs to",
+    ],
+    [
+      "two filters beside a single-repo snapshot read in the plural",
+      {
+        code: "discovery-filters-without-wildcard",
+        filters: ["forks", "topics"],
+        targets: "snapshot-file",
+      },
+      'the discovery filter inputs "forks", "topics" only apply to repos: "*" discovery, but this snapshot targets one repository. Set repos: "*" with snapshot-dir to discover repositories, or remove the filter inputs',
+    ],
+    [
+      "one filter beside a single-repo snapshot reads in the singular",
+      { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "snapshot-file" },
+      'the discovery filter input "forks" only applies to repos: "*" discovery, but this snapshot targets one repository. Set repos: "*" with snapshot-dir to discover repositories, or remove the filter input',
+    ],
+    [
+      "two unknown sections read in the plural",
+      {
+        code: "settings-unknown-sections",
+        source: "f.yml",
+        unknown: ["labls", "rulesest"],
+        known: SECTION_KEYS,
+      },
+      `unknown top-level sections in f.yml: labls, rulesest (known: ${KNOWN}). Fix the typo, or set the "sections" input to limit processing`,
+    ],
+    [
+      "one unknown underscore key reads in the singular",
+      { code: "settings-unknown-directives", source: "f.yml", unknown: ["_notes"] },
+      "unknown underscore key in f.yml: _notes. The underscore marks this action's directives, " +
+        '"_layering" (a file\'s top level or a list section\'s {entries} wrapper) and "_undeclared" (a wrapper), and nothing else; ' +
+        "there are no private-note keys. Remove the key, or keep the note as a YAML comment",
+    ],
+    [
+      "one invalid repos-dir file reads in the singular",
+      {
+        code: "repos-dir-invalid-files",
+        reposDir: "repos",
+        files: [{ kind: "not-a-slug", filePath: "repos/o/a b.yml", slug: "o/a b" }],
+      },
+      'repos-dir "repos" has 1 invalid settings file:\n- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes',
+    ],
+    [
       "one merge-only input reads in the singular",
       { code: "input-merge-only", inputs: ["layering"], mode: "apply" },
-      'the "layering" input(s) only apply to mode: merge, but this run is in apply mode, so it would never be used. Remove the input(s), or set mode: merge to fold settings files',
+      'the "layering" input only applies to mode: merge, but this run is in apply mode, so it would never be used. Remove the input, or set mode: merge to fold settings files',
     ],
     [
       "filters beside an explicit repos list",
@@ -327,12 +384,12 @@ describe("describeProblem", () => {
         filters: ["forks", "topics"],
         targets: "explicit-repos",
       },
-      'the discovery filter input(s) "forks", "topics" only apply when repos is "*", but the "repos" input lists explicit repositories. Set repos: "*", or remove the filter input(s)',
+      'the discovery filter inputs "forks", "topics" only apply when repos is "*", but the "repos" input lists explicit repositories. Set repos: "*", or remove the filter inputs',
     ],
     [
       "filters beside repos-dir targets only",
       { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "repos-dir" },
-      'the discovery filter input(s) "forks" only apply to repos: "*" discovery, but targets come only from repos-dir files. Set repos: "*", or remove the filter input(s)',
+      'the discovery filter input "forks" only applies to repos: "*" discovery, but targets come only from repos-dir files. Set repos: "*", or remove the filter input',
     ],
     [
       "a defaults file that cannot be read",

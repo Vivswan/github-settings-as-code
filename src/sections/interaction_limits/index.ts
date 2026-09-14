@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import {
   cannotVerifyNote,
@@ -328,7 +329,8 @@ export const interactionLimitsSection = {
           payload: { users: remove },
           describe: "removing users from the pull request creation cap bypass list",
           drift: [
-            `interaction_limits.pull_request_creation_bypass: live login(s) [${remove.join(", ")}] are not declared; apply will remove them`,
+            `interaction_limits.pull_request_creation_bypass: live ${agree(remove.length, "login", "logins")} [${remove.join(", ")}] ` +
+              `${agree(remove.length, "is", "are")} not declared; apply will remove ${agree(remove.length, "it", "them")}`,
           ],
           change: `removed [${remove.join(", ")}] from the pull request creation cap bypass list`,
         });
@@ -339,7 +341,8 @@ export const interactionLimitsSection = {
           payload: { users: add },
           describe: "adding users to the pull request creation cap bypass list",
           drift: [
-            `interaction_limits.pull_request_creation_bypass: declared login(s) [${add.join(", ")}] are not on the live bypass list; apply will add them`,
+            `interaction_limits.pull_request_creation_bypass: declared ${agree(add.length, "login", "logins")} [${add.join(", ")}] ` +
+              `${agree(add.length, "is", "are")} not on the live bypass list; apply will add ${agree(add.length, "it", "them")}`,
           ],
           change: `added [${add.join(", ")}] to the pull request creation cap bypass list`,
         });

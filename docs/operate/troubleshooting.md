@@ -44,7 +44,7 @@ What it means: the retries already happened, or were deliberately skipped becaus
 
 What to do: re-run after the reset. If a multi-repo run keeps hitting the limit, reduce its scope: fewer targets per run, or a `sections` allowlist so each target makes fewer calls.
 
-## "unknown top-level section(s) in ..."
+## "unknown top-level section in ..." (or "sections")
 
 What you see: the run fails during validation, naming the unknown keys and listing every known section name.
 

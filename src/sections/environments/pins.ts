@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { agree, countNoun } from "../../text.js";
 import { repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -281,14 +282,16 @@ export async function planPinned(
   const notes: string[] = [];
 
   if (plan.interleaved.length > 0) {
+    const count = plan.interleaved.length;
     notes.push(
-      `pinned environment(s) ${plan.interleaved.map((name) => `"${name}"`).join(", ")} have no pinned declaration in the settings file; ` +
-        "they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins",
+      `pinned ${agree(count, "environment", "environments")} ${plan.interleaved.map((name) => `"${name}"`).join(", ")} ` +
+        `${agree(count, "has", "have")} no pinned declaration in the settings file; ${agree(count, "it stays", "they stay")} pinned ` +
+        `(only a pinned: false entry unpins) and apply moves ${agree(count, "it", "them")} after the declared pins`,
     );
   }
   const overflow =
     plan.finalCount > MAX_PINNED_ENVIRONMENTS
-      ? `pinning the ${plan.pins.length} declared environment(s) not yet pinned would leave ` +
+      ? `pinning the ${countNoun(plan.pins.length, "declared environment", "declared environments")} not yet pinned would leave ` +
         `${plan.finalCount} environments pinned, but GitHub allows at most ` +
         `${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration are left untouched, so ` +
         `declare pinned: false on entries for some of the currently pinned environments, or ` +

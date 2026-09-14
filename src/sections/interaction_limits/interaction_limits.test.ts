@@ -323,8 +323,8 @@ describe("interaction_limits pull request creation cap", () => {
       pull_request_creation_cap: { enabled: true, max_open_prs: 5 },
     } as InteractionLimitsConfig);
     expect(result.notes).toEqual([
-      'interaction_limits.pull_request_creation_cap: declared key(s) "max_open_prs" do not ' +
-        "exist on the live creation cap, so if GitHub ignores them this PATCH will re-run on " +
+      'interaction_limits.pull_request_creation_cap: declared key "max_open_prs" does not ' +
+        "exist on the live creation cap, so if GitHub ignores it this PATCH will re-run on " +
         "every apply without converging. Fix the key name, or remove it from the settings file",
     ]);
   });
@@ -359,7 +359,7 @@ describe("interaction_limits pull request creation bypass list", () => {
         payload: { users: ["goner"] },
         describe: "removing users from the pull request creation cap bypass list",
         drift: [
-          "interaction_limits.pull_request_creation_bypass: live login(s) [goner] are not declared; apply will remove them",
+          "interaction_limits.pull_request_creation_bypass: live login [goner] is not declared; apply will remove it",
         ],
         change: "removed [goner] from the pull request creation cap bypass list",
       },
@@ -368,13 +368,26 @@ describe("interaction_limits pull request creation bypass list", () => {
         payload: { users: ["newcomer"] },
         describe: "adding users to the pull request creation cap bypass list",
         drift: [
-          "interaction_limits.pull_request_creation_bypass: declared login(s) [newcomer] are not on the live bypass list; apply will add them",
+          "interaction_limits.pull_request_creation_bypass: declared login [newcomer] is not on the live bypass list; apply will add it",
         ],
         change: "added [newcomer] to the pull request creation cap bypass list",
       },
     ]);
     const matching = await plan(api, { pull_request_creation_bypass: ["KEEPER", "Goner"] });
     expect(matching.ops).toEqual([]);
+  });
+
+  test("several removed and added logins read in the plural", async () => {
+    const api = new MockApi({ [BYPASS_GET]: { data: [{ login: "goner" }, { login: "gone2" }] } });
+    const result = await plan(api, { pull_request_creation_bypass: ["newcomer", "newer"] });
+    expect(result.ops.map((op) => op.drift)).toEqual([
+      [
+        "interaction_limits.pull_request_creation_bypass: live logins [goner, gone2] are not declared; apply will remove them",
+      ],
+      [
+        "interaction_limits.pull_request_creation_bypass: declared logins [newcomer, newer] are not on the live bypass list; apply will add them",
+      ],
+    ]);
   });
 
   test("a declared empty list removes everyone", async () => {
@@ -407,7 +420,9 @@ describe("interaction_limits shape", () => {
       pull_request_creation_cap: { enabled: true },
     });
     expect(parsed.success).toBe(false);
-    expect(JSON.stringify(parsed.error?.issues)).toContain("requires a limit");
+    expect(parsed.error?.issues.map((issue) => issue.message)).toEqual([
+      "key [expiry] rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove it",
+    ]);
   });
 
   test("a bypass list over GitHub's 100-user cap is rejected", () => {

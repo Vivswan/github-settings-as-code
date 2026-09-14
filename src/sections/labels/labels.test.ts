@@ -100,7 +100,7 @@ describe("labels", () => {
         },
       ],
       notes: [
-        'labels[bug]: declared key(s) "colr" do not exist on the live label, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+        'labels[bug]: declared key "colr" does not exist on the live label, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
       ],
       drift: [],
     });

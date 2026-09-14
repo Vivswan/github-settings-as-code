@@ -6,6 +6,8 @@
  * desired "", live null or absent   -> no delta
  */
 
+import { agree } from "../text.js";
+
 type PathStep = string | number | { readonly key: string };
 
 type ListMatch = "key" | "shape" | "value";
@@ -306,5 +308,9 @@ export function phantomKeys(desired: Record<string, unknown>, live: unknown): st
 
 export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
   const list = keys.map((k) => `"${k}"`).join(", ");
-  return `${prefix}: declared key(s) ${list} do not exist on the live ${noun}, so if GitHub ignores them ${rewrite} on every apply without converging. Fix the key name, or remove it from the settings file`;
+  const count = keys.length;
+  return (
+    `${prefix}: declared ${agree(count, "key", "keys")} ${list} ${agree(count, "does", "do")} not exist on the live ${noun}, ` +
+    `so if GitHub ignores ${agree(count, "it", "them")} ${rewrite} on every apply without converging. Fix the key name, or remove it from the settings file`
+  );
 }

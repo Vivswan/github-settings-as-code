@@ -191,7 +191,7 @@ describe("repository", () => {
     const api = new MockApi({ [GET]: { data: { description: "d" } } });
     const result = await plan(api, { description: "d", extra_field: "x" });
     expect(result.notes).toEqual([
-      'repository: declared key(s) "extra_field" do not exist on the live repository, so if GitHub ignores them this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+      'repository: declared key "extra_field" does not exist on the live repository, so if GitHub ignores it this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
     ]);
     expect(result.ops.map((op) => op.role)).toEqual(["update"]);
   });

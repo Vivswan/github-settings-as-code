@@ -111,7 +111,7 @@ describe("autolinks", () => {
       ],
     ]);
     expect(result.notes).toEqual([
-      'autolinks[JIRA-]: declared key(s) "is_alphanumerc" do not exist on the live autolink, so if GitHub ignores them this delete-and-recreate will repeat on every apply without converging. Fix the key name, or remove it from the settings file',
+      'autolinks[JIRA-]: declared key "is_alphanumerc" does not exist on the live autolink, so if GitHub ignores it this delete-and-recreate will repeat on every apply without converging. Fix the key name, or remove it from the settings file',
       KEEP_NOTE,
     ]);
   });

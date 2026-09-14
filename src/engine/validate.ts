@@ -5,6 +5,7 @@ import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
+import { countNoun } from "../text.js";
 
 /**
  * zod's object schemas accept a Date, Set, or Uint8Array (YAML !!timestamp, !!set, !!binary) as an empty mapping, so a
@@ -71,8 +72,9 @@ export function validateSectionShapes(
       }
       if (issues.length > 5) {
         // A silently truncated list costs one fix-and-rerun cycle per hidden offender.
-        const rest = issues.length - 5;
-        problems.push(`${key}: ...and ${rest} more issue${rest === 1 ? "" : "s"} in this section`);
+        problems.push(
+          `${key}: ...and ${countNoun(issues.length - 5, "more issue", "more issues")} in this section`,
+        );
       }
       continue;
     }

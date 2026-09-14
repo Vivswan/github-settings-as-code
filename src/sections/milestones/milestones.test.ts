@@ -85,7 +85,7 @@ describe("milestones", () => {
       ],
     ]);
     expect(result.notes).toEqual([
-      'milestones[v1]: declared key(s) "due_on" do not exist on the live milestone, so if GitHub ignores them this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+      'milestones[v1]: declared key "due_on" does not exist on the live milestone, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
       KEEP_NOTE,
     ]);
   });
