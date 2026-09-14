@@ -318,6 +318,11 @@ function describeCentralFile(file: CentralFileProblem): string {
   }
 }
 
+/** The files the entries name: an ownerless entry folds every top-level file into one bullet, and a duplicate pair has one surplus file. */
+function invalidFileCount(files: readonly CentralFileProblem[]): number {
+  return files.reduce((n, file) => n + (file.kind === "ownerless" ? file.files.length : 1), 0);
+}
+
 function describeUnreadable(problem: ProblemOf<"settings-file-unreadable">): string {
   switch (problem.role) {
     case "settings-file":
@@ -565,7 +570,7 @@ export function describeProblem(problem: Problem): string {
     case "repos-dir-unreadable":
       return `cannot read repos-dir "${problem.reposDir}": ${problem.reason}. Check that it is a readable directory of settings files`;
     case "repos-dir-invalid-files":
-      return `repos-dir "${problem.reposDir}" has ${countNoun(problem.files.length, "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
+      return `repos-dir "${problem.reposDir}" has ${countNoun(invalidFileCount(problem.files), "invalid settings file", "invalid settings files")}:\n- ${problem.files.map(describeCentralFile).join("\n- ")}`;
     case "discovery-request-failed":
       return `cannot discover repositories for repos: "*": GET ${problem.path} failed: ${problem.status} ${problem.message}. ${problem.denied ? PAT_ADVICE : RERUN_ADVICE}`;
     case "discovery-transport-failed":

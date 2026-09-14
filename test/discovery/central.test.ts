@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { err, ok } from "neverthrow";
 import { resolveCentralTargets } from "../../src/discovery/central.js";
+import { describeProblem } from "../../src/problem.js";
+import { withTempDir } from "../temp-dir.js";
 
 describe("resolveCentralTargets", () => {
   test("reads owner-shorthand and owner/name files, warns on strays", () => {
@@ -38,6 +42,16 @@ describe("resolveCentralTargets", () => {
       }),
     );
   });
+
+  test("two ownerless files fold into one entry, and the message counts both files", () =>
+    withTempDir("central-ownerless-", (dir) => {
+      writeFileSync(join(dir, "a.yml"), "");
+      writeFileSync(join(dir, "b.yml"), "");
+      const problem = resolveCentralTargets(dir, "")._unsafeUnwrapErr();
+      expect(describeProblem(problem)).toStartWith(
+        `repos-dir "${dir}" has 2 invalid settings files:\n- cannot resolve ${join(dir, "a.yml")}, ${join(dir, "b.yml")}: `,
+      );
+    }));
 
   test("the same repo defined twice is refused, naming both files", () => {
     expect(resolveCentralTargets("test/fixtures/repos-dup", "viv")).toEqual(

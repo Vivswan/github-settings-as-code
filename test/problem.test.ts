@@ -275,7 +275,7 @@ const SPECIMENS = {
         { kind: "ownerless", files: ["repos/api.yml", "repos/web.yml"] },
       ],
     },
-    'repos-dir "repos" has 3 invalid settings files:\n' +
+    'repos-dir "repos" has 4 invalid settings files:\n' +
       '- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes\n' +
       "- duplicate target o/x: defined by both repos/o/x.yml and repos/x.yml. Keep exactly one settings file per repository\n" +
       "- cannot resolve repos/api.yml, repos/web.yml: top-level repos-dir files use the current repository's owner, which is unknown outside GitHub Actions. Use the <owner>/<name>.yml layout instead",
