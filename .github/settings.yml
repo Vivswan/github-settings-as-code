@@ -20,7 +20,6 @@ repository:
   has_issues: true
   has_projects: false
   has_wiki: false
-  homepage: ""
   private: false
   security_and_analysis:
     secret_scanning:
