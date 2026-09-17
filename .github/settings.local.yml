@@ -21,7 +21,6 @@ repository:
   description: "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement."
   # Declared even when empty: the apply manages only declared keys, so
   # this keeps it healing out-of-band edits.
-  homepage: ""
   topics: github-action, repository-settings, settings-as-code, configuration-as-code, probot-settings, rulesets, branch-protection, labels
   private: false
 
