@@ -11,7 +11,7 @@ on:
   schedule:
     # Off-peak, off the top of the hour, and distinct from the fleet's other
     # nightlies (chromium-bridge 47 4, litellm-vscode-chat 59 7, this repo's
-    # e2e-nightly 28 10).
+    # nightly.yml 47 2).
     - cron: "41 5 * * *"
   workflow_dispatch:
     inputs:
@@ -59,7 +59,7 @@ jobs:
 
       # The trimmed OpenAPI spec is a fetched, gitignored artifact the mock
       # validates responses against. Always fetched fresh (no cache), same as
-      # e2e-nightly: the fetch doubles as an upstream-drift tripwire.
+      # nightly.yml's e2e job: the fetch doubles as an upstream-drift tripwire.
       - name: Fetch the trimmed OpenAPI spec
         run: bun .github/scripts/trim-openapi.ts
 

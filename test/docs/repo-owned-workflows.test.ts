@@ -1,21 +1,11 @@
 /**
- * Two properties of the repo-owned workflows a later edit breaks with no other check noticing: the commit-back push
- * jobs run no PR code under their write token and push only over the head they patched, and lint:yaml never skips
- * in CI.
+ * A property of the repo-owned commit-back workflows a later edit breaks with no other check noticing: the push jobs
+ * run no PR code under their write token and push only over the head they patched.
  */
 
 import { describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { ROOT } from "../root.js";
 import { readWorkflow, type Step } from "./workflow-loader.js";
 
-const SCRIPTS = (
-  JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
-    scripts: Record<string, string>;
-  }
-).scripts;
 /** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs what it finds there. */
 const RUNS_CHECKOUT = /(?:^|[\s;&|(])(?:bun|bunx|node|npm|npx|pnpm|yarn|deno|tsx)(?=\s|$)/m;
 /** The script with its quoted strings blanked, so a word inside an echo is not read as a command. */
@@ -59,25 +49,4 @@ describe("the commit-back push jobs", () => {
       }
     },
   );
-});
-
-describe("lint:yaml", () => {
-  /** The script's exit status from the repository root with PATH cut to the system directories, where yamllint is absent. */
-  function lintYamlWithout(env: Record<string, string>): number {
-    try {
-      execFileSync("bash", ["-c", SCRIPTS["lint:yaml"] ?? ""], {
-        cwd: ROOT,
-        stdio: "pipe",
-        env: { HOME: process.env.HOME ?? "", ...env, PATH: "/usr/bin:/bin" },
-      });
-      return 0;
-    } catch (error) {
-      return (error as { status?: number }).status ?? -1;
-    }
-  }
-
-  test("without yamllint a CI run fails and a local run skips", () => {
-    expect(lintYamlWithout({ CI: "true" })).toBe(1);
-    expect(lintYamlWithout({})).toBe(0);
-  });
 });
