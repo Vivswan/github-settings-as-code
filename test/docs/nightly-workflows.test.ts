@@ -1,8 +1,9 @@
 /**
- * Both nightlies file a failure issue through the fleet's fuzz-issue action, pointing at the artifact the run uploaded, resolve it on the
- * next green night, and dispatch auto-assign.yml with the issue number. The links a rename on one side breaks with no other check noticing:
- * the directory the runner writes, the artifact the issue cites, the conditions the steps run under, the step ids the expressions read, the
- * label the report and the resolve share, and the input names the dispatch passes to a workflow the platform syncs.
+ * Both nightlies file a failure issue through the fleet's fuzz-issue action, resolve it on the next green night, and dispatch
+ * auto-assign.yml with the issue number. The links a rename on one side breaks with no other check noticing: the directory the
+ * runner writes and the artifact the fuzz issue cites, the conditions the steps run under, the step ids the expressions read, the
+ * label the report and the resolve share, the input names the dispatch passes to a workflow the platform syncs, and in nightly.yml
+ * the sibling jobs the report job's red and green conditions fold in.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,10 +14,8 @@ import { readWorkflow, type Step } from "./workflow-loader.js";
 
 const FUZZ_ISSUE_ACTION = "Vivswan/repo-platform/actions/fuzz-issue@stable";
 
-const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [
-  ["e2e-nightly.yml", "nightly"],
-  ["nightly-fuzz.yml", "fuzz"],
-];
+/** The nightlies whose one job runs the checks and files the issue; nightly.yml's report job is judged on its own below. */
+const NIGHTLIES: ReadonlyArray<[file: string, job: string]> = [["nightly-fuzz.yml", "fuzz"]];
 
 const filerIn = (steps: Step[], mode: string) =>
   steps.find((s) => s.uses === FUZZ_ISSUE_ACTION && s.with?.mode === mode);
@@ -133,10 +132,60 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
   });
 });
 
+/**
+ * A job condition over `needs.<job>.result` evaluated the way the runner does, with each job's result substituted; the remaining text is
+ * checked to be nothing but string literals and the ==, !=, &&, ||, ! and parenthesis operators before it runs.
+ */
+function evaluate(raw: unknown, results: Record<string, string>): boolean {
+  const expression = condition(raw).replace(/\bneeds\.([\w-]+)\.result\b/g, (_, job: string) => {
+    const result = results[job];
+    if (result === undefined)
+      throw new Error(`the condition reads needs.${job}, which is not in needs`);
+    return JSON.stringify(result);
+  });
+  if (!/^(?:"[a-z]*"|'[a-z]*'|==|!=|&&|\|\||!|[()\s])+$/.test(expression)) {
+    throw new Error(`the condition uses more than the evaluator knows: ${expression}`);
+  }
+  return Boolean(new Function(`return (${expression});`)());
+}
+
+describe("nightly.yml report job", () => {
+  const workflow = readWorkflow("nightly.yml");
+  const report = workflow.jobs.report;
+  const steps = report?.steps ?? [];
+  const siblings = Object.keys(workflow.jobs).filter((job) => job !== "report");
+  const red = filerIn(steps, "report")?.if;
+  const green = filerIn(steps, "resolve")?.if;
+  const night = (job: string, result: string) =>
+    Object.fromEntries(siblings.map((sibling) => [sibling, sibling === job ? result : "success"]));
+
+  test("every sibling job is in its needs, and a sibling that is not green files the issue and does not close it", () => {
+    // GitHub enforces neither (docs/nightly.md in the platform repository): a sibling outside `needs` never reaches the report, and a
+    // result the conditions do not fold in is a red night the green branch closes, or one that matches neither side and files nothing.
+    const needs = report?.needs;
+    expect(Array.isArray(needs) ? [...needs].sort() : needs).toEqual([...siblings].sort());
+    const verdicts = siblings.flatMap((job) =>
+      ["failure", "cancelled", "skipped"].map((result) => ({
+        night: `${job} ${result}`,
+        files: evaluate(red, night(job, result)),
+        closes: evaluate(green, night(job, result)),
+      })),
+    );
+    expect(verdicts).toEqual(
+      verdicts.map(({ night: name }) => ({ night: name, files: true, closes: false })),
+    );
+    expect(evaluate(red, night("", ""))).toBe(false);
+    expect(evaluate(green, night("", ""))).toBe(true);
+  });
+});
+
 test("the nightlies file under distinct labels, so one's green night cannot close the other's issue", () => {
-  const labels = NIGHTLIES.map(
-    ([file, job]) => filerIn(readWorkflow(file).jobs[job]?.steps ?? [], "report")?.with?.label,
-  );
+  const labels = [
+    ...NIGHTLIES.map(
+      ([file, job]) => filerIn(readWorkflow(file).jobs[job]?.steps ?? [], "report")?.with?.label,
+    ),
+    filerIn(readWorkflow("nightly.yml").jobs.report?.steps ?? [], "report")?.with?.label,
+  ];
   // GitHub compares label names without regard to case.
   expect(new Set(labels.map((label) => String(label).toLowerCase())).size).toBe(labels.length);
 });

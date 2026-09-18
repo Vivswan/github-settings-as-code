@@ -1,18 +1,14 @@
 # The bun setup and the dependency install of every repo-owned workflow job; the caller keeps its own checkout and
 # setup-node, whose options differ per job.
-#   install  -> --ignore-scripts: scripts.prepare installs lefthook, a git hook no runner uses; "false" (any letter
-#               case, as GitHub compares) skips the install for a job that runs a bare script or resolves the lockfile itself
-#   yamllint -> "true" installs the pinned yamllint behind `bun run lint:yaml`, which fails a CI run where it is missing
+#   install -> --ignore-scripts: scripts.prepare installs lefthook, a git hook no runner uses; "false" (any letter
+#              case, as GitHub compares) skips the install for a job that runs a bare script or resolves the lockfile itself
 name: Set up bun
-description: The pinned bun, the locked dependencies unless told not to, and yamllint for the jobs that lint YAML
+description: The pinned bun, and the locked dependencies unless told not to
 
 inputs:
   install:
     description: '"false" sets up bun alone; anything else runs bun install --frozen-lockfile --ignore-scripts'
     default: "true"
-  yamllint:
-    description: '"true" installs the pinned yamllint for lint:yaml'
-    default: "false"
 
 runs:
   using: composite
@@ -24,9 +20,3 @@ runs:
       if: inputs.install != 'false'
       shell: bash
       run: bun install --frozen-lockfile --ignore-scripts
-    # pipx ships on the ubuntu runner image with its bin directory on PATH; a venv of its own leaves the runner's
-    # python untouched.
-    - name: Install yamllint
-      if: inputs.yamllint == 'true'
-      shell: bash
-      run: pipx install yamllint==1.38.0

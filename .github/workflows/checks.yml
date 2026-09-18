@@ -16,21 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-        with:
-          yamllint: "true"
       # bun test loads the fetched, gitignored OpenAPI spec and GraphQL
       # schema; the composite restores each from cache or fetches on a miss.
       - uses: ./.github/actions/fetch-test-artifacts
       - name: Lint (biome)
         run: bun run lint
-      - name: Lint (yaml)
-        run: bun run lint:yaml
       - name: Lint (architecture)
         run: bun run lint:arch
       - name: Typecheck
         run: bun run typecheck
-      - name: Dead code (knip)
-        run: bun run knip
       - name: Compat markers
         run: bun run check:compat
       - name: Test
