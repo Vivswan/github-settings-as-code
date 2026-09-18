@@ -46,9 +46,6 @@ labels:
     - name: docs-link-rot
       color: D4A72C
       description: Automated docs-site link-rot report
-    - name: e2e-fuzz
-      color: B60205
-      description: Automated e2e nightly failure
     - name: enhancement
       color: a2eeef
       description: New feature or request
