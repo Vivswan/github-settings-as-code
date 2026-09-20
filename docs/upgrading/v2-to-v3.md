@@ -20,7 +20,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | The three outputs are always set | `repos-result` existed only in multi-repo runs and the `snapshot-dir` form; unset elsewhere | `result`, `skipped-sections`, and `repos-result` are set on every run; `repos-result` is `{}` outside a fleet | No error. A step testing `repos-result != ''` to detect a fleet run now always passes; [section 6](#6-the-three-outputs-are-always-set) |
 | One `--json` envelope on the command line | `validate` printed `{file, valid, sections}`, `permissions` a bare grant map, `init` `skippedSections` | Every subcommand prints `{result, ...}`; `permissions` puts its grants under `grant`, lists are lists | A `jq` filter on the old keys reads `null`; [section 7](#7-one---json-envelope) |
 | A snapshot section that fails on its own fails the target | `result: partial`, exit 0, the file written without that section | `result: failed`, exit 1, no file for that target; `init` refuses to write | The workflow step fails where it passed; [section 8](#8-a-failed-snapshot-section-fails-the-target) |
-| Library: a documented public entry, an internal one, and the v3 names | One entry, 192 names; `GithubApi`, `RepoRunReport`, `validateSettings` returning `warnings` | the public entry holds the 118 documented names, the internal entry the rest; `GitHubApi`, `CheckReport`, every report carries `log` | The old import fails to compile, naming the missing export; every rename is in [section 9](#9-library-the-public-entry-and-the-v3-names) |
+| Library: a documented public entry, an internal one, and the v3 names | The pre-release v3 builds had one entry, 192 names; `GithubApi`, `RepoRunReport`, `validateSettings` returning `warnings` | the public entry holds the names the library page documents, the internal entry the rest; `GitHubApi`, `CheckReport`, every report carries `log` | The old import fails to compile, naming the missing export; every rename is in [section 9](#9-library-the-public-entry-and-the-v3-names) |
 | One redacted label in every mode | A single-repository run labelled its hidden target `private repository`; a fleet numbered them `private repository #N` | `private repository #N` everywhere; a run over one repository is `#1` | No error. A log filter or artifact-report reader matching `private repository:` exactly no longer matches; [section 10](#10-one-redacted-label-in-every-mode) |
 | Two live items under one identity fail the section | The last one listed won silently in most sections | Every live list refuses, naming the pair | The section fails until one is deleted on GitHub; [section 11](#11-two-live-items-under-one-identity-fail-the-section) |
 | The webhook snapshot placeholder | `$WEBHOOK_SECRET_<id>` | `$SECRET_WEBHOOK_<id>` | No error: an old reference keeps resolving from its old export; a new snapshot writes the new name, so move both together; [section 12](#12-the-webhook-snapshot-placeholder-leads-with-secret_) |
@@ -38,21 +38,21 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | The rendered file is the fold in the canonical order | The pre-release v3 builds wrote the validated parse, keys in the schema's order | The fold rendered in the one canonical order (sections in execution order, keys as the schema declares them, the entries of every keyed list by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), byte for byte what `mergeSettings` returns as `yaml` | No error: a committed rendered file reorders once; [section 24](#24-the-rendered-file-is-the-fold-in-the-canonical-order) |
 | Every live read is parsed at the port | A body off the documented shape flowed into the comparison (a null Actions body read as drift on every key) | Every read fails loudly naming the endpoint and the field | The section fails with `returned a body outside the documented shape`; [section 25](#25-every-live-read-is-parsed-at-the-port) |
 | The snapshot file is canonical and undated | The second header line read `# Snapshot of owner/name taken <instant>`; list entries sat in the order GitHub listed them | No dated line: the run's notice and the step summary say `snapshot taken <instant>`; the document renders in the canonical order the rendered file shares | No error: a committed snapshot reorders once and loses its dated second line; a script reading the instant from the file reads the run's notice instead; [section 26](#26-the-snapshot-file-is-canonical-and-undated) |
-| Library: one problem code for a malformed document | `settings-unknown-directives` and `settings-unknown-sections`, one standalone stop each | Both are lines of `settings-malformed-sections`, beside the section issues | A `switch` on `Problem.code` naming a deleted code fails to compile; [section 27](#27-library-one-problem-code-for-a-malformed-document) |
+| Library: one problem code for a malformed document | The pre-release v3 builds had `settings-unknown-directives` and `settings-unknown-sections`, one standalone stop each | Both are lines of `settings-malformed-sections`, beside the section issues | A `switch` on `Problem.code` naming a deleted code fails to compile; [section 27](#27-library-one-problem-code-for-a-malformed-document) |
 | `_layering` takes `replace`, `shallow`, or `deep`, and every list section layers by key | No layering; the pre-release v3 builds took `merge` or `replace`, and only `labels` and `rulesets` unioned | `deep` (default) unions by the section's key and merges a same-key pair field by field; `shallow` unions and swaps the pair; `replace` lets the higher list win; all sixteen knobbed sections union | `_layering: merge` and `layering: merge` fail as unknown values, naming the three; a fourteen-section overlay that relied on silent replacement now unions; [section 28](#28-_layering-takes-replace-shallow-or-deep) |
 | `mode: merge` is `mode: render` | No render mode; the pre-release v3 builds spelled it `mode: merge`, `merged-file`, CLI `merge`, result `merged` | `mode: render`, `rendered-file`, CLI `render`, result `rendered`; five problem codes and four library flow exports carry the render spelling | `mode: merge` fails as an unsupported mode value; a `merged-file` input draws the runner's unknown-input warning; [section 29](#29-mode-merge-is-mode-render) |
 | `environments`, `branches`, and `workflows` layer by key | A higher list replaced the lower one whole | Union by key under `deep`: environment names case-insensitively, branch names verbatim, workflow paths as GitHub lists them; each accepts a `{_layering, entries}` wrapper; an environment's nested lists union by their own keys | No error: a higher layer that meant to replace now unions; write `_layering: replace` on the wrapper; [section 30](#30-environments-branches-and-workflows-layer-by-key) |
-| A higher layer's `null` wins and means empty on GitHub; `_remove: true` drops a keyed entry | In v2's defaults merge a target's `null` survived as a value; the pre-release fold read it as "delete the lower key" | `null` is written as the value, the empty or off state; a key with no empty state refuses it; a whole-section `null` only on `pages` and `interaction_limits`; `_remove: true` drops one lower entry and is consumed | Validation fails naming the legal values; a `null` written to mean "stop managing this" empties the setting on GitHub instead; [section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry) |
+| A higher layer's `null` wins and means empty on GitHub; `_remove: true` drops a keyed entry | In v2's defaults merge a whole-section `null` opted out of the defaults' section while a nested `null` survived as a value; the pre-release fold read a `null` as "delete the lower key" | `null` is written as the value, the empty or off state; a key with no empty state refuses it; a whole-section `null` only on `pages` and `interaction_limits`; `_remove: true` drops one lower entry and is consumed | Validation fails naming the legal values; a `null` written to mean "stop managing this" empties the setting on GitHub instead; [section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry) |
 | File-wide `_undeclared` and the run input `undeclared` | The policy lived on each section's wrapper only | A top-level `_undeclared: keep` or `delete` sets every knobbed section of the file; the `undeclared` input sets the run; a wrapper beats the file, the file beats the input, the input beats the section default | No error: a top-level `_undeclared: delete` that v2 dropped as a note now deletes undeclared entries on the first apply; a file that set every wrapper by hand keeps working; a file-wide `delete` also deletes undeclared deployment protection rules; [section 32](#32-file-wide-_undeclared-and-the-undeclared-input) |
 | Apply refuses to write over a live value the file omits | Check compared declared keys only; the ruleset and environment PUTs wrote the whole object, so an omitted live value was deleted while check said clean | Check reports the omitted value as drift; apply refuses that entry's PUT and fails the section | The section fails with `not applied - the update would remove a live value the settings file omits`; declare the key, or declare it empty; [section 33](#33-apply-refuses-over-omitted-live-values) |
 | Every file-only check runs before the first write | A duplicate in a section the `sections` input excluded never ran; one in a selected section threw mid-run after earlier sections wrote | Every section's file-only checks run at validation, selected or not, before any request | A file that applied with `sections: repository` beside a broken `labels` fails with exit 1 and zero requests; a custom list module built with the library implements `validate`; [section 34](#34-file-only-checks-run-before-the-first-write) |
-| Library: `plan()` takes only validator-minted input | `labels.plan(ctx, [{name: "bug"}, {name: "Bug"}])` compiled, so a caller could skip the file-only checks | The parameter is `ValidatedInput<K>`, minted by `validateSettings`, `mergeSettings`, or `snapshotRepository` | A raw list fails to compile, naming `ValidatedBrand`; [section 35](#35-library-plan-takes-only-validator-minted-input) |
+| Library: `plan()` takes only validator-minted input | In the pre-release v3 builds `labels.plan(ctx, [{name: "bug"}, {name: "Bug"}])` compiled, so a caller could skip the file-only checks | The parameter is `ValidatedInput<K>`, minted by `validateSettings`, `mergeSettings`, or `snapshotRepository` | A raw list fails to compile, naming `ValidatedBrand`; [section 35](#35-library-plan-takes-only-validator-minted-input) |
 | Labels: color and description are checked at parse | `color: red` reached GitHub as a 422 and never converged; a 150-character description 422ed | `color` is six hex digits, the `#` optional; `description` is at most 100 characters | Validation fails naming the entry and the rule; [section 36](#36-labels-colors-and-descriptions) |
 | Repository: GET-only keys, commit-message pairs, topics, and security sub-keys | `has_downloads: false` drifted on every run; an illegal squash pair or a bad topic 422ed at apply | Refused at parse: a GET-only key (`has_downloads`, `has_pages`, `custom_properties`, ids, urls, counts), an unknown `security_and_analysis` sub-key, a commit message without its title or in an illegal squash pair, a malformed or empty topic, more than 20 topics | Validation fails naming the key and the fix; [section 37](#37-repository-get-only-keys-commit-pairs-topics-and-security-sub-keys) |
 | Pages: GET-only site fields and the source path | `custom_404: true` rode the PUT, was dropped, and drifted forever; `source.path: /src` 422ed | `url`, `html_url`, `status`, `custom_404`, `protected_domain_state`, `pending_domain_unverified_at`, and `https_certificate` are refused; `source.path` is `/` or `/docs` | Validation fails naming the key; [section 38](#38-pages-get-only-fields-and-the-source-path) |
 | Actions: reported-only fields, a closed `selected_actions`, enums and bounds | `maximum_allowed_days: 400` was re-PUT on every run; a misspelled `selected_actions` key was re-PUT silently forever | `selected_actions_url`, `artifact_and_log_retention.maximum_allowed_days`, and `oidc_customization_sub.sub_claim_prefix` are refused; `selected_actions` is closed to its three keys and typed; `approval_policy` is an enum; claim keys match `^[A-Za-z0-9_]+$` and are unique; retention days and cache limits are positive integers; `include_claim_keys` beside `use_default: true` is refused; `sha_pinning_required` is a known boolean | Validation fails naming the key and the fix; [section 39](#39-actions-fields-that-could-never-converge) |
-| Code scanning and code quality setup: GET-only keys, languages, the runner pair | `schedule: weekly`, `languages: [javascript]`, and a `runner_label` under `runner_type: standard` each drifted forever | `schedule` and `updated_at` are refused; languages are spelled as the PATCH takes them (`javascript-typescript`, no `rust`); a string `runner_label` goes only with `runner_type: labeled`, which requires one | Validation fails naming the key and the spelling to write; a key the GET never echoes earns the never-converges note; [section 40](#40-setup-sections-get-only-keys-languages-and-the-runner-pair) |
-| Branches: protection shapes the file alone shows wrong | A protection copied from GitHub's GET (`{url, enabled}` wrappers, `enforcement_level`) applied and drifted forever; `required_status_checks` without `strict` 422ed; `required_approving_review_count: 7` 422ed | Refused at parse: a GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`); `required_status_checks` needs `strict` and `contexts` or `checks`; the count is 0 to 6; a `checks` item takes only `context` and `app_id`; a scalar where the two mappings go | Validation fails naming the key and the fix; a live all-empty `restrictions` holder the file omits is now drift and a loud PUT, not silence; [section 41](#41-branches-protection-shapes) |
+| Code scanning and code quality setup: GET-only keys, languages, the runner pair | `schedule: weekly` and a `runner_label` under `runner_type: standard` each drifted forever; `languages: [javascript]` never matched the pair GitHub reports | `schedule` and `updated_at` are refused; languages are spelled as the PATCH takes them (`javascript-typescript`, no `rust`); a string `runner_label` goes only with `runner_type: labeled`, which requires one | Validation fails naming the key and the spelling to write; a key the GET never echoes earns the never-converges note; [section 40](#40-setup-sections-get-only-keys-languages-and-the-runner-pair) |
+| Branches: protection shapes the file alone shows wrong | A protection copied from GitHub's GET 422ed on its `{url, enabled}` wrappers, and its other GET-only keys (`url`, `enforcement_level`) drifted forever; `required_status_checks` without `strict` 422ed; `required_approving_review_count: 7` 422ed | Refused at parse: a GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`); `required_status_checks` needs `strict` and `contexts` or `checks`; the count is 0 to 6; a `checks` item takes only `context` and `app_id`; a scalar where the two mappings go | Validation fails naming the key and the fix; a live all-empty `restrictions` holder the file omits is now drift and a loud PUT, not silence; [section 41](#41-branches-protection-shapes) |
 | Collaborators and teams: permissions and team slugs | `permission: write` converged on an existing Write grant and 422ed on a new one; `teams[].name: Core Team` probed `/teams/Core%20Team`, 404ed, and check said "no access" | `permission` refuses `read`, `write`, a mis-cased standard permission, an empty value, and whitespace at either end; `teams[].name` is the slug alphabet `[A-Za-z0-9._-]` with at least one letter or digit | Validation fails suggesting a form that parses (`push`, `admin`, `core-team`); [section 42](#42-collaborators-and-teams-permissions-and-slugs) |
 | Secret and variable names, and the variable value cap | `name: deploy-token` parsed; the sealed PUT 422ed mid-apply; a variable value over 48 KB 422ed | Names are ASCII letters, digits, and underscores, no leading digit, no `GITHUB_` prefix in any case; a variable value is at most 49152 bytes of UTF-8 | Validation fails naming the entry's path; [section 43](#43-secret-and-variable-names-and-the-value-cap) |
 | Check-suite preferences: `app_id` | `app_id: 0` and a negative id were PATCHed on every run; a repeated id was collapsed by GitHub with nothing reading it back | `app_id` is a positive integer and appears once | Validation fails naming the entries; [section 44](#44-check-suite-preferences-app_id) |
@@ -63,7 +63,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | Rulesets: enforcement, bypass actors, ref-name tokens, rule parameters | `enforcement: enabled`, `include: ["~all"]`, a Team actor without `actor_id`, or `grouping_strategy: allgreen` 422ed after earlier sections wrote | `enforcement` is `active`, `evaluate`, or `disabled`; bypass actors are typed from the spec; a `~` value is `~ALL` or `~DEFAULT_BRANCH`; the 23 known rule types carry typed parameters, and an unknown type passes through | Validation fails naming the entry, key, and accepted values; [section 49](#49-rulesets-enforcement-actors-tokens-and-parameters) |
 | Milestones: `due_on` is a day | `due_on: 2026-01-15` compared unequal to the `08:00:00Z` GitHub echoes and drifted forever; `T00:00:00Z` stored the previous day; `null` and offset timestamps passed through | A calendar day `YYYY-MM-DD`, or a UTC timestamp read for its day; written as noon UTC; `null` and offsets are refused | Validation fails naming the day form; a snapshot writes `YYYY-MM-DDT12:00:00Z`; [section 50](#50-milestones-due_on-is-a-day) |
 | Environments: declared-off protection converges, and GitHub's refusals move to parse | `wait_timer: 0`, `prevent_self_review: false`, `reviewers: []` on an unprotected environment drifted forever; a two-false `deployment_branch_policy` 422ed | The disabled values are the baseline, so they converge; refused at parse: `wait_timer` outside 0 to 43200 or fractional, more than 6 reviewers, both policy flags true or both false, `prevent_self_review: true` without reviewers, a policy `type` outside `branch` and `tag` | Validation fails naming the fix (`deployment_branch_policy: null` spells "any branch"); [section 51](#51-environments-disabled-defaults-and-the-refusals) |
-| Autolinks: charset, the `<num>` placeholder, overlapping prefixes, the live flag | An empty or bad-charset `key_prefix` or a template without `<num>` 422ed; a recreate dropped the live `is_alphanumeric: false` | Refused at parse: an empty `key_prefix`, a character outside GitHub's set, a template without `<num>`, two prefixes where one begins the other; a recreate keeps the live flag | Validation fails naming the key and an example value; [section 52](#52-autolinks-charset-placeholder-and-overlapping-prefixes) |
+| Autolinks: charset, the `<num>` placeholder, overlapping prefixes, the live flag | An empty or bad-charset `key_prefix` or a template without `<num>` 422ed; a recreate sent `is_alphanumeric: true` over a live `false` | Refused at parse: an empty `key_prefix`, a character outside GitHub's set, a template without `<num>`, two prefixes where one begins the other; a recreate keeps the live flag | Validation fails naming the key and an example value; [section 52](#52-autolinks-charset-placeholder-and-overlapping-prefixes) |
 | YAML merge keys resolve | `<<: *base` survived as a literal `<<` field and rode into the create payload | `<<` merges the aliased mapping, as the Probot Settings app's parser did | No error: an entry that carried a literal `<<` key now gets the merged fields instead; [section 53](#53-yaml-merge-keys-resolve) |
 | Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2322`, naming the missing key); parse the document through `validateSettings`, or declare both keys; [section 54](#54-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
 
@@ -163,30 +163,30 @@ A value the section's own schema rejects already failed the target in v2; that c
 
 ## 9. Library: the public entry and the v3 names
 
-For `@vivswan/github-settings-as-code` consumers. Before and after, one program:
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds' (v2.0.0's package was private and exported nothing), as in sections 24 and 29. Before and after, one program:
 
 ```text
-v2   import { GithubApi, checkRepository, validateSettings, runForRepo } from "@vivswan/github-settings-as-code";
-     const { settings, warnings } = validateSettings(doc)._unsafeUnwrap();
-     await checkRepository(client, { repo, settings, onMissingPermission: "fail", sections: SectionSelection.ALL });
+pre-release   import { GithubApi, checkRepository, validateSettings, runForRepo } from "@vivswan/github-settings-as-code";
+              const { settings, warnings } = validateSettings(doc)._unsafeUnwrap();
+              await checkRepository(client, { repo, settings, onMissingPermission: "fail", sections: SectionSelection.ALL });
 
-v3   import { GitHubApi, checkRepository, validateSettings } from "@vivswan/github-settings-as-code";
-     import { runForRepo } from "@vivswan/github-settings-as-code/internal";
-     const { settings, log } = validateSettings(doc)._unsafeUnwrap();
-     await checkRepository(client, repo, settings);
+v3            import { GitHubApi, checkRepository, validateSettings } from "@vivswan/github-settings-as-code";
+              import { runForRepo } from "@vivswan/github-settings-as-code/internal";
+              const { settings, log } = validateSettings(doc)._unsafeUnwrap();
+              await checkRepository(client, repo, settings);
 ```
 
 The package now has two entries, and one naming family per layer:
 
-| | v2 | v3 |
+| | pre-release | v3 |
 |---|---|---|
-| The entry | One, 192 names, all pinned | The public entry: the 118 names the [library page](../reference/library.md#the-api-by-group) tables document, under semver. The internal entry, `@vivswan/github-settings-as-code/internal`: everything else the action, the CLI, and the tests import, with no promise |
+| The entry | One, 192 names, all pinned | The public entry: the names the [library page](../reference/library.md#the-api-by-group) tables document, under semver. The internal entry, `@vivswan/github-settings-as-code/internal`: everything else the action, the CLI, and the tests import, with no promise |
 | The verbs | `checkRepository`, `applyRepository`, `snapshotRepository`, `snapshotRepositories`, `validateSettings`, plus `foldLayers` and `mergeLayers` for a merge | The same five, plus `mergeSettings`; every verb takes its inputs positionally and one options object of the same knobs (`sections`, `onMissingPermission`, `io`, ...), each defaulted as the action's input |
 | The reports | `RepoRunReport` (`log`), `SnapshotReport` (`log`), `validateSettings` (`warnings: string[]`) | `CheckReport`, `ApplyReport`, `SnapshotReport`, `MergeReport`, `ValidateReport`: one `log: CollectedLine[]` on every report, the annotation level kept beside each line |
 
 Every rename, old to new. An old name fails to compile, naming the missing export; the new name is in the public entry unless the row says the internal entry:
 
-| v2 | v3 |
+| pre-release | v3 |
 |---|---|
 | `GithubApi` | `GitHubApi` |
 | `GithubClient` | `GitHubClient` |
@@ -294,6 +294,7 @@ v2 refused to delete an undeclared ruleset whose list entry lacked `source_type`
 ## 16. Underscore keys are directives, never notes
 
 v2 dropped any unknown top-level key starting with `_` as a private note, while rejecting the same key inside a section's `{entries}` wrapper.
+
 v3 has one rule everywhere: the underscore belongs to the directives, `_layering`, `_undeclared`, and `_remove` ([section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry)), and any other underscore key fails validation before any section runs.
 
 ```yaml settings
@@ -463,9 +464,9 @@ The snapshot's notes are sorted the same way, in the file header and in the anno
 
 ## 27. Library: one problem code for a malformed document
 
-For `@vivswan/github-settings-as-code` consumers.
+For `@vivswan/github-settings-as-code` consumers. The left column is the pre-release v3 builds' shape, as in sections 24 and 29.
 
-| v2 | v3 |
+| Pre-release | v3 |
 |---|---|
 | `settings-unknown-directives`: an unknown underscore key stopped the run alone | A line of `settings-malformed-sections`: `unknown underscore key: _owner. ...` |
 | `settings-unknown-sections`: an unknown section stopped the run alone | A line of the same problem: `unknown top-level section: stickers (known: ...)` |
@@ -606,6 +607,8 @@ Environment names fold case-insensitively, branch names verbatim, workflow paths
 
 Each of the three accepts a `{_layering, entries}` wrapper, which the render consumes; the rendered file holds the bare list. `_layering: replace` on the wrapper keeps the old outcome. The wrapper takes no `_undeclared`, since these sections apply no undeclared policy.
 
+The nested `variables` list renders bare above because both layers wrote it bare; the file-wide `_undeclared` of [section 32](#32-file-wide-_undeclared-and-the-undeclared-input) arrives separately and makes the render write every nested knobbed list in wrapper form, its resolved `_undeclared` spelled out.
+
 ## 31. null wins and means empty, and _remove drops an entry
 
 The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value like any other. Our `null` is the EMPTY or OFF state on GitHub, never a marker that deletes a lower key.
@@ -654,7 +657,7 @@ notice: repo.yml: labels[0] carries _remove: true and dropped the entry a lower 
 Where GitHub has no empty state, a `null` is the layer's own error, naming the values that exist. So is a whole-section `null` outside `pages` and `interaction_limits`:
 
 ```text
-error: bad.yml has malformed section entries: repository.enable_git_lfs has no empty state; write true or false; labels: null has no meaning; remove the section or declare its entries
+error: bad.yml has malformed section entries: repository.enable_git_lfs has no empty state; write true or false; labels: null has no meaning; remove the section or declare its entries. ...
 ```
 
 The pre-release fold read a higher `null` as "delete the lower key" with a notice, and dropped a top-level `null` that met nothing. Both readings are gone: every `null` that won its key is in the rendered file, and validation refused every one a key does not admit. `_undeclared: null` is refused the same way; omit the key to inherit the lower policy.
@@ -690,22 +693,22 @@ To stop managing a key, omit it from every layer; a live ruleset or environment 
 The policy no longer has to be repeated on every wrapper:
 
 ```text
-v2   labels:
-       _undeclared: delete
-       entries: [...]
-     milestones:
-       _undeclared: delete
-       entries: [...]
-     webhooks:
-       _undeclared: delete
-       entries: [...]
+pre-release   labels:
+                _undeclared: delete
+                entries: [...]
+              milestones:
+                _undeclared: delete
+                entries: [...]
+              webhooks:
+                _undeclared: delete
+                entries: [...]
 
-v3   _undeclared: delete          # every knobbed section of this file, unless its wrapper says otherwise
-     labels: [...]
-     milestones: [...]
-     webhooks:
-       _undeclared: keep          # the wrapper wins for this one section
-       entries: [...]
+v3            _undeclared: delete          # every knobbed section of this file, unless its wrapper says otherwise
+              labels: [...]
+              milestones: [...]
+              webhooks:
+                _undeclared: keep          # the wrapper wins for this one section
+                entries: [...]
 ```
 
 The run input `undeclared` (`keep` or `delete`, unset by default) sets the same default for every file an apply, check, or render reads; `mode: snapshot` rejects it. The precedence, highest first: the list's wrapper, then the file's top-level `_undeclared`, then the `undeclared` input, then the list's own default the [undeclared policy](../reference/undeclared-policy.md) page lists.
@@ -762,18 +765,18 @@ Fix the declaration, in the excluded section too. For `@vivswan/github-settings-
 
 ## 35. Library: plan() takes only validator-minted input
 
-For `@vivswan/github-settings-as-code` consumers.
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in sections 24 and 29.
 
 ```text
-v2   const labels = sectionModule("labels");
-     await labels.plan(planContext(labels, client, repo), [{ name: "bug" }, { name: "Bug" }]);
-     // compiled: a caller could hand the planner a pair the validator refuses
+pre-release   const labels = sectionModule("labels");
+              await labels.plan(planContext(labels, client, repo), [{ name: "bug" }, { name: "Bug" }]);
+              // compiled: a caller could hand the planner a pair the validator refuses
 
-v3   const { settings } = validateSettings(doc)._unsafeUnwrap();
-     if (settings.labels !== undefined) {
-       await labels.plan(planContext(labels, client, repo), settings.labels);
-     }
-     // settings.labels is the ValidatedInput<"labels"> the planner takes, or undefined when the file has no labels section
+v3            const { settings } = validateSettings(doc)._unsafeUnwrap();
+              if (settings.labels !== undefined) {
+                await labels.plan(planContext(labels, client, repo), settings.labels);
+              }
+              // settings.labels is the ValidatedInput<"labels"> the planner takes, or undefined when the file has no labels section
 ```
 
 The old call fails to compile with `Property '[validatedInput]' is missing in type '{ name: string; }[]' but required in type 'ValidatedBrand<"labels">'`. Pass the section off a validated document: `validateSettings(doc)`, `mergeSettings(layers)`, or `snapshotRepository(...)` returns `settings`, and each section of it carries the brand. `SectionInput<K>`, the unbranded shape, stays exported for a custom module's `validate` hook.
@@ -867,7 +870,7 @@ Fix: delete the reported-only field, fix the `selected_actions` spelling, and wr
 v2   code_scanning_default_setup:
        state: configured
        schedule: weekly             # drift schedule: "weekly" != null, PATCH planned forever
-       languages: [javascript]      # drift languages: missing "javascript", forever
+       languages: [javascript]      # never matched: GitHub reports javascript and typescript apart, and the PATCH takes only javascript-typescript
      code_quality_setup:
        runner_type: standard
        runner_label: gpu            # drift runner_label: "gpu" != null, forever
@@ -888,7 +891,7 @@ v2   branches:
            url: https://api.github.com/repos/octocat/hello-world/branches/main/protection
            enforce_admins: {url: "...", enabled: true}
            required_status_checks: {strict: true, contexts: [ci], enforcement_level: everyone}
-     -> PUT .../branches/main/protection -> 200, result: applied; every later check reports drift
+     -> PUT .../branches/main/protection -> 422 on the {url, enabled} wrapper; without it the PUT landed and the other GET-only keys drifted on every check
 
 v3   branches[0].protection.required_status_checks.enforcement_level: ... is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)
      branches[0].protection.url: ... is a link GitHub's GET response carries and the protection PUT has no word for; remove it
@@ -898,11 +901,11 @@ v3   branches[0].protection.required_status_checks.enforcement_level: ... is Git
 
 | Declared | v2 | v3 |
 |---|---|---|
-| A GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`) | Applied, then drifted forever | Refused with the fix |
+| A GET-only key at any depth (`name`, `enabled`, `enforcement_level`, `url`, `*_url`) | A `{url, enabled}` wrapper 422ed at apply; the other keys applied, then drifted forever | Refused with the fix |
 | `required_status_checks` without `strict`, or without `contexts` or `checks` | 422 at apply | Refused |
 | `required_approving_review_count: 7` | 422 at apply | Refused: a whole number 0 to 6 |
 | A `checks` item with a key other than `context` and `app_id` | Sent as written | Refused naming the key |
-| A scalar where `required_status_checks` or `required_pull_request_reviews` goes | Passed through on wildcard entries | Refused: a mapping or `null` on every entry |
+| A scalar where `required_status_checks` or `required_pull_request_reviews` goes | Refused on a wildcard entry, passed through to the PUT on a literal one | Refused: a mapping or `null` on every entry |
 
 Fix: declare the PUT's shape (bare booleans, `strict` beside the check list) instead of pasting the GET. Also new: a live `restrictions` holder whose `users`, `teams`, and `apps` are all empty is a push restriction that lets nobody through, so a file that omits it now sees the omitted-live drift line and a loud PUT instead of a silent lift.
 
@@ -915,7 +918,7 @@ v2   collaborators:
        - username: bob
          permission: Admin          # 422
      teams:
-       - name: Core Team            # probed /teams/Core%20Team, 404; check said "no access; apply will grant"
+       - name: Core Team            # probed /teams/Core%20Team, 404; check said: no access to <repo>; apply will grant "push"
          permission: push
 
 v3   collaborators[0].permission: "write" is the vocabulary GitHub reports a role in (role_name), not one a grant accepts; declare "push" ("pull", "triage", "push", "maintain", "admin", or a custom org role name)
@@ -963,7 +966,7 @@ v2   interaction_limits:
        expiry: two_weeks
        expires_at: "2027-01-01T00:00:00Z"
        pull_request_creation_cap: {enabled: true, max_open_pull_requests: 0}
-     -> PUT ships all of it; 422 on every apply, since the base PUT re-arms every run
+     -> the base PUT re-armed every run and 422ed on expiry and expires_at, failing the section before the cap's own PATCH ran
 
 v3   interaction_limits.limit: limit is one of existing_users, contributors_only, collaborators_only (GitHub's interaction groups)
      interaction_limits.expiry: expiry is one of one_day, three_days, one_week, one_month, six_months (GitHub's interaction durations)
@@ -998,15 +1001,15 @@ v2   webhooks:
            content_type: JSON
            insecure_ssl: 2
          events: [push, pushes]
-     -> gsac validate: valid; POST /repos/{owner}/{repo}/hooks -> 422, after the other sections ran
+     -> validation accepted the file; POST /repos/{owner}/{repo}/hooks -> 422, after the other sections ran
 
 v3   webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the shape is https://hooks.example.com/ci); GitHub refuses the hook otherwise
      webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"
      webhooks[0].config.insecure_ssl: 2 is not a value GitHub accepts; use "0" (verify the TLS certificate) or "1" (skip verification), as a string or a number
-     webhooks[0].events[1]: "pushes" is not a repository webhook event this release knows ("*" means every event); GitHub's list is https://docs.github.com/webhooks/webhook-events-and-payloads, and an event added there since is a new line in src/upstream-gaps/webhook-events.ts
+     webhooks[0].events[1]: "pushes" is not an event GitHub delivers to repository webhooks ("*" means every event); the accepted names are GitHub's list at https://docs.github.com/webhooks/webhook-events-and-payloads, read from @octokit/openapi-webhooks, so an event GitHub added since arrives in the release that bumps that package
 ```
 
-Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. An event GitHub adds later is refused by this release until the vocabulary file gains its line.
+Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. The list is generated from `@octokit/openapi-webhooks`, so an event GitHub adds later is refused until the release that bumps that package.
 
 ## 48. Secret scanning patterns must compile
 
@@ -1016,7 +1019,7 @@ v2   secret_scanning_custom_patterns:
          pattern: "([a-z"           # parsed clean; check saw only a missing pattern; apply -> bulk create 422
          must_match: ["[0-9]", "*prod"]
 
-v3   secret_scanning_custom_patterns[0].pattern: cannot be compiled as a regular expression (Invalid regular expression: missing )); fix the expression, or report a documentation issue if Hyperscan accepts it as written - ...
+v3   secret_scanning_custom_patterns[0].pattern: cannot be compiled as a regular expression (Invalid regular expression: missing terminating ] for character class); fix the expression, or report a documentation issue if Hyperscan accepts it as written - ...
      secret_scanning_custom_patterns[0].must_match[1]: cannot be compiled as a regular expression (quantifier does not follow a repeatable item); ...
 ```
 
@@ -1039,7 +1042,7 @@ v2   rulesets:
 
 v3   rulesets[0].enforcement: Invalid option: expected one of "active"|"evaluate"|"disabled"
      rulesets[0].conditions.ref_name.include[0]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"
-     rulesets[0].rules[0]: parameters.grouping_strategy: Invalid option: expected one of "ALLGREEN"|"HEADGREEN"; parameters.merge_method: Invalid option: expected one of "MERGE"|"SQUASH"|"REBASE"
+     rulesets[0].rules[0]: parameters.grouping_strategy: Invalid option: expected one of "ALLGREEN"|"HEADGREEN"; parameters.merge_method: Invalid option: expected one of "MERGE"|"SQUASH"|"REBASE"; parameters.check_response_timeout_minutes: Invalid input: expected number, received undefined; ... (the four other numeric merge_queue parameters the file left out, the same way)
      rulesets[0].bypass_actors[0].actor_id: a Team bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it
 ```
 
@@ -1088,7 +1091,7 @@ GitHub answers `protection_rules: []` for an unprotected environment, and the fl
 | `prevent_self_review: true` with no reviewers | Drifted forever (the flag rides the required-reviewers rule) | Refused: declare a reviewer, or write `false` |
 | `wait_timer: 2.5`, or outside 0 to 43200 | 422 | Refused: a whole number of minutes in GitHub's range |
 | More than 6 `reviewers` | 422 | Refused: GitHub's cap |
-| `deployment_branch_policies[].type: wildcard` | Deleted and recreated the pattern every run | Refused: `branch` or `tag` |
+| `deployment_branch_policies[].type: wildcard` | Deleted the live policy, then the create 422ed; every run retried | Refused: `branch` or `tag` |
 
 For library consumers, `DeploymentBranchPolicyConfig.type` narrows from `string` to `"branch" | "tag"`.
 
@@ -1108,7 +1111,7 @@ v3   autolinks[0].url_template: url_template "https://example.com/TICKET" has no
      autolinks[2].key_prefix: key_prefix "BUG " may only contain letters, digits, and . - _ + = : / #, which is all GitHub accepts; remove the other characters
 ```
 
-Two prefixes where one begins the other (`TICKET-` and `TICKET-A`) are refused as a pair before the section's read, since GitHub rejects the second create. A recreate (the template changed) now carries the live `is_alphanumeric` instead of letting GitHub's create default flip it to `true` with no drift line.
+Two prefixes where one begins the other (`TICKET-` and `TICKET-A`) are refused as a pair before the section's read, since GitHub rejects the second create. A recreate (the template changed) now carries the live `is_alphanumeric`; v2's create sent `is_alphanumeric: true` itself when the file left the flag out, flipping a live `false` with no drift line.
 
 Fix: a non-empty prefix in GitHub's charset, `<num>` in every template, and prefixes where neither begins another.
 
@@ -1147,13 +1150,12 @@ v3   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // T
 
 An entry cast past the type gets two omitted-key drift lines, since nothing fills them after the parse.
 
-
 ## Order of operations
 
 1. Rename any settings file whose path contains a comma, rename `undeclared` to `_undeclared` in every settings file, and move every other underscore key into a YAML comment; the v2 line accepts the old spellings only, so do all three together with the pin move.
 2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
 3. Where a snapshot wrote a `$WEBHOOK_SECRET_<id>` reference, change the reference and its exported variable to `SECRET_WEBHOOK_<id>` together, or re-snapshot.
-4. Move the pin to `@v3` with `mode: check`; a layered setup renames `mode: merge` to `mode: render` and `merged-file` to `rendered-file` in the same edit, since v3 refuses the old mode before check can run. The parse-time refusals (sections 36 to 52) surface here, before any request, collected per run (a section prints at most five of its own issues); fix each by the message and run check again.
+4. Move the pin to `@v3` with `mode: check`. A layered setup also renames `mode: merge` to `mode: render` and `merged-file` to `rendered-file`, and writes `deep` where a layer or the `layering` input said `merge`; v3 refuses the old mode and value before check runs. The parse-time refusals (sections 36 to 52) surface here, before any request, at most five schema issues per section; fix each and run check again.
 5. Read the fallback notices and the drift; add render steps where a target needs the old overlay behavior; delete duplicated live items the sections now refuse; declare or empty the live values apply now refuses to write over (section 33).
-6. In a layered setup, write `_layering: replace` where a higher list must still win, and replace every `null` that meant "stop managing this" with an omission or `_remove: true` (sections 28 to 31).
+6. In a layered setup, write `_layering: replace` where a higher list must still win, omit from every layer any key whose `null` meant "stop managing this", and drop a lower entry with `_remove: true` (sections 28 to 31).
 7. Switch back to apply.
