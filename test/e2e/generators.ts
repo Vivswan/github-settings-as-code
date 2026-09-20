@@ -42,7 +42,7 @@ import { genMilestones, milestonesWitness } from "../../src/sections/milestones/
 import { genPages } from "../../src/sections/pages/generators.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { genRepository } from "../../src/sections/repository/generators.js";
-import { genRulesets } from "../../src/sections/rulesets/generators.js";
+import { genRulesets, PULL_REQUEST_PARAMETERS } from "../../src/sections/rulesets/generators.js";
 import { compileFailure } from "../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
 import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
 import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
@@ -678,6 +678,67 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
         doc: { rulesets: value },
         offendingToken: `${itemToken}.conditions.ref_name.include`,
       };
+    },
+  },
+  {
+    name: "rulesets-enforcement-enum",
+    build: (rng) => {
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).enforcement = rng.pick(["enabled", "Active", "on"]);
+      return { doc: { rulesets: value }, offendingToken: `${itemToken}.enforcement` };
+    },
+  },
+  {
+    name: "rulesets-ref-token-typo",
+    build: (rng) => {
+      // normalizeRefName passes every "~" value through, so a typo'd token would reach GitHub as written.
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).conditions = {
+        ref_name: { include: [rng.pick(["~all", "~MAIN", "~default_branch"])] },
+      };
+      return {
+        doc: { rulesets: value },
+        offendingToken: `${itemToken}.conditions.ref_name.include[0]`,
+      };
+    },
+  },
+  {
+    name: "rulesets-bypass-actor-without-id",
+    build: (rng) => {
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).bypass_actors = [
+        { actor_type: rng.pick(["Team", "User", "RepositoryRole", "Integration"]) },
+      ];
+      return { doc: { rulesets: value }, offendingToken: `${itemToken}.bypass_actors[0].actor_id` };
+    },
+  },
+  {
+    name: "rulesets-known-rule-parameter-case",
+    build: (rng) => {
+      // The casing GitHub sets on a KNOWN rule type is refused at parse; an unknown type still passes through to GitHub's own 422.
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).rules = [
+        rng.pick([
+          { type: "branch_name_pattern", parameters: { operator: "startsWith", pattern: "feat/" } },
+          {
+            type: "pull_request",
+            parameters: { ...PULL_REQUEST_PARAMETERS, allowed_merge_methods: ["SQUASH"] },
+          },
+          {
+            type: "merge_queue",
+            parameters: {
+              check_response_timeout_minutes: 60,
+              grouping_strategy: "ALLGREEN",
+              max_entries_to_build: 5,
+              max_entries_to_merge: 5,
+              merge_method: "squash",
+              min_entries_to_merge: 1,
+              min_entries_to_merge_wait_minutes: 5,
+            },
+          },
+        ]),
+      ];
+      return { doc: { rulesets: value }, offendingToken: `${itemToken}.rules[0]: parameters.` };
     },
   },
   {
@@ -2257,7 +2318,8 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
   const parameterRng = rng.fork("rule-parameters");
   for (const entry of rulesetEntries(doc)) {
     for (const rule of Array.isArray(entry.rules) ? entry.rules : []) {
-      if (isPlainMapping(rule) && parameterRng.bool(0.4)) {
+      // Only a rule drawn bare takes the marker: a typed rule's parameters are what the schema requires of it.
+      if (isPlainMapping(rule) && rule.parameters === undefined && parameterRng.bool(0.4)) {
         rule.parameters = { strict: parameterRng.bool() };
       }
     }

@@ -556,9 +556,10 @@ export function storedKeyMaterial(key: string): string {
 }
 
 /**
- * Mock-only realism: the action passes rules through verbatim and never consults this list; it exists so
- * a typo'd rules[].type answers GitHub's real 422 shape instead of being stored silently. A lockstep test
- * (openapi/validate.test.ts) pins it to the trimmed spec's rules[].type enums.
+ * Mock-only realism: the runtime never consults this list (an unknown rules[].type passes through verbatim);
+ * it exists so a typo'd type answers GitHub's real 422 shape instead of being stored silently. A lockstep test
+ * (openapi/validate.test.ts) pins it to the trimmed spec's rules[].type enums, and rulesets-schema.test.ts
+ * pins the schema's KNOWN_RULE_TYPES to it.
  */
 export const RULESET_RULE_TYPES = new Set([
   "creation",

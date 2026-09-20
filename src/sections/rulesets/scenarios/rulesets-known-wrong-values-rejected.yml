@@ -1,0 +1,37 @@
+# What the file alone shows wrong about a ruleset is refused when it is parsed,
+# naming each key and the fix, before any request: an enforcement level GitHub
+# does not spell that way, a Team bypass actor without its actor_id, a DeployKey
+# actor carrying one, a pull_request bypass mode on a tag ruleset, and a "~"
+# ref-name value that is not ~ALL or ~DEFAULT_BRANCH.
+name: rulesets-known-wrong-values-rejected
+settings:
+  rulesets:
+    - name: main-protection
+      enforcement: enabled
+      conditions:
+        ref_name:
+          include: ["~all"]
+      bypass_actors:
+        - actor_type: Team
+        - actor_type: DeployKey
+          actor_id: 7
+    - name: release-tags
+      target: tag
+      bypass_actors:
+        - actor_type: RepositoryRole
+          actor_id: 5
+          bypass_mode: pull_request
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'rulesets[0].enforcement: Invalid option: expected one of "active"|"evaluate"|"disabled"'
+    - 'rulesets[0].conditions.ref_name.include[0]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"'
+    - "rulesets[0].bypass_actors[0].actor_id: a Team bypass actor needs its numeric actor_id"
+    - "rulesets[0].bypass_actors[1].actor_id: a DeployKey bypass actor takes no actor_id (GitHub documents it as null); remove the key or write null"
+    - 'rulesets[1].bypass_actors[0].bypass_mode: bypass_mode "pull_request" applies to branch rulesets only, and this ruleset targets tag; use "always" or "exempt"'

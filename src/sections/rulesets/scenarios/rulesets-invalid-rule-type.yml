@@ -1,8 +1,9 @@
-# The motivating case for the enriched rejection messages: a rule type GitHub
-# does not recognize. Rules pass through verbatim by design (no local catalog
-# of valid types), so the typo reaches GitHub and comes back as a 422; the
-# failure message must name the operation, the failure class, and carry the
-# documentation link from the response body.
+# A rule type GitHub does not recognize, which motivated the enriched rejection
+# messages. A type the vendored spec does not know passes through verbatim by
+# design, so a type GitHub ships tomorrow works today and this typo reaches
+# GitHub and comes back as a 422 that must name the operation and the failure
+# class and carry the documentation link. Wrongly cased parameters of a known
+# type never get this far: rulesets-known-rule-parameters-rejected.
 name: rulesets-invalid-rule-type
 settings:
   rulesets:

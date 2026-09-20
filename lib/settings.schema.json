@@ -541,6 +541,44 @@
       },
       "additionalProperties": {}
     },
+    "BypassActorConfig": {
+      "description": "One actor that may bypass the ruleset. Integration, RepositoryRole, Team, and User need their numeric actor_id; DeployKey takes none (null); OrganizationAdmin ignores it.",
+      "type": "object",
+      "properties": {
+        "actor_id": {
+          "description": "The id GitHub assigns the app, role, team, or user. Required for Integration, RepositoryRole, Team, and User; refused for DeployKey (write null or omit it); ignored for OrganizationAdmin.",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "actor_type": {
+          "description": "Integration, OrganizationAdmin, RepositoryRole, Team, DeployKey, or User, as GitHub spells them.",
+          "type": "string",
+          "enum": [
+            "Integration",
+            "OrganizationAdmin",
+            "RepositoryRole",
+            "Team",
+            "DeployKey",
+            "User"
+          ]
+        },
+        "bypass_mode": {
+          "description": "\"always\" (the default), \"pull_request\" (bypass only through a pull request; branch rulesets only, and never for a DeployKey), or \"exempt\" (rules are not run for the actor).",
+          "type": "string",
+          "enum": [
+            "always",
+            "pull_request",
+            "exempt"
+          ]
+        }
+      },
+      "required": [
+        "actor_type"
+      ],
+      "additionalProperties": {}
+    },
     "CheckSuitePreferencesConfig": {
       "description": "PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the declared preferences on every run.",
       "type": "object",
@@ -674,6 +712,43 @@
           ]
         }
       }
+    },
+    "CodeScanningToolConfig": {
+      "description": "One tool that must provide code scanning results.",
+      "type": "object",
+      "properties": {
+        "alerts_threshold": {
+          "description": "The alert severity that blocks the update: none, errors, errors_and_warnings, or all.",
+          "type": "string",
+          "enum": [
+            "none",
+            "errors",
+            "errors_and_warnings",
+            "all"
+          ]
+        },
+        "security_alerts_threshold": {
+          "description": "The security severity that blocks the update: none, critical, high_or_higher, medium_or_higher, or all.",
+          "type": "string",
+          "enum": [
+            "none",
+            "critical",
+            "high_or_higher",
+            "medium_or_higher",
+            "all"
+          ]
+        },
+        "tool": {
+          "description": "The code scanning tool's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alerts_threshold",
+        "security_alerts_threshold",
+        "tool"
+      ],
+      "additionalProperties": {}
     },
     "CodespacesSecretConfig": {
       "description": "One repository Codespaces secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
@@ -1355,6 +1430,39 @@
         ]
       }
     },
+    "PatternRuleParameters": {
+      "description": "The pattern and operator the five *_pattern rule types share.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "How the rule appears when configuring it.",
+          "type": "string"
+        },
+        "negate": {
+          "description": "Whether the rule fails when the pattern matches.",
+          "type": "boolean"
+        },
+        "operator": {
+          "description": "starts_with, ends_with, contains, or regex, in that spelling.",
+          "type": "string",
+          "enum": [
+            "starts_with",
+            "ends_with",
+            "contains",
+            "regex"
+          ]
+        },
+        "pattern": {
+          "description": "The pattern to match.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operator",
+        "pattern"
+      ],
+      "additionalProperties": {}
+    },
     "RepositoryConfig": {
       "description": "The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so current and future repo fields work unchanged; the keys below route to their own endpoints instead. Only declared keys are ever applied or compared.",
       "type": "object",
@@ -1410,6 +1518,856 @@
         "description": "Everything else passes through to PATCH /repos/{r} verbatim."
       }
     },
+    "RequiredReviewerConfig": {
+      "description": "A team and the file patterns whose changes it must approve.",
+      "type": "object",
+      "properties": {
+        "file_patterns": {
+          "description": "fnmatch patterns of the files the team must review.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "minimum_approvals": {
+          "description": "Approvals required from the team; zero adds the team as a reviewer without requiring approval.",
+          "type": "integer"
+        },
+        "reviewer": {
+          "description": "The reviewing team.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "The team's id.",
+              "type": "integer"
+            },
+            "type": {
+              "description": "Always \"Team\".",
+              "type": "string",
+              "const": "Team"
+            }
+          },
+          "required": [
+            "id",
+            "type"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "file_patterns",
+        "minimum_approvals",
+        "reviewer"
+      ],
+      "additionalProperties": {}
+    },
+    "ReviewDismissalActorConfig": {
+      "description": "One actor allowed to dismiss pull request reviews.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The actor's id.",
+          "type": "integer"
+        },
+        "type": {
+          "description": "User, Team, IntegrationInstallation, or RepositoryRole.",
+          "type": "string",
+          "enum": [
+            "User",
+            "Team",
+            "IntegrationInstallation",
+            "RepositoryRole"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<branch_name_pattern>": {
+      "description": "Branch names must match (or not match) a pattern.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "branch_name_pattern"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PatternRuleParameters"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<code_scanning>": {
+      "description": "Named code scanning tools must report before the ref is updated.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "code_scanning"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "code_scanning_tools": {
+              "description": "The tools that must provide results.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CodeScanningToolConfig"
+              }
+            }
+          },
+          "required": [
+            "code_scanning_tools"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<commit_author_email_pattern>": {
+      "description": "Commit author emails must match (or not match) a pattern.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "commit_author_email_pattern"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PatternRuleParameters"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<commit_message_pattern>": {
+      "description": "Commit messages must match (or not match) a pattern.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "commit_message_pattern"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PatternRuleParameters"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<committer_email_pattern>": {
+      "description": "Committer emails must match (or not match) a pattern.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "committer_email_pattern"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PatternRuleParameters"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<copilot_code_review>": {
+      "description": "Copilot code review is requested on new pull requests automatically.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "copilot_code_review"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "review_draft_pull_requests": {
+              "description": "Whether drafts are reviewed before they are marked ready.",
+              "type": "boolean"
+            },
+            "review_on_push": {
+              "description": "Whether each new push is reviewed.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<creation>": {
+      "description": "Only actors with bypass permission may create matching refs.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "creation"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<deletion>": {
+      "description": "Only actors with bypass permission may delete matching refs.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "deletion"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<file_extension_restriction>": {
+      "description": "Commits adding files with the listed extensions are refused.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "file_extension_restriction"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "restricted_file_extensions": {
+              "description": "The file extensions refused.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "restricted_file_extensions"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<file_path_restriction>": {
+      "description": "Commits touching the listed paths are refused.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "file_path_restriction"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "restricted_file_paths": {
+              "description": "The file and folder paths refused.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "restricted_file_paths"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<license_compliance_scanning>": {
+      "description": "Added or changed dependencies must comply with the organization's license policy.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "license_compliance_scanning"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<max_file_path_length>": {
+      "description": "Commits with file paths over the length cap are refused.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "max_file_path_length"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "max_file_path_length": {
+              "description": "The most characters a file path may have (1 to 32767).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32767
+            }
+          },
+          "required": [
+            "max_file_path_length"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<max_file_size>": {
+      "description": "Commits with a file over the size cap are refused.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "max_file_size"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "max_file_size": {
+              "description": "The largest file allowed, in megabytes (1 to 100); Git LFS objects are exempt.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "max_file_size"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<merge_queue>": {
+      "description": "Merges into matching branches go through a merge queue.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "merge_queue"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "check_response_timeout_minutes": {
+              "description": "Minutes a required status check may take before it counts as failed (1 to 360).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 360
+            },
+            "grouping_strategy": {
+              "description": "ALLGREEN (every PR's merge commit must pass all required checks) or HEADGREEN (only the head of the merge group must), in GitHub's upper-case spelling.",
+              "type": "string",
+              "enum": [
+                "ALLGREEN",
+                "HEADGREEN"
+              ]
+            },
+            "max_entries_to_build": {
+              "description": "Cap on queued pull requests building at the same time (0 to 100).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "max_entries_to_merge": {
+              "description": "Cap on pull requests merged as one group (0 to 100).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "merge_method": {
+              "description": "MERGE, SQUASH, or REBASE, in GitHub's upper-case spelling (the lower-case pull_request allowed_merge_methods spelling is refused here).",
+              "type": "string",
+              "enum": [
+                "MERGE",
+                "SQUASH",
+                "REBASE"
+              ]
+            },
+            "min_entries_to_merge": {
+              "description": "Minimum pull requests merged as one group (0 to 100).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "min_entries_to_merge_wait_minutes": {
+              "description": "Minutes the queue waits for the minimum group size before merging a smaller group (0 to 360).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 360
+            }
+          },
+          "required": [
+            "check_response_timeout_minutes",
+            "grouping_strategy",
+            "max_entries_to_build",
+            "max_entries_to_merge",
+            "merge_method",
+            "min_entries_to_merge",
+            "min_entries_to_merge_wait_minutes"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<non_fast_forward>": {
+      "description": "No force pushes to matching refs.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "non_fast_forward"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<pull_request>": {
+      "description": "Changes reach matching branches through a pull request only.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "pull_request"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "allowed_merge_methods": {
+              "description": "The merge methods allowed, lower-case merge, squash, rebase (the upper-case merge_queue spelling is refused here); at least one.",
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "merge",
+                  "squash",
+                  "rebase"
+                ]
+              }
+            },
+            "dismiss_stale_reviews_on_push": {
+              "description": "Whether a new reviewable push dismisses earlier approvals.",
+              "type": "boolean"
+            },
+            "dismissal_restriction": {
+              "description": "Who may dismiss pull request reviews.",
+              "type": "object",
+              "properties": {
+                "allowed_actors": {
+                  "description": "The people, teams, or apps allowed to dismiss reviews.",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/ReviewDismissalActorConfig"
+                  }
+                },
+                "enabled": {
+                  "description": "Whether review dismissal is restricted to the listed actors.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "enabled"
+              ],
+              "additionalProperties": {}
+            },
+            "require_code_owner_review": {
+              "description": "Whether files with a code owner need that owner's approving review.",
+              "type": "boolean"
+            },
+            "require_last_push_approval": {
+              "description": "Whether the most recent reviewable push must be approved by someone other than its pusher.",
+              "type": "boolean"
+            },
+            "required_approving_review_count": {
+              "description": "Approving reviews required (0 to 10).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "required_review_thread_resolution": {
+              "description": "Whether every review conversation must be resolved before merging.",
+              "type": "boolean"
+            },
+            "required_reviewers": {
+              "description": "Teams that must review changes to given file patterns (GitHub marks this beta).",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RequiredReviewerConfig"
+              }
+            }
+          },
+          "required": [
+            "dismiss_stale_reviews_on_push",
+            "require_code_owner_review",
+            "require_last_push_approval",
+            "required_approving_review_count",
+            "required_review_thread_resolution"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<required_deployments>": {
+      "description": "Named environments must deploy successfully before a push lands.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "required_deployments"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "required_deployment_environments": {
+              "description": "The environment names that must be deployed to first.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "required_deployment_environments"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<required_linear_history>": {
+      "description": "No merge commits may be pushed to matching refs.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "required_linear_history"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<required_signatures>": {
+      "description": "Commits pushed to matching refs must carry verified signatures.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "required_signatures"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<required_status_checks>": {
+      "description": "Named status checks must pass before the ref is updated.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "required_status_checks"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "do_not_enforce_on_create": {
+              "description": "Whether a new ref may be created even when a check would otherwise block it.",
+              "type": "boolean"
+            },
+            "required_status_checks": {
+              "description": "The checks that must pass.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/StatusCheckConfig"
+              }
+            },
+            "strict_required_status_checks_policy": {
+              "description": "Whether a pull request must be tested against the latest target commit.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "required_status_checks",
+            "strict_required_status_checks_policy"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<tag_name_pattern>": {
+      "description": "Tag names must match (or not match) a pattern.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "tag_name_pattern"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PatternRuleParameters"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<update>": {
+      "description": "Only actors with bypass permission may update matching refs.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "update"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "update_allows_fetch_and_merge": {
+              "description": "Whether the branch may still pull changes from its upstream repository.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "update_allows_fetch_and_merge"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "Rule<workflows>": {
+      "description": "Named workflows must pass before changes merge into matching branches.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it.",
+          "type": "string",
+          "const": "workflows"
+        },
+        "parameters": {
+          "description": "The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.",
+          "type": "object",
+          "properties": {
+            "do_not_enforce_on_create": {
+              "description": "Whether a new ref may be created even when a workflow would otherwise block it.",
+              "type": "boolean"
+            },
+            "workflows": {
+              "description": "The workflow files that must pass.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowFileConfig"
+              }
+            }
+          },
+          "required": [
+            "workflows"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
+    "RuleConfig": {
+      "description": "One rule of the ruleset: a type the spec knows, with its parameters typed, or any other type, passed through as written.",
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Rule%3Ccreation%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cupdate%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cdeletion%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Crequired_linear_history%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cmerge_queue%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Crequired_deployments%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Crequired_signatures%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cpull_request%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Crequired_status_checks%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cnon_fast_forward%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ccommit_message_pattern%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ccommit_author_email_pattern%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ccommitter_email_pattern%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cbranch_name_pattern%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ctag_name_pattern%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cworkflows%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ccode_scanning%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Ccopilot_code_review%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Clicense_compliance_scanning%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cfile_path_restriction%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cmax_file_path_length%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cfile_extension_restriction%3E"
+            },
+            {
+              "$ref": "#/definitions/Rule%3Cmax_file_size%3E"
+            }
+          ]
+        },
+        {
+          "$ref": "#/definitions/UnknownRule"
+        }
+      ]
+    },
     "RulesetConfig": {
       "description": "One repository ruleset, matched to the live repo by name.",
       "type": "object",
@@ -1429,9 +2387,14 @@
           ]
         },
         "enforcement": {
-          "description": "\"active\", \"evaluate\", or \"disabled\". Omitted, it is \"active\" (GitHub requires a value on create; this is the one chosen), so a live active ruleset is not drift under an entry without the key.",
+          "description": "\"active\", \"evaluate\", or \"disabled\", in that spelling (\"enabled\" and \"Active\" are refused at parse). Omitted, it is \"active\" (GitHub requires a value on create; this is the one chosen), so a live active ruleset is not drift under an entry without the key.",
           "default": "active",
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "active",
+            "evaluate",
+            "disabled"
+          ]
         },
         "conditions": {
           "description": "Which refs the ruleset covers.",
@@ -1442,14 +2405,14 @@
               "type": "object",
               "properties": {
                 "include": {
-                  "description": "Ref patterns the ruleset targets (fnmatch; ~DEFAULT_BRANCH and ~ALL are accepted).",
+                  "description": "Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as written; any other value starting with \"~\" is refused at parse, since no ref name contains one.",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "exclude": {
-                  "description": "Ref patterns excluded from the ruleset.",
+                  "description": "Ref patterns excluded from the ruleset; the same \"~\" rule applies.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -1460,32 +2423,17 @@
           }
         },
         "rules": {
-          "description": "Rule list, passed through verbatim (future rule types included).",
+          "description": "Rule list. A rule type the vendored spec knows has its parameters checked at parse; a type it does not know passes through verbatim, so a rule type GitHub ships tomorrow works today.",
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "type": {
-                "description": "The rule type, as the rulesets API names it (e.g. pull_request, required_status_checks).",
-                "type": "string"
-              },
-              "parameters": {
-                "description": "The rule's parameters, passed through verbatim as the API documents them for its type.",
-                "type": "object",
-                "additionalProperties": {}
-              }
-            },
-            "required": [
-              "type"
-            ]
+            "$ref": "#/definitions/RuleConfig"
           }
         },
         "bypass_actors": {
           "description": "Who may bypass the ruleset; each actor is one (actor_type, actor_id) pair, bypass_mode defaulting to always. An entry without the key leaves a live bypass list as drift and apply refuses the PUT; `[]` clears it on purpose. GitHub returns it only to a token with write access to the ruleset, so without Administration write check mode notes it instead of judging drift.",
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": {}
+            "$ref": "#/definitions/BypassActorConfig"
           }
         }
       },
@@ -1877,6 +2825,24 @@
           ]
         }
       }
+    },
+    "StatusCheckConfig": {
+      "description": "One required status check.",
+      "type": "object",
+      "properties": {
+        "context": {
+          "description": "The status check context name that must be present on the commit.",
+          "type": "string"
+        },
+        "integration_id": {
+          "description": "The GitHub App the check must come from, when pinned.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "additionalProperties": {}
     },
     "TeamConfig": {
       "description": "One org team's access to the repository, matched by team slug. Keys other than name and permission are rejected (a misspelled \"permission\" would otherwise silently grant the default role).",
@@ -2549,6 +3515,52 @@
       ],
       "additionalProperties": false
     },
+    "UnknownRule": {
+      "description": "A rule type the vendored spec does not know, passed through verbatim so a type GitHub ships tomorrow reaches it the day it ships; a typo comes back as GitHub's own 422 naming it.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "The rule type, as the rulesets API names it; none of the types the spec knows.",
+          "type": "string",
+          "not": {
+            "enum": [
+              "creation",
+              "update",
+              "deletion",
+              "required_linear_history",
+              "merge_queue",
+              "required_deployments",
+              "required_signatures",
+              "pull_request",
+              "required_status_checks",
+              "non_fast_forward",
+              "commit_message_pattern",
+              "commit_author_email_pattern",
+              "committer_email_pattern",
+              "branch_name_pattern",
+              "tag_name_pattern",
+              "workflows",
+              "code_scanning",
+              "copilot_code_review",
+              "license_compliance_scanning",
+              "file_path_restriction",
+              "max_file_path_length",
+              "file_extension_restriction",
+              "max_file_size"
+            ]
+          }
+        },
+        "parameters": {
+          "description": "The rule's parameters, as the API documents them for its type.",
+          "type": "object",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": {}
+    },
     "WebhookConfig": {
       "description": "One repository webhook, matched to the live repo by config.url. Hook URLs are configuration, not credentials: they appear in drift lines and notes on purpose. The secret never does.",
       "type": "object",
@@ -2708,6 +3720,33 @@
         "path",
         "state"
       ]
+    },
+    "WorkflowFileConfig": {
+      "description": "One workflow that must run for the rule to pass.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The path to the workflow file.",
+          "type": "string"
+        },
+        "ref": {
+          "description": "The branch or tag of the workflow file to use.",
+          "type": "string"
+        },
+        "repository_id": {
+          "description": "The id of the repository that holds the workflow.",
+          "type": "integer"
+        },
+        "sha": {
+          "description": "The commit of the workflow file to use.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "repository_id"
+      ],
+      "additionalProperties": {}
     }
   }
 }
