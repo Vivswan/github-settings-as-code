@@ -12,17 +12,17 @@ settings:
         required_pull_request_reviews:
           required_approving_review_count: 1
           dismissal_restrictions:
-            users: [{ login: octocat, id: 1, type: User }]
+            users: [{login: octocat, id: 1, type: User}]
             teams: []
             apps: []
           bypass_pull_request_allowances:
             users: []
-            teams: [{ slug: platform-team, id: 2, name: Platform Team }]
+            teams: [{slug: platform-team, id: 2, name: Platform Team}]
             apps: []
         restrictions:
           users: []
           teams: []
-          apps: [{ slug: deploy-gate, id: 3 }]
+          apps: [{slug: deploy-gate, id: 3}]
 live_state:
   branches: ["main"]
 token_permissions:
