@@ -27,7 +27,7 @@ import {
   type SectionPlan,
 } from "../contract/plan.js";
 import { leftOutOfSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
-import { INTERACTION_LIMITS_ROUTED_KEYS, InteractionLimitsConfig } from "./schema.js";
+import { InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -136,36 +136,24 @@ async function liveBaseLimit(ctx: InteractionLimitsContext): Promise<LiveLimitSt
     : { kind: "repository", limit: parsed.limit, body: parsed };
 }
 
-/**
- * When `base` is present it carries `limit` as a non-optional string BY CONSTRUCTION: the shape's
- * superRefine rejected base keys without a limit upfront, so the prose sites read base.limit instead
- * of re-trusting an optional field.
- */
+/** `base` is present exactly when a limit is declared: the shape refuses an expiry without one. */
 interface DeclaredLimits {
-  base?: { limit: string } & Record<string, unknown>;
+  base?: { limit: string; expiry?: string };
   cap: DeclaredInteractionLimits["pull_request_creation_cap"];
   bypass: DeclaredInteractionLimits["pull_request_creation_bypass"];
 }
 
 function splitDeclared(desired: DeclaredInteractionLimits): DeclaredLimits {
-  const base = Object.fromEntries(
-    Object.entries(desired as Record<string, unknown>).filter(
-      ([key]) => !INTERACTION_LIMITS_ROUTED_KEYS.has(key),
-    ),
-  );
-  const cap = desired.pull_request_creation_cap;
-  const bypass = desired.pull_request_creation_bypass;
-  if (Object.keys(base).length === 0) {
+  const {
+    limit,
+    expiry,
+    pull_request_creation_cap: cap,
+    pull_request_creation_bypass: bypass,
+  } = desired;
+  if (limit === undefined) {
     return { cap, bypass };
   }
-  const limit = base.limit;
-  if (typeof limit !== "string") {
-    // The shape's superRefine rejects base keys without a limit upfront, and the engine hands plan() that shape's output.
-    throw new Error(
-      `BUG: interaction_limits base key(s) [${Object.keys(base).join(", ")}] reached plan() without a limit; the shape rejects this pairing during document validation`,
-    );
-  }
-  return { base: { ...base, limit }, cap, bypass };
+  return { base: expiry === undefined ? { limit } : { limit, expiry }, cap, bypass };
 }
 
 /**
@@ -241,9 +229,8 @@ export const interactionLimitsSection = {
         );
       } else {
         // The live body carries limit/origin/expires_at but never the declared expiry duration, so
-        // diffing expiry would be permanent false drift.
-        const { expiry: _expiry, ...comparable } = base;
-        drift.push(...subsetDiff(comparable, live.body, "interaction_limits"));
+        // only the limit is diffed.
+        drift.push(...subsetDiff({ limit: base.limit }, live.body, "interaction_limits"));
         if (live.kind === "inherited") {
           plan.notes.push(
             `interaction_limits: ${ORG_OVERRIDE} (origin: ${live.origin}); apply cannot change it from the repository`,
