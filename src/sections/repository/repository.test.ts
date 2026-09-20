@@ -1175,21 +1175,6 @@ describe("repository parse refusals", () => {
       `repository.topics[0]: "${"a".repeat(51)}" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
     ],
     [
-      "an empty list item, which would otherwise clear every topic as topics: [] does",
-      ["ci", ""],
-      "repository.topics[1]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
-    ],
-    [
-      "an empty comma-string segment",
-      "ci,,tooling",
-      "repository.topics[1]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
-    ],
-    [
-      "an empty string",
-      "",
-      "repository.topics[0]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
-    ],
-    [
       "21 topics",
       Array.from({ length: 21 }, (_, index) => `topic-${index}`),
       "repository.topics: 21 topics declared; GitHub allows at most 20",
@@ -1200,6 +1185,16 @@ describe("repository parse refusals", () => {
       expect(refusals({ topics })).toEqual([message]);
     },
   );
+
+  test.each([
+    ["an empty list item, once dropped silently", ["ci", ""], 1],
+    ["an empty comma-string segment, once dropped silently", "ci,,tooling", 1],
+    ["an empty string, once the wholesale clear", "", 0],
+  ])("topics: %s is refused at parse by index", (_what, topics, index) => {
+    expect(refusals({ topics })).toEqual([
+      `repository.topics[${index}]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic`,
+    ]);
+  });
 
   test("topics: 20 well-formed topics, a 50-character one and uppercase input among them, parse", () => {
     const topics = [
