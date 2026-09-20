@@ -6,10 +6,7 @@ import {
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
 import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
-import {
-  FIXTURE_ENV_NAME,
-  FLAG_PAIRING_FIXTURES,
-} from "../../../test/fixtures/environment-flag-pairing.js";
+import { ENVIRONMENT_PARSE_FIXTURES } from "../../../test/fixtures/environment-parse-rules.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake, registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
@@ -782,29 +779,32 @@ describe("environments deployment branch policies check mode", () => {
   });
 });
 
-describe("environments deployment branch policies validation and shape", () => {
-  test("the flag pairing is a SHAPE rule: declaring the list without custom_branch_policies: true fails validation", () => {
-    // A shape rule, not a plan() hook, so upfront validation rejects the document in both modes before any section writes (the apply-mode preflight
+describe("environments parse rules", () => {
+  test("every combination GitHub 422s or never reads back is refused at parse time, naming the key and the fix", () => {
+    // Shape rules, not a plan() hook, so upfront validation rejects the document in both modes before any section writes (the apply-mode preflight
     // swallows non-permission hook errors).
-    // The fixtures are the set the published-schema test also runs, so the zod refinement and the schema's if/then face the same cases.
+    // The fixtures are the set the published-schema test also runs, so each zod rule and its JSON Schema twin face the same cases.
     const shape = environmentsSection.shape;
-    for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
-      const parsed = shape.safeParse([entry]);
-      expect(parsed.success, name).toBe(valid);
-      if (valid) {
+    for (const fixture of ENVIRONMENT_PARSE_FIXTURES) {
+      const parsed = shape.safeParse([fixture.entry]);
+      expect(parsed.success, fixture.name).toBe(fixture.valid);
+      if (fixture.valid) {
         continue;
       }
-      const messages = (parsed.error?.issues ?? []).map((issue) => issue.message).join("\n");
-      expect(messages).toContain(
-        `the "${FIXTURE_ENV_NAME}" entry declares deployment_branch_policies`,
-      );
-      expect(messages).toContain("custom_branch_policies: true");
-      // The issue points at the offending key, so the document-validation error names environments[N].deployment_branch_policies.
-      const paths = (parsed.error?.issues ?? []).map((issue) => issue.path.join("."));
-      expect(paths).toContain("0.deployment_branch_policies");
+      const issues = (parsed.error?.issues ?? []).map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      }));
+      // The issue points at the offending key, so the document-validation error names environments[N].<key>.
+      expect(issues, fixture.name).toContainEqual({
+        path: `0.${fixture.path}`,
+        message: expect.stringContaining(fixture.refusal),
+      });
     }
   });
+});
 
+describe("environments deployment branch policies validation and shape", () => {
   test("duplicate patterns are rejected upfront, naming the environment", async () => {
     const api = new MockApi({});
     await expect(
@@ -1241,7 +1241,13 @@ describe("environments deployment protection rules validation and shape", () => 
       name: "prod",
       protection_rules: [{ id: 41, node_id: "DPR_41", type: "deploy-gate" }],
     });
-    expect(Object.keys(flattened).sort()).toEqual(["name", "protection_rules"]);
+    expect(flattened).toEqual({
+      name: "prod",
+      protection_rules: [{ id: 41, node_id: "DPR_41", type: "deploy-gate" }],
+      wait_timer: 0,
+      prevent_self_review: false,
+      reviewers: [],
+    });
   });
 });
 
@@ -1515,6 +1521,8 @@ describe("environments convergence", () => {
 
 describe("environments snapshot", () => {
   const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+  /** What an environment without protection rules reads back as: the snapshot writes the disabled values out. */
+  const UNPROTECTED = { wait_timer: 0, prevent_self_review: false, reviewers: [] };
 
   test("a disabled protection rule and patterns behind an off flag are not read back; a lowercase secret listing reads back under its uppercase key", async () => {
     const api = fragmentFake(environmentsSection, environmentsMockHandlers, {
@@ -1546,6 +1554,7 @@ describe("environments snapshot", () => {
       value: [
         {
           name: "qa",
+          ...UNPROTECTED,
           deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
           secrets: {
             _undeclared: "keep",
@@ -1622,6 +1631,8 @@ describe("environments snapshot", () => {
         {
           name: "production",
           wait_timer: 5,
+          prevent_self_review: false,
+          reviewers: [],
           deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
           variables: { _undeclared: "delete", entries: [{ name: "REGION", value: "eu" }] },
         },
@@ -1665,7 +1676,11 @@ describe("environments snapshot", () => {
     });
     const { snapshot } = await proveSnapshotRoundTrip(environmentsSection, api);
     expect(snapshot).toEqual({
-      value: [{ name: "api", pinned: true }, { name: "web", pinned: true }, { name: "sandbox" }],
+      value: [
+        { name: "api", pinned: true, ...UNPROTECTED },
+        { name: "web", pinned: true, ...UNPROTECTED },
+        { name: "sandbox", ...UNPROTECTED },
+      ],
       notes: [],
     });
   });

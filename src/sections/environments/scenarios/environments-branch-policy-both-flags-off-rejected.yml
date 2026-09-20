@@ -1,0 +1,20 @@
+# Both deployment_branch_policy flags false is a GitHub 422: "any branch may
+# deploy" is spelled deployment_branch_policy: null. The rule lives in the
+# section's shape, so upfront document validation rejects the run before any
+# request, naming the key and the null spelling.
+name: environments-branch-policy-both-flags-off-rejected
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: false
+        custom_branch_policies: false
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "environments[0].deployment_branch_policy"
+    - "GitHub spells 'any branch may deploy' as deployment_branch_policy: null, so write null"

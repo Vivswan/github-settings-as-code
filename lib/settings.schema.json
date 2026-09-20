@@ -557,11 +557,11 @@
         },
         "type": {
           "description": "What the pattern matches: \"branch\" (the upstream default) or \"tag\". Immutable on GitHub, so changing it is applied as delete plus recreate.",
+          "type": "string",
           "enum": [
             "branch",
             "tag"
-          ],
-          "type": "string"
+          ]
         }
       },
       "required": [
@@ -595,15 +595,18 @@
           "type": "boolean"
         },
         "wait_timer": {
-          "description": "Minutes to wait before deployments proceed.",
-          "type": "number"
+          "description": "Minutes to wait before deployments proceed, 0 to 43200 (30 days). 0 declares the wait timer off and matches a live environment without one.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 43200
         },
         "prevent_self_review": {
-          "description": "Whether the deployer may approve their own deployment.",
+          "description": "Whether the deployer may approve their own deployment. The flag lives on the required-reviewers rule, so `true` needs at least one reviewer; `false` declares it off and matches a live environment without the rule.",
           "type": "boolean"
         },
         "reviewers": {
-          "description": "Required reviewers by numeric user/team id.",
+          "description": "Required reviewers by numeric user/team id, at most 6. An empty list declares required reviewers off and matches a live environment without the rule.",
+          "maxItems": 6,
           "type": "array",
           "items": {
             "type": "object",
@@ -628,7 +631,7 @@
           }
         },
         "deployment_branch_policy": {
-          "description": "Which branches may deploy; null clears the policy.",
+          "description": "Which branches may deploy; null lets any branch deploy. As an object, exactly one of the two flags is true: both true is rejected by GitHub, and both false is spelled null.",
           "anyOf": [
             {
               "type": "object",
@@ -645,7 +648,28 @@
               "required": [
                 "protected_branches",
                 "custom_branch_policies"
-              ]
+              ],
+              "if": {
+                "properties": {
+                  "protected_branches": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "custom_branch_policies": {
+                    "const": false
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "custom_branch_policies": {
+                    "const": true
+                  }
+                }
+              }
             },
             {
               "type": "null"
@@ -712,29 +736,55 @@
       "required": [
         "name"
       ],
-      "if": {
-        "required": [
-          "deployment_branch_policies"
-        ]
-      },
-      "then": {
-        "required": [
-          "deployment_branch_policy"
-        ],
-        "properties": {
-          "deployment_branch_policy": {
-            "type": "object",
+      "allOf": [
+        {
+          "if": {
             "required": [
-              "custom_branch_policies"
+              "deployment_branch_policies"
+            ]
+          },
+          "then": {
+            "required": [
+              "deployment_branch_policy"
             ],
             "properties": {
-              "custom_branch_policies": {
+              "deployment_branch_policy": {
+                "type": "object",
+                "required": [
+                  "custom_branch_policies"
+                ],
+                "properties": {
+                  "custom_branch_policies": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "prevent_self_review"
+            ],
+            "properties": {
+              "prevent_self_review": {
                 "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reviewers"
+            ],
+            "properties": {
+              "reviewers": {
+                "minItems": 1
               }
             }
           }
         }
-      }
+      ]
     },
     "EnvironmentSecretConfig": {
       "description": "One per-environment Actions secret, matched by case-insensitive name (GitHub stores secret names uppercase). Keys other than name and value are rejected: the API body is built from the sealed value alone, so an extra key would silently do nothing.",
