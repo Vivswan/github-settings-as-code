@@ -1,6 +1,7 @@
 /** The `branches:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
+import { isMapping, stringItems } from "../shared/raw-values.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
@@ -32,9 +33,10 @@ export function parseBypassActor(raw: string): BypassActor | null {
 const ACTOR_FORM_ERROR =
   'each force_push_bypassers actor must be a bare user login ("octocat"), "org/team-slug" for a team, or "app/slug" for a GitHub App';
 
-function duplicateIn(list: readonly string[]): string | null {
+/** The list may be raw beside its own shape issue (see ../shared/raw-values.ts): only the string items are judged. */
+function duplicateIn(list: unknown): string | null {
   const seen = new Set<string>();
-  for (const item of list) {
+  for (const item of stringItems(list)) {
     const key = item.toLowerCase();
     if (seen.has(key)) {
       return item;
@@ -317,8 +319,8 @@ export const BranchConfig = z
     // replace wholesale, so a duplicate would apply "successfully" and then drift forever against
     // the deduplicated read-back.
     const routed = entry.protection;
-    if (routed !== null) {
-      const duplicateActor = duplicateIn(routed.force_push_bypassers ?? []);
+    if (isMapping(routed)) {
+      const duplicateActor = duplicateIn(routed.force_push_bypassers);
       if (duplicateActor !== null) {
         refineCtx.addIssue({
           code: "custom",
@@ -326,11 +328,7 @@ export const BranchConfig = z
           message: `force_push_bypassers lists "${duplicateActor}" more than once (actor names are case-insensitive); keep one entry per actor`,
         });
       }
-      const duplicateEnv = duplicateIn(
-        routed.required_deployments === null
-          ? []
-          : (routed.required_deployments?.environments ?? []),
-      );
+      const duplicateEnv = duplicateIn(routed.required_deployments?.environments);
       if (duplicateEnv !== null) {
         refineCtx.addIssue({
           code: "custom",

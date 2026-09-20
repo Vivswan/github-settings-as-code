@@ -66,6 +66,7 @@ Rate limits (429 and secondary limits) and transient 5xx or network failures are
 Before the barrier, and in every mode, document validation runs every check that reads only the settings file: the section shapes, unknown keys, two entries naming one resource, a malformed deploy key. A settings-file mistake fails the run before any section runs, with the collected issues listed by path, so nothing is written.
 
 A section's shape reports every mistake it finds in that one run, like a compiler: its cross-field rules (a contradictory pair, a key that belongs elsewhere) are judged even when a sibling value already failed its type.
+A rule meeting such a raw sibling reports what it can and passes over what it cannot read; the sibling's own type issue is the report there.
 
 The shape's own issues are capped at 5 per section; the line after them counts the rest ("...and N more issues in this section"). The checks that need the parsed section (two entries naming one resource) wait for its shape to pass and report every finding; only the unrecognized-key check of a closed section keeps a cap of its own, 5 entries.
 

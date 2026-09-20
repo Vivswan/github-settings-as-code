@@ -8,6 +8,7 @@
  */
 
 import { z } from "zod";
+import { isMapping } from "../shared/raw-values.js";
 import {
   conditional,
   nestedKnobbed,
@@ -60,7 +61,13 @@ const DeploymentBranchPolicyFlags = z
     custom_branch_policies: z.boolean(),
   })
   .superRefine((flags, refineCtx) => {
-    if (flags.protected_branches !== flags.custom_branch_policies) {
+    // A raw flag beside its own shape issue is neither setting: two equal raw values (0 and 0, a YAML alias
+    // to one mapping) are not both false, nor both true.
+    if (
+      typeof flags.protected_branches !== "boolean" ||
+      typeof flags.custom_branch_policies !== "boolean" ||
+      flags.protected_branches !== flags.custom_branch_policies
+    ) {
       return;
     }
     refineCtx.addIssue({
@@ -117,26 +124,32 @@ export const EnvironmentConfig = z
           "environment secrets belong under the entry's `secrets` list, not a singular `secret` key; here it would pass through to the environment PUT verbatim and configure nothing",
       });
     }
+    // The name may be raw beside its own shape issue, and a bare rendering can throw on a mapping.
+    const who = typeof entry.name === "string" ? `the "${entry.name}" entry` : "this entry";
     // The flag lives on the required-reviewers rule, and GitHub creates that rule only for a
-    // non-empty reviewer list: with none, the flag reads back false and drifts on every run.
-    if (entry.prevent_self_review === true && (entry.reviewers ?? []).length === 0) {
+    // non-empty reviewer list: with none, the flag reads back false and drifts on every run. A
+    // reviewers value that is not a list is raw beside its own shape issue and declares nothing here.
+    const reviewers = entry.reviewers;
+    const noReviewers =
+      reviewers === undefined || (Array.isArray(reviewers) && reviewers.length === 0);
+    if (entry.prevent_self_review === true && noReviewers) {
       refineCtx.addIssue({
         code: "custom",
         path: ["prevent_self_review"],
-        message: `the "${entry.name}" entry declares prevent_self_review: true without reviewers; GitHub keeps the flag only on a required-reviewers rule, which needs at least one reviewer. Declare a reviewer, or write prevent_self_review: false`,
+        message: `${who} declares prevent_self_review: true without reviewers; GitHub keeps the flag only on a required-reviewers rule, which needs at least one reviewer. Declare a reviewer, or write prevent_self_review: false`,
       });
     }
     // Checked in the shape rather than the section's validate hook: both run before ANY section
     // writes, and a refinement reports the pair at zod's own path beside the entry's other shape
     // issues. Unchecked, the pattern POST would 404 only once the environment PUT had landed.
-    if (
-      entry.deployment_branch_policies !== undefined &&
-      entry.deployment_branch_policy?.custom_branch_policies !== true
-    ) {
+    if (entry.deployment_branch_policies === undefined) {
+      return;
+    }
+    if (entry.deployment_branch_policy?.custom_branch_policies !== true) {
       refineCtx.addIssue({
         code: "custom",
         path: ["deployment_branch_policies"],
-        message: `the "${entry.name}" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy with custom_branch_policies: true - GitHub rejects every pattern write while the flag is off`,
+        message: `${who} declares deployment_branch_policies, so it must also declare deployment_branch_policy with custom_branch_policies: true - GitHub rejects every pattern write while the flag is off`,
       });
     }
   })
@@ -165,7 +178,10 @@ export const EnvironmentConfig = z
 export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
 
 export const EnvironmentsConfig = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
-  const pinnedIndexes = entries.flatMap((entry, index) => (entry.pinned === true ? [index] : []));
+  // An entry may be raw beside its own shape issue (see ../shared/raw-values.ts); it declares no pin.
+  const pinnedIndexes = entries.flatMap((entry, index) =>
+    isMapping(entry) && entry.pinned === true ? [index] : [],
+  );
   if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
     refineCtx.addIssue({
       code: "custom",

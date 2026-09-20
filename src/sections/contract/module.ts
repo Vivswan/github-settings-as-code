@@ -154,14 +154,17 @@ export function keyedBy(
 /**
  * The entries of a list section's value in either form, by reference: the bare list, or the `{entries}` wrapper (the
  * knobbed `{_undeclared, entries}` and the plain-list `{_layering, entries}` alike). The one unwrap a planner over a
- * plain-list section performs; the knobbed ones read theirs through undeclaredPolicy().
+ * plain-list section performs; the knobbed ones read theirs through undeclaredPolicy(). A shape rule reads a wrapper
+ * whose `entries` is raw or missing beside its own shape issue (../shared/raw-values.ts); it holds no entries.
  */
 export function listEntries<E>(
   declared: readonly E[] | { readonly entries: readonly E[] },
 ): readonly E[] {
-  return Array.isArray(declared)
-    ? declared
-    : (declared as { readonly entries: readonly E[] }).entries;
+  if (Array.isArray(declared)) {
+    return declared;
+  }
+  const entries: unknown = (declared as { readonly entries: readonly E[] }).entries;
+  return Array.isArray(entries) ? (entries as readonly E[]) : [];
 }
 
 /** The wrapper type in ../../types.ts is zod-free and spells the directive's values itself; both pins fail when the two sets part. */
@@ -722,6 +725,13 @@ export function checksReportingBesideFailures(schema: z.ZodType): z.ZodType {
 
 const REPORTS_BESIDE_FAILURES = new WeakSet<z.core.$ZodCheck>();
 
+let swallowedThrowObserver: ((error: unknown) => void) | null = null;
+
+/** Test seam for the swallowed throws below (test/sections/raw-sibling.test.ts); production leaves it null. */
+export function observeSwallowedThrows(observer: ((error: unknown) => void) | null): void {
+  swallowedThrowObserver = observer;
+}
+
 /** The paths of the issues that abort a parse (a wrong type, a refused option); a rule's own finding and an unrecognized key do not. */
 function failedPaths(issues: readonly z.core.$ZodRawIssue[]): PropertyKey[][] {
   return issues.flatMap((issue) => (issue.continue === true ? [] : [issue.path ?? []]));
@@ -735,7 +745,9 @@ function isUnder(path: readonly PropertyKey[], failed: readonly PropertyKey[]): 
  * zod skips a node's own checks once a nested value failed; rewired, a check runs unless the node itself was refused
  * (a pathless failure). The contract for a rule, which then meets the raw value at a failed property: a finding under
  * a failed path is dropped (the shape's issue stands there), a throw ends the rule with its findings so far, and a
- * rule branching on a sibling's type guards that read itself. With no failure a throw propagates.
+ * rule branching on a sibling's type guards that read itself, and a rule reading a property or the truth of a
+ * sibling asks for the type first (an empty string's length is zero, a number is truthy). With no failure a throw
+ * propagates.
  */
 function reportingBesideFailures(check: z.core.$ZodCheck): z.core.$ZodCheck {
   if (REPORTS_BESIDE_FAILURES.has(check)) {
@@ -759,8 +771,9 @@ function reportingBesideFailures(check: z.core.$ZodCheck): z.core.$ZodCheck {
         const before = payload.issues.length;
         try {
           inner(payload);
-        } catch {
+        } catch (error) {
           // The rule tripped on a raw value whose own shape issue is already listed.
+          swallowedThrowObserver?.(error);
         }
         const findings = payload.issues.splice(before);
         payload.issues.push(
@@ -779,6 +792,8 @@ function reportingBesideFailures(check: z.core.$ZodCheck): z.core.$ZodCheck {
  *
  *   strictObject             -> stays strict
  *   refine/superRefine       -> survives (clones carry the checks); one on the knobbed union itself throws instead
+ *   a leaf's own checks      -> rewired like a rule (a min or max length runs, in zod, on any value with a length,
+ *                               so it would judge a raw list beside the leaf's own type issue)
  *   knobbed-section union    -> rewrapped as a container-routed check, so a failing entry keeps its issue path
  *                               (`labels[2].name`) instead of a plain union's pathless "Invalid input"
  *   unrecognized CONTAINER   -> throws, rather than ship a shape that silently skipped loosening
@@ -822,7 +837,7 @@ export function loosen(schema: z.ZodType): z.ZodType {
           `BUG: loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
         );
       }
-      return schema;
+      return (def.checks?.length ?? 0) > 0 ? cloneWith(schema, {}) : schema;
   }
 }
 

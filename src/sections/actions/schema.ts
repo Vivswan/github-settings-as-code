@@ -1,6 +1,7 @@
 /** The `actions:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
+import { siblingText } from "../shared/raw-values.js";
 
 /** GitHub's rule for an OIDC claim key; the PUT 422s on anything else. */
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
@@ -45,8 +46,13 @@ const ClaimKeys = z
     }),
   )
   .superRefine((keys, refineCtx) => {
+    // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts): a YAML alias repeats one
+    // mapping at two items, and rendering it into the message can throw.
     const seen = new Set<string>();
     keys.forEach((key, index) => {
+      if (typeof key !== "string") {
+        return;
+      }
       if (seen.has(key)) {
         refineCtx.addIssue({
           code: "custom",
@@ -74,7 +80,8 @@ const OidcTemplate = z
     }),
   ])
   .superRefine((declared, refineCtx) => {
-    if (declared.use_default && Object.hasOwn(declared, "include_claim_keys")) {
+    // A raw use_default beside its own shape issue is truthy without being true and selects no template.
+    if (declared.use_default === true && Object.hasOwn(declared, "include_claim_keys")) {
       refineCtx.addIssue({
         code: "custom",
         path: ["include_claim_keys"],
@@ -143,7 +150,8 @@ export const ActionsConfig = z
       refineCtx.addIssue({
         code: "custom",
         path: ["selected_actions"],
-        message: `selected_actions is declared together with allowed_actions: "${declared.allowed_actions}", but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
+        // siblingText: the value may be raw beside its own shape issue, and a bare rendering can throw on a mapping.
+        message: `selected_actions is declared together with allowed_actions: ${siblingText(declared.allowed_actions)}, but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
       });
     }
   })

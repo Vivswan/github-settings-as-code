@@ -158,12 +158,19 @@ export const DeployKeyConfig = z
   })
   // Entry-level so the refusal can name the entry by title; the field-level form would know only the index.
   .superRefine((entry, refineCtx) => {
-    const parsed = parsePublicKey(entry.key);
+    // The key or the title may be raw beside its own shape issue (see ../shared/raw-values.ts): a non-string key is
+    // no material to read, and a bare rendering of the title can throw on a mapping.
+    const key: unknown = entry.key;
+    if (typeof key !== "string") {
+      return;
+    }
+    const parsed = parsePublicKey(key);
     if (!parsed.ok) {
+      const who = typeof entry.title === "string" ? `entry "${entry.title}"` : "this entry";
       refineCtx.addIssue({
         code: "custom",
         path: ["key"],
-        message: `entry "${entry.title}": ${parsed.reason}`,
+        message: `${who}: ${parsed.reason}`,
       });
     }
   })

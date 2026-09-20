@@ -1,12 +1,13 @@
 /**
  * The parse-time rules the two setup slices (code scanning default setup, code quality setup) share:
  * what the settings file alone shows to be wrong is refused here, naming the key and the fix, instead
- * of surfacing as a 422 at apply or as drift that never converges. Imports only zod and the text leaf,
- * like schema-helpers.ts, so the slices src/schema.ts composes stay free of import cycles.
+ * of surfacing as a 422 at apply or as drift that never converges. Imports only zod, the text leaf, and
+ * the raw-value readers, like schema-helpers.ts, so the slices src/schema.ts composes stay free of import cycles.
  */
 
 import { z } from "zod";
 import { agree } from "../../text.js";
+import { siblingText } from "./raw-values.js";
 
 type Names = readonly [string, ...string[]];
 
@@ -111,7 +112,7 @@ export function refineSetup(declared: RunnerFields, refineCtx: z.RefinementCtx):
     const under =
       runner_type === undefined
         ? "without runner_type"
-        : `under runner_type: ${JSON.stringify(runner_type)}`;
+        : `under runner_type: ${siblingText(runner_type)}`;
     refineCtx.addIssue({
       code: "custom",
       path: ["runner_label"],

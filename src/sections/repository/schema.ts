@@ -400,13 +400,18 @@ function refineCommitMessagePairs(declared: Record<string, unknown>, ctx: z.Refi
       });
       continue;
     }
-    // Both values passed their enums, or the refinement would not be running.
-    const allowed = family.pairs?.[title as string];
-    if (allowed !== undefined && !allowed.includes(message as string)) {
+    // A value that failed its enum is raw here beside its own issue (see ../shared/raw-values.ts) and has no pairing;
+    // the table is read by own key, since a title like "toString" would otherwise find a prototype property.
+    if (typeof title !== "string" || typeof message !== "string") {
+      continue;
+    }
+    const pairs = family.pairs;
+    const allowed = pairs !== undefined && Object.hasOwn(pairs, title) ? pairs[title] : undefined;
+    if (allowed !== undefined && !allowed.includes(message)) {
       ctx.addIssue({
         code: "custom",
         path: [family.messageKey],
-        message: `${family.titleKey} ${String(title)} cannot pair with ${family.messageKey} ${String(message)} (GitHub answers 422)${family.legalHint}`,
+        message: `${family.titleKey} ${title} cannot pair with ${family.messageKey} ${message} (GitHub answers 422)${family.legalHint}`,
       });
     }
   }
