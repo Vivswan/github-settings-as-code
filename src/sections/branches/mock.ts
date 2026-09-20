@@ -137,6 +137,49 @@ function effectiveProtection(state: MockState, branch: string): Json | null {
   return rule === undefined ? null : restViewOfRule(rule);
 }
 
+const ACTOR_LISTS = ["users", "teams", "apps"] as const;
+type ActorHolder = Record<(typeof ACTOR_LISTS)[number], string[]>;
+const isMapping = (value: unknown): value is Json =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The actor holders of a PUT body as GitHub reads them back: logins and slugs in their canonical
+ * lowercase, and a review-side holder naming nobody dropped, since GitHub serves
+ * dismissal_restrictions and bypass_pull_request_allowances only when they name someone.
+ * `restrictions` stays whole: an all-empty one restricts pushes to nobody.
+ */
+function actorsAsGitHubReadsBack(payload: Json): Json {
+  const canonical = (holder: Json): ActorHolder => {
+    const out = { users: [], teams: [], apps: [] } as ActorHolder;
+    for (const list of ACTOR_LISTS) {
+      const names = holder[list];
+      out[list] = Array.isArray(names) ? names.map((name) => String(name).toLowerCase()) : [];
+    }
+    return out;
+  };
+  const out: Json = { ...payload };
+  if (isMapping(payload.restrictions)) {
+    out.restrictions = canonical(payload.restrictions);
+  }
+  if (isMapping(payload.required_pull_request_reviews)) {
+    const nested: Json = { ...payload.required_pull_request_reviews };
+    for (const key of ["dismissal_restrictions", "bypass_pull_request_allowances"]) {
+      const holder = nested[key];
+      if (!isMapping(holder)) {
+        continue;
+      }
+      const folded = canonical(holder);
+      if (Object.values(folded).every((names) => names.length === 0)) {
+        delete nested[key];
+      } else {
+        nested[key] = folded;
+      }
+    }
+    out.required_pull_request_reviews = nested;
+  }
+  return out;
+}
+
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.listProtected": ({ state, param, query }) => {
     // A branch a wildcard rule matches is protected too, as on GitHub, where the REST view serves
@@ -180,7 +223,7 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
     if (!state.branches.includes(branch)) {
       return rejected(MISSING_BRANCH);
     }
-    const stored = protectionFromPut(asObject(body));
+    const stored = protectionFromPut(actorsAsGitHubReadsBack(asObject(body)));
     // required_signatures is its own sub-resource and absent from the PUT's request schema. Whether
     // GitHub's PUT PRESERVES an existing requirement is undocumented; the mock carries it across as
     // the conservative reading, and the docs tell users to DECLARE the toggle, which pins the state

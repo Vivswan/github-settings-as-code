@@ -1,0 +1,39 @@
+# An all-empty dismissal_restrictions holder means "nobody is restricted",
+# which GitHub reads back by omitting the key from
+# required_pull_request_reviews. The declaration and the live protection
+# describe the same state, so apply has no change to make (no PUT) and the
+# check rerun stays clean.
+name: branches-empty-dismissal-restrictions-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_pull_request_reviews:
+          required_approving_review_count: 1
+          dismissal_restrictions:
+            users: []
+            teams: []
+            apps: []
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: false
+        require_code_owner_reviews: false
+        require_last_push_approval: false
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"
+  fixpoint: converges

@@ -1,0 +1,40 @@
+# A real change to who may push is still drift once the actor lists fold
+# case: the settings file names release-bot, the live restriction names
+# octocat. Check mode reports the list's two lines, exits 1, and writes
+# nothing.
+name: branches-restrictions-actor-change-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        restrictions:
+          users: [release-bot]
+          teams: []
+          apps: []
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+      restrictions:
+        users:
+          - login: octocat
+        teams: []
+        apps: []
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - 'branches[main].protection.restrictions.users: missing "release-bot"'
+    - 'branches[main].protection.restrictions.users: unexpected "octocat"'
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"

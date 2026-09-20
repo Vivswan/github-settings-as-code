@@ -1,0 +1,27 @@
+# Apply protects an unprotected branch with a mixed-case actor list. The mock
+# stores the actors the way GitHub reads them back, in their canonical
+# lowercase spelling, so the apply-idempotence rerun finds the restriction
+# already satisfied and issues no second PUT.
+name: branches-mixed-case-restrictions-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        restrictions:
+          users: [Octocat]
+          teams: [Platform-Team]
+          apps: [Deploy-Gate]
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+  fixpoint: apply_idempotent

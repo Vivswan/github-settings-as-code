@@ -435,12 +435,15 @@ async function planLiteralEntry(
         delete declaredRest[key];
       }
     }
+    // Both sides compare in GitHub's spelling; the PUT payload keeps the file's.
+    const declaredView = foldActorNames(declaredRest);
+    const liveView = withEmptyReviewHolders(foldActorNames(live));
     // The PUT replaces the whole protection, so live settings the declaration omits are REMOVED by
     // it: drift, not silence. The signature toggle is the one live field the PUT never touches.
-    const { required_signatures: _liveSignatures, ...liveRest } = live;
+    const { required_signatures: _liveSignatures, ...liveRest } = liveView;
     const restDrift = [
-      ...subsetDiff(declaredRest, live, prefix),
-      ...omittedLiveDrift(declaredRest, liveRest, prefix),
+      ...subsetDiff(declaredView, liveView, prefix),
+      ...omittedLiveDrift(declaredView, liveRest, prefix),
     ];
     const drift = justified(restDrift);
     if (drift !== null) {
@@ -549,6 +552,45 @@ const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url")
 
 const ACTOR_NAME_KEYS = ["login", "slug"] as const;
 const ACTOR_LIST_KEYS = new Set(["users", "teams", "apps"]);
+
+/**
+ * GitHub matches a login or slug in any case and reads back its own spelling, so the compare folds
+ * every actor list on both sides; the PUT still carries the file's spelling and the snapshot GitHub's.
+ *   declared users: [Octocat]  vs  live users: [octocat]  -> clean
+ */
+function foldActorNames(protection: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(protection)) {
+    if (ACTOR_LIST_KEYS.has(key) && Array.isArray(value)) {
+      out[key] = value.map((name) => (typeof name === "string" ? name.toLowerCase() : name));
+    } else {
+      out[key] = isPlainMapping(value) ? foldActorNames(value) : value;
+    }
+  }
+  return out;
+}
+
+// The two actor holders GitHub serves only when they name someone: an all-empty one is "no
+// restriction", and the GET omits the key.
+const REVIEW_ACTOR_HOLDERS = ["dismissal_restrictions", "bypass_pull_request_allowances"] as const;
+
+/**
+ * A live review block without a holder reads as the all-empty holder, so a declared empty one is
+ * clean and a declared actor diffs against an empty list instead of a missing field. Compare-only:
+ * the snapshot writes the GET's own shape. `restrictions` stays as read, since an all-empty one is
+ * a restriction that lets nobody push, ON by its presence.
+ */
+function withEmptyReviewHolders(live: Record<string, unknown>): Record<string, unknown> {
+  const reviews = live.required_pull_request_reviews;
+  if (!isPlainMapping(reviews)) {
+    return live;
+  }
+  const filled = { ...reviews };
+  for (const holder of REVIEW_ACTOR_HOLDERS) {
+    filled[holder] ??= { users: [], teams: [], apps: [] };
+  }
+  return { ...live, required_pull_request_reviews: filled };
+}
 
 function flattenValue(value: unknown): unknown {
   if (typeof value !== "object" || value === null) {

@@ -19,7 +19,11 @@ coverage:
       PUT /repos/{owner}/{repo}/branches/{branch}/protection passthrough; the four required keys are
       null-filled; protection: null issues DELETE (deleteBranchProtectionRule for a wildcard entry).
       Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings,
-      *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection).
+      *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection);
+      actor logins and slugs compare case-insensitively (GitHub matches them in any case and reads
+      back its own spelling), and a live review block without dismissal_restrictions or
+      bypass_pull_request_allowances compares as the all-empty holder, which is how GitHub reads an
+      empty one back.
       Every write is drift-gated: the PUT is planned when a declared key diverges or when the
       replacing PUT would remove a live setting the file omits, and a converged branch plans
       nothing. Three routed keys never ride the PUT: required_signatures (the PUT silently drops it)
