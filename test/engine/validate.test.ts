@@ -147,7 +147,7 @@ describe("the wrapped undeclared-policy form", () => {
   test("both policies and the bare wrapper validate", () => {
     const doc = {
       labels: { _undeclared: "keep", entries: [{ name: "bug" }] },
-      autolinks: { _undeclared: "keep", entries: [{ key_prefix: "J-", url_template: "u" }] },
+      autolinks: { _undeclared: "keep", entries: [{ key_prefix: "J-", url_template: "u/<num>" }] },
       collaborators: { entries: [{ username: "alice" }] },
       rulesets: { _undeclared: "delete", entries: [{ name: "r" }] },
       milestones: { _undeclared: "delete", entries: [{ title: "v1" }] },

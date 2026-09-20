@@ -13,6 +13,10 @@ schema:
     Autolink references; undeclared ones are DELETED by default (the wrapped form can set
     `_undeclared: keep`).
   AutolinkConfig: One autolink reference, matched by key prefix.
-  AutolinkConfig.key_prefix: Text prefix that triggers the link (e.g. "TICKET-"), the natural key.
+  AutolinkConfig.key_prefix: >-
+    Text prefix that triggers the link (e.g. "TICKET-"), the natural key; letters, digits, and
+    ". - _ + = : / #" only, and no declared prefix may begin another.
   AutolinkConfig.url_template: Target URL template containing "<num>".
-  AutolinkConfig.is_alphanumeric: Whether <num> also matches letters; upstream default is true.
+  AutolinkConfig.is_alphanumeric: >-
+    Whether <num> also matches letters; upstream default is true on a create, and a recreate
+    re-sends the live value when undeclared.

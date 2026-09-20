@@ -1,0 +1,27 @@
+# Autolinks cannot be edited, so a new url_template is a DELETE then a POST.
+# The file leaves is_alphanumeric undeclared and the live autolink has it
+# false; GitHub's create default is true, so a recreate body that omitted the
+# flag would flip it with no drift line. The recreate re-sends the live flag,
+# and the check rerun over the mutated state converges.
+name: autolinks-recreate-keeps-alphanumeric
+settings:
+  autolinks:
+    - key_prefix: "TICKET-"
+      url_template: "https://example.com/TICKET/<num>"
+live_state:
+  autolinks:
+    - id: 10
+      key_prefix: "TICKET-"
+      url_template: "https://old.example.com/<num>"
+      is_alphanumeric: false
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    autolinks: applied
+  mutations:
+    - "DELETE /repos/{repo}/autolinks/10"
+    - "POST /repos/{repo}/autolinks"
+  fixpoint: converges
