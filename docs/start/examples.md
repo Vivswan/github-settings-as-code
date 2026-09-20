@@ -280,7 +280,9 @@ branches:
     protection: null
 ```
 
-In a `mode: merge` fold, a `null` over a key a lower layer declared removes that key from the merged document instead; the [layering guide](../operate/layering.md) has the rules. A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above. A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
+A `mode: merge` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `branches` list replaces the lower one as written. Elsewhere a `null` over a key a lower layer declared removes that key from the merged document; the [layering guide](../operate/layering.md) has the rules.
+
+A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above. A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
 
 ## Notes in the file
 
