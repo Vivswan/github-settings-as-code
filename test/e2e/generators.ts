@@ -1780,7 +1780,7 @@ export type MergeForce =
 /** The sections whose top-level null is the section's value; on every other section a whole-section null fails validation. */
 const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
 
-export function isNullValued(key: string): boolean {
+function isNullValued(key: string): boolean {
   return (NULLABLE_SECTIONS as readonly string[]).includes(key);
 }
 

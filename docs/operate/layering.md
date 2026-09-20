@@ -319,7 +319,7 @@ The rendered file is exactly what apply runs, so it is worth knowing its shape:
 - Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`.
 - `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list is written as the higher entry declared it, except where `deep` merged a pair through it: then a wrapper on either side keeps the wrapper form.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
-- Every `null` a layer wrote is there, at the top level (`pages: null`, `interaction_limits: null`) or below: the fold reads no `null` as a marker, and validation refused every one a key does not admit.
+- Every `null` that won its key is there, at the top level (`pages: null`, `interaction_limits: null`) or below: the fold reads no `null` as a marker, and validation refused every one a key does not admit.
 - No `_remove` anywhere: each removal was consumed at its own layer's step, along with the entry it named.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
 

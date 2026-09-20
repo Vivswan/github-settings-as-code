@@ -302,7 +302,7 @@ A few individual fields accept `null` as a value of their own too, such as `page
 
 Unknown top-level sections are hard errors, so a typo cannot silently do nothing. The one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it.
 
-An underscore key is not an escape hatch: the underscore marks this action's two directives, `_layering` and `_undeclared` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
+An underscore key is not an escape hatch: the underscore marks this action's three directives, `_layering`, `_undeclared`, and `_remove` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
 
 ```yaml settings
 # owner: platform-team, see runbook RB-112

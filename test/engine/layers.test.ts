@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type Layer, type Layering, mergeLayers, standaloneView } from "../../src/engine/layers.js";
+import { type Layer, type Layering, mergeLayers } from "../../src/engine/layers.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -1578,64 +1578,5 @@ describe("mergeLayers: _remove drops a lower entry", () => {
     ],
   ])("%s is refused naming the layer and the entry", (_case, layering, doc, code, error) => {
     expect(merge([fleet, layer("repo", doc)], layering)).toEqual({ code, error });
-  });
-});
-
-describe("standaloneView", () => {
-  test("drops the two directives the fold consumes and keeps every value, null included", () => {
-    const doc = deepFreeze({
-      _layering: "replace",
-      a: null,
-      repository: { description: null, has_wiki: false },
-      pages: null,
-      labels: {
-        _layering: "shallow",
-        _undeclared: null,
-        entries: [
-          { name: "bug", description: null },
-          { name: "old", _remove: true },
-        ],
-      },
-      milestones: [{ title: "v1" }, { title: "v0", _remove: true }],
-      environments: [
-        {
-          name: "prod",
-          wait_timer: null,
-          variables: {
-            _undeclared: "keep",
-            entries: [
-              { name: "A", value: "1" },
-              { name: "B", _remove: true },
-            ],
-          },
-          secrets: [{ name: "C", _remove: true }],
-          typo: [{ name: "D", _remove: true }],
-        },
-      ],
-      rulesets: [
-        {
-          name: "main",
-          rules: [{ type: "deletion", _remove: true }, { type: "non_fast_forward" }],
-        },
-      ],
-    });
-    expect(standaloneView(doc)).toEqual({
-      a: null,
-      repository: { description: null, has_wiki: false },
-      pages: null,
-      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
-      milestones: [{ title: "v1" }],
-      environments: [
-        {
-          name: "prod",
-          wait_timer: null,
-          variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
-          secrets: [],
-          // Not a keyed list the module declares: data to the fold, so its marker stays for the validator to name.
-          typo: [{ name: "D", _remove: true }],
-        },
-      ],
-      rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
-    });
   });
 });

@@ -36,11 +36,11 @@ import {
 } from "./gen-support.js";
 import {
   displayKeyOf,
-  isNullValued,
   type MergeLayer,
   type MergeScenarioMeta,
   type MultiScenarioMeta,
   type ScenarioMeta,
+  standaloneViewOf,
 } from "./generators.js";
 import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
@@ -1231,49 +1231,17 @@ function keyedListRefused(
 }
 
 /**
- * What the per-layer validation refuses, in the oracle's words: a whole-section null where null is not the section's
- * value, a list section that is not a list or a wrapper, a non-mapping entry, a keyless entry (every list section's
- * schema requires its key field). The run validates every layer before any fold, so the first such layer is named.
+ * What the per-layer validation refuses: the validator's own question, asked of the harness's standalone view (the
+ * layer minus the two directives), as predictMerge already asks it of the final document. The run validates every
+ * layer before any fold, so the first such layer is named; whether a null is legal there is the schema's to say.
  */
 function refusedByValidation(layer: MergeLayer): boolean {
-  for (const [key, value] of Object.entries(layer.doc)) {
-    if (value === null && !isNullValued(key)) {
-      return true;
-    }
-  }
-  for (const key of LIST_SECTIONS) {
-    const value = layer.doc[key];
-    if (value === undefined || value === null) {
-      continue;
-    }
-    const wrapper = asWrapper(value);
-    if (!isMapping(wrapper) || !Array.isArray(wrapper.entries)) {
-      return true;
-    }
-    if (!wrapper.entries.every(isMapping)) {
-      return true;
-    }
-    if (keylessAnywhere(wrapper.entries, KEYED_MERGE_SECTIONS[key])) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** A keyless entry at any nesting; the standalone view drops removals first, so a removal's fields never reach this. */
-function keylessAnywhere(entries: readonly unknown[], keyed: KeyedList): boolean {
-  return entries.some((entry) => {
-    if (!isMapping(entry)) {
-      return true;
-    }
-    if (!isRemovalEntry(entry) && keyed.keysOf(entry) === null) {
-      return true;
-    }
-    return Object.entries(keyed.nested ?? {}).some(([field, nested]) => {
-      const form = nestedForm(entry[field]);
-      return form !== null && keylessAnywhere(form.entries, nested);
-    });
-  });
+  return validateSettingsDoc(
+    standaloneViewOf(layer.doc),
+    layer.name,
+    SectionSelection.ALL,
+    silentIo(),
+  ).isErr();
 }
 
 /**

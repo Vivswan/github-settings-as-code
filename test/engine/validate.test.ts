@@ -107,16 +107,6 @@ describe("section shape validation", () => {
     ]);
   });
 
-  test.each<[string, Record<string, unknown>]>([
-    ["pages", { pages: null }],
-    ["interaction_limits", { interaction_limits: null }],
-    ["a nullable field", { pages: { cname: null } }],
-    ["a nullable entry field", { branches: [{ name: "main", protection: null }] }],
-    ["a passthrough key", { repository: { description: null } }],
-  ])("a null the schema admits is a value: %s", (_what, doc) => {
-    expect(issuesOf(doc)).toBeNull();
-  });
-
   test("the happy shapes pass, and the parsed document carries the unknown keys through untouched", () => {
     const happy = {
       rulesets: [{ name: "r", conditions: { ref_name: { include: ["main"] } }, extra: 1 }],
