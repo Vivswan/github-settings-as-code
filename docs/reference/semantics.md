@@ -4,7 +4,7 @@ order: 130
 
 # Semantics
 
-The rules every section obeys, whatever it manages: what the engine compares, what it deletes, which errors can be softened, and what happens around a failure. The [Sections table](sections.md) says what each section does; this page is the model those behaviors share. Read it when you need to predict what an apply or a check will do before running it.
+The rules every section obeys, whatever it manages: what the file itself can get wrong, what the engine compares, what it deletes, which errors can be softened, and what happens around a failure. The [Sections table](sections.md) says what each section does; this page is the model those behaviors share. Read it when you need to predict what an apply or a check will do before running it.
 
 The engine is stateless and declared-keys-only: a key you do not declare is never touched or compared, except under the three replacing writes below, where an omitted live value is reported because the write would clear it.
 There is no state file; resources are matched by their natural names. Removing a section from the file stops managing it - it does not revert anything.
@@ -22,6 +22,26 @@ The sweep stops where the settings schema stops naming keys, inside `rules[].par
 A live `require_code_owner_review: true` beside a declared `pull_request` rule reads clean, and the PUT resets it.
 
 Apply is convergent: re-running preserves the declared state (some sections diff first and skip converged writes, others send idempotent full-payload writes), and a check right after an apply reports clean.
+
+## What the parse refuses
+
+Anything the settings file alone proves wrong is refused when the file is parsed, before any API call, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
+
+The field GitHub reports but cannot set is the case that motivated the rule:
+
+| | `repository.has_downloads: false` in the file |
+| --- | --- |
+| Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging. |
+| Now | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No API call is made. |
+
+An unknown key has two fates, decided by the shape it sits in:
+
+| Shape | Unknown key | What you see |
+| --- | --- | --- |
+| Closed: the write carries only the fields the shape names, so an extra key has nowhere to go | refused at parse | the error names the key and the shape it sits in |
+| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent | a check-time note when GitHub does not echo the key back: if GitHub ignores it, every apply re-sends it without converging |
+
+The [forward compatibility page](forward-compatibility.md#the-closed-sections) lists which sections and nested shapes are closed.
 
 ## What happens to undeclared resources
 
