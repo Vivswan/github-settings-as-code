@@ -6,24 +6,33 @@ import { z } from "zod";
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
 
 /**
- * A field the GET reports and the PUT does not take: a declared value can only diff against live and
- * re-PUT forever, so the document is refused with the key named. The holder is the loosened
- * (passthrough) parse output, which is how the refinement sees a key the shape does not declare.
+ * The fields the GET reports and the PUT does not take, as [path to the holder, field]: a declared value
+ * can only diff against live and re-PUT forever, so the document is refused with the key named. The
+ * holder is read off the loosened (passthrough) parse output, which is how the refinement sees a key
+ * the shape does not declare.
  */
-function refuseReportedOnly(
-  ctx: z.core.$RefinementCtx,
-  holder: object | undefined,
-  path: readonly string[],
-  field: string,
-): void {
-  if (holder !== undefined && Object.hasOwn(holder, field)) {
-    ctx.addIssue({
-      code: "custom",
-      path: [...path, field],
-      message:
-        `${field} is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), ` +
-        "so a declared value could never be applied; remove it from the settings file",
-    });
+const REPORTED_ONLY: readonly (readonly [readonly string[], string])[] = [
+  [[], "selected_actions_url"],
+  [["artifact_and_log_retention"], "maximum_allowed_days"],
+  [["oidc_customization_sub"], "sub_claim_prefix"],
+];
+
+function refuseReportedOnly(ctx: z.core.$RefinementCtx, declared: object): void {
+  for (const [path, field] of REPORTED_ONLY) {
+    const holder = path.reduce<unknown>(
+      (node, key) =>
+        typeof node === "object" && node !== null ? Reflect.get(node, key) : undefined,
+      declared,
+    );
+    if (typeof holder === "object" && holder !== null && Object.hasOwn(holder, field)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [...path, field],
+        message:
+          `${field} is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), ` +
+          "so a declared value could never be applied; remove it from the settings file",
+      });
+    }
   }
 }
 
@@ -126,19 +135,7 @@ export const ActionsConfig = z
   .superRefine((declared, refineCtx) => {
     // Checked in the shape, not in plan(), so both modes reject the document before ANY section
     // writes; a plan-time throw would fire after earlier sections already wrote.
-    refuseReportedOnly(refineCtx, declared, [], "selected_actions_url");
-    refuseReportedOnly(
-      refineCtx,
-      declared.artifact_and_log_retention,
-      ["artifact_and_log_retention"],
-      "maximum_allowed_days",
-    );
-    refuseReportedOnly(
-      refineCtx,
-      declared.oidc_customization_sub,
-      ["oidc_customization_sub"],
-      "sub_claim_prefix",
-    );
+    refuseReportedOnly(refineCtx, declared);
     if (declared.selected_actions === undefined || declared.allowed_actions === undefined) {
       return;
     }
