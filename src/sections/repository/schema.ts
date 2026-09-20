@@ -258,7 +258,7 @@ const securityAndAnalysisHint = (key: string): string | undefined =>
     ? `"dependabot_security_updates" is reported by GitHub here but the PATCH rejects it; declare enable_automated_security_fixes instead`
     : undefined;
 
-export const SecurityAndAnalysisConfig = z
+const SecurityAndAnalysisConfig = z
   .strictObject(securityAndAnalysisShape, {
     error: closedKeyError(
       "security_and_analysis",

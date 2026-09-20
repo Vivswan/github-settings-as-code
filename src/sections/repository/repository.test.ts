@@ -1055,8 +1055,13 @@ describe("repository parse refusals", () => {
     ],
     [
       "an unknown sub-key",
-      { secret_scaning: { status: "enabled" } },
-      'repository.security_and_analysis: "secret_scaning" is not a key security_and_analysis accepts (GitHub rejects it with a 422); remove it. Known keys: "advanced_security", "code_security", "secret_scanning", "secret_scanning_push_protection", "secret_scanning_ai_detection", "secret_scanning_non_provider_patterns", "secret_scanning_delegated_alert_dismissal", "secret_scanning_delegated_bypass", "secret_scanning_delegated_bypass_options", "secret_scanning_validity_checks"',
+      { not_a_security_feature: { status: "enabled" } },
+      'repository.security_and_analysis: "not_a_security_feature" is not a key security_and_analysis accepts ' +
+        '(GitHub rejects it with a 422); remove it. Known keys: "advanced_security", "code_security", ' +
+        '"secret_scanning", "secret_scanning_push_protection", "secret_scanning_ai_detection", ' +
+        '"secret_scanning_non_provider_patterns", "secret_scanning_delegated_alert_dismissal", ' +
+        '"secret_scanning_delegated_bypass", "secret_scanning_delegated_bypass_options", ' +
+        '"secret_scanning_validity_checks"',
     ],
     [
       "a status outside enabled/disabled",
