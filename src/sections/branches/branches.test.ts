@@ -436,61 +436,70 @@ describe("branches", () => {
     ).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("actor lists compare case-insensitively in both directions: GitHub matches a login or slug in any case and reads back its own spelling (a user's login can be mixed-case), so a declaration differing only in case is clean and a real actor change is the whole drift", async () => {
-    const api = new MockApi({
-      [PROTECTION]: {
-        data: {
-          enforce_admins: { enabled: true },
-          required_pull_request_reviews: {
-            required_approving_review_count: 1,
-            dismissal_restrictions: { users: [{ login: "OctoCat" }], teams: [], apps: [] },
-            bypass_pull_request_allowances: { users: [], teams: [{ slug: "platform" }], apps: [] },
-          },
-          restrictions: {
-            users: [{ login: "OctoCat" }],
-            teams: [{ slug: "platform" }],
-            apps: [{ slug: "deploy-gate" }],
+  test(
+    "actor lists compare case-insensitively in both directions: GitHub matches a login or slug in any case and " +
+      "reads back its own spelling (a user's login can be mixed-case), so a declaration differing only in case " +
+      "is clean and a real actor change is the whole drift",
+    async () => {
+      const api = new MockApi({
+        [PROTECTION]: {
+          data: {
+            enforce_admins: { enabled: true },
+            required_pull_request_reviews: {
+              required_approving_review_count: 1,
+              dismissal_restrictions: { users: [{ login: "OctoCat" }], teams: [], apps: [] },
+              bypass_pull_request_allowances: {
+                users: [],
+                teams: [{ slug: "platform" }],
+                apps: [],
+              },
+            },
+            restrictions: {
+              users: [{ login: "OctoCat" }],
+              teams: [{ slug: "platform" }],
+              apps: [{ slug: "deploy-gate" }],
+            },
           },
         },
-      },
-    });
-    const spelled = {
-      enforce_admins: true,
-      required_pull_request_reviews: {
-        required_approving_review_count: 1,
-        dismissal_restrictions: { users: ["octocat"], teams: [], apps: [] },
-        bypass_pull_request_allowances: { users: [], teams: ["Platform"], apps: [] },
-      },
-      restrictions: { users: ["Octocat"], teams: ["PLATFORM"], apps: ["Deploy-Gate"] },
-    };
-    expect(await plan(api, [{ name: "main", protection: spelled }])).toEqual({
-      ops: [],
-      notes: [],
-      drift: [],
-    });
-    const changed = {
-      ...spelled,
-      restrictions: { ...spelled.restrictions, users: ["Release-Bot"] },
-    };
-    // The PUT carries the file's spelling; only the compare folds.
-    expect(await plan(api, [{ name: "main", protection: changed }])).toEqual({
-      ops: [
-        {
-          role: "putProtection",
-          params: MAIN,
-          payload: { ...changed, required_status_checks: null },
-          describe: 'replacing protection for branch "main"',
-          drift: [
-            'branches[main].protection.restrictions.users: missing "release-bot"',
-            'branches[main].protection.restrictions.users: unexpected "octocat"',
-          ],
-          change: 'applied protection to "main"',
+      });
+      const spelled = {
+        enforce_admins: true,
+        required_pull_request_reviews: {
+          required_approving_review_count: 1,
+          dismissal_restrictions: { users: ["octocat"], teams: [], apps: [] },
+          bypass_pull_request_allowances: { users: [], teams: ["Platform"], apps: [] },
         },
-      ],
-      notes: [],
-      drift: [],
-    });
-  });
+        restrictions: { users: ["Octocat"], teams: ["PLATFORM"], apps: ["Deploy-Gate"] },
+      };
+      expect(await plan(api, [{ name: "main", protection: spelled }])).toEqual({
+        ops: [],
+        notes: [],
+        drift: [],
+      });
+      const changed = {
+        ...spelled,
+        restrictions: { ...spelled.restrictions, users: ["Release-Bot"] },
+      };
+      // The PUT carries the file's spelling; only the compare folds.
+      expect(await plan(api, [{ name: "main", protection: changed }])).toEqual({
+        ops: [
+          {
+            role: "putProtection",
+            params: MAIN,
+            payload: { ...changed, required_status_checks: null },
+            describe: 'replacing protection for branch "main"',
+            drift: [
+              'branches[main].protection.restrictions.users: missing "release-bot"',
+              'branches[main].protection.restrictions.users: unexpected "octocat"',
+            ],
+            change: 'applied protection to "main"',
+          },
+        ],
+        notes: [],
+        drift: [],
+      });
+    },
+  );
 
   test.each(["dismissal_restrictions", "bypass_pull_request_allowances"])(
     "a live review block without %s reads as the empty holder GitHub omits: an empty declaration is clean, a declared actor diffs against the empty list",
