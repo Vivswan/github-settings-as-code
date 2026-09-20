@@ -1,0 +1,26 @@
+# A color GitHub would 422 (a name instead of six hex digits) and a description
+# over GitHub's 100-character cap are refused when the settings file is parsed,
+# naming each entry and its rule, before any API contact: a 422 at apply time
+# would leave every other label unwritten, and on an existing label the bad
+# color would drift and be re-PATCHed on every run.
+name: labels-invalid-color-and-long-description-rejected
+settings:
+  labels:
+    - name: bug
+      color: red
+    - name: docs
+      color: "#0075ca"
+      description: >-
+        Improvements or additions to documentation, including the guides, the
+        reference pages, the README, and every generated region under docs
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "labels[0].color"
+    - six hex digits
+    - "labels[1].description"
+    - 100 characters

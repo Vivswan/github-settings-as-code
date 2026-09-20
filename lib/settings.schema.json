@@ -872,12 +872,14 @@
           "type": "string"
         },
         "color": {
-          "description": "Hex color, with or without the leading \"#\".",
-          "type": "string"
+          "description": "Six hex digits, the leading \"#\" optional (\"#d73a4a\" or \"d73a4a\"). Color names and three-digit shorthand fail at parse time; GitHub rejects them.",
+          "type": "string",
+          "pattern": "^#?[0-9a-fA-F]{6}$"
         },
         "description": {
-          "description": "Short explanation shown in the label picker.",
-          "type": "string"
+          "description": "Short explanation shown in the label picker, at most 100 characters (GitHub's cap); longer ones fail at parse time.",
+          "type": "string",
+          "maxLength": 100
         },
         "new_name": {
           "description": "Probot compat: rename an existing label.",

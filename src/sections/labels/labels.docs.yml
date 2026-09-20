@@ -14,6 +14,10 @@ schema:
     set `_undeclared: keep`).
   LabelConfig: One label, matched to the live repo by name.
   LabelConfig.name: The label name, the natural key.
-  LabelConfig.color: Hex color, with or without the leading "#".
-  LabelConfig.description: Short explanation shown in the label picker.
+  LabelConfig.color: >-
+    Six hex digits, the leading "#" optional ("#d73a4a" or "d73a4a"). Color names and three-digit
+    shorthand fail at parse time; GitHub rejects them.
+  LabelConfig.description: >-
+    Short explanation shown in the label picker, at most 100 characters (GitHub's cap); longer ones
+    fail at parse time.
   LabelConfig.new_name: "Probot compat: rename an existing label."
