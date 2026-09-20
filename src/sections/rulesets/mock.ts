@@ -15,12 +15,13 @@ import {
 } from "../../../test/e2e/mock/support.js";
 
 /**
- * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS): the create handler
- * below mints the same source_type, so a seed is served as a created ruleset would be.
+ * The seed completion buildState applies (test/e2e/mock/state.ts LIST_MOCKS), and the create handler below spreads
+ * the same defaults, so a seed is served as a created ruleset would be. GitHub documents "branch" as the target a
+ * create without one gets; enforcement has no default there (the create requires it), so none is minted.
  */
 export const RULESETS_MOCK: ListMockSpec = {
   collection: (state) => state.rulesets,
-  defaults: { source_type: "Repository" },
+  defaults: { source_type: "Repository", target: "branch" },
   owned: (id) => ({ id }),
   unique: "identity",
 };
@@ -45,7 +46,7 @@ export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
     if (invalid) {
       return invalid;
     }
-    const ruleset: Json = { id: state.nextId++, source_type: "Repository", ...asObject(body) };
+    const ruleset: Json = { id: state.nextId++, ...RULESETS_MOCK.defaults, ...asObject(body) };
     state.rulesets.push(ruleset);
     return { status: 201, body: withBypassActors(ruleset) };
   },

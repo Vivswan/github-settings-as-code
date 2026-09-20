@@ -11,8 +11,9 @@ export function genRulesets(rng: Rng): EntriesForm {
     const target = rng.pick(["branch", "tag"] as const);
     return {
       name: `${rng.pick(["protect", "guard", "lock"])}-${i}`,
-      target,
-      enforcement: rng.pick(["active", "disabled", "evaluate"]),
+      // The file may leave both out: the slice fills them at parse, so an omitted target is a branch ruleset.
+      ...(target === "branch" && rng.bool(0.3) ? {} : { target }),
+      ...(rng.bool(0.3) ? {} : { enforcement: rng.pick(["active", "disabled", "evaluate"]) }),
       conditions: {
         ref_name: {
           include: [target === "tag" ? "~ALL" : "~DEFAULT_BRANCH"],

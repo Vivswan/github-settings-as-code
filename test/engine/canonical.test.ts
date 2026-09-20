@@ -257,6 +257,7 @@ function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): vo
   switch (def.type) {
     case "optional":
     case "nullable":
+    case "default":
       mappingListPaths(def.innerType as z.ZodType, path, out);
       return;
     case "object":
@@ -266,7 +267,7 @@ function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): vo
       return;
     case "array": {
       let element = def.element as z.ZodType;
-      while (["optional", "nullable"].includes(defOf(element).type)) {
+      while (["optional", "nullable", "default"].includes(defOf(element).type)) {
         element = defOf(element).innerType as z.ZodType;
       }
       if (["object", "record"].includes(defOf(element).type)) {

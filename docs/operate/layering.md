@@ -120,7 +120,7 @@ Reordering keys, or the entries of a keyed list, in a layer changes nothing in t
 
 - `branches`: GitHub applies overlapping wildcard rules in creation order
 - the `pinned: true` environments: their order is the pin rank
-- the two mapping lists with no identity: `bypass_actors`, `reviewers`
+- the two mapping lists with no layering identity, so a higher list replaces the lower one and never unions with it: `bypass_actors` (the planner still pairs actors by `actor_type` plus `actor_id` for its drift lines), `reviewers`
 - every scalar list: `topics`, `include` patterns
 
 The `_undeclared` knob across layers:

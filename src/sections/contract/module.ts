@@ -635,6 +635,7 @@ export function loosen(schema: z.ZodType): z.ZodType {
       return cloneWith(schema, { valueType: loosen(def.valueType as z.ZodType) });
     case "optional":
     case "nullable":
+    case "default":
       return cloneWith(schema, { innerType: loosen(def.innerType as z.ZodType) });
     case "union": {
       const options = def.options ?? [];

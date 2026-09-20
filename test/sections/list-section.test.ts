@@ -584,7 +584,7 @@ describe("generatorFromSlice", () => {
     }
   });
 
-  test("wrapped fields draw their inner type: a defaulted enum yields both members across seeds", () => {
+  test("wrapped fields draw their inner type: a defaulted enum yields both members across seeds, and is left out too, since the file may omit it", () => {
     const wrapped = z.object({
       state: z.enum(["open", "closed"]).default("open"),
       pinned: z.boolean().catch(false),
@@ -594,6 +594,6 @@ describe("generatorFromSlice", () => {
     for (let i = 0; i < 50; i++) {
       seen.add(String(gen(new Rng(i)).state));
     }
-    expect([...seen].sort()).toEqual(["closed", "open"]);
+    expect([...seen].sort()).toEqual(["closed", "open", "undefined"]);
   });
 });

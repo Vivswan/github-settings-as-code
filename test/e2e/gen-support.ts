@@ -200,8 +200,8 @@ export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng
 function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
   const entry: Json = {};
   for (const [field, child] of Object.entries(defOf(schema).shape ?? {})) {
-    const optional = defOf(child).type === "optional";
-    if (optional && !rng.bool(seed.present?.[field] ?? 0.5)) {
+    const omittable = ["optional", "default"].includes(defOf(child).type);
+    if (omittable && !rng.bool(seed.present?.[field] ?? 0.5)) {
       continue;
     }
     const pool = seed.fields?.[field];

@@ -1177,7 +1177,8 @@
           "type": "string"
         },
         "target": {
-          "description": "What the ruleset applies to; defaults to \"branch\" upstream.",
+          "description": "What the ruleset applies to. Omitted, it is \"branch\", the default GitHub documents, so a live branch ruleset is not drift under an entry without the key.",
+          "default": "branch",
           "type": "string",
           "enum": [
             "branch",
@@ -1186,7 +1187,8 @@
           ]
         },
         "enforcement": {
-          "description": "\"active\", \"evaluate\", or \"disabled\". Created rulesets default to \"active\".",
+          "description": "\"active\", \"evaluate\", or \"disabled\". Omitted, it is \"active\" (GitHub requires a value on create; this is the one chosen), so a live active ruleset is not drift under an entry without the key.",
+          "default": "active",
           "type": "string"
         },
         "conditions": {

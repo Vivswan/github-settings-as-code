@@ -9,6 +9,8 @@
  *                             and refuses hosts, paths, and spaces that the runtime's new URL() rule accepts
  *   date strings           -> UNFORMATTED: the format: "date" / "date-time" z.iso emits is deleted too, since ajv-formats
  *                             rounds long fractional seconds into an invalid :60; zod's pattern beside it stays and is the grammar
+ *   defaulted keys         -> OPTIONAL: io: "input" describes the file, not the parsed output, so a key the slice
+ *                             fills at parse (a ruleset's target) stays out of required and keeps its default keyword
  *   root layout            -> zod's own, passed through verbatim
  *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the committed file diffs deterministically
  */
@@ -35,6 +37,7 @@ interface ZodDefView {
 
 const generated = z.toJSONSchema(SettingsFile, {
   target: "draft-7",
+  io: "input",
   override(ctx) {
     const def = (ctx.zodSchema as unknown as { _zod: { def: ZodDefView } })._zod.def;
     const json = ctx.jsonSchema as Record<string, unknown>;
