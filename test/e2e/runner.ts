@@ -564,6 +564,16 @@ export function stripMaskLines(stdout: string): string {
 }
 
 /**
+ * A scenario's captured stdout as --print-stdout echoes it, indented under the PASS or FAIL line.
+ * The `::add-mask::` lines go first: indented, a workflow command is plain text to the Actions
+ * runner, so the secret it carries would print unmasked in the job log.
+ */
+export function indentedStdout(stdout: string): string {
+  const kept = stripMaskLines(stdout).trimEnd();
+  return kept === "" ? "" : kept.replace(/^/gm, "        ");
+}
+
+/**
  * `::debug::` lines carry API request TRACES, not rendered output. The unredacted counterfactual
  * judges whether a canary reached a RENDERED surface (summary, annotation, plain log line), since that
  * is what a detail-suppression regression affects; a canary only in a trace proves nothing.

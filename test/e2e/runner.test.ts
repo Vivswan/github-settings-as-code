@@ -15,6 +15,7 @@ import {
   exitCodeFailure,
   failureArtifacts,
   forbiddenPresent,
+  indentedStdout,
   isSubsequence,
   markReportTitle,
   parseGithubOutput,
@@ -442,6 +443,18 @@ describe("stripMaskLines", () => {
     expect(stripped).not.toContain("acme/secret-repo");
     expect(stripped).toContain("private repository #1: failed");
     expect(stripped).toContain("result: failed");
+  });
+});
+
+describe("indentedStdout (what --print-stdout echoes)", () => {
+  test("indents every line and drops the ::add-mask:: lines, so no workflow command carries a secret off column zero", () => {
+    const stdout =
+      "::add-mask::abc\nresult: clean\n::add-mask::acme/secret-repo\nrepository: 1 op\n";
+    expect(indentedStdout(stdout)).toBe("        result: clean\n        repository: 1 op");
+  });
+
+  test("stdout that is only mask lines echoes nothing", () => {
+    expect(indentedStdout("::add-mask::abc\n")).toBe("");
   });
 });
 
