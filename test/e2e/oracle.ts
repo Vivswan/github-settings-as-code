@@ -944,13 +944,16 @@ function settle(slot: Slot, higher: unknown, path: string, site: Site, scope?: E
   return structuredClone(higher);
 }
 
+/**
+ * The higher keys settle in the order the higher layer wrote them (that is the order the engine visits them, so
+ * notices agree); the result keeps the lower keys' order, the higher-only keys after them.
+ */
 function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?: EntryScope): Json {
-  const out: Json = {};
-  for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
+  const settledByKey = new Map<string, unknown>();
+  for (const key of Object.keys(higher)) {
     const above = own(higher, key);
     const below = own(lower, key);
     if (above === undefined) {
-      put(out, key, below);
       continue;
     }
     const nested = scope?.prefix === "" ? scope.keyed.nested : undefined;
@@ -988,6 +991,11 @@ function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?:
     } else {
       settled = settle(below, above, at(path, key), site, within);
     }
+    settledByKey.set(key, settled);
+  }
+  const out: Json = {};
+  for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
+    const settled = settledByKey.has(key) ? settledByKey.get(key) : own(lower, key);
     if (settled !== undefined) {
       put(out, key, settled);
     }
@@ -1143,6 +1151,11 @@ export function foldMergeLayers(
   const notices: MergeNotice[] = [];
   const slots = new Map<SectionKey, Slot>();
   for (const layer of layers) {
+    // The engine admits a layer (its boundary gates) right before folding it, so a lower layer's fold refusal comes
+    // before a higher layer's boundary refusal.
+    if (refusedAtBoundary(layer, layering)) {
+      throw new FoldRefused(layer.name);
+    }
     const fileDirective = isDirective(layer.doc[LAYERING_KEY])
       ? layer.doc[LAYERING_KEY]
       : undefined;
@@ -1218,53 +1231,101 @@ function keyedListRefused(
 }
 
 /**
- * The refusals a layer earns on its own, before any fold: the boundary's shape rules, and the per-layer validation's
- * whole-section null (legal only where null is the section's value). `run` resolves a wrapper's effective directive.
+ * What the per-layer validation refuses, in the oracle's words: a whole-section null where null is not the section's
+ * value, a list section that is not a list or a wrapper, a non-mapping entry, a keyless entry (every list section's
+ * schema requires its key field). The run validates every layer before any fold, so the first such layer is named.
+ */
+function refusedByValidation(layer: MergeLayer): boolean {
+  for (const [key, value] of Object.entries(layer.doc)) {
+    if (value === null && !isNullValued(key)) {
+      return true;
+    }
+  }
+  for (const key of LIST_SECTIONS) {
+    const value = layer.doc[key];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    const wrapper = asWrapper(value);
+    if (!isMapping(wrapper) || !Array.isArray(wrapper.entries)) {
+      return true;
+    }
+    if (!wrapper.entries.every(isMapping)) {
+      return true;
+    }
+    if (keylessAnywhere(wrapper.entries, KEYED_MERGE_SECTIONS[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A keyless entry at any nesting; the standalone view drops removals first, so a removal's fields never reach this. */
+function keylessAnywhere(entries: readonly unknown[], keyed: KeyedList): boolean {
+  return entries.some((entry) => {
+    if (!isMapping(entry)) {
+      return true;
+    }
+    if (!isRemovalEntry(entry) && keyed.keysOf(entry) === null) {
+      return true;
+    }
+    return Object.entries(keyed.nested ?? {}).some(([field, nested]) => {
+      const form = nestedForm(entry[field]);
+      return form !== null && keylessAnywhere(form.entries, nested);
+    });
+  });
+}
+
+/**
+ * What the fold's boundary refuses as it admits one layer, in the oracle's words: a directive outside the set, a
+ * duplicated key, a malformed removal, a removal under an effective replace. `run` resolves a wrapper's directive.
+ */
+function refusedAtBoundary(layer: MergeLayer, run: LayeringDirective): boolean {
+  const fileDirective = layer.doc[LAYERING_KEY];
+  if (fileDirective !== undefined && !isDirective(fileDirective)) {
+    return true;
+  }
+  for (const key of LIST_SECTIONS) {
+    const value = layer.doc[key];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    const wrapper = asWrapper(value);
+    if (!isMapping(wrapper) || !Array.isArray(wrapper.entries)) {
+      continue;
+    }
+    const directive = wrapper[LAYERING_KEY];
+    if (directive !== undefined && !isDirective(directive)) {
+      return true;
+    }
+    const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
+    if (keyedListRefused(wrapper.entries, KEYED_MERGE_SECTIONS[key], effective)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The layer a stack is refused at before any fold runs, read statically: the validation pass over every layer, then
+ * each layer's boundary in order. A removal with nothing to act on is the fold's own refusal (predictMerge).
  */
 export function refusedMergeLayer(
   layers: readonly MergeLayer[],
   run: LayeringDirective,
 ): string | undefined {
-  for (const layer of layers) {
-    const fileDirective = layer.doc[LAYERING_KEY];
-    if (fileDirective !== undefined && !isDirective(fileDirective)) {
-      return layer.name;
-    }
-    for (const [key, value] of Object.entries(layer.doc)) {
-      if (value === null && !isNullValued(key)) {
-        return layer.name;
-      }
-    }
-    for (const key of LIST_SECTIONS) {
-      const value = layer.doc[key];
-      if (value === undefined || value === null) {
-        continue;
-      }
-      const wrapper = asWrapper(value);
-      if (!isMapping(wrapper) || !Array.isArray(wrapper.entries)) {
-        return layer.name;
-      }
-      if (!wrapper.entries.every(isMapping)) {
-        return layer.name;
-      }
-      const directive = wrapper[LAYERING_KEY];
-      if (directive !== undefined && !isDirective(directive)) {
-        return layer.name;
-      }
-      const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
-      if (keyedListRefused(wrapper.entries, KEYED_MERGE_SECTIONS[key], effective)) {
-        return layer.name;
-      }
-    }
-  }
-  return undefined;
+  return (
+    layers.find(refusedByValidation)?.name ??
+    layers.find((layer) => refusedAtBoundary(layer, run))?.name
+  );
 }
 
 /** A mode: render run never contacts the mock: it is refused, invalid, or written from the fold alone. */
 export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
-  const refused = refusedMergeLayer(meta.layers, meta.layering);
-  if (refused !== undefined) {
-    return { kind: "refused", layer: refused };
+  // The run's order: every layer validated on its own, then admitted and folded one by one.
+  const invalid = meta.layers.find(refusedByValidation);
+  if (invalid !== undefined) {
+    return { kind: "refused", layer: invalid.name };
   }
   let folded: ReturnType<typeof foldMergeLayers>;
   try {

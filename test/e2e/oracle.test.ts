@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { describeRemoval, mergeLayers, type RemovalNotice } from "../../src/engine/layers.js";
+import { foldLayers } from "../../src/flows/layers.js";
+import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { LIST_SECTIONS } from "../../src/schema.js";
 import { listLayering } from "../../src/sections/registry.js";
@@ -1764,8 +1766,62 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
     ],
     ["a whole-section null where null is not the section's value", { labels: null }],
   ];
-  test.each(refusals)("refuses %s, naming the layer", (_name, doc) => {
-    expect(refusedMergeLayer(stack(admitted, doc, admitted), "replace")).toBe("layer-1.yml");
+  test.each(refusals)("refuses %s, naming the layer the run names", (_name, doc) => {
+    const layers = stack(admitted, doc, admitted);
+    expect(refusedMergeLayer(layers, "replace")).toBe("layer-1.yml");
+    // The run's own verdict: per-layer validation or the fold's boundary, whichever fires, names the same layer.
+    expect(
+      foldLayers(layers, "merged", "replace", silentIo()).match(
+        () => null,
+        (problem) => ("layer" in problem ? problem.layer : problem.source),
+      ),
+    ).toBe("layer-1.yml");
+  });
+
+  test("a lower fold refusal comes before a higher boundary refusal, as the run admits and folds one layer at a time", () => {
+    const layers = stack(
+      { labels: [{ name: "gone", [REMOVE_KEY]: true }] },
+      { _layering: "invalid", labels: [{ name: "a" }] },
+    );
+    expect(predictMerge({ layers, layering: "deep", features: [] })).toEqual({
+      kind: "refused",
+      layer: "layer-0.yml",
+    });
+    expect(
+      foldLayers(layers, "merged", "deep", silentIo()).match(
+        () => null,
+        (problem) => ("layer" in problem ? problem.layer : problem.source),
+      ),
+    ).toBe("layer-0.yml");
+  });
+
+  test("nested removal notices come in the order the higher layer wrote its fields, as the action prints them", () => {
+    const layers = stack(
+      {
+        environments: [
+          {
+            name: "prod",
+            variables: [{ name: "A", value: "1" }],
+            secrets: [{ name: "B", value: "$B" }],
+          },
+        ],
+      },
+      {
+        environments: [
+          {
+            name: "prod",
+            secrets: { entries: [{ name: "B", [REMOVE_KEY]: true }] },
+            variables: { entries: [{ name: "A", [REMOVE_KEY]: true }] },
+          },
+        ],
+      },
+    );
+    const oracle = foldMergeLayers(layers, "deep");
+    expect(oracle.notices).toEqual([
+      { layer: "settings.yml", path: "environments[0].secrets[0]" },
+      { layer: "settings.yml", path: "environments[0].variables[0]" },
+    ]);
+    expect(engineNotices(layers)).toEqual(oracle.notices);
   });
 });
 

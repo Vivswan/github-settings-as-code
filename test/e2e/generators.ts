@@ -1777,7 +1777,7 @@ export type MergeForce =
   | { kind: "valid"; layering: LayeringDirective }
   | { kind: "refused"; refusal: MergeRefusalKind };
 
-/** The sections whose top-level null is the section's value; on every other section a null over nothing drops. */
+/** The sections whose top-level null is the section's value; on every other section a whole-section null fails validation. */
 const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
 
 export function isNullValued(key: string): boolean {
@@ -2183,8 +2183,8 @@ export function mergeFeaturesOf(
 /**
  * Every admitted layer is valid on its own by construction; the folded document is what the oracle predicts, and it is
  * not always a merged one.
- *   nested null placement              -> probed through the action's validator on this layer and the one below
- *   top-level null                     -> drops out of the standalone view, so it needs no probe
+ *   nested null placement              -> probed through the action's validator with the null written into this layer
+ *   top-level null                     -> only on a section whose value null is, so it needs no probe
  *   the refused layer                  -> rewritten after the check, invalid by design
  *   two valid mapping sections merged  -> can trip a cross-field rule; the valid force gives every mapping section one contribution
  */

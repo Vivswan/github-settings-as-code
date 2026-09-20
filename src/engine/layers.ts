@@ -518,19 +518,19 @@ function nestedRemovalSite(
 type NothingToRemove = Extract<LayerProblem, { code: "layer-remove-nothing" }>["reason"];
 
 /**
- * An entry placed as written: a removal at its top is refused for `reason`, and one inside its nested lists because the
- * entry is copied whole (or, under replace, because the whole list already wins); nothing below meets either.
+ * An entry the fold places as written meets nothing below: a removal at its top is refused for `reason`, and one inside
+ * its nested lists because the entry is copied whole (or, under replace, because the whole list already wins).
  */
-function copiedAsWritten(
+function refuseRemovalsIn(
   item: Readonly<Record<string, unknown>>,
   keyed: KeyedListLayering,
   path: string,
   reason: NothingToRemove,
   step: Step,
-): Readonly<Record<string, unknown>> {
+): void {
   if (isRemoval(item)) {
     refuseStep(step, path, { code: "layer-remove-nothing", reason });
-    return structuredClone(item);
+    return;
   }
   const site = nestedRemovalSite(item, keyed, path);
   if (site !== null) {
@@ -539,6 +539,16 @@ function copiedAsWritten(
       reason: reason === "replace" ? "replace" : "swapped",
     });
   }
+}
+
+function copiedAsWritten(
+  item: Readonly<Record<string, unknown>>,
+  keyed: KeyedListLayering,
+  path: string,
+  reason: NothingToRemove,
+  step: Step,
+): Readonly<Record<string, unknown>> {
+  refuseRemovalsIn(item, keyed, path, reason, step);
   return structuredClone(item);
 }
 
@@ -581,7 +591,7 @@ function mergeMappings(
         // A nested list with nothing below it: its entries are copied as written, so a removal among them is refused.
         higherForm.entries.forEach((item, index) => {
           if (isPlainObject(item)) {
-            copiedAsWritten(item, nested, `${here}[${index}]`, "unmatched", step);
+            refuseRemovalsIn(item, nested, `${here}[${index}]`, "unmatched", step);
           }
         });
       }
