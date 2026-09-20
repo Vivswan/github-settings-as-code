@@ -70,7 +70,9 @@ The step ends with `result: rendered` and exit 0, or exit 1 with an error naming
 | `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it. The wrapper of a section without an undeclared policy (`environments`, `branches`, `workflows`) takes this one key beside `entries`, and the rendered file holds its bare list |
 | `_undeclared` | A knobbed list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
 
-The two underscore keys are this action's directives, never GitHub settings, and they are the whole underscore vocabulary: any other underscore key, at a file's top level or on a wrapper, fails validation with an error naming these two (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
+The underscore marks this action's directives, never a GitHub setting, and each location takes a fixed set. A file's top level takes `_layering`; a knobbed section's wrapper takes `_layering` and `_undeclared`; a plain-list wrapper (`environments`, `branches`, `workflows`) takes `_layering` alone.
+
+Any other underscore key at any of these locations fails validation with an error naming which directive belongs where (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
 
 ## The rules
 
