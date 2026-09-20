@@ -179,6 +179,10 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "schema-looser: the at-most-10 pinned entries cap is a superRefine counting pinned: true across the array, which JSON Schema cannot count",
   "branches-wildcard-untranslatable-key-rejected.yml settings":
     "schema-looser: the wildcard-entry key sweep is a superRefine over the section's GraphQL translation tables (branches.ts); protection stays an open passthrough mapping in the schema",
+  "code-scanning-default-setup-get-only-key-rejected.yml settings":
+    "schema-looser: the GET-only schedule/updated_at refusal is a superRefine reading the passthrough record (setup-schema.ts); the shape stays open for passthrough parity",
+  "code-quality-setup-runner-label-without-labeled-rejected.yml settings":
+    "schema-looser: the runner_type/runner_label pairing is a cross-field superRefine (setup-schema.ts), rejected at runtime upfront",
 };
 
 describe("published schema agrees with the runtime over the corpus", () => {

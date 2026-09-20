@@ -1,0 +1,34 @@
+# The GET reports "rust", which the PATCH cannot set, so a snapshot of such a
+# repository leaves it out with a note and the written file parses. Fed back to
+# a check run against the same state, it reads clean: the compare leaves the
+# same language out, with the same note, instead of drifting forever.
+name: code-quality-setup-snapshot-drops-undeclarable-language
+settings: {}
+live_state:
+  code_quality:
+    state: configured
+    languages:
+      - python
+      - rust
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: code_quality_setup
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    code_quality_setup: snapshot
+  snapshot:
+    code_quality_setup:
+      state: configured
+      languages:
+        - python
+  stdout_contains:
+    - "code_quality_setup.languages: left out of the snapshot - GitHub reports \"rust\", which the PATCH's languages vocabulary has no value for, so it stays as GitHub detected it"
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

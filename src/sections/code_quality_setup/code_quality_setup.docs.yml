@@ -13,7 +13,8 @@ coverage:
       workflow after it finishes); a 403 can mean code quality is unavailable on the repository or
       the repository is archived, rather than a missing permission, and a 422 (the change cannot be
       applied) carries GitHub's message verbatim. Check compares declared keys only, languages as a
-      set. ASSUMPTION: the GET is graded as a plain read under the Administration permission,
+      set in the PATCH's vocabulary, and notes a key the GET never echoes as never converging; parse
+      refuses the GET-only schedule and updated_at. ASSUMPTION: the GET is graded as a plain read under the Administration permission,
       mirroring code scanning - the fine-grained grading of these endpoints is not verified against
       production. The sibling /code-quality/findings endpoints are read-only and stay out of scope.
       Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
@@ -22,8 +23,12 @@ schema:
   SettingsFile.code_quality_setup: Code quality analysis setup.
   CodeQualitySetupConfig: PATCH /repos/{r}/code-quality/setup, sent verbatim.
   CodeQualitySetupConfig.state: Turn code quality analysis on ("configured") or off ("not-configured").
-  CodeQualitySetupConfig.languages: Languages to analyze, compared as a set; GitHub auto-detects when omitted.
+  CodeQualitySetupConfig.languages: >-
+    Languages to analyze, in the PATCH's vocabulary (the GET's "rust" cannot be declared and stays as
+    detected), compared as a set; GitHub auto-detects when omitted.
   CodeQualitySetupConfig.runner_type: Run on GitHub-hosted ("standard") or labeled self-hosted runners.
-  CodeQualitySetupConfig.runner_label: Runner label when runner_type is "labeled"; null clears it.
+  CodeQualitySetupConfig.runner_label: >-
+    Runner label: a string needs runner_type: "labeled" and is refused under any other; null clears
+    it under runner_type: "standard" or none.
   CodeQualitySetupConfig.ai_findings_option: >-
     AI-powered findings: "on_push" runs them on every push, "disabled" turns them off.

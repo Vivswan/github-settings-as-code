@@ -5,11 +5,14 @@
  */
 
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever } from "../../types.js";
-import { CodeQualitySetupConfig } from "../code_quality_setup/schema.js";
-import { CodeScanningDefaultSetupConfig } from "../code_scanning_default_setup/schema.js";
+import { CODE_QUALITY_LANGUAGES, CodeQualitySetupConfig } from "../code_quality_setup/schema.js";
+import {
+  CODE_SCANNING_LANGUAGES,
+  CodeScanningDefaultSetupConfig,
+} from "../code_scanning_default_setup/schema.js";
 import { expand } from "../contract/endpoints.js";
 import { parseLive } from "../contract/live.js";
 import {
@@ -28,7 +31,8 @@ import {
   type SectionPlan,
   type SnapshotContext,
 } from "../contract/plan.js";
-import { projectOntoSchema } from "./snapshot-helpers.js";
+import { type SetupLanguages, undeclarableLanguages } from "./setup-schema.js";
+import { leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
 export type SetupKey = "code_scanning_default_setup" | "code_quality_setup";
 
@@ -37,17 +41,19 @@ const SETUPS = {
   code_scanning_default_setup: {
     path: "code-scanning/default-setup",
     slice: CodeScanningDefaultSetupConfig,
+    languages: CODE_SCANNING_LANGUAGES,
     read: {},
   },
   code_quality_setup: {
     path: "code-quality/setup",
     slice: CodeQualitySetupConfig,
+    languages: CODE_QUALITY_LANGUAGES,
     // GitHub gates this GET at write (the Codespaces secrets precedent), so a read-only token is denied it.
     read: { accessGrade: "write" },
   },
 } as const satisfies Record<
   SetupKey,
-  { path: string; slice: z.ZodType; read: { accessGrade?: "write" } }
+  { path: string; slice: z.ZodObject; languages: SetupLanguages; read: { accessGrade?: "write" } }
 >;
 
 type Setup<K extends SetupKey = SetupKey> = (typeof SETUPS)[K];
@@ -74,7 +80,7 @@ type SetupDeclared<K extends SetupKey> = Exclude<SettingsFile[K], undefined>;
 /**
  * One setup's plan() over exactly its own dictionary and declared value (the
  * registry's exactness lockstep); indexed by K so the factory's one
- * SharedPlan can be assigned to it.
+ * SharedPlan serves it.
  */
 type SetupPlan<K extends SetupKey> = {
   [F in SetupKey]: (
@@ -90,11 +96,11 @@ type SharedPlan = (
   declared: SetupDeclared<SetupKey>,
 ) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
 
-type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-type _SharedPlanIsEverySetupPlan = MustBeNever<
+// Assignability, not equality: the shared plan takes the union of both declared values, and the
+// two languages vocabularies make that union wider than either key's own.
+type _SharedPlanServesEverySetup = MustBeNever<
   {
-    [K in SetupKey]: Invariant<SharedPlan, KeyErasedPlan<SetupPlan<K>>> extends true ? never : K;
+    [K in SetupKey]: [SharedPlan] extends [KeyErasedPlan<SetupPlan<K>>] ? never : K;
   }[SetupKey]
 >;
 
@@ -120,6 +126,36 @@ export interface SetupSectionModule<K extends SetupKey> {
 /** The GET body: the whole configuration as a mapping, which subsetDiff compares the declared keys against. */
 const LiveSetup = z.looseObject({});
 
+/**
+ * The GET body in the PATCH's vocabulary: `languages` with the GET-only names folded onto their
+ * declarable name (once each), and the names with none set aside. Every other key rides through
+ * untouched.
+ */
+function inPatchVocabulary(
+  live: Record<string, unknown>,
+  vocabulary: SetupLanguages,
+): { live: Record<string, unknown>; undeclarable: string[] } {
+  const reported = live.languages;
+  if (!Array.isArray(reported)) {
+    return { live, undeclarable: [] };
+  }
+  const folded = new Set<string>();
+  const undeclarable: string[] = [];
+  for (const name of reported) {
+    const declarable = vocabulary.declarable.includes(name)
+      ? name
+      : Object.hasOwn(vocabulary.getOnly, name)
+        ? vocabulary.getOnly[name]
+        : undefined;
+    if (typeof declarable === "string") {
+      folded.add(declarable);
+    } else {
+      undeclarable.push(name);
+    }
+  }
+  return { live: { ...live, languages: [...folded] }, undeclarable };
+}
+
 /** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
 export function setupSection<K extends SetupKey>(setup: {
   key: K;
@@ -131,7 +167,7 @@ export function setupSection<K extends SetupKey>(setup: {
   noun: string;
 }): SetupSectionModule<K> {
   const { key, permission, grantCaveat, noun } = setup;
-  const { path, slice, read }: Setup<K> = SETUPS[key];
+  const { path, slice, languages, read }: Setup<K> = SETUPS[key];
   const readGrade: { accessGrade?: "write" } = read;
   const endpoints: SetupEndpoints<K> = {
     get: {
@@ -155,7 +191,23 @@ export function setupSection<K extends SetupKey>(setup: {
   const plan: SharedPlan = async (ctx, declared) => {
     const desired: Record<string, unknown> = declared;
     const planned: SectionPlan<PlannedOp<WideEndpoints>> = { ops: [], notes: [], drift: [] };
-    const drift = subsetDiff(desired, await ctx.read.get.call(LiveSetup), key);
+    const reported = await ctx.read.get.call(LiveSetup);
+    // The keys pass through, so a key GitHub never echoes would re-PATCH on every apply without
+    // converging. A slice key the GET lacks is drift the PATCH resolves (the GET reports every PATCH
+    // field), so only a key outside the slice is noted.
+    const phantom = phantomKeys(desired, reported).filter(
+      (name) => !Object.hasOwn(slice.shape, name),
+    );
+    if (phantom.length > 0) {
+      planned.notes.push(phantomNote(key, phantom, noun, "this PATCH will re-run"));
+    }
+    const { live, undeclarable } = inPatchVocabulary(reported, languages);
+    if (undeclarable.length > 0) {
+      planned.notes.push(
+        `${key}.languages: left out of the compare - ${undeclarableLanguages(undeclarable)}`,
+      );
+    }
+    const drift = subsetDiff(desired, live, key);
     if (!hasDrift(drift)) {
       return planned;
     }
@@ -183,16 +235,21 @@ export function setupSection<K extends SetupKey>(setup: {
   };
 
   // The GET always answers with the whole configuration (a not-configured setup included), so
-  // the snapshot is that body on the slice's keys; the PATCH takes the same keys back verbatim.
-  // SETUPS pairs the slice with its key, so its projection IS the section's declared type; the
-  // casts are the wide-port and per-key boundaries.
+  // the snapshot is that body, in the PATCH's vocabulary, on the slice's keys; the PATCH takes the
+  // same keys back verbatim. SETUPS pairs the slice with its key, so its projection IS the section's
+  // declared type; the casts are the wide-port and per-key boundaries.
   const snapshot = async (
     ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
   ): Promise<SectionSnapshot<K>> => {
-    const live = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call(
+    const reported = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call(
       LiveSetup,
     );
-    return { value: projectOntoSchema(slice as z.ZodType, live) as SetupDeclared<K>, notes: [] };
+    const { live, undeclarable } = inPatchVocabulary(reported, languages);
+    const notes =
+      undeclarable.length > 0
+        ? [leftOutOfSnapshot(`${key}.languages`, undeclarableLanguages(undeclarable))]
+        : [];
+    return { value: projectOntoSchema(slice, live) as SetupDeclared<K>, notes };
   };
 
   const section: SetupSectionModule<K> = {

@@ -6,20 +6,7 @@
 
 import type { Json } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
-
-// The published settings schema is looser, but the mock validates the PATCH body against GitHub's
-// real OpenAPI enum, so only these canonical values may be emitted.
-const CODE_SCANNING_LANGUAGES = [
-  "actions",
-  "c-cpp",
-  "csharp",
-  "go",
-  "java-kotlin",
-  "javascript-typescript",
-  "python",
-  "ruby",
-  "swift",
-] as const;
+import { CODE_SCANNING_LANGUAGES } from "./schema.js";
 
 export function genCodeScanning(rng: Rng): Json {
   const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };
@@ -38,7 +25,9 @@ export function genCodeScanning(rng: Rng): Json {
     }
   }
   if (rng.bool(0.5)) {
-    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () => rng.pick(CODE_SCANNING_LANGUAGES));
+    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () =>
+      rng.pick(CODE_SCANNING_LANGUAGES.declarable),
+    );
   }
   return cfg;
 }

@@ -409,10 +409,18 @@
           ]
         },
         "languages": {
-          "description": "Languages to analyze, compared as a set; GitHub auto-detects when omitted.",
+          "description": "Languages to analyze, in the PATCH's vocabulary (the GET's \"rust\" cannot be declared and stays as detected), compared as a set; GitHub auto-detects when omitted.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "csharp",
+              "go",
+              "java-kotlin",
+              "javascript-typescript",
+              "python",
+              "ruby"
+            ]
           }
         },
         "runner_type": {
@@ -424,7 +432,7 @@
           ]
         },
         "runner_label": {
-          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
+          "description": "Runner label: a string needs runner_type: \"labeled\" and is refused under any other; null clears it under runner_type: \"standard\" or none.",
           "type": [
             "string",
             "null"
@@ -461,10 +469,21 @@
           ]
         },
         "languages": {
-          "description": "Languages to scan, compared as a set; GitHub auto-detects when omitted.",
+          "description": "Languages to scan, in the PATCH's vocabulary (\"javascript-typescript\", never the GET's separate \"javascript\" and \"typescript\"), compared as a set; GitHub auto-detects when omitted.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "actions",
+              "c-cpp",
+              "csharp",
+              "go",
+              "java-kotlin",
+              "javascript-typescript",
+              "python",
+              "ruby",
+              "swift"
+            ]
           }
         },
         "runner_type": {
@@ -476,7 +495,7 @@
           ]
         },
         "runner_label": {
-          "description": "Runner label when runner_type is \"labeled\"; null clears it.",
+          "description": "Runner label: a string needs runner_type: \"labeled\" and is refused under any other; null clears it under runner_type: \"standard\" or none.",
           "type": [
             "string",
             "null"

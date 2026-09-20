@@ -8,23 +8,42 @@ import type { SectionModule } from "../../src/sections/contract/module.js";
 import { type PlanContext, planContext } from "../../src/sections/contract/plan.js";
 import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
 import type { MustBeNever } from "../../src/types.js";
+import type { LiveState } from "../e2e/mock/state.js";
 import { MockApi } from "../mock-api.js";
+import { registryFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
 import { REPO } from "./section-run.js";
+import { proveSnapshotRoundTrip, type SnapshotSection } from "./snapshot-roundtrip.js";
 
 /** One section's declared setup document. */
 type Declared<K extends SetupKey = SetupKey> = Exclude<SettingsFile[K], undefined>;
+
+type Languages<K extends SetupKey> = NonNullable<Declared<K>["languages"]>;
+
+/** The names reversed, still typed as their vocabulary: array methods on the union of the two erase to string[]. */
+function reversed<T extends readonly string[]>(names: T): T {
+  return names.slice().reverse() as unknown as T;
+}
 
 /** The lockstep tuple on which the minted sections differ, typed by the same key throughout. */
 interface SetupFacts<K extends SetupKey> {
   section: SetupSectionModule<K>;
   /** The expanded endpoint path ("/repos/o/r/code-quality/setup"). */
   path: string;
-  /** A live GET body; must carry a `languages` list for the set compare. */
-  live: Record<string, unknown> & { languages: string[] };
+  /** A live GET body; must carry a `languages` list for the set compare, and lack the key `knownAbsent` declares. */
+  live: Record<string, unknown> & { languages: Languages<K> };
   /** A declared document that drifts from `live`, and the exact drift line. */
   driftDeclared: Declared<K>;
   driftLine: string;
+  /** A slice key `live` lacks: drift the PATCH resolves, never a phantom. */
+  knownAbsent: Declared<K>;
+  /** A language only the GET reports, and the exact refusal it earns in a settings file. */
+  getOnlyLanguage: [string, string];
+  /** The mock's seeded setup whose `languages` carry the GET's spellings, and what they read back as. */
+  seeded: LiveState;
+  languagesRead: Languages<K>;
+  /** The GET-only names with no declarable form, left out of the compare and the snapshot with a note. */
+  undeclarable: string[];
   /** A declared document for the verbatim-PATCH case. */
   applyPayload: Declared<K>;
   changeLine: string;
@@ -45,6 +64,16 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     },
     driftDeclared: { state: "configured", query_suite: "extended" },
     driftLine: 'code_scanning_default_setup.query_suite: "extended" != "default"',
+    knownAbsent: { threat_model: "remote" },
+    getOnlyLanguage: [
+      "javascript",
+      '"javascript" is the spelling GitHub reports, not one the PATCH accepts; write "javascript-typescript"',
+    ],
+    seeded: {
+      code_scanning: { state: "configured", languages: ["javascript", "typescript", "python"] },
+    },
+    languagesRead: ["javascript-typescript", "python"],
+    undeclarable: [],
     applyPayload: { state: "configured", query_suite: "extended" },
     changeLine: "applied code scanning default setup",
     conflict409:
@@ -67,6 +96,14 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
     driftDeclared: { state: "configured", ai_findings_option: "on_push" },
     driftLine:
       'code_quality_setup.ai_findings_option: declared "on_push" but the API response has no such field (new or write-only field?)',
+    knownAbsent: { ai_findings_option: "on_push" },
+    getOnlyLanguage: [
+      "rust",
+      '"rust" is reported by GitHub but the PATCH cannot set it; remove it from the settings file (it stays as GitHub detected it)',
+    ],
+    seeded: { code_quality: { state: "configured", languages: ["python", "rust"] } },
+    languagesRead: ["python"],
+    undeclarable: ["rust"],
     applyPayload: { state: "configured", ai_findings_option: "disabled" },
     changeLine: "applied code quality setup",
     conflict409:
@@ -133,11 +170,17 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
   (_key, facts) => {
     // The erased view: one plan() signature over either section's declared value.
     const section: SectionModule<SetupKey> = facts.section;
+    const snapshotting: SnapshotSection = facts.section;
     const {
       path,
       live,
       driftDeclared,
       driftLine,
+      knownAbsent,
+      getOnlyLanguage,
+      seeded,
+      languagesRead,
+      undeclarable,
       applyPayload,
       changeLine,
       conflict409,
@@ -145,6 +188,123 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
     } = facts;
     const plan = (api: GitHubClient, declared: Declared) =>
       section.plan(planContext(section, api, REPO), declared);
+
+    /** Every issue of a parse, as [path, message], so a refusal is pinned whole. */
+    const issuesOf = (document: unknown): [string, string][] | "accepted" => {
+      const parsed = section.shape.safeParse(document);
+      return parsed.success
+        ? "accepted"
+        : parsed.error.issues.map((issue) => [issue.path.join("."), issue.message]);
+    };
+
+    const getOnlyKey = (key: string) =>
+      `${JSON.stringify(key)} is reported by GitHub but the PATCH does not accept it, so declaring it could only drift; remove it from the settings file`;
+
+    test("what the settings file alone shows to be wrong is refused at parse, naming the key and the fix, instead of a 422 or drift that never converges", () => {
+      const [language, languageIssue] = getOnlyLanguage;
+      const refused: [string, unknown, [string, string][]][] = [
+        [
+          "the GET's schedule and updated_at, which no PATCH takes",
+          { state: "configured", schedule: "weekly", updated_at: "2026-07-01T10:00:00Z" },
+          [
+            ["schedule", getOnlyKey("schedule")],
+            ["updated_at", getOnlyKey("updated_at")],
+          ],
+        ],
+        [
+          "a language only the GET reports",
+          { languages: ["python", language] },
+          [["languages.1", languageIssue]],
+        ],
+        [
+          "a labeled runner without its label",
+          { runner_type: "labeled", runner_label: null },
+          [
+            [
+              "runner_label",
+              'runner_type: "labeled" needs a runner_label naming the self-hosted runner label; declare runner_label, or set runner_type: "standard"',
+            ],
+          ],
+        ],
+        [
+          "a label under the standard runner",
+          { runner_type: "standard", runner_label: "gpu" },
+          [
+            [
+              "runner_label",
+              'runner_label "gpu" is declared under runner_type: "standard", where GitHub ignores it; set runner_type: "labeled", or remove runner_label',
+            ],
+          ],
+        ],
+        [
+          "a label without a runner type",
+          { runner_label: "gpu" },
+          [
+            [
+              "runner_label",
+              'runner_label "gpu" is declared without runner_type, where GitHub ignores it; set runner_type: "labeled", or remove runner_label',
+            ],
+          ],
+        ],
+      ];
+      for (const [why, document, issues] of refused) {
+        expect(issuesOf(document), why).toEqual(issues);
+      }
+      // A name off both vocabularies that is a prototype property: zod's own enum refusal (whose
+      // wording is zod's to change), never the getOnly fold wording, since the fold table is read as
+      // own properties only. Both fold messages name GitHub; zod's does not.
+      const prototypeName = section.shape.safeParse({ languages: ["toString"] });
+      const [issue, ...more] = prototypeName.error?.issues ?? [];
+      expect(more).toEqual([]);
+      expect([issue?.code, issue?.path.join(".")]).toEqual(["invalid_value", "languages.0"]);
+      expect(issue?.message).not.toMatch(/GitHub/);
+      // The pairs GitHub takes, and a clearing null label under the standard runner, still parse.
+      for (const accepted of [
+        { state: "configured", runner_type: "labeled", runner_label: "gpu" },
+        { runner_type: "standard", runner_label: null },
+        { languages: languagesRead },
+      ]) {
+        expect(issuesOf(accepted)).toBe("accepted");
+      }
+    });
+
+    test("a key outside the slice that the GET never echoes is noted as never converging; a slice key the GET lacks is plain drift", async () => {
+      const api = new MockApi({ [`GET ${path}`]: { data: live } });
+      // A prototype property's name is a phantom like any other typo, not a slice key.
+      const typo = { ...knownAbsent, runer_type: "standard", toString: "standard" };
+      const phantom = await plan(api, typo);
+      const noun = changeLine.slice("applied ".length);
+      expect(phantom.notes).toEqual([
+        `${section.key}: declared keys "runer_type", "toString" do not exist on the live ${noun}, ` +
+          "so if GitHub ignores them this PATCH will re-run on every apply without converging. " +
+          "Fix the key name, or remove it from the settings file",
+      ]);
+      expect(phantom.ops.map((op) => [op.role, op.payload])).toEqual([["update", typo]]);
+      const known = await plan(api, knownAbsent);
+      expect(known.notes).toEqual([]);
+      expect(known.ops.map((op) => [op.role, op.payload])).toEqual([["update", knownAbsent]]);
+    });
+
+    test("languages the GET spells its own way fold onto the PATCH's names for compare and snapshot; a name with no declarable form is left out with a note, and the snapshot round-trips", async () => {
+      const api = registryFake(seeded);
+      const { snapshot, plan: replanned } = await proveSnapshotRoundTrip(snapshotting, api);
+      const reason = (left: string) =>
+        undeclarable.length === 0
+          ? []
+          : [
+              `${section.key}.languages: left out of the ${left} - GitHub reports "rust", which the PATCH's languages vocabulary has no value for, so it stays as GitHub detected it`,
+            ];
+      expect(snapshot).toEqual({
+        value: { state: "configured", languages: languagesRead },
+        notes: reason("snapshot"),
+      });
+      expect(replanned.ops).toEqual([]);
+      expect(replanned.notes).toEqual(reason("compare"));
+      // Declared in the PATCH's spelling, reordered: still converged against the GET's.
+      const reordered = await plan(api, { languages: reversed(languagesRead) });
+      expect(reordered.ops).toEqual([]);
+      expect(api.writes).toEqual([]);
+    });
 
     test("plans the verbatim PATCH on declared-keys-only drift, languages as a set", async () => {
       const api = new MockApi({ [`GET ${path}`]: { data: live } });
@@ -155,7 +315,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       ]);
       expect(drifted.notes).toEqual([]);
       expect(drifted.drift).toEqual([]);
-      const reordered = await plan(api, { languages: [...live.languages].reverse() });
+      const reordered = await plan(api, { languages: reversed(live.languages) });
       expect(reordered.ops).toEqual([]);
       expect(api.mutations()).toEqual([]);
     });

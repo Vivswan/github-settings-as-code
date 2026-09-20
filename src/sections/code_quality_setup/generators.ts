@@ -6,16 +6,7 @@
 
 import type { Json } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
-
-/** The languages the code-quality PATCH accepts (a subset of the GET enum). */
-const CODE_QUALITY_LANGUAGES = [
-  "csharp",
-  "go",
-  "java-kotlin",
-  "javascript-typescript",
-  "python",
-  "ruby",
-] as const;
+import { CODE_QUALITY_LANGUAGES } from "./schema.js";
 
 export function genCodeQuality(rng: Rng): Json {
   const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };
@@ -26,7 +17,9 @@ export function genCodeQuality(rng: Rng): Json {
     }
   }
   if (rng.bool(0.5)) {
-    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () => rng.pick(CODE_QUALITY_LANGUAGES));
+    cfg.languages = Array.from({ length: rng.int(3) + 1 }, () =>
+      rng.pick(CODE_QUALITY_LANGUAGES.declarable),
+    );
   }
   if (rng.bool(0.3)) {
     cfg.ai_findings_option = rng.pick(["disabled", "on_push"]);
