@@ -61,6 +61,36 @@ describe("parseSettingsDoc", () => {
     });
   });
 
+  test("a `<<: *base` merge key folds the anchored mapping into its entry instead of surviving as a literal key", async () => {
+    // The Probot app's js-yaml resolved merge keys, so a migrated file relying on them would otherwise create the
+    // second label with no color, no description, and a "<<" field riding the create payload.
+    expect(
+      await captureOutput(() =>
+        parseSettingsDoc(
+          [
+            "labels:",
+            "  - &base",
+            "    name: bug",
+            "    color: ff0000",
+            "    description: Something broken",
+            "  - <<: *base",
+            "    name: defect",
+            "",
+          ].join("\n"),
+        ),
+      ),
+    ).toEqual({
+      result: ok({
+        labels: [
+          { name: "bug", color: "ff0000", description: "Something broken" },
+          { name: "defect", color: "ff0000", description: "Something broken" },
+        ],
+      }),
+      warnings: [],
+      stderr: "",
+    });
+  });
+
   test("a syntax error still fails through the error path, not a partial parse", async () => {
     const captured = await captureOutput(() => parseSettingsDoc("labels: [oops, unclosed\n"));
     expect(captured).toEqual({
