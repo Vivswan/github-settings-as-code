@@ -49,7 +49,7 @@ flowchart TD
 
 - A settings file is YAML text until the reader parses it, and an unknown document until validation brands it.
 - `mode: render` is the only path through the fold: every layer is validated on its own, folded, validated again, and written to `rendered-file`.
-- Check and apply take one file straight to validation, then through each active section module. Every check that reads only the file runs there, before the first request ([the validation phase](#the-validation-phase)).
+- Check and apply take one file straight to validation, then through each active section module. Every check that reads only the file runs there, before the first request to that repository's sections ([the validation phase](#the-validation-phase)).
 - Planning is where the reads happen: a section reads its live state through the client, diffs it against the declaration, and returns a plan of ops, each carrying its drift line.
 - Check renders the plan's drift lines and never calls the API again. Apply executes the plan's writes, reading only what a write needs on the way (a public key before sealing a secret).
 - The run ends with a summary, outputs, and an exit code.
@@ -74,8 +74,8 @@ flowchart LR
 ```
 
 - You declare, the engine diffs the declaration against the live repository, and apply converges the two.
-- A key you do not declare is never compared or touched.
-- The one knob on the live axis is `_undeclared`: what happens to a live resource the file does not declare. A list section's wrapper sets it; a file's top-level `_undeclared` sets it for every list section of that file, and the run input `undeclared` for every file; the section's own default applies where none is set.
+- A key you do not declare is never compared or touched, except under the three replacing writes ([Semantics](semantics.md) names them).
+- The one live-axis knob is `_undeclared`: what happens to a live resource the file does not declare. A knobbed list section's wrapper sets it; a file's top-level `_undeclared` sets it for every knobbed list section of that file, and the run input `undeclared` for every file; the section's default applies where none is set. `environments`, `branches`, and `workflows` apply no policy and refuse the knob ([Undeclared policy](undeclared-policy.md)).
 - Re-running an apply rewrites nothing the engine can read back, and a check right after it reads clean. Writes whose value GitHub does not read back recur by design: `interaction_limits` re-arms its expiry, every declared secret is re-sealed, and the Git LFS toggle and `check_suite_preferences` are re-sent on every apply.
 
 Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml), [src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
@@ -107,7 +107,7 @@ flowchart TD
   top["the top level<br>src/engine/orchestrate.ts validateSettingsDoc()"]
   shapes["every section, in turn<br>src/engine/validate.ts validateSectionShapes()"]
   hook["the section's validate hook<br>src/sections/contract/module.ts SectionModule"]
-  issues["one collected list of issues, exit 1, zero requests"]
+  issues["one collected list of issues, exit 1, zero section requests"]
   minted["src/engine/orchestrate.ts<br>ValidatedSettings"]
   plan["src/sections/contract/plan.ts<br>planContext() SectionPlan"]
   doc --> top
@@ -122,17 +122,17 @@ flowchart TD
 
 One rule decides what belongs here: what the settings file alone shows wrong is refused when the file is parsed, naming the key and the fix, never discovered at apply time. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
 
-The phase runs in every mode before the first request, and in render mode on every layer and on the fold. Three kinds of check take part:
+The phase runs in every mode before the first request to that repository's sections, and in render mode on every layer and on the fold. In a multi-repo run each target is validated in turn, once its file is fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
 
 - The zod shape of each section, with its cross-field rules. A rule still runs beside a sibling that failed, so one run reports the bad enum and the contradictory pair together.
 - The section's `validate` hook, required on every list section: duplicates by the section's key, a rename that collides, a nested list's own duplicates. Its issues carry paths under the section key, like the shape's.
 - Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite.
 
-Every issue the phase finds lands in one list: unknown directives, then unknown sections, then each section's issues in the order the action applies sections. The run exits 1 with zero requests. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
+Every issue the phase finds lands in one list: unknown directives, then unknown sections, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
 
 Two limits. A shape's own issues are capped at five per section, with a count of the rest; and a section's hook runs once its shape parsed, so a shape error in an entry can hide a duplicate until it is fixed.
 
-The success path mints the input a planner accepts: a section's `plan()` takes the section's value carrying a type-level brand that names the section it was validated as. A hand-built entry list does not compile, so no path reaches a planner around the phase.
+The success path mints the input a planner accepts: a section's `plan()` takes the section's value carrying a type-level brand that names the section it was validated as. A hand-built entry list does not compile. A nullable section's `null` carries no brand: it holds nothing a file-only check could judge.
 
 Secret references are the exception. The `$NAME` syntax is judged per section when the run starts, because the verdict needs the document's provenance ([Trust and provenance](#trust-and-provenance)).
 
