@@ -1,0 +1,36 @@
+# The GET still spells JavaScript and TypeScript apart while the PATCH takes
+# only the pair, so a snapshot of such a repository folds them onto
+# "javascript-typescript" (once) and the written file parses. Fed back to a
+# check run against the same state, it reads clean: the compare folds the same way.
+name: code-scanning-default-setup-snapshot-folds-languages
+settings: {}
+live_state:
+  code_scanning:
+    state: configured
+    languages:
+      - javascript
+      - typescript
+      - python
+    query_suite: default
+inputs:
+  mode: snapshot
+  snapshot_file: snapshot.yml
+  sections: code_scanning_default_setup
+expect:
+  exit_code: 0
+  result: snapshot
+  outcomes:
+    code_scanning_default_setup: snapshot
+  snapshot:
+    code_scanning_default_setup:
+      state: configured
+      query_suite: default
+      languages:
+        - javascript-typescript
+        - python
+  never:
+    - POST /
+    - PATCH /
+    - PUT /
+    - DELETE /
+  snapshot_converges: true

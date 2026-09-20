@@ -1,0 +1,26 @@
+# A misspelled key passes through (the surface is open so a field GitHub ships
+# tomorrow is declarable), but the GET never echoes it, so the PATCH would
+# re-run on every apply without converging. Check mode notes exactly that,
+# naming the key, alongside the drift it causes, and writes nothing.
+name: code-quality-setup-unknown-key-noted
+settings:
+  code_quality_setup:
+    state: configured
+    ai_finding_option: on_push
+inputs:
+  mode: check
+live_state:
+  code_quality:
+    state: configured
+    languages:
+      - python
+    ai_findings_option: disabled
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    code_quality_setup: drift
+  stdout_contains:
+    - 'declared key "ai_finding_option" does not exist on the live code quality setup, so if GitHub ignores it this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file'
+  never:
+    - "PATCH /repos/{repo}/code-quality/setup"

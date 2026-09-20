@@ -9,16 +9,21 @@ coverage:
       GET/PATCH /repos/{owner}/{repo}/code-scanning/default-setup, PATCH body verbatim (state,
       query_suite, languages, runner_type, runner_label, threat_model). A 202 answer means GitHub
       rolls the change out in a configuration run, which the log names. Check compares declared keys
-      only, languages as a set. Needs GitHub Advanced Security on private repositories; a 403 can
-      mean that (or an archived repository) rather than a missing permission.
-      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
-      not-configured setup's runner_type) is omitted.
+      only, languages as a set in the PATCH's vocabulary, and notes a key the GET never echoes as
+      never converging; parse refuses the GET-only schedule and updated_at. Needs GitHub Advanced
+      Security on private repositories; a 403 can mean that (or an archived repository) rather than
+      a missing permission. Snapshot reads the GET body back on the declared keys; a null the slice
+      does not take (a not-configured setup's runner_type) is omitted.
 schema:
   SettingsFile.code_scanning_default_setup: Code scanning default setup (CodeQL).
   CodeScanningDefaultSetupConfig: PATCH /repos/{r}/code-scanning/default-setup, sent verbatim.
   CodeScanningDefaultSetupConfig.state: Turn default setup on ("configured") or off ("not-configured").
   CodeScanningDefaultSetupConfig.query_suite: CodeQL query suite to run.
-  CodeScanningDefaultSetupConfig.languages: Languages to scan, compared as a set; GitHub auto-detects when omitted.
+  CodeScanningDefaultSetupConfig.languages: >-
+    Languages to scan, in the PATCH's vocabulary ("javascript-typescript", never the GET's separate
+    "javascript" and "typescript"), compared as a set; GitHub auto-detects when omitted.
   CodeScanningDefaultSetupConfig.runner_type: Run on GitHub-hosted ("standard") or labeled self-hosted runners.
-  CodeScanningDefaultSetupConfig.runner_label: Runner label when runner_type is "labeled"; null clears it.
+  CodeScanningDefaultSetupConfig.runner_label: >-
+    Runner label: a string needs runner_type: "labeled" and is refused under any other; null clears
+    it under runner_type: "standard" or none.
   CodeScanningDefaultSetupConfig.threat_model: Whether to model local sources as threats in addition to remote ones.

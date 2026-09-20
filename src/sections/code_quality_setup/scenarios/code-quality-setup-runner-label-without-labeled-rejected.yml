@@ -1,0 +1,19 @@
+# The settings file declares a runner_label under runner_type: standard, where
+# GitHub ignores the label: applied, it could only drift forever. The document
+# is refused at parse, naming the key and the fix, before any request leaves
+# the client. The repository section here pins that ordering.
+name: code-quality-setup-runner-label-without-labeled-rejected
+settings:
+  repository:
+    description: should never be written
+  code_quality_setup:
+    state: configured
+    runner_type: standard
+    runner_label: gpu
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - "code_quality_setup.runner_label"
+    - 'set runner_type: "labeled", or remove runner_label'
+  zero_requests: true

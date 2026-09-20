@@ -1,0 +1,18 @@
+# The settings file declares `schedule`, which the GET reports but the PATCH
+# never accepts: applied, it could only drift forever. The document is refused
+# at parse, naming the key and the fix, before any request leaves the client.
+# The repository section here pins that ordering.
+name: code-scanning-default-setup-get-only-key-rejected
+settings:
+  repository:
+    description: should never be written
+  code_scanning_default_setup:
+    state: configured
+    schedule: weekly
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - "code_scanning_default_setup.schedule"
+    - "the PATCH does not accept it"
+  zero_requests: true
