@@ -1,12 +1,23 @@
 /** The `pages:` section's whole-section config declaration (see src/schema.ts). */
 
+import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
 
+type PagesPutBody = NonNullable<
+  operations["repos/update-information-about-pages-site"]["requestBody"]
+>["content"]["application/json"];
+
 /**
- * Fields the site GET reports that the update PUT has no parameter for: declared, each would ride the
- * PUT ignored and diff against the live read on every run. The value is the fix the refusal names.
+ * A site field the GET reports that the update PUT has no parameter for, so declared it would ride the
+ * PUT ignored and diff against the live read on every run. `public` stays out: Enterprise Cloud sets it.
  */
-const READ_ONLY_SITE_FIELDS: Readonly<Record<string, string>> = {
+type ReadOnlySiteField = Exclude<
+  keyof components["schemas"]["page"],
+  keyof PagesPutBody | "public"
+>;
+
+/** The fix each refusal names. Exhaustive over ReadOnlySiteField, so a new GET field fails to compile here. */
+const READ_ONLY_SITE_FIELDS = {
   url: "GitHub mints the API address from the repository",
   html_url:
     "GitHub mints the site address from the repository and `cname`; declare `cname` for a custom domain",
@@ -18,7 +29,7 @@ const READ_ONLY_SITE_FIELDS: Readonly<Record<string, string>> = {
   pending_domain_unverified_at: "it reports the custom domain's verification deadline",
   https_certificate:
     "GitHub provisions the certificate for `cname`; declare `cname` and `https_enforced`",
-};
+} satisfies Record<ReadOnlySiteField, string>;
 
 // Not exported: consumers spell it NonNullable<PagesConfig>. The definition id stays "PagesConfig";
 // moving it onto the nullable wrapper would change the published schema.

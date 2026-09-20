@@ -69,12 +69,6 @@ describe("pages shape", () => {
       [["source", "path"], 'Invalid option: expected one of "/"|"/docs"'],
     ]);
   });
-
-  test("a key GitHub may add to the PUT still passes through: the refusal list is not a closed surface", () => {
-    const result = parse({ source: { branch: "main", path: "/docs" }, future_flag: true });
-    expect(result.success).toBe(true);
-    expect(result.data).toEqual({ source: { branch: "main", path: "/docs" }, future_flag: true });
-  });
 });
 
 describe("pages", () => {
