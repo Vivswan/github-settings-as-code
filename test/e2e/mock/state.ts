@@ -1300,26 +1300,26 @@ export function applyRuleInputToLiteral(
 
 /**
  * Read back by environments' `flattenEnvironment`: a reviewer's `id` nests under `reviewer` while its
- * `type` stays top-level, matching the flattener's extraction.
+ * `type` stays top-level, matching the flattener's extraction. Like GitHub, the disabled values
+ * create no rule: wait_timer 0 and an empty reviewer list (prevent_self_review rides that rule, so
+ * it is dropped with it) read back as protection_rules: [].
  */
 export function environmentFromPut(payload: Json): Json {
   const { wait_timer, prevent_self_review, reviewers, ...rest } = payload;
   const rules: Json[] = [];
-  if (wait_timer !== undefined) {
+  if (typeof wait_timer === "number" && wait_timer > 0) {
     rules.push({ type: "wait_timer", wait_timer });
   }
-  if (prevent_self_review !== undefined || reviewers !== undefined) {
-    const rule: Json = { type: "required_reviewers" };
-    if (prevent_self_review !== undefined) {
-      rule.prevent_self_review = prevent_self_review;
-    }
-    if (Array.isArray(reviewers)) {
-      rule.reviewers = reviewers.map((r) => {
+  const declaredReviewers = Array.isArray(reviewers) ? reviewers : [];
+  if (declaredReviewers.length > 0) {
+    rules.push({
+      type: "required_reviewers",
+      prevent_self_review: prevent_self_review === true,
+      reviewers: declaredReviewers.map((r) => {
         const reviewer = r as { type?: unknown; id?: unknown };
         return { type: reviewer.type, reviewer: { id: reviewer.id } };
-      });
-    }
-    rules.push(rule);
+      }),
+    });
   }
   return { ...rest, protection_rules: rules };
 }

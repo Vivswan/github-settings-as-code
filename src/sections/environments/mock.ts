@@ -52,6 +52,16 @@ function servedEnvironment(state: MockState, name: string, environment: Json): J
   return { ...environment, protection_rules: [...rules, ...custom] };
 }
 
+/**
+ * GitHub matches environment names case-insensitively and echoes the stored spelling, so every
+ * handler addresses the stored key: a PUT to "Prod" over a live "prod" updates it, never creates a second one.
+ */
+function environmentName(state: MockState, param: (name: string) => string): string {
+  const requested = param("environment_name");
+  const fold = requested.toLowerCase();
+  return Object.keys(state.environments).find((name) => name.toLowerCase() === fold) ?? requested;
+}
+
 export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   "environments.list": ({ state, query }) => {
     const environments = Object.entries(state.environments).map(([name, environment]) =>
@@ -63,7 +73,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     });
   },
   "environments.probe": ({ state, param }) => {
-    const name = param("environment_name");
+    const name = environmentName(state, param);
     const environment = state.environments[name];
     if (!environment) {
       return { status: 404, body: { message: "Not Found" } };
@@ -71,7 +81,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return ok(servedEnvironment(state, name, environment));
   },
   "environments.update": ({ state, param, body }) => {
-    const name = param("environment_name");
+    const name = environmentName(state, param);
     // GitHub's PUT returns 200 on BOTH create and update, never 201. The node id is minted last so
     // a smuggled node_id in the PUT body can never displace the canonical one.
     state.environments[name] = {
@@ -84,7 +94,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   // Every variables handler 404s for a missing environment; the section touches them only for an
   // environment its probe found or its PUT created.
   "environments.listVariables": ({ state, param, query }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -96,7 +106,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     });
   },
   "environments.createVariable": ({ state, param, body }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -120,7 +130,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return { status: 201, body: {} };
   },
   "environments.updateVariable": ({ state, param, body }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const name = param("name");
     const variable = (state.environment_variables[env] ?? []).find(
       (v) => variableName(v) === variableKey(name),
@@ -138,7 +148,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return noContent();
   },
   "environments.removeVariable": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const name = param("name");
     const list = state.environment_variables[env] ?? [];
     const index = list.findIndex((v) => variableName(v) === variableKey(name));
@@ -149,21 +159,21 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return noContent();
   },
   "environments.listSecrets": ({ state, param, query }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     return secretsList(state.environment_secrets[env] ?? [], query);
   },
   "environments.secretsPublicKey": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
     return ok({ key_id: MOCK_SECRETS_KEY_ID, key: MOCK_SECRETS_PUBLIC_KEY });
   },
   "environments.putSecret": ({ state, param, body }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const name = param("secret_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
@@ -181,7 +191,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return sealedSecretPut(state, list, digests, name, body);
   },
   "environments.removeSecret": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const name = param("secret_name");
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
@@ -196,7 +206,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
   // does not enable custom_branch_policies: GitHub documents "Not Found or custom_branch_policies
   // is false" for this family.
   "environments.listPolicies": ({ state, param, query }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!branchPoliciesEnabled(state, env)) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -207,7 +217,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     });
   },
   "environments.createPolicy": ({ state, param, body }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!branchPoliciesEnabled(state, env)) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -241,7 +251,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return ok(policy);
   },
   "environments.removePolicy": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const id = param("branch_policy_id");
     const list = state.environment_branch_policies[env] ?? [];
     const index = list.findIndex((policy) => String(policy.id) === id);
@@ -252,7 +262,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return noContent();
   },
   "environments.listProtectionRules": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -261,7 +271,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return ok({ total_count: rules.length, custom_deployment_protection_rules: rules });
   },
   "environments.listProtectionRuleApps": ({ state, param, query }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -274,7 +284,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     });
   },
   "environments.createProtectionRule": ({ state, param, body }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
@@ -299,7 +309,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     return { status: 201, body: rule };
   },
   "environments.removeProtectionRule": ({ state, param }) => {
-    const env = param("environment_name");
+    const env = environmentName(state, param);
     const id = param("protection_rule_id");
     const list = state.environment_protection_rules[env] ?? [];
     const index = list.findIndex((rule) => String(rule.id) === id);

@@ -11,7 +11,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
-import { FLAG_PAIRING_FIXTURES } from "./fixtures/environment-flag-pairing.js";
+import { ENVIRONMENT_PARSE_FIXTURES } from "./fixtures/environment-parse-rules.js";
 import { ROOT } from "./root.js";
 
 const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
@@ -129,22 +129,12 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
     expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(accepted);
   });
 
-  test("the branch-policy type enum is the one shape where the schema is the stricter side", () => {
-    // The published schema pins the documented upstream enum; the runtime shape stays a loose string, GitHub being the authority there.
-    const doc = prod({
-      deployment_branch_policy: customPolicies,
-      deployment_branch_policies: [{ name: "v*", type: "wildcard" }],
-    });
-    expect(validate(doc)).toBe(false);
-    expect(runtimeAccepts(doc)).toBe(true);
-  });
-
-  test("the branch-policies flag pairing is enforced, agreeing with the runtime per fixture", () => {
+  test("every environment parse rule is enforced by the published schema, agreeing with the runtime per fixture", () => {
     // Both verdicts must be represented, or a fixture file reduced to one side would pass here vacuously.
-    expect(new Set(FLAG_PAIRING_FIXTURES.map((fixture) => fixture.valid))).toEqual(
+    expect(new Set(ENVIRONMENT_PARSE_FIXTURES.map((fixture) => fixture.valid))).toEqual(
       new Set([true, false]),
     );
-    for (const { name, entry, valid } of FLAG_PAIRING_FIXTURES) {
+    for (const { name, entry, valid } of ENVIRONMENT_PARSE_FIXTURES) {
       const doc = { environments: [entry] };
       expect(validate(doc), `published schema: ${name}`).toBe(valid);
       expect(

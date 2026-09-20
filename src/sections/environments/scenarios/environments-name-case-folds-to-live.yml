@@ -1,0 +1,32 @@
+# GitHub matches environment names case-insensitively: the declared "Prod" IS
+# the live "prod". The probe of Prod must find it (the mock folds the name the
+# way GitHub does) and, its settings already matching, the run makes no PUT at
+# all; a second environment named Prod is never created.
+name: environments-name-case-folds-to-live
+settings:
+  environments:
+    - name: Prod
+      wait_timer: 15
+      reviewers: []
+live_state:
+  environments:
+    prod:
+      name: prod
+      protection_rules:
+        - id: 3736
+          node_id: MDQ6R2F0ZTM3MzY=
+          type: wait_timer
+          wait_timer: 15
+      deployment_branch_policy: null
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  requests_contain:
+    - "GET /repos/e2e-owner/e2e-repo/environments/Prod"
+  never:
+    - "PUT /"
+  fixpoint: converges

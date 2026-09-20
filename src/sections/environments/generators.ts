@@ -22,7 +22,12 @@ export function genEnvironments(rng: Rng): Json[] {
       env.wait_timer = rng.int(30);
     }
     if (rng.bool()) {
+      // The flag rides the required-reviewers rule, so a true draw brings a reviewer with it; the
+      // parse rules refuse the flag on its own. No extra main-stream draw, so recorded seeds reproduce.
       env.prevent_self_review = rng.bool();
+      if (env.prevent_self_review === true) {
+        env.reviewers = [{ type: "User", id: 101 }];
+      }
     }
     if (variablesRng.bool(0.35)) {
       // Mixed-case picks exercise the case-insensitive match; the suffix keeps names unique after it.
