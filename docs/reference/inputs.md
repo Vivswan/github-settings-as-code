@@ -26,6 +26,7 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 | `repos-dir` | (empty) | Multi-repo central mode: directory of per-repo settings files in this repo |
 | `defaults-file` | (empty) | YAML applied to every multi-repo target without a settings file (multi-repo mode only) |
 | `layering` | `deep` | `mode: render` only: how every list section's entries combine across layers, by the section's key; `replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and merges a same-key pair field by field; a layer's `_layering` overrides it |
+| `undeclared` | (each list's default) | `keep` or `delete`: the fallback policy for every list that takes `_undeclared`, below a wrapper's and the file's own; unset, each list's default applies ([the undeclared policy](undeclared-policy.md)) |
 | `private-repos` | `redact` | `redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them |
 | `private-report` | `none` | `issue` delivers each redacted target's full report to a reused issue on that target repository; `issue-on-failure` writes that issue only when the target fails or drifts, closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show` |
 | `report-public-key` | (empty) | The `age1...` recipient the `artifact` channel encrypts reports to; required with `private-report: artifact`, rejected otherwise |

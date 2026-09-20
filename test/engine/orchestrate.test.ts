@@ -171,7 +171,7 @@ describe("runForRepo", () => {
     expect(desired.extra).toBe(raw.pages.extra);
   });
 
-  test("a knobbed list section receives zod's parsed copy in both forms: a fresh list or wrapper, own __proto__ dropped on each entry", async () => {
+  test("a knobbed list section receives zod's parsed copy in both forms, resolved to the wrapper with its policy explicit, own __proto__ dropped on each entry", async () => {
     const plain = JSON.parse('{"rulesets":[{"name":"r","__proto__":{"planted":1}}]}');
     const wrapped = JSON.parse(
       '{"rulesets":{"_undeclared":"keep","entries":[{"name":"r","__proto__":{"planted":1}}]}}',
@@ -179,12 +179,14 @@ describe("runForRepo", () => {
     expect(Object.hasOwn(plain.rulesets[0], "__proto__")).toBe(true);
     expect(Object.hasOwn(wrapped.rulesets.entries[0], "__proto__")).toBe(true);
 
-    const [plainDesired] = (await receivedBy(rulesetsSection, plain)) as [object[]];
-    expect(plainDesired).not.toBe(plain.rulesets);
+    const [plainDesired] = (await receivedBy(rulesetsSection, plain)) as [
+      { _undeclared: string; entries: object[] },
+    ];
+    expect(plainDesired.entries).not.toBe(plain.rulesets);
     // The parsed copy also carries the slice's defaults (target, enforcement).
     const parsedEntry = { name: "r", target: "branch", enforcement: "active" };
-    expect(plainDesired).toEqual([parsedEntry]);
-    prototypeClean(plainDesired[0] as object);
+    expect(plainDesired).toEqual({ _undeclared: "keep", entries: [parsedEntry] });
+    prototypeClean(plainDesired.entries[0] as object);
 
     const [wrappedDesired] = (await receivedBy(rulesetsSection, wrapped)) as [
       { _undeclared: string; entries: object[] },
@@ -545,6 +547,78 @@ describe("validateSettingsDoc", () => {
       }),
     );
   });
+
+  test("the validator resolves every undeclared policy once: the file's _undeclared over the run input over each list's default, the top-level key consumed", () => {
+    const { io } = captureIo();
+    const doc = {
+      _undeclared: "keep",
+      labels: [{ name: "bug" }],
+      milestones: { entries: [{ title: "v1" }] },
+      webhooks: { _undeclared: "delete", entries: [{ config: { url: "https://h" } }] },
+      environments: [
+        {
+          name: "prod",
+          variables: [{ name: "A", value: "1" }],
+          deployment_protection_rules: { _undeclared: "delete", entries: [{ app: "gate" }] },
+        },
+      ],
+    };
+    const branded: unknown = validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, io, {
+      undeclared: "delete",
+    })._unsafeUnwrap();
+    expect(branded).toEqual({
+      labels: { _undeclared: "keep", entries: [{ name: "bug" }] },
+      milestones: { _undeclared: "keep", entries: [{ title: "v1" }] },
+      webhooks: { _undeclared: "delete", entries: [{ config: { url: "https://h" } }] },
+      environments: [
+        {
+          name: "prod",
+          variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+          deployment_protection_rules: { _undeclared: "delete", entries: [{ app: "gate" }] },
+        },
+      ],
+    });
+    // Without the file's directive the run input is the fallback, and without either the list's own default.
+    const { _undeclared: _file, ...bare } = doc;
+    const policies = (undeclared: "keep" | "delete" | undefined) =>
+      validateSettingsDoc(bare, "s.yml", SectionSelection.ALL, io, { undeclared })
+        .map((settings) => {
+          const env = (settings.environments as Array<Record<string, unknown>>)[0] ?? {};
+          const knob = (value: unknown) => (value as Record<string, unknown>)._undeclared;
+          return [knob(settings.labels), knob(settings.milestones), knob(env.variables)];
+        })
+        ._unsafeUnwrap();
+    expect(policies("delete")).toEqual(["delete", "delete", "delete"]);
+    expect(policies(undefined)).toEqual(["delete", "keep", "delete"]);
+  });
+
+  test.each<[string, unknown, string]>([
+    ["a string outside the two values", "remove", "a string that is none of them"],
+    ["null", null, "null"],
+  ])(
+    "a top-level _undeclared that is %s is one collected issue naming the two values and the fix, beside the document's other problems",
+    (_case, value, shape) => {
+      const { io } = captureIo();
+      // The bad directive does not cut the collection short: the unknown section and the malformed entry are reported in the same run.
+      const result = validateSettingsDoc(
+        { _undeclared: value, labls: [], labels: [{ name: "bug" }, { name: "Bug" }] },
+        "s.yml",
+        SectionSelection.ALL,
+        io,
+      );
+      expect(result).toEqual(
+        err({
+          code: "settings-malformed-sections",
+          source: "s.yml",
+          issues: [
+            `_undeclared must be one of "keep", "delete"; got ${shape}. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list's own policy applies`,
+            unknownSectionsIssue(["labls"], SECTION_KEYS),
+            'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
+          ],
+        }),
+      );
+    },
+  );
 
   test("a valid document comes back branded, ready for runForRepo", () => {
     const { io } = captureIo();

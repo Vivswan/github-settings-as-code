@@ -1,0 +1,83 @@
+# A file-wide `_undeclared` is a directive: the highest layer that sets one
+# steers every list of the fold that has no policy of its own, and it never
+# reaches the rendered document. The fleet says keep, the repo says delete, and
+# the run input (keep) sits below both. So the bare labels and milestones come
+# out `delete`, and so do the environment's bare variables and deployment
+# protection rules: a file-wide delete disables undeclared deployment gates too.
+# A wrapper's own policy is the most specific and survives: the fleet's rulesets
+# wrapper (inherited by the repo's bare list) and the repo's secrets wrapper keep.
+name: render-file-undeclared
+inputs:
+  mode: render
+  undeclared: keep
+settings_layers:
+  - _undeclared: keep
+    labels:
+      - name: bug
+        color: d73a4a
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: main
+          target: branch
+settings:
+  _undeclared: delete
+  labels:
+    - name: incident
+      color: "b60205"
+  rulesets:
+    - name: tags
+      target: tag
+  milestones:
+    - title: v1
+  environments:
+    - name: prod
+      variables:
+        - name: REGION
+          value: eu-west-1
+      secrets:
+        _undeclared: keep
+        entries:
+          - name: TOKEN
+            value: $E2E_SECRET_A
+      deployment_protection_rules:
+        - app: gate-keeper
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  rendered:
+    labels:
+      _undeclared: delete
+      entries:
+        - name: bug
+          color: d73a4a
+        - name: incident
+          color: "b60205"
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: main
+          target: branch
+        - name: tags
+          target: tag
+    environments:
+      - name: prod
+        deployment_protection_rules:
+          _undeclared: delete
+          entries:
+            - app: gate-keeper
+        variables:
+          _undeclared: delete
+          entries:
+            - name: REGION
+              value: eu-west-1
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: TOKEN
+              value: $E2E_SECRET_A
+    milestones:
+      _undeclared: delete
+      entries:
+        - title: v1

@@ -1,0 +1,43 @@
+# The run input `undeclared: keep` is the fallback below every wrapper's own
+# policy and above each list's default: the bare labels (delete by default) and
+# the environment's bare variables (delete by default) come out `keep`, while
+# the protection rules wrapper's own `delete` stands. The rendered document
+# spells every policy, so a later apply needs no undeclared input of its own.
+name: render-run-undeclared
+inputs:
+  mode: render
+  undeclared: keep
+settings:
+  labels:
+    - name: bug
+      color: d73a4a
+  environments:
+    - name: prod
+      variables:
+        - name: REGION
+          value: eu-west-1
+      deployment_protection_rules:
+        _undeclared: delete
+        entries:
+          - app: gate-keeper
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  rendered:
+    labels:
+      _undeclared: keep
+      entries:
+        - name: bug
+          color: d73a4a
+    environments:
+      - name: prod
+        deployment_protection_rules:
+          _undeclared: delete
+          entries:
+            - app: gate-keeper
+        variables:
+          _undeclared: keep
+          entries:
+            - name: REGION
+              value: eu-west-1

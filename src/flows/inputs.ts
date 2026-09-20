@@ -14,14 +14,14 @@ import {
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
-import { LAYERINGS, type Layering } from "../engine/layers.js";
+import { LAYERINGS, type Layering, UNDECLARED_POLICIES } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import type { Problem } from "../problem.js";
 import { parseRecipient } from "../report/artifact-report.js";
 import { PRIVATE_REPORT_CHANNELS, type PrivateReportChannel } from "../report/delivery.js";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
-import type { MustBeNever } from "../types.js";
+import type { MustBeNever, UndeclaredPolicy } from "../types.js";
 import type { RunFlowConfig } from "./deliver.js";
 import { DEFAULT_SETTINGS_FILE, type MultiConfig } from "./multi.js";
 import { PRIVATE_REPOS_POLICIES, type PrivateReposPolicy } from "./redact.js";
@@ -99,8 +99,8 @@ export const INPUT_DECLS = {
     description:
       "apply (mutate), check (report drift, exit 1 on any), render (fold the settings-file layers " +
       "into one document written to rendered-file, with no token and no GitHub API call; render reads " +
-      "only settings-file, rendered-file, and layering, ignores token, and rejects every other input " +
-      "set to a non-default value, since each controls an apply or check run), or snapshot (read " +
+      "only settings-file, rendered-file, layering, and undeclared, ignores token, and rejects every " +
+      "other input set to a non-default value, since each controls an apply or check run), or snapshot (read " +
       "the live settings of the target repositories back and write each as a settings document to " +
       "snapshot-file or under snapshot-dir; nothing is written to GitHub, the document reaches only " +
       "the file, and every input that controls an apply, a check, or a render is rejected). check " +
@@ -231,6 +231,21 @@ export const INPUT_DECLS = {
       "`replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and " +
       "merges a same-key pair field by field; a layer's `_layering` overrides it",
     shownDefault: "`deep`",
+  },
+  undeclared: {
+    description:
+      "keep or delete: the run-wide fallback for what apply does to a live resource a list does not " +
+      "declare, for every list that takes the _undeclared knob (the sixteen knobbed sections and " +
+      "an environment's variables, secrets, deployment branch policies, and deployment protection " +
+      "rules). Unset by default, so each list's own default applies. A list's wrapper _undeclared " +
+      "wins over the file's top-level _undeclared, which wins over this input. In mode: render the " +
+      "resolved policy is written into every list of the rendered document, so a later apply of " +
+      "that document needs no undeclared input of its own. Rejected in mode: snapshot.",
+    default: "",
+    summary:
+      "`keep` or `delete`: the fallback policy for every list that takes `_undeclared`, below a wrapper's " +
+      "and the file's own; unset, each list's default applies ([the undeclared policy](docs/reference/undeclared-policy.md))",
+    shownDefault: "(each list's default)",
   },
   "private-repos": {
     description:
@@ -377,19 +392,37 @@ type FilterInput = (typeof FILTER_INPUTS)[number];
 
 type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>;
 
-function readEnum<T extends string>(
+/**
+ * An enum input: unset reads as `fallback`, which is one of the values or, for an input whose unset state means "no
+ * value" (`undeclared` leaves each list its own default), undefined.
+ */
+function readEnum<T extends string, F extends T | undefined>(
   input: Inputs,
   name: InputName,
   allowed: readonly T[],
-  fallback: T,
+  fallback: F,
   noun: string,
-): Result<T, Problem> {
-  const value = input.value(name) || fallback;
+): Result<T | F, Problem> {
+  const value = input.value(name);
+  if (value === "") {
+    return ok(fallback);
+  }
   const match = allowed.find((candidate) => candidate === value);
   if (match === undefined) {
-    return err({ code: "input-unsupported-value", input: name, value, noun, allowed, fallback });
+    return err({
+      code: "input-unsupported-value",
+      input: name,
+      value,
+      noun,
+      allowed,
+      fallback: fallback ?? null,
+    });
   }
   return ok(match);
+}
+
+function readUndeclared(input: Inputs): Result<UndeclaredPolicy | undefined, Problem> {
+  return readEnum(input, "undeclared", UNDECLARED_POLICIES, undefined, "undeclared policy");
 }
 
 /** What separates the entries of a list input; a single path can never contain one. */
@@ -481,6 +514,7 @@ export const RENDER_INPUTS = [
   "settings-file",
   "rendered-file",
   "layering",
+  "undeclared",
   "token",
 ] as const satisfies readonly InputName[];
 
@@ -506,6 +540,7 @@ function parseRenderConfig(input: Inputs): Result<Extract<RunConfig, { kind: "re
       return err({ code: "input-rendered-file-missing" });
     }
     const layering = yield* readEnum(input, "layering", LAYERINGS, DEFAULT_LAYERING, "layering");
+    const undeclared = yield* readUndeclared(input);
     const settingsFiles = input.list("settings-file");
     if (settingsFiles.length === 0) {
       return err({
@@ -513,7 +548,7 @@ function parseRenderConfig(input: Inputs): Result<Extract<RunConfig, { kind: "re
         value: input.orDefault("settings-file"),
       });
     }
-    return ok({ kind: "render", settingsFiles, renderedFile, layering });
+    return ok({ kind: "render", settingsFiles, renderedFile, layering, undeclared });
   });
 }
 
@@ -800,6 +835,7 @@ export function parseConfig(
     const token = yield* readToken(input, env);
     const githubRepository = env.GITHUB_REPOSITORY ?? "";
     const { onMissingPermission, sections, privateRepos } = yield* readPolicies(input);
+    const undeclared = yield* readUndeclared(input);
     const apiVersion = input.orDefault("api-version");
     const privateReport = yield* readEnum(
       input,
@@ -834,6 +870,7 @@ export function parseConfig(
       reportPublicKey,
       selfSlug: githubRepository,
       runUrl,
+      undeclared,
     };
 
     const { discoveryFilters, discoveryFiltersSet } = yield* readDiscoveryFilters(input);

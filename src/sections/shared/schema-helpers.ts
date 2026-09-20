@@ -8,7 +8,13 @@ import { z } from "zod";
 import { agree } from "../../text.js";
 import { renamedKeyError } from "./renamed-key.js";
 
-const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
+/**
+ * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
+ * engine/layers.ts resolves it and re-exports it to the flows. Described in shared.docs.yml and src/schema.docs.yml.
+ */
+export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
+
+export const UndeclaredPolicySchema = z.enum(UNDECLARED_POLICIES).meta({ id: "UndeclaredPolicy" });
 
 /**
  * A JSON Schema conditional for the published schema, the one place the keyword pair is spelled. zod refinements

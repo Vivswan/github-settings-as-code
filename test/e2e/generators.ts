@@ -65,6 +65,8 @@ import {
   maybeWrapUndeclared,
   REMOVE_KEY,
   UNDECLARED_KEY,
+  UNDECLARED_POLICIES,
+  type UndeclaredPolicyWord,
 } from "./gen-support.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
@@ -1695,6 +1697,7 @@ export interface MergeLayer {
  *
  * duplicate-rule-type / duplicate-label      -> two entries of one keyed list sharing a key (rules by type, labels by case-folded name)
  * bad-wrapper-layering / bad-file-layering   -> a directive value outside replace|shallow|deep (the retired `merge` among them)
+ * bad-file-undeclared                        -> a top-level `_undeclared` outside keep|delete (null among them: the knob has no empty state)
  * remove-under-replace                       -> a `_remove: true` entry in a list whose effective directive is replace
  * remove-unmatched                           -> a `_remove: true` entry no lower layer declares a key for
  * remove-with-fields                         -> a `_remove: true` entry carrying a field beside its key
@@ -1705,6 +1708,7 @@ export const MERGE_REFUSAL_KINDS = [
   "duplicate-label",
   "bad-wrapper-layering",
   "bad-file-layering",
+  "bad-file-undeclared",
   "remove-under-replace",
   "remove-unmatched",
   "remove-with-fields",
@@ -1745,6 +1749,11 @@ export const MERGE_FEATURES = [
   /** A `_remove: true` rule dropping a held rule type inside a deep-merged ruleset. */
   "remove-nested",
   "wrapper-undeclared",
+  /** A layer's top-level `_undeclared`: the fold's fallback policy for every list without its own. */
+  "file-undeclared",
+  "run-undeclared-keep",
+  "run-undeclared-delete",
+  "run-undeclared-default",
   "wrapper-layering-replace",
   "wrapper-layering-shallow",
   "wrapper-layering-deep",
@@ -1765,6 +1774,8 @@ type MergeFeature = (typeof MERGE_FEATURES)[number];
 export interface MergeScenarioMeta {
   layers: MergeLayer[];
   layering: LayeringDirective;
+  /** The run's `undeclared` input, unset unless the scenario set it. */
+  undeclared?: UndeclaredPolicyWord | undefined;
   refusal?: { layer: string; kind: MergeRefusalKind };
   features: MergeFeature[];
 }
@@ -1813,10 +1824,10 @@ function isPlainMapping(value: unknown): value is Json {
 }
 
 /**
- * A layer as its standalone validation sees it, in the harness's own words: the document minus the two directives the
- * fold consumes, `_layering` (top and wrapper) and every entry carrying `_remove` (top and nested, in either form, any
- * value: the fold judges the marker). Every value stays, null included: a null a key does not admit is the layer's own
- * validation error.
+ * A layer as its standalone validation sees it, in the harness's own words: the document minus the directives the
+ * fold consumes, `_layering` (top and wrapper), the top-level `_undeclared`, and every entry carrying `_remove` (top
+ * and nested, in either form, any value: the fold judges the marker). Every value stays, null included: a null a key
+ * does not admit is the layer's own validation error.
  */
 export function standaloneViewOf(doc: Json): Json {
   const withoutRemovals = (entries: readonly unknown[], nested: readonly string[]): unknown[] =>
@@ -1836,7 +1847,7 @@ export function standaloneViewOf(doc: Json): Json {
     }
     return out;
   };
-  const { [LAYERING_KEY]: _file, ...out } = doc;
+  const { [LAYERING_KEY]: _file, [UNDECLARED_KEY]: _policy, ...out } = doc;
   for (const [key, value] of Object.entries(out)) {
     if (!isListSectionKey(key)) {
       continue;
@@ -1931,6 +1942,9 @@ function ensureEntries(doc: Json, key: SectionKey): Json[] {
 
 /** `merge` is the directive's retired spelling: it fails as any unknown value does. */
 const BAD_LAYERING_VALUES = ["merge", "DEEP", "union", "both", 1] as const;
+
+/** Outside keep|delete; null among them, since the knob has no empty state and the fold refuses it like any other value. */
+const BAD_UNDECLARED_VALUES = ["remove", "KEEP", "kep", true, null] as const;
 
 interface LayerDraft {
   doc: Json;
@@ -2056,6 +2070,7 @@ export function mergeFeaturesOf(
   layers: readonly MergeLayer[],
   runInput: LayeringDirective | undefined,
   refused: boolean,
+  runUndeclared: UndeclaredPolicyWord | undefined = undefined,
 ): MergeFeature[] {
   const features = new Set<MergeFeature>();
   if (refused) {
@@ -2063,6 +2078,9 @@ export function mergeFeaturesOf(
     return MERGE_FEATURES.filter((feature) => features.has(feature));
   }
   features.add(runInput === undefined ? "run-layering-default" : `run-layering-${runInput}`);
+  features.add(
+    runUndeclared === undefined ? "run-undeclared-default" : `run-undeclared-${runUndeclared}`,
+  );
   const run = runInput ?? DEFAULT_LAYERING_DIRECTIVE;
   const present = new Set<string>();
   const held: HeldKeyed = { labels: [], rulesets: new Map() };
@@ -2072,7 +2090,10 @@ export function mergeFeaturesOf(
     if (fileDirective !== undefined) {
       features.add("file-layering");
     }
-    const keys = Object.keys(doc).filter((key) => key !== LAYERING_KEY);
+    if (doc[UNDECLARED_KEY] !== undefined) {
+      features.add("file-undeclared");
+    }
+    const keys = Object.keys(doc).filter((key) => key !== LAYERING_KEY && key !== UNDECLARED_KEY);
     if (keys.length === 0) {
       features.add("empty-layer");
     }
@@ -2201,6 +2222,7 @@ export function genMergeScenario(
   const runLayering: LayeringDirective | undefined =
     force?.kind === "valid" ? force.layering : rolledLayering;
   const effectiveRunLayering: LayeringDirective = runLayering ?? DEFAULT_LAYERING_DIRECTIVE;
+  const runUndeclared = rng.fork("run-undeclared").pick([...UNDECLARED_POLICIES, undefined]);
 
   const rolledRefusal = rng.bool(0.2)
     ? { index: rng.int(count), kind: rng.pick(MERGE_REFUSAL_KINDS) }
@@ -2242,7 +2264,7 @@ export function genMergeScenario(
       refuseLayer(layerRng.fork("refusal"), draft, refusal.kind);
     }
     for (const [key, value] of Object.entries(draft.doc)) {
-      if (key === LAYERING_KEY) {
+      if (key === LAYERING_KEY || key === UNDECLARED_KEY) {
         continue;
       }
       const section = key as SectionKey;
@@ -2276,7 +2298,11 @@ export function genMergeScenario(
     tiers: ["mock"],
     settings: top.doc,
     settings_layers: layers.slice(0, -1).map((layer) => layer.doc),
-    inputs: { mode: "render", ...(runLayering === undefined ? {} : { layering: runLayering }) },
+    inputs: {
+      mode: "render",
+      ...(runLayering === undefined ? {} : { layering: runLayering }),
+      ...(runUndeclared === undefined ? {} : { undeclared: runUndeclared }),
+    },
     denial_style: "fine_grained",
     owner_kind: "org",
     expect: { exit_code: 0 },
@@ -2286,10 +2312,11 @@ export function genMergeScenario(
     meta: {
       layers,
       layering: effectiveRunLayering,
+      undeclared: runUndeclared,
       ...(refusal === undefined
         ? {}
         : { refusal: { layer: mergeLayerName(refusal.index, count), kind: refusal.kind } }),
-      features: mergeFeaturesOf(layers, runLayering, refusal !== undefined),
+      features: mergeFeaturesOf(layers, runLayering, refusal !== undefined, runUndeclared),
     },
   };
 }
@@ -2315,6 +2342,9 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
   const fileDirective = rng.bool(0.2) ? rng.pick(LAYERING_DIRECTIVES) : undefined;
   if (fileDirective !== undefined) {
     doc[LAYERING_KEY] = fileDirective;
+  }
+  if (rng.bool(0.2)) {
+    doc[UNDECLARED_KEY] = rng.pick(UNDECLARED_POLICIES);
   }
   const wrapperDirectives: LayerDraft["wrapperDirectives"] = {};
   for (const key of chosen) {
@@ -2590,6 +2620,10 @@ function refuseLayer(rng: Rng, draft: LayerDraft, kind: MergeRefusalKind): void 
     }
     case "bad-file-layering": {
       doc[LAYERING_KEY] = rng.pick(BAD_LAYERING_VALUES);
+      return;
+    }
+    case "bad-file-undeclared": {
+      doc[UNDECLARED_KEY] = rng.pick(BAD_UNDECLARED_VALUES);
       return;
     }
     case "remove-under-replace": {

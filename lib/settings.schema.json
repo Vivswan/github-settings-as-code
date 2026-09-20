@@ -3191,6 +3191,14 @@
             "shallow",
             "deep"
           ]
+        },
+        "_undeclared": {
+          "description": "The file-wide undeclared policy: what apply does to a live resource a list does not declare, for every list in this document that takes the `_undeclared` knob (the knobbed sections and an environment's variables, secrets, deployment branch policies, and deployment protection rules) and whose own wrapper sets none. A wrapper's `_undeclared` wins over it; it wins over the run's `undeclared` input; each list's own default applies when none of the three is set. Resolved into every list's wrapper, so the rendered document carries no `_undeclared` at its top. In a layered merge the highest layer that sets it steers the whole fold: a directive, not a merged value.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UndeclaredPolicy"
+            }
+          ]
         }
       }
     },
@@ -3240,11 +3248,11 @@
       ]
     },
     "UndeclaredPolicyList<ActionsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3274,11 +3282,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<ActionsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3308,11 +3316,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AgentsSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3342,11 +3350,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AgentsVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3376,11 +3384,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<AutolinkConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3410,11 +3418,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CodespacesSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3444,11 +3452,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CollaboratorConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3478,11 +3486,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<CustomPropertyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3512,11 +3520,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DependabotSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3546,11 +3554,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeployKeyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3580,11 +3588,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeploymentBranchPolicyConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3605,11 +3613,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<DeploymentProtectionRuleConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3630,11 +3638,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<EnvironmentSecretConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3655,11 +3663,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<EnvironmentVariableConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3680,11 +3688,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<LabelConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3714,11 +3722,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<MilestoneConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3748,11 +3756,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<RulesetConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3782,11 +3790,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<SecretScanningPatternConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3816,11 +3824,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<TeamConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"
@@ -3850,11 +3858,11 @@
       "additionalProperties": false
     },
     "UndeclaredPolicyList<WebhookConfig>": {
-      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form keeps the list's own default policy (for a top-level section that is the section default, and a multi-repo defaults file can set it; a nested list such as environments[].variables has its own fixed default and never inherits one); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
+      "description": "The wrapped form of a list, overriding what happens to live resources the file does not declare. The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input, else the list's own default (the section default for a top-level section, a fixed default for a nested list such as environments[].variables); this wrapper can set it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.",
       "type": "object",
       "properties": {
         "_undeclared": {
-          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the list's own default applies.",
+          "description": "What apply does to live resources `entries` does not declare: \"delete\" removes them, \"keep\" leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared` applies, else the run's `undeclared` input, else the list's own default.",
           "allOf": [
             {
               "$ref": "#/definitions/UndeclaredPolicy"

@@ -13,7 +13,7 @@ import type {
   UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../../types.js";
-import type { Layering } from "../shared/schema-helpers.js";
+import type { Layering, UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -127,6 +127,12 @@ export interface KeyedListLayering {
    * several (a reviewer is its `type` and `id`). Any other path on a removal is refused at the layer boundary by name.
    */
   readonly removalPaths?: readonly string[];
+  /**
+   * A NESTED list's `_undeclared` default (an environment's variables), the last fallback engine/layers.ts resolves a
+   * nested wrapper without a policy to; absent on a nested list that takes no knob (a ruleset's rules, reviewers).
+   * test/sections/registry.test.ts pins it to the nested wrappers the schema declares.
+   */
+  readonly undeclaredDefault?: UndeclaredPolicy;
 }
 
 /** A list keyed by one string field of each entry, folded as the planner's duplicate check folds it. */
@@ -135,6 +141,7 @@ export function keyedBy(
   options: {
     readonly fold?: (name: string) => string;
     readonly nested?: Readonly<Record<string, KeyedListLayering>>;
+    readonly undeclaredDefault?: UndeclaredPolicy;
   } = {},
 ): KeyedListLayering {
   const fold = options.fold ?? ((name: string) => name);
@@ -145,6 +152,9 @@ export function keyedBy(
       return typeof value === "string" ? [fold(value)] : null;
     },
     ...(options.nested === undefined ? {} : { nested: options.nested }),
+    ...(options.undeclaredDefault === undefined
+      ? {}
+      : { undeclaredDefault: options.undeclaredDefault }),
   };
 }
 
@@ -160,6 +170,10 @@ export function listEntries<E>(
     ? declared
     : (declared as { readonly entries: readonly E[] }).entries;
 }
+
+/** The policy type in ../../types.ts is zod-free and spells the values itself; both pins fail when the two sets part. */
+type _PolicyComplete = MustBeNever<Exclude<(typeof UNDECLARED_POLICIES)[number], UndeclaredPolicy>>;
+type _PolicySound = MustBeNever<Exclude<UndeclaredPolicy, (typeof UNDECLARED_POLICIES)[number]>>;
 
 /** The wrapper type in ../../types.ts is zod-free and spells the directive's values itself; both pins fail when the two sets part. */
 type _WrapperLayeringComplete = MustBeNever<
@@ -948,8 +962,11 @@ export type EntryOf<T> = T extends readonly (infer E)[]
     : never;
 
 /**
- * `defaultPolicy` is REQUIRED on purpose: a nested list cannot derive its default from its section's
- * undeclaredDefault, so the call site always says which applies. Entries are returned by reference.
+ * A validated document arrives with every knobbed list in wrapper form and its policy explicit
+ * (resolveUndeclaredPolicies in engine/layers.ts runs at the fold and in the validator), so at run time the
+ * wrapper's `_undeclared` is what a planner reads. `defaultPolicy` is REQUIRED all the same: it is the list's
+ * own default, which the drift prose names and which a plan() called on a raw declaration (a test) falls back
+ * to, and a nested list cannot derive it from its section's undeclaredDefault. Entries are returned by reference.
  */
 export function undeclaredPolicy<E>(
   declared: readonly E[] | UndeclaredPolicyList<E>,

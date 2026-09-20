@@ -1,0 +1,67 @@
+# On the single-file path the validator resolves the same precedence the render
+# does. The file-wide `_undeclared: delete` reaches the environment's bare
+# deployment protection rules, so the undeclared change-window gate is drift
+# (apply would disable it) where the nested default would only note it. The
+# labels wrapper's own `keep` is more specific and stands: the undeclared
+# wontfix label stays a note, and the section is clean.
+name: check-file-undeclared-delete
+settings:
+  _undeclared: delete
+  labels:
+    _undeclared: keep
+    entries:
+      - name: bug
+        color: d73a4a
+        description: Something isn't working
+  environments:
+    - name: production
+      deployment_protection_rules:
+        - app: region-guard
+inputs:
+  mode: check
+live_state:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something isn't working
+    - name: wontfix
+      color: ffffff
+      description: This will not be worked on
+  environments:
+    production:
+      name: production
+      protection_rules: []
+  environment_protection_rules:
+    production:
+      - id: 7100
+        node_id: DPR_7100
+        enabled: true
+        app:
+          id: 3516
+          slug: region-guard
+          integration_url: https://api.github.com/apps/region-guard
+          node_id: MDQ6R2F0ZTM1MTY=
+      - id: 7101
+        node_id: DPR_7101
+        enabled: true
+        app:
+          id: 3517
+          slug: change-window
+          integration_url: https://api.github.com/apps/change-window
+          node_id: MDQ6R2F0ZTM1MTc=
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    labels: clean
+    environments: drift
+  summary_contains:
+    - "deployment_protection_rules[change-window]: undeclared"
+  stdout_contains:
+    - '"_undeclared: delete" is set, so apply will DISABLE it'
+    - "kept under \"_undeclared: keep\""
+    - wontfix
+  never:
+    - "PUT /repos/{repo}/environments"
+    - "DELETE /repos/{repo}/environments"
+    - "DELETE /repos/{repo}/labels"

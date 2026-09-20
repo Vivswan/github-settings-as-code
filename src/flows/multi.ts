@@ -141,6 +141,7 @@ async function processTarget(ctx: {
     read.sourceLabel,
     cfg.sections,
     channel.unprefixed,
+    { undeclared: cfg.undeclared },
   );
   if (validated.isErr()) {
     return fail(describeProblem(validated.error));
@@ -385,7 +386,9 @@ export function runMulti(
     let defaults: ValidatedSettings | null = null;
     if (cfg.defaultsFile) {
       const doc = yield* readSettingsFile(cfg.defaultsFile, "defaults-file");
-      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections, io);
+      defaults = yield* validateSettingsDoc(doc, cfg.defaultsFile, cfg.sections, io, {
+        undeclared: cfg.undeclared,
+      });
     }
 
     const { targets, plan, visibilityOf } = yield* resolveTargets(api, cfg, io);

@@ -357,3 +357,20 @@ describe("the document-level _layering directive", () => {
     ).toEqual(ok({ labels: [{ name: "bug" }] }));
   });
 });
+
+describe("the document-level _undeclared directive", () => {
+  test("the published schema and the zod document both accept a policy and reject anything else, naming the key", () => {
+    const doc: SettingsFile = { _undeclared: "keep", labels: [{ name: "bug" }] };
+    expect(validate(doc)).toBe(true);
+    expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
+    const bad = { _undeclared: "remove", labels: [{ name: "bug" }] };
+    expect(validate(bad)).toBe(false);
+    expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
+      ["/_undeclared", "enum", { allowedValues: ["keep", "delete"] }],
+    ]);
+    const parsed = SettingsFile.safeParse(bad);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
+      [["_undeclared"], "invalid_value"],
+    ]);
+  });
+});

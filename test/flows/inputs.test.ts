@@ -239,6 +239,27 @@ describe("the mode input", () => {
       value: "not-a-slug",
     });
   });
+
+  test("the undeclared input rides into an apply or check config, unset when the workflow left it out", () => {
+    expect(engineConfig(single({ undeclared: "keep" })).undeclared).toBe("keep");
+    expect(engineConfig(single({ mode: "check", undeclared: "delete" })).undeclared).toBe("delete");
+    expect(engineConfig(single({})).undeclared).toBeUndefined();
+    expect(
+      engineConfig(parse({ token: "t", repos: "o/a" }, { GITHUB_REPOSITORY: "o/admin" }))
+        .undeclared,
+    ).toBeUndefined();
+  });
+
+  test("an unsupported undeclared policy is rejected naming the two values and that unset is a choice", () => {
+    expect(rejection(single({ undeclared: "remove" }))).toEqual({
+      code: "input-unsupported-value",
+      input: "undeclared",
+      value: "remove",
+      noun: "undeclared policy",
+      allowed: ["keep", "delete"],
+      fallback: null,
+    });
+  });
 });
 
 describe("mode: render", () => {
@@ -252,6 +273,15 @@ describe("mode: render", () => {
 
   test("parses without any token, carrying the ordered layers, the output path, and the layering", () => {
     expect(merge({ layering: "replace" })).toEqual(ok({ ...RENDER_CONFIG, layering: "replace" }));
+  });
+
+  test("the undeclared input rides into the render config, and a bad value is refused as in apply", () => {
+    expect(merge({ undeclared: "keep" })).toEqual(ok({ ...RENDER_CONFIG, undeclared: "keep" }));
+    expect(rejection(merge({ undeclared: "kep" }))).toMatchObject({
+      code: "input-unsupported-value",
+      input: "undeclared",
+      fallback: null,
+    });
   });
 
   test("the layering input defaults to deep and a comma list of layers works too", () => {
@@ -480,8 +510,8 @@ describe("mode: snapshot", () => {
     ],
     [
       "several at once, every one named in declaration order",
-      { "defaults-file": "d.yml", "settings-file": "s.yml", layering: "deep" },
-      ["settings-file", "defaults-file", "layering"],
+      { "defaults-file": "d.yml", "settings-file": "s.yml", layering: "deep", undeclared: "keep" },
+      ["settings-file", "defaults-file", "layering", "undeclared"],
     ],
   ] as const)(
     "%s is rejected: a snapshot applies nothing, folds nothing, and reports nothing",

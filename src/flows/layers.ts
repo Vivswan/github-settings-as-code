@@ -3,8 +3,8 @@
 import { ok, Result } from "neverthrow";
 import { renderCanonicalYaml } from "../engine/canonical.js";
 import {
+  type FoldOptions,
   type Layer,
-  type Layering,
   mergeLayers,
   type RemovalNotice,
   standaloneView,
@@ -49,7 +49,7 @@ export interface FoldedLayers {
 export function foldLayers(
   layers: readonly Layer[],
   sourceLabel: string,
-  layering: Layering,
+  options: FoldOptions,
   io: Io,
 ): Result<FoldedLayers, SettingsProblem | LayerProblem> {
   return Result.combine(
@@ -57,9 +57,12 @@ export function foldLayers(
       validateSettingsDoc(standaloneView(layer.doc), layer.name, EVERY_SECTION, io),
     ),
   )
-    .andThen(() => mergeLayers(layers, { layering }))
+    .andThen(() => mergeLayers(layers, options))
     .andThen((merged) =>
-      validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, io).map((settings) => ({
+      // The fold resolved every policy already, so the run input changes nothing here; passed so the two paths read alike.
+      validateSettingsDoc(merged.settings, sourceLabel, EVERY_SECTION, io, {
+        undeclared: options.undeclared,
+      }).map((settings) => ({
         settings,
         notices: merged.notices,
         // Validation just proved the fold a plain mapping of section keys: the directives were consumed, and any other key refused.

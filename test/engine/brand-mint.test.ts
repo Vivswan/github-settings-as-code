@@ -30,7 +30,7 @@ const BRAND_NAMES = [
 const MINT = {
   file: "src/engine/orchestrate.ts",
   within: "validateSettingsDoc",
-  text: "parsed as ValidatedSettings",
+  text: "resolved as ValidatedSettings",
 };
 
 const SCANNED_DIRS = ["src", "test", ".github/scripts"];

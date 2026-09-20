@@ -28,7 +28,13 @@ import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { ENDPOINTS } from "./endpoints.js";
-import { NESTED_KEYS, planNested, splitEntry, validateNested } from "./nested.js";
+import {
+  NESTED_KEYS,
+  nestedDefaultPolicy,
+  planNested,
+  splitEntry,
+  validateNested,
+} from "./nested.js";
 import {
   type EnvironmentsPlan,
   environmentNodeId,
@@ -112,10 +118,20 @@ export const environmentsSection = {
   layering: keyedBy("name", {
     fold: (name) => name.toLowerCase(),
     nested: {
-      variables: keyedBy("name", { fold: variableKey }),
-      secrets: keyedBy("name", { fold: secretKey }),
-      deployment_branch_policies: keyedBy("name"),
-      deployment_protection_rules: keyedBy("app"),
+      variables: keyedBy("name", {
+        fold: variableKey,
+        undeclaredDefault: nestedDefaultPolicy("variables"),
+      }),
+      secrets: keyedBy("name", {
+        fold: secretKey,
+        undeclaredDefault: nestedDefaultPolicy("secrets"),
+      }),
+      deployment_branch_policies: keyedBy("name", {
+        undeclaredDefault: nestedDefaultPolicy("deployment_branch_policies"),
+      }),
+      deployment_protection_rules: keyedBy("app", {
+        undeclaredDefault: nestedDefaultPolicy("deployment_protection_rules"),
+      }),
       reviewers: REVIEWER_LAYERING,
     },
   }),

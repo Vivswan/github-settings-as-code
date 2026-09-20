@@ -64,11 +64,11 @@ The examples continue from one another and form one program (the docs tests comp
 | Name | Kind | Says |
 |---|---|---|
 | `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a `null` is a declared value, refused where the key has no empty state |
-| `ValidateOptions` | type | `source`, `sections`, `io` |
+| `ValidateOptions` | type | `source`, `sections`, `io`, `undeclared` (the action's input of that name: the fallback policy below a list's wrapper and the file's top-level `_undeclared`) |
 | `ValidateReport` | type | `settings` and `log` |
-| `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
+| `ValidatedSettings` | type | The document as zod parsed it, branded by validation, every knobbed list in `{_undeclared, entries}` form with its policy resolved; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
 | `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
-| `MergeOptions` | type | `source`, `layering` (`"deep"` unless set), `io` |
+| `MergeOptions` | type | `source`, `layering` (`"deep"` unless set), `undeclared` (unset unless given), `io` |
 | `MergeReport` | type | `settings`, `notices` (one per `_remove: true` entry that dropped a lower entry), `yaml` (the file text `mode: render` writes, byte for byte), and `log` (the lines the fold printed) |
 | `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
 | `Layering` | type | `"replace"`, `"shallow"`, or `"deep"`: how every list section's entries fold across layers, by the section's key |
@@ -206,7 +206,7 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 | `MultiConfig` | type | Its config |
 | `TargetOutcome` | type | One fleet target's result, with its `source` |
 | `runRender` | function | Fold settings files into `rendered-file`; no token, no API call |
-| `RenderConfig` | type | Its config: `settingsFiles`, `renderedFile`, `layering` |
+| `RenderConfig` | type | Its config: `settingsFiles`, `renderedFile`, `layering`, `undeclared` |
 | `FinishedRender` | type | Its result: the layers and the written file |
 | `runSnapshot` | function | The live settings of one repository to a file, or of every fleet target to a directory |
 | `SnapshotConfig` | type | Its config, in the `file` or the `dir` form |

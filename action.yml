@@ -36,14 +36,14 @@ inputs:
       apply (mutate), check (report drift, exit 1 on any), render (fold the
       settings-file layers into one document written to rendered-file, with no
       token and no GitHub API call; render reads only settings-file,
-      rendered-file, and layering, ignores token, and rejects every other
-      input set to a non-default value, since each controls an apply or check
-      run), or snapshot (read the live settings of the target repositories
-      back and write each as a settings document to snapshot-file or under
-      snapshot-dir; nothing is written to GitHub, the document reaches only
-      the file, and every input that controls an apply, a check, or a render
-      is rejected). check makes no settings changes, though a private report
-      may still be delivered.
+      rendered-file, layering, and undeclared, ignores token, and rejects
+      every other input set to a non-default value, since each controls an
+      apply or check run), or snapshot (read the live settings of the target
+      repositories back and write each as a settings document to snapshot-file
+      or under snapshot-dir; nothing is written to GitHub, the document
+      reaches only the file, and every input that controls an apply, a check,
+      or a render is rejected). check makes no settings changes, though a
+      private report may still be delivered.
     required: false
     default: "apply"
   rendered-file:
@@ -156,6 +156,20 @@ inputs:
       section's {entries} wrapper, overrides it per file or per section. Lists
       outside the list sections are replaced by the higher layer's. Fails when
       set in apply or check.
+    required: false
+    default: ""
+  undeclared:
+    description: >-
+      keep or delete: the run-wide fallback for what apply does to a live
+      resource a list does not declare, for every list that takes the
+      _undeclared knob (the sixteen knobbed sections and an environment's
+      variables, secrets, deployment branch policies, and deployment
+      protection rules). Unset by default, so each list's own default applies.
+      A list's wrapper _undeclared wins over the file's top-level _undeclared,
+      which wins over this input. In mode: render the resolved policy is
+      written into every list of the rendered document, so a later apply of
+      that document needs no undeclared input of its own. Rejected in mode:
+      snapshot.
     required: false
     default: ""
   private-repos:

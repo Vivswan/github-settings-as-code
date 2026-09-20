@@ -72,7 +72,9 @@ export function runSingle(
   uploader?: ArtifactUploader,
 ): ResultAsync<SingleOutcome, Problem> {
   return readSettingsFile(cfg.settingsFile, "settings-file")
-    .andThen((doc) => validateSettingsDoc(doc, cfg.settingsFile, cfg.sections, io))
+    .andThen((doc) =>
+      validateSettingsDoc(doc, cfg.settingsFile, cfg.sections, io, { undeclared: cfg.undeclared }),
+    )
     .asyncAndThen((settings) =>
       ResultAsync.fromSafePromise(runTarget(api, cfg, io, settings, uploader)),
     );
