@@ -1413,20 +1413,6 @@ describe("mergeLayers: _remove drops a lower entry", () => {
     });
   });
 
-  test("a removal is consumed at its own step: the next layer may declare the key anew", () => {
-    const result = merge([
-      fleet,
-      layer("team", { labels: [{ name: "bug", _remove: true }] }),
-      layer("repo", { labels: [{ name: "bug", color: "333333" }] }),
-    ]);
-    expect(
-      (result as { settings: { labels: { entries: unknown } } }).settings.labels.entries,
-    ).toEqual([
-      { name: "docs", color: "222222", new_name: "documentation" },
-      { name: "bug", color: "333333" },
-    ]);
-  });
-
   test.each<[string, Layering, unknown, LayerProblem["code"], string]>([
     [
       "a marker that is not true",

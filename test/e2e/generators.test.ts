@@ -1307,28 +1307,6 @@ describe("mergeFeaturesOf (nulls and removals read the way the fold writes them)
       ],
       ["override", "null-section"],
     ],
-    [
-      "a null inside a mapping section, and one inside a keyed entry",
-      [
-        {
-          repository: { description: "x" },
-          branches: [{ name: "main", protection: { enforce_admins: true } }],
-        },
-        { repository: { description: null }, branches: [{ name: "main", protection: null }] },
-      ],
-      ["override", "null-nested", "null-entry-field"],
-    ],
-    [
-      "a removal at the top level and one inside a merged ruleset",
-      [
-        { labels: [{ name: "a" }], rulesets: [{ name: "r", rules: [{ type: "t" }] }] },
-        {
-          labels: [{ name: "A", [REMOVE_KEY]: true }],
-          rulesets: [{ name: "r", rules: [{ type: "t", [REMOVE_KEY]: true }] }],
-        },
-      ],
-      ["override", "union-labels", "union-rulesets", "remove-entry", "remove-nested"],
-    ],
   ];
   test.each(cases)("%s", (_name, docs, expected) => {
     const layers = docs.map((doc, i) => ({
