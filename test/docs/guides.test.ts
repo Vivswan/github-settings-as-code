@@ -11,7 +11,7 @@ import { RENDER_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flow
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
-import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { LIST_SECTIONS, SECTION_KEYS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
@@ -643,7 +643,7 @@ describe("docs/ guide pages", () => {
       }
     }
     expect(documented).toEqual(
-      new Map(UNDECLARED_POLICY_SECTIONS.map((key) => [key, listLayering(key).keyField])),
+      new Map(LIST_SECTIONS.map((key) => [key, listLayering(key).keyField])),
     );
   });
 

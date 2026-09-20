@@ -46,23 +46,31 @@ function defOf(schema: z.ZodType): ZodDefView {
   return (schema as unknown as { _zod: { def: ZodDefView } })._zod.def;
 }
 
-/** Keyed over SectionKey, so a new section fails to compile here until its expectation is declared. */
+/**
+ * Keyed over SectionKey, so a new section fails to compile here until its expectation is declared.
+ *
+ *   slice    -> the property IS the slice export
+ *   knob     -> knobbed(entry): identity holds on the entry element of both branches
+ *   layered  -> layeredList(slice): identity holds on the list slice itself, as the bare branch and the wrapper's entries
+ */
 const EXPECTED: Record<
   SectionKey,
-  { kind: "slice"; slice: z.ZodType } | { kind: "knob"; entry: z.ZodType }
+  | { kind: "slice"; slice: z.ZodType }
+  | { kind: "knob"; entry: z.ZodType }
+  | { kind: "layered"; slice: z.ZodType }
 > = {
   repository: { kind: "slice", slice: RepositoryConfig },
   labels: { kind: "knob", entry: LabelConfig },
   rulesets: { kind: "knob", entry: RulesetConfig },
-  environments: { kind: "slice", slice: EnvironmentsConfig },
-  branches: { kind: "slice", slice: BranchesConfig },
+  environments: { kind: "layered", slice: EnvironmentsConfig },
+  branches: { kind: "layered", slice: BranchesConfig },
   autolinks: { kind: "knob", entry: AutolinkConfig },
   actions: { kind: "slice", slice: ActionsConfig },
   actions_secrets: { kind: "knob", entry: ActionsSecretConfig },
   dependabot_secrets: { kind: "knob", entry: DependabotSecretConfig },
   codespaces_secrets: { kind: "knob", entry: CodespacesSecretConfig },
   agents_secrets: { kind: "knob", entry: AgentsSecretConfig },
-  workflows: { kind: "slice", slice: WorkflowsConfig },
+  workflows: { kind: "layered", slice: WorkflowsConfig },
   check_suite_preferences: { kind: "slice", slice: CheckSuitePreferencesConfig },
   pages: { kind: "slice", slice: PagesConfig },
   code_scanning_default_setup: { kind: "slice", slice: CodeScanningDefaultSetupConfig },
@@ -94,20 +102,31 @@ describe("SettingsFile slice composition identity", () => {
         ).toBe(true);
         return;
       }
-      // knobbed() builds the inner union in root, so identity holds one level down, on both branches' entry element.
+      // knobbed() and layeredList() build the inner union in root, so identity holds one level down.
       const innerDef = defOf(inner);
-      expect(innerDef.type, `${key}: the knobbed property must wrap a union`).toBe("union");
+      expect(innerDef.type, `${key}: the wrapped property must wrap a union`).toBe("union");
       const options = innerDef.options ?? [];
       const list = options.find((option) => defOf(option).type === "array");
       const wrapper = options.find((option) => defOf(option).type === "object");
-      expect(list !== undefined && wrapper !== undefined, `${key}: knob branches missing`).toBe(
+      expect(list !== undefined && wrapper !== undefined, `${key}: wrapper branches missing`).toBe(
         true,
       );
+      const entries = defOf(wrapper as z.ZodType).shape?.entries as z.ZodType;
+      if (expected.kind === "layered") {
+        expect(
+          list === expected.slice,
+          `${key}: the plain-array branch is not the section's list slice instance`,
+        ).toBe(true);
+        expect(
+          entries === expected.slice,
+          `${key}: the wrapper's entries is not the section's list slice instance`,
+        ).toBe(true);
+        return;
+      }
       expect(
         defOf(list as z.ZodType).element === expected.entry,
         `${key}: the plain-array branch's element is not the entry slice instance`,
       ).toBe(true);
-      const entries = defOf(wrapper as z.ZodType).shape?.entries as z.ZodType;
       expect(
         defOf(entries).element === expected.entry,
         `${key}: the wrapper's entries element is not the entry slice instance`,

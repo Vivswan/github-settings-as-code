@@ -107,7 +107,7 @@ console.log(merged.value.yaml, merged.value.notices.length);
 | `SettingsFile` | const | The zod schema of the whole document, and its inferred type |
 | `SECTION_KEYS` | const | Every section key in execution order |
 | `SectionKey` | type | One of them |
-| `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared`, and so `_layering`: the only places, beside the document top, a `_layering` directive may sit |
+| `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared` beside `_layering`; `environments`, `branches`, and `workflows` layer by key too, through a `{_layering, entries}` wrapper of their own (`LIST_SECTIONS` in the schema module) |
 | `UndeclaredPolicySection` | type | One of them |
 
 The schema subpath serves the committed JSON Schema.

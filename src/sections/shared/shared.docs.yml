@@ -24,6 +24,23 @@ schema:
     What apply does to live resources `entries` does not declare: "delete" removes them, "keep"
     leaves them alone and surfaces each as a note. Omitted, the list's own default applies.
   UndeclaredPolicyList<*>.entries: The declared entries, exactly as the plain array form lists them.
+  LayeredList<*>: >-
+    The wrapped form of a list section that applies no undeclared policy (environments, branches,
+    workflows): the plain array beside `{_layering, entries}`. The wrapper exists for the render
+    directive alone, so the rendered document always holds the plain array, and with `_layering`
+    omitted it behaves exactly like the plain array. Its keys are strict: anything besides
+    `_layering` and `entries` (there is no `_undeclared` here, since the section keeps every live
+    resource it does not declare) is rejected upfront as a typo.
+  LayeredList<*>.entries: The declared entries, exactly as the plain array form lists them.
+  LayeredList<*>._layering: >-
+    A render-time directive: how this section combines with the layers BELOW it in a layered merge,
+    by the section's key (an environment's name, a branch name or pattern, a workflow path).
+    "replace" lets this layer's list win wholesale; "shallow" unions the entries by key and swaps a
+    same-key entry for this layer's; "deep" unions by key and merges a same-key pair field by field,
+    the entry's nested lists (an environment's variables, secrets, branch policies, protection
+    rules, and reviewers, each by its own key) unioning the same way. Omitted, the file's
+    `_layering` applies, else the run's layering. It has no effect on a single document, and the
+    rendered document never carries it.
   UndeclaredPolicyList<*>._layering: >-
     A render-time directive: how this section combines with the layers BELOW it in a layered merge,
     by the section's key (a label's name, a secret's name, a webhook's URL, ...). "replace" lets

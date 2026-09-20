@@ -31,17 +31,27 @@ const renamedPolicyKeyError = renamedKeyError(
   "in v3 (a directive, like _layering) - write _undeclared: keep or _undeclared: delete",
 );
 
+/** The directives a wrapper takes, in the words its key error names them. */
+const KNOBBED_DIRECTIVES = '"_undeclared" and, on a top-level section, "_layering"';
+const LAYERED_DIRECTIVES =
+  '"_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared")';
+
 /**
  * The wrapper's unrecognized keys, one clause per kind, joined: the pre-v3 policy spelling names its rename, and
- * any other underscore key names the two directives, since a wrapper takes no private notes either (the document
- * level says the same in src/problem.ts). A misspelled entry field beside them stays on zod's own line, so the
- * directives clause names the underscore keys it is about whenever the list holds anything else.
+ * any other underscore key names the wrapper's directives, since a wrapper takes no private notes either (the
+ * document level says the same in src/problem.ts). A misspelled entry field beside them stays on zod's own line, so
+ * the directives clause names the underscore keys it is about whenever the list holds anything else.
  */
-function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+function wrapperKeyError(
+  issue: z.core.$ZodRawIssue,
+  directivesClause: string = KNOBBED_DIRECTIVES,
+): string | undefined {
   if (issue.code !== "unrecognized_keys") {
     return undefined;
   }
-  const renamed = renamedPolicyKeyError(issue);
+  // Only a knobbed wrapper ever spelled the policy without its underscore; a layered wrapper never took one.
+  const renamed =
+    directivesClause === KNOBBED_DIRECTIVES ? renamedPolicyKeyError(issue) : undefined;
   const directives = issue.keys.filter((key) => key.startsWith("_"));
   if (directives.length === 0) {
     return renamed;
@@ -49,7 +59,7 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
   const quoted = (keys: readonly string[]) => keys.map((key) => JSON.stringify(key)).join(", ");
   const clause =
     `${directives.length < issue.keys.length ? `${quoted(directives)}: ` : ""}the wrapper's directives are ` +
-    '"_undeclared" and, on a top-level section, "_layering", and nothing else - there are no ' +
+    `${directivesClause}, and nothing else - there are no ` +
     "private-note keys. Remove the key, or keep the note as a YAML comment";
   return renamed === undefined
     ? `${agree(issue.keys.length, "Unrecognized key", "Unrecognized keys")}: ${quoted(issue.keys)}; ${clause}`
@@ -96,11 +106,35 @@ export function knobbed<T extends z.ZodType>(entry: T) {
 }
 
 /**
- * A nested list (environments[].variables) is replaced wholesale by a higher layer, so `_layering`
- * would be accepted and never act; the wrapper rejects it.
+ * A nested list (environments[].variables) unions by its own key under the directive its entry inherits, so
+ * `_layering` on its wrapper would be accepted and never act; the wrapper rejects it.
  */
 export function nestedKnobbed<T extends z.ZodType>(entry: T) {
   return knobbedList(entry, (knobs) => knobs);
+}
+
+/**
+ * The wrapper of a list section that applies no undeclared policy (environments, branches, workflows): the bare list
+ * beside `{_layering, entries}`. The directive is the only reason the wrapper exists, so the fold consumes it and
+ * writes the bare list, and a planner reads either form through listEntries() (../contract/module.ts). loosen() and
+ * engine/canonical.ts recognize this union by the same detector as knobbed()'s (a strict wrapper with `entries`).
+ *
+ *   list without an element id   -> throws at MODULE LOAD, not typecheck (the wrapper's definition name derives from it)
+ */
+export function layeredList<T extends z.ZodArray<z.ZodType>>(list: T) {
+  const entryName = z.globalRegistry.get(list.element)?.id;
+  if (entryName === undefined) {
+    throw new Error(
+      "layeredList(): the list's element schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
+    );
+  }
+  const wrapper = z
+    .strictObject(
+      { _layering: LayeringSchema.optional(), entries: list },
+      { error: (issue) => wrapperKeyError(issue, LAYERED_DIRECTIVES) },
+    )
+    .meta({ id: `LayeredList<${entryName}>` });
+  return z.union([list, wrapper]);
 }
 
 /** A repository-scope sealed secret entry (name + `$NAME` reference value). */

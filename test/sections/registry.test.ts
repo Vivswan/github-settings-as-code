@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  LIST_SECTIONS,
   type SECTION_KEYS,
   type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
@@ -55,29 +56,39 @@ const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
 
 describe("section permissions", () => {
-  test("every knobbed section's shape parses both forms", () => {
-    // UNDECLARED_POLICY_SECTIONS is pinned to the types at compile time (schema.ts, SectionMeta's undeclaredDefault); the zod shapes are the one
+  test("every list section's shape parses both forms, and only a knobbed one takes the policy", () => {
+    // LIST_SECTIONS and UNDECLARED_POLICY_SECTIONS are pinned to the types at compile time (schema.ts); the zod shapes are the one
     // piece only a runtime round-trip can check.
     const byKey = new Map(SECTIONS.map((module) => [module.key as string, module]));
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
+    const knobbed: ReadonlySet<string> = new Set(UNDECLARED_POLICY_SECTIONS);
+    for (const key of LIST_SECTIONS) {
       const module = byKey.get(key);
       if (!module) {
-        throw new Error(`UNDECLARED_POLICY_SECTIONS names "${key}" but no module registers it`);
+        throw new Error(`LIST_SECTIONS names "${key}" but no module registers it`);
       }
       expect(module.shape.safeParse([]).success, `${key}: plain array form must parse`).toBe(true);
       expect(
         module.shape.safeParse({ entries: [] }).success,
-        `${key}: wrapper without a policy must parse`,
+        `${key}: wrapper without a knob must parse`,
       ).toBe(true);
       expect(
         module.shape.safeParse({ _undeclared: "keep", entries: [] }).success,
-        `${key}: wrapper with a policy must parse`,
-      ).toBe(true);
+        `${key}: wrapper with a policy must parse only on a knobbed section`,
+      ).toBe(knobbed.has(key));
     }
   });
 
-  test("_layering is accepted on every top-level knobbed wrapper and rejected on the nested ones", () => {
-    // A list nested in an entry is replaced wholesale by the merge, so a _layering accepted there would validate and never act.
+  test("a plain-list wrapper refuses the policy naming the directive it does take", () => {
+    const verdict = sectionShape("environments").safeParse({ _undeclared: "keep", entries: [] });
+    expect(
+      verdict.success ? "accepted" : verdict.error.issues.map((issue) => issue.message),
+    ).toEqual([
+      'Unrecognized key: "_undeclared"; the wrapper\'s directives are "_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared"), and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment',
+    ]);
+  });
+
+  test("_layering is accepted on every top-level list wrapper and rejected on the nested ones", () => {
+    // A list nested in an entry unions under the directive its entry inherits, so a _layering accepted there would validate and never act.
     const wrapper = { entries: [], _layering: "deep" };
     const nested = {
       deployment_branch_policies: wrapper,
@@ -88,16 +99,13 @@ describe("section permissions", () => {
     const verdict = sectionShape("environments").safeParse([{ name: "prod", ...nested }]);
     expect({
       topLevel: Object.fromEntries(
-        UNDECLARED_POLICY_SECTIONS.map((key) => [
-          key,
-          sectionShape(key).safeParse(wrapper).success,
-        ]),
+        LIST_SECTIONS.map((key) => [key, sectionShape(key).safeParse(wrapper).success]),
       ),
       nested: verdict.success
         ? "accepted"
         : verdict.error.issues.map((issue) => [issue.path.join("."), issue.message]).sort(),
     }).toEqual({
-      topLevel: Object.fromEntries(UNDECLARED_POLICY_SECTIONS.map((key) => [key, true])),
+      topLevel: Object.fromEntries(LIST_SECTIONS.map((key) => [key, true])),
       nested: Object.keys(nested)
         .map((list) => [
           `0.${list}`,
@@ -265,15 +273,31 @@ describe("null-valued entry paths", () => {
     return list.items;
   };
 
-  test("every knobbed section declares exactly the entry paths its published schema types nullable, nested lists included", () => {
+  /** A nested list's entry definition, under either form: the bare list's items, or the wrapper's `entries` items. */
+  const nestedItems = (property: JsonSchema): JsonSchema | undefined => {
+    for (const arm of arms(property)) {
+      if (arm.items !== undefined) {
+        return arm.items;
+      }
+      const entries = arm.properties?.entries;
+      const inner = entries === undefined ? undefined : nestedItems(entries);
+      if (inner !== undefined) {
+        return inner;
+      }
+    }
+    return undefined;
+  };
+
+  test("every list section declares exactly the entry paths its published schema types nullable, nested lists included", () => {
     // A field that admits null is a value there, never a delete marker; a schema gaining one tomorrow fails here
     // until the module says so, instead of the fold silently deleting a lower field the author meant to set to null.
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
+    for (const key of LIST_SECTIONS) {
       const declared = listLayering(key);
       const entry = entrySchema(key);
       expect([...(declared.nullValued ?? [])].sort(), key).toEqual(nullablePaths(entry).sort());
       for (const [field, nested] of Object.entries(declared.nested ?? {})) {
-        const items = resolve(entry).properties?.[field]?.items;
+        const property = resolve(entry).properties?.[field];
+        const items = property === undefined ? undefined : nestedItems(property);
         if (items === undefined) {
           throw new Error(`${key}.${field}: the published schema shows no nested list`);
         }
@@ -282,8 +306,15 @@ describe("null-valued entry paths", () => {
         );
       }
     }
-    // The instrument's positive control: the walk reaches a definition and reads a nullable field there.
+    // The instrument's positive control: the walk reaches a definition and reads a nullable field there, a nested one included.
     expect(nullablePaths(entrySchema("custom_properties"))).toEqual(["value"]);
+    expect(nullablePaths(entrySchema("branches")).sort()).toEqual([
+      "protection",
+      "protection.required_deployments",
+      "protection.required_pull_request_reviews",
+      "protection.required_status_checks",
+      "protection.restrictions",
+    ]);
   });
 
   test.each<[string, JsonSchema, string[] | "throws"]>([

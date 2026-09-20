@@ -1,8 +1,9 @@
 /**
  * The layered merge, folded low to high; pure (no Io, no GitHub), and layers are trees: a document aliasing a node
- * inside itself is refused. Lists never combine except a knobbed section's entries, unioned by the module's key
+ * inside itself is refused. Lists never combine except a list section's entries, unioned by the module's key
  * (and the nested lists that key declares) under the effective directive: the wrapper's `_layering`, else the file's,
- * else the run's.
+ * else the run's. A list section is knobbed (`{_undeclared, entries}`, the policy resolved after the fold) or plain
+ * (`{_layering, entries}`, unwrapped to the bare list after the fold: the directive was its only content).
  *
  * higher plain mapping                  -> merged key by key
  * higher scalar, list, tagged           -> replaces
@@ -20,6 +21,8 @@ import { err, ok, type Result } from "neverthrow";
 import { isPlainObject } from "../plain-data.js";
 import type { LayerProblem } from "../problem.js";
 import {
+  LIST_SECTIONS,
+  type ListSection,
   SECTION_KEYS,
   type SectionKey,
   type SettingsFile,
@@ -57,6 +60,12 @@ type Uniting = Exclude<Layering, "replace">;
 
 const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
 
+const KNOBBED: ReadonlySet<string> = new Set(UNDECLARED_POLICY_SECTIONS);
+
+function isListSection(key: string): key is ListSection {
+  return LIST_SECTIONS.some((section) => section === key);
+}
+
 /**
  * The sections whose null is a document value (Pages disabled, no interaction limits), the only top-level nulls the
  * fold may leave standing; the two pins fail to compile when a section's schema starts or stops admitting null.
@@ -83,12 +92,12 @@ const NULL_VALUED: ReadonlySet<string> = new Set(NULL_VALUED_SECTIONS);
  * A plain array becomes `{entries}` with NO `_undeclared`: that omission is what lets a merge inherit a lower layer's
  * policy. Resolved to the section default here, a higher layer's default would overwrite the lower's explicit policy.
  */
-function normalizeKnobbedSections(settings: unknown): unknown {
+function normalizeListSections(settings: unknown): unknown {
   if (!isPlainObject(settings)) {
     return settings;
   }
   const out: Record<string, unknown> = { ...settings };
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
+  for (const key of LIST_SECTIONS) {
     const value = out[key];
     if (Array.isArray(value)) {
       out[key] = { entries: value };
@@ -112,6 +121,40 @@ function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
       put(merged, key, { _undeclared: sectionDefaultPolicy(key), ...value });
     }
   }
+}
+
+/**
+ * A plain-list section's wrapper carried only the directive the fold consumed, so the rendered document holds the bare
+ * list. A wrapper still carrying another key is left for validation to name (its strict shape takes none).
+ */
+function unwrapPlainLists(merged: Record<string, unknown>): void {
+  for (const key of LIST_SECTIONS) {
+    const value = merged[key];
+    if (KNOBBED.has(key) || !isPlainObject(value) || !Array.isArray(value.entries)) {
+      continue;
+    }
+    if (Object.keys(value).every((knob) => knob === "entries")) {
+      put(merged, key, value.entries);
+    }
+  }
+}
+
+/** A nested keyed list in either form: the bare list, or the nested `{_undeclared, entries}` wrapper; null when neither. */
+interface NestedForm {
+  readonly entries: readonly unknown[];
+  /** The wrapper's keys besides `entries`; null for the bare list, so the fold can tell the two forms apart. */
+  readonly knobs: Readonly<Record<string, unknown>> | null;
+}
+
+function nestedForm(value: unknown): NestedForm | null {
+  if (Array.isArray(value)) {
+    return { entries: value, knobs: null };
+  }
+  if (isPlainObject(value) && Array.isArray(value.entries)) {
+    const { entries, ...knobs } = value;
+    return { entries, knobs };
+  }
+  return null;
 }
 
 /**
@@ -178,10 +221,32 @@ function stripMapping(
       key,
       nested === undefined
         ? stripValue(value, within(scope, key), descent)
-        : stripKeyedList(value, nested, descent),
+        : stripNested(value, nested, descent),
     );
   }
   descent.delete(map);
+  return out;
+}
+
+/** A nested list in its wrapper form: the wrapper's knobs are markers or data like any mapping key, its entries a keyed list. */
+function stripNested(value: unknown, keyed: KeyedListLayering, descent: Descent): unknown {
+  if (!isPlainObject(value) || !Array.isArray(value.entries)) {
+    return stripKeyedList(value, keyed, descent);
+  }
+  const enclosing = descent.get(value);
+  if (enclosing !== undefined) {
+    return enclosing;
+  }
+  const out: Record<string, unknown> = {};
+  descent.set(value, out);
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "entries") {
+      put(out, key, stripKeyedList(child, keyed, descent));
+    } else if (child !== null) {
+      put(out, key, stripValue(child, undefined, descent));
+    }
+  }
+  descent.delete(value);
   return out;
 }
 
@@ -205,7 +270,7 @@ function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descen
   return out;
 }
 
-/** The directive a knobbed section folds under, read as admitSection reads it; a value outside the set is not a directive. */
+/** The directive a list section folds under, read as admitSection reads it; a value outside the set is not a directive. */
 function effectiveLayering(wrapper: unknown, file: Layering | undefined, run: Layering): Layering {
   const directive = isPlainObject(wrapper) ? wrapper[LAYERING_KEY] : undefined;
   return (isLayering(directive) ? directive : undefined) ?? file ?? run;
@@ -213,13 +278,13 @@ function effectiveLayering(wrapper: unknown, file: Layering | undefined, run: La
 
 /**
  * A layer validated on its own is seen as the merge could leave it: every null the merge would read as a marker drops,
- * every other null stays for the validator to judge. A knobbed section's entries are entered only under `deep`, the
+ * every other null stays for the validator to judge. A list section's entries are entered only under `deep`, the
  * one directive that merges a same-key pair; under `shallow` and `replace` an entry is copied as written. A cyclic
  * input yields a cyclic clone; the merge is what refuses those.
  *
  * `rulesets[main].bypass_actors: null` under deep  -> dropped (a mapping key inside an entry the merge combines)
  * the same under `_layering: shallow`              -> kept (the merge swaps the entry in whole)
- * `branches[].protection: null`                    -> kept (inside a list the merge copies as written)
+ * `branches[].protection: null`                    -> kept (a null-valued entry path: the entry schema types it)
  * `pages: null`                                    -> kept (the section's value; the merge writes it, never reads it as a marker)
  * a null list element                              -> kept
  */
@@ -235,19 +300,18 @@ export function stripNulls(doc: unknown, run: Layering): unknown {
     if (value === null && !NULL_VALUED.has(key)) {
       continue;
     }
-    const section = UNDECLARED_POLICY_SECTIONS.find((candidate) => candidate === key);
     let stripped: unknown;
-    if (section === undefined || effectiveLayering(value, file, run) !== "deep") {
+    if (!isListSection(key) || effectiveLayering(value, file, run) !== "deep") {
       stripped = stripValue(value, undefined, descent);
     } else if (isPlainObject(value)) {
       const wrapper: EntryScope = {
-        nested: { entries: listLayering(section) },
+        nested: { entries: listLayering(key) },
         nullValued: new Set(),
         prefix: "",
       };
       stripped = stripMapping(value, wrapper, descent);
     } else {
-      stripped = stripKeyedList(value, listLayering(section), descent);
+      stripped = stripKeyedList(value, listLayering(key), descent);
     }
     put(out, key, stripped);
   }
@@ -324,7 +388,11 @@ function checkKeyed(
   for (const [index, entry] of entries.entries()) {
     const keys = keyed.keys(entry);
     if (keys === null) {
-      return refuse(layer, `${path}[${index}]`, { code: "layer-no-key", keyField: keyed.keyField });
+      return refuse(layer, `${path}[${index}]`, {
+        code: "layer-no-key",
+        keyField: keyed.keyField,
+        ...(keyed.keyKind === undefined ? {} : { keyKind: keyed.keyKind }),
+      });
     }
     for (const key of keys) {
       const first = seen.get(key);
@@ -339,12 +407,13 @@ function checkKeyed(
       seen.set(key, index);
     }
     for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-      const value = entry[field];
-      if (!Array.isArray(value)) {
+      const form = nestedForm(entry[field]);
+      if (form === null) {
         continue;
       }
+      // The wrapper is transparent to the path, as in the rendered order: `environments[0].variables[1]` under both forms.
       const nestedPath = `${path}[${index}].${field}`;
-      const checked = admitEntries(layer, nestedPath, value).andThen((mappings) =>
+      const checked = admitEntries(layer, nestedPath, form.entries).andThen((mappings) =>
         checkKeyed(layer, mappings, nested, nestedPath),
       );
       if (checked.isErr()) {
@@ -375,14 +444,16 @@ function fileLayering(
 
 function admitSection(
   layer: string,
-  key: UndeclaredPolicySection,
+  key: ListSection,
   value: unknown,
   fallback: { readonly file: Layering | undefined; readonly run: Layering },
 ): Result<AdmittedSection, LayerProblem> {
   if (!isPlainObject(value) || !Array.isArray(value.entries)) {
     return refuse(layer, key, {
       code: "layer-wrong-shape",
-      expected: "a list of mappings or an {_undeclared, entries} wrapper",
+      expected: KNOBBED.has(key)
+        ? "a list of mappings or an {_undeclared, entries} wrapper"
+        : "a list of mappings or an {_layering, entries} wrapper",
       actual: value,
       detail: isPlainObject(value) ? " without an entries list" : undefined,
     });
@@ -437,13 +508,13 @@ function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerP
   if (hasCycle(layer.doc, new WeakSet(), new WeakSet())) {
     return refuse(layer.name, "the document", { code: "layer-cycle" });
   }
-  const doc = normalizeKnobbedSections(layer.doc);
+  const doc = normalizeListSections(layer.doc);
   if (!isPlainObject(doc)) {
     return ok(null);
   }
   return fileLayering(layer.name, doc).andThen((file) => {
     const sections = new Map<string, AdmittedSection>();
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
+    for (const key of LIST_SECTIONS) {
       const value = doc[key];
       if (value === undefined || value === null) {
         continue;
@@ -545,14 +616,35 @@ function mergeMappings(
     }
     const nested = nestedList(scope, key);
     const lower = own(out, key);
-    if (nested !== undefined && Array.isArray(lower) && Array.isArray(value)) {
-      // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too.
-      put(out, key, unionKeyed(lower, value, nested, "deep", here, step));
+    const lowerForm = nested === undefined ? null : nestedForm(lower);
+    const higherForm = nested === undefined ? null : nestedForm(value);
+    if (nested !== undefined && lowerForm !== null && higherForm !== null) {
+      put(out, key, mergeNested(lowerForm, higherForm, nested, here, step));
       continue;
     }
     put(out, key, mergeValue(lower, value, here, step, within(scope, key)));
   }
   return out;
+}
+
+/**
+ * Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too. Two bare lists
+ * fold to a bare list; a wrapper on either side keeps the wrapper form, its knobs (`_undeclared`) merged as the
+ * top-level knobs are, so a lower policy is inherited by a higher bare list.
+ */
+function mergeNested(
+  lower: NestedForm,
+  higher: NestedForm,
+  keyed: KeyedListLayering,
+  path: string,
+  step: Step,
+): unknown {
+  const entries = unionKeyed(lower.entries, higher.entries, keyed, "deep", path, step);
+  if (lower.knobs === null && higher.knobs === null) {
+    return entries;
+  }
+  const knobs = mergeMappings(lower.knobs ?? {}, higher.knobs ?? {}, path, step);
+  return { ...knobs, entries };
 }
 
 /** `index` is the entry's position in the higher list, which is how the layer's notices name it. */
@@ -690,6 +782,7 @@ export function mergeLayers(
   }
   if (isPlainObject(acc)) {
     resolveUndeclaredPolicies(acc);
+    unwrapPlainLists(acc);
   }
   return ok({ settings: acc, notices });
 }

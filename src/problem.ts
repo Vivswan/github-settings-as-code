@@ -178,7 +178,10 @@ export type Problem =
       readonly code: "layer-wrong-shape";
       readonly layer: string;
       readonly site: string;
-      readonly expected: "a mapping" | "a list of mappings or an {_undeclared, entries} wrapper";
+      readonly expected:
+        | "a mapping"
+        | "a list of mappings or an {_undeclared, entries} wrapper"
+        | "a list of mappings or an {_layering, entries} wrapper";
       readonly actual: unknown;
       readonly detail?: " without an entries list";
     }
@@ -194,6 +197,8 @@ export type Problem =
       readonly layer: string;
       readonly site: string;
       readonly keyField: string;
+      /** The field's kind in prose; "string" when the module says nothing else. */
+      readonly keyKind?: string;
     }
   | {
       readonly code: "layer-duplicate-key";
@@ -529,7 +534,7 @@ export function describeProblem(problem: Problem): string {
     case "layer-bad-directive":
       return `${layerSite(problem)} must be one of ${problem.allowed.map(quote).join(", ")}; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is none of them" : ""}`;
     case "layer-no-key":
-      return `${layerSite(problem)} carries no string ${quote(problem.keyField)}, which every entry needs to layer by`;
+      return `${layerSite(problem)} carries no ${problem.keyKind ?? "string"} ${quote(problem.keyField)}, which every entry needs to layer by`;
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
     case "rendered-file-is-layer":

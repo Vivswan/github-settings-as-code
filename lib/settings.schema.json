@@ -1149,6 +1149,84 @@
         "name"
       ]
     },
+    "LayeredList<BranchConfig>": {
+      "description": "The wrapped form of a list section that applies no undeclared policy (environments, branches, workflows): the plain array beside `{_layering, entries}`. The wrapper exists for the render directive alone, so the rendered document always holds the plain array, and with `_layering` omitted it behaves exactly like the plain array. Its keys are strict: anything besides `_layering` and `entries` (there is no `_undeclared` here, since the section keeps every live resource it does not declare) is rejected upfront as a typo.",
+      "type": "object",
+      "properties": {
+        "_layering": {
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (an environment's name, a branch name or pattern, a workflow path). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, the entry's nested lists (an environment's variables, secrets, branch policies, protection rules, and reviewers, each by its own key) unioning the same way. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, and the rendered document never carries it.",
+          "type": "string",
+          "enum": [
+            "replace",
+            "shallow",
+            "deep"
+          ]
+        },
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BranchConfig"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "LayeredList<EnvironmentConfig>": {
+      "description": "The wrapped form of a list section that applies no undeclared policy (environments, branches, workflows): the plain array beside `{_layering, entries}`. The wrapper exists for the render directive alone, so the rendered document always holds the plain array, and with `_layering` omitted it behaves exactly like the plain array. Its keys are strict: anything besides `_layering` and `entries` (there is no `_undeclared` here, since the section keeps every live resource it does not declare) is rejected upfront as a typo.",
+      "type": "object",
+      "properties": {
+        "_layering": {
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (an environment's name, a branch name or pattern, a workflow path). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, the entry's nested lists (an environment's variables, secrets, branch policies, protection rules, and reviewers, each by its own key) unioning the same way. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, and the rendered document never carries it.",
+          "type": "string",
+          "enum": [
+            "replace",
+            "shallow",
+            "deep"
+          ]
+        },
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EnvironmentConfig"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "LayeredList<WorkflowConfig>": {
+      "description": "The wrapped form of a list section that applies no undeclared policy (environments, branches, workflows): the plain array beside `{_layering, entries}`. The wrapper exists for the render directive alone, so the rendered document always holds the plain array, and with `_layering` omitted it behaves exactly like the plain array. Its keys are strict: anything besides `_layering` and `entries` (there is no `_undeclared` here, since the section keeps every live resource it does not declare) is rejected upfront as a typo.",
+      "type": "object",
+      "properties": {
+        "_layering": {
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (an environment's name, a branch name or pattern, a workflow path). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, the entry's nested lists (an environment's variables, secrets, branch policies, protection rules, and reviewers, each by its own key) unioning the same way. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, and the rendered document never carries it.",
+          "type": "string",
+          "enum": [
+            "replace",
+            "shallow",
+            "deep"
+          ]
+        },
+        "entries": {
+          "description": "The declared entries, exactly as the plain array form lists them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkflowConfig"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
     "MilestoneConfig": {
       "description": "One milestone, matched by title.",
       "type": "object",
@@ -1498,17 +1576,31 @@
         },
         "branches": {
           "description": "Classic branch protection per branch.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/BranchConfig"
-          }
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/BranchConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/LayeredList%3CBranchConfig%3E"
+            }
+          ]
         },
         "environments": {
           "description": "Deployment environments, upserted by name.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/EnvironmentConfig"
-          }
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/EnvironmentConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/LayeredList%3CEnvironmentConfig%3E"
+            }
+          ]
         },
         "autolinks": {
           "description": "Autolink references; undeclared ones are DELETED by default (the wrapped form can set `_undeclared: keep`).",
@@ -1590,10 +1682,17 @@
         },
         "workflows": {
           "description": "Per-workflow enable/disable state; undeclared workflows are untouched.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/WorkflowConfig"
-          }
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/WorkflowConfig"
+              }
+            },
+            {
+              "$ref": "#/definitions/LayeredList%3CWorkflowConfig%3E"
+            }
+          ]
         },
         "check_suite_preferences": {
           "description": "Check suite preferences: per-GitHub-App `auto_trigger_checks` toggles controlling whether pushes automatically create check suites. Write-only upstream (GitHub exposes no read endpoint), so check mode cannot verify them and apply re-asserts the declared preferences on every run. The token owner must be a repository administrator.",

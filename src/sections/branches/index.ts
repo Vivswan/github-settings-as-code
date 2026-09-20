@@ -13,10 +13,17 @@ import { subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
+import {
+  keyedBy,
+  listEntries,
+  loosen,
+  type SectionMeta,
+  type SectionModule,
+} from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
+import { layeredList } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
@@ -171,11 +178,16 @@ export const branchesSection = {
   graphql: GRAPHQL,
   // The wildcard key sweep composes HERE, not in schema.ts: it reads the GraphQL translation tables,
   // which are this section's own machinery, and nothing outside them can reach a wildcard rule.
-  shape: loosen(BranchesConfig).superRefine((declared, refineCtx) => {
-    if (!Array.isArray(declared)) {
-      return;
-    }
-    declared.forEach((entry: BranchConfig, index) => {
+  shape: loosen(layeredList(BranchesConfig)).superRefine((declared, refineCtx) => {
+    // The routed shape parsed one of the two forms; under the wrapper an issue's path starts at `entries`.
+    const wrapped = !Array.isArray(declared);
+    const entries = listEntries(declared as BranchConfig[] | { entries: BranchConfig[] });
+    const at = (index: number, ...rest: string[]): (string | number)[] => [
+      ...(wrapped ? ["entries"] : []),
+      index,
+      ...rest,
+    ];
+    entries.forEach((entry: BranchConfig, index) => {
       if (!isWildcardPattern(entry.name) || entry.protection === null) {
         return;
       }
@@ -184,7 +196,7 @@ export const branchesSection = {
         if (!WILDCARD_KEY_SET.has(key)) {
           refineCtx.addIssue({
             code: "custom",
-            path: [index, "protection", key],
+            path: at(index, "protection", key),
             message: WILDCARD_KEY_ERROR(entry.name, key),
           });
         }
@@ -204,7 +216,7 @@ export const branchesSection = {
           if (!(subKey in twins)) {
             refineCtx.addIssue({
               code: "custom",
-              path: [index, "protection", key, subKey],
+              path: at(index, "protection", key, subKey),
               message: WILDCARD_KEY_ERROR(entry.name, `${key}.${subKey}`),
             });
           }
@@ -212,12 +224,24 @@ export const branchesSection = {
       }
     });
   }),
+  // Branch names and patterns are verbatim keys, as plan() rejects duplicates. `protection: null` (no protection) and a
+  // null under it (a core control or required_deployments turned off) are values the entry schema types, never delete markers.
+  layering: keyedBy("name", {
+    nullValued: [
+      "protection",
+      "protection.required_deployments",
+      "protection.required_pull_request_reviews",
+      "protection.required_status_checks",
+      "protection.restrictions",
+    ],
+  }),
   async plan(ctx, desired): Promise<BranchesPlan> {
+    const branches = listEntries(desired);
     // Two entries for one branch or pattern would overwrite each other's write on every run.
     raise(
       rejectDuplicates(
         this,
-        desired,
+        branches,
         (b) => b.name,
         (b) => b.name,
       ),
@@ -227,7 +251,7 @@ export const branchesSection = {
     // probe; a pure-REST declaration never starts it, so no separate predicate gates the fetch.
     let graphqlRun: GraphqlRun | null = null;
     const entries: ClassifiedEntry[] = [];
-    for (const branch of desired) {
+    for (const branch of branches) {
       const protection: SplitProtection | null = branch.protection;
       if (isWildcardPattern(branch.name)) {
         graphqlRun ??= await startGraphqlRun(ctx);
@@ -240,7 +264,7 @@ export const branchesSection = {
       }
     }
     if (graphqlRun !== null) {
-      const declaredPatterns = new Set(desired.map((branch) => branch.name));
+      const declaredPatterns = new Set(branches.map((branch) => branch.name));
       for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
         if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
           plan.notes.push(

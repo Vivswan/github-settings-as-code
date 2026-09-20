@@ -1,0 +1,31 @@
+# mode: render over `workflows`, a plain-list section: a bare file name and its
+# .github/workflows/ path are one workflow, so the repo's disabled `ci.yml` swaps
+# the fleet's active `.github/workflows/ci.yml` under the wrapper's
+# `_layering: shallow`, and the fleet's nightly rides along. The rendered file
+# holds the bare list: the wrapper existed for the directive alone.
+name: render-workflows-wrapper
+inputs:
+  mode: render
+  layering: replace
+settings_layers:
+  - workflows:
+      - path: .github/workflows/ci.yml
+        state: active
+      - path: nightly.yml
+        state: active
+settings:
+  workflows:
+    _layering: shallow
+    entries:
+      - path: ci.yml
+        state: disabled
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  rendered:
+    workflows:
+      - path: ci.yml
+        state: disabled
+      - path: nightly.yml
+        state: active

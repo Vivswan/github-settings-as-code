@@ -67,8 +67,8 @@ The step ends with `result: rendered` and exit 0, or exit 1 with an error naming
 | Knob | Where | Axis | Meaning |
 |---|---|---|---|
 | `layering` | The action input | Merge time | Run-wide default for how a list section combines with the layers below it: `deep` (default) unions the entries by the section's key and merges a same-key pair field by field, `shallow` unions and swaps a same-key entry for the higher one, `replace` lets the higher list win |
-| `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it |
-| `_undeclared` | A list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
+| `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it. The wrapper of a section without an undeclared policy (`environments`, `branches`, `workflows`) takes this one key beside `entries`, and the rendered file holds its bare list |
+| `_undeclared` | A knobbed list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
 
 The two underscore keys are this action's directives, never GitHub settings, and they are the whole underscore vocabulary: any other underscore key, at a file's top level or on a wrapper, fails validation with an error naming these two (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
 
@@ -80,16 +80,16 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 |---|---|---|
 | A mapping | A mapping | Merged key by key. Lower keys keep their order, higher-only keys follow |
 | A scalar, a list, or a YAML-tagged value | Anything | Replaces |
-| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice. Inside a list section's entry the deletion holds under `deep` only: under `shallow` and `replace` the entry is copied as written, so a `null` there is a value the section must accept. A field the entry's schema types nullable (`custom_properties[].value`, where `null` unsets the property) is a value under every directive, never a marker |
+| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice. Inside a list section's entry the deletion holds under `deep` only: under `shallow` and `replace` the entry is copied as written, so a `null` there is a value the section must accept. A field the entry's schema types nullable (`custom_properties[].value`, where `null` unsets the property; `branches[].protection`, where it removes the protection; `environments[].deployment_branch_policy`) is a value under every directive, never a marker |
 | `null` | Nothing, or another `null` | Below the top level, stays as written. At the top level it opted out of nothing and drops with no notice, except on `pages` and `interaction_limits`, where `null` is the section's value and stays (`pages: null` still means "disable Pages") |
-| A list section's entries, layering `deep` | Its entries | Union by the section's key (the table below). A same-key pair merges field by field, the higher fields winning, in the lower entry's place; a nested keyed list (a ruleset's `rules`, by `type`) unions the same way, its same-type pairs merging field by field too; new keys are appended in the higher order |
+| A list section's entries, layering `deep` | Its entries | Union by the section's key (the table below). A same-key pair merges field by field, the higher fields winning, in the lower entry's place; a nested keyed list (a ruleset's `rules` by `type`, an environment's `variables` by name) unions the same way under `deep`, its same-key pairs merging field by field too, in its bare or `{_undeclared, entries}` form alike (a lower wrapper's policy is inherited by a higher bare list); new keys are appended in the higher order |
 | A list section's entries, layering `shallow` | Its entries | Union by the section's key. A same-key entry is swapped for the higher one in place, new keys are appended |
 | A list section's entries, layering `replace` | Its entries | The higher list wins. An omitted `_undeclared` still inherits the lower layer's |
-| Any other list (`branches`, `environments`, `topics`, ...) | A list | Replaces, whatever the run's layering |
+| Any other list (`topics`, a ruleset's `bypass_actors`, `check_suite_preferences.auto_trigger_checks`, ...) | A list | Replaces, whatever the run's layering |
 
 Under `shallow` and `deep` an empty higher list adds nothing. To clear a list, write `_layering: replace` with an empty list.
 
-Every list section, the sections the [undeclared policy](../reference/undeclared-policy.md) counts, layers by the key its planner matches entries by, folded the same way:
+Every list section layers by the key its planner matches entries by, folded the same way. The sixteen the [undeclared policy](../reference/undeclared-policy.md) counts take `_layering` beside `_undeclared`; `environments`, `branches`, and `workflows` take it in a `{_layering, entries}` wrapper of their own, which the render unwraps to the bare list:
 
 | Section | Key | Folded |
 |---|---|---|
@@ -99,6 +99,9 @@ Every list section, the sections the [undeclared policy](../reference/undeclared
 | `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets` | `name` | uppercased, as GitHub stores it |
 | `actions_variables`, `agents_variables` | `name` | uppercased, as GitHub stores it |
 | `rulesets` | `name`; its `rules` by `type` | verbatim |
+| `environments` | `name`; its `variables` and `secrets` by `name` (uppercased), `deployment_branch_policies` by `name`, `deployment_protection_rules` by `app`, `reviewers` by `type` and `id` | case-insensitive |
+| `branches` | `name` (a branch or a wildcard pattern) | verbatim |
+| `workflows` | `path` (a bare file name and its `.github/workflows/` path are one workflow) | as GitHub lists it |
 | `autolinks` | `key_prefix` | verbatim |
 | `milestones` | `title` | verbatim |
 | `webhooks` | `config.url` | verbatim |
@@ -106,7 +109,9 @@ Every list section, the sections the [undeclared policy](../reference/undeclared
 | `deploy_keys` | `title` | verbatim |
 | `secret_scanning_custom_patterns` | `name` | verbatim |
 
-So a fleet `Bug` and a repository `bug` are one label, and a fleet `MY_SECRET` and a repository `my_secret` are one secret. When the spellings differ, the higher layer's spelling is the one written, under every directive. Within one layer two entries may not share a key; the fold refuses that layer (see [Refusals](#refusals)).
+So a fleet `Bug` and a repository `bug` are one label, a fleet `MY_SECRET` and a repository `my_secret` are one secret, and a fleet `Prod` environment and a repository `prod` are one environment, their variables unioned by name. When the spellings differ, the higher layer's spelling is the one written, under every directive. Within one layer two entries may not share a key, at any depth; the fold refuses that layer (see [Refusals](#refusals)).
+
+Under `shallow` a same-key entry is swapped whole, its nested lists with it: only `deep` enters an entry, so only `deep` unions an environment's variables with the fleet's.
 
 Under `deep` a lower entry that two higher entries both claim (a lower label renaming into a name one higher entry declares while another declares its old name) is superseded by both as written: only a one-to-one pair merges field by field, so the rendered document never carries two entries claiming one key.
 
@@ -118,9 +123,9 @@ The rules above decide the content. The written file's order is the canonical on
 
 Reordering keys, or the entries of a keyed list, in a layer changes nothing in the rendered file. The lists kept as written do change it:
 
-- `branches`: GitHub applies overlapping wildcard rules in creation order
+- `branches`: GitHub applies overlapping wildcard rules in creation order, so the union keeps the lower order and appends
 - the `pinned: true` environments: their order is the pin rank
-- the two mapping lists with no layering identity, so a higher list replaces the lower one and never unions with it: `bypass_actors` (the planner still pairs actors by `actor_type` plus `actor_id` for its drift lines), `reviewers`
+- `bypass_actors`, the mapping list with no layering identity, so a higher list replaces the lower one and never unions with it (the planner still pairs actors by `actor_type` plus `actor_id` for its drift lines); `reviewers` is not kept as written, since the fold unions it by type and id
 - every scalar list: `topics`, `include` patterns
 
 The `_undeclared` knob across layers:
@@ -228,7 +233,7 @@ Reading it back:
 
 The rendered file is exactly what apply runs, so it is worth knowing its shape:
 
-- Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. Other lists (`branches`, `environments`, and the nested per-environment lists) stay as written.
+- Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list keeps the form its layers gave it, a wrapper if any layer wrote one.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
 - A top-level `null` that met nothing below is gone, except `pages: null` and `interaction_limits: null`, which keep their engine meaning; a nested one stays as written.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
@@ -289,6 +294,8 @@ The per-layer validation catches what a standalone settings file could not say, 
 | The layer has | Caught by |
 |---|---|
 | A list section that is not a list or an `{entries}` wrapper (`labels: oops`) | Validation: `labels: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as string` |
+| A plain-list section that is neither, named with the one directive its wrapper takes (`environments: oops`) | Validation: `environments: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_layering" directive), but this section parsed as string` |
+| The policy on a plain-list wrapper (`environments: {_undeclared: keep, entries: []}`) | Validation: `environments: Unrecognized key: "_undeclared"; the wrapper's directives are "_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared"), and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment` |
 | A keyed entry without its key, here a label with no `name` (`labels: [{name: bug}, {color: d73a4a}]`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 | An underscore key that is not a directive on a wrapper (`labels: {_notes: x, entries: [{name: bug}]}`) | Validation: `labels: Unrecognized key: "_notes"; the wrapper's directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment` |
@@ -319,8 +326,11 @@ A render-mode log can therefore show your settings file's structure and, through
 | Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |
 | Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`) | `rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer` |
 | Two milestones under one title in one list (`milestones: [{title: v1}, {title: v1, state: closed}]`) | `milestones[0] and milestones[1] both claim one title; each title belongs to one entry within a layer` |
+| Two variables of one environment under one uppercased name, in either form (`environments: [{name: prod, variables: {entries: [{name: region, value: eu}, {name: REGION, value: us}]}}]`) | `environments[0].variables[0] and environments[0].variables[1] both claim one name; each name belongs to one entry within a layer` |
+| A workflow named by its file and its path in one list (`workflows: [{path: ci.yml, state: active}, {path: .github/workflows/ci.yml, state: disabled}]`) | `workflows[0] and workflows[1] both claim one path; each path belongs to one entry within a layer` |
 | An unknown `_layering` value on a wrapper, the retired `merge` included (`labels: {_layering: merge, entries: [{name: bug}]}`) | `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
+| An unknown `_layering` value on a plain-list wrapper (`environments: {_layering: union, entries: []}`) | `environments._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | A YAML anchor aliased inside its own node (`repository: &loop {self: *loop}`) | `the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees` |
 
 ## Where to go next
