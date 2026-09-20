@@ -5,6 +5,7 @@
 
 import {
   collaboratorFromPut,
+  grantablePermission,
   invitationFromPut,
   invitationPermissionFromPut,
 } from "../../../test/e2e/mock/state.js";
@@ -13,14 +14,20 @@ import {
   type Json,
   noContent,
   ok,
+  PERMISSION_NOT_GRANTABLE,
   type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
+import { INVITATION_ROLES } from "../shared/roles.js";
 
 export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
   "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
   "collaborators.update": ({ state, param, body }) => {
     const username = param("username");
+    // Before any lookup, like GitHub: a permission it cannot grant is refused whether or not the user has access.
+    if (!grantablePermission(asObject(body))) {
+      return PERMISSION_NOT_GRANTABLE;
+    }
     const existing = state.collaborators.find(
       (c) => String(c.login).toLowerCase() === username.toLowerCase(),
     );
@@ -67,9 +74,20 @@ export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
     if (!invitation) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    // The PATCH speaks the invitation's own read vocabulary (read/write/...), so `permissions` is stored verbatim.
+    // The PATCH speaks the invitation's own read vocabulary (read/write/...); the grant's "push" is the 422
+    // GitHub answers a value outside the spec's enum with, so the section's mapping is observable here.
     const permissions = asObject(body).permissions;
     if (permissions !== undefined) {
+      if (typeof permissions !== "string" || !INVITATION_ROLES.has(permissions)) {
+        return {
+          status: 422,
+          body: {
+            message: "Validation Failed",
+            errors: [{ field: "permissions", code: "invalid" }],
+          },
+          requestOffSpec: true,
+        };
+      }
       invitation.permissions = permissions;
     }
     return ok(invitation);

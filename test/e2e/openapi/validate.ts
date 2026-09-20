@@ -13,6 +13,7 @@ import {
   endpointMethod,
   endpointPath,
   matchesTemplate,
+  type Route,
 } from "../../../src/sections/contract/endpoints.js";
 import { GRAPHQL_ERROR_TYPES } from "../../../src/sections/contract/graphql.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
@@ -149,6 +150,39 @@ interface OpenApiSpec {
   paths: Record<string, PathItem>;
 }
 
+/**
+ * What GitHub keeps of a request body: the properties the operation's schema documents, across every
+ * oneOf/anyOf/allOf branch, and whether the schema closes over them (additionalProperties: false, where
+ * GitHub answers an unknown key with a 422 instead of dropping it).
+ */
+export interface DocumentedRequestBody {
+  readonly fields: ReadonlySet<string>;
+  readonly closed: boolean;
+}
+
+/** Collects a schema's property names into `fields`; true when the schema itself is closed. */
+function collectDocumentedFields(schema: unknown, fields: Set<string>): boolean {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) {
+    return false;
+  }
+  const node = schema as Json;
+  const properties = node.properties;
+  if (properties !== null && typeof properties === "object") {
+    for (const name of Object.keys(properties)) {
+      fields.add(name);
+    }
+  }
+  for (const combinator of ["oneOf", "anyOf", "allOf"]) {
+    const branches = node[combinator];
+    if (Array.isArray(branches)) {
+      for (const branch of branches) {
+        collectDocumentedFields(branch, fields);
+      }
+    }
+  }
+  return node.additionalProperties === false;
+}
+
 /** Built once per process and reused across scenarios, so schemas compile once per variant, not per run. */
 export class OpenApiValidator {
   private readonly ajv: Ajv;
@@ -159,6 +193,8 @@ export class OpenApiValidator {
   private readonly cache = new Map<unknown, ValidateFunction>();
   /** Compiled request-body validators (required kept), keyed by schema. */
   private readonly requiredCache = new Map<unknown, ValidateFunction>();
+  /** The documented request body per declared route; null records an operation documenting none. */
+  private readonly bodyCache = new Map<string, DocumentedRequestBody | null>();
 
   constructor(
     private readonly spec: OpenApiSpec,
@@ -196,6 +232,26 @@ export class OpenApiValidator {
   /** The path templates the loaded spec documents; validate.test.ts pins them equal to USED_PATHS. */
   paths(): readonly string[] {
     return this.templates;
+  }
+
+  /**
+   * The documented request body of a declared route ("PATCH /repos/{owner}/{repo}/labels/{name}"), or
+   * undefined when the operation documents no body, or one without properties.
+   */
+  requestBody(route: Route): DocumentedRequestBody | undefined {
+    const cached = this.bodyCache.get(route);
+    if (cached !== undefined) {
+      return cached ?? undefined;
+    }
+    const operation = this.spec.paths[endpointPath(route)]?.[endpointMethod(route).toLowerCase()];
+    const fields = new Set<string>();
+    const closed = collectDocumentedFields(
+      this.jsonSchema(operation?.requestBody?.content),
+      fields,
+    );
+    const body = fields.size === 0 ? null : { fields, closed };
+    this.bodyCache.set(route, body);
+    return body ?? undefined;
   }
 
   /** Two caches, not one: a schema shared by a request and a response body compiles once per variant. */

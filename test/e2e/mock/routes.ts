@@ -5,7 +5,7 @@
  *
  * The stage order is the contract, the same on both wires:
  *   wire checks -> route match -> check-mode barrier -> target resolution -> fault barrier -> permission gate
- *     -> denial barrier -> handler -> response guard -> chaos hook
+ *     -> denial barrier -> body allowlist -> handler -> response guard -> chaos hook
  */
 
 import type { SectionKey } from "../../../src/schema.js";
@@ -54,6 +54,7 @@ import {
 } from "./grading.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "./handlers.js";
 import { decodeNodeId, type NodeFamily } from "./node-id.js";
+import { acceptedBody } from "./request-body.js";
 import type { MockState } from "./state.js";
 import {
   asObject,
@@ -591,15 +592,22 @@ export function runPipeline(
     // Unreachable after assertHandlerCompleteness at construction; loud rather than a silent undefined call.
     return violation(`no handler registered for matched endpoint "${key}"`);
   }
-  const response = handler({
-    state,
-    endpoint,
-    param: paramAccessor(key, endpoint, matched.params),
-    query: request.query,
-    body: request.body,
-    headers: requestHeaders(request.headers),
-    grants: (kind) => gradeRequirement(mask, { permission: requirement.permission, kind }).allowed,
-  });
+  // The handler sees only what GitHub keeps of the body (request-body.ts): an undocumented key is dropped on an open
+  // body and is the 422 below on a closed one, so no handler can echo a key GitHub never stores.
+  const accepted = acceptedBody(endpoint.route, request.body);
+  const response =
+    "rejected" in accepted
+      ? accepted.rejected
+      : handler({
+          state,
+          endpoint,
+          param: paramAccessor(key, endpoint, matched.params),
+          query: request.query,
+          body: accepted.body,
+          headers: requestHeaders(request.headers),
+          grants: (kind) =>
+            gradeRequirement(mask, { permission: requirement.permission, kind }).allowed,
+        });
 
   // Before the chaos hook, which deliberately goes off-contract, so statusAllowed holds on every request, not only the
   // ones a curated test drives.

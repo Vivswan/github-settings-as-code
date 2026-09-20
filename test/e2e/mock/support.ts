@@ -284,10 +284,8 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       }),
     create: ({ state, body }) => {
       const payload = asObject(body);
-      // GitHub stores variable names uppercased however they are entered. Payload spread FIRST so the
-      // passthrough fields the section sends (and later subsetDiffs) read back; canonical fields normalize over them.
+      // GitHub stores variable names uppercased however they are entered.
       const variable: Json = {
-        ...payload,
         name: variableName(payload),
         value: payload.value ?? "",
         created_at: "2026-01-01T00:00:00Z",
@@ -309,14 +307,6 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       }
       if (payload.value !== undefined) {
         variable.value = payload.value;
-      }
-      // Passthrough fields update verbatim, mirroring the create path, so a
-      // second apply's subsetDiff over them reads back what was written.
-      for (const [field, value] of Object.entries(payload)) {
-        if (VARIABLE_CANONICAL_KEYS.has(field)) {
-          continue;
-        }
-        variable[field] = value;
       }
       return noContent();
     },
@@ -456,17 +446,6 @@ export function findLabel(state: MockState, name: string): Json | undefined {
   return state.labels.find((l) => labelName(l) === nameKey(name));
 }
 
-/**
- * Variable fields the server owns (or the update handler maps explicitly);
- * the passthrough loop must never let a payload overwrite them.
- */
-const VARIABLE_CANONICAL_KEYS = new Set(["name", "value", "created_at", "updated_at"]);
-/**
- * Hook fields the update handler owns (config, events, and active mapped explicitly; name and id
- * ignored); anything else in a PATCH body is a passthrough field stored verbatim.
- */
-export const HOOK_CANONICAL_KEYS = new Set(["config", "events", "active", "name", "id"]);
-
 /** The custom-pattern fields the PATCH may update (the name is immutable). */
 export const SECRET_SCANNING_UPDATABLE_KEYS = [
   "pattern",
@@ -550,7 +529,13 @@ export function maskHookSecret(hook: Json): Json {
   return config.secret === undefined ? hook : { ...hook, config: maskedConfig(config) };
 }
 
-export function nextNumber(items: Json[]): number {
+/** GitHub's reply to a grant PUT whose `permission` is neither a standard permission nor a defined custom role. */
+export const PERMISSION_NOT_GRANTABLE: MockResponse = {
+  status: 422,
+  body: { message: "Validation Failed", errors: [{ field: "permission", code: "invalid" }] },
+};
+
+export function nextNumber(items: readonly Json[]): number {
   const max = items.reduce((acc, item) => Math.max(acc, Number(item.number) || 0), 0);
   return max + 1;
 }

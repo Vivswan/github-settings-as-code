@@ -685,18 +685,16 @@ describe("writes mutate state", () => {
     expect(singleState(h).labels).toHaveLength(1);
   });
 
-  test("label create and update preserve passthrough fields the section diffs", async () => {
-    // The labels section sends unknown passthrough fields verbatim and subsetDiffs them on the
-    // next read; a mock that dropped them would make a converged second apply read as drift and
-    // re-PATCH, falsely failing the idempotence proof's zero-write rule.
+  test("label create and update drop what the body cannot set: unknown keys and server-owned fields", async () => {
+    // GitHub ignores a key its labels body does not document and never lets a body set id, node_id,
+    // url, or default; a mock keeping either would let a phantom key converge or an id be spoofed.
     const h = await start(scenario());
     const created = await call(h, "POST", labelsPath, {
       body: { name: "feature", color: "00ff00", tone: "warm" },
     });
     expect(created.status).toBe(201);
     let list = await jsonArray(await call(h, "GET", labelsPath));
-    expect(list[0]?.tone).toBe("warm");
-    // Known fields stay normalized over the spread payload.
+    expect(list[0]).not.toHaveProperty("tone");
     expect(list[0]?.default).toBe(false);
     const patched = await call(h, "PATCH", `${labelsPath}/feature`, {
       body: {
@@ -711,7 +709,7 @@ describe("writes mutate state", () => {
     });
     expect(patched.status).toBe(200);
     list = await jsonArray(await call(h, "GET", labelsPath));
-    expect(list[0]?.tone).toBe("cool");
+    expect(list[0]).not.toHaveProperty("tone");
     expect(list[0]?.name).toBe("feature");
     expect(list[0]?.id).not.toBe(999);
     expect(list[0]?.node_id).not.toBe("FAKE");

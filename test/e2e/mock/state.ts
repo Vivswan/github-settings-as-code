@@ -477,9 +477,15 @@ export const LIST_MOCKS = {
   webhooks: WEBHOOKS_MOCK,
 } as const satisfies Partial<Record<ListSectionKey, ListMockSpec>>;
 
-function completeListItem(spec: ListMockSpec, seed: Json, id: number, slug: string): Json {
+function completeListItem(
+  spec: ListMockSpec,
+  seed: Json,
+  id: number,
+  slug: string,
+  siblings: readonly Json[],
+): Json {
   const item = { ...spec.defaults, ...seed };
-  return { ...item, ...spec.owned(id, slug, item) };
+  return { ...item, ...spec.owned(id, slug, item, siblings) };
 }
 
 function seededIds(value: unknown): number[] {
@@ -497,15 +503,17 @@ function seededIds(value: unknown): number[] {
 function completeListCollections(state: MockState): void {
   for (const spec of Object.values(LIST_MOCKS)) {
     const items = spec.collection(state);
-    const completed = items.map((seed) =>
-      completeListItem(
+    // In place and in order over the whole collection, so an unpinned milestone seed numbers past
+    // every pinned one (wherever it sits) and past the seeds completed before it: no two share a number.
+    items.forEach((seed, index) => {
+      items[index] = completeListItem(
         spec,
         seed,
         typeof seed.id === "number" ? seed.id : state.nextId++,
         state.slug,
-      ),
-    );
-    items.splice(0, items.length, ...completed);
+        items,
+      );
+    });
   }
 }
 
@@ -1345,6 +1353,39 @@ export function environmentFromPut(payload: Json): Json {
     });
   }
   return { ...rest, protection_rules: rules };
+}
+
+/**
+ * The grant PUT's own vocabulary (collaborators and teams alike), which the team listing's `permission` also
+ * spells; the invitation PATCH speaks the GET's instead.
+ */
+export const GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
+  "pull",
+  "triage",
+  "push",
+  "maintain",
+  "admin",
+]);
+
+/**
+ * The custom repository roles the mock's organization defines, so a grant naming one converges (the
+ * snapshot round trips read them back) while any other spelling is refused the way GitHub refuses a
+ * role the organization never defined.
+ */
+const CUSTOM_REPOSITORY_ROLES: ReadonlySet<string> = new Set(["security-team", "security-auditor"]);
+
+/**
+ * Whether a grant PUT's `permission` is one GitHub takes: a standard permission or a defined custom role,
+ * spelled exactly. An absent key is the default grant. "write", "read", or a mis-cased "Admin" is the 422 the
+ * runtime's parse rules exist to avoid (src/sections/shared/roles.ts).
+ */
+export function grantablePermission(payload: Json): boolean {
+  const permission = payload.permission;
+  return (
+    permission === undefined ||
+    (typeof permission === "string" &&
+      (GRANT_PERMISSIONS.has(permission) || CUSTOM_REPOSITORY_ROLES.has(permission)))
+  );
 }
 
 /**
