@@ -48,3 +48,36 @@ edges:
   problem: [plain-data, schema, text]
   schema: [sections, types]
   upstream-gaps: [types]
+
+# The never-throw rule: errors are values, so a `throw` in src/ is a `BUG:` invariant (a programming error no user
+# can cause), a bare rethrow sitting directly inside its catch clause, or spared here. `requestLayer` lists the files the GitHub request
+# layer still throws from, until it returns Results. `ratchet` lists every other throw by file with its exact count:
+# a count going up fails, and so does one going down until this list is edited, so the total only ever shrinks.
+throws:
+  requestLayer:
+    - src/github/api.ts
+    - src/sections/contract/errors.ts
+    - src/sections/contract/live.ts
+    - src/sections/contract/requests.ts
+  ratchet:
+    src/action/artifact.ts: 1
+    src/cli/inputs.ts: 1
+    src/engine/diff.ts: 1
+    src/engine/execute.ts: 1
+    src/engine/orchestrate.ts: 1
+    src/github/secret-scan.ts: 5
+    src/sections/branches/graphql-rules.ts: 10
+    src/sections/branches/index.ts: 1
+    src/sections/collaborators/index.ts: 2
+    src/sections/contract/docs.ts: 2
+    src/sections/custom_properties/index.ts: 2
+    src/sections/deploy_keys/index.ts: 2
+    src/sections/environments/branch-policies.ts: 2
+    src/sections/environments/pins.ts: 2
+    src/sections/environments/protection-rules.ts: 3
+    src/sections/repository/index.ts: 4
+    src/sections/rulesets/index.ts: 1
+    src/sections/shared/list-section.ts: 3
+    src/sections/shared/roles.ts: 1
+    src/sections/shared/sealed-box.ts: 1
+    src/sections/shared/secrets-engine.ts: 4

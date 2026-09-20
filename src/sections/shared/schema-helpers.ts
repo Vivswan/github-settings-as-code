@@ -75,7 +75,7 @@ function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
   const entryName = z.globalRegistry.get(entry)?.id;
   if (entryName === undefined) {
     throw new Error(
-      "knobbed(): the entry schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
+      "BUG: knobbed(): the entry schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
     );
   }
   const wrapper = z

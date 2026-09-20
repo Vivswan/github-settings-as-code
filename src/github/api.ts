@@ -452,7 +452,7 @@ export class GitHubApi implements GitHubClient {
     }
     const slug = repoSlugOf(path);
     if (slug === undefined) {
-      throw new Error(`internal: redactTrace needs a /repos/<owner>/<repo> path, got ${path}`);
+      throw new Error(`BUG: redactTrace needs a /repos/<owner>/<repo> path, got ${path}`);
     }
     const release = this.trace.hold(slug);
     try {
