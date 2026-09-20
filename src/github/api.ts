@@ -356,10 +356,8 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
  * request details in free text, where neither a field name nor the output mask finds a secret or a redacted slug. The
  * one renderer behind GitHubApi's transport failures and the contract layer's (sections/contract/requests.ts).
  */
-export function transportFailure(label: string, reason: string, target: string): Error {
-  return new Error(
-    `${label} failed: ${reason}. Check network connectivity from the runner to ${target}, then re-run`,
-  );
+export function transportFailure(label: string, reason: string, target: string): string {
+  return `${label} failed: ${reason}. Check network connectivity from the runner to ${target}, then re-run`;
 }
 
 function transportReason(error: unknown, withholdReason: string | undefined): string {
@@ -520,10 +518,12 @@ export class GitHubApi implements GitHubClient {
         // Fail closed for a secret-carrying request: an error body may echo the rejected value.
         return { error: apiErrorFromHttp(error, carriesSecret) };
       }
-      throw transportFailure(
-        `${method} ${path}`,
-        transportReason(error, carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined),
-        this.baseUrl,
+      throw new Error(
+        transportFailure(
+          `${method} ${path}`,
+          transportReason(error, carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined),
+          this.baseUrl,
+        ),
       );
     }
   }
@@ -602,17 +602,19 @@ export class GitHubApi implements GitHubClient {
           error: forRedacted(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent())),
         };
       }
-      throw transportFailure(
-        `GRAPHQL ${op.name}`,
-        transportReason(
-          error,
-          carriesSecret
-            ? SECRET_TRANSPORT_WITHHELD
-            : redacted()
-              ? REDACTED_TRANSPORT_WITHHELD
-              : undefined,
+      throw new Error(
+        transportFailure(
+          `GRAPHQL ${op.name}`,
+          transportReason(
+            error,
+            carriesSecret
+              ? SECRET_TRANSPORT_WITHHELD
+              : redacted()
+                ? REDACTED_TRANSPORT_WITHHELD
+                : undefined,
+          ),
+          this.baseUrl,
         ),
-        this.baseUrl,
       );
     }
     const body = (response.data ?? {}) as {
@@ -721,7 +723,7 @@ export function isRateLimitError(error: ApiError): boolean {
 /**
  * True when an error means the token lacks access, as opposed to a bad payload: a status fold, blind
  * to the body. A message an endpoint declares as a definitive rejection (sections/contract/endpoints.ts)
- * is classified ahead of this in throwFor, where the endpoint is known.
+ * is classified ahead of this in failureFor, where the endpoint is known.
  */
 export function isPermissionError(error: ApiError): boolean {
   if (isRateLimitError(error)) {

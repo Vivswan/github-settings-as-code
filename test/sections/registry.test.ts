@@ -108,7 +108,7 @@ describe("section permissions", () => {
   });
 
   test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {
-    // throwFor classifies 403/404 as PermissionDenied before reading `hints`, so a hint there is dead advice; ambiguity on those statuses goes in
+    // failureFor classifies 403/404 as PermissionDenied before reading `hints`, so a hint there is dead advice; ambiguity on those statuses goes in
     // `denialHint`. HintableStatus misses a hoisted hints object that also carries a permitted key, and sections hoist shared hints, so this sweep
     // is the runtime backstop.
     for (const [key, endpoint] of Object.entries(allEndpoints())) {
@@ -830,12 +830,13 @@ describe("probeAbsent tolerance derivation", () => {
     check: true,
   });
 
-  test("without an explicit tolerate, an undeclared error status throws", async () => {
+  test("without an explicit tolerate, an undeclared error status is a failure, never an absence", async () => {
     const endpoint = {
       route: "GET /repos/{owner}/{repo}/vulnerability-alerts",
       statuses: { 204: "a" },
     } satisfies EndpointDecl;
-    await expect(probeAbsent(ctxWith(404), section, endpoint)).rejects.toThrow();
+    const probed = await probeAbsent(ctxWith(404), section, endpoint);
+    expect(probed.isErr() && probed.error.kind).toBe("permission-denied");
   });
 });
 

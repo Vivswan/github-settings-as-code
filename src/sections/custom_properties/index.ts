@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
@@ -113,12 +114,14 @@ function propertiesByName(
   section: SectionMeta,
   live: readonly z.infer<typeof LiveProperty>[],
 ): Map<string, z.infer<typeof LiveProperty>> {
-  return liveByIdentity(
-    section,
-    "custom property",
-    live,
-    (p) => p.property_name,
-    (p) => liveIdentity(p.property_name),
+  return raise(
+    liveByIdentity(
+      section,
+      "custom property",
+      live,
+      (p) => p.property_name,
+      (p) => liveIdentity(p.property_name),
+    ),
   );
 }
 
@@ -152,11 +155,13 @@ export const customPropertiesSection = {
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // GitHub documents no case folding for property names, so entries are duplicates only when they match verbatim.
-    rejectDuplicates(
-      this,
-      desired,
-      (p) => p.property_name,
-      (p) => p.property_name,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (p) => p.property_name,
+        (p) => p.property_name,
+      ),
     );
     for (const property of desired) {
       rejectMalformedList(property);

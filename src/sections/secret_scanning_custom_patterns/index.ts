@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
@@ -142,12 +143,14 @@ function patternsByName<T extends { id: number; name: string }>(
   section: SectionMeta,
   live: readonly T[],
 ): Map<string, T> {
-  return liveByIdentity(
-    section,
-    "secret scanning custom pattern",
-    live,
-    (p) => p.name,
-    (p) => liveIdentity(p.name, { pattern_id: p.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "secret scanning custom pattern",
+      live,
+      (p) => p.name,
+      (p) => liveIdentity(p.name, { pattern_id: p.id }),
+    ),
   );
 }
 
@@ -177,11 +180,13 @@ export const secretScanningPatternsSection = {
   },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    rejectDuplicates(
-      this,
-      desired,
-      (p) => p.name,
-      (p) => p.name,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (p) => p.name,
+        (p) => p.name,
+      ),
     );
     const live = (await ctx.read.list.listAll(LivePatternEntry)).map(liveFrom);
     const liveByName = patternsByName(this, live);

@@ -151,7 +151,7 @@ export function sectionGrant(section: Pick<SectionMeta, "permission" | "grantCav
   return grantFor(section.permission, section.grantCaveat);
 }
 
-/** A union, not a structural facet, so `{}` cannot satisfy it; throwFor and endpointPermission classify both kinds through it. */
+/** A union, not a structural facet, so `{}` cannot satisfy it; failureFor and endpointPermission classify both kinds through it. */
 export type FailingOp = EndpointDecl | GraphqlOpDecl;
 
 /** The one place the override-vs-section precedence lives; the e2e mock's permission gate resolves through it too. "none" means public. */

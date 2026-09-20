@@ -38,7 +38,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 
 - Generated artifacts (`lib/settings.schema.json`, `src/upstream-gaps/index.ts`, the generated docs and `action.yml` regions) are regenerated, never hand-edited; `.github/scripts/generated.ts` lists them and `bun run build:check` fails on drift.
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built, never committed on main; the packaged commits off main carry them.
-- Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`throwFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
+- Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`failureFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
 - New sections and endpoints ship with e2e scenarios, and `bun run test:e2e` runs green before they land.

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   missingDrift,
@@ -105,12 +106,14 @@ async function listProtectionRuleApps(
     LiveProtectionRuleApp,
     { params: { environment_name: envName }, describe: `environment "${envName}"` },
   );
-  return liveByIdentity(
-    section,
-    "protection-rule App",
-    apps,
-    (app) => app.slug,
-    (app) => liveIdentity(app.slug, { app_id: app.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "protection-rule App",
+      apps,
+      (app) => app.slug,
+      (app) => liveIdentity(app.slug, { app_id: app.id }),
+    ),
   );
 }
 
@@ -124,12 +127,14 @@ export function enabledRulesBySlug(
   live: readonly LiveProtectionRule[],
   envName: string,
 ): Map<string, LiveProtectionRule> {
-  return liveByIdentity(
-    section,
-    "deployment protection rule",
-    live.filter((rule) => rule.enabled !== false),
-    (rule) => liveRuleSlug(rule, envName),
-    (rule) => liveIdentity(liveRuleSlug(rule, envName), { protection_rule_id: rule.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "deployment protection rule",
+      live.filter((rule) => rule.enabled !== false),
+      (rule) => liveRuleSlug(rule, envName),
+      (rule) => liveIdentity(liveRuleSlug(rule, envName), { protection_rule_id: rule.id }),
+    ),
   );
 }
 
@@ -142,12 +147,14 @@ export async function planProtectionRules(
   entries: readonly DeploymentProtectionRuleConfig[],
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<NestedPlan> {
-  rejectDuplicates(
-    section,
-    entries,
-    (rule) => rule.app,
-    (rule) => rule.app,
-    `deployment protection rule App of the "${envName}" environment`,
+  raise(
+    rejectDuplicates(
+      section,
+      entries,
+      (rule) => rule.app,
+      (rule) => rule.app,
+      `deployment protection rule App of the "${envName}" environment`,
+    ),
   );
   const params = { environment_name: envName };
   const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, envName);

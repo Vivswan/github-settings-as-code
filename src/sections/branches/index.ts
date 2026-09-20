@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -211,11 +212,13 @@ export const branchesSection = {
   }),
   async plan(ctx, desired): Promise<BranchesPlan> {
     // Two entries for one branch or pattern would overwrite each other's write on every run.
-    rejectDuplicates(
-      this,
-      desired,
-      (b) => b.name,
-      (b) => b.name,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (b) => b.name,
+        (b) => b.name,
+      ),
     );
     const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
     // The first entry that needs the GraphQL surface starts the one rules read, ahead of every REST
@@ -277,12 +280,14 @@ export const branchesSection = {
       query: { protected: "true" },
     });
     // Git refnames are exact, so the fold is the name itself.
-    liveByIdentity(
-      this,
-      "protected branch",
-      listed,
-      (branch) => branch.name,
-      (branch) => liveIdentity(branch.name),
+    raise(
+      liveByIdentity(
+        this,
+        "protected branch",
+        listed,
+        (branch) => branch.name,
+        (branch) => liveIdentity(branch.name),
+      ),
     );
     const rules = await fetchRulesForSnapshot(ctx);
     const entries: BranchConfig[] = [];

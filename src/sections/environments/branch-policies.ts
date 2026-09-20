@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   missingDrift,
@@ -70,12 +71,14 @@ export function policiesByName(
   live: readonly LiveBranchPolicy[],
   envName: string,
 ): Map<string, LiveBranchPolicy> {
-  return liveByIdentity(
-    section,
-    "deployment branch policy",
-    live,
-    (pattern) => livePolicyName(pattern, envName),
-    (pattern) => liveIdentity(livePolicyName(pattern, envName), { branch_policy_id: pattern.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "deployment branch policy",
+      live,
+      (pattern) => livePolicyName(pattern, envName),
+      (pattern) => liveIdentity(livePolicyName(pattern, envName), { branch_policy_id: pattern.id }),
+    ),
   );
 }
 
@@ -119,12 +122,14 @@ export async function planBranchPolicies(
 ): Promise<NestedPlan> {
   // Two entries for one pattern could fight over its type on every run. The flag pairing is checked
   // in the zod shape (schema.ts), not here, so it fails before any section writes.
-  rejectDuplicates(
-    section,
-    entries,
-    (pattern) => pattern.name,
-    (pattern) => pattern.name,
-    `deployment branch policy of the "${envName}" environment`,
+  raise(
+    rejectDuplicates(
+      section,
+      entries,
+      (pattern) => pattern.name,
+      (pattern) => pattern.name,
+      `deployment branch policy of the "${envName}" environment`,
+    ),
   );
   const params = { environment_name: envName };
   const planned: NestedPlan = { ops: [], notes: [] };

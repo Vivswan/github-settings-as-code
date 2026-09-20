@@ -4,6 +4,7 @@ import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import { repoVariables } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { ExecTools, Late, PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
@@ -398,12 +399,14 @@ function indexRules(ctx: BranchesContext, rules: readonly RuleNode[]): Map<strin
       );
     }
   }
-  return liveByIdentity(
-    { key: ctx.section },
-    "protection rule",
-    rules,
-    (rule) => rule.pattern,
-    (rule) => liveIdentity(rule.pattern, { rule_id: rule.id }),
+  return raise(
+    liveByIdentity(
+      { key: ctx.section },
+      "protection rule",
+      rules,
+      (rule) => rule.pattern,
+      (rule) => liveIdentity(rule.pattern, { rule_id: rule.id }),
+    ),
   );
 }
 

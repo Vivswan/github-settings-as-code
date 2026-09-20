@@ -11,7 +11,12 @@ import {
   endpointKind,
   toleratedStatuses,
 } from "../../src/sections/contract/endpoints.js";
-import { PermissionDenied, throwFor } from "../../src/sections/contract/errors.js";
+import {
+  errorOf,
+  failureFor,
+  PermissionDenied,
+  raise,
+} from "../../src/sections/contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
 import { parseLive } from "../../src/sections/contract/live.js";
 import {
@@ -257,7 +262,11 @@ function endpoint(
   return { route: "POST /repos/{owner}/{repo}/rulesets", statuses: { 201: "created" }, ...extra };
 }
 
-describe("throwFor context enrichment", () => {
+function raiseFor(...args: Parameters<typeof failureFor>): never {
+  throw errorOf(failureFor(...args));
+}
+
+describe("failureFor context enrichment", () => {
   const rejection = {
     status: 422,
     message: 'Validation Failed ([{"field":"rules","message":"Invalid rule"}])',
@@ -265,7 +274,7 @@ describe("throwFor context enrichment", () => {
   };
 
   test("generic rejection without context keeps the classic shape", () => {
-    expect(() => throwFor(section, "POST", "/repos/o/r/rulesets", rejection)).toThrow(
+    expect(() => raiseFor(section, "POST", "/repos/o/r/rulesets", rejection)).toThrow(
       new Error(
         'rulesets: POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
       ),
@@ -274,7 +283,7 @@ describe("throwFor context enrichment", () => {
 
   test("operation label prefixes the cause", () => {
     expect(() =>
-      throwFor(section, "POST", "/repos/o/r/rulesets", rejection, {
+      raiseFor(section, "POST", "/repos/o/r/rulesets", rejection, {
         operation: 'creating ruleset "quality"',
       }),
     ).toThrow(
@@ -300,7 +309,7 @@ describe("throwFor context enrichment", () => {
     } as const;
     const message = (types: readonly string[]): string => {
       try {
-        throwFor(
+        raiseFor(
           section,
           "GRAPHQL",
           "PinEnvironment",
@@ -315,7 +324,7 @@ describe("throwFor context enrichment", () => {
       } catch (error) {
         return (error as Error).message;
       }
-      throw new Error("throwFor returned");
+      throw new Error("failureFor returned");
     };
     expect(message(["UNPROCESSABLE"])).toBe(
       'rulesets: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 Repositories ' +
@@ -333,7 +342,7 @@ describe("throwFor context enrichment", () => {
 
   test("the status-matched hint and documentation_url are appended to the generic branch", () => {
     expect(() =>
-      throwFor(
+      raiseFor(
         section,
         "POST",
         "/repos/o/r/rulesets",
@@ -353,7 +362,7 @@ describe("throwFor context enrichment", () => {
 
   test("a hint keyed to a different status is not rendered", () => {
     expect(() =>
-      throwFor(
+      raiseFor(
         section,
         "POST",
         "/repos/o/r/rulesets",
@@ -370,7 +379,7 @@ describe("throwFor context enrichment", () => {
   test("permission errors keep the grant advice and gain the operation label", () => {
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         section,
         "POST",
         "/repos/o/r/rulesets",
@@ -437,7 +446,7 @@ describe("throwFor context enrichment", () => {
       });
       let thrown: unknown;
       try {
-        throwFor(
+        raiseFor(
           section,
           "PUT",
           "/repos/o/r/branches/x/protection",
@@ -460,7 +469,7 @@ describe("throwFor context enrichment", () => {
   test("denialHint is appended to the permission branch, and only there", () => {
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         section,
         "PUT",
         "/repos/o/r/lfs",
@@ -480,7 +489,7 @@ describe("throwFor context enrichment", () => {
     );
     // The generic branch never renders it.
     expect(() =>
-      throwFor(
+      raiseFor(
         section,
         "PUT",
         "/repos/o/r/lfs",
@@ -498,7 +507,7 @@ describe("throwFor context enrichment", () => {
     // A 5xx-keyed hint is unrepresentable (HintableStatus), so the fixture carries a 422 one.
     const hinted = { op: endpoint({ hints: { 422: "never rendered here" } }) };
     expect(() =>
-      throwFor(
+      raiseFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
@@ -511,7 +520,7 @@ describe("throwFor context enrichment", () => {
       ),
     );
     expect(() =>
-      throwFor(
+      raiseFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
@@ -528,7 +537,7 @@ describe("throwFor context enrichment", () => {
   test("a permission override renders the endpoint's own grant, not the section's", () => {
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         section,
         "POST",
         "/repos/o/r/actions/oidc/customization/sub",
@@ -551,7 +560,7 @@ describe("throwFor context enrichment", () => {
     // read, pass preflight, fail on the write).
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         actionsSection,
         "GET",
         "/repos/o/r/actions/oidc/customization/sub",
@@ -571,7 +580,7 @@ describe("throwFor context enrichment", () => {
     // A denied PUBLIC endpoint is not about the token's grants, so grant advice cannot help.
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         section,
         "GET",
         "/repos/o/r/rulesets",
@@ -592,7 +601,7 @@ describe("throwFor context enrichment", () => {
     expect(sectionGrant(customPropertiesSection)).toMatch(/^grant /);
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         customPropertiesSection,
         "GET",
         "/repos/o/r/properties/values",
@@ -615,7 +624,7 @@ describe("throwFor context enrichment", () => {
       statuses: { 200: "x" },
     };
     try {
-      throwFor(
+      raiseFor(
         actionsSection,
         "GET",
         "/repos/o/r/actions/permissions",
@@ -852,7 +861,7 @@ describe("planContext read port", () => {
     expect(await ctx.read.probe.tryCall(z.unknown(), { params: { branch: "main" } })).toEqual({
       error: { status: 500, message: "Internal Server Error", body: "" },
     });
-    // The control: the same status on a plain read classifies through throwFor.
+    // The control: the same status on a plain read classifies through failureFor.
     expect(typeof ctx.read.plain.call).toBe("function");
     await expect(ctx.read.plain.tryCall(z.unknown())).rejects.toThrow(
       new Error(
@@ -964,13 +973,13 @@ describe("parseLive", () => {
     [1, "; and 1 more issue"],
     [2, "; and 2 more issues"],
   ])("three issues shown and %i hidden: the remainder agrees with its count", (hidden, tail) => {
-    expect(() => parseLive(section, endpoint({}), strict, wrongIn(3 + hidden))).toThrow(
+    expect(() => raise(parseLive(section, endpoint({}), strict, wrongIn(3 + hidden)))).toThrow(
       new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+${tail}\\. Check`),
     );
   });
 
   test("three issues or fewer render whole, with no remainder", () => {
-    expect(() => parseLive(section, endpoint({}), strict, wrongIn(3))).toThrow(
+    expect(() => raise(parseLive(section, endpoint({}), strict, wrongIn(3)))).toThrow(
       new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+\\. Check`),
     );
   });
@@ -1171,7 +1180,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       payload: { token: "hunter2" },
       carriesSecret,
       describe: "arming the setup",
-    });
+    }).then(raise);
   const graphql = (api: GitHubClient, carriesSecret: boolean) =>
     callGraphql(
       { ...ctx, api, resolveSecret: () => "" },
@@ -1182,7 +1191,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
         describe: "arming the setup",
         carriesSecret,
       },
-    );
+    ).then(raise);
 
   test.each([
     {
@@ -1234,15 +1243,17 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
 
   test("a tolerated status on a marked request comes back withheld too, keeping the status the tolerance reads", async () => {
     // The tolerance's outcome thunk may render error.message into a note or failure (shared/setup-section.ts does).
-    const result = await tryCallDeclared(
-      { ...ctx, api: answering(409), resolveSecret: () => "" },
-      actionsSection,
-      endpoint,
-      {
-        payload: { token: "hunter2" },
-        carriesSecret: true,
-        tolerated: declaredTolerance(endpoint),
-      },
+    const result = raise(
+      await tryCallDeclared(
+        { ...ctx, api: answering(409), resolveSecret: () => "" },
+        actionsSection,
+        endpoint,
+        {
+          payload: { token: "hunter2" },
+          carriesSecret: true,
+          tolerated: declaredTolerance(endpoint),
+        },
+      ),
     );
     expect(result).toEqual({
       error: { status: 409, message: SECRET_RESPONSE_WITHHELD, body: SECRET_RESPONSE_WITHHELD },
@@ -1297,14 +1308,16 @@ describe("tryCallDeclared", () => {
       },
     });
 
-  test("a tolerated status comes back as { error }; any other classifies through throwFor", async () => {
+  test("a tolerated status comes back as { error }; any other classifies through failureFor", async () => {
     const tolerated = declaredTolerance(endpoint);
     expect(
-      await tryCallDeclared(
-        { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
-        actionsSection,
-        endpoint,
-        { tolerated, carriesSecret: false, describe: "arming the setup" },
+      raise(
+        await tryCallDeclared(
+          { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
+          actionsSection,
+          endpoint,
+          { tolerated, carriesSecret: false, describe: "arming the setup" },
+        ),
       ),
     ).toEqual({ error: { status: 409, message: "Conflict", body: "" } });
     await expect(
@@ -1313,7 +1326,7 @@ describe("tryCallDeclared", () => {
         actionsSection,
         endpoint,
         { tolerated, carriesSecret: false, describe: "arming the setup" },
-      ),
+      ).then(raise),
     ).rejects.toThrow(
       new Error(
         'actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 Unprocessable. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above',
@@ -1341,24 +1354,26 @@ describe("tryCallDeclared", () => {
         actionsSection,
         declares403,
         { tolerated: declaredTolerance(declares403), carriesSecret: false },
-      ),
+      ).then(raise),
     ).rejects.toThrow(limitHit);
     await expect(
-      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403),
+      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403).then(raise),
     ).rejects.toThrow(limitHit);
     const plain = new MockApi({
       "GET /repos/o/r/pages": { error: { status: 403, message: "Forbidden", body: "" } },
     });
     expect(
-      await tryCallDeclared(
-        { ...ctx, api: plain, resolveSecret: () => "" },
-        actionsSection,
-        declares403,
-        { tolerated: declaredTolerance(declares403), carriesSecret: false },
+      raise(
+        await tryCallDeclared(
+          { ...ctx, api: plain, resolveSecret: () => "" },
+          actionsSection,
+          declares403,
+          { tolerated: declaredTolerance(declares403), carriesSecret: false },
+        ),
       ),
     ).toEqual({ error: { status: 403, message: "Forbidden", body: "" } });
     expect(
-      await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403),
+      raise(await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403)),
     ).toEqual({ missing: true });
   });
 
@@ -1371,7 +1386,7 @@ describe("tryCallDeclared", () => {
     await expect(
       probeAbsent({ ...ctx, api, check: true }, actionsSection, probe, {
         tolerate: [422 as unknown as 404],
-      }),
+      }).then(raise),
     ).rejects.toThrow(
       new Error(
         "BUG: GET /repos/{owner}/{repo}/pages was asked to tolerate status(es) 422, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429",
@@ -1444,7 +1459,7 @@ describe("samePermission", () => {
     expect(restated.permission).not.toBe(actionsSection.permission);
     let thrown: unknown;
     try {
-      throwFor(
+      raiseFor(
         actionsSection,
         "GET",
         "/repos/o/r/actions/permissions",

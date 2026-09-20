@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { omittedDeltas, refuseOmitted, renderDelta, subsetDiff } from "../../engine/diff.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
@@ -97,11 +98,13 @@ export const environmentsSection = {
     });
   },
   async plan(ctx, desired) {
-    rejectDuplicates(
-      this,
-      desired,
-      (env) => env.name.toLowerCase(),
-      (env) => env.name,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (env) => env.name.toLowerCase(),
+        (env) => env.name,
+      ),
     );
     const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
     /** Each entry's declared pin state, in file order (order IS the pin order). */
@@ -176,12 +179,14 @@ export const environmentsSection = {
       return { value: undefined, notes: [] };
     }
     // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
-    liveByIdentity(
-      this,
-      "environment",
-      listed,
-      (live) => live.name.toLowerCase(),
-      (live) => liveIdentity(live.name, { environment_id: live.id }),
+    raise(
+      liveByIdentity(
+        this,
+        "environment",
+        listed,
+        (live) => live.name.toLowerCase(),
+        (live) => liveIdentity(live.name, { environment_id: live.id }),
+      ),
     );
     const notes: string[] = [];
     const entries: EnvironmentConfig[] = [];

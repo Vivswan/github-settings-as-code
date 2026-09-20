@@ -7,6 +7,7 @@
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   cannotVerifyNote,
@@ -120,12 +121,14 @@ export function rejectDuplicateSecretNames(
   entries: readonly SecretEntry[],
   what?: string,
 ): void {
-  rejectDuplicates(
-    section,
-    entries,
-    (entry) => secretKey(entry.name),
-    (entry) => entry.name,
-    what,
+  raise(
+    rejectDuplicates(
+      section,
+      entries,
+      (entry) => secretKey(entry.name),
+      (entry) => entry.name,
+      what,
+    ),
   );
 }
 
@@ -231,12 +234,14 @@ export function liveSecretsByKey(
   noun: string,
   live: readonly LiveSecretName[],
 ): Map<string, string> {
-  const byKey = liveByIdentity(
-    section,
-    noun,
-    live,
-    (item) => secretKey(item.name),
-    (item) => liveIdentity(item.name),
+  const byKey = raise(
+    liveByIdentity(
+      section,
+      noun,
+      live,
+      (item) => secretKey(item.name),
+      (item) => liveIdentity(item.name),
+    ),
   );
   return new Map([...byKey].map(([key, item]) => [key, item.name]));
 }
