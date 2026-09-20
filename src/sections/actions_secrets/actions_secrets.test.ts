@@ -11,8 +11,10 @@ import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { SectionSelection } from "../../engine/section-selection.js";
 import { describeProblem } from "../../problem.js";
+import type { SectionInput } from "../contract/module.js";
 import { driftOf, type ExecTools, type PlannedOp, planContext } from "../contract/plan.js";
 import { actionsSecretsSection } from "./index.js";
 
@@ -22,7 +24,7 @@ const KEY_ROUTE = { data: { key_id: "test-key-id", key: MOCK_SECRETS_PUBLIC_KEY 
 const CANNOT_VERIFY =
   "actions_secrets: Actions secret values cannot be read back from GitHub, so check mode cannot verify them, only that each declared secret exists; apply re-seals and rewrites every declared value on every run";
 
-type Declared = Parameters<typeof actionsSecretsSection.plan>[1];
+type Declared = SectionInput<"actions_secrets">;
 
 function listOf(...names: string[]) {
   return {
@@ -53,7 +55,10 @@ function tools(resolved: Record<string, string> = {}): ExecTools & { lookups: st
 }
 
 const plan = (api: GitHubClient, declared: Declared) =>
-  actionsSecretsSection.plan(planContext(actionsSecretsSection, api, REPO), declared);
+  actionsSecretsSection.plan(
+    planContext(actionsSecretsSection, api, REPO),
+    validatedInput("actions_secrets", declared),
+  );
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
 async function apply(api: GitHubClient, declared: Declared, exec: ExecTools = tools()) {

@@ -358,7 +358,7 @@ describe("applyMarkerInjection", () => {
     const settings = validated(doc);
     const result = applyMarkerInjection(settings, on);
     expect<unknown>(result.notice).toEqual(notice);
-    expect(result.settings.labels).toEqual(labels);
+    expect<unknown>(result.settings.labels).toEqual(labels);
     expect(result.settings.repository).toEqual(settings.repository);
   });
 });

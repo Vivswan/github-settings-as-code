@@ -10,9 +10,8 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  declaredEntries,
   defaultUndeclaredPolicy,
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   loosen,
   ORG_PROBE,
@@ -136,14 +135,9 @@ export const teamsSection = {
   },
   // A team's slug is its lowercased name, the identity every lookup below uses.
   validate(declared) {
-    const { entries, path } = declaredEntries(declared);
-    return duplicateIssues(
-      entries,
-      {
-        keyOf: (t) => t.name.toLowerCase(),
-        describe: (t) => t.name,
-        at: (_t, index) => `${path}[${index}].name`,
-      },
+    return duplicateFieldIssues(
+      declared,
+      { field: "name", fold: (name) => name.toLowerCase() },
       "team",
     );
   },

@@ -5,6 +5,8 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { labelsSection } from "./index.js";
 import { labelsMockHandlers } from "./mock.js";
 
@@ -13,8 +15,8 @@ const liveLabels = [
   { name: "bug", color: "d73a4a", description: "Something isn't working" },
   { name: "stale", color: "ffffff", description: null },
 ];
-const plan = (api: MockApi, desired: Parameters<typeof labelsSection.plan>[1]) =>
-  labelsSection.plan(planContext(labelsSection, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"labels">) =>
+  labelsSection.plan(planContext(labelsSection, api, REPO), validatedInput("labels", desired));
 
 describe("labels", () => {
   test("plans a create per missing label, an update per drifted one, and a delete per undeclared one, reading only", async () => {
@@ -106,14 +108,7 @@ describe("labels", () => {
     });
   });
 
-  test.each<
-    [
-      form: string,
-      declared: Parameters<typeof labelsSection.plan>[1],
-      roles: string[],
-      notes: string[],
-    ]
-  >([
+  test.each<[form: string, declared: SectionInput<"labels">, roles: string[], notes: string[]]>([
     [
       "wrapped _undeclared:keep",
       { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },

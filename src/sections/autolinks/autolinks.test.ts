@@ -4,6 +4,8 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { autolinksSection } from "./index.js";
 import { autolinksMockHandlers } from "./mock.js";
 
@@ -15,8 +17,11 @@ const liveAutolinks = [
 ];
 const KEEP_NOTE =
   'autolink "OLD-" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it';
-const plan = (api: MockApi, desired: Parameters<typeof autolinksSection.plan>[1]) =>
-  autolinksSection.plan(planContext(autolinksSection, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"autolinks">) =>
+  autolinksSection.plan(
+    planContext(autolinksSection, api, REPO),
+    validatedInput("autolinks", desired),
+  );
 
 describe("autolinks", () => {
   test("plans a delete-and-recreate for a changed autolink, a create for a missing one, and a delete for the undeclared one, reading once", async () => {
@@ -116,14 +121,7 @@ describe("autolinks", () => {
     ]);
   });
 
-  test.each<
-    [
-      form: string,
-      declared: Parameters<typeof autolinksSection.plan>[1],
-      roles: string[],
-      notes: string[],
-    ]
-  >([
+  test.each<[form: string, declared: SectionInput<"autolinks">, roles: string[], notes: string[]]>([
     [
       "wrapped _undeclared:keep",
       {

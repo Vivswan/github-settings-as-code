@@ -10,6 +10,7 @@ import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { MockApi } from "../mock-api.js";
 import { REPO } from "../sections/section-run.js";
+import { validatedInput } from "../sections/validated-input.js";
 
 /** Frozen to the leaves: a fold step that touched an input would throw, so every test also pins that inputs are never mutated. */
 function deepFreeze<T>(value: T): T {
@@ -308,7 +309,7 @@ describe("mergeLayers: keyed sections", () => {
     const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: [] } });
     const plan = await labelsSection.plan(
       planContext(labelsSection, api, REPO),
-      entries as Parameters<typeof labelsSection.plan>[1],
+      validatedInput("labels", entries),
     );
     return plan.ops.map((op) => op.describe);
   }

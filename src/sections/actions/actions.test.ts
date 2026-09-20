@@ -12,9 +12,10 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { sectionGrant } from "../contract/module.js";
+import { type SectionInput, sectionGrant } from "../contract/module.js";
 import { grantFor } from "../contract/permissions.js";
 import { actionsSection, endpointRouted } from "./index.js";
 // The `as ActionsConfig` casts below simulate keys GitHub adds: the shape passes unknown keys through verbatim, which the static config type cannot
@@ -72,8 +73,8 @@ function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: st
 }
 
 describe("actions", () => {
-  const plan = (api: MockApi, desired: Parameters<typeof actionsSection.plan>[1]) =>
-    actionsSection.plan(planContext(actionsSection, api, REPO), desired);
+  const plan = (api: MockApi, desired: SectionInput<"actions">) =>
+    actionsSection.plan(planContext(actionsSection, api, REPO), validatedInput("actions", desired));
   const roles = (api: MockApi) => api.calls.map((c) => `${c.method} ${c.path}`);
 
   test("routes every divergent key to its own PUT: base, workflow, then the routed table", async () => {
@@ -523,18 +524,6 @@ describe("actions", () => {
     expect((await plan(custom, { oidc_customization_sub: { use_default: false } })).ops).toEqual(
       [],
     );
-  });
-
-  test("a claim-key list handed to plan() beside use_default: true is ignored, as GitHub ignores it", async () => {
-    // The shape refuses the pair in a settings file, but the library's direct plan() takes the typed object with no parse; the plan narrows on the
-    // flag, so the ignored list is never compared and never planned as drift.
-    const api = new MockApi({
-      [OIDC]: { data: { use_default: true, include_claim_keys: ["context"] } },
-    });
-    const bypassed = { use_default: true, include_claim_keys: ["repo"] } as unknown as NonNullable<
-      ActionsConfig["oidc_customization_sub"]
-    >;
-    expect((await plan(api, { oidc_customization_sub: bypassed })).ops).toEqual([]);
   });
 
   test("a declared use_immutable_subject rides the remainder diff", async () => {

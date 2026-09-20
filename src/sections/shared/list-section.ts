@@ -40,6 +40,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
+  type ValidatedInput,
   valueDrift,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -412,7 +413,7 @@ export interface ListSectionModule<
   readonly validate: (declared: Declared<K>) => readonly DeclaredIssue[];
   readonly plan: (
     ctx: PlanContext<Ends, GraphqlDict, K>,
-    desired: Declared<K>,
+    desired: ValidatedInput<K>,
   ) => Promise<SectionPlan<PlannedOp<Ends>>>;
   readonly snapshot: (ctx: SnapshotContext<Ends, GraphqlDict, K>) => Promise<SectionSnapshot<K>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */

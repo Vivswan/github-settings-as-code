@@ -4,6 +4,8 @@ import { type PlannedOp, planContext } from "../../../src/sections/contract/plan
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { workflowsSection } from "./index.js";
 
 /** A live workflow as the list endpoint returns it. */
@@ -47,8 +49,11 @@ describe("workflows", () => {
     ],
   };
   const route = "GET /repos/o/r/actions/workflows?per_page=100&page=1";
-  const plan = (api: MockApi, desired: Parameters<typeof workflowsSection.plan>[1]) =>
-    workflowsSection.plan(planContext(workflowsSection, api, REPO), desired);
+  const plan = (api: MockApi, desired: SectionInput<"workflows">) =>
+    workflowsSection.plan(
+      planContext(workflowsSection, api, REPO),
+      validatedInput("workflows", desired),
+    );
 
   test("plans one toggle per divergent workflow by live id, matching bare file names", async () => {
     const api = new MockApi({ [route]: { data: liveWorkflows } });

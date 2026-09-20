@@ -384,11 +384,34 @@ export function cannotVerifyNote(
 }
 
 /**
- * validateSettingsDoc (engine/orchestrate.ts) has run every section's shape before a handler sees this,
- * so plan() carries the proof in its parameter type instead of a per-section cast. Only `undefined` (the
- * absent-section marker) is excluded: a nullable section (interaction_limits) keeps its `null`.
+ * A section's declared value as the schema types it. Only `undefined` (the absent-section marker) is excluded: a
+ * nullable section (interaction_limits, pages) keeps its `null`. The validate and secretValues hooks take it, since
+ * they run inside validation; plan() takes ValidatedInput, the same shape carrying validation's proof.
  */
-type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
+export type SectionInput<K extends SectionKey> = Exclude<SettingsFile[K], undefined>;
+
+declare const validatedInput: unique symbol;
+
+/**
+ * The brand's carrier, named so a module's declaration prints a planner's input by this name (a bundled declaration
+ * cannot spell the unexported symbol). It holds the KEY the value was validated as, so a validated branches list is
+ * not a labels input, whose checks it never met. An alias, not an interface: an interface has no implicit index
+ * signature, so a branded mapping could no longer pass where a `Record<string, unknown>` is read.
+ */
+export type ValidatedBrand<K extends SectionKey = SectionKey> = { readonly [validatedInput]: K };
+
+/**
+ * The proof that validateSettingsDoc (engine/orchestrate.ts) ran section K's every file-only check over the value:
+ * a brand that exists at the type level only (no runtime field), minted at that one site and read off the
+ * ValidatedSettings document. Every plan() takes it, so a hand-built entry list cannot reach a planner and skip the
+ * checks; the unbranded shape is read back by assignment (`const declared: SectionInput<K> = desired`). A `null`
+ * value stays unbranded: it carries nothing a file-only check could judge, and no brand attaches to null.
+ */
+export type ValidatedInput<K extends SectionKey> = K extends SectionKey
+  ? Validated<SectionInput<K>, K>
+  : never;
+
+type Validated<T, K extends SectionKey> = T extends null ? null : T & ValidatedBrand<K>;
 
 interface SectionModuleBase<
   K extends SectionKey = SectionKey,
@@ -514,6 +537,33 @@ export function duplicateIssues<T>(
 }
 
 /**
+ * duplicateIssues over a list whose entries carry ONE identity field, in either declared form: the key is `fold`
+ * of the field (the field itself when GitHub matches exactly), the description the field verbatim, and each issue
+ * sits at `<wrapper path>[i].<field>`, so `labels[1].name` and `labels.entries[1].name` read alike.
+ */
+export function duplicateFieldIssues<F extends string, E extends Record<F, string>>(
+  declared: readonly E[] | UndeclaredPolicyList<E>,
+  identity: {
+    readonly field: F;
+    /** Folds the field to the key GitHub matches it by; omitted, GitHub matches exactly. */
+    readonly fold?: (name: string) => string;
+  },
+  what: string,
+): DeclaredIssue[] {
+  const { entries, path } = declaredEntries(declared);
+  const fold = identity.fold ?? ((name: string): string => name);
+  return duplicateIssues(
+    entries,
+    {
+      keyOf: (entry) => fold(entry[identity.field]),
+      describe: (entry) => entry[identity.field],
+      at: (_entry, index) => `${path}[${index}].${identity.field}`,
+    },
+    what,
+  );
+}
+
+/**
  * What a section reads back as a settings document: its live state in the section's own declared
  * form, or `undefined` when nothing exists (the engine omits the key). `notes` carry what the value
  * cannot: a secret's unreadable value, a feature the repository lacks.
@@ -543,7 +593,7 @@ export type SectionModule<
   ValidateFacet<K> & {
     plan(
       ctx: PlanContext<E, G, K>,
-      desired: SectionInput<K>,
+      desired: ValidatedInput<K>,
     ): Promise<SectionPlan<PlannedOp<E, G>>>;
     /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
     run?: never;

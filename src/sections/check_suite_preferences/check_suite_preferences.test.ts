@@ -8,6 +8,8 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { checkSuitePreferencesSection } from "./index.js";
 
 describe("check_suite_preferences", () => {
@@ -20,10 +22,10 @@ describe("check_suite_preferences", () => {
   };
   const note =
     "check_suite_preferences: GitHub exposes no read endpoint for check suite preferences, so check mode cannot verify them; apply re-asserts the declared preferences on every run";
-  const plan = (api: MockApi, desired: Parameters<typeof checkSuitePreferencesSection.plan>[1]) =>
+  const plan = (api: MockApi, desired: SectionInput<"check_suite_preferences">) =>
     checkSuitePreferencesSection.plan(
       planContext(checkSuitePreferencesSection, api, REPO),
-      desired,
+      validatedInput("check_suite_preferences", desired),
     );
   /** The change line the plan's one operation renders for a PATCH response. */
   const rendered = (of: SectionPlan, response: unknown): string => {

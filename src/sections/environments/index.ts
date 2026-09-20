@@ -11,7 +11,8 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
-  duplicateIssues,
+  declaredEntries,
+  duplicateFieldIssues,
   type KeyedListLayering,
   keyedBy,
   listEntries,
@@ -130,18 +131,12 @@ export const environmentsSection = {
   },
   // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
   validate(desired) {
-    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
-    const at = Array.isArray(desired) ? "" : ".entries";
-    const environments = listEntries(desired);
-    const issues = duplicateIssues(
-      environments,
-      {
-        keyOf: (env) => env.name.toLowerCase(),
-        describe: (env) => env.name,
-        at: (_env, index) => `${at}[${index}].name`,
-      },
+    const issues = duplicateFieldIssues(
+      desired,
+      { field: "name", fold: (name) => name.toLowerCase() },
       "environment",
     );
+    const { entries: environments, path: at } = declaredEntries(desired);
     environments.forEach((env, index) => {
       issues.push(
         ...validateNested(env).map((issue) => ({ ...issue, path: `${at}[${index}]${issue.path}` })),

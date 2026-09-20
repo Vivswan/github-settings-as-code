@@ -16,6 +16,7 @@ import { completeRule, type LiveState, ruleWireNode } from "../e2e/mock/state.js
 import { type FragmentFake, registryFake } from "./fragment-fake.js";
 import { REPO } from "./section-run.js";
 import { STAMPS } from "./snapshot-rows/families.js";
+import { validatedInput } from "./validated-input.js";
 
 /** One live list seeded with a pair under one identity. */
 interface Seed {
@@ -532,7 +533,7 @@ async function proveNoLiveList(section: SectionModule, declared: unknown): Promi
       return fake.tryGraphql(op, variables, slug, mark);
     },
   };
-  await section.plan(planContext(section, api, REPO), declared as never);
+  await section.plan(planContext(section, api, REPO), validatedInput(section.key, declared));
   if (section.snapshot !== undefined) {
     await section.snapshot(snapshotContext(section, api, REPO, "fail"));
   }
@@ -603,7 +604,7 @@ async function proveRefused(section: SectionModule, seed: Seed): Promise<void> {
     const fake = registryFake(seed.live);
     const api = clientFor(fake, seed);
     await expect(
-      section.plan(planContext(section, api, REPO), seed.declared as never),
+      section.plan(planContext(section, api, REPO), validatedInput(section.key, seed.declared)),
     ).rejects.toThrow(new Error(seed.refusal));
     expect(fake.writes).toEqual([]);
   }

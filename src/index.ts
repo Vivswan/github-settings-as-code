@@ -123,6 +123,8 @@ export {
   type SectionModule,
   type SectionSnapshot,
   sectionGrant,
+  type ValidatedBrand,
+  type ValidatedInput,
 } from "./sections/contract/module.js";
 export {
   type DenialPolicy,

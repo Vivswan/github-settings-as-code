@@ -4,6 +4,8 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { type PlannedOp, planContext } from "../contract/plan.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { actionsVariablesSection } from "./index.js";
@@ -14,7 +16,7 @@ describe("variableKey", () => {
   });
 });
 
-type Declared = Parameters<typeof actionsVariablesSection.plan>[1];
+type Declared = SectionInput<"actions_variables">;
 
 /** The enveloped list body the mock serves for a live variable set. */
 function listRoute(variables: Array<{ name: string; value: string }>) {
@@ -26,7 +28,10 @@ function listRoute(variables: Array<{ name: string; value: string }>) {
 }
 
 const plan = (api: GitHubClient, declared: Declared) =>
-  actionsVariablesSection.plan(planContext(actionsVariablesSection, api, REPO), declared);
+  actionsVariablesSection.plan(
+    planContext(actionsVariablesSection, api, REPO),
+    validatedInput("actions_variables", declared),
+  );
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
 async function apply(api: GitHubClient, declared: Declared) {
@@ -175,16 +180,13 @@ describe("actions_variables", () => {
     ]);
   });
 
-  test("a passthrough value JSON cannot carry fails the plan at the payload, on a create and on an update alike", async () => {
-    // The loose shape admits any extra key; the engine proves the body plain before it is planned, so
-    // NaN (which JSON would turn into null) never reaches the wire as a silent change of value.
+  test("a passthrough value JSON cannot carry is refused by validation, so plan() never meets it", async () => {
+    // The loose shape admits any extra key; document validation refuses a non-finite one, and plan() takes only
+    // validated input, so NaN (which JSON would turn into null) never reaches the wire as a silent change of value.
     const api = new MockApi(listRoute([{ name: "PRESENT", value: "x" }]));
     const odd = { name: "NEW", value: "v", extra: Number.NaN };
-    await expect(plan(api, [odd as never])).rejects.toThrow(
-      /a planned payload carries a value JSON cannot carry at extra/,
-    );
-    await expect(plan(api, [{ ...odd, name: "PRESENT" } as never])).rejects.toThrow(
-      /a planned payload carries a value JSON cannot carry at extra/,
+    expect(() => validatedInput("actions_variables", [odd])).toThrow(
+      "actions_variables[0].extra is NaN, which JSON cannot carry (it would become null); declare a finite number or remove the key",
     );
     // The control: a plain extra key rides through.
     const plain = await plan(api, [{ name: "NEW", value: "v", extra: 42 } as never]);
@@ -220,11 +222,12 @@ describe("actions_variables", () => {
   });
 
   test("url-encodes tricky live names in the request path", async () => {
+    // The parse refuses such a name in the settings file, so the tricky name is a LIVE one the file leaves undeclared.
     const api = new MockApi(listRoute([{ name: "ODD NAME", value: "x" }])).allowMutations(
-      "PATCH /repos/o/r/actions/variables/*",
+      "DELETE /repos/o/r/actions/variables/*",
     );
-    const { changes } = await apply(api, [{ name: "ODD NAME", value: "y" }]);
-    expect(changes).toEqual(['updated Actions variable "ODD NAME"']);
+    const { changes } = await apply(api, { _undeclared: "delete", entries: [] });
+    expect(changes).toEqual(['DELETED undeclared Actions variable "ODD NAME"']);
     expect(api.mutations()[0]?.path).toBe("/repos/o/r/actions/variables/ODD%20NAME");
   });
 

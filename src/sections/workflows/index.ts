@@ -8,7 +8,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   listEntries,
   loosen,
@@ -86,17 +86,7 @@ export const workflowsSection = {
   },
   // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
   validate(desired) {
-    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
-    const at = Array.isArray(desired) ? "" : ".entries";
-    return duplicateIssues(
-      listEntries(desired),
-      {
-        keyOf: (w) => workflowPath(w.path),
-        describe: (w) => w.path,
-        at: (_w, index) => `${at}[${index}].path`,
-      },
-      "workflow",
-    );
+    return duplicateFieldIssues(desired, { field: "path", fold: workflowPath }, "workflow");
   },
   async plan(ctx, desired) {
     const workflows = listEntries(desired);

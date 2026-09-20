@@ -23,6 +23,7 @@ import { registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import {
   endpointMethod,
   endpointPath,
@@ -30,6 +31,7 @@ import {
   pathSegments,
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
+import type { SectionInput } from "../contract/module.js";
 import {
   type ExplicitKeys,
   type RestCarriedKey,
@@ -46,10 +48,13 @@ import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } fr
 import type { BranchProtectionConfig } from "./schema.js";
 
 /** The bare-list form of the section's value; the tests never hand plan() the `{_layering, entries}` wrapper. */
-type Desired = Extract<Parameters<typeof branchesSection.plan>[1], readonly unknown[]>;
+type Desired = Extract<SectionInput<"branches">, readonly unknown[]>;
 
 const plan = (api: GitHubClient, desired: Desired) =>
-  branchesSection.plan(planContext(branchesSection, api, REPO), desired);
+  branchesSection.plan(
+    planContext(branchesSection, api, REPO),
+    validatedInput("branches", desired),
+  );
 
 /** The tools no branches plan ever needs: the section declares no secret values. */
 const NO_SECRETS = {

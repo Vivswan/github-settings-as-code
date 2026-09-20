@@ -15,6 +15,7 @@ import {
   type SettingsFile,
 } from "../schema.js";
 import { PermissionDenied } from "../sections/contract/errors.js";
+import type { ValidatedInput } from "../sections/contract/module.js";
 import {
   type ExecTools,
   type OnMissingPermission,
@@ -53,10 +54,14 @@ export type SectionOutcome =
 
 /**
  * The brand has exactly one construction site (validateSettingsDoc's success return), so a RepoRunOptions built from an
- * unvalidated document is a compile error. The value is the PARSED document zod built, never the caller's object.
+ * unvalidated document is a compile error. The value is the PARSED document zod built, never the caller's object. Each
+ * section's value reads back as ValidatedInput, the per-section proof every plan() takes, so the document is the only
+ * source of planner input.
  */
 declare const validatedSettings: unique symbol;
-export type ValidatedSettings = SettingsFile & { readonly [validatedSettings]: true };
+export type ValidatedSettings = {
+  [K in keyof SettingsFile]: K extends SectionKey ? ValidatedInput<K> : SettingsFile[K];
+} & { readonly [validatedSettings]: true };
 
 export interface RepoRunOptions {
   repo: RepoRef;
@@ -326,7 +331,7 @@ export async function runForRepo(
     const desired = settings[section.key];
     if (desired === undefined) {
       // disposition() classified this section active, which requires a declared value; planning on undefined would
-      // break plan()'s SectionInput contract.
+      // break plan()'s ValidatedInput contract.
       throw new Error(
         `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
       );

@@ -11,6 +11,7 @@ import { planContext, snapshotContext } from "../../src/sections/contract/plan.j
 import { SECTIONS } from "../../src/sections/registry.js";
 import { MockApi } from "../mock-api.js";
 import { REPO } from "./section-run.js";
+import { validatedInput } from "./validated-input.js";
 
 const gated = SECTIONS.filter((section) => section.ownerSensitivity === "org");
 
@@ -27,7 +28,10 @@ const requests = (api: MockApi) => api.calls.map((c) => `${c.method} ${c.path}`)
 const planAll = async (api: GitHubClient, repo: RepoRef = REPO): Promise<string[]> => {
   const notes: string[] = [];
   for (const section of gated) {
-    const result = await section.plan(planContext(section, api, repo), []);
+    const result = await section.plan(
+      planContext(section, api, repo),
+      validatedInput(section.key, []),
+    );
     notes.push(...result.notes);
   }
   return notes;
@@ -63,8 +67,12 @@ describe("the owner gate's memo", () => {
     if (first === undefined || second === undefined) {
       throw new Error("two gated sections are expected");
     }
-    await expect(first.plan(planContext(first, api, REPO), [])).rejects.toThrow(/500/);
-    expect((await second.plan(planContext(second, api, REPO), [])).notes).toEqual([]);
+    await expect(
+      first.plan(planContext(first, api, REPO), validatedInput(first.key, [])),
+    ).rejects.toThrow(/500/);
+    expect(
+      (await second.plan(planContext(second, api, REPO), validatedInput(second.key, []))).notes,
+    ).toEqual([]);
     expect(requests(inner).filter((request) => request === ORG)).toEqual([ORG]);
   });
 

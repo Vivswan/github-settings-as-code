@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
-import type { SectionModule } from "../../../src/sections/contract/module.js";
+import type { SectionInput, SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
 import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { customPropertiesSection, normalizeValue } from "./index.js";
 import { customPropertiesMockHandlers } from "./mock.js";
 
@@ -22,8 +23,8 @@ function orgRoutes(values: Array<{ property_name: string; value: unknown }>) {
   };
 }
 
-const plan = (api: MockApi, desired: Parameters<typeof customPropertiesSection.plan>[1]) =>
-  gated.plan(planContext(gated, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"custom_properties">) =>
+  gated.plan(planContext(gated, api, REPO), validatedInput("custom_properties", desired));
 
 /** The lines an op's change renders; the section builds them at plan time, so no response is needed. */
 function changeLines(op: SectionPlan["ops"][number]): readonly string[] {

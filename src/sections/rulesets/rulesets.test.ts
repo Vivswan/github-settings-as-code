@@ -9,6 +9,8 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { normalizeRefName, normalizeRuleset, rulesetsSection } from "./index.js";
 import type { RulesetConfig } from "./schema.js";
 
@@ -90,8 +92,11 @@ function liveRepo(
 
 describe("rulesets", () => {
   const listRoute = "GET /repos/o/r/rulesets?per_page=100&page=1";
-  const plan = (api: MockApi, desired: Parameters<typeof rulesetsSection.plan>[1]) =>
-    rulesetsSection.plan(planContext(rulesetsSection, api, REPO), desired);
+  const plan = (api: MockApi, desired: SectionInput<"rulesets">) =>
+    rulesetsSection.plan(
+      planContext(rulesetsSection, api, REPO),
+      validatedInput("rulesets", desired),
+    );
   /** A mock that would accept every write the section declares. */
   const writable = (routes: ConstructorParameters<typeof MockApi>[0]) =>
     new MockApi(routes).allowMutations(
@@ -139,7 +144,7 @@ describe("rulesets", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([listRoute]);
   });
 
-  test("a live rule's GitHub-filled parameter defaults under a declaration that names one parameter are not drift, since the PUT leaves them as they are", async () => {
+  test("a live rule's GitHub-filled parameter defaults under a declaration without a parameters key are not drift, since the PUT leaves them as they are", async () => {
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {
@@ -172,17 +177,13 @@ describe("rulesets", () => {
       enforcement: "active" as const,
       conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
     };
-    const clean = { ops: [], notes: [], drift: [] };
-    expect(
-      await plan(api, [
-        {
-          ...declared,
-          rules: [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
-        },
-      ]),
-    ).toEqual(clean);
-    // A rule declared without any parameters key is GitHub's defaults too.
-    expect(await plan(api, [{ ...declared, rules: [{ type: "pull_request" }] }])).toEqual(clean);
+    // A partial parameters mapping is refused at parse (the spec requires every pull_request parameter), so the
+    // one form that leaves GitHub's defaults in place is a rule declared without a parameters key.
+    expect(await plan(api, [{ ...declared, rules: [{ type: "pull_request" }] }])).toEqual({
+      ops: [],
+      notes: [],
+      drift: [],
+    });
   });
 
   test("a divergent existing ruleset plans a full-payload update carrying the subset drift and what the PUT would drop", async () => {
@@ -311,7 +312,10 @@ describe("rulesets", () => {
       enforcemant: "evaluate",
     };
     const pass = async () =>
-      rulesetsSection.plan(planContext(rulesetsSection, api, REPO), [misspelled]);
+      rulesetsSection.plan(
+        planContext(rulesetsSection, api, REPO),
+        validatedInput("rulesets", [misspelled]),
+      );
     const first = await pass();
     const execution = await executePlan(first, rulesetsSection, api, REPO, {
       resolveSecret() {
@@ -838,7 +842,7 @@ describe("rulesets snapshot", () => {
     });
     const planned = await rulesetsSection.plan(
       planContext(rulesetsSection, api, REPO),
-      read.value as NonNullable<typeof read.value>,
+      validatedInput("rulesets", read.value),
     );
     expect({ ops: planned.ops, drift: planned.drift }).toEqual({ ops: [], drift: [] });
     expect(api.writes).toEqual([]);

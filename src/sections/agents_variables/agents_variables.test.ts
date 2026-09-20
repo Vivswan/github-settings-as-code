@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { planContext } from "../contract/plan.js";
 import { agentsVariablesSection } from "./index.js";
 
@@ -25,7 +26,10 @@ describe("agents_variables", () => {
     { name: "FIREWALL_MODE", value: "strict" },
   ];
   const plan = (api: MockApi) =>
-    agentsVariablesSection.plan(planContext(agentsVariablesSection, api, REPO), declared);
+    agentsVariablesSection.plan(
+      planContext(agentsVariablesSection, api, REPO),
+      validatedInput("agents_variables", declared),
+    );
 
   test("the plan labels drift with this section's key and its noun; undeclared defaults to delete", async () => {
     expect(agentsVariablesSection.undeclaredDefault).toBe("delete");

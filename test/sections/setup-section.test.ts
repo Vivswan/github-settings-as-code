@@ -4,7 +4,7 @@ import type { GitHubClient } from "../../src/github/api.js";
 import type { SettingsFile } from "../../src/schema.js";
 import { codeQualitySetupSection } from "../../src/sections/code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "../../src/sections/code_scanning_default_setup/index.js";
-import type { SectionModule } from "../../src/sections/contract/module.js";
+import type { SectionInput, SectionModule } from "../../src/sections/contract/module.js";
 import { type PlanContext, planContext } from "../../src/sections/contract/plan.js";
 import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
 import type { MustBeNever } from "../../src/types.js";
@@ -14,6 +14,7 @@ import { registryFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
 import { REPO } from "./section-run.js";
 import { proveSnapshotRoundTrip, type SnapshotSection } from "./snapshot-roundtrip.js";
+import { validatedInput } from "./validated-input.js";
 
 /** One section's declared setup document. */
 type Declared<K extends SetupKey = SetupKey> = Exclude<SettingsFile[K], undefined>;
@@ -127,7 +128,7 @@ type _DeniedReadHasNoProbe = MustBeNever<
   Extract<{ [K in SetupKey]: GetHelpers<K> }[SetupKey], "probeAbsent" | "tryCall">
 >;
 
-type DeclaredOf<K extends SetupKey> = Parameters<SetupSectionModule<K>["plan"]>[1];
+type DeclaredOf<K extends SetupKey> = SectionInput<K>;
 ({ query_suite: "extended" }) satisfies DeclaredOf<"code_scanning_default_setup">;
 // @ts-expect-error ai_findings_option belongs to code_quality_setup alone
 ({ ai_findings_option: "disabled" }) satisfies DeclaredOf<"code_scanning_default_setup">;
@@ -187,7 +188,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       denied403,
     } = facts;
     const plan = (api: GitHubClient, declared: Declared) =>
-      section.plan(planContext(section, api, REPO), declared);
+      section.plan(planContext(section, api, REPO), validatedInput(section.key, declared));
 
     /** Every issue of a parse, as [path, message], so a refusal is pinned whole. */
     const issuesOf = (document: unknown): [string, string][] | "accepted" => {

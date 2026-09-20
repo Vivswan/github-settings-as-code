@@ -4,7 +4,7 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
-  duplicateIssues,
+  duplicateFieldIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
@@ -144,13 +144,9 @@ export function duplicateProtectionRuleIssues(
   entries: readonly DeploymentProtectionRuleConfig[],
   envName: string,
 ): DeclaredIssue[] {
-  return duplicateIssues(
+  return duplicateFieldIssues(
     entries,
-    {
-      keyOf: (rule) => rule.app,
-      describe: (rule) => rule.app,
-      at: (_rule, index) => `[${index}].app`,
-    },
+    { field: "app" },
     `deployment protection rule App of the "${envName}" environment`,
   );
 }

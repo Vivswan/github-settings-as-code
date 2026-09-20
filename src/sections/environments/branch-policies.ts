@@ -10,7 +10,7 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
-  duplicateIssues,
+  duplicateFieldIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
@@ -120,13 +120,9 @@ export function duplicateBranchPolicyIssues(
   entries: readonly DeploymentBranchPolicyConfig[],
   envName: string,
 ): DeclaredIssue[] {
-  return duplicateIssues(
+  return duplicateFieldIssues(
     entries,
-    {
-      keyOf: (pattern) => pattern.name,
-      describe: (pattern) => pattern.name,
-      at: (_pattern, index) => `[${index}].name`,
-    },
+    { field: "name" },
     `deployment branch policy of the "${envName}" environment`,
   );
 }

@@ -6,12 +6,12 @@
 
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import type { UndeclaredPolicy } from "../../types.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
-  duplicateIssues,
+  duplicateFieldIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
@@ -92,22 +92,14 @@ export interface VariablesPlanScope<
 
 /**
  * Variable names are case-insensitive on GitHub, so two entries differing only in case name one variable.
- * Every scope's validate hook runs it (planVariables trusts the document); `what` names the resource
- * ("variable", `variable of the "prod" environment`).
+ * Every scope's validate hook runs it over its declared value in either form (planVariables trusts the
+ * document); `what` names the resource ("variable", `variable of the "prod" environment`).
  */
 export function duplicateVariableNameIssues(
-  entries: readonly VariableEntry[],
+  declared: readonly VariableEntry[] | UndeclaredPolicyList<VariableEntry>,
   what: string,
 ): DeclaredIssue[] {
-  return duplicateIssues(
-    entries,
-    {
-      keyOf: (variable) => variableKey(variable.name),
-      describe: (variable) => variable.name,
-      at: (_variable, index) => `[${index}].name`,
-    },
-    what,
-  );
+  return duplicateFieldIssues(declared, { field: "name", fold: variableKey }, what);
 }
 
 /**

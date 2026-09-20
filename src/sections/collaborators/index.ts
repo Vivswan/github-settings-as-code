@@ -9,9 +9,8 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  declaredEntries,
   defaultUndeclaredPolicy,
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   loosen,
   type SectionMeta,
@@ -149,14 +148,9 @@ export const collaboratorsSection = {
   },
   // Logins are case-insensitive on GitHub, the fold every lookup below uses.
   validate(declared) {
-    const { entries, path } = declaredEntries(declared);
-    return duplicateIssues(
-      entries,
-      {
-        keyOf: (c) => c.username.toLowerCase(),
-        describe: (c) => c.username,
-        at: (_c, index) => `${path}[${index}].username`,
-      },
+    return duplicateFieldIssues(
+      declared,
+      { field: "username", fold: (username) => username.toLowerCase() },
       "collaborator",
     );
   },
