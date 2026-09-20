@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 
 const KEY = "secret_scanning_custom_patterns";
-const REFUSAL = "cannot be compiled as a JavaScript regular expression";
+const REFUSAL = "cannot be compiled as a regular expression";
 
 function issues(entry: Record<string, unknown>): readonly string[] {
   return validateSectionShapes({ [KEY]: [entry] }, "settings.yml").match(

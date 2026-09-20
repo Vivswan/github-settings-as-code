@@ -717,7 +717,15 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
         "must_match",
         "must_not_match",
       ]);
-      const broken = rng.pick(["([a-z", "*token", "key_[0-9]{6}\\", "(?P<t>key_[0-9"]);
+      // The last two are PCRE refusals a flagless RegExp alone would take: a quantified anchor, a group name declared twice.
+      const broken = rng.pick([
+        "([a-z",
+        "*token",
+        "key_[0-9]{6}\\",
+        "(?P<t>key_[0-9",
+        "\\A+",
+        "(?<t>x)|(?<t>y)",
+      ]);
       if (compileFailure(broken) === undefined) {
         throw new Error(
           `the refused draw ${JSON.stringify(broken)} passes the syntax check; pick another`,

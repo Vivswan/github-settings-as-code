@@ -17,8 +17,9 @@ function regexSource(): z.ZodString {
       refineCtx.addIssue({
         code: "custom",
         message:
-          `cannot be compiled as a JavaScript regular expression (${reason}); fix the expression - GitHub's own dialect ` +
-          "is Hyperscan, a PCRE subset without option modifiers such as (?i), and can still refuse an expression that compiles here",
+          `cannot be compiled as a regular expression (${reason}); fix the expression, or report a documentation issue if ` +
+          "Hyperscan accepts it as written - the check translates the PCRE-only forms the field docs list before compiling, " +
+          "and GitHub can still refuse at apply what Hyperscan alone refuses",
         params: { [REGEX_SYNTAX]: reason },
       });
     }

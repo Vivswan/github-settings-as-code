@@ -48,6 +48,11 @@ describe("compilableForm", () => {
     ["a literal bracket first in a class", "[]a(]", "[\\]a(]"],
     ["a literal bracket first in a negated class", "[^](]", "[^\\](]"],
     ["a literal bracket after an empty quote, still first", "[\\Q\\E]a(]", "[\\]a(]"],
+    // PCRE reads the negation after the empty quote it drops; a flagless RegExp reads the quote letters and the caret as members.
+    ["a class negated after an empty quote, then a literal bracket", "[\\Q\\E^](]", "[^\\](]"],
+    // The comment breaks the quantifier, so PCRE reads the braces as text; dropping it must not let the RegExp read `{2,1}`.
+    ["a brace quantifier split by a comment, which makes it text", "a{2(?#c),1}", "a\\{2,1\\}"],
+    ["a brace opened by a comment, which makes it text", "{(?#c)2}", "\\{2\\}"],
   ])("%s: the raw form fails, the translated form compiles", (_form, raw, translated) => {
     expect(compiles(raw)).toBe(false);
     expect(compilableForm(raw)).toBe(translated);
@@ -67,6 +72,21 @@ describe("compilableForm", () => {
     ["a POSIX class followed by a literal bracket", "[[:alpha:][]", "[\\w[]"],
     ["a quoted literal", "\\Qa.b(\\E[0-9]+", "a\\.b\\([0-9]+"],
     ["a quoted literal without its closing escape, running to the end", "id=\\Q(x", "id=\\(x"],
+    // Hyperscan and PCRE before 10.43 read `{,n}` as text; the check follows them, not PCRE2's quantifier reading.
+    ["a brace PCRE reads as a literal", "a{,2}", "a\\{,2\\}"],
+    ["a literal closing brace before a plus", "x}+", "x\\}+"],
+    ["the last code point PCRE accepts", "\\x{10FFFF}", "\\uFFFF"],
+    // PCRE reads `\\x` with no digit as NUL and `\\0` with up to two more octal digits; fixed-width, so a digit after a drop stays its own.
+    ["a hex escape with no digit, which is NUL", "\\x", "\\u0000"],
+    ["an octal escape after a zero, in a class range", "[\\012-\\015]", "[\\u000a-\\u000d]"],
+    [
+      "an octal zero split from digits by a stray quote end, the digits their own range",
+      "[\\0\\E77-8]",
+      "[\\u000077-8]",
+    ],
+    // Inside a class `\\1` to `\\7` are octal to PCRE and Hyperscan (no backreference can sit there); outside they pass through.
+    ["a three-digit octal escape inside a class", "[\\177]", "[\\u007f]"],
+    ["a class octal split from digits by a stray quote end", "[\\1\\E77-8]", "[\\u000177-8]"],
   ])("%s: translated to one spelling", (_form, raw, translated) => {
     expect(compilableForm(raw)).toBe(translated);
     expect(compiles(translated)).toBe(true);
@@ -75,12 +95,15 @@ describe("compilableForm", () => {
   test.each<[form: string, source: string]>([
     ["GitHub's default delimiters", "\\A|[^0-9A-Za-z]"],
     ["the PCRE escapes a flagless RegExp reads as identity escapes", "\\A\\z\\Z\\h\\R\\K"],
+    ["a lookahead", "(?=key_)[0-9]+"],
+    ["a backreference (Hyperscan refuses it at apply, the check does not see it)", "(a)\\1"],
+    ["a negative lookbehind (Hyperscan refuses it at apply, the check does not see it)", "(?<!x)y"],
+    // PCRE refuses an anchor inside a class; the check does not (recorded), and the raw spelling compiles.
+    ["an anchor inside a class", "[\\A]"],
     ["a JavaScript-style named group", "(?<token>key)"],
     ["a lazy quantifier", "a+?b*?c??"],
-    ["a literal brace", "a{,2}"],
     ["a group opening spelled inside a character class", "[(?i)]"],
     ["an escaped parenthesis before ?P, which is a quantifier on the literal", "\\(?P<n>"],
-    ["a literal closing brace before a plus", "x}+"],
     ["lookbehind (Hyperscan refuses it at apply, the check does not see it)", "(?<=key_)[0-9]+"],
     ["a comment opening spelled inside a character class", "[(?#x)]"],
   ])("%s passes through untouched and compiles", (_form, source) => {
@@ -121,11 +144,52 @@ describe("compilableForm", () => {
     // PCRE cannot repeat an anchor; a flagless RegExp reads `\A` as a literal A, so dropping the `+` would let `\A+` through.
     ["a possessive quantifier on the start anchor", "\\A++"],
     ["a possessive quantifier on the end anchor", "\\z*+"],
+    ["a plus on the start anchor", "\\A+"],
+    ["a question mark on the start anchor", "\\A?"],
+    ["a lazy plus on the start anchor", "\\A+?"],
+    ["a brace quantifier on the end anchor", "\\z{2}"],
+    ["a star on the end-or-newline anchor", "\\Z*"],
+    ["a plus on the match reset", "\\K+"],
+    ["a plus on the previous-match anchor", "\\G+"],
+    // PCRE reads a quantifier after `(`, `|`, `^`, `$` or a group opening as an error; a dropped token must not re-fuse `(` and `?` into a group.
+    ["a quantifier after a group opening split by a comment", "((?#c)?:a)"],
+    ["a quantifier after a group opening split by an empty quote", "(\\Q\\E?:a)"],
+    ["a named group opening split by a comment", "(?<(?#c)n>a)"],
+    ["a quantifier after an alternation bar", "a|*b"],
+    ["a quantifier on the caret anchor", "^+"],
+    ["a quantifier on a word boundary", "\\b+"],
+    ["a brace quantifier on a brace quantifier", "a{2}{3}"],
+    // The `(?` openings PCRE may accept and Hyperscan refuses (branch reset, recursion, a Python-style backreference).
+    ["a branch reset group", "(?|a|b)"],
+    ["a recursion", "a(?R)?"],
+    ["a Python-style backreference", "(?P<n>a)(?P=n)"],
+    // PCRE refuses a group name declared twice in any spelling; V8 takes it across alternatives since Node 24.
+    ["a JavaScript-style group name used twice across alternatives", "(?<a>x)|(?<a>y)"],
+    // PCRE reads `\\c` with the printable ASCII character after it, and refuses it at the end or before any other.
+    ["a control escape at the end of the pattern", "\\c"],
+    ["a control escape at the end of the pattern, after text", "a\\c"],
+    ["a control escape before a tab", "\\c\t"],
+    // PCRE refuses a code point above U+10FFFF; the fixed BMP literal stands in only up to there.
+    ["a braced hex escape above the last code point", "\\x{110000}"],
+    ["a braced octal escape above the last code point", "\\o{77777777}"],
+    ["a braced hex escape far above the last code point", "\\x{FFFFFFFFFFFF}"],
     // PCRE reads the `]` as a literal, so the class never closes; a flagless RegExp would read an empty class.
     ["an empty class", "[]"],
     ["a class whose literal bracket starts a range out of order, split by a comment", "[]z-(?#x)]"],
     ["a class whose POSIX member is followed by a range out of order", "[[:alpha:]z-(?#x)]"],
     ["a class whose only member is a stray quote end", "[\\E]"],
+    // The digits after the drop are members of their own, so the range they start runs backwards.
+    ["an octal zero split from a reversed range by a stray quote end", "[\\0\\E40-!]"],
+    ["a hex escape with no digit split from a reversed range by a stray quote end", "[\\x\\E20-!]"],
+    ["a class octal split from a reversed range by a stray quote end", "[\\1\\E0-!]"],
+    // PCRE and Hyperscan both refuse a malformed code point escape; a flagless RegExp reads an x, an o, or a c.
+    ["a braced hex escape with non-hex digits", "\\x{ZZ}"],
+    ["a braced hex escape left open", "\\x{"],
+    ["a braced octal escape with a non-octal digit", "\\o{8}"],
+    ["an octal escape without its braces", "\\o"],
+    ["a JavaScript-style group name PCRE refuses", "(?<$>a)"],
+    // The caret after the empty quote negates, so the `]` is the first member and the class never closes.
+    ["a class negated after an empty quote, never closed", "[\\Q\\E^]"],
     // The quote closes before the `)`, so the comment opening is text and the parenthesis is unmatched.
     ["a quote closed inside a comment opening", "\\Q(?#\\E)"],
     // The quote runs to the end of the pattern, swallowing the `]`, in PCRE as here.
