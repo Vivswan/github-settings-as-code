@@ -57,6 +57,7 @@ edges:
 throws:
   requestLayer:
     - src/github/api.ts
+    # Only raise(): the seam that stays until sections return Results themselves, then leaves with them.
     - src/sections/contract/errors.ts
   ratchet:
     src/action/artifact.ts: 1

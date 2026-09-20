@@ -55,16 +55,33 @@ export class PermissionDenied extends Error {
   }
 }
 
-/** A failure as the section loops catch it: only a denial keeps its shape, since only a denial has a policy. */
+/**
+ * A failure as the section loops catch it: only a denial keeps its shape, since only a denial has a policy. The
+ * switch is exhaustive so a new kind is placed here deliberately instead of falling into the plain Error arm.
+ */
 export function errorOf(failure: SectionFailure): Error {
-  return failure.kind === "permission-denied"
-    ? new PermissionDenied(failure.section, failure.detail, failure.status)
-    : new Error(failure.message);
+  switch (failure.kind) {
+    case "permission-denied":
+      return new PermissionDenied(failure.section, failure.detail, failure.status);
+    case "rate-limit":
+    case "rejected":
+    case "server-error":
+    case "unauthorized":
+    case "validation":
+    case "transport":
+    case "malformed":
+    case "declared-duplicate":
+    case "live-duplicate":
+      return new Error(failure.message);
+    default:
+      return failure satisfies never;
+  }
 }
 
 /**
  * The ONE seam where a failure value becomes a throw: sections still leave by throwing, so the read port
- * (./plan.ts) and the duplicate checks raise here.
+ * (./plan.ts) and the duplicate checks raise here. It exists until sections return Results themselves; each
+ * call then becomes a match and this function, the last request-layer throw, goes with them.
  */
 export function raise<T>(result: Result<T, SectionFailure>): T {
   if (result.isErr()) {
