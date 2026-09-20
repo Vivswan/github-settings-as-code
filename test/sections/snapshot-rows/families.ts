@@ -9,8 +9,8 @@ import type { Row, SnapshotSection } from "../snapshot-roundtrip.js";
 export const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 
 /**
- * One secret family's row: the names read back as per-store references (so the same name in two
- * stores never shares a variable), one note each; a reserved-looking name needs no escape.
+ * One secret family's row: two names, each read back as its own per-store reference (so the same
+ * name in two stores never shares a variable), one note each.
  */
 export function secretsRow(section: SnapshotSection, store: string, family: keyof LiveState): Row {
   const STORE = store.toUpperCase();
