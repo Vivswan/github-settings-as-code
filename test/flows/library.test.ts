@@ -353,28 +353,29 @@ describe("mergeSettings", () => {
     expect(parseYamlDoc(report.yaml)).toEqual({ branches });
   });
 
-  test("one layer opting out with null folds to the section absent, with no notice", () => {
+  test("a null section is the layer's own problem, naming the layer, as is a non-mapping layer", () => {
     expect(
       mergeSettings([{ name: "fleet.yml", doc: { repository: { has_wiki: true }, labels: null } }]),
     ).toEqual(
-      ok({
-        settings: branded({ repository: { has_wiki: true } }),
-        notices: [],
-        yaml: "repository:\n  has_wiki: true\n",
-        log: [],
+      err({
+        code: "settings-malformed-sections",
+        source: "fleet.yml",
+        issues: ["labels: null has no meaning; remove the section or declare its entries"],
       }),
+    );
+    expect(mergeSettings([fleet, { name: "bad.yml", doc: [1] }])).toEqual(
+      err({ code: "settings-not-mapping", source: "bad.yml", shape: "list" }),
     );
   });
 
-  test("a null over a declared section is a notice, and an invalid layer is the problem naming that layer", () => {
-    const optOut = mergeSettings([
+  test("a removal is a notice naming the layer and the entry, and the rendered file omits both the marker and the lower entry", () => {
+    const removed = mergeSettings([
       fleet,
-      { name: "repo.yml", doc: { labels: null } },
+      { name: "repo.yml", doc: { labels: [{ name: "bug", _remove: true }] } },
     ])._unsafeUnwrap();
-    expect(optOut.notices).toEqual([{ layer: "repo.yml", path: "labels" }]);
-    expect("labels" in optOut.settings).toBe(false);
-    expect(mergeSettings([fleet, { name: "bad.yml", doc: [1] }])).toEqual(
-      err({ code: "settings-not-mapping", source: "bad.yml", shape: "list" }),
+    expect(removed.notices).toEqual([{ layer: "repo.yml", path: "labels[0]" }]);
+    expect(removed.yaml).toBe(
+      "repository:\n  has_wiki: true\nlabels:\n  _undeclared: delete\n  entries: []\n",
     );
   });
 });

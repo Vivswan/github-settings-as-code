@@ -229,17 +229,8 @@ export const branchesSection = {
       }
     });
   }),
-  // Branch names and patterns are verbatim keys, as validate() rejects duplicates. `protection: null` (no protection) and a
-  // null under it (a core control or required_deployments turned off) are values the entry schema types, never delete markers.
-  layering: keyedBy("name", {
-    nullValued: [
-      "protection",
-      "protection.required_deployments",
-      "protection.required_pull_request_reviews",
-      "protection.required_status_checks",
-      "protection.restrictions",
-    ],
-  }),
+  // Branch names and patterns are verbatim keys, as validate() rejects duplicates.
+  layering: keyedBy("name"),
   // Two entries for one branch or pattern would overwrite each other's write on every run.
   validate(desired) {
     return duplicateFieldIssues(desired, { field: "name" }, "branch");

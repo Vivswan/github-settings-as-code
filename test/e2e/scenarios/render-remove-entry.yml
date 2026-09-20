@@ -1,0 +1,77 @@
+# `_remove: true` on a keyed entry drops the entry a lower layer declared under
+# the same key, at the top level (a label, case-folded) and inside a deep-merged
+# pair (a rule by type, an environment variable by uppercased name). The marker
+# never reaches the rendered file, and each removal is one notice naming the
+# layer and the entry by its index, never by its name.
+name: render-remove-entry
+inputs:
+  mode: render
+settings_layers:
+  - labels:
+      - name: bug
+        color: d73a4a
+      - name: wontfix
+        color: ffffff
+    rulesets:
+      - name: main
+        target: branch
+        enforcement: active
+        rules:
+          - type: deletion
+          - type: non_fast_forward
+    environments:
+      - name: prod
+        variables:
+          _undeclared: keep
+          entries:
+            - name: REGION
+              value: eu-west-1
+            - name: LOG_LEVEL
+              value: info
+settings:
+  labels:
+    - name: Wontfix
+      _remove: true
+    - name: docs
+      color: "0075ca"
+  rulesets:
+    - name: main
+      rules:
+        - type: deletion
+          _remove: true
+  environments:
+    - name: prod
+      variables:
+        - name: log_level
+          _remove: true
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  stdout_contains:
+    - "settings.yml: labels[0] carries _remove: true and dropped the entry a lower layer declared under its key"
+    - "settings.yml: rulesets[0].rules[0] carries _remove: true and dropped the entry a lower layer declared under its key"
+    - "settings.yml: environments[0].variables[0] carries _remove: true and dropped the entry a lower layer declared under its key"
+  rendered:
+    labels:
+      _undeclared: delete
+      entries:
+        - name: bug
+          color: d73a4a
+        - name: docs
+          color: "0075ca"
+    rulesets:
+      _undeclared: keep
+      entries:
+        - name: main
+          target: branch
+          enforcement: active
+          rules:
+            - type: non_fast_forward
+    environments:
+      - name: prod
+        variables:
+          _undeclared: keep
+          entries:
+            - name: REGION
+              value: eu-west-1

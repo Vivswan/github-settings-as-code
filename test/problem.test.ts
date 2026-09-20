@@ -209,6 +209,24 @@ const SPECIMENS = {
     },
     'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
   ],
+  "layer-remove-not-true": [
+    { code: "layer-remove-not-true", layer: "repo", site: "labels[1]._remove", actual: "yes" },
+    'layer "repo": labels[1]._remove takes only true; got a string. Write _remove: true to drop the lower entry, or remove the key to keep it',
+  ],
+  "layer-remove-with-fields": [
+    {
+      code: "layer-remove-with-fields",
+      layer: "repo",
+      site: "labels[1]",
+      keyPaths: ["name"],
+      extra: ["color", "description"],
+    },
+    'layer "repo": labels[1] carries _remove: true beside "color", "description"; a removal names its name and nothing else. Drop the fields, or the marker',
+  ],
+  "layer-remove-nothing": [
+    { code: "layer-remove-nothing", layer: "repo", site: "labels[1]", reason: "unmatched" },
+    'layer "repo": labels[1] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key',
+  ],
   "rendered-file-is-layer": [
     { code: "rendered-file-is-layer", renderedFile: "./repo.yml", index: 1, layer: "repo.yml" },
     'the "rendered-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +

@@ -1,0 +1,23 @@
+# A removal with nothing to remove is refused, naming the layer and the entry
+# by index and the fix: under `_layering: replace` the higher list already
+# wins. No file is written.
+name: render-remove-refused
+inputs:
+  mode: render
+settings_layers:
+  - labels:
+      - name: bug
+        color: d73a4a
+settings:
+  labels:
+    _layering: replace
+    entries:
+      - name: bug
+        _remove: true
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'layer "'
+    - "settings.yml\": labels[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key"

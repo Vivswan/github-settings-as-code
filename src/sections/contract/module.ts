@@ -123,11 +123,10 @@ export interface KeyedListLayering {
    */
   readonly nested?: Readonly<Record<string, KeyedListLayering>>;
   /**
-   * Dotted paths within the entry whose null the ENTRY SCHEMA types as a value (custom_properties' `value` unsets the
-   * property): the fold writes such a null as the value and the per-layer view keeps it, where every other null inside
-   * an entry is a delete-the-lower-key marker. test/sections/registry.test.ts pins each list to the published schema.
+   * The dotted paths a `_remove: true` entry may carry beside the marker: the key field's own unless the key spans
+   * several (a reviewer is its `type` and `id`). Any other path on a removal is refused at the layer boundary by name.
    */
-  readonly nullValued?: readonly string[];
+  readonly removalPaths?: readonly string[];
 }
 
 /** A list keyed by one string field of each entry, folded as the planner's duplicate check folds it. */
@@ -135,7 +134,6 @@ export function keyedBy(
   keyField: string,
   options: {
     readonly fold?: (name: string) => string;
-    readonly nullValued?: readonly string[];
     readonly nested?: Readonly<Record<string, KeyedListLayering>>;
   } = {},
 ): KeyedListLayering {
@@ -146,7 +144,6 @@ export function keyedBy(
       const value = entry[keyField];
       return typeof value === "string" ? [fold(value)] : null;
     },
-    ...(options.nullValued === undefined ? {} : { nullValued: options.nullValued }),
     ...(options.nested === undefined ? {} : { nested: options.nested }),
   };
 }
@@ -926,6 +923,8 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
         ctx.addIssue({
           code: "custom",
           message: `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`,
+          // A null list has no empty state of its own: engine/validate.ts names the fix from this instead of the type prose.
+          ...(value === null ? { params: { legal: "a list of entries ([] for none)" } } : {}),
         });
         return z.NEVER;
       }

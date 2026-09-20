@@ -1,0 +1,17 @@
+# A whole-section null has no meaning outside pages and interaction_limits: the
+# layer's own validation refuses it before any fold, naming the layer, the
+# section, and the two fixes. No file is written.
+name: render-null-section-refused
+inputs:
+  mode: render
+settings_layers:
+  - repository:
+      has_wiki: false
+settings:
+  repository: null
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "settings.yml has malformed section entries: repository: null has no meaning; remove the section or declare its fields"

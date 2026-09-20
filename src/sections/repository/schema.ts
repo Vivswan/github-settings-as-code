@@ -26,13 +26,12 @@ function describeValue(value: unknown): string {
   return String(value);
 }
 
+/** A PATCH boolean; a null on it is the validator's general refusal (no empty state; write true or false), not this shape's. */
 function repositoryToggle() {
   return z
     .boolean({
       error: (issue) =>
-        issue.input === null
-          ? "null is not a boolean, and a toggle has no empty state; write true or false"
-          : `${describeValue(issue.input)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
+        `${describeValue(issue.input)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
     })
     .optional();
 }

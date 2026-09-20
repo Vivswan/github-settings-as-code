@@ -27,6 +27,13 @@ export function quoteList(names: readonly string[]): string {
   return names.map((name) => `"${name}"`).join(", ");
 }
 
+/** Names as prose lists them: `a`, `a and b`, `a, b and c`. */
+function andList(names: readonly string[]): string {
+  return names.length < 2
+    ? names.join("")
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 function inputsWording(names: readonly string[]) {
   const count = names.length;
   const inputs = agree(count, "input", "inputs");
@@ -188,6 +195,8 @@ export type Problem =
       readonly keyField: string;
       /** The field's kind in prose; "string" when the module says nothing else. */
       readonly keyKind?: string;
+      /** The other paths of a composite identity (a reviewer's `type` beside its `id`), when the module names one. */
+      readonly alongside?: readonly string[];
     }
   | {
       readonly code: "layer-duplicate-key";
@@ -196,6 +205,28 @@ export type Problem =
       readonly keyField: string;
       readonly first: number;
       readonly second: number;
+    }
+  | {
+      readonly code: "layer-remove-not-true";
+      readonly layer: string;
+      readonly site: string;
+      readonly actual: unknown;
+    }
+  | {
+      readonly code: "layer-remove-with-fields";
+      readonly layer: string;
+      readonly site: string;
+      /** The dotted paths a removal names its entry by: the key field's own, or a composite (`type` and `id`). */
+      readonly keyPaths: readonly string[];
+      /** The dotted paths riding beside the key and the marker (`color`, `config.secret`), in the entry's order. */
+      readonly extra: readonly string[];
+    }
+  | {
+      readonly code: "layer-remove-nothing";
+      readonly layer: string;
+      readonly site: string;
+      /** replace: the higher list already wins; swapped: the entry is copied whole; unmatched: no lower entry claims the key. */
+      readonly reason: "replace" | "swapped" | "unmatched";
     }
   // The section selection
   | { readonly code: "required-sections-excluded"; readonly excluded: readonly SectionKey[] }
@@ -525,9 +556,15 @@ export function describeProblem(problem: Problem): string {
     case "layer-bad-directive":
       return `${layerSite(problem)} must be one of ${problem.allowed.map(quote).join(", ")}; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is none of them" : ""}`;
     case "layer-no-key":
-      return `${layerSite(problem)} carries no ${problem.keyKind ?? "string"} ${quote(problem.keyField)}, which every entry needs to layer by`;
+      return `${layerSite(problem)} carries no ${problem.keyKind ?? "string"} ${quote(problem.keyField)}${problem.alongside === undefined ? "" : ` paired with its ${quoteList(problem.alongside)}`}, which every entry needs to layer by`;
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
+    case "layer-remove-not-true":
+      return `${layerSite(problem)} takes only true; got ${describeShape(problem.actual)}. Write _remove: true to drop the lower entry, or remove the key to keep it`;
+    case "layer-remove-with-fields":
+      return `${layerSite(problem)} carries _remove: true beside ${quoteList(problem.extra)}; a removal names its ${andList(problem.keyPaths)} and nothing else. Drop the ${agree(problem.extra.length, "field", "fields")}, or the marker`;
+    case "layer-remove-nothing":
+      return `${layerSite(problem)} carries _remove: true, but ${describeNothingToRemove(problem.reason)}. Remove the entry, or fix its key`;
     case "rendered-file-is-layer":
       return (
         `the "rendered-file" input "${problem.renderedFile}" is layer ${problem.index + 1} of the ` +
@@ -579,4 +616,15 @@ export function describeProblem(problem: Problem): string {
 /** The `layer "<name>": <site>` prefix every layer refusal opens with. */
 function layerSite(problem: LayerProblem): string {
   return `layer ${quote(problem.layer)}: ${problem.site}`;
+}
+
+function describeNothingToRemove(reason: "replace" | "swapped" | "unmatched"): string {
+  switch (reason) {
+    case "replace":
+      return "under _layering: replace the higher list already wins, so there is nothing to remove";
+    case "swapped":
+      return "its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove";
+    case "unmatched":
+      return "no lower layer declares an entry under its key";
+  }
 }

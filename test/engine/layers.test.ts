@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { err, ok } from "neverthrow";
-import { type Layer, type Layering, mergeLayers, stripNulls } from "../../src/engine/layers.js";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
-import { silentIo } from "../../src/io.js";
+import {
+  describeRemoval,
+  type Layer,
+  type Layering,
+  mergeLayers,
+  standaloneView,
+} from "../../src/engine/layers.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -77,7 +79,8 @@ describe("mergeLayers: the mapping dialect", () => {
     });
   });
 
-  test("a higher null deletes a lower declaration at the top level and nested, with a notice each", () => {
+  test("a higher null wins at the top level and nested, written as the value with no notice: the fold reads no marker", () => {
+    // Whether `actions: null` or `description: null` is legal is the validator's question, asked of the layer and of the fold.
     const result = merge([
       layer("fleet", {
         repository: { has_wiki: false, description: "fleet" },
@@ -87,11 +90,12 @@ describe("mergeLayers: the mapping dialect", () => {
       layer("repo", { actions: null, repository: { description: null } }),
     ]);
     expect(result).toEqual({
-      settings: { repository: { has_wiki: false }, pages: { build_type: "workflow" } },
-      notices: [
-        { layer: "repo", path: "actions" },
-        { layer: "repo", path: "repository.description" },
-      ],
+      settings: {
+        repository: { has_wiki: false, description: null },
+        pages: { build_type: "workflow" },
+        actions: null,
+      },
+      notices: [],
     });
   });
 
@@ -101,10 +105,7 @@ describe("mergeLayers: the mapping dialect", () => {
       layer("team", { actions: null }),
       layer("repo", { actions: { enabled: false } }),
     ]);
-    expect(result).toEqual({
-      settings: { actions: { enabled: false } },
-      notices: [{ layer: "team", path: "actions" }],
-    });
+    expect(result).toEqual({ settings: { actions: { enabled: false } }, notices: [] });
   });
 
   test.each([
@@ -117,31 +118,22 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(merge(layers)).toEqual({ settings: { pages: null }, notices: [] });
   });
 
-  // `pages: null` is the only spelling of "Pages off"; read as an opt-out marker it would leave a fleet-declared site running.
+  // `pages: null` is the only spelling of "Pages off"; the fold writes every higher null the same way, and the
+  // validator refuses the sections that have no null value (labels among them) before or after the fold.
   test.each([
-    ["pages", { build_type: "workflow" }, { settings: { pages: null }, notices: [] }],
-    [
-      "interaction_limits",
-      { limit: "collaborators_only" },
-      { settings: { interaction_limits: null }, notices: [] },
-    ],
-    [
-      "labels",
-      [{ name: "bug", color: "d73a4a" }],
-      { settings: {}, notices: [{ layer: "repo", path: "labels" }] },
-    ],
-  ])(
-    "a higher %s: null over a lower declaration is the section's value where the section takes null, and an opt-out elsewhere",
-    (key, lower, expected) => {
-      expect(merge([layer("fleet", { [key]: lower }), layer("repo", { [key]: null })])).toEqual(
-        expected,
-      );
-    },
-  );
+    ["pages", { build_type: "workflow" }],
+    ["interaction_limits", { limit: "collaborators_only" }],
+    ["labels", [{ name: "bug", color: "d73a4a" }]],
+  ])("a higher %s: null over a lower declaration is written as the value", (key, lower) => {
+    expect(merge([layer("fleet", { [key]: lower }), layer("repo", { [key]: null })])).toEqual({
+      settings: { [key]: null },
+      notices: [],
+    });
+  });
 
-  test("a null on a section that has no null value, over one layer, opts out of nothing: it drops, with no notice", () => {
+  test("a null on a list section over one layer stays as written for the validator to refuse", () => {
     expect(merge([layer("repo", { repository: { has_wiki: false }, labels: null })])).toEqual({
-      settings: { repository: { has_wiki: false } },
+      settings: { repository: { has_wiki: false }, labels: null },
       notices: [],
     });
   });
@@ -507,27 +499,29 @@ describe("mergeLayers: keyed sections", () => {
     });
   });
 
-  test("bypass_actors: null on a higher ruleset removes the lower key with a notice", () => {
+  test("bypass_actors: null on a higher ruleset is the field's value in the merged entry, for the validator to judge", () => {
     const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
     const result = merge([
       layer("fleet", { rulesets: [{ ...MAIN_RULESET, bypass_actors: bypass }] }),
       layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
     ]);
     expect(result).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
-      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
+      settings: {
+        rulesets: { _undeclared: "keep", entries: [{ ...MAIN_RULESET, bypass_actors: null }] },
+      },
+      notices: [],
     });
   });
 
-  test("a notice names the entry by its index in the layer it names, not by its name or its lower slot", () => {
+  test("a removal notice names the entry by its index in the layer it names, not by its name or its lower slot", () => {
     const tags = { name: "tags", target: "tag" };
     const result = merge([
-      layer("fleet", { rulesets: [tags, { ...MAIN_RULESET, bypass_actors: [{ actor_id: 1 }] }] }),
-      layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
+      layer("fleet", { rulesets: [tags, MAIN_RULESET] }),
+      layer("repo", { rulesets: [{ name: "main", _remove: true }] }),
     ]);
     expect(result).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [tags, MAIN_RULESET] } },
-      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
+      settings: { rulesets: { _undeclared: "keep", entries: [tags] } },
+      notices: [{ layer: "repo", path: "rulesets[0]" }],
     });
   });
 });
@@ -632,14 +626,14 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     });
   });
 
-  test("_undeclared: null deletes the lower policy with a notice, and the default fills in", () => {
+  test("_undeclared: null wins over the lower policy like any value, and stays for the validator to refuse", () => {
     const result = merge([
       fleetKeep,
       layer("repo", { labels: { _undeclared: null, entries: [] } }),
     ]);
     expect(result).toEqual({
-      settings: { labels: { _undeclared: "delete", entries: [{ name: "fleet" }] } },
-      notices: [{ layer: "repo", path: "labels._undeclared" }],
+      settings: { labels: { _undeclared: null, entries: [{ name: "fleet" }] } },
+      notices: [],
     });
   });
 });
@@ -1006,7 +1000,7 @@ describe("mergeLayers: the plain-list sections", () => {
     expect(result).toEqual({ settings: { environments: [higher] }, notices: [] });
   });
 
-  test("a null at a plain-list entry's nullable path is the value under deep; a null elsewhere in the entry deletes with a notice", () => {
+  test("a null inside a plain-list entry is the field's value under deep, at a nullable path or not", () => {
     const result = merge([
       layer("fleet", {
         branches: [
@@ -1032,9 +1026,9 @@ describe("mergeLayers: the plain-list sections", () => {
           { name: "main", protection: { enforce_admins: true, required_deployments: null } },
           { name: "release/*", protection: null },
         ],
-        environments: [{ ...PROD, deployment_branch_policy: null, wait_timer: undefined }],
+        environments: [{ ...PROD, deployment_branch_policy: null, wait_timer: null }],
       },
-      notices: [{ layer: "repo", path: "environments[0].wait_timer" }],
+      notices: [],
     });
   });
 });
@@ -1129,7 +1123,7 @@ describe("mergeLayers: layer-boundary refusals", () => {
       "a reviewer whose id is not a number",
       { environments: [{ name: "prod", reviewers: [{ type: "User", id: "1" }] }] },
       "layer-no-key",
-      'layer "repo": environments[0].reviewers[0] carries no numeric "id", which every entry needs to layer by',
+      'layer "repo": environments[0].reviewers[0] carries no numeric "id" paired with its "type", which every entry needs to layer by',
     ],
     [
       "a workflow named twice, by its bare name and its path",
@@ -1211,8 +1205,9 @@ describe("mergeLayers: layer-boundary refusals", () => {
     });
   });
 
-  test("no refusal, of any kind, echoes a value or key taken from the document", () => {
-    // Every identity, malformed value, and private key below holds the marker; the recognized keys (labels, color) are structure the prose may name.
+  test("no refusal, of any kind, echoes a value taken from the document", () => {
+    // Every identity and malformed value below holds the marker; the recognized keys (labels, color) are structure the
+    // prose may name, and a removal's extra paths are the one place the author's own keys appear.
     const M = "ZZ_MARKER";
     const cyclic: Record<string, unknown> = { [M]: M };
     cyclic[`${M}_self`] = cyclic;
@@ -1247,6 +1242,14 @@ describe("mergeLayers: layer-boundary refusals", () => {
       ["an entry without its key", { labels: [{ color: M, [M]: M }] }],
       ["a milestone without its key", { milestones: [{ description: M }] }],
       ["two entries claiming one key", { labels: [{ name: M }, { name: M.toLowerCase() }] }],
+      ["a removal marker that is not true", { labels: [{ name: M, _remove: M }] }],
+      // The refusal names the extra field, the author's key, so only the value stands in for the marker here.
+      ["a removal beside other fields", { labels: [{ name: M, _remove: true, color: M }] }],
+      ["a removal with nothing below it", { labels: [{ name: M, _remove: true }] }],
+      [
+        "a removal under replace",
+        { labels: { _layering: "replace", entries: [{ name: M, _remove: true }] } },
+      ],
       ["a cycle", { repository: cyclic }],
     ];
     for (const [, doc, code, error] of shaped) {
@@ -1318,220 +1321,338 @@ describe("mergeLayers: cyclic documents", () => {
   });
 });
 
-describe("stripNulls", () => {
-  test("drops the nulls the merge reads as markers under deep and keeps the nulls it copies as data", () => {
-    const doc = deepFreeze({
-      a: null,
-      b: { c: null, d: 1, e: { f: null } },
-      list: [null, { g: null }],
-      branches: [null, { name: "release", protection: null, extra: null }],
-      environments: [
-        {
-          name: "prod",
-          wait_timer: null,
-          deployment_branch_policy: null,
-          variables: { _undeclared: null, entries: [{ name: "A", value: null }] },
-          secrets: [{ name: "B", value: null }],
+describe("mergeLayers: _remove drops a lower entry", () => {
+  const fleet = layer("fleet", {
+    labels: [
+      { name: "Bug", color: "111111" },
+      { name: "docs", color: "222222", new_name: "documentation" },
+    ],
+    rulesets: [MAIN_RULESET],
+    environments: [
+      {
+        name: "prod",
+        variables: {
+          _undeclared: "keep",
+          entries: [
+            { name: "REGION", value: "eu" },
+            { name: "TIMEOUT", value: "30" },
+          ],
         },
-      ],
-      workflows: { _layering: "shallow", entries: [{ path: "ci.yml", state: null }] },
-      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
-      milestones: { _undeclared: null, entries: [{ title: "v1", due_on: null }] },
-      rulesets: [
-        null,
-        {
-          name: "main",
-          bypass_actors: null,
-          conditions: { ref_name: { include: null, exclude: [] } },
-          rules: [null, { type: "pull_request", parameters: null }],
-        },
-      ],
-      pages: null,
-      zero: 0,
-    });
-    expect(stripNulls(doc, "deep")).toEqual({
-      b: { d: 1, e: {} },
-      list: [null, { g: null }],
-      branches: [null, { name: "release", protection: null }],
-      environments: [
-        {
-          name: "prod",
-          deployment_branch_policy: null,
-          variables: { entries: [{ name: "A" }] },
-          secrets: [{ name: "B" }],
-        },
-      ],
-      workflows: { _layering: "shallow", entries: [{ path: "ci.yml", state: null }] },
-      labels: { entries: [{ name: "bug" }] },
-      milestones: { entries: [{ title: "v1" }] },
-      rulesets: [
-        null,
-        {
-          name: "main",
-          conditions: { ref_name: { exclude: [] } },
-          rules: [null, { type: "pull_request" }],
-        },
-      ],
-      pages: null,
-      zero: 0,
-    });
+        reviewers: [
+          { type: "User", id: 1 },
+          { type: "Team", id: 1 },
+        ],
+      },
+    ],
   });
 
-  test("the wrapper form of a keyed section is entered like the plain list", () => {
-    const doc = deepFreeze({
-      rulesets: { _undeclared: "keep", entries: [{ name: "main", bypass_actors: null }] },
-    });
-    expect(stripNulls(doc, "deep")).toEqual({
-      rulesets: { _undeclared: "keep", entries: [{ name: "main" }] },
-    });
-  });
-
-  test.each([
-    ["before", (shared: unknown) => ({ _template: shared, rulesets: shared })],
-    ["after", (shared: unknown) => ({ rulesets: shared, _template: shared })],
-  ])(
-    "a wrapper aliased under a non-section key %s the section is stripped by the position it sits in, not the one first met",
-    (_order, compose) => {
-      const shared = { entries: [{ name: "main", bypass_actors: null }] };
-      expect(stripNulls(deepFreeze(compose(shared)), "deep")).toEqual({
-        _template: { entries: [{ name: "main", bypass_actors: null }] },
-        rulesets: { entries: [{ name: "main" }] },
+  test.each<Exclude<Layering, "replace">>(["shallow", "deep"])(
+    "under %s a removal drops the lower entry it claims (case-folded, or through a rename target), is never placed, and is a notice by its index",
+    (layering) => {
+      const result = merge(
+        [
+          fleet,
+          layer("repo", {
+            labels: [
+              { name: "infra" },
+              { name: "bug", _remove: true },
+              { name: "documentation", _remove: true },
+            ],
+          }),
+        ],
+        layering,
+      );
+      expect(result).toEqual({
+        settings: {
+          labels: { _undeclared: "delete", entries: [{ name: "infra" }] },
+          rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] },
+          environments: (fleet.doc as { environments: unknown }).environments,
+        },
+        notices: [
+          { layer: "repo", path: "labels[1]" },
+          { layer: "repo", path: "labels[2]" },
+        ],
       });
     },
   );
 
-  test("a null at a null-valued entry path is the value under deep, in the per-layer view and the fold alike; a null elsewhere in the entry is still a marker", () => {
-    // custom_properties' `value: null` unsets the property, so a lone layer saying it validates and a higher one writes it over the lower value with no notice.
-    const lower = { custom_properties: [{ property_name: "pilot", value: "true", note: "lower" }] };
-    const higher = deepFreeze({
-      custom_properties: [{ property_name: "pilot", value: null, note: null }],
-    });
-    expect(stripNulls(higher, "deep")).toEqual({
-      custom_properties: [{ property_name: "pilot", value: null }],
-    });
-    expect(merge([layer("fleet", lower), layer("repo", higher)])).toEqual({
+  test("under deep a removal reaches a nested list in either form, through a merged parent pair, and the wrapper's policy survives", () => {
+    const result = merge([
+      fleet,
+      layer("repo", {
+        rulesets: [{ name: "main", rules: [{ type: "deletion", _remove: true }] }],
+        environments: [
+          {
+            name: "Prod",
+            variables: [{ name: "region", _remove: true }],
+            reviewers: [{ type: "Team", id: 1, _remove: true }],
+          },
+        ],
+      }),
+    ]);
+    expect(result).toEqual({
       settings: {
-        custom_properties: {
-          _undeclared: "keep",
-          entries: [{ property_name: "pilot", value: null }],
-        },
-      },
-      notices: [{ layer: "repo", path: "custom_properties[0].note" }],
-    });
-  });
-
-  test("the merge agrees: a lower layer declaring every stripped key is deleted with a notice, the kept nulls survive as data or as the section value", () => {
-    const fleet = layer("fleet", {
-      a: 1,
-      b: { c: 2, e: { f: 3 } },
-      labels: { _undeclared: "keep", entries: [{ name: "bug", description: "Fleet bug" }] },
-      rulesets: [
-        {
-          name: "main",
-          bypass_actors: [{ actor_id: 1 }],
-          conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } },
-          rules: [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
-        },
-      ],
-      pages: { build_type: "workflow" },
-    });
-    const repo = layer("repo", {
-      a: null,
-      b: { c: null, e: { f: null } },
-      pages: null,
-      branches: [{ name: "release", protection: null }],
-      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
-      rulesets: [
-        {
-          name: "main",
-          bypass_actors: null,
-          conditions: { ref_name: { include: null, exclude: [] } },
-          rules: [{ type: "pull_request", parameters: null }],
-        },
-      ],
-    });
-    expect(merge([fleet, repo])).toEqual({
-      settings: {
-        b: { e: {} },
-        labels: { _undeclared: "delete", entries: [{ name: "bug" }] },
-        rulesets: {
-          _undeclared: "keep",
+        labels: {
+          _undeclared: "delete",
           entries: [
-            {
-              name: "main",
-              conditions: { ref_name: { exclude: [] } },
-              rules: [{ type: "pull_request" }],
-            },
+            { name: "Bug", color: "111111" },
+            { name: "docs", color: "222222", new_name: "documentation" },
           ],
         },
-        pages: null,
-        branches: [{ name: "release", protection: null }],
+        rulesets: {
+          _undeclared: "keep",
+          entries: [{ ...MAIN_RULESET, rules: MAIN_RULESET.rules.slice(1) }],
+        },
+        environments: [
+          {
+            name: "Prod",
+            variables: { _undeclared: "keep", entries: [{ name: "TIMEOUT", value: "30" }] },
+            reviewers: [{ type: "User", id: 1 }],
+          },
+        ],
       },
       notices: [
-        { layer: "repo", path: "a" },
-        { layer: "repo", path: "b.c" },
-        { layer: "repo", path: "b.e.f" },
-        { layer: "repo", path: "labels._undeclared" },
-        { layer: "repo", path: "labels[0].description" },
-        { layer: "repo", path: "rulesets[0].bypass_actors" },
-        { layer: "repo", path: "rulesets[0].conditions.ref_name.include" },
-        { layer: "repo", path: "rulesets[0].rules[0].parameters" },
+        { layer: "repo", path: "rulesets[0].rules[0]" },
+        { layer: "repo", path: "environments[0].variables[0]" },
+        { layer: "repo", path: "environments[0].reviewers[0]" },
       ],
     });
   });
 
-  test("a layer nulling a ruleset key validates alone once stripped, merges with a notice, and the merged document validates", () => {
-    const lower = { rulesets: [{ ...MAIN_RULESET, bypass_actors: [{ actor_id: 1 }] }] };
-    const upper = deepFreeze({ rulesets: [{ name: "main", bypass_actors: null }] });
-    // Widened so the whole verdict can be pinned by value; the brand is opaque to toEqual.
-    const validate = (doc: unknown): unknown =>
-      validateSettingsDoc(doc, "repo", SectionSelection.ALL, silentIo());
-    expect(validate(upper)).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "repo",
-        issues: [expect.stringContaining("rulesets")],
-      }),
+  test("a removal is consumed at its own step: the next layer may declare the key anew", () => {
+    const result = merge([
+      fleet,
+      layer("team", { labels: [{ name: "bug", _remove: true }] }),
+      layer("repo", { labels: [{ name: "bug", color: "333333" }] }),
+    ]);
+    expect(
+      (result as { settings: { labels: { entries: unknown } } }).settings.labels.entries,
+    ).toEqual([
+      { name: "docs", color: "222222", new_name: "documentation" },
+      { name: "bug", color: "333333" },
+    ]);
+  });
+
+  test.each<[string, Layering, unknown, LayerProblem["code"], string]>([
+    [
+      "a marker that is not true",
+      "deep",
+      { labels: [{ name: "bug", _remove: "yes" }] },
+      "layer-remove-not-true",
+      'layer "repo": labels[0]._remove takes only true; got a string. Write _remove: true to drop the lower entry, or remove the key to keep it',
+    ],
+    [
+      "a removal beside other fields",
+      "deep",
+      { labels: [{ name: "bug", _remove: true, color: "ffffff", description: "x" }] },
+      "layer-remove-with-fields",
+      'layer "repo": labels[0] carries _remove: true beside "color", "description"; a removal names its name and nothing else. Drop the fields, or the marker',
+    ],
+    [
+      "a removal carrying a field inside its key's container",
+      "deep",
+      {
+        webhooks: [{ config: { url: "https://hooks.example.com/a", secret: "s" }, _remove: true }],
+      },
+      "layer-remove-with-fields",
+      'layer "repo": webhooks[0] carries _remove: true beside "config.secret"; a removal names its config.url and nothing else. Drop the field, or the marker',
+    ],
+    [
+      "a removal whose key container is not a mapping",
+      "deep",
+      { webhooks: [{ config: "https://hooks.example.com/a", _remove: true }] },
+      "layer-remove-with-fields",
+      'layer "repo": webhooks[0] carries _remove: true beside "config"; a removal names its config.url and nothing else. Drop the field, or the marker',
+    ],
+    [
+      "a composite-key removal carrying a field beside its two key fields",
+      "deep",
+      {
+        environments: [
+          {
+            name: "prod",
+            reviewers: [{ type: "User", id: 1, prevent_self_review: true, _remove: true }],
+          },
+        ],
+      },
+      "layer-remove-with-fields",
+      'layer "repo": environments[0].reviewers[0] carries _remove: true beside "prevent_self_review"; a removal names its type and id and nothing else. Drop the field, or the marker',
+    ],
+    [
+      "a removal spelling its nested key as one literal dotted field beside the nested one",
+      "deep",
+      {
+        webhooks: [
+          {
+            config: { url: "https://hooks.example.com/a" },
+            "config.url": "ignored",
+            _remove: true,
+          },
+        ],
+      },
+      "layer-remove-with-fields",
+      'layer "repo": webhooks[0] carries _remove: true beside "config.url"; a removal names its config.url and nothing else. Drop the field, or the marker',
+    ],
+    [
+      "a composite-key removal whose type is not a string",
+      "deep",
+      {
+        environments: [{ name: "prod", reviewers: [{ type: ["User"], id: 1, _remove: true }] }],
+      },
+      "layer-no-key",
+      'layer "repo": environments[0].reviewers[0] carries no numeric "id" paired with its "type", which every entry needs to layer by',
+    ],
+    [
+      "a removal renaming as it removes",
+      "deep",
+      { labels: [{ name: "bug", new_name: "defect", _remove: true }] },
+      "layer-remove-with-fields",
+      'layer "repo": labels[0] carries _remove: true beside "new_name"; a removal names its name and nothing else. Drop the field, or the marker',
+    ],
+    [
+      "a removal under the run's replace",
+      "replace",
+      { labels: [{ name: "bug", _remove: true }] },
+      "layer-remove-nothing",
+      'layer "repo": labels[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key',
+    ],
+    [
+      "a removal under the wrapper's replace",
+      "deep",
+      {
+        labels: {
+          _layering: "replace",
+          entries: [{ name: "docs" }, { name: "bug", _remove: true }],
+        },
+      },
+      "layer-remove-nothing",
+      'layer "repo": labels[1] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key',
+    ],
+    [
+      "a nested removal under replace",
+      "deep",
+      {
+        rulesets: {
+          _layering: "replace",
+          entries: [{ name: "main", rules: [{ type: "deletion", _remove: true }] }],
+        },
+      },
+      "layer-remove-nothing",
+      'layer "repo": rulesets[0].rules[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key',
+    ],
+    [
+      "a removal no lower layer matches",
+      "deep",
+      { labels: [{ name: "wontfix", _remove: true }] },
+      "layer-remove-nothing",
+      'layer "repo": labels[0] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key',
+    ],
+    [
+      "a removal naming a dotted key and nothing else, with nothing below it",
+      "deep",
+      { webhooks: [{ config: { url: "https://hooks.example.com/a" }, _remove: true }] },
+      "layer-remove-nothing",
+      'layer "repo": webhooks[0] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key',
+    ],
+    [
+      "a removal in a section no lower layer declares",
+      "deep",
+      { milestones: [{ title: "v1", _remove: true }] },
+      "layer-remove-nothing",
+      'layer "repo": milestones[0] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key',
+    ],
+    [
+      "a nested removal inside a new entry under deep",
+      "deep",
+      { rulesets: [{ name: "tags", rules: [{ type: "deletion", _remove: true }] }] },
+      "layer-remove-nothing",
+      'layer "repo": rulesets[0].rules[0] carries _remove: true, but its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove. Remove the entry, or fix its key',
+    ],
+    [
+      "a nested removal under shallow, where the parent is swapped whole",
+      "shallow",
+      { rulesets: [{ name: "main", rules: [{ type: "deletion", _remove: true }] }] },
+      "layer-remove-nothing",
+      'layer "repo": rulesets[0].rules[0] carries _remove: true, but its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove. Remove the entry, or fix its key',
+    ],
+    [
+      "a nested removal in a list the lower entry lacks",
+      "deep",
+      { environments: [{ name: "prod", secrets: [{ name: "TOKEN", _remove: true }] }] },
+      "layer-remove-nothing",
+      'layer "repo": environments[0].secrets[0] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key',
+    ],
+  ])("%s is refused naming the layer and the entry", (_case, layering, doc, code, error) => {
+    expect(merge([fleet, layer("repo", doc)], layering)).toEqual({ code, error });
+  });
+
+  test("the notice line names the layer and the entry, never a value from the document", () => {
+    expect(describeRemoval({ layer: "repo.yml", path: "labels[1]" })).toBe(
+      "repo.yml: labels[1] carries _remove: true and dropped the entry a lower layer declared under its key",
     );
-    expect(validate(stripNulls(upper, "deep"))).toEqual(
-      ok({ rulesets: [{ name: "main", target: "branch", enforcement: "active" }] }),
-    );
-    const merged = merge([layer("fleet", lower), layer("repo", upper)]);
-    expect(merged).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },
-      notices: [{ layer: "repo", path: "rulesets[0].bypass_actors" }],
+  });
+});
+
+describe("standaloneView", () => {
+  test("drops the two directives the fold consumes and keeps every value, null included", () => {
+    const doc = deepFreeze({
+      _layering: "replace",
+      a: null,
+      repository: { description: null, has_wiki: false },
+      pages: null,
+      labels: {
+        _layering: "shallow",
+        _undeclared: null,
+        entries: [
+          { name: "bug", description: null },
+          { name: "old", _remove: true },
+        ],
+      },
+      milestones: [{ title: "v1" }, { title: "v0", _remove: true }],
+      environments: [
+        {
+          name: "prod",
+          wait_timer: null,
+          variables: {
+            _undeclared: "keep",
+            entries: [
+              { name: "A", value: "1" },
+              { name: "B", _remove: true },
+            ],
+          },
+          secrets: [{ name: "C", _remove: true }],
+          typo: [{ name: "D", _remove: true }],
+        },
+      ],
+      rulesets: [
+        {
+          name: "main",
+          rules: [{ type: "deletion", _remove: true }, { type: "non_fast_forward" }],
+        },
+      ],
     });
-    if ("error" in merged) {
-      throw new Error(merged.error);
-    }
-    expect(validate(merged.settings)).toEqual(
-      ok({ rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } }),
-    );
+    expect(standaloneView(doc)).toEqual({
+      a: null,
+      repository: { description: null, has_wiki: false },
+      pages: null,
+      labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
+      milestones: [{ title: "v1" }],
+      environments: [
+        {
+          name: "prod",
+          wait_timer: null,
+          variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+          secrets: [],
+          // Not a keyed list the module declares: data to the fold, so its marker stays for the validator to name.
+          typo: [{ name: "D", _remove: true }],
+        },
+      ],
+      rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
+    });
   });
 
-  test("a key named __proto__ survives as an own property", () => {
-    const proto = "__proto__";
-    const out = stripNulls(JSON.parse('{"__proto__": {"a": null, "b": 1}}'), "deep") as Record<
-      string,
-      unknown
-    >;
-    expect(out).toEqual({ [proto]: { b: 1 } });
-    expect(Object.hasOwn(out, proto)).toBe(true);
-  });
-
-  test("a non-mapping document comes back as a clone", () => {
-    const list = deepFreeze([{ a: null }]);
-    const out = stripNulls(list, "deep");
-    expect(out).toEqual([{ a: null }]);
-    expect(out).not.toBe(list);
-  });
-
-  test("a document that includes itself comes back as a cyclic clone with its marker nulls dropped", () => {
-    const doc = deepFreeze(cyclicMapping());
-    const repository: Record<string, unknown> = { description: "x" };
-    repository.self = repository;
-    const out = stripNulls(doc, "deep");
-    expect(out).toEqual({ repository });
-    expect(out).not.toBe(doc);
+  test("a non-mapping document passes through", () => {
+    expect(standaloneView(["a"])).toEqual(["a"]);
+    expect(standaloneView(null)).toBeNull();
   });
 });

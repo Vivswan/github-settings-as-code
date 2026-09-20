@@ -3,10 +3,72 @@
 import { err, ok, type Result } from "neverthrow";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
-import { SECTION_KEYS, type SettingsFile } from "../schema.js";
+import { LIST_SECTIONS, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { checksReportingBesideFailures, type DeclaredIssue } from "../sections/contract/module.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
+
+const LIST_KEYS: ReadonlySet<string> = new Set(LIST_SECTIONS);
+
+/** The value at an issue's path, so a null the author wrote can be told from a type the author got wrong. */
+function valueAt(root: unknown, path: readonly PropertyKey[]): unknown {
+  let node: unknown = root;
+  for (const step of path) {
+    if (typeof node !== "object" || node === null) {
+      return undefined;
+    }
+    node = (node as Record<PropertyKey, unknown>)[step];
+  }
+  return node;
+}
+
+/** zod's issue fields this module reads; `legal` is this action's own, set where a shape refuses null itself. */
+interface NullIssue {
+  code: string;
+  expected?: string;
+  values?: readonly unknown[];
+  errors?: readonly (readonly NullIssue[])[];
+  params?: { legal?: string };
+}
+
+/** The values a key that refused null does take, in the words of the fix: "true or false", "a string ("" for none)". */
+function legalValues(issue: NullIssue): string {
+  if (issue.params?.legal !== undefined) {
+    return issue.params.legal;
+  }
+  switch (issue.code) {
+    case "invalid_type":
+      return legalOfType(issue.expected);
+    case "invalid_value":
+      return `one of ${(issue.values ?? []).map((value) => JSON.stringify(value)).join(", ")}`;
+    case "invalid_union": {
+      const kinds = new Set(
+        (issue.errors ?? []).flatMap((arm) => arm.map((inner) => legalValues(inner))),
+      );
+      return [...kinds].join(", or ");
+    }
+    default:
+      return "a value of the key's own type";
+  }
+}
+
+function legalOfType(expected: string | undefined): string {
+  switch (expected) {
+    case "boolean":
+      return "true or false";
+    case "string":
+      return 'a string ("" for none)';
+    case "number":
+    case "int":
+      return "a number";
+    case "array":
+      return "a list ([] for none)";
+    case "object":
+      return "a mapping of its fields";
+    default:
+      return expected === undefined ? "a value of the key's own type" : `a ${expected}`;
+  }
+}
 
 /**
  * One walk over a section's value for what no shape can judge, so a new mapping or passthrough field needs no guard
@@ -129,6 +191,15 @@ export function validateSectionShapes(
     if (declared === undefined) {
       continue;
     }
+    const shape = sectionShape(key);
+    // A null section is a value only where the section has an off state (Pages, interaction limits); elsewhere it
+    // declares nothing and the layered fold would write it as such, so it is refused before any shape parse.
+    if (declared === null && !shape.safeParse(null).success) {
+      problems.push(
+        `${key}: null has no meaning; remove the section or declare its ${LIST_KEYS.has(key) ? "entries" : "fields"}`,
+      );
+      continue;
+    }
     // Before the shape parse: zod would accept the tagged value as an empty mapping and never report it.
     const nonPlain = findOffending(declared, key, nonPlainOffence, "pass");
     if (nonPlain !== null) {
@@ -136,13 +207,20 @@ export function validateSectionShapes(
       continue;
     }
     // The section may compose a rule onto its loosened shape; loosen() itself covers every check beneath.
-    const parsed = checksReportingBesideFailures(sectionShape(key)).safeParse(declared);
+    const parsed = checksReportingBesideFailures(shape).safeParse(declared);
     if (!parsed.success) {
       const issues = parsed.error.issues;
       for (const issue of issues.slice(0, 5)) {
         const path = issue.path
           .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
           .join("");
+        // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that exist.
+        if (valueAt(declared, issue.path) === null) {
+          problems.push(
+            `${key}${path} has no empty state; write ${legalValues(issue as NullIssue)}`,
+          );
+          continue;
+        }
         problems.push(`${key}${path}: ${issue.message}`);
       }
       if (issues.length > 5) {

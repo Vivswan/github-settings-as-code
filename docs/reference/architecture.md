@@ -20,7 +20,7 @@ That block counts the remaining throws per file. The lint fails when the block a
 flowchart TD
   read["src/flows/settings-read.ts<br>readSettingsFile()"]
   mode{"mode"}
-  fold["src/engine/layers.ts<br>stripNulls() mergeLayers()"]
+  fold["src/engine/layers.ts<br>standaloneView() mergeLayers()"]
   validate["src/engine/orchestrate.ts<br>validateSettingsDoc()"]
   merged["rendered-file"]
   repo["src/engine/orchestrate.ts<br>runForRepo()"]
@@ -32,7 +32,7 @@ flowchart TD
   report["src/flows/deliver.ts<br>concludeRun()"]
   read -->|YAML text, parsed to an unknown document per file| mode
   mode -->|render: every layer, each validated on its own first| fold
-  fold -->|one folded document, a notice per null opt-out| validate
+  fold -->|one folded document, a notice per removal| validate
   mode -->|check or apply: the one file| validate
   validate -->|ValidatedSettings, in render mode| merged
   validate -->|ValidatedSettings, in check or apply| repo
@@ -107,7 +107,7 @@ flowchart BT
   team["team.yml"]
   repo["repo.yml, the highest layer"]
   out["the merged document<br>src/engine/layers.ts mergeLayers()"]
-  fleet -->|mappings merge, lists replace, null deletes, or is the value on pages and interaction_limits| team
+  fleet -->|mappings merge, list sections union by key, every other value wins whole, null included| team
   team -->|list sections union by key| repo
   repo -->|_undeclared resolved, _layering consumed| out
 ```
@@ -115,12 +115,12 @@ flowchart BT
 The stack folds bottom up, one layer per step:
 
 - The higher layer's mappings merge key by key; its scalars and lists replace.
-- Its `null` deletes what a lower layer declared, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such.
+- Its `null` wins like any value and is written as such: the empty or off state on GitHub, refused by validation where a key has none. Its `_remove: true` on a keyed entry drops the lower entry under that key.
 - The list sections (`labels`, `rulesets`, every other section with an `_undeclared` knob, and the three plain lists `environments`, `branches`, and `workflows`) union their entries by the section's key instead of replacing; a same-key pair merges field by field under `deep`, is swapped under `shallow`, and the whole list is replaced under `replace`.
 
 The [layering guide](../operate/layering.md) has the full rule table and a worked example.
 
-Demonstrated by: [test/e2e/scenarios/render-union-optout.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-union-optout.yml), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
+Demonstrated by: [test/e2e/scenarios/render-null-wins.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-null-wins.yml), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
 
 ## Trust and provenance
 

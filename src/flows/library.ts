@@ -6,7 +6,7 @@
 
 import type { Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
-import type { Layer, Layering, OptOutNotice } from "../engine/layers.js";
+import type { Layer, Layering, RemovalNotice } from "../engine/layers.js";
 import {
   type RepoRunOptions,
   type RepoRunResult,
@@ -77,10 +77,10 @@ export interface MergeOptions {
   io?: Io;
 }
 
-/** The fold's result: the merged document, its opt-out notices, and the file text mode: render writes, byte for byte. */
+/** The fold's result: the merged document, its removal notices, and the file text mode: render writes, byte for byte. */
 export interface MergeReport {
   settings: ValidatedSettings;
-  notices: OptOutNotice[];
+  notices: RemovalNotice[];
   yaml: string;
   log: CollectedLine[];
 }

@@ -1,6 +1,8 @@
 repository:
-  has_projects: null
+  has_issues: true
 labels:
+  - name: bug
+    _remove: true
   - name: team
     color: "00ff00"
 rulesets:

@@ -55,6 +55,14 @@ Three sections illustrate the range of default policies:
 
 Every section's own default is stated in the [Sections table](sections.md)'s Undeclared default column, and the [undeclared policy](undeclared-policy.md) page covers the knob that overrides it.
 
+## Null is the empty state
+
+A `null` in the settings file is a declared value: the EMPTY or OFF state on GitHub (`pages: null` turns Pages off, `cname: null` removes the custom domain, `protection: null` strips a branch's protection). A key with no empty state refuses it at validation, naming the values that exist: `repository.enable_git_lfs has no empty state; write true or false`.
+
+A whole section takes `null` only where `null` is its off state (`pages`, `interaction_limits`).
+
+A file written by hand and a file `mode: render` folded mean the same thing by it. The [layering guide](../operate/layering.md) covers how a higher layer's `null` wins and how `_remove` drops a keyed entry instead.
+
 ## Errors and retries
 
 Permission failures (403, or 404 on admin endpoints with a fine-grained token) are the only softenable errors; everything else always fails with the API message verbatim. The [permissions page](permissions.md) covers the `on-missing-permission` and `required-sections` inputs that do the softening.

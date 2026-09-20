@@ -2,7 +2,7 @@ name: repository-null-toggle-rejected
 description: >
   A repository toggle declared as null (has_wiki with no value) is refused when the
   file is parsed, before any API contact: the PATCH takes true or false and answers
-  422 to null. The message names the two legal values.
+  422 to null. The validator's null rule names the two legal values.
 settings:
   repository:
     has_issues: true
@@ -15,4 +15,4 @@ expect:
   zero_requests: true
   stdout_contains:
     - repository.has_wiki
-    - a toggle has no empty state; write true or false
+    - repository.has_wiki has no empty state; write true or false
