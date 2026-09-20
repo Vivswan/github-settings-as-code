@@ -22,13 +22,14 @@ import type { GitHubClient } from "../../github/api.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
 import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
+import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import { environmentsMockGraphqlHandlers, environmentsMockHandlers } from "./mock.js";
 import { GRAPHQL_OPS } from "./pins.js";
-import type {
-  DeploymentBranchPolicyConfig,
+import {
+  type DeploymentBranchPolicyConfig,
   EnvironmentConfig,
-  EnvironmentVariableConfig,
+  type EnvironmentVariableConfig,
 } from "./schema.js";
 import { sharedSecretNotes, withPins } from "./snapshot.js";
 
@@ -1232,6 +1233,20 @@ describe("environments deployment protection rules validation and shape", () => 
       shape.safeParse([{ name: "prod", deployment_protection_rules: { entires: [], entries: [] } }])
         .success,
     ).toBe(false);
+  });
+
+  test("a required_reviewers rule without reviewers reads prevent_self_review back as off", () => {
+    // The schema refuses the flag without a reviewer, so the snapshot of such a body must not carry it.
+    const flattened = flattenEnvironment({
+      name: "prod",
+      protection_rules: [
+        { id: 7, type: "required_reviewers", prevent_self_review: true, reviewers: [] },
+      ],
+    });
+    expect(flattened).toMatchObject({ prevent_self_review: false, reviewers: [] });
+    expect(
+      EnvironmentConfig.safeParse(projectOntoSchema(EnvironmentConfig, flattened)).success,
+    ).toBe(true);
   });
 
   test("a custom-rule protection_rules entry flattens without leaking keys", () => {

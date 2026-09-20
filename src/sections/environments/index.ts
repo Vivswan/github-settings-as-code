@@ -215,10 +215,10 @@ export function flattenEnvironment(live: LiveEnvironmentBody): Record<string, un
     if (rule.type === "wait_timer") {
       out.wait_timer = rule.wait_timer;
     } else if (rule.type === "required_reviewers") {
-      if (rule.prevent_self_review !== undefined) {
-        out.prevent_self_review = rule.prevent_self_review;
-      }
-      out.reviewers = (rule.reviewers ?? []).map((r) => ({ type: r.type, id: r.reviewer?.id }));
+      const reviewers = rule.reviewers ?? [];
+      // The flag counts only with a reviewer to apply it to, the combination the schema accepts.
+      out.prevent_self_review = rule.prevent_self_review === true && reviewers.length > 0;
+      out.reviewers = reviewers.map((r) => ({ type: r.type, id: r.reviewer?.id }));
     } else {
       // Unknown rule types un-nest generically, or a declared setting of theirs would read as drift.
       for (const [key, value] of Object.entries(rule)) {
