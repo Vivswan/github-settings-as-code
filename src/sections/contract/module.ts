@@ -642,7 +642,7 @@ export function loosen(schema: z.ZodType): z.ZodType {
       if (knob !== null) {
         if ((def.checks?.length ?? 0) > 0) {
           throw new Error(
-            "loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+            "BUG: loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
           );
         }
         return routedListShape(loosen(knob.list), loosen(knob.wrapper));
@@ -652,7 +652,7 @@ export function loosen(schema: z.ZodType): z.ZodType {
     default:
       if (!LOOSEN_LEAF_TYPES.has(def.type)) {
         throw new Error(
-          `loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
+          `BUG: loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
         );
       }
       return schema;

@@ -112,7 +112,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
     default:
       if (!LEAF_TYPES.has(def.type)) {
         throw new Error(
-          `projectOntoSchema(): unhandled schema type "${def.type}" - teach the projection its walk before authoring it in a section slice`,
+          `BUG: projectOntoSchema(): unhandled schema type "${def.type}" - teach the projection its walk before authoring it in a section slice`,
         );
       }
       return live;

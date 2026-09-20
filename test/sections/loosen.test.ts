@@ -74,7 +74,7 @@ describe("loosen", () => {
       .superRefine(() => {});
     expect(() => loosen(knob)).toThrow(
       new Error(
-        "loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+        "BUG: loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
       ),
     );
   });
@@ -82,7 +82,7 @@ describe("loosen", () => {
   test("an unrecognized container type fails loudly instead of skipping the derivation", () => {
     expect(() => loosen(z.tuple([z.string()]))).toThrow(
       new Error(
-        'loosen(): unhandled schema type "tuple" - teach loosen() its runtime derivation before authoring it in src/schema.ts',
+        'BUG: loosen(): unhandled schema type "tuple" - teach loosen() its runtime derivation before authoring it in src/schema.ts',
       ),
     );
   });

@@ -10,6 +10,10 @@ The check is existence only: a caption-only box (`mode`, `rendered-file`) names 
 
 The [module map](#the-module-map) at the end is generated from [architecture.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/architecture.yml). The `lint:arch` script keeps that declaration equal to the import graph, so the map cannot show an edge the code does not draw.
 
+It also enforces the never-throw rule: errors are values, a neverthrow `Result` carrying a typed `Problem`. A `throw` is allowed only as a `BUG:` invariant, a bare rethrow directly in its `catch`, or in a file the `throws` block of architecture.yml names.
+
+That block counts the remaining throws per file. The lint fails when the block and the tree disagree in either direction; that a count only goes down is the review rule in AGENTS.md.
+
 ## The journey of one settings file
 
 ```mermaid
