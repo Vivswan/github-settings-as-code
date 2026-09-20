@@ -13,12 +13,23 @@ coverage:
       branches' protection: null. In a mode: merge fold, pages: null is written as the section's
       value even over a lower layer's pages declaration, so the merged file turns the site off (the
       layering guide owns that rule); a multi-repo defaults-file never merges into a target's file.
-      The Enterprise Cloud site-visibility boolean `public` (public vs repo-members-only) rides the
-      PUT passthrough too -
-      the dotcom docs omit it but the GHEC flavor documents it, and the GET echoes it in both, so
-      declaring it applies and check-verifies today.
       Snapshot reads the live site back on the declared keys; a repository without Pages is omitted
       rather than declared null.
+  - area: >-
+      [Fields the Pages update ignores](https://docs.github.com/en/rest/pages/pages#update-information-about-a-github-pages-site)
+    notes: >-
+      Parsing the file refuses the fields only the site GET reports (url, html_url, status,
+      custom_404, protected_domain_state, pending_domain_unverified_at, https_certificate) and a
+      source.path other than / or /docs, the only directories Pages publishes from. Sent, GitHub
+      would drop the fields and report them as drift on every run, and the path would 422 at apply.
+      A workflow-built site still reports its source, so build_type: workflow beside a source
+      converges.
+  - area: >-
+      [Pages site visibility](https://docs.github.com/en/enterprise-cloud@latest/rest/pages/pages#update-information-about-a-github-pages-site)
+    notes: >-
+      The boolean `public` rides the PUT passthrough. Only an organization on Enterprise Cloud can
+      set it; everywhere else GitHub reports public: true and ignores the field, so a public: false
+      declaration drifts on every run and the check run's note says why.
 schema:
   SettingsFile.pages: GitHub Pages configuration; null disables Pages on the repository.
   PagesConfig: "GitHub Pages site configuration; use `pages: null` to disable the site."
@@ -29,5 +40,6 @@ schema:
   PagesConfig.cname: Custom domain; null removes it.
   PagesConfig.https_enforced: Whether HTTPS is enforced for the site.
   PagesConfig.public: >-
-    Enterprise Cloud site visibility: true for public, false for repository members only. Documented
-    only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.
+    Enterprise Cloud site visibility: true for public, false for repository members only. Only an
+    organization on Enterprise Cloud can set it; everywhere else GitHub reports true and ignores the
+    field, so false drifts on every run.

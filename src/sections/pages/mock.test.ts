@@ -43,6 +43,24 @@ describe("pages mock handlers", () => {
     });
   });
 
+  test("PUT stores only the update body's fields, so a key github.com ignores cannot fake convergence here", () => {
+    // github.com drops `public` (Enterprise Cloud only) and every GET-only field from the update; an echoing mock hid that.
+    const state = slugged({ build_type: "workflow", public: true, custom_404: false });
+    const response = handler("pages.update")(
+      handlerTestContext("pages.update", state, {
+        body: { cname: "docs.example.com", public: false, custom_404: true, status: "built" },
+      }),
+    );
+    expect(response.status).toBe(204);
+    expect(state.pages).toEqual({
+      url: "https://api.github.com/repos/acme/private/pages",
+      build_type: "workflow",
+      public: true,
+      custom_404: false,
+      cname: "docs.example.com",
+    });
+  });
+
   test("create mints the Pages url from the state slug", () => {
     const state = slugged(null);
     const response = handler("pages.create")(

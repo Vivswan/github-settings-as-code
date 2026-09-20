@@ -51,6 +51,10 @@ type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
  */
 const LiveSite = z.looseObject({});
 
+/** Site visibility is an Enterprise Cloud organization feature; github.com reports `public: true` and drops the field from the update, so nothing in the file can tell the two apart. */
+const PUBLIC_VISIBILITY_NOTE =
+  "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; elsewhere GitHub reports public: true and ignores the field on the update, so this drift never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization";
+
 export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
@@ -102,6 +106,9 @@ export const pagesSection = {
           drift,
           change: "updated GitHub Pages configuration",
         });
+        if (payload.public !== undefined && probe.data.public !== payload.public) {
+          plan.notes.push(PUBLIC_VISIBILITY_NOTE);
+        }
       }
       return plan;
     }
