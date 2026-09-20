@@ -447,6 +447,36 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
+    // The section has no read endpoint, so an id GitHub 422s or a pair it silently collapses can only be refused here.
+    name: "check-suite-app-id-not-positive-integer",
+    build: (rng) => ({
+      doc: {
+        check_suite_preferences: {
+          auto_trigger_checks: [{ app_id: rng.pick([0, -15368, 15368.5] as const), setting: true }],
+        },
+      },
+      offendingToken: "check_suite_preferences.auto_trigger_checks[0].app_id",
+    }),
+  },
+  {
+    name: "check-suite-duplicate-app-id",
+    build: (rng) => {
+      const app_id = rng.pick([15368, 29310] as const);
+      return {
+        doc: {
+          check_suite_preferences: {
+            auto_trigger_checks: [
+              { app_id, setting: rng.bool() },
+              { app_id: 62410, setting: true },
+              { app_id, setting: rng.bool() },
+            ],
+          },
+        },
+        offendingToken: `check_suite_preferences.auto_trigger_checks[2].app_id: repeats app_id ${app_id} from auto_trigger_checks[0]`,
+      };
+    },
+  },
+  {
     name: "pages-wrong-type",
     build: (rng) => ({
       doc: { pages: rng.pick(["gh-pages", [1]] as const) },
