@@ -1,0 +1,47 @@
+# Declaring `bypass_actors: []` is the on-purpose removal the omitted-value drift line offers: the
+# live ruleset carries a bypass actor, the file declares the empty list, so apply's one PUT clears
+# it and the rerun reads back an empty list that matches the declaration.
+name: rulesets-apply-empty-bypass-actors-converges
+settings:
+  rulesets:
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  mutations:
+    - "PUT /repos/{repo}/rulesets/42"
+  stdout_contains:
+    - '"rules":[{"type":"deletion"}],"bypass_actors":[]}'
+  never:
+    - "POST /repos/{repo}/rulesets"
+  fixpoint: converges

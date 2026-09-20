@@ -5,6 +5,7 @@
  */
 
 import type { z } from "zod";
+import type { ReplaceSweep } from "../../engine/diff.js";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import { PermissionDenied } from "../contract/errors.js";
@@ -115,6 +116,61 @@ function project(schema: z.ZodType, live: unknown): unknown {
         );
       }
       return live;
+  }
+}
+
+/**
+ * What a replace-write comparison's omission sweep needs to know about a slice: the dotted paths where it stops
+ * typing keys (a record, an unknown, or an object with a catchall, a list item spelled `[]`: `rules[].parameters`,
+ * `bypass_actors[]`), which the sweep skips while the typed list key itself still counts, and the paths that accept
+ * `null`, whose clearing spelling is `null`.
+ */
+export function replaceSweep(schema: z.ZodType): ReplaceSweep {
+  const passthrough: string[] = [];
+  const nullable: string[] = [];
+  collectSweep(schema, "", passthrough, nullable);
+  return { passthrough, nullable };
+}
+
+function collectSweep(
+  schema: z.ZodType,
+  path: string,
+  passthrough: string[],
+  nullable: string[],
+): void {
+  const def = defOf(schema);
+  switch (def.type) {
+    case "optional":
+      collectSweep(def.innerType as z.ZodType, path, passthrough, nullable);
+      return;
+    case "nullable":
+      nullable.push(path);
+      collectSweep(def.innerType as z.ZodType, path, passthrough, nullable);
+      return;
+    case "array":
+      collectSweep(def.element as z.ZodType, `${path}[]`, passthrough, nullable);
+      return;
+    case "union":
+      for (const option of def.options ?? []) {
+        collectSweep(option, path, passthrough, nullable);
+      }
+      return;
+    case "object": {
+      if (def.catchall !== undefined && defOf(def.catchall).type !== "never") {
+        passthrough.push(path);
+        return;
+      }
+      for (const [key, child] of Object.entries(def.shape ?? {})) {
+        collectSweep(child, path === "" ? key : `${path}.${key}`, passthrough, nullable);
+      }
+      return;
+    }
+    case "record":
+    case "unknown":
+      passthrough.push(path);
+      return;
+    default:
+      return;
   }
 }
 

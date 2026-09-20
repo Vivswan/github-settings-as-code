@@ -43,7 +43,27 @@ export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
       refName.exclude = refName.exclude.map((v) => normalizeRefName(v, target));
     }
   }
+  if (copy.bypass_actors !== undefined) {
+    copy.bypass_actors = copy.bypass_actors.map(asStored);
+  }
   return copy;
+}
+
+/**
+ * An actor as GitHub stores it, on both operands of the comparison: the mode defaults to "always" (so an omitted
+ * mode is compared, not silently reset by the PUT), and an OrganizationAdmin actor's id, which GitHub ignores and
+ * answers as 1 or null, is 1.
+ */
+function asStored<A extends { actor_type?: unknown; actor_id?: unknown; bypass_mode?: unknown }>(
+  actor: A,
+): A {
+  // Assignment keeps a present key's position, so the line quoting the live actor reads in GitHub's order.
+  const stored = { ...actor };
+  stored.bypass_mode = actor.bypass_mode ?? "always";
+  if (actor.actor_type === "OrganizationAdmin") {
+    stored.actor_id = 1;
+  }
+  return stored;
 }
 
 /** The rule types a ruleset repeats; rules pair by type, so a repeat has no pairing. */
@@ -76,11 +96,26 @@ const LiveRuleset = z.looseObject({
   name: z.string(),
   source_type: z.string().optional(),
   rules: z.array(z.looseObject({ type: z.string() })).optional(),
+  // In GitHub's field order: the parsed shape sets the key order the drift line quotes a live actor in.
+  bypass_actors: z
+    .array(
+      z.looseObject({
+        actor_id: z.number().nullable().optional(),
+        actor_type: z.string().optional(),
+        bypass_mode: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 type LiveRuleset = z.infer<typeof LiveRuleset>;
 
-/** A live body repeating a rule type has no pairing either; GitHub keeps one rule per type, so this names a defect worth a look. */
-function pairableRuleset(live: LiveRuleset): LiveRuleset {
+/**
+ * The live body as the comparison reads it: its actors as stored (the same fold the declared side gets, so a live
+ * OrganizationAdmin id of null cannot loop against the declared 1), and its bypass_actors key kept absent when GitHub
+ * concealed it. A live body repeating a rule type has no pairing; GitHub keeps one rule per type, so that names a
+ * defect worth a look.
+ */
+function comparableRuleset(live: LiveRuleset): LiveRuleset {
   const repeated = repeatedRuleTypes(live.rules);
   if (repeated !== undefined) {
     throw new Error(
@@ -88,7 +123,9 @@ function pairableRuleset(live: LiveRuleset): LiveRuleset {
         "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
     );
   }
-  return live;
+  return live.bypass_actors === undefined
+    ? live
+    : { ...live, bypass_actors: live.bypass_actors.map(asStored) };
 }
 
 // Rules pass through verbatim, so a typo'd rules[].type reaches GitHub unchanged and comes back as
@@ -136,10 +173,11 @@ export const rulesetsSection = listSection({
     // The full ruleset is the wire body (a partial PUT narrows a ruleset). The slice types rule
     // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
     toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
-    fromLive: (live) => pairableRuleset(live),
-    // Rules pair by type, as the layered merge does; every other list pairs by shape.
-    matchBy: { rules: "type" },
+    fromLive: (live) => comparableRuleset(live),
+    // Rules pair by type, as the layered merge does; an actor is one per (type, id) pair, with no single identity field.
+    matchBy: { rules: "type", bypass_actors: ["actor_type", "actor_id"] },
   },
+  replaces: true,
   // GitHub keeps one rule per type, and the comparison pairs rules by it, so a repeated type is a settings-file mistake.
   conflicts: {
     declared: (writes) =>

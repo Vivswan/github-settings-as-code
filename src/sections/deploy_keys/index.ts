@@ -90,6 +90,7 @@ export const deployKeysSection = listSection({
     fromLive: (live) => ({ ...live, key: liveMaterial(live) }),
     matchBy: {},
   },
+  replaces: false,
   /**
    * GitHub creates a key READ/WRITE when the body omits read_only, and this file does not manage an
    * undeclared flag, so the flag reaches a create body only from a source that holds it:

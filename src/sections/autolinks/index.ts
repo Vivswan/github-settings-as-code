@@ -66,5 +66,6 @@ export const autolinksSection = listSection({
         }),
       ),
   },
+  replaces: false,
   prose: { undeclaredAction: "DELETE it" },
 });

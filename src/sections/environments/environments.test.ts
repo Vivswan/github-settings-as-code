@@ -119,6 +119,39 @@ describe("environments plan", () => {
     ]);
   });
 
+  test("the disabled protection values are never omitted drift: a bare entry plans clean against no rules and against rules holding them", async () => {
+    // flattenEnvironment starts from wait_timer 0 / prevent_self_review false / reviewers [], and the
+    // full-payload sweep treats those as nothing to preserve, whether the values come from the absence
+    // of a rule or from a rule that carries the disabled value itself.
+    const unprotected = new MockApi({ "GET /repos/o/r/environments/prod": liveEnv("prod") });
+    expect(await plan(unprotected, [{ name: "prod" }])).toEqual({ ops: [], notes: [], drift: [] });
+    const disabledRules = new MockApi({
+      "GET /repos/o/r/environments/prod": liveEnv("prod", {
+        protection_rules: [
+          { id: 1, type: "wait_timer", wait_timer: 0 },
+          { id: 2, type: "required_reviewers", prevent_self_review: false, reviewers: [] },
+        ],
+      }),
+    });
+    expect(await plan(disabledRules, [{ name: "prod" }])).toEqual({
+      ops: [],
+      notes: [],
+      drift: [],
+    });
+  });
+
+  test("an omitted live branch policy offers null as its clearing spelling, the one the slice accepts for that object", async () => {
+    const api = new MockApi({
+      "GET /repos/o/r/environments/prod": liveEnv("prod", {
+        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+      }),
+    });
+    expect((await check(api, [{ name: "prod" }])).drift).toEqual([
+      'environments[prod].deployment_branch_policy: live has {"protected_branches":true,"custom_branch_policies":false} but the settings file omits it, ' +
+        "so apply would REMOVE it; declare deployment_branch_policy to keep it, or deployment_branch_policy: null to remove it on purpose",
+    ]);
+  });
+
   test("a missing environment plans its PUT with the missing line, in both modes", async () => {
     const api = new MockApi({ "PUT /repos/o/r/environments/prod": { data: { name: "prod" } } });
     const planned = await plan(api, [{ name: "prod", wait_timer: 5 }]);
@@ -218,6 +251,26 @@ describe("environments variables check mode", () => {
     protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }],
   });
 
+  test("an entry declaring variables alone against a live wait timer: check names the timer the PUT would clear, apply refuses the PUT and writes nothing of the entry", async () => {
+    const routes = {
+      "GET /repos/o/r/environments/prod": liveProd,
+      [VARIABLES_LIST]: variablesBody([]),
+    };
+    const desired = [{ name: "prod", variables: [{ name: "A", value: "1" }] }];
+    const checked = await check(new MockApi(routes, { unroutedMutations: "succeed" }), desired);
+    expect(checked.drift).toEqual([
+      "environments[prod].wait_timer: live has 5 but the settings file omits it, so apply would REMOVE it; declare wait_timer to keep it, or wait_timer: 0 to remove it on purpose",
+      'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
+    ]);
+    const api = new MockApi(routes, { unroutedMutations: "succeed" });
+    await expect(apply(api, desired)).rejects.toThrow(
+      "environments[prod]: not applied - the update would remove a live value the settings file omits. " +
+        "environments[prod].wait_timer: live has 5 but the settings file omits it, so apply would REMOVE it; declare wait_timer to keep it, or wait_timer: 0 to remove it on purpose",
+    );
+    // The variables POST is planned after the PUT and never reached: the refusal leaves the whole entry untouched.
+    expect(api.mutations()).toEqual([]);
+  });
+
   test("value drift and undeclared variables report drift; the environment diff excludes variables", async () => {
     const api = new MockApi(
       {
@@ -246,7 +299,9 @@ describe("environments variables check mode", () => {
       "GET /repos/o/r/environments/prod": liveProd,
       [VARIABLES_LIST]: variablesBody([]),
     });
-    const result = await check(api, [{ name: "prod", variables: [{ name: "A", value: "1" }] }]);
+    const result = await check(api, [
+      { name: "prod", wait_timer: 5, variables: [{ name: "A", value: "1" }] },
+    ]);
     expect(result.drift).toEqual([
       'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
     ]);

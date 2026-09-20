@@ -46,7 +46,7 @@ expect:
     rulesets: drift
   summary_contains:
     - "rulesets[main-protection].enforcement"
-    - "rulesets[main-protection].bypass_actors[0]: no matching live entry"
+    - "rulesets[main-protection].bypass_actors[RepositoryRole 5]: missing live"
   stdout_lacks:
     - "bypass_actors is not visible to this token"
   never:

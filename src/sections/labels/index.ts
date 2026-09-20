@@ -83,5 +83,6 @@ export const labelsSection = listSection({
     }),
     matchBy: {},
   },
+  replaces: false,
   prose: { undeclaredAction: "DELETE it" },
 });

@@ -1,0 +1,38 @@
+# The environment PUT carries every protection setting at once, so writing this file over the live
+# production environment would drop its required-reviewers rule, which the file never mentions.
+# Apply refuses that write instead: the section fails naming the omitted key and both ways to say
+# what is meant, and no PUT is issued.
+name: environments-apply-omitted-reviewers-refused
+settings:
+  environments:
+    - name: production
+      wait_timer: 45
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules:
+        - id: 3736
+          type: wait_timer
+          wait_timer: 30
+        - id: 3737
+          type: required_reviewers
+          reviewers:
+            - type: User
+              reviewer:
+                id: 101
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    environments: failed
+  summary_contains:
+    - >-
+      environments[production]: not applied - the update would remove a live value the settings file
+      omits. environments[production].reviewers: live has [{"type":"User","id":101}] but the
+      settings file omits it, so apply would REMOVE it; declare reviewers to keep it, or
+      reviewers: [] to remove it on purpose
+  never:
+    - "PUT /repos/{repo}/environments/production"

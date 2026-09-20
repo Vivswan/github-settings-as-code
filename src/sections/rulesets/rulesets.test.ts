@@ -136,7 +136,53 @@ describe("rulesets", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([listRoute]);
   });
 
-  test("a divergent existing ruleset plans a full-payload update carrying the subset drift", async () => {
+  test("a live rule's GitHub-filled parameter defaults under a declaration that names one parameter are not drift, since the PUT leaves them as they are", async () => {
+    const api = writable({
+      [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
+      "GET /repos/o/r/rulesets/9": {
+        data: {
+          id: 9,
+          name: "main",
+          target: "branch",
+          enforcement: "active",
+          conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+          rules: [
+            {
+              type: "pull_request",
+              parameters: {
+                required_approving_review_count: 1,
+                dismiss_stale_reviews_on_push: false,
+                require_code_owner_review: false,
+                require_last_push_approval: false,
+                required_review_thread_resolution: false,
+                allowed_merge_methods: ["merge", "squash", "rebase"],
+              },
+            },
+          ],
+          bypass_actors: [],
+        },
+      },
+    });
+    const declared = {
+      name: "main",
+      target: "branch" as const,
+      enforcement: "active",
+      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+    };
+    const clean = { ops: [], notes: [], drift: [] };
+    expect(
+      await plan(api, [
+        {
+          ...declared,
+          rules: [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+        },
+      ]),
+    ).toEqual(clean);
+    // A rule declared without any parameters key is GitHub's defaults too.
+    expect(await plan(api, [{ ...declared, rules: [{ type: "pull_request" }] }])).toEqual(clean);
+  });
+
+  test("a divergent existing ruleset plans a full-payload update carrying the subset drift and what the PUT would drop", async () => {
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {
@@ -146,7 +192,7 @@ describe("rulesets", () => {
           target: "branch",
           enforcement: "evaluate",
           rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
-          bypass_actors: [{ actor_id: 1, actor_type: "Team" }],
+          bypass_actors: [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }],
         },
       },
     });
@@ -164,10 +210,13 @@ describe("rulesets", () => {
             enforcement: "active",
             rules: [{ type: "deletion" }],
           },
+          // The omitted line makes the op refuse itself in apply mode; the test below runs that hook.
+          before: expect.any(Function),
           describe: 'updating ruleset "main"',
           drift: [
             "rulesets[main].rules[non_fast_forward]: present live but not declared",
             'rulesets[main].enforcement: declared "active" != live "evaluate"; apply will set the declared value',
+            'rulesets[main].bypass_actors: live has [{"actor_id":1,"actor_type":"Team","bypass_mode":"always"}] but the settings file omits it, so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to remove it on purpose',
           ],
           change: 'updated ruleset "main"',
         },
@@ -175,6 +224,38 @@ describe("rulesets", () => {
       notes: [],
       drift: [],
     });
+    expect(api.mutations()).toEqual([]);
+  });
+
+  test("apply refuses the update that would remove what the file omits: the PUT is never sent, and the failure carries the omitted line", async () => {
+    const api = writable({
+      [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
+      "GET /repos/o/r/rulesets/9": {
+        data: {
+          id: 9,
+          name: "main",
+          target: "branch",
+          enforcement: "evaluate",
+          rules: [{ type: "deletion" }],
+          bypass_actors: [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }],
+        },
+      },
+    });
+    const planned = await plan(api, [
+      { name: "main", target: "branch", rules: [{ type: "deletion" }] },
+    ]);
+    const execution = await executePlan(planned, rulesetsSection, api, REPO, {
+      resolveSecret() {
+        throw new Error("no secrets");
+      },
+    });
+    expect(execution.status).toBe("failed");
+    expect(execution.landed).toBe(0);
+    expect(String((execution as { error: Error }).error.message)).toBe(
+      "rulesets[main]: not applied - the update would remove a live value the settings file omits. " +
+        'rulesets[main].bypass_actors: live has [{"actor_id":1,"actor_type":"Team","bypass_mode":"always"}] but the settings file omits it, ' +
+        "so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to remove it on purpose",
+    );
     expect(api.mutations()).toEqual([]);
   });
 
@@ -293,9 +374,7 @@ describe("rulesets", () => {
                 bypass_actors: [team],
               },
               describe: 'updating ruleset "main"',
-              drift: [
-                'rulesets[main].bypass_actors[0]: no matching live entry for {"actor_id":1,"actor_type":"Team","bypass_mode":"always"}',
-              ],
+              drift: ["rulesets[main].bypass_actors[Team 1]: missing live"],
               change: 'updated ruleset "main"',
             },
           ],
@@ -307,6 +386,49 @@ describe("rulesets", () => {
         name: "key present and equal: converged, no note",
         declared: [team],
         live: { ...BASE, bypass_actors: [team] },
+        expected: { ops: [], notes: [], drift: [] },
+      },
+      {
+        name: "a live mode other than the default under a declaration that omits the mode is ONE line on that actor, since the PUT would reset it to always",
+        declared: [{ actor_id: 1, actor_type: "Team" }],
+        live: { ...BASE, bypass_actors: [{ ...team, bypass_mode: "pull_request" }] },
+        expected: {
+          ops: [
+            {
+              role: "update",
+              params: { ruleset_id: "9" },
+              payload: {
+                name: "main",
+                target: "branch",
+                enforcement: "active",
+                bypass_actors: [team],
+              },
+              describe: 'updating ruleset "main"',
+              drift: [
+                'rulesets[main].bypass_actors[Team 1].bypass_mode: "always" != "pull_request"',
+              ],
+              change: 'updated ruleset "main"',
+            },
+          ],
+          notes: [],
+          drift: [],
+        },
+      },
+      {
+        name: "GitHub's default fill on a live actor (bypass_mode always, a DeployKey's null id, the null an OrganizationAdmin's id can read back as) is not drift under a declaration that omits it",
+        declared: [
+          { actor_id: 1, actor_type: "Team" },
+          { actor_type: "OrganizationAdmin" },
+          { actor_type: "DeployKey" },
+        ],
+        live: {
+          ...BASE,
+          bypass_actors: [
+            { actor_id: null, actor_type: "DeployKey", bypass_mode: "always" },
+            { actor_id: null, actor_type: "OrganizationAdmin", bypass_mode: "always" },
+            team,
+          ],
+        },
         expected: { ops: [], notes: [], drift: [] },
       },
     ];

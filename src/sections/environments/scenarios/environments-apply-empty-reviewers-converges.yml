@@ -1,0 +1,35 @@
+# Declaring `reviewers: []` is the on-purpose removal the omitted-value drift line offers: the live
+# environment carries a required-reviewers rule, the file declares the empty list beside the wait
+# timer, so apply's one PUT clears the rule and the rerun reads an empty reviewer list back.
+name: environments-apply-empty-reviewers-converges
+settings:
+  environments:
+    - name: production
+      wait_timer: 30
+      reviewers: []
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules:
+        - id: 3736
+          type: wait_timer
+          wait_timer: 30
+        - id: 3737
+          type: required_reviewers
+          reviewers:
+            - type: User
+              reviewer:
+                id: 101
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  stdout_contains:
+    - 'payload: {"wait_timer":30,"reviewers":[]}'
+  fixpoint: converges

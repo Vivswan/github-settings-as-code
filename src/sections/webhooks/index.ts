@@ -108,6 +108,7 @@ export const webhooksSection = listSection({
     },
     matchBy: {},
   },
+  replaces: false,
   foreign: (live) => {
     const url = urlOf(live);
     if (url === undefined) {
