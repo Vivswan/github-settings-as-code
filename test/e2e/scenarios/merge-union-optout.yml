@@ -1,9 +1,10 @@
 # mode: merge folds an ordered layer stack into one document without touching
 # GitHub: a fleet layer declares labels, a `main` ruleset, and Pages; the repo
 # layer on top recolors one label, adds another, appends a rule type to `main`,
-# and opts out of Pages with null. The written document is exactly what apply
-# would run (list sections in their resolved {_undeclared, entries} form), the
-# null opt-out is announced, and the mock sees ZERO requests.
+# and turns Pages off with null. The written document is exactly what apply
+# would run (list sections in their resolved {_undeclared, entries} form, and
+# `pages: null` kept as the section value with no opt-out notice, since null is
+# the only spelling of "Pages off"), and the mock sees ZERO requests.
 name: merge-union-optout
 inputs:
   mode: merge
@@ -44,8 +45,8 @@ expect:
   exit_code: 0
   result: merged
   zero_requests: true
-  stdout_contains:
-    - "settings.yml: null removed pages declared by a lower layer"
+  stdout_lacks:
+    - "null removed pages"
   summary_contains:
     - "| 1 | "
     - "layer-0.yml |"
@@ -53,6 +54,7 @@ expect:
     - "settings.yml |"
     - "Merged document written to "
   merged:
+    pages: null
     labels:
       _undeclared: delete
       entries:

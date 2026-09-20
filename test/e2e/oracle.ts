@@ -955,7 +955,10 @@ export function foldMergeLayers(
       slot = reduceKnobbed(key, column, layering, notices);
     } else {
       for (const { layer, value } of column) {
-        slot = settle(slot, value, key, { layer, notices });
+        // Where null is the section's value (`pages: null` is the only spelling of "Pages off"), a higher null is
+        // written over whatever lies below, with no opt-out notice.
+        slot =
+          value === null && isNullValued(key) ? null : settle(slot, value, key, { layer, notices });
       }
     }
     // A top-level null that met nothing below opted out of nothing: it drops, unless null is the section's value.
