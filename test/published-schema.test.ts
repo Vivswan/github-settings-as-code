@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
+import addFormats from "ajv-formats";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
@@ -19,7 +20,10 @@ const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json")
 };
 
 // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
+// The format plugin is loaded so a format keyword, should one ever be emitted, is judged here the way editors and CI linters judge it.
 const ajv = new Ajv({ strict: false, allErrors: true });
+const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
+(add as typeof addFormats)(ajv);
 const validate: ValidateFunction = ajv.compile(schema);
 
 const runtimeAccepts = (doc: Record<string, unknown>): boolean =>
@@ -142,6 +146,50 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
         `runtime validateSectionShapes disagrees with the published schema: ${name}`,
       ).toBe(valid);
     }
+  });
+});
+
+describe("url strings carry no format keyword", () => {
+  // ajv judges format: "uri" by RFC 3986; the runtime's z.url() parses with new URL(). The three shapes below pass the second and fail the
+  // first, so the generator strips the keyword and this walk keeps every future z.url() unformatted too.
+  test("no definition in the published schema carries a format keyword", () => {
+    const formatted: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        for (const [index, item] of node.entries()) {
+          walk(item, `${path}[${index}]`);
+        }
+        return;
+      }
+      if (typeof node !== "object" || node === null) {
+        return;
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "format") {
+          formatted.push(`${path}.format=${String(value)}`);
+        }
+        walk(value, `${path}.${key}`);
+      }
+    };
+    walk(schema.definitions, "definitions");
+    expect(formatted).toEqual([]);
+  });
+
+  test.each([
+    "https://例え.example.com/ci",
+    "https://hooks.example.com/ci/例え",
+    "https://hooks.example.com/ci with space",
+  ])("both validators accept the webhook url %s", (url) => {
+    const doc = { webhooks: [{ config: { url } }] };
+    expect(validate(doc), "published schema").toBe(true);
+    expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(true);
+  });
+
+  test("a scheme with no host is the stated place where the runtime is the stricter side", () => {
+    // Recorded, allowed: the runtime may refuse what the published schema accepts, never the reverse.
+    const doc = { webhooks: [{ config: { url: "https://" } }] };
+    expect(validate(doc)).toBe(true);
+    expect(runtimeAccepts(doc)).toBe(false);
   });
 });
 

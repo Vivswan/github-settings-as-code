@@ -2282,8 +2282,7 @@
       "properties": {
         "url": {
           "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared). Must be an absolute URL; GitHub refuses anything else.",
-          "type": "string",
-          "format": "uri"
+          "type": "string"
         },
         "content_type": {
           "description": "Payload encoding: exactly \"json\" or \"form\" (GitHub's default); other spellings such as \"JSON\" or a MIME type are refused at parse time.",

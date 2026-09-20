@@ -5,6 +5,8 @@
  *
  *   plain (strip) objects  -> OPENED: the additionalProperties: false zod emits is deleted, since GitHub-bound bodies
  *                             must accept future fields; only strictObject declarations stay closed, like the runtime
+ *   url strings            -> UNFORMATTED: the format: "uri" z.url() emits is deleted, since ajv judges it by RFC 3986
+ *                             and refuses hosts, paths, and spaces that the runtime's new URL() rule accepts
  *   root layout            -> zod's own, passed through verbatim
  *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the committed file diffs deterministically
  */
@@ -25,6 +27,7 @@ const SCHEMA_ID =
 
 interface ZodDefView {
   type?: string;
+  format?: string;
   catchall?: unknown;
 }
 
@@ -37,6 +40,11 @@ const generated = z.toJSONSchema(SettingsFile, {
     // what the runtime accepts. Strict objects carry a catchall (z.never) and keep their false.
     if (def.type === "object" && def.catchall === undefined) {
       delete json.additionalProperties;
+    }
+    // z.url() parses with new URL(), which takes a non-ASCII host or path and a space; ajv's format: "uri" refuses all
+    // three, so the keyword goes and the runtime alone judges the URL (the string stays typed and described).
+    if (def.type === "string" && def.format === "url") {
+      delete json.format;
     }
     // z.record's propertyNames: {type: "string"} is a no-op in JSON (keys are always strings).
     if (def.type === "record" && JSON.stringify(json.propertyNames) === '{"type":"string"}') {
