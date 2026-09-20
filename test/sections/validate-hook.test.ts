@@ -6,16 +6,23 @@
 
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../src/engine/validate.js";
-import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
-import type { SectionModule } from "../../src/sections/contract/module.js";
+import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../../src/schema.js";
+import type { EntryOf, SectionModule } from "../../src/sections/contract/module.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 
 /**
- * One well-formed entry per list section, null for a mapping section (nothing to duplicate). Declared over every
- * SectionKey, so a new section must say which it is; a list section's entry is declared twice below.
+ * One well-formed entry per list section, null for a mapping section (nothing to duplicate). The type permits null
+ * only where the section value has no entries, so a list section cannot opt out of the census below, and a new
+ * section must say which it is.
  */
-const ONE_ENTRY: Record<SectionKey, Record<string, unknown> | null> = {
+type OneEntryPerSection = {
+  [K in SectionKey]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
+    ? null
+    : Record<string, unknown>;
+};
+
+const ONE_ENTRY: OneEntryPerSection = {
   repository: null,
   labels: { name: "bug" },
   rulesets: { name: "protect-main" },
@@ -68,18 +75,15 @@ describe("every list section's validate hook reaches the engine", () => {
   );
 });
 
-describe("the contract makes validate mandatory on a list section", () => {
-  test("a list module without validate does not compile; a mapping module may omit it", () => {
-    const { validate: _dropped, ...withoutValidate } = labelsSection;
-    // @ts-expect-error labels is a list section, so registering it without validate is flagged by name
-    const _list: SectionModule<"labels", typeof labelsSection.endpoints> = withoutValidate;
-    const _mapping: SectionModule<
-      "repository",
-      typeof repositorySection.endpoints,
-      typeof repositorySection.graphql
-    > = repositorySection;
-    // The erased roster keeps it optional, so every module erases into it.
-    const _erased: SectionModule = labelsSection;
-    expect(labelsSection.validate([{ name: "a" }])).toEqual([]);
-  });
-});
+// The contract makes validate mandatory on a list section and optional on a mapping section; the census above pins
+// the runtime half, these declarations the compile-time half. The erased roster keeps it optional, so every module
+// erases into it.
+const { validate: _dropped, ...withoutValidate } = labelsSection;
+// @ts-expect-error labels is a list section, so registering it without validate is flagged by name
+const _list: SectionModule<"labels", typeof labelsSection.endpoints> = withoutValidate;
+const _mapping: SectionModule<
+  "repository",
+  typeof repositorySection.endpoints,
+  typeof repositorySection.graphql
+> = repositorySection;
+const _erased: SectionModule = labelsSection;

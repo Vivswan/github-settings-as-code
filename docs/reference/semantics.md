@@ -63,7 +63,7 @@ Rate limits (429 and secondary limits) and transient 5xx or network failures are
 
 ## The preflight barrier
 
-Before the barrier, and in every mode, document validation runs every check that reads only the settings file: the section shapes, unknown keys, two entries naming one resource, a malformed deploy key. A settings-file mistake fails the run before any section runs, with every issue listed by path, so nothing is written.
+Before the barrier, and in every mode, document validation runs every check that reads only the settings file: the section shapes, unknown keys, two entries naming one resource, a malformed deploy key. A settings-file mistake fails the run before any section runs, with the collected issues listed by path, so nothing is written.
 
 Under `on-missing-permission: fail`, every declared section is then probed read-only before ANY write. If a section is inaccessible, nothing is applied at all (per repository in multi-repo mode; earlier targets in the same run are already done).
 

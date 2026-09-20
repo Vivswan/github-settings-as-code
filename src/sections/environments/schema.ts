@@ -126,7 +126,9 @@ export const EnvironmentConfig = z
         message: `the "${entry.name}" entry declares prevent_self_review: true without reviewers; GitHub keeps the flag only on a required-reviewers rule, which needs at least one reviewer. Declare a reviewer, or write prevent_self_review: false`,
       });
     }
-    // The pattern POST would 404 only once the environment PUT had landed, half-applying the run.
+    // Checked in the shape rather than the section's validate hook: both run before ANY section
+    // writes, and a refinement reports the pair at zod's own path beside the entry's other shape
+    // issues. Unchecked, the pattern POST would 404 only once the environment PUT had landed.
     if (
       entry.deployment_branch_policies !== undefined &&
       entry.deployment_branch_policy?.custom_branch_policies !== true

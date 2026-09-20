@@ -254,7 +254,8 @@ export const customPropertiesSection = {
     return plan;
   },
   // An unset (null) live value is the org default, which no declaration needs to restate; an empty
-  // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
+  // list is read the same way (the validate hook refuses a declared `[]`, whose storage GitHub
+  // leaves undocumented).
   // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
     const live = await ctx.read.list.call(z.array(LiveProperty));
