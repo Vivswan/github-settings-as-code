@@ -2405,17 +2405,19 @@
               "type": "object",
               "properties": {
                 "include": {
-                  "description": "Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as written; any other value starting with \"~\" is refused at parse, since no ref name contains one.",
+                  "description": "Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as written; any other value carrying \"~\", or one of \"^\", \":\", \"\\\\\", space, \"..\", \"@{\", or a control character, is refused at parse: git refuses these in a ref name and a ruleset pattern has no use for them. \"*\", \"?\", and \"[\" are pattern syntax and pass.",
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^(?:~ALL|~DEFAULT_BRANCH|(?:(?![~^:\\\\ \\x00-\\x1f\\x7f]|\\.\\.|@\\{)[\\s\\S])*)$"
                   }
                 },
                 "exclude": {
-                  "description": "Ref patterns excluded from the ruleset; the same \"~\" rule applies.",
+                  "description": "Ref patterns excluded from the ruleset; the same character rules apply.",
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^(?:~ALL|~DEFAULT_BRANCH|(?:(?![~^:\\\\ \\x00-\\x1f\\x7f]|\\.\\.|@\\{)[\\s\\S])*)$"
                   }
                 }
               }

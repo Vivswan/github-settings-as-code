@@ -7,16 +7,34 @@ import { z } from "zod";
 
 // --- Ref-name conditions ------------------------------------------------------
 
-/** The two tokens GitHub reads in a ref-name pattern; a "~" prefix means nothing else, since no ref name contains one. */
-const REF_NAME_TOKENS: ReadonlySet<string> = new Set(["~ALL", "~DEFAULT_BRANCH"]);
+/** The two tokens GitHub reads in a ref-name pattern; any other "~" means nothing, since no ref name contains one. */
+const REF_NAME_TOKENS = ["~ALL", "~DEFAULT_BRANCH"] as const;
+
+/**
+ * What git check-ref-format refuses in a ref name and a ruleset fnmatch pattern has no use for either (GitHub
+ * documents "\\" quoting and "[^...]" as unsupported): "~" outside the two tokens, "^", ":", "\\", space, "..", "@{",
+ * and control characters. A pattern carrying one is a typo. "*", "?", and "[" are pattern syntax and stay.
+ */
+const REF_NAME_ILLEGAL = String.raw`[~^:\\ \x00-\x1f\x7f]|\.\.|@\{`;
+
+/** A token, or a value with no illegal sequence at any position; as a regex so the published schema carries the rule. */
+const REF_NAME_PATTERN = new RegExp(
+  `^(?:${REF_NAME_TOKENS.join("|")}|(?:(?!${REF_NAME_ILLEGAL})[\\s\\S])*)$`,
+);
+
+/** JSON's rendering, which escapes every control character but DEL, so the message never carries an invisible one. */
+const quoted = (text: string) => JSON.stringify(text).replace(/\x7f/g, "\\u007f");
 
 // normalizeRefName (index.ts) passes every "~" value through unprefixed, so a typo'd token would reach GitHub as written.
-const RefNamePattern = z
-  .string()
-  .refine((value) => !value.startsWith("~") || REF_NAME_TOKENS.has(value), {
-    error: (issue) =>
-      `${JSON.stringify(issue.input)} is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"`,
-  });
+const RefNamePattern = z.string().regex(REF_NAME_PATTERN, {
+  error: (issue) => {
+    const value = String(issue.input);
+    const hit = new RegExp(REF_NAME_ILLEGAL).exec(value)?.[0] ?? "";
+    return hit === "~"
+      ? `${quoted(value)} is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"`
+      : `${quoted(value)} contains ${quoted(hit)}: git refuses "~", "^", ":", "\\", space, "..", "@{", and control characters in a ref name, and a ruleset pattern has no use for them`;
+  },
+});
 
 // --- Bypass actors --------------------------------------------------------------
 

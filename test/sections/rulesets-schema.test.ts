@@ -111,7 +111,13 @@ describe("a ruleset the API would reject never reaches it", () => {
       name: "main",
       target: "branch",
       enforcement: "evaluate",
-      conditions: { ref_name: { include: ["~DEFAULT_BRANCH", "release/*"], exclude: ["~ALL"] } },
+      // "*", "?", and "[" are pattern syntax, not ref-name characters, so they pass with the two tokens.
+      conditions: {
+        ref_name: {
+          include: ["~DEFAULT_BRANCH", "refs/heads/*", "feature/**", "v?.[0-9]"],
+          exclude: ["~ALL"],
+        },
+      },
       rules: EVERY_RULE,
       bypass_actors: EVERY_ACTOR,
     };
@@ -181,6 +187,45 @@ describe("a ruleset the API would reject never reaches it", () => {
       [
         /^rulesets\[0\]\.conditions\.ref_name\.include\[0\]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH/,
         /^rulesets\[0\]\.conditions\.ref_name\.exclude\[1\]: "~MAIN" is not a ref-name token/,
+      ],
+    ],
+    [
+      "a token typo buried inside a ref name, in include and in exclude",
+      {
+        name: "main",
+        conditions: { ref_name: { include: ["release~1"], exclude: ["~ALL", "v1~rc"] } },
+      },
+      [
+        /^rulesets\[0\]\.conditions\.ref_name\.include\[0\]: "release~1" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH \(case-sensitive\), and no ref name contains "~"/,
+        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[1\]: "v1~rc" is not a ref-name token/,
+      ],
+    ],
+    [
+      "one pattern per character git refuses in a ref name and a ruleset pattern cannot use either",
+      {
+        name: "main",
+        conditions: {
+          ref_name: { include: ["release^2", "refs/heads/a:b", "back\\slash", "hot fix"] },
+        },
+      },
+      [
+        /^rulesets\[0\]\.conditions\.ref_name\.include\[0\]: "release\^2" contains "\^": git refuses "~", "\^", ":", "\\", space, "\.\.", "@\{", and control characters in a ref name, and a ruleset pattern has no use for them$/,
+        /^rulesets\[0\]\.conditions\.ref_name\.include\[1\]: "refs\/heads\/a:b" contains ":"/,
+        /^rulesets\[0\]\.conditions\.ref_name\.include\[2\]: "back\\\\slash" contains "\\\\"/,
+        /^rulesets\[0\]\.conditions\.ref_name\.include\[3\]: "hot fix" contains " "/,
+      ],
+    ],
+    [
+      "the two-character sequences git refuses, and control characters, in exclude",
+      {
+        name: "main",
+        conditions: { ref_name: { exclude: ["a..b", "main@{1}", "tab\tbed", "del\u007fete"] } },
+      },
+      [
+        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[0\]: "a\.\.b" contains "\.\."/,
+        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[1\]: "main@\{1\}" contains "@\{"/,
+        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[2\]: "tab\\tbed" contains "\\t"/,
+        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[3\]: "del\\u007fete" contains "\\u007f"/,
       ],
     ],
     [

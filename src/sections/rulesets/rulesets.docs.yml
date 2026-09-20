@@ -56,9 +56,11 @@ schema:
   RulesetConfig.conditions.ref_name: Short ref names are auto-prefixed (staging -> refs/heads/staging).
   RulesetConfig.conditions.ref_name.include: >-
     Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as
-    written; any other value starting with "~" is refused at parse, since no ref name contains one.
+    written; any other value carrying "~", or one of "^", ":", "\\", space, "..", "@{", or a control
+    character, is refused at parse: git refuses these in a ref name and a ruleset pattern has no use for
+    them. "*", "?", and "[" are pattern syntax and pass.
   RulesetConfig.conditions.ref_name.exclude: >-
-    Ref patterns excluded from the ruleset; the same "~" rule applies.
+    Ref patterns excluded from the ruleset; the same character rules apply.
   RulesetConfig.rules: >-
     Rule list. A rule type the vendored spec knows has its parameters checked at parse; a type it
     does not know passes through verbatim, so a rule type GitHub ships tomorrow works today.

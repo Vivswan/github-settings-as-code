@@ -1,0 +1,26 @@
+# A ref pattern carrying a character git refuses in a ref name is refused when
+# it is parsed, before any request: a "~" anywhere outside the two tokens, and
+# the characters a ruleset fnmatch pattern has no use for either. "*", "?", and
+# "[" are pattern syntax and pass.
+name: rulesets-ref-pattern-rejected
+settings:
+  rulesets:
+    - name: main-protection
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH", "release~1", "hot fix", "refs/heads/v?.[0-9]"]
+          exclude: ["~ALL", "release^2", "a..b", "main@{1}"]
+inputs:
+  mode: check
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'rulesets[0].conditions.ref_name.include[1]: "release~1" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"'
+    - 'rulesets[0].conditions.ref_name.include[2]: "hot fix" contains " ": git refuses "~", "^", ":", "\", space, "..", "@{", and control characters in a ref name, and a ruleset pattern has no use for them'
+    - 'rulesets[0].conditions.ref_name.exclude[1]: "release^2" contains "^"'
+    - 'rulesets[0].conditions.ref_name.exclude[2]: "a..b" contains ".."'
+    - 'rulesets[0].conditions.ref_name.exclude[3]: "main@{1}" contains "@{"'

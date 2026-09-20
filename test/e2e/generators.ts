@@ -694,11 +694,37 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       // normalizeRefName passes every "~" value through, so a typo'd token would reach GitHub as written.
       const { value, entries, index, itemToken } = validItems(rng, "rulesets");
       (entries[index] as Json).conditions = {
-        ref_name: { include: [rng.pick(["~all", "~MAIN", "~default_branch"])] },
+        ref_name: { include: [rng.pick(["~all", "~MAIN", "~default_branch", "release~1"])] },
       };
       return {
         doc: { rulesets: value },
         offendingToken: `${itemToken}.conditions.ref_name.include[0]`,
+      };
+    },
+  },
+  {
+    name: "rulesets-ref-pattern-illegal-character",
+    build: (rng) => {
+      // A character git refuses in a ref name; the pattern would reach GitHub prefixed and come back as a 422.
+      const { value, entries, index, itemToken } = validItems(rng, "rulesets");
+      (entries[index] as Json).conditions = {
+        ref_name: {
+          exclude: [
+            rng.pick([
+              "release^2",
+              "a:b",
+              "back\\slash",
+              "hot fix",
+              "a..b",
+              "main@{1}",
+              "tab\tbed",
+            ]),
+          ],
+        },
+      };
+      return {
+        doc: { rulesets: value },
+        offendingToken: `${itemToken}.conditions.ref_name.exclude[0]`,
       };
     },
   },
