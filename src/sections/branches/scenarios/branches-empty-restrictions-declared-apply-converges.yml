@@ -1,0 +1,32 @@
+# The settings file declares restrictions with empty users, teams, and apps
+# against a branch whose live protection carries no restrictions key, GitHub's
+# shape for an unrestricted branch. The two are different states (nobody may
+# push vs anybody may), so apply issues one PUT that turns the restriction on,
+# and the check rerun reads the all-empty holder back as declared.
+name: branches-empty-restrictions-declared-apply-converges
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        restrictions:
+          users: []
+          teams: []
+          apps: []
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    branches: applied
+  mutations:
+    - "PUT /repos/{repo}/branches/main/protection"
+  fixpoint: converges

@@ -40,7 +40,10 @@ export function genBranches(rng: Rng): Json[] {
       protection.enforce_admins = rng.bool();
     }
     if (rng.bool(0.4)) {
-      protection.required_status_checks = { strict: rng.bool(), contexts: [] };
+      // Both spellings the PUT takes: bare names, or {context, app_id} items (-1 lets any App report).
+      protection.required_status_checks = rng.bool(0.3)
+        ? { strict: rng.bool(), checks: [{ context: "ci", app_id: -1 }, { context: "lint" }] }
+        : { strict: rng.bool(), contexts: [] };
     }
     if (rng.bool(0.3)) {
       protection.restrictions = null;

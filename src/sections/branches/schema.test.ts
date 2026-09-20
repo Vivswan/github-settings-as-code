@@ -29,6 +29,34 @@ const cases: Array<{
     fix: "contexts: [] requires none",
   },
   {
+    refused: "a check item carrying a key the PUT has no word for",
+    protection: {
+      required_status_checks: { strict: true, checks: [{ context: "ci", app: "ci-bot" }] },
+    },
+    paths: ["0.protection.required_status_checks.checks.0"],
+    fix: 'remove "app"',
+  },
+  {
+    refused: "a check item without its context",
+    protection: { required_status_checks: { strict: true, checks: [{ app_id: 15368 }] } },
+    paths: ["0.protection.required_status_checks.checks.0.context"],
+    fix: "the check's name",
+  },
+  {
+    refused: "a fractional app_id on a check item",
+    protection: {
+      required_status_checks: { strict: true, checks: [{ context: "ci", app_id: 1.5 }] },
+    },
+    paths: ["0.protection.required_status_checks.checks.0.app_id"],
+    fix: "-1",
+  },
+  {
+    refused: "a bare name where a check item goes",
+    protection: { required_status_checks: { strict: true, checks: ["ci"] } },
+    paths: ["0.protection.required_status_checks.checks.0"],
+    fix: "contexts: [names]",
+  },
+  {
     refused: "a scalar where the status-check mapping goes, on a literal branch",
     protection: { required_status_checks: true },
     paths: ["0.protection.required_status_checks"],

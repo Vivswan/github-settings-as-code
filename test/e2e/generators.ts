@@ -621,6 +621,26 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
+    name: "branches-checks-unknown-key",
+    build: (rng) => {
+      // A check item is GitHub's closed {context, app_id} shape; the entry is made literal, since a
+      // wildcard rule refuses `checks` itself ahead of the item.
+      const { value, entries, index, itemToken } = validItems(rng, "branches");
+      const entry = entries[index] as Json;
+      entry.name = "main";
+      entry.protection = {
+        required_status_checks: {
+          strict: true,
+          checks: [{ context: "ci", [rng.pick(["app", "app_slug", "name"])]: "ci-bot" }],
+        },
+      };
+      return {
+        doc: { branches: value },
+        offendingToken: `${itemToken}.protection.required_status_checks.checks[0]`,
+      };
+    },
+  },
+  {
     name: "workflows-state-enum",
     build: (rng) => {
       const { value, entries, index, itemToken } = validItems(rng, "workflows");
