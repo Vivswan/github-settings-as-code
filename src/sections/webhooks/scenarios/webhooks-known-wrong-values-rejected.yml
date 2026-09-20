@@ -22,5 +22,5 @@ expect:
     - 'webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL'
     - 'webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"'
     - 'webhooks[0].config.insecure_ssl: true is not a value GitHub accepts; use "0"'
-    - 'webhooks[0].events[1]: "pushes" is not a repository webhook event this release knows'
-    - https://docs.github.com/webhooks/webhook-events-and-payloads
+    - 'webhooks[0].events[1]: "pushes" is not an event GitHub delivers to repository webhooks'
+    - https://docs.github.com/webhooks/webhook-events-and-payloads, read from @octokit/openapi-webhooks
