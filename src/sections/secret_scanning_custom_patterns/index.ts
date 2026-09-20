@@ -29,8 +29,12 @@ import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
-import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
-import { SecretScanningPatternConfig } from "./schema.js";
+import {
+  knobbedSnapshot,
+  leftOutOfSnapshot,
+  projectOntoSchema,
+} from "../shared/snapshot-helpers.js";
+import { SecretScanningPatternConfig, unverifiableRegexFields } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
@@ -286,7 +290,27 @@ export const secretScanningPatternsSection = {
       return { value: undefined, notes: [] };
     }
     patternsByName(this, live);
-    const entries = live.map((pattern) => projectOntoSchema(SecretScanningPatternConfig, pattern));
-    return { value: knobbedSnapshot(this, entries), notes: [] };
+    const notes: string[] = [];
+    const entries: SecretScanningPatternConfig[] = [];
+    for (const pattern of live) {
+      const entry = projectOntoSchema(SecretScanningPatternConfig, pattern);
+      // A live value the syntax check cannot verify has no file-side fix: the entry is left out, the
+      // rest is written. A mis-shaped entry stays, for the engine's validation to name as the bug it is.
+      const unverifiable = unverifiableRegexFields(entry);
+      if (unverifiable.length > 0) {
+        notes.push(
+          leftOutOfSnapshot(
+            `${key}[${pattern.name}]`,
+            `its ${unverifiable.join(", ")} cannot be verified as ${agree(unverifiable.length, "a regular expression", "regular expressions")} by this tool; the pattern stays live and undeclared under the keep default`,
+          ),
+        );
+        continue;
+      }
+      entries.push(entry);
+    }
+    if (entries.length === 0) {
+      return { value: undefined, notes };
+    }
+    return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"secret_scanning_custom_patterns", typeof ENDPOINTS>;

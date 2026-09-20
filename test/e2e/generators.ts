@@ -41,6 +41,7 @@ import { genPages } from "../../src/sections/pages/generators.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { genRepository } from "../../src/sections/repository/generators.js";
 import { genRulesets } from "../../src/sections/rulesets/generators.js";
+import { compileFailure } from "../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
 import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
 import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
 import { genTeams } from "../../src/sections/teams/generators.js";
@@ -703,7 +704,8 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "secret-scanning-pattern-uncompilable",
     build: (rng) => {
-      // Each field is a regex GitHub compiles as Hyperscan; the schema refuses what a flagless JavaScript RegExp cannot compile.
+      // Each field is a regex GitHub compiles as Hyperscan; the schema refuses what no dialect parses,
+      // and the oracle here is the section's own check, so a pool value the check accepts fails the draw loudly.
       const { value, entries, index, itemToken } = validItems(
         rng,
         "secret_scanning_custom_patterns",
@@ -715,7 +717,12 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
         "must_match",
         "must_not_match",
       ]);
-      const broken = rng.pick(["([a-z", "*token", "(?i)key_[0-9]{6}"]);
+      const broken = rng.pick(["([a-z", "*token", "key_[0-9]{6}\\", "(?P<t>key_[0-9"]);
+      if (compileFailure(broken) === undefined) {
+        throw new Error(
+          `the refused draw ${JSON.stringify(broken)} passes the syntax check; pick another`,
+        );
+      }
       const entry = entries[index] as Json;
       const listField = field === "must_match" || field === "must_not_match";
       entry[field] = listField ? ["[0-9]", broken] : broken;

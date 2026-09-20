@@ -1,0 +1,136 @@
+/**
+ * The translation of compilable-form.ts against PCRE's grammar, row by row: a PCRE-only form's raw
+ * spelling fails a flagless RegExp (or compiles as another pattern, noted per row) and its
+ * translation compiles; an untouched form stays as is; a form PCRE refuses stays refused, among
+ * them the ones a careless rewrite would repair.
+ */
+
+import { describe, expect, test } from "bun:test";
+import { compilableForm, compileFailure } from "./compilable-form.js";
+
+function compiles(source: string): boolean {
+  try {
+    new RegExp(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("compilableForm", () => {
+  test.each<[form: string, raw: string, translated: string]>([
+    ["a Python-style named group", "(?P<token>key_[A-Z0-9]{32})", "(?<token>key_[A-Z0-9]{32})"],
+    ["an inline comment", "(?#vendor)key_[A-Z0-9]{32}", "key_[A-Z0-9]{32}"],
+    ["a braced hex escape in a class range", "[\\x{41}-\\x{5A}]{32}", "[\\u0041-\\u005a]{32}"],
+    ["a braced octal escape in a class range", "[\\o{141}-\\o{172}]+", "[\\u0061-\\u007a]+"],
+    // `\c[` is one escape (ESC) to PCRE; a flagless RegExp would read `\c` and then open a class.
+    ["a control escape whose character opens a class", "\\c[++", "\\u001b+"],
+    ["a single-quoted named group", "(?'token'key_[A-Z0-9]{32})", "(?<token>key_[A-Z0-9]{32})"],
+    // To PCRE `\a` is BEL and `\e` ESC; a flagless RegExp reads the letters, so the ranges run backwards.
+    ["a class range from the bell to the backspace escape", "[\\a-\\b]", "[\\u0007-\\b]"],
+    ["a class range from the escape character to a punctuation mark", "[\\e-!]", "[\\u001b-!]"],
+    // PCRE takes one hex digit after `\x`; a flagless RegExp wants two and otherwise reads an x.
+    ["a class range from a one-digit hex escape", "[\\xF-\\x10]", "[\\u000f-\\u0010]"],
+    ["an inline option modifier", "(?i)key_[a-z0-9]{8}", "key_[a-z0-9]{8}"],
+    ["several modifiers, some negated", "(?im-s)key", "key"],
+    ["a negation-only modifier group", "(?-i)key", "key"],
+    ["an atomic group", "(?>key)_[0-9]+", "(?:key)_[0-9]+"],
+    ["a possessive plus", "a++", "a+"],
+    ["a possessive star", "a*+", "a*"],
+    ["a possessive question mark", "a?+", "a?"],
+    ["a possessive brace quantifier", "a{2,}+", "a{2,}"],
+    // PCRE drops a comment before it reads quantifiers, so the `+` after the comment is possessive.
+    ["a possessive plus split by a comment", "a+(?#x)+", "a+"],
+    ["a quantifier after a comment", "a(?#x)*b", "a*b"],
+    // Quoted text is literal to PCRE, so a comment opening inside it is text and the `+` quantifies its last character.
+    ["a comment opening inside a quote", "\\Q(?#x)\\E+", "\\(\\?#x\\)+"],
+    // PCRE reads a `]` before any member as a literal one; a flagless RegExp closes the class there.
+    ["a literal bracket first in a class", "[]a(]", "[\\]a(]"],
+    ["a literal bracket first in a negated class", "[^](]", "[^\\](]"],
+    ["a literal bracket after an empty quote, still first", "[\\Q\\E]a(]", "[\\]a(]"],
+  ])("%s: the raw form fails, the translated form compiles", (_form, raw, translated) => {
+    expect(compiles(raw)).toBe(false);
+    expect(compilableForm(raw)).toBe(translated);
+    expect(compiles(translated)).toBe(true);
+    expect(compileFailure(raw)).toBeUndefined();
+  });
+
+  // These raw forms compile flagless, but not as the pattern Hyperscan reads: `\x{A}` is a literal
+  // x repeated, `\Q` an identity escape, and `(?i:...)` a modifier group on V8 since Node 23 and
+  // a syntax error before; the translation makes the check read one spelling everywhere.
+  test.each<[form: string, raw: string, translated: string]>([
+    ["a braced hex escape of one digit, padded", "\\x{A}", "\\u000a"],
+    ["a flagged non-capturing group", "(?i:key)_[0-9]+", "(?:key)_[0-9]+"],
+    // PCRE drops the empty quote before it reads quantifiers, so the second `+` is possessive.
+    ["a possessive plus split by an empty quote", "a+\\Q\\E+", "a+"],
+    // A POSIX class is one member to PCRE; a flagless RegExp reads a nested `[` and closes the class at its `]`.
+    ["a POSIX class followed by a literal bracket", "[[:alpha:][]", "[\\w[]"],
+    ["a quoted literal", "\\Qa.b(\\E[0-9]+", "a\\.b\\([0-9]+"],
+    ["a quoted literal without its closing escape, running to the end", "id=\\Q(x", "id=\\(x"],
+  ])("%s: translated to one spelling", (_form, raw, translated) => {
+    expect(compilableForm(raw)).toBe(translated);
+    expect(compiles(translated)).toBe(true);
+  });
+
+  test.each<[form: string, source: string]>([
+    ["GitHub's default delimiters", "\\A|[^0-9A-Za-z]"],
+    ["the PCRE escapes a flagless RegExp reads as identity escapes", "\\A\\z\\Z\\h\\R\\K"],
+    ["a JavaScript-style named group", "(?<token>key)"],
+    ["a lazy quantifier", "a+?b*?c??"],
+    ["a literal brace", "a{,2}"],
+    ["a group opening spelled inside a character class", "[(?i)]"],
+    ["an escaped parenthesis before ?P, which is a quantifier on the literal", "\\(?P<n>"],
+    ["a literal closing brace before a plus", "x}+"],
+    ["lookbehind (Hyperscan refuses it at apply, the check does not see it)", "(?<=key_)[0-9]+"],
+    ["a comment opening spelled inside a character class", "[(?#x)]"],
+  ])("%s passes through untouched and compiles", (_form, source) => {
+    expect(compilableForm(source)).toBe(source);
+    expect(compileFailure(source)).toBeUndefined();
+  });
+
+  test("a braced hex escape beyond the BMP stays one literal at the top of a range, so a range from any BMP point compiles", () => {
+    expect(compileFailure("[\\x{41}-\\x{1F600}]+")).toBeUndefined();
+  });
+
+  test.each<[form: string, source: string]>([
+    ["an unbalanced group", "(key_[A-Z0-9]{32}"],
+    ["an unterminated character class", "[0-9"],
+    ["a dangling quantifier", "*token"],
+    ["a trailing backslash", "key\\"],
+    ["a range out of order", "[z-a]"],
+    ["a quantifier on a quantifier", "a+++"],
+    ["a lazy quantifier made possessive", "a??+"],
+    ["an unterminated inline comment", "(?#vendor"],
+    ["a named group left unbalanced after translation", "(?P<t>key_[0-9"],
+    // The forms a rewrite could repair: each is a PCRE error the translated spelling must keep.
+    ["a lazy modifier on a possessive quantifier", "a++?"],
+    ["a possessive star made lazy", "a*+?"],
+    ["a brace quantifier after a possessive plus", "a++{2}"],
+    ["a quantifier on an option group", "a(?i)*"],
+    ["an option group quantified at the start", "(?i)*a"],
+    ["a Python-style group name PCRE refuses", "(?P<$>a)"],
+    ["a lazy modifier split from its possessive by an empty quote", "a++\\Q\\E?"],
+    ["a quantifier split from its option group by an empty quote", "a(?i)\\Q\\E*"],
+    // PCRE refuses a duplicate group name in either spelling; a rewrite of the second `(?P<` would let the RegExp take it.
+    ["a Python-style group name used twice", "(?P<a>x)|(?P<a>y)"],
+    ["a Python-style group name a JavaScript-style group already took", "(?<a>x)(?P<a>y)"],
+    ["a Python-style group name a JavaScript-style group takes later", "(?P<a>x)|(?<a>y)"],
+    // PCRE ignores a `\E` with no `\Q`, so the quantifier after it still follows the possessive or the option group.
+    ["a lazy modifier split from its possessive by a stray quote end", "a++\\E?"],
+    ["a quantifier split from its option group by a stray quote end", "a(?i)\\E*"],
+    // PCRE cannot repeat an anchor; a flagless RegExp reads `\A` as a literal A, so dropping the `+` would let `\A+` through.
+    ["a possessive quantifier on the start anchor", "\\A++"],
+    ["a possessive quantifier on the end anchor", "\\z*+"],
+    // PCRE reads the `]` as a literal, so the class never closes; a flagless RegExp would read an empty class.
+    ["an empty class", "[]"],
+    ["a class whose literal bracket starts a range out of order, split by a comment", "[]z-(?#x)]"],
+    ["a class whose POSIX member is followed by a range out of order", "[[:alpha:]z-(?#x)]"],
+    ["a class whose only member is a stray quote end", "[\\E]"],
+    // The quote closes before the `)`, so the comment opening is text and the parenthesis is unmatched.
+    ["a quote closed inside a comment opening", "\\Q(?#\\E)"],
+    // The quote runs to the end of the pattern, swallowing the `]`, in PCRE as here.
+    ["a quote opened inside a class and never closed", "[\\Qx]"],
+  ])("%s is refused after translation", (_form, source) => {
+    expect(compileFailure(source)).toBeDefined();
+  });
+});

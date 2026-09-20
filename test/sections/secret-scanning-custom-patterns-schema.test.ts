@@ -1,9 +1,7 @@
 /**
- * The five regex fields of a secret scanning custom pattern reach GitHub as opaque strings, so a
- * typo in one used to surface only as a bulk-create 422 whose hint guesses at the cause. These pin
- * the parse-time refusal and the two facts it rests on: a flagless JS RegExp accepts GitHub's own
- * default delimiters (`\A` and `\z` are identity escapes without the u flag), and GitHub documents
- * option modifiers such as `(?i)` as unsupported.
+ * The parse-time refusal of a regex field, at the field level: every field is covered and named
+ * with its index, and GitHub's own default delimiters and the PCRE-only forms Hyperscan accepts
+ * parse clean. The translation itself is pinned next to its module (compilable-form.test.ts).
  */
 
 import { describe, expect, test } from "bun:test";
@@ -27,10 +25,8 @@ describe("secret_scanning_custom_patterns regex fields", () => {
     ["start_delimiter", { ...VALID, start_delimiter: "[" }, "start_delimiter"],
     ["end_delimiter", { ...VALID, end_delimiter: "*)" }, "end_delimiter"],
     ["must_match", { ...VALID, must_match: ["[A-Z]", "(?<!x"] }, "must_match[1]"],
-    ["must_not_match", { ...VALID, must_not_match: ["a++"] }, "must_not_match[0]"],
-    // GitHub's reference says Hyperscan option modifiers are not supported, so refusing them here
-    // matches the upstream verdict instead of waiting for it.
-    ["an option modifier", { ...VALID, pattern: "(?i)int_[a-z0-9]{8}" }, "pattern"],
+    ["must_not_match", { ...VALID, must_not_match: ["a)"] }, "must_not_match[0]"],
+    ["a trailing backslash", { ...VALID, pattern: "int_[a-z0-9]{8}\\" }, "pattern"],
   ])(
     "an uncompilable %s is refused at parse with the field path, not at the bulk-create 422",
     (_label, entry, path) => {
@@ -50,6 +46,19 @@ describe("secret_scanning_custom_patterns regex fields", () => {
         end_delimiter: "\\z|[^0-9A-Za-z]",
         must_match: ["[A-Z]", "[0-9]", "[$%@!]"],
         must_not_match: ["[a-z]{2,}"],
+      }),
+    ).toEqual([]);
+  });
+
+  test("the PCRE-only forms Hyperscan accepts parse clean in every field: a user can declare what GitHub already holds", () => {
+    expect(
+      issues({
+        ...VALID,
+        pattern: "(?P<token>int_[a-z0-9]{8})",
+        start_delimiter: "(?#word edge)\\A|[^0-9A-Za-z]",
+        end_delimiter: "(?i)\\z|[^0-9A-Za-z]",
+        must_match: ["[\\x{41}-\\x{5A}]", "(?>[0-9])++"],
+        must_not_match: ["\\Qexample.com\\E"],
       }),
     ).toEqual([]);
   });
