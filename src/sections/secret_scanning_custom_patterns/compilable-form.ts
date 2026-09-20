@@ -2,7 +2,9 @@
  * The syntax check behind every regex field of a secret scanning custom pattern. GitHub compiles
  * them with Hyperscan, a PCRE subset this action cannot run, so the check is a flagless JavaScript
  * RegExp over a translation of the PCRE-only forms, refusing only what PCRE refuses too. What
- * Hyperscan alone refuses compiles here and fails at apply as the bulk create's 422.
+ * Hyperscan alone refuses compiles here and fails at apply as the bulk create's 422. Left to that
+ * 422 as well: a pattern in extended mode (`(?x)`), whose whitespace and `#` comments this
+ * tokenizer does not read, so it passes unchecked rather than refused on a lexing it cannot follow.
  */
 
 /**
@@ -40,7 +42,9 @@ interface GroupRewrite {
 
 /**
  * The `(?` group openings the check knows. The flag-only group (`(?i)`, `(?im-s)`, and PCRE's empty
- * `(?)`) is removed: flags change what a pattern matches, never whether it parses. An atomic group
+ * `(?)`) is removed: flags change what a pattern matches, never whether it parses, except the
+ * extended-mode `x`, which changes how PCRE lexes what follows; `extendedMode()` names that case
+ * and `compileFailure()` passes it unchecked. An atomic group
  * and a flagged non-capturing group are plain non-capturing groups to the check. A JavaScript-style
  * named group and the lookarounds are their own spelling, listed so a name counts toward a
  * duplicate and so no `(?` PCRE knows falls to the refusal of the ones it does not.
@@ -54,6 +58,20 @@ const GROUP_REWRITES: readonly GroupRewrite[] = [
   { syntax: /^\(\?>/, form: "(?:" },
   { syntax: /^\(\?<?[=!]/, form: "$&" },
 ];
+
+/** A flag group that leaves extended mode on: `x` set (`(?x)`, `(?xx)`, `(?ix)`, `(?x:`) and not unset after the `-`, as `(?x-x)` and `(?-x)` do. */
+const EXTENDED_MODE_GROUP = /^\(\?[ims]*x[imsx]*(?:-[ims]*)?[):]$/;
+
+/**
+ * Whether `tokens` turn extended mode on anywhere. From that group on PCRE skips unescaped
+ * whitespace and reads `#` to the end of the line as a comment, a lexing this tokenizer does not
+ * follow: `(?x)foo # )` is valid, `(?x)\A +` a quantified anchor. Decided over the tokens, so the
+ * same letters inside a class, a quote, or a comment are the text PCRE reads them as, and the
+ * first such group is lexed under the plain rules that hold up to it.
+ */
+function extendedMode(tokens: readonly Token[]): boolean {
+  return tokens.some((token) => token.kind === "group" && EXTENDED_MODE_GROUP.test(token.text));
+}
 
 /** The escapes PCRE cannot repeat, its anchors and the match reset, which a flagless RegExp reads as repeatable letters. */
 const UNREPEATABLE_ESCAPE = /^\\[AbBGKzZ]$/;
@@ -359,9 +377,16 @@ export function compilableForm(source: string): string {
   return render(lex(source));
 }
 
-/** Why `source` fails the check (PCRE's own refusal, else the RegExp's compile error), or undefined when it passes. */
+/**
+ * Why `source` fails the check (PCRE's own refusal, else the RegExp's compile error), or undefined
+ * when it passes; a pattern in extended mode passes unchecked, since its tokens past the flag were
+ * lexed under rules PCRE no longer applies there.
+ */
 export function compileFailure(source: string): string | undefined {
   const tokens = lex(source);
+  if (extendedMode(tokens)) {
+    return undefined;
+  }
   const refusal = pcreRefusal(tokens);
   if (refusal !== undefined) {
     return refusal;

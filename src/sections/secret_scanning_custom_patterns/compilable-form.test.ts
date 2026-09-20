@@ -115,6 +115,36 @@ describe("compilableForm", () => {
     expect(compileFailure("[\\x{41}-\\x{1F600}]+")).toBeUndefined();
   });
 
+  // Extended mode changes how PCRE lexes what follows (whitespace skipped, `#` to the end of the line a
+  // comment), which the tokenizer does not follow; such a pattern is left to GitHub's own check at apply.
+  test.each<[form: string, source: string]>([
+    // Valid to PCRE: the `)` sits in a comment. A check reading the raw text would refuse an unmatched `)`.
+    ["a closing parenthesis inside an extended-mode comment", "(?x)foo # )\n"],
+    // PCRE skips the space and refuses the quantified anchor `\A+`; the check does not, and GitHub's 422 names it.
+    ["a quantifier split from an anchor by extended-mode whitespace", "(?x)\\A +"],
+    ["extended mode turned on with another flag", "(?ix)foo # )\n"],
+    ["extended mode turned on after other tokens", "key_(?x)foo # )\n"],
+    ["extended mode scoped to a group", "(?x:foo # )\n)"],
+    ["PCRE2's extended-more mode", "(?xx)foo # )\n"],
+    ["extended mode turned on while another flag is turned off", "(?x-i)foo # )\n"],
+  ])("%s passes unchecked", (_form, source) => {
+    expect(compileFailure(source)).toBeUndefined();
+  });
+
+  test.each<[form: string, source: string]>([
+    ["an unmatched closing parenthesis after a hash, outside extended mode", "foo # )\n"],
+    ["an unmatched closing parenthesis after a group turning extended mode off", "(?-x)foo # )\n"],
+    // PCRE unsets an option named on both sides of the `-`, so the group leaves extended mode off.
+    ["an extended-mode flag set and unset in one group", "(?x-x)foo # )\n"],
+    ["an extended-mode flag set and unset in one scoped group", "(?x-x:foo # )\n)"],
+    // The letters of the flag group are text inside a quote or a class, so extended mode never turns on.
+    ["an extended-mode flag inside a quote", "\\Q(?x)\\Efoo # )\n"],
+    ["an extended-mode flag inside a class", "[(?x)]foo # )\n"],
+    ["an extended-mode flag inside a comment", "(?#(?x))foo # )\n"],
+  ])("%s is refused: the pattern is not in extended mode", (_form, source) => {
+    expect(compileFailure(source)).toBeDefined();
+  });
+
   test.each<[form: string, source: string]>([
     ["an unbalanced group", "(key_[A-Z0-9]{32}"],
     ["an unterminated character class", "[0-9"],
