@@ -17,10 +17,10 @@ coverage:
     notes: >-
       PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository/index.ts), so a
       field GitHub adds to the PATCH body works day one; GET-only fields (ids, urls, counts,
-      has_downloads, custom_properties) and illegal commit title/message pairs are refused at parse,
-      since they would drift or 422 on every run. Check mode = subsetDiff of declared keys against
-      GET /repos. Snapshot reads back the PATCH fields, topics, toggles, and GraphQL keys
-      (docs/operate/snapshot.md).
+      has_downloads, custom_properties), a commit message without its title, and illegal squash
+      title/message pairs are refused at parse, since they would drift or 422 on every run. Check
+      mode = subsetDiff of declared keys against GET /repos. Snapshot reads back the PATCH fields,
+      topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
   - area: >-
       [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
       Security, secret scanning, push protection, delegated bypass, validity checks)
@@ -132,11 +132,10 @@ schema:
     squash_merge_commit_title declared beside it, in one of the legal pairs.
   RepositoryConfig.merge_commit_title: >-
     The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside
-    merge_commit_message; legal pairs are PR_TITLE with PR_BODY or BLANK, and MERGE_MESSAGE with
-    PR_TITLE.
+    merge_commit_message.
   RepositoryConfig.merge_commit_message: >-
     The default message of a merge commit: PR_BODY, PR_TITLE, or BLANK. Needs merge_commit_title
-    declared beside it, in one of the legal pairs.
+    declared beside it.
   SecurityAndAnalysisConfig: >-
     The nested security_and_analysis object, closed to the sub-keys the PATCH accepts (GitHub rejects
     any other with a 422). Each feature is {status: enabled/disabled}. dependabot_security_updates

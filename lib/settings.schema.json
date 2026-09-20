@@ -1526,7 +1526,7 @@
           ]
         },
         "merge_commit_title": {
-          "description": "The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside merge_commit_message; legal pairs are PR_TITLE with PR_BODY or BLANK, and MERGE_MESSAGE with PR_TITLE.",
+          "description": "The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside merge_commit_message.",
           "type": "string",
           "enum": [
             "PR_TITLE",
@@ -1534,7 +1534,7 @@
           ]
         },
         "merge_commit_message": {
-          "description": "The default message of a merge commit: PR_BODY, PR_TITLE, or BLANK. Needs merge_commit_title declared beside it, in one of the legal pairs.",
+          "description": "The default message of a merge commit: PR_BODY, PR_TITLE, or BLANK. Needs merge_commit_title declared beside it.",
           "type": "string",
           "enum": [
             "PR_BODY",

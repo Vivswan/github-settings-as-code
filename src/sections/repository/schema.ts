@@ -270,73 +270,91 @@ const SecurityAndAnalysisConfig = z
 
 // --- Commit message defaults ---------------------------------------------------
 
-type EnumList = readonly [string, ...string[]];
+type CommitMessageKey =
+  | "squash_merge_commit_title"
+  | "squash_merge_commit_message"
+  | "merge_commit_title"
+  | "merge_commit_message";
+
+type CommitMessageValue<K extends CommitMessageKey> = NonNullable<RepoPatchBody[K]>;
+
+/** Each field's vocabulary, pinned both ways to the vendored spec: no extras by satisfies, no gaps by the pin. */
+const COMMIT_MESSAGE_VOCABULARIES = {
+  squash_merge_commit_title: ["PR_TITLE", "COMMIT_OR_PR_TITLE"],
+  squash_merge_commit_message: ["PR_BODY", "BLANK", "COMMIT_MESSAGES"],
+  merge_commit_title: ["PR_TITLE", "MERGE_MESSAGE"],
+  merge_commit_message: ["PR_BODY", "BLANK", "PR_TITLE"],
+} as const satisfies { [K in CommitMessageKey]: readonly CommitMessageValue<K>[] };
+type _CommitMessageVocabulariesComplete = MustBeNever<
+  {
+    [K in CommitMessageKey]: Exclude<
+      CommitMessageValue<K>,
+      (typeof COMMIT_MESSAGE_VOCABULARIES)[K][number]
+    >;
+  }[CommitMessageKey]
+>;
+
+type Vocabulary<K extends CommitMessageKey> = (typeof COMMIT_MESSAGE_VOCABULARIES)[K][number];
 
 /**
- * A title/message family of the merge settings: the table's keys are the title vocabulary, its values
- * the messages each title may pair with. GitHub answers 422 (invalid_squash_commit_setting_combo) to
- * any other pair, and rejects a message declared without its title.
+ * The squash pairs GitHub documents: any other title/message pair answers 422
+ * (invalid_squash_commit_setting_combo). The merge family has no documented matrix, so it gets none.
  */
-interface CommitMessageFamily {
-  readonly titleKey: string;
-  readonly messageKey: string;
-  readonly pairs: Readonly<Record<string, EnumList>>;
-  readonly title: z.ZodEnum;
-  readonly message: z.ZodEnum;
-}
+const SQUASH_COMMIT_PAIRS = {
+  PR_TITLE: ["PR_BODY", "BLANK", "COMMIT_MESSAGES"],
+  COMMIT_OR_PR_TITLE: ["COMMIT_MESSAGES"],
+} as const satisfies Record<
+  Vocabulary<"squash_merge_commit_title">,
+  readonly Vocabulary<"squash_merge_commit_message">[]
+>;
 
-function commitMessageFamily<const P extends Readonly<Record<string, EnumList>>>(
-  titleKey: string,
-  messageKey: string,
-  pairs: P,
-): CommitMessageFamily {
-  const titles = Object.keys(pairs) as [keyof P & string, ...(keyof P & string)[]];
-  const messages = [...new Set(Object.values(pairs).flat())] as [
-    P[keyof P][number],
-    ...P[keyof P][number][],
-  ];
-  const legal = legalPairs(pairs);
-  return {
-    titleKey,
-    messageKey,
-    pairs,
-    title: z.enum(titles, {
-      error: (issue) =>
-        `${describeValue(issue.input)} is not a ${titleKey} value; use ${listKeys(titles)}. Legal pairs: ${legal}`,
-    }),
-    message: z.enum(messages, {
-      error: (issue) =>
-        `${describeValue(issue.input)} is not a ${messageKey} value; use ${listKeys(messages)}. Legal pairs: ${legal}`,
-    }),
-  };
-}
+type PairTable = Readonly<Record<string, readonly string[]>>;
 
-function legalPairs(pairs: Readonly<Record<string, EnumList>>): string {
+function legalPairs(pairs: PairTable): string {
   return Object.entries(pairs)
     .map(([title, messages]) => `${title} with ${messages.join(" or ")}`)
     .join("; ");
 }
 
-type SquashTitle = NonNullable<RepoPatchBody["squash_merge_commit_title"]>;
-type SquashMessage = NonNullable<RepoPatchBody["squash_merge_commit_message"]>;
-type MergeTitle = NonNullable<RepoPatchBody["merge_commit_title"]>;
-type MergeMessage = NonNullable<RepoPatchBody["merge_commit_message"]>;
+/** What the pair refinement needs of a family; the enums themselves stay typed by their vocabularies. */
+interface CommitMessageFamily {
+  readonly titleKey: string;
+  readonly messageKey: string;
+  /** Title to the messages it may pair with; undefined when GitHub documents no matrix. */
+  readonly pairs: PairTable | undefined;
+  readonly legalHint: string;
+}
 
-const SQUASH_COMMIT_PAIRS = {
-  PR_TITLE: ["PR_BODY", "BLANK", "COMMIT_MESSAGES"],
-  COMMIT_OR_PR_TITLE: ["COMMIT_MESSAGES"],
-} as const satisfies Record<SquashTitle, readonly SquashMessage[]>;
-type _SquashMessagesComplete = MustBeNever<
-  Exclude<SquashMessage, (typeof SQUASH_COMMIT_PAIRS)[SquashTitle][number]>
->;
-
-const MERGE_COMMIT_PAIRS = {
-  PR_TITLE: ["PR_BODY", "BLANK"],
-  MERGE_MESSAGE: ["PR_TITLE"],
-} as const satisfies Record<MergeTitle, readonly MergeMessage[]>;
-type _MergeMessagesComplete = MustBeNever<
-  Exclude<MergeMessage, (typeof MERGE_COMMIT_PAIRS)[MergeTitle][number]>
->;
+/**
+ * A title/message pair of the merge settings. GitHub rejects a message declared without its title in
+ * both families; the pair matrix applies only where GitHub documents one.
+ */
+function commitMessageFamily<
+  TitleKey extends CommitMessageKey,
+  MessageKey extends CommitMessageKey,
+>(
+  titleKey: TitleKey,
+  messageKey: MessageKey,
+  pairs?: Readonly<Record<Vocabulary<TitleKey>, readonly Vocabulary<MessageKey>[]>>,
+) {
+  const titles = COMMIT_MESSAGE_VOCABULARIES[titleKey];
+  const messages = COMMIT_MESSAGE_VOCABULARIES[messageKey];
+  const legalHint = pairs === undefined ? "" : `. Legal pairs: ${legalPairs(pairs)}`;
+  return {
+    titleKey,
+    messageKey,
+    pairs,
+    legalHint,
+    title: z.enum(titles, {
+      error: (issue) =>
+        `${describeValue(issue.input)} is not a ${titleKey} value; use ${listKeys(titles)}${legalHint}`,
+    }),
+    message: z.enum(messages, {
+      error: (issue) =>
+        `${describeValue(issue.input)} is not a ${messageKey} value; use ${listKeys(messages)}${legalHint}`,
+    }),
+  };
+}
 
 const SQUASH_COMMIT = commitMessageFamily(
   "squash_merge_commit_title",
@@ -344,11 +362,7 @@ const SQUASH_COMMIT = commitMessageFamily(
   SQUASH_COMMIT_PAIRS,
 );
 
-const MERGE_COMMIT = commitMessageFamily(
-  "merge_commit_title",
-  "merge_commit_message",
-  MERGE_COMMIT_PAIRS,
-);
+const MERGE_COMMIT = commitMessageFamily("merge_commit_title", "merge_commit_message");
 
 const COMMIT_MESSAGE_FAMILIES: readonly CommitMessageFamily[] = [SQUASH_COMMIT, MERGE_COMMIT];
 
@@ -359,22 +373,21 @@ function refineCommitMessagePairs(declared: Record<string, unknown>, ctx: z.Refi
     if (message === undefined) {
       continue;
     }
-    const legal = legalPairs(family.pairs);
     if (title === undefined) {
       ctx.addIssue({
         code: "custom",
         path: [family.messageKey],
-        message: `${family.messageKey} needs ${family.titleKey} declared beside it (GitHub requires the pair). Legal pairs: ${legal}`,
+        message: `${family.messageKey} needs ${family.titleKey} declared beside it (GitHub requires the pair)${family.legalHint}`,
       });
       continue;
     }
     // Both values passed their enums, or the refinement would not be running.
-    const allowed = family.pairs[title as string];
+    const allowed = family.pairs?.[title as string];
     if (allowed !== undefined && !allowed.includes(message as string)) {
       ctx.addIssue({
         code: "custom",
         path: [family.messageKey],
-        message: `${family.titleKey} ${String(title)} cannot pair with ${family.messageKey} ${String(message)} (GitHub answers 422). Legal pairs: ${legal}`,
+        message: `${family.titleKey} ${String(title)} cannot pair with ${family.messageKey} ${String(message)} (GitHub answers 422)${family.legalHint}`,
       });
     }
   }
@@ -452,3 +465,10 @@ export const RepositoryConfig = z
   })
   .meta({ id: "RepositoryConfig" });
 export type RepositoryConfig = z.infer<typeof RepositoryConfig>;
+
+/** The parsed commit-message fields are the spec's unions; a widened enum would type them as string. */
+type _CommitMessageFieldsNarrow = MustBeNever<
+  {
+    [K in CommitMessageKey]: Exclude<NonNullable<RepositoryConfig[K]>, CommitMessageValue<K>>;
+  }[CommitMessageKey]
+>;

@@ -1012,7 +1012,6 @@ describe("repository parse refusals", () => {
 
   const SQUASH_PAIRS =
     "PR_TITLE with PR_BODY or BLANK or COMMIT_MESSAGES; COMMIT_OR_PR_TITLE with COMMIT_MESSAGES";
-  const MERGE_PAIRS = "PR_TITLE with PR_BODY or BLANK; MERGE_MESSAGE with PR_TITLE";
 
   test.each([
     [
@@ -1074,24 +1073,6 @@ describe("repository parse refusals", () => {
       'repository.security_and_analysis.secret_scanning: "enabled" is not a key a security_and_analysis feature accepts (GitHub rejects it with a 422); remove it. Known keys: "status"',
     ],
     [
-      "a reviewer type outside TEAM/ROLE",
-      {
-        secret_scanning_delegated_bypass_options: {
-          reviewers: [{ reviewer_id: 7, reviewer_type: "USER" }],
-        },
-      },
-      'repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0].reviewer_type: Invalid option: expected one of "TEAM"|"ROLE"',
-    ],
-    [
-      "a reviewer id that is not an integer",
-      {
-        secret_scanning_delegated_bypass_options: {
-          reviewers: [{ reviewer_id: "7", reviewer_type: "TEAM" }],
-        },
-      },
-      "repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0].reviewer_id: Invalid input: expected number, received string",
-    ],
-    [
       "an unknown reviewer key",
       {
         secret_scanning_delegated_bypass_options: {
@@ -1107,27 +1088,11 @@ describe("repository parse refusals", () => {
     },
   );
 
-  test("the full PATCHable security_and_analysis object, validity checks and bypass reviewers included, parses, and so does the null the PATCH body documents", () => {
+  test("security_and_analysis accepts the null the PATCH body documents, and the validity-checks sub-key the descriptor omits", () => {
     expect(refusals({ security_and_analysis: null })).toEqual([]);
     expect(
       refusals({
-        security_and_analysis: {
-          advanced_security: { status: "enabled" },
-          code_security: { status: "disabled" },
-          secret_scanning: { status: "enabled" },
-          secret_scanning_push_protection: { status: "enabled" },
-          secret_scanning_ai_detection: { status: "disabled" },
-          secret_scanning_non_provider_patterns: { status: "enabled" },
-          secret_scanning_delegated_alert_dismissal: { status: "disabled" },
-          secret_scanning_delegated_bypass: { status: "enabled" },
-          secret_scanning_delegated_bypass_options: {
-            reviewers: [
-              { reviewer_id: 12, reviewer_type: "TEAM" },
-              { reviewer_id: 3, reviewer_type: "ROLE", mode: "EXEMPT" },
-            ],
-          },
-          secret_scanning_validity_checks: { status: "enabled" },
-        },
+        security_and_analysis: { secret_scanning_validity_checks: { status: "enabled" } },
       }),
     ).toEqual([]);
   });
@@ -1151,40 +1116,39 @@ describe("repository parse refusals", () => {
     [
       "a merge message without its title",
       { merge_commit_message: "PR_TITLE" },
-      `repository.merge_commit_message: merge_commit_message needs merge_commit_title declared beside it (GitHub requires the pair). Legal pairs: ${MERGE_PAIRS}`,
-    ],
-    [
-      "MERGE_MESSAGE with PR_BODY",
-      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
-      `repository.merge_commit_message: merge_commit_title MERGE_MESSAGE cannot pair with merge_commit_message PR_BODY (GitHub answers 422). Legal pairs: ${MERGE_PAIRS}`,
+      "repository.merge_commit_message: merge_commit_message needs merge_commit_title declared beside it (GitHub requires the pair)",
     ],
     [
       "a merge message outside the vocabulary",
       { merge_commit_title: "PR_TITLE", merge_commit_message: "COMMIT_MESSAGES" },
-      `repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "BLANK", "PR_TITLE". Legal pairs: ${MERGE_PAIRS}`,
+      'repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "BLANK", "PR_TITLE"',
     ],
   ])(
-    "commit message defaults: %s is refused at parse, naming the legal pairs GitHub would otherwise 422 on",
+    "commit message defaults: %s is refused at parse instead of as GitHub's 422 at apply",
     (_what, declared, message) => {
       expect(refusals(declared)).toEqual([message]);
     },
   );
 
   test.each([
-    [
-      "every legal squash pair",
-      { squash_merge_commit_title: "PR_TITLE", squash_merge_commit_message: "COMMIT_MESSAGES" },
-    ],
-    [
-      "the default squash pair",
-      {
-        squash_merge_commit_title: "COMMIT_OR_PR_TITLE",
-        squash_merge_commit_message: "COMMIT_MESSAGES",
-      },
-    ],
+    ["PR_TITLE", "PR_BODY"],
+    ["PR_TITLE", "BLANK"],
+    ["PR_TITLE", "COMMIT_MESSAGES"],
+    ["COMMIT_OR_PR_TITLE", "COMMIT_MESSAGES"],
+  ])("commit message defaults: the legal squash pair %s with %s parses", (title, message) => {
+    expect(
+      refusals({ squash_merge_commit_title: title, squash_merge_commit_message: message }),
+    ).toEqual([]);
+  });
+
+  test.each([
     [
       "the default merge pair",
       { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
+    ],
+    [
+      "a merge pair GitHub documents no refusal for",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
     ],
     [
       "a lone title, whose pair is only decidable against the live message",
