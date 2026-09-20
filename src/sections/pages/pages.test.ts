@@ -33,9 +33,87 @@ function liveRepo(site: Record<string, unknown> | null): GitHubClient & { writes
   };
 }
 
+describe("pages shape", () => {
+  const parse = (site: Record<string, unknown>) => pagesSection.shape.safeParse(site);
+
+  test("every field only the site GET reports is refused at parse: the PUT has no slot for it, so it would drift on every run", () => {
+    // Any JSON value: the GET's type for the key is irrelevant, the update body has no slot for it at all.
+    const reported = {
+      url: "x",
+      status: "built",
+      custom_404: true,
+      html_url: "x",
+      protected_domain_state: "verified",
+      pending_domain_unverified_at: null,
+      https_certificate: { state: "approved" },
+    };
+    const result = parse({ cname: "docs.example.com", ...reported });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path).sort()).toEqual(
+      Object.keys(reported)
+        .map((key) => [key])
+        .sort(),
+    );
+    const custom404 = parse({ custom_404: true });
+    expect(custom404.error?.issues.map((issue) => issue.message)).toEqual([
+      "GitHub reports this field on the Pages site and the update has no such parameter, so the value " +
+        "would be sent, ignored, and reported as drift on every run (it reports whether the published " +
+        "site carries a 404.html; add that file to the source instead); remove it",
+    ]);
+  });
+
+  test("a source.path other than / or /docs is refused at parse instead of a 422 at apply", () => {
+    const result = parse({ source: { branch: "main", path: "/src" } });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => [issue.path, issue.message])).toEqual([
+      [["source", "path"], 'Invalid option: expected one of "/"|"/docs"'],
+    ]);
+  });
+});
+
 describe("pages", () => {
   const plan = (api: MockApi, desired: Parameters<typeof pagesSection.plan>[1]) =>
     pagesSection.plan(planContext(pagesSection, api, REPO), desired);
+
+  test("public drift carries the Enterprise Cloud note: github.com reports true and ignores the PUT, so it never converges", async () => {
+    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: true } } });
+    const result = await plan(api, { public: false });
+    expect(result).toEqual({
+      ops: [
+        {
+          role: "update",
+          payload: { public: false },
+          drift: ["pages.public: false != true"],
+          change: "updated GitHub Pages configuration",
+        },
+      ],
+      notes: [
+        "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
+          "elsewhere GitHub reports public: true and ignores the field on the update, so this drift " +
+          "never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud " +
+          "organization",
+      ],
+      drift: [],
+    });
+    // An Enterprise Cloud site that already matches gets no note: the drift, not the key, earns it.
+    expect(await plan(api, { public: true })).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
+  test("a live non-public site proves the host sets visibility, so making it public is ordinary drift", async () => {
+    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: false } } });
+    expect(await plan(api, { public: true })).toEqual({
+      ops: [
+        {
+          role: "update",
+          payload: { public: true },
+          drift: ["pages.public: true != false"],
+          change: "updated GitHub Pages configuration",
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+  });
 
   test("no live site: create carries build_type and source, then the update the rest", async () => {
     const api = new MockApi({}); // GET /pages 404s

@@ -952,7 +952,11 @@
             },
             "path": {
               "description": "The directory within the branch Pages publishes: / or /docs.",
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "/",
+                "/docs"
+              ]
             }
           },
           "required": [
@@ -971,9 +975,48 @@
           "type": "boolean"
         },
         "public": {
-          "description": "Enterprise Cloud site visibility: true for public, false for repository members only. Documented only in the GHEC flavor of the Pages PUT; the GET echoes it everywhere.",
+          "description": "Enterprise Cloud site visibility: true for public, false for repository members only. Only an organization on Enterprise Cloud can set it; everywhere else GitHub reports true and ignores the field, so false drifts on every run.",
           "type": "boolean"
         }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "html_url"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "required": [
+              "custom_404"
+            ]
+          },
+          {
+            "required": [
+              "protected_domain_state"
+            ]
+          },
+          {
+            "required": [
+              "pending_domain_unverified_at"
+            ]
+          },
+          {
+            "required": [
+              "https_certificate"
+            ]
+          }
+        ]
       }
     },
     "RepositoryConfig": {

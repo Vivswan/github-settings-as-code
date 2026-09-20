@@ -51,6 +51,17 @@ type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
  */
 const LiveSite = z.looseObject({});
 
+/**
+ * A note, not a parse error: nothing in the file tells an Enterprise Cloud organization from github.com,
+ * where GitHub reports `public: true` and drops the field from the update. Only that signature (live
+ * true, declared false) earns it: a live non-public site proves the host supports visibility, so the
+ * PUT can make it public and the drift is ordinary.
+ */
+const PUBLIC_VISIBILITY_NOTE =
+  "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
+  "elsewhere GitHub reports public: true and ignores the field on the update, so this drift never " +
+  "converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization";
+
 export const pagesSection = {
   key: "pages",
   undeclaredDefault: "untouched",
@@ -102,6 +113,9 @@ export const pagesSection = {
           drift,
           change: "updated GitHub Pages configuration",
         });
+        if (payload.public === false && probe.data.public === true) {
+          plan.notes.push(PUBLIC_VISIBILITY_NOTE);
+        }
       }
       return plan;
     }

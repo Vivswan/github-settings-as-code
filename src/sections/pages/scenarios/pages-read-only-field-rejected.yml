@@ -1,0 +1,28 @@
+name: pages-read-only-field-rejected
+description: >-
+  A settings file declaring a Pages field only the site GET reports (custom_404) is refused when
+  the file is parsed: exit 1 and no request reaches the API. Sent, the key would ride the PUT
+  ignored and diff against the live site on every run.
+settings:
+  pages:
+    custom_404: true
+    source:
+      branch: main
+      path: /docs
+live_state:
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    build_type: legacy
+    custom_404: false
+    source:
+      branch: main
+      path: /
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - >-
+      pages.custom_404: GitHub reports this field on the Pages site and the update has no such
+      parameter, so the value would be sent, ignored, and reported as drift on every run (it reports
+      whether the published site carries a 404.html; add that file to the source instead); remove it
