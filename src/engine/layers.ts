@@ -50,7 +50,7 @@ export interface RemovalNotice {
 const LAYERING_KEY = "_layering";
 
 /** The one entry-level directive: `_remove: true` names a lower entry by its key and drops it. */
-export const REMOVE_KEY = "_remove";
+const REMOVE_KEY = "_remove";
 
 function isLayering(value: unknown): value is Layering {
   return LAYERINGS.some((layering) => layering === value);
@@ -113,13 +113,13 @@ function unwrapPlainLists(merged: Record<string, unknown>): void {
 }
 
 /** A nested keyed list in either form: the bare list, or the nested `{_undeclared, entries}` wrapper; null when neither. */
-export interface NestedForm {
+interface NestedForm {
   readonly entries: readonly unknown[];
   /** The wrapper's keys besides `entries`; null for the bare list, so the fold can tell the two forms apart. */
   readonly knobs: Readonly<Record<string, unknown>> | null;
 }
 
-export function nestedForm(value: unknown): NestedForm | null {
+function nestedForm(value: unknown): NestedForm | null {
   if (Array.isArray(value)) {
     return { entries: value, knobs: null };
   }
@@ -131,7 +131,7 @@ export function nestedForm(value: unknown): NestedForm | null {
 }
 
 /** Whether a keyed entry is a removal: `_remove: true` beside its key. The boundary refused every other `_remove`. */
-export function isRemoval(entry: unknown): entry is Readonly<Record<string, unknown>> {
+function isRemoval(entry: unknown): entry is Readonly<Record<string, unknown>> {
   return isPlainObject(entry) && entry[REMOVE_KEY] === true;
 }
 

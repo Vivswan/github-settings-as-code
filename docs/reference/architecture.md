@@ -278,7 +278,6 @@ graph TD
   flows --> engine
   flows --> github
   flows --> io
-  flows --> plain_data
   flows --> private
   flows --> problem
   flows --> report

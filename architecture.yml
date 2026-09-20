@@ -39,7 +39,7 @@ edges:
   cli: [library, internal]
   library: [discovery, engine, flows, github, io, problem, report, schema, sections]
   internal: [discovery, engine, flows, github, problem, report, schema, sections, text, types]
-  flows: [discovery, engine, github, io, plain-data, private, problem, report, schema, text, types]
+  flows: [discovery, engine, github, io, private, problem, report, schema, text, types]
   engine: [discovery, github, io, plain-data, problem, schema, sections, text, types]
   sections: [discovery, engine, github, schema, text, types, upstream-gaps]
   github: [io, plain-data]
