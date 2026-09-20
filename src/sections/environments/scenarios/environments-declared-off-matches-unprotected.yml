@@ -1,0 +1,27 @@
+# An environment without protection rules answers protection_rules: [], and a
+# declaration of the disabled values (wait_timer 0, prevent_self_review false,
+# no reviewers) is satisfied by that absence, the way GitHub reads it: the run
+# needs no PUT, and the same document is an apply fixpoint.
+name: environments-declared-off-matches-unprotected
+settings:
+  environments:
+    - name: production
+      wait_timer: 0
+      prevent_self_review: false
+      reviewers: []
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+      deployment_branch_policy: null
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  never:
+    - "PUT /repos/{repo}/environments/production"
+  fixpoint: converges

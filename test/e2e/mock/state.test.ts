@@ -357,26 +357,51 @@ describe("branch protection rule projections", () => {
 });
 
 describe("environmentFromPut round trip", () => {
-  test("the engine flattener over environmentFromPut(payload) shows no drift", () => {
-    const payload = {
-      wait_timer: 30,
-      prevent_self_review: true,
-      reviewers: [
-        { type: "User", id: 101 },
-        { type: "Team", id: 201 },
+  // flattenEnvironment leaves the un-nested protection_rules on the object; subsetDiff (declared-keys-only,
+  // exactly as the environments section uses it) ignores that undeclared key.
+  test.each<[string, Record<string, unknown>, unknown[]]>([
+    [
+      "every protection key on",
+      {
+        wait_timer: 30,
+        prevent_self_review: true,
+        reviewers: [
+          { type: "User", id: 101 },
+          { type: "Team", id: 201 },
+        ],
+        deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+      },
+      [
+        { type: "wait_timer", wait_timer: 30 },
+        {
+          type: "required_reviewers",
+          prevent_self_review: true,
+          reviewers: [
+            { type: "User", reviewer: { id: 101 } },
+            { type: "Team", reviewer: { id: 201 } },
+          ],
+        },
       ],
-      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
-    };
-    // flattenEnvironment leaves the un-nested protection_rules on the object; subsetDiff (declared-keys-only,
-    // exactly as the environments section uses it) ignores that undeclared key.
-    const flattened = flattenEnvironment(environmentFromPut(payload));
-    expect(subsetDiff(payload, flattened, "environments[production]")).toEqual([]);
-  });
+    ],
+    // GitHub creates no rule for the disabled values, and the flattener's baseline reads them back.
+    ["the disabled values", { wait_timer: 0, prevent_self_review: false, reviewers: [] }, []],
+    ["a null branch policy", { deployment_branch_policy: null }, []],
+  ])(
+    "%s: the engine flattener over environmentFromPut(payload) shows no drift",
+    (_name, payload, rules) => {
+      const get = environmentFromPut(payload);
+      expect(get.protection_rules).toEqual(rules);
+      expect(subsetDiff(payload, flattenEnvironment(get), "environments[production]")).toEqual([]);
+    },
+  );
 
-  test("deployment_branch_policy passes through untouched", () => {
-    const get = environmentFromPut({ deployment_branch_policy: null });
-    expect(get.deployment_branch_policy).toBeNull();
-    expect(get.protection_rules).toEqual([]);
+  test("an empty PUT reads back as the three disabled values, so a later declaration of them is satisfied", () => {
+    expect(flattenEnvironment(environmentFromPut({}))).toEqual({
+      protection_rules: [],
+      wait_timer: 0,
+      prevent_self_review: false,
+      reviewers: [],
+    });
   });
 });
 

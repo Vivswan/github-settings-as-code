@@ -3,7 +3,8 @@ description: >-
   mode: snapshot reads the live environments back into snapshot.yml and writes nothing to GitHub.
   The environment listing names production and staging; each reads back as an entry: the PUT-shape
   settings off its GET body (protection_rules un-nested into wait_timer, prevent_self_review, and
-  reviewers by type and id; deployment_branch_policy kept, null included), and every nested list
+  reviewers by type and id, an environment without rules reading back as the three disabled values;
+  deployment_branch_policy kept, null included), and every nested list
   with live items in its wrapped form under that list's default policy: variables with their values,
   secrets as per-store $SECRET_ENVIRONMENT_<NAME>_<SECRET> references with a note each, the branch-
   policy patterns while custom_branch_policies is on, and the enabled protection rules by App slug.
@@ -102,6 +103,9 @@ expect:
     environments:
       - name: staging
         pinned: true
+        wait_timer: 0
+        prevent_self_review: false
+        reviewers: []
         deployment_branch_policy: null
         secrets:
           _undeclared: keep

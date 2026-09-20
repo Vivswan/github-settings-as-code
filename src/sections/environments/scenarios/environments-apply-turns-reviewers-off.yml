@@ -1,0 +1,36 @@
+# The live environment carries a required_reviewers rule (one User reviewer,
+# prevent_self_review on) and the declaration turns both off with the disabled
+# values. Apply issues one PUT; the mock, like GitHub, creates no rule for an
+# empty reviewer list, so the re-check reads the disabled baseline back and the
+# run converges instead of PUTting forever.
+name: environments-apply-turns-reviewers-off
+settings:
+  environments:
+    - name: production
+      prevent_self_review: false
+      reviewers: []
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules:
+        - id: 3755
+          node_id: MDQ6R2F0ZTM3NTU=
+          type: required_reviewers
+          prevent_self_review: true
+          reviewers:
+            - type: User
+              reviewer:
+                login: octocat
+                id: 583231
+      deployment_branch_policy: null
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  fixpoint: converges

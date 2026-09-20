@@ -199,9 +199,18 @@ export const environmentsSection = {
  * GET nests wait_timer / prevent_self_review / reviewers inside protection_rules[]; translated back
  * to the PUT shape so check compares like with like. Exported so the e2e state tests can assert
  * their environmentFromPut inverts this exact function.
+ *
+ * An environment without protection answers protection_rules: [], so the disabled values are the
+ * baseline and a present rule overwrites its keys: a declared `wait_timer: 0` or `reviewers: []`
+ * is satisfied by the absence of the rule, as GitHub itself reads it.
  */
 export function flattenEnvironment(live: LiveEnvironmentBody): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...live };
+  const out: Record<string, unknown> = {
+    ...live,
+    wait_timer: 0,
+    prevent_self_review: false,
+    reviewers: [],
+  };
   for (const rule of live.protection_rules ?? []) {
     if (rule.type === "wait_timer") {
       out.wait_timer = rule.wait_timer;
