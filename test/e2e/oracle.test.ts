@@ -1594,6 +1594,24 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     expect(mergeLayers(layers, { layering }).isErr()).toBe(true);
   });
 
+  test("two layers each carrying a refusal: the fold names the lower one, as the engine does, whatever the sections' order", () => {
+    // The oracle folds layer by layer; a section-first fold would meet the higher layer's labels before the lower's environments.
+    const layers = stack(
+      { environments: [{ name: "prod", [REMOVE_KEY]: true }] },
+      { labels: [{ name: "bug", [REMOVE_KEY]: true }] },
+    );
+    expect(predictMerge({ layers, layering: "deep", features: [] })).toEqual({
+      kind: "refused",
+      layer: "layer-0.yml",
+    });
+    expect(
+      mergeLayers(layers, { layering: "deep" }).match(
+        () => null,
+        (problem) => problem.layer,
+      ),
+    ).toBe("layer-0.yml");
+  });
+
   test.each<[LayeringDirective, Record<string, unknown>[]]>([
     ["deep", [{ title: "v1" }, { title: "v2" }]],
     ["shallow", [{ title: "v1" }, { title: "v2" }]],
@@ -1748,14 +1766,6 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
   ];
   test.each(refusals)("refuses %s, naming the layer", (_name, doc) => {
     expect(refusedMergeLayer(stack(admitted, doc, admitted), "replace")).toBe("layer-1.yml");
-  });
-
-  test("a removal under an effective shallow or deep is the fold's question, not the boundary's", () => {
-    const doc = { labels: [{ name: "a", [REMOVE_KEY]: true }] };
-    expect(refusedMergeLayer(stack(admitted, doc), "deep")).toBeUndefined();
-    expect(
-      refusedMergeLayer(stack(admitted, { ...doc, _layering: "shallow" }), "replace"),
-    ).toBeUndefined();
   });
 });
 

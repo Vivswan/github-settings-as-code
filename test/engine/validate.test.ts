@@ -67,7 +67,7 @@ describe("section shape validation", () => {
     [
       "a string inside a keyed entry",
       { labels: [{ name: "bug", description: null }] },
-      'labels[0].description has no empty state; write a string ("" for none)',
+      "labels[0].description has no empty state; write a string",
     ],
     [
       "a list",
@@ -77,7 +77,7 @@ describe("section shape validation", () => {
     [
       "a union of a string and a list",
       { repository: { topics: null } },
-      'repository.topics has no empty state; write a string ("" for none), or a list ([] for none)',
+      "repository.topics has no empty state; write a string, or a list ([] for none)",
     ],
     [
       "a nested list section",
@@ -96,6 +96,15 @@ describe("section shape validation", () => {
     ],
   ])("a null a key does not admit names the legal values: %s", (_what, doc, issue) => {
     expect(issuesOf(doc)).toEqual([issue]);
+  });
+
+  test("a shape's own diagnostic for a null keeps its words: no value would make the key legal", () => {
+    // The environments slice refuses a singular `secret` key by name; the null rewrite has nothing truer to say.
+    expect(issuesOf({ environments: [{ name: "prod", secret: null }] })).toEqual([
+      expect.stringMatching(
+        /^environments\[0\]\.secret: environment secrets belong under the entry's `secrets` list/,
+      ),
+    ]);
   });
 
   test.each<[string, Record<string, unknown>]>([

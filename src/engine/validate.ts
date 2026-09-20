@@ -31,7 +31,15 @@ interface NullIssue {
   params?: { legal?: string };
 }
 
-/** The values a key that refused null does take, in the words of the fix: "true or false", "a string ("" for none)". */
+/** A type, value, or union mismatch is zod's wording, replaced here; a custom issue is the shape's own, kept unless it names the legal values. */
+function rewritesForNull(issue: NullIssue): boolean {
+  return (
+    issue.params?.legal !== undefined ||
+    ["invalid_type", "invalid_value", "invalid_union"].includes(issue.code)
+  );
+}
+
+/** The values a key that refused null does take, in the words of the fix: "true or false", "a string", "a list ([] for none)". */
 function legalValues(issue: NullIssue): string {
   if (issue.params?.legal !== undefined) {
     return issue.params.legal;
@@ -57,7 +65,7 @@ function legalOfType(expected: string | undefined): string {
     case "boolean":
       return "true or false";
     case "string":
-      return 'a string ("" for none)';
+      return "a string";
     case "number":
     case "int":
       return "a number";
@@ -214,8 +222,9 @@ export function validateSectionShapes(
         const path = issue.path
           .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
           .join("");
-        // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that exist.
-        if (valueAt(declared, issue.path) === null) {
+        // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that
+        // exist. A shape's own diagnostic (a custom issue) already names the fix, unless it supplies the legal values itself.
+        if (valueAt(declared, issue.path) === null && rewritesForNull(issue as NullIssue)) {
           problems.push(
             `${key}${path} has no empty state; write ${legalValues(issue as NullIssue)}`,
           );

@@ -361,7 +361,7 @@ Commit the rendered file only if you want to review it in pull requests; the ste
 
 ## Validation per layer
 
-Each layer must be a valid settings document on its own, judged with its two directives set aside: `_layering` (at the top or on a wrapper) and every `_remove: true` entry, which declares nothing. Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails the layer's validation under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
+Each layer must be a valid settings document on its own, judged with its two directives set aside: `_layering` (at the top or on a wrapper) and every `_remove: true` entry, which declares nothing. Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
 
 Whatever a standalone settings file may not say, a layer may not say either:
 

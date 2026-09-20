@@ -1078,41 +1078,41 @@ interface Contribution {
  * A list section's column: every layer's entries union under its effective directive. A knobbed section resolves its
  * policy afterwards; a plain list's wrapper carried only the directive, so the fold writes the bare list.
  */
-function reduceList(
+/** One layer's contribution to a list section, folded onto what the layers below built. */
+function reduceListStep(
   key: ListSection,
-  column: readonly Contribution[],
+  slot: Slot,
+  contribution: Contribution,
   run: LayeringDirective,
-  notices: MergeNotice[],
+  site: Site,
 ): Slot {
   const keyed = KEYED_MERGE_SECTIONS[key];
-  let slot: Slot;
-  for (const { layer, value, fileDirective } of column) {
-    const site: Site = { layer, notices };
-    if (value === null) {
-      slot = settle(slot, null, key, site);
-      continue;
-    }
-    const { entries, [LAYERING_KEY]: directive, ...knobs } = asWrapper(value);
-    const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
-    const below = isMapping(slot) ? slot : {};
-    const { entries: belowEntries, ...belowKnobs } = below;
-    const unites = effective !== "replace" && Array.isArray(belowEntries);
-    // A list written whole (under replace, or with nothing below) gives a removal at any depth nothing to act on.
-    if (
-      !unites &&
-      (entries as Json[]).some(
-        (entry) => isRemovalEntry(entry) || carriesNestedRemoval(entry, keyed),
-      )
-    ) {
-      throw new FoldRefused(layer);
-    }
-    slot = {
-      ...mergeTrees(belowKnobs, knobs, key, site),
-      entries: unites
-        ? unionKeyed(belowEntries as Json[], entries as Json[], keyed, effective, key, site)
-        : structuredClone(entries),
-    };
+  const { layer, value, fileDirective } = contribution;
+  if (value === null) {
+    return settle(slot, null, key, site);
   }
+  const { entries, [LAYERING_KEY]: directive, ...knobs } = asWrapper(value);
+  const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
+  const below = isMapping(slot) ? slot : {};
+  const { entries: belowEntries, ...belowKnobs } = below;
+  const unites = effective !== "replace" && Array.isArray(belowEntries);
+  // A list written whole (under replace, or with nothing below) gives a removal at any depth nothing to act on.
+  if (
+    !unites &&
+    (entries as Json[]).some((entry) => isRemovalEntry(entry) || carriesNestedRemoval(entry, keyed))
+  ) {
+    throw new FoldRefused(layer);
+  }
+  return {
+    ...mergeTrees(belowKnobs, knobs, key, site),
+    entries: unites
+      ? unionKeyed(belowEntries as Json[], entries as Json[], keyed, effective, key, site)
+      : structuredClone(entries),
+  };
+}
+
+/** After the fold: a knobbed section takes its default policy, a plain list sheds the wrapper the directive rode in. */
+function finishList(key: ListSection, slot: Slot): Slot {
   if (!isMapping(slot) || !Array.isArray(slot.entries)) {
     return slot;
   }
@@ -1125,45 +1125,48 @@ function reduceList(
   return Object.keys(slot).every((knob) => knob === "entries") ? slot.entries : slot;
 }
 
+function isSectionKey(key: string): key is SectionKey {
+  return (SECTION_KEYS as readonly string[]).includes(key);
+}
+
 /**
  * The oracle's own fold, written from the dialect's description rather than the engine; it assumes
- * refusedMergeLayer admitted every layer. `_layering` is consumed, never written: a layer's top-level
- * directive governs its list sections, a wrapper's governs its own section.
+ * refusedMergeLayer admitted every layer. Layers fold low to high and, within a layer, its sections in the
+ * order the layer wrote them, so a refusal names the layer that carries it and notices come in the order
+ * the action prints them. `_layering` is consumed, never written: a layer's top-level directive governs its
+ * list sections, a wrapper's governs its own section.
  */
 export function foldMergeLayers(
   layers: readonly MergeLayer[],
   layering: LayeringDirective,
 ): { merged: Json; notices: MergeNotice[] } {
   const notices: MergeNotice[] = [];
+  const slots = new Map<SectionKey, Slot>();
+  for (const layer of layers) {
+    const fileDirective = isDirective(layer.doc[LAYERING_KEY])
+      ? layer.doc[LAYERING_KEY]
+      : undefined;
+    const site: Site = { layer: layer.name, notices };
+    for (const key of Object.keys(layer.doc)) {
+      const value = layer.doc[key];
+      if (!isSectionKey(key) || value === undefined) {
+        continue;
+      }
+      const slot = slots.get(key);
+      slots.set(
+        key,
+        isListSection(key)
+          ? reduceListStep(key, slot, { layer: layer.name, value, fileDirective }, layering, site)
+          : // The higher value wins whole, null included: `pages: null` is Pages off whatever lies below.
+            settle(slot, value, key, site),
+      );
+    }
+  }
   const merged: Json = {};
   for (const key of SECTION_KEYS) {
-    const column: Contribution[] = layers.flatMap((layer) =>
-      layer.doc[key] === undefined
-        ? []
-        : [
-            {
-              layer: layer.name,
-              value: layer.doc[key],
-              fileDirective: isDirective(layer.doc[LAYERING_KEY])
-                ? layer.doc[LAYERING_KEY]
-                : undefined,
-            },
-          ],
-    );
-    if (column.length === 0) {
-      continue;
-    }
-    let slot: Slot;
-    if (isListSection(key)) {
-      slot = reduceList(key, column, layering, notices);
-    } else {
-      for (const { layer, value } of column) {
-        // The higher value wins whole, null included: `pages: null` is Pages off whatever lies below.
-        slot = settle(slot, value, key, { layer, notices });
-      }
-    }
+    const slot = slots.get(key);
     if (slot !== undefined) {
-      merged[key] = slot;
+      merged[key] = isListSection(key) ? finishList(key, slot) : slot;
     }
   }
   return { merged, notices };

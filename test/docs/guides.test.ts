@@ -487,6 +487,20 @@ describe("docs/ guide pages", () => {
     expect(marked.sort()).toEqual([...extraFiles].sort());
   });
 
+  /** The example with every `_remove: true` turned into the plain entry it names: the lower layer every removal in it matches. */
+  function withoutMarkers(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map(withoutMarkers);
+    }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    const { _remove, ...rest } = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(rest).map(([key, inner]) => [key, withoutMarkers(inner)]),
+    );
+  }
+
   for (const page of guidePages()) {
     const markdown = readFileSync(join(DOCS, page), "utf8");
 
@@ -512,12 +526,12 @@ describe("docs/ guide pages", () => {
         } catch (error) {
           throw new Error(`docs/${page} has an unparseable layer example: ${error}`);
         }
-        // The view stands in for the layer at the fold too: a removal alone has nothing below to act on, and the
-        // refusal tables own the markers the fold refuses; the fold's other gates (keys, shapes, cycles) still judge it.
-        const view = standaloneView(doc);
-        assertValidSettingsExample(view, `docs/${page} layer example`);
-        const folded = mergeLayers([{ name: `docs/${page}`, doc: view }], { layering: "deep" });
-        expect("error" in folded ? folded.error : null).toBeNull();
+        assertValidSettingsExample(standaloneView(doc), `docs/${page} layer example`);
+        // The raw layer meets every fold gate over a lower layer that declares what its removals name, so the fold
+        // has nothing to tolerate: the fold reports its first refusal only, and a tolerated one would hide the next.
+        const lower = { name: `docs/${page} (lower)`, doc: standaloneView(withoutMarkers(doc)) };
+        const folded = mergeLayers([lower, { name: `docs/${page}`, doc }], { layering: "deep" });
+        expect(folded.isErr() ? folded.error : null).toBeNull();
       }
     });
 

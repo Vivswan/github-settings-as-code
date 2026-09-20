@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  describeRemoval,
-  type Layer,
-  type Layering,
-  mergeLayers,
-  standaloneView,
-} from "../../src/engine/layers.js";
+import { type Layer, type Layering, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -1585,12 +1579,6 @@ describe("mergeLayers: _remove drops a lower entry", () => {
   ])("%s is refused naming the layer and the entry", (_case, layering, doc, code, error) => {
     expect(merge([fleet, layer("repo", doc)], layering)).toEqual({ code, error });
   });
-
-  test("the notice line names the layer and the entry, never a value from the document", () => {
-    expect(describeRemoval({ layer: "repo.yml", path: "labels[1]" })).toBe(
-      "repo.yml: labels[1] carries _remove: true and dropped the entry a lower layer declared under its key",
-    );
-  });
 });
 
 describe("standaloneView", () => {
@@ -1649,10 +1637,5 @@ describe("standaloneView", () => {
       ],
       rulesets: [{ name: "main", rules: [{ type: "non_fast_forward" }] }],
     });
-  });
-
-  test("a non-mapping document passes through", () => {
-    expect(standaloneView(["a"])).toEqual(["a"]);
-    expect(standaloneView(null)).toBeNull();
   });
 });

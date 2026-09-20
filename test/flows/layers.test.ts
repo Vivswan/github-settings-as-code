@@ -74,7 +74,7 @@ describe("foldLayers", () => {
     "a null a key does not admit is the layer's own error under %s: the fold reads no null as a marker",
     (_case, repo, run) => {
       expect(fold(repo, run).match(() => null, describeProblem)).toMatch(
-        /^repo\.yml has malformed section entries: labels(\.entries)?\[0\]\.description has no empty state; write a string \("" for none\)/,
+        /^repo\.yml has malformed section entries: labels(\.entries)?\[0\]\.description has no empty state; write a string\./,
       );
     },
   );

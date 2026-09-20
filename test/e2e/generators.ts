@@ -2437,8 +2437,11 @@ function effectiveLayering(
 /**
  * Every null placed here is one the schema admits, so the layer stays valid on its own:
  *   a whole section         -> only where null is the section's value (pages, interaction limits), held below or not
- *   a nested mapping key    -> probed through the action's validator on both sides (the lower document without the
- *                              key, this document with the key's parents but not the key)
+ *   a nested mapping key    -> a key the lower layer declares, probed through the action's validator with the null
+ *                              written into this document (a passthrough key, or a nullable field) and into the lower
+ *                              declaration, which is what the fold makes of the pair: a cross-field rule the null
+ *                              trips only beside the lower fields (runner_type: labeled with runner_label: null) is
+ *                              caught here, not read as an invalid fold
  *   a keyed entry's field   -> a held branch's `protection: null`, the entry schema's own nullable field
  */
 function placeNulls(
@@ -2463,11 +2466,15 @@ function placeNulls(
       continue;
     }
     if (roll === 1) {
-      // Only a null the schema admits at that path (a passthrough key, a nullable field) keeps the layer valid.
+      // Only a null the schema admits at that path (a passthrough key, a nullable field) keeps the layer valid, and
+      // only one the lower declaration admits beside its other fields keeps the fold valid.
       const candidates = nestedMappingPaths(lower.doc).filter((path) => {
         const top = path[0] as string;
         return (
-          doc[top] !== null && !isKnobbedSection(top) && standaloneValid(withNullAt(doc, path))
+          doc[top] !== null &&
+          !isKnobbedSection(top) &&
+          standaloneValid(withNullAt(doc, path)) &&
+          standaloneValid(withNullAt(lower.doc, path))
         );
       });
       if (candidates.length > 0) {
