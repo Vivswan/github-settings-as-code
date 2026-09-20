@@ -93,6 +93,14 @@ export const ENVIRONMENT_PARSE_FIXTURES: readonly EnvironmentParseFixture[] = [
     valid: true,
   },
   {
+    name: "protected_branches alone passes (the JSON Schema `then` branch's accepted side)",
+    entry: {
+      name: FIXTURE_ENV_NAME,
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+    },
+    valid: true,
+  },
+  {
     name: "both branch-policy flags false is GitHub's 422, spelled null here",
     entry: {
       name: FIXTURE_ENV_NAME,

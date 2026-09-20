@@ -395,13 +395,11 @@ describe("environmentFromPut round trip", () => {
     },
   );
 
-  test("an empty PUT reads back as the three disabled values, so a later declaration of them is satisfied", () => {
-    expect(flattenEnvironment(environmentFromPut({}))).toEqual({
-      protection_rules: [],
-      wait_timer: 0,
-      prevent_self_review: false,
-      reviewers: [],
-    });
+  test("a null branch policy passes through as null, which subsetDiff alone would not notice", () => {
+    // subsetDiff reads a declared null as absent, so the each-row above passes even if the mock drops the key.
+    expect(
+      environmentFromPut({ deployment_branch_policy: null }).deployment_branch_policy,
+    ).toBeNull();
   });
 });
 
