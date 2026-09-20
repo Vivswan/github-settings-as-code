@@ -464,8 +464,9 @@
           "type": "string"
         },
         "permission": {
-          "description": "\"pull\", \"triage\", \"push\", \"maintain\", \"admin\", or a custom org role; defaults to \"push\".",
-          "type": "string"
+          "description": "\"pull\", \"triage\", \"push\", \"maintain\", \"admin\", or a custom org role name; defaults to \"push\". The grant's own vocabulary, lowercase: \"read\" and \"write\" are what GitHub reports a role as, not what a grant accepts, so they and a mis-cased standard permission fail at parse time, naming the form to declare.",
+          "type": "string",
+          "pattern": "^(?:pull|triage|push|maintain|admin|(?!(?:[Pp][Uu][Ll][Ll]|[Tt][Rr][Ii][Aa][Gg][Ee]|[Pp][Uu][Ss][Hh]|[Mm][Aa][Ii][Nn][Tt][Aa][Ii][Nn]|[Aa][Dd][Mm][Ii][Nn]|[Ww][Rr][Ii][Tt][Ee]|[Rr][Ee][Aa][Dd])$)\\S(?:.*\\S)?)$"
         }
       },
       "required": [
@@ -1536,12 +1537,14 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The team slug, the natural key.",
-          "type": "string"
+          "description": "The team slug (the name in the team's URL), the natural key: letters, digits, \".\", \"_\", and \"-\". A display name with spaces fails at parse time, since the slug is what every API path takes and a wrong one reads as \"no access\".",
+          "type": "string",
+          "pattern": "^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]+$"
         },
         "permission": {
-          "description": "Same vocabulary as collaborators; defaults to \"push\".",
-          "type": "string"
+          "description": "Same vocabulary and parse rules as collaborators; defaults to \"push\".",
+          "type": "string",
+          "pattern": "^(?:pull|triage|push|maintain|admin|(?!(?:[Pp][Uu][Ll][Ll]|[Tt][Rr][Ii][Aa][Gg][Ee]|[Pp][Uu][Ss][Hh]|[Mm][Aa][Ii][Nn][Tt][Aa][Ii][Nn]|[Aa][Dd][Mm][Ii][Nn]|[Ww][Rr][Ii][Tt][Ee]|[Rr][Ee][Aa][Dd])$)\\S(?:.*\\S)?)$"
         }
       },
       "required": [

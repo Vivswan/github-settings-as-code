@@ -1,5 +1,6 @@
-/** The one normalizer shared by two sections: collaborators and teams. */
+/** The permission vocabulary shared by collaborators and teams. */
 
+import { z } from "zod";
 import type { SectionMeta } from "../contract/module.js";
 import { leftOutOfSnapshot } from "./snapshot-helpers.js";
 
@@ -33,6 +34,58 @@ const ROLE_FOR_PERMISSION: ReadonlyMap<string, string> = new Map([
 const PERMISSION_FOR_ROLE: ReadonlyMap<string, string> = new Map(
   [...ROLE_FOR_PERMISSION].map(([permission, role]) => [role, permission]),
 );
+
+/** The grant PUT's own vocabulary; anything else it accepts is a custom org role, named exactly as the org spelled it. */
+const STANDARD_PERMISSIONS = ["pull", "triage", "push", "maintain", "admin"] as const;
+
+/**
+ * A permission the file alone shows GitHub will not take is refused at parse; a custom org role name passes.
+ * The two wrong spellings hide until apply: "write" on an existing Write collaborator converges with zero drift
+ * (the live role_name IS "write") while the same entry on a new one PUTs {"permission":"write"} and 422s.
+ *
+ *   read, write (any case)            -> the vocabulary GET reports a role in; the grant takes pull, push
+ *   Push, ADMIN (a mis-cased standard) -> the lowercase form
+ *   "", " push", "push\n" (block scalar) -> nothing to grant, or whitespace GitHub would not match
+ *
+ * One regex, so the published schema carries the same rule as a `pattern` (a pattern has no flags, hence the
+ * case classes): an exact standard permission, or one line with no whitespace at either end that folds to none
+ * of the seven words.
+ */
+const REFUSED_FOLDED = [...STANDARD_PERMISSIONS, ...PERMISSION_FOR_ROLE.keys()];
+const caseless = (word: string) => [...word].map((c) => `[${c.toUpperCase()}${c}]`).join("");
+const PERMISSION_PATTERN = new RegExp(
+  `^(?:${STANDARD_PERMISSIONS.join("|")}|(?!(?:${REFUSED_FOLDED.map(caseless).join("|")})$)\\S(?:.*\\S)?)$`,
+);
+
+/** Every suggested fix is one the pattern accepts, so a reader never chases a second refusal. */
+function permissionError(declared: string): string {
+  const options = `${STANDARD_PERMISSIONS.map((p) => `"${p}"`).join(", ")}, or a custom org role name`;
+  const shown = JSON.stringify(declared);
+  const trimmed = declared.trim();
+  if (trimmed === "") {
+    const what = declared === "" ? "an empty permission" : `${shown} (whitespace only)`;
+    return `${what} grants nothing; declare ${options}, or omit the key for the default "${DEFAULT_ROLE}"`;
+  }
+  const folded = trimmed.toLowerCase();
+  const reported = PERMISSION_FOR_ROLE.get(folded);
+  const standard = (STANDARD_PERMISSIONS as readonly string[]).includes(folded);
+  const fix = reported ?? (standard ? folded : trimmed);
+  const shownFix = JSON.stringify(fix);
+  if (!PERMISSION_PATTERN.test(fix)) {
+    return `${shown} spans several lines; a permission is one line: ${options}`;
+  }
+  if (trimmed !== declared) {
+    return `${shown} carries whitespace at an end (a YAML block scalar ends in a newline); declare ${shownFix}`;
+  }
+  if (reported !== undefined) {
+    return `${shown} is the vocabulary GitHub reports a role in (role_name), not one a grant accepts; declare ${shownFix} (${options})`;
+  }
+  return `${shown} is not a permission GitHub accepts; the standard permissions are lowercase: declare ${shownFix}`;
+}
+
+export const PermissionSchema = z.string().regex(PERMISSION_PATTERN, {
+  error: (issue: { input: unknown }) => permissionError(String(issue.input)),
+});
 
 /**
  * The GET reports this enum and the PATCH accepts nothing else, so a declared custom org role can never be

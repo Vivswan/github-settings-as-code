@@ -33,4 +33,7 @@ schema:
     rejected (a misspelled "permission" would otherwise silently grant the default role).
   CollaboratorConfig.username: GitHub login, the natural key.
   CollaboratorConfig.permission: >-
-    "pull", "triage", "push", "maintain", "admin", or a custom org role; defaults to "push".
+    "pull", "triage", "push", "maintain", "admin", or a custom org role name; defaults to "push".
+    The grant's own vocabulary, lowercase: "read" and "write" are what GitHub reports a role as,
+    not what a grant accepts, so they and a mis-cased standard permission fail at parse time,
+    naming the form to declare.

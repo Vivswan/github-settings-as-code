@@ -1,0 +1,29 @@
+# A permission spelled in the vocabulary GitHub REPORTS a role in ("write",
+# the role_name a GET returns) or mis-cased ("Admin") is refused when the
+# settings file is parsed, naming the entry and the request-vocabulary form,
+# before any API contact. Without the refusal the same entry behaves two ways:
+# on an existing Write collaborator "write" converges with zero drift (the
+# live role_name IS "write"), while for a new one the grant PUTs
+# {"permission":"write"} and GitHub 422s.
+name: collaborators-permission-not-grantable-rejected
+settings:
+  collaborators:
+    - username: alice
+      permission: write
+    - username: bob
+      permission: Admin
+inputs:
+  mode: apply
+live_state:
+  collaborators:
+    - login: alice
+      role_name: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "collaborators[0].permission"
+    - '"push"'
+    - "collaborators[1].permission"
+    - '"admin"'

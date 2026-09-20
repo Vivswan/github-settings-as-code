@@ -512,6 +512,32 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
+    // "write" converges on an existing Write collaborator and 422s on a new one; "Push" and "" 422 on both.
+    name: "collaborators-permission-not-grantable",
+    build: (rng) => {
+      const { value, entries, index, itemToken } = validItems(rng, "collaborators");
+      (entries[index] as Json).permission = rng.pick([
+        "read",
+        "write",
+        "Write",
+        "Push",
+        "ADMIN",
+        "",
+        "push\n",
+      ]);
+      return { doc: { collaborators: value }, offendingToken: `${itemToken}.permission` };
+    },
+  },
+  {
+    // A display name is the team_slug in the API path: the probe 404s and check reports "no access".
+    name: "teams-name-not-a-slug",
+    build: (rng) => {
+      const { value, entries, index, itemToken } = validItems(rng, "teams");
+      (entries[index] as Json).name = rng.pick(["Core Team", "core/team", "@core", " core", ""]);
+      return { doc: { teams: value }, offendingToken: `${itemToken}.name` };
+    },
+  },
+  {
     name: "branches-protection-missing",
     build: (rng) => {
       // protection is REQUIRED (nullable, not optional) on every branch entry.

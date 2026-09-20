@@ -33,5 +33,8 @@ schema:
     One org team's access to the repository, matched by team slug. Keys other than name and
     permission are rejected (a misspelled "permission" would otherwise silently grant the default
     role).
-  TeamConfig.name: The team slug, the natural key.
-  TeamConfig.permission: Same vocabulary as collaborators; defaults to "push".
+  TeamConfig.name: >-
+    The team slug (the name in the team's URL), the natural key: letters, digits, ".", "_", and
+    "-". A display name with spaces fails at parse time, since the slug is what every API path
+    takes and a wrong one reads as "no access".
+  TeamConfig.permission: Same vocabulary and parse rules as collaborators; defaults to "push".
