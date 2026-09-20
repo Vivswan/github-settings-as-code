@@ -2,42 +2,67 @@
 
 import { z } from "zod";
 import { agree } from "../../text.js";
-import type { MustBeNever } from "../../types.js";
 
-// Shared by the shape's base-key sweep below and the handler's strip. Pinned to the config type
-// after the schema (_RoutedKeysReal), so a typo'd or renamed key fails to compile instead of
-// silently riding the base PUT.
-const ROUTED_KEY_LIST = ["pull_request_creation_cap", "pull_request_creation_bypass"] as const;
-export const INTERACTION_LIMITS_ROUTED_KEYS: ReadonlySet<string> = new Set(ROUTED_KEY_LIST);
+const INTERACTION_GROUPS = ["existing_users", "contributors_only", "collaborators_only"] as const;
+const INTERACTION_EXPIRIES = [
+  "one_day",
+  "three_days",
+  "one_week",
+  "one_month",
+  "six_months",
+] as const;
+
+const LIMIT_RULE = `limit is one of ${INTERACTION_GROUPS.join(", ")} (GitHub's interaction groups)`;
+const EXPIRY_RULE = `expiry is one of ${INTERACTION_EXPIRIES.join(", ")} (GitHub's interaction durations)`;
+const CAP_RULE = "max_open_pull_requests is a whole number from 1 to 1000 (GitHub's range)";
+
+// GitHub reads the base limit back as limit, origin, and expires_at; the last two are never accepted, and an
+// expires_at declared here would compare unequal on every run.
+const KNOWN_KEYS =
+  "interaction_limits takes limit, expiry, pull_request_creation_cap, and pull_request_creation_bypass " +
+  "(origin and expires_at are what GitHub reports, not what it accepts); remove the key, or fix its spelling";
+
+function unknownKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+  if (issue.code !== "unrecognized_keys") {
+    return undefined;
+  }
+  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
+  return `${agree(issue.keys.length, "Unrecognized key", "Unrecognized keys")}: ${keys}; ${KNOWN_KEYS}`;
+}
 
 // Not exported: consumers spell it NonNullable<InteractionLimitsConfig>. The definition id stays
 // "InteractionLimitsConfig"; moving it onto the nullable wrapper would change the published schema.
 const InteractionLimits = z
-  .object({
-    limit: z.string().optional(),
-    expiry: z.string().optional(),
-    // The cap object IS the PATCH body, open so future fields ride it; the flag is typed so a
-    // YAML-quoted "true" fails upfront in document validation, before any section writes.
-    pull_request_creation_cap: z
-      .object({
-        enabled: z.boolean({
-          error:
-            'enabled must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the cap direction is unambiguous',
-        }),
-        max_open_pull_requests: z.number().optional(),
-      })
-      .optional(),
-    pull_request_creation_bypass: z.array(z.string()).optional(),
-  })
+  .strictObject(
+    {
+      limit: z.enum(INTERACTION_GROUPS, { error: LIMIT_RULE }).optional(),
+      expiry: z.enum(INTERACTION_EXPIRIES, { error: EXPIRY_RULE }).optional(),
+      // The cap object IS the PATCH body, open so future fields ride it; the flag is typed so a
+      // YAML-quoted "true" fails upfront in document validation, before any section writes.
+      pull_request_creation_cap: z
+        .object({
+          enabled: z.boolean({
+            error:
+              'enabled must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the cap direction is unambiguous',
+          }),
+          max_open_pull_requests: z
+            .int({ error: CAP_RULE })
+            .min(1, CAP_RULE)
+            .max(1000, CAP_RULE)
+            .optional(),
+        })
+        .optional(),
+      pull_request_creation_bypass: z.array(z.string()).optional(),
+    },
+    { error: unknownKeyError },
+  )
   .superRefine((declared, refineCtx) => {
-    // Checked in the shape so both modes fail before ANY section writes. Base keys are read off the
-    // parsed record because only the loosen()ed clone, which keeps unknown keys, ever parses documents.
-    const record = declared as Record<string, unknown>;
-    const baseKeys = Object.keys(record).filter((key) => !INTERACTION_LIMITS_ROUTED_KEYS.has(key));
+    // Checked in the shape so both modes fail before ANY section writes.
     if (
-      baseKeys.length === 0 &&
-      record.pull_request_creation_cap === undefined &&
-      record.pull_request_creation_bypass === undefined
+      declared.limit === undefined &&
+      declared.expiry === undefined &&
+      declared.pull_request_creation_cap === undefined &&
+      declared.pull_request_creation_bypass === undefined
     ) {
       refineCtx.addIssue({
         code: "custom",
@@ -45,20 +70,18 @@ const InteractionLimits = z
           "declare at least one of limit, pull_request_creation_cap, or pull_request_creation_bypass (or declare interaction_limits: null to clear the base limit)",
       });
     }
-    if (baseKeys.length > 0 && record.limit === undefined) {
+    if (declared.expiry !== undefined && declared.limit === undefined) {
       // GitHub rejects the base PUT body without a limit, and a run that never issues the PUT would
-      // silently drop the other base keys.
-      const them = agree(baseKeys.length, "it", "them");
+      // silently drop the expiry.
       refineCtx.addIssue({
         code: "custom",
         path: ["limit"],
         message:
-          `${agree(baseKeys.length, "key", "keys")} [${baseKeys.join(", ")}] ${agree(baseKeys.length, "rides", "ride")} the base interaction-limits PUT, ` +
-          `which requires a limit; declare limit alongside ${them}, or remove ${them}`,
+          "expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry",
       });
     }
-    const bypass = record.pull_request_creation_bypass;
-    if (!Array.isArray(bypass)) {
+    const bypass = declared.pull_request_creation_bypass;
+    if (bypass === undefined) {
       return;
     }
     if (bypass.length > 100) {
@@ -71,7 +94,7 @@ const InteractionLimits = z
       });
     }
     const seen = new Map<string, string>();
-    for (const login of bypass as string[]) {
+    for (const login of bypass) {
       const key = login.toLowerCase();
       const first = seen.get(key);
       if (first === undefined) {
@@ -89,7 +112,3 @@ const InteractionLimits = z
 
 export const InteractionLimitsConfig = InteractionLimits.nullable();
 export type InteractionLimitsConfig = z.infer<typeof InteractionLimitsConfig>;
-
-type _RoutedKeysReal = MustBeNever<
-  Exclude<(typeof ROUTED_KEY_LIST)[number], keyof NonNullable<InteractionLimitsConfig>>
->;

@@ -1,0 +1,29 @@
+# A limit GitHub has no group for, an expiry it has no duration for, GitHub's
+# own read-back expires_at declared as input, and a cap outside GitHub's 1-1000
+# range are refused when the settings file is parsed, naming each key and its
+# rule, before any API contact: the base PUT re-arms on every apply, so a 422
+# there would recur on every run, and a declared expires_at would compare
+# unequal to the live one forever.
+name: interaction-limits-invalid-values-and-unknown-key-rejected
+settings:
+  interaction_limits:
+    limit: collaborators
+    expiry: two_weeks
+    expires_at: "2027-01-01T00:00:00Z"
+    pull_request_creation_cap:
+      enabled: true
+      max_open_pull_requests: 0
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "interaction_limits.limit"
+    - existing_users, contributors_only, collaborators_only
+    - "interaction_limits.expiry"
+    - one_day, three_days, one_week, one_month, six_months
+    - 'Unrecognized key: "expires_at"'
+    - "interaction_limits.pull_request_creation_cap.max_open_pull_requests"
+    - whole number from 1 to 1000

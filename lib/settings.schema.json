@@ -826,16 +826,28 @@
       ]
     },
     "InteractionLimitsConfig": {
-      "description": "The `interaction_limits:` section. The base object is sent verbatim to PUT /repos/{r}/interaction-limits minus the two routed keys below, which go to their own .../interaction-limits/pulls sub-endpoints instead. GitHub reads the base limit back as limit, origin, and the computed expires_at only. Declare at least one of `limit`, `pull_request_creation_cap`, or `pull_request_creation_bypass`.",
+      "description": "The `interaction_limits:` section, exactly four keys: `limit` and `expiry` are the body of PUT /repos/{r}/interaction-limits, and the two pull-request keys go to their own .../interaction-limits/pulls sub-endpoints. Any other key fails at parse time, origin and expires_at included: GitHub reports them on the GET but never accepts them. Declare at least one of `limit`, `pull_request_creation_cap`, or `pull_request_creation_bypass`.",
       "type": "object",
       "properties": {
         "limit": {
-          "description": "Who may interact: \"existing_users\", \"contributors_only\", or \"collaborators_only\". Optional when only the pull-request keys below are declared; an omitted limit leaves the live base limit untouched.",
-          "type": "string"
+          "description": "Who may interact: \"existing_users\", \"contributors_only\", or \"collaborators_only\"; any other value fails at parse time (GitHub would 422 the PUT). Optional when only the pull-request keys below are declared; an omitted limit leaves the live base limit untouched.",
+          "type": "string",
+          "enum": [
+            "existing_users",
+            "contributors_only",
+            "collaborators_only"
+          ]
         },
         "expiry": {
-          "description": "How long the limit lasts (\"one_day\" through \"six_months\"); GitHub defaults to one_day. Write-only: GitHub reports back the computed expires_at, never the duration, so check mode cannot verify this field and apply re-arms it on every run. Requires a sibling `limit`.",
-          "type": "string"
+          "description": "How long the limit lasts: \"one_day\", \"three_days\", \"one_week\", \"one_month\", or \"six_months\"; GitHub defaults to one_day, and any other value fails at parse time. Write-only: GitHub reports back the computed expires_at, never the duration, so check mode cannot verify this field and apply re-arms it on every run. Requires a sibling `limit`.",
+          "type": "string",
+          "enum": [
+            "one_day",
+            "three_days",
+            "one_week",
+            "one_month",
+            "six_months"
+          ]
         },
         "pull_request_creation_cap": {
           "description": "The pull request creation cap, routed to GET/PATCH /repos/{r}/interaction-limits/pulls/creation-cap. Unlike the base limit it is persistent desired state with no self-expiry and reads back verbatim, so check mode diffs it exactly and apply PATCHes only on divergence. max_open_pull_requests is 1-1000. On repositories where the cap is not available, the endpoints answer 405: apply surfaces that as a note, check mode as drift.",
@@ -846,8 +858,10 @@
               "type": "boolean"
             },
             "max_open_pull_requests": {
-              "description": "The maximum number of open pull requests one user may have (1-1000).",
-              "type": "number"
+              "description": "The maximum number of open pull requests one user may have, a whole number from 1 to 1000 (GitHub's range); anything else fails at parse time.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
             }
           },
           "required": [
@@ -861,7 +875,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "LabelConfig": {
       "description": "One label, matched to the live repo by name.",

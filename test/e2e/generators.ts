@@ -449,12 +449,32 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     }),
   },
   {
-    name: "interaction-limits-bad-limit",
-    build: (rng) => ({
-      // Base keys ride a PUT that requires `limit`, so expiry alone fails the refinement; a non-string limit fails its type.
-      doc: { interaction_limits: rng.pick([{ expiry: "one_week" }, { limit: 7 }] as const) },
-      offendingToken: "interaction_limits",
-    }),
+    name: "interaction-limits-refused-at-parse",
+    build: (rng) => {
+      // What the PUT would 422, or what GitHub reports but never accepts, fails at parse; the token is the key each issue names.
+      const cases: ReadonlyArray<readonly [Json, string]> = [
+        [{ expiry: "one_week" }, "interaction_limits.limit"],
+        [{ limit: 7 }, "interaction_limits.limit"],
+        [{ limit: "collaborators" }, "interaction_limits.limit"],
+        [{ limit: "existing_users", expiry: "two_weeks" }, "interaction_limits.expiry"],
+        [
+          { limit: "existing_users", expires_at: "2027-01-01T00:00:00Z" },
+          'Unrecognized key: "expires_at"',
+        ],
+        [{ limit: "existing_users", origin: "repository" }, 'Unrecognized key: "origin"'],
+        [
+          {
+            pull_request_creation_cap: {
+              enabled: true,
+              max_open_pull_requests: rng.pick([0, -1, 2.5, 1001]),
+            },
+          },
+          "interaction_limits.pull_request_creation_cap.max_open_pull_requests",
+        ],
+      ];
+      const [doc, offendingToken] = rng.pick(cases);
+      return { doc: { interaction_limits: doc }, offendingToken };
+    },
   },
   {
     name: "scalar-item",
