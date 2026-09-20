@@ -393,7 +393,7 @@ describe("validateSettingsDoc", () => {
     );
   });
 
-  test("a document with a duplicate label and a malformed deploy key beside a valid repository section is refused whole, both issues with their paths, so runForRepo can never PATCH the repository first", () => {
+  test("a duplicate label and a malformed deploy key beside a valid repository section refuse the document whole, so runForRepo never PATCHes the repository first", () => {
     const verdict = validateSettingsDoc(
       {
         repository: { description: "should never be written" },

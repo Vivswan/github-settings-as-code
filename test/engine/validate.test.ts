@@ -96,7 +96,7 @@ describe("file-only checks run inside document validation", () => {
     ]);
   });
 
-  test("a non-finite number in a passthrough field is refused at the boundary: a typed field's shape already refuses it, and plan()'s payload proof would throw only after earlier sections wrote", () => {
+  test("a non-finite number in a passthrough field is refused at the boundary, where a typed field's shape already refuses it", () => {
     expect(
       issuesOf({
         repository: { description: "changed" },
@@ -134,7 +134,8 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
     ]);
   });
 
-  test("a YAML alias cycle in a passthrough field is refused at the boundary with its path, where plan()'s payload proof would otherwise throw after earlier sections wrote; a typed field keeps its shape's message, and a shared alias between siblings is plain data", () => {
+  // Without this gate, plan()'s payload proof would throw on the cycle only after earlier sections wrote.
+  test("a YAML alias cycle in a passthrough field is refused at the boundary with its path", () => {
     const loop: Record<string, unknown> = {};
     loop.self = loop;
     expect(issuesOf({ repository: { enable_git_lfs: loop } })).toEqual([
