@@ -22,7 +22,9 @@ coverage:
       rules](https://docs.github.com/en/rest/deployments/protection-rules) (GitHub App gates)
     notes: >-
       PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's
-      protection_rules[] back into the PUT shape. A declared per-environment `variables` key
+      protection_rules[] back into the PUT shape. A live wait timer or reviewers list the entry
+      omits is drift, and apply refuses the PUT (the [replace-write
+      rule](docs/reference/semantics.md)). A declared per-environment `variables` key
       reconciles that environment's Actions variables AFTER the PUT, through GET/POST
       /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}:
       create missing, update divergent values, and delete undeclared ones by default (the wrapped

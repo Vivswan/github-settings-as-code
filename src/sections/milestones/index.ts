@@ -81,6 +81,7 @@ export const milestonesSection = listSection({
     }),
     matchBy: {},
   },
+  replaces: false,
   prose: {
     undeclaredAction: DETACH_ACTION,
     undeclaredNote: {

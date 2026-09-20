@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { omittedDeltas, refuseOmitted, renderDelta, subsetDiff } from "../../engine/diff.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
@@ -11,7 +11,7 @@ import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
 import { listSecretValues } from "../shared/secrets-engine.js";
-import { projectOntoSchema } from "../shared/snapshot-helpers.js";
+import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS } from "./endpoints.js";
 import { NESTED_KEYS, planNested, splitEntry } from "./nested.js";
 import {
@@ -115,10 +115,11 @@ export const environmentsSection = {
         describe: `environment "${name}"`,
       });
       const live = "missing" in probe ? undefined : probe.data;
-      const drift =
+      const label = `environments[${name}]`;
+      const { drift, omitted } =
         live === undefined
-          ? [missingDrift(`environments[${name}]`)]
-          : subsetDiff(settings, flattenEnvironment(live), `environments[${name}]`);
+          ? { drift: [missingDrift(label)], omitted: [] }
+          : environmentDrift(label, settings, flattenEnvironment(live));
       // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
       // body is validated only when a mutation needs it.
       const probedNodeId = live === undefined ? undefined : { node_id: live.node_id };
@@ -139,6 +140,7 @@ export const environmentsSection = {
           role: "update",
           params,
           payload: plainData(settings),
+          before: refuseOmitted(label, omitted),
           drift,
           change: `applied environment "${name}"`,
           describe: `upserting environment "${name}"`,
@@ -194,6 +196,23 @@ export const environmentsSection = {
     return { value: pinned.entries, notes };
   },
 } satisfies SectionModule<"environments", typeof ENDPOINTS, typeof GRAPHQL_OPS>;
+
+/**
+ * The PUT replaces the environment's settings whole (an omitted `reviewers` clears the reviewers rule), so a
+ * non-empty live setting the entry omits is drift too, and the lines it makes (`omitted`) are what apply refuses
+ * the write over. The live body is split the way the entry was, so only the PUT's own keys take part in that sweep.
+ */
+function environmentDrift(
+  label: string,
+  settings: Record<string, unknown>,
+  live: Record<string, unknown>,
+): { drift: string[]; omitted: string[] } {
+  const liveSettings = splitEntry(projectOntoSchema(EnvironmentConfig, live)).settings;
+  const omitted = omittedDeltas(settings, liveSettings, {
+    sweep: replaceSweep(EnvironmentConfig),
+  }).map((delta) => renderDelta(label, delta));
+  return { drift: [...subsetDiff(settings, live, label), ...omitted], omitted };
+}
 
 /**
  * GET nests wait_timer / prevent_self_review / reviewers inside protection_rules[]; translated back

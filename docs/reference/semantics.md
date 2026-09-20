@@ -6,7 +6,19 @@ order: 130
 
 The rules every section obeys, whatever it manages: what the engine compares, what it deletes, which errors can be softened, and what happens around a failure. The [Sections table](sections.md) says what each section does; this page is the model those behaviors share. Read it when you need to predict what an apply or a check will do before running it.
 
-The engine is stateless and declared-keys-only: a key you do not declare is never touched or compared. There is no state file; resources are matched by their natural names. Removing a section from the file stops managing it - it does not revert anything.
+The engine is stateless and declared-keys-only: a key you do not declare is never touched or compared, except under the three replacing writes below, where an omitted live value is reported because the write would clear it.
+There is no state file; resources are matched by their natural names. Removing a section from the file stops managing it - it does not revert anything.
+
+Three writes carry the whole object, the ruleset PUT, the environment PUT, and the branch protection PUT, so a live value under a declared ruleset, environment, or protected branch that its entry leaves out would be removed by that write.
+
+Check reports each one as drift naming the key (`bypass_actors`, `conditions.ref_name.exclude`, `reviewers`, `required_status_checks`).
+
+For a ruleset or an environment, apply refuses that write: the entry fails with the same line and nothing of it is written, until the file says which is meant.
+
+Declare the key to keep the value, or declare it empty (`bypass_actors: []`, `reviewers: []`, `deployment_branch_policy: null`) to remove it on purpose. Empty values (an empty list, a zero, false, null) never count.
+
+The sweep stops where the settings schema stops naming keys, inside `rules[].parameters` and a bypass actor's own fields, because there it cannot tell a default GitHub filled from a value the file left out.
+A live `require_code_owner_review: true` beside a declared `pull_request` rule reads clean, and the PUT resets it.
 
 Apply is convergent: re-running preserves the declared state (some sections diff first and skip converged writes, others send idempotent full-payload writes), and a check right after an apply reports clean.
 

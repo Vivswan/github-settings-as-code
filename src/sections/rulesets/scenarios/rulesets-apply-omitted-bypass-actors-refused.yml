@@ -1,0 +1,49 @@
+# The ruleset PUT carries the whole body, so writing this file over the live main-protection ruleset
+# would clear its bypass list, which the file never mentions. Apply refuses that write instead: the
+# section fails naming the omitted key and both ways to say what is meant, and no PUT is issued.
+name: rulesets-apply-omitted-bypass-actors-refused
+settings:
+  rulesets:
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: evaluate
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  outcomes:
+    rulesets: failed
+  summary_contains:
+    - >-
+      rulesets[main-protection]: not applied - the update would remove a live value the settings file
+      omits. rulesets[main-protection].bypass_actors: live has
+      [{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}] but the settings file
+      omits it, so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to
+      remove it on purpose
+  never:
+    - "PUT /repos/{repo}/rulesets/42"
+    - "POST /repos/{repo}/rulesets"

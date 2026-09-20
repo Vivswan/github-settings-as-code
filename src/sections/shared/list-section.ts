@@ -6,7 +6,16 @@
  */
 
 import { z } from "zod";
-import { type Delta, deltas, phantomNote, renderDelta } from "../../engine/diff.js";
+import {
+  type Delta,
+  deltas,
+  type MatchKey,
+  omittedDeltas,
+  phantomNote,
+  phantomPaths,
+  refuseOmitted,
+  renderDelta,
+} from "../../engine/diff.js";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
@@ -47,6 +56,7 @@ import {
   knobbedSnapshot,
   leftOutOfSnapshot,
   projectOntoSchema,
+  replaceSweep,
   unreadableSecretNote,
 } from "./snapshot-helpers.js";
 
@@ -314,8 +324,15 @@ interface ListSectionDeclFields<
      */
     readonly fromLive: (live: Live) => ListComparable<F>;
     /** Per entry field holding a list, the item key to pair by (see DeltaOptions.matchBy); `{}` when none does. */
-    readonly matchBy: Readonly<Partial<Record<keyof Entry<K> & string, string>>>;
+    readonly matchBy: Readonly<Partial<Record<keyof Entry<K> & string, MatchKey>>>;
   };
+  /**
+   * Whether the update body replaces the live item whole (a ruleset's PUT) or sets named fields only (a PATCH).
+   * Under `true` a non-empty live value under a key of the entry slice that the entry omits is drift, and apply
+   * refuses the write. Every declaration says which, so a replace-style section cannot inherit the declared-keys
+   * comparison by leaving it out.
+   */
+  readonly replaces: boolean;
   /**
    * The body recreating a drifted item of a resource GitHub cannot edit (no update role), when the
    * write alone would drop a live field the file leaves undeclared (a deploy key's read_only).
@@ -412,8 +429,9 @@ interface ErasedDecl<Key extends string> {
   readonly lens: {
     readonly toWrite: (entry: object) => ListWrite<string>;
     readonly fromLive: (live: object) => ListComparable<string>;
-    readonly matchBy: Readonly<Record<string, string>>;
+    readonly matchBy: Readonly<Record<string, MatchKey>>;
   };
+  readonly replaces: boolean;
   readonly mapping?: string;
   readonly recreate?: (live: object, write: ListWrite<string>) => ListWrite<string>;
   readonly conflicts?: {
@@ -707,6 +725,7 @@ async function planList<Key extends string>(
   const { fold } = identity;
   const update = updateRole(endpoints);
   const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
+  const sweep = decl.replaces ? replaceSweep(decl.entry) : undefined;
   const defaultPolicy = defaultUndeclaredPolicy(section);
   const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
 
@@ -794,14 +813,18 @@ async function planList<Key extends string>(
     const body = await readItem(decl, ctx, existing.item);
     const compared = comparison(decl, label, write, body, lens.fromLive(body));
     plan.notes.push(...compared.notes);
-    const found = deltas(compared.write, compared.live, { matchBy: lens.matchBy });
+    const found = [
+      ...deltas(compared.write, compared.live, { matchBy: lens.matchBy }),
+      ...(sweep === undefined
+        ? []
+        : omittedDeltas(compared.write, projectOntoSchema(decl.entry, compared.live), {
+            matchBy: lens.matchBy,
+            sweep,
+          })),
+    ];
     const render = (delta: Delta): string =>
       renderEntryDelta(key, identity.field, { want: name, live: existing.name }, delta, remedies);
-    const phantom = found.flatMap((delta) =>
-      delta.kind === "phantom" && delta.path.length === 1 && typeof delta.path[0] === "string"
-        ? [delta.path[0]]
-        : [],
-    );
+    const phantom = phantomPaths(found);
     if (phantom.length > 0) {
       plan.notes.push(phantomNote(label, phantom, noun, remedies.phantom));
     }
@@ -881,6 +904,10 @@ async function planList<Key extends string>(
           ? plainData(updateBody(decl, general))
           : (exec: ExecTools) =>
               resolvedWrite(exec, updateBody(decl, general) as ListWrite<string>, generalSecrets),
+      before: refuseOmitted(
+        label,
+        found.flatMap((delta) => (delta.kind === "omitted" ? [render(delta)] : [])),
+      ),
       describe: `updating ${noun} "${name}"`,
       drift: facetOr(
         generalSecrets.length === 0 ? null : secretFacet(decl, label, generalSecrets),

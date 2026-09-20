@@ -1168,7 +1168,7 @@
           }
         },
         "bypass_actors": {
-          "description": "Who may bypass the ruleset, passed through verbatim. GitHub returns it only to a token with write access to the ruleset, so a token without Administration write cannot judge drift on it (check mode notes this instead of reporting drift).",
+          "description": "Who may bypass the ruleset; each actor is one (actor_type, actor_id) pair, bypass_mode defaulting to always. An entry without the key leaves a live bypass list as drift and apply refuses the PUT; `[]` clears it on purpose. GitHub returns it only to a token with write access to the ruleset, so without Administration write check mode notes it instead of judging drift.",
           "type": "array",
           "items": {
             "type": "object",

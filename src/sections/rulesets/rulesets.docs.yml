@@ -8,10 +8,13 @@ coverage:
       [Rulesets](https://docs.github.com/en/rest/repos/rules) (branch, tag, and push targets; all
       rule types, conditions, bypass_actors)
     notes: >-
-      GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT, verbatim
+      GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT,
       passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
-      through). The list carries summaries, so each matched ruleset is read whole before the
-      comparison. New rule types/bypass fields/condition types GitHub ships work day one. Undeclared
+      through) and the actor fill GitHub applies (bypass_mode always, an OrganizationAdmin's
+      actor_id 1). The list carries summaries, so each matched ruleset is read whole before the
+      comparison. A live value the entry omits is drift, and apply refuses the PUT (the
+      [replace-write rule](docs/reference/semantics.md)). New rule
+      types/bypass fields/condition types GitHub ships work day one. Undeclared
       rulesets kept by default (notes only); the wrapped `_undeclared: delete` form deletes them.
       Org-sourced rulesets are outside the section (source_type other than Repository). GitHub
       returns bypass_actors only to a token with write access to the ruleset, so under a token
@@ -48,6 +51,8 @@ schema:
   RulesetConfig.rules[].type: >-
     The rule type, as the rulesets API names it (e.g. pull_request, required_status_checks).
   RulesetConfig.bypass_actors: >-
-    Who may bypass the ruleset, passed through verbatim. GitHub returns it only to a token with
-    write access to the ruleset, so a token without Administration write cannot judge drift on it
-    (check mode notes this instead of reporting drift).
+    Who may bypass the ruleset; each actor is one (actor_type, actor_id) pair, bypass_mode
+    defaulting to always. An entry without the key leaves a live bypass list as drift and apply
+    refuses the PUT; `[]` clears it on purpose. GitHub returns it only to a token
+    with write access to the ruleset, so without Administration write check mode notes it instead
+    of judging drift.

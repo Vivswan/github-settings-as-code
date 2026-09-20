@@ -1,0 +1,52 @@
+# A bypass actor is one per (actor_type, actor_id) pair, so a changed bypass_mode is ONE drift line
+# on that actor's field, never a missing declared actor plus an undeclared live one.
+name: rulesets-check-bypass-mode-change
+settings:
+  rulesets:
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 1
+          actor_type: Team
+          bypass_mode: pull_request
+inputs:
+  mode: check
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 1
+          actor_type: Team
+          bypass_mode: always
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    rulesets: drift
+  summary_contains:
+    - 'rulesets[main-protection].bypass_actors[Team 1].bypass_mode: "pull_request" != "always"'
+  summary_lacks:
+    - "no matching live entry"
+    - "live entry not declared"
+    - "rulesets[main-protection].bypass_actors[Team 1]: "
+  never:
+    - "PUT /repos/{repo}/rulesets/42"

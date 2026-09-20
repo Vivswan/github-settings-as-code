@@ -1,0 +1,78 @@
+# The ruleset PUT carries the whole body, so a live value the file leaves out would go with the
+# write (which apply refuses). Check names each one instead of reporting clean: main-protection's live bypass_actors (the file
+# has no bypass_actors key) and release-tags' live conditions.ref_name.exclude (the file declares
+# include only). Every declared field matches, so these are the only drift lines, and no write
+# happens in check mode.
+name: rulesets-check-omitted-live-drift
+settings:
+  rulesets:
+    - name: main-protection
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+    - name: release-tags
+      target: tag
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["refs/tags/v*"]
+      rules:
+        - type: deletion
+inputs:
+  mode: check
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors:
+        - actor_id: 5
+          actor_type: RepositoryRole
+          bypass_mode: always
+    - id: 43
+      name: release-tags
+      source_type: Repository
+      target: tag
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["refs/tags/v*"]
+          exclude: ["refs/tags/v0*"]
+      rules:
+        - type: deletion
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    rulesets: drift
+  summary_contains:
+    - >-
+      rulesets[main-protection].bypass_actors: live has
+      [{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}] but the settings file
+      omits it, so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to
+      remove it on purpose
+    - >-
+      rulesets[release-tags].conditions.ref_name.exclude: live has ["refs/tags/v0*"] but the settings
+      file omits it, so apply would REMOVE it; declare conditions.ref_name.exclude to keep it, or
+      conditions.ref_name.exclude: [] to remove it on purpose
+  summary_lacks:
+    - "rulesets[main-protection].enforcement"
+    - "rulesets[release-tags].bypass_actors"
+  never:
+    - "PUT /repos/{repo}/rulesets/42"
+    - "PUT /repos/{repo}/rulesets/43"

@@ -1,0 +1,38 @@
+# The environment PUT carries every protection setting at once, so a live required-reviewers rule
+# the file leaves out would go with the write (which apply refuses). Check names it instead of
+# reporting clean: the declared
+# wait_timer matches, the live reviewers are the drift. No write happens in check mode.
+name: environments-check-omitted-reviewers
+settings:
+  environments:
+    - name: production
+      wait_timer: 30
+inputs:
+  mode: check
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules:
+        - id: 3736
+          type: wait_timer
+          wait_timer: 30
+        - id: 3737
+          type: required_reviewers
+          reviewers:
+            - type: User
+              reviewer:
+                id: 101
+token_permissions:
+  environments: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    environments: drift
+  summary_contains:
+    - 'environments[production].reviewers: live has [{"type":"User","id":101}] but the settings file omits it, so apply would REMOVE it; declare reviewers to keep it, or reviewers: [] to remove it on purpose'
+  summary_lacks:
+    - "environments[production].wait_timer"
+  never:
+    - "PUT /repos/{repo}/environments/production"
