@@ -51,9 +51,14 @@ type PagesCreateBody = Pick<PagesWirePayload, "build_type" | "source">;
  */
 const LiveSite = z.looseObject({});
 
-/** Site visibility is an Enterprise Cloud organization feature; github.com reports `public: true` and drops the field from the update, so nothing in the file can tell the two apart. */
+/**
+ * A note, not a parse error: nothing in the file tells an Enterprise Cloud organization from github.com,
+ * where GitHub reports `public: true` and drops the field from the update.
+ */
 const PUBLIC_VISIBILITY_NOTE =
-  "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; elsewhere GitHub reports public: true and ignores the field on the update, so this drift never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization";
+  "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
+  "elsewhere GitHub reports public: true and ignores the field on the update, so this drift never " +
+  "converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization";
 
 export const pagesSection = {
   key: "pages",

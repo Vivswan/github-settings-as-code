@@ -12,7 +12,10 @@ import {
   type SectionRestHandlers,
 } from "../../../test/e2e/mock/support.js";
 
-/** The create and update bodies GitHub documents; anything else on the wire is dropped, as github.com drops it (`public` included: it is settable only on Enterprise Cloud). */
+/**
+ * The create and update bodies GitHub documents; anything else on the wire is dropped, as github.com
+ * drops it (`public` included: it is settable only on Enterprise Cloud).
+ */
 const CREATE_BODY_FIELDS = ["build_type", "source"] as const;
 const UPDATE_BODY_FIELDS = ["cname", "https_enforced", "build_type", "source"] as const;
 

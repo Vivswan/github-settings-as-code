@@ -22,4 +22,7 @@ expect:
   result: failed
   zero_requests: true
   stdout_contains:
-    - "pages.custom_404: GitHub reports this field on the Pages site and the update has no such parameter, so the value would be sent, ignored, and reported as drift on every run (it reports whether the published site carries a 404.html; add that file to the source instead); remove it"
+    - >-
+      pages.custom_404: GitHub reports this field on the Pages site and the update has no such
+      parameter, so the value would be sent, ignored, and reported as drift on every run (it reports
+      whether the published site carries a 404.html; add that file to the source instead); remove it

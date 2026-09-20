@@ -56,7 +56,9 @@ describe("pages shape", () => {
     );
     const custom404 = parse({ custom_404: true });
     expect(custom404.error?.issues.map((issue) => issue.message)).toEqual([
-      "GitHub reports this field on the Pages site and the update has no such parameter, so the value would be sent, ignored, and reported as drift on every run (it reports whether the published site carries a 404.html; add that file to the source instead); remove it",
+      "GitHub reports this field on the Pages site and the update has no such parameter, so the value " +
+        "would be sent, ignored, and reported as drift on every run (it reports whether the published " +
+        "site carries a 404.html; add that file to the source instead); remove it",
     ]);
   });
 
@@ -92,7 +94,10 @@ describe("pages", () => {
         },
       ],
       notes: [
-        "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; elsewhere GitHub reports public: true and ignores the field on the update, so this drift never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud organization",
+        "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
+          "elsewhere GitHub reports public: true and ignores the field on the update, so this drift " +
+          "never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud " +
+          "organization",
       ],
       drift: [],
     });

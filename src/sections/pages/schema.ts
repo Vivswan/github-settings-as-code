@@ -37,7 +37,9 @@ const PagesSite = z
         refineCtx.addIssue({
           code: "custom",
           path: [key],
-          message: `GitHub reports this field on the Pages site and the update has no such parameter, so the value would be sent, ignored, and reported as drift on every run (${fix}); remove it`,
+          message:
+            "GitHub reports this field on the Pages site and the update has no such parameter, so the " +
+            `value would be sent, ignored, and reported as drift on every run (${fix}); remove it`,
         });
       }
     }
