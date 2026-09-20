@@ -48,11 +48,16 @@ export function mockFragmentFor<
   // The collection holds the GET shape the section parses, so the address
   // reads the same fields off a raw item.
   const addressOf = (item: Json): Readonly<Record<string, string>> => address(item as Live);
+  // A path addressing by the identity field matches as GitHub folds it (PATCH /labels/Bug reaches "bug"); an id matches exactly.
+  const sameAddress = (name: string, live: string, requested: string): boolean =>
+    name === identity.field ? identity.fold(live) === identity.fold(requested) : live === requested;
   const locate = (state: MockState, param: (name: string) => string): Json | undefined =>
     spec
       .collection(state)
       .find((item) =>
-        Object.entries(addressOf(item)).every(([name, value]) => param(name) === value),
+        Object.entries(addressOf(item)).every(([name, value]) =>
+          sameAddress(name, value, param(name)),
+        ),
       );
   const update: Handler = ({ state, param, body }) => {
     const item = locate(state, param);

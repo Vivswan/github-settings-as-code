@@ -2,10 +2,9 @@
  * The standard scenario set, over SECTIONS: each section ships the e2e scenarios its contract implies,
  * under one naming rule, so a section cannot register without its convergence proof, a reading section
  * not without its drift and read-back proofs, and a policy section not without both undeclared
- * postures. The corpus loader pins that a file's `name` is its stem (test/e2e/foundation.test.ts); this
- * file pins that the stems exist.
+ * postures. The corpus loader pins that a file's `name` is its stem (test/e2e/foundation.test.ts).
  *
- *   <slug>-apply-converges       every section
+ *   <slug>-apply-converges       every section; declares expect.fixpoint, or it is one apply run proving nothing about the second
  *   <slug>-check-drift           a section with a planning read (a write-only section has no drift to show)
  *   <slug>-snapshot-roundtrip    a section with snapshot()
  *   <slug>-undeclared-delete     a section under the undeclared policy
@@ -15,19 +14,25 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { planningReads, type SectionModule } from "../../src/sections/contract/module.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { parseScenario } from "../e2e/schema.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
 const POLICY_SECTIONS: ReadonlySet<string> = new Set(UNDECLARED_POLICY_SECTIONS);
 
+function slugOf(section: SectionModule): string {
+  return section.key.replaceAll("_", "-");
+}
+
 /** The scenario stems a section's contract demands. */
 function standardSet(section: SectionModule): string[] {
-  const slug = section.key.replaceAll("_", "-");
+  const slug = slugOf(section);
   return [
     `${slug}-apply-converges`,
     ...(planningReads(section).length > 0 ? [`${slug}-check-drift`] : []),
@@ -43,12 +48,22 @@ function missingScenarios(section: SectionModule, dir: string): string[] {
   return standardSet(section).filter((stem) => !existsSync(join(dir, `${stem}.yml`)));
 }
 
+/** The re-run proof the section's apply-converges scenario declares, through the corpus's own parser. */
+function convergenceProof(section: SectionModule, dir: string): string | undefined {
+  const path = join(dir, `${slugOf(section)}-apply-converges.yml`);
+  return parseScenario(parseYaml(readFileSync(path, "utf8")), path).expect.fixpoint;
+}
+
 describe("the standard scenario set", () => {
   test.each(SECTIONS.map((section) => [section.key, section] as const))(
-    "%s ships every scenario its contract implies",
+    "%s ships every scenario its contract implies, and its convergence proof declares the re-run",
     (key, section) => {
       const dir = join(ROOT, "src", "sections", key, "scenarios");
       expect(missingScenarios(section, dir), `missing under ${dir}`).toEqual([]);
+      expect(
+        convergenceProof(section, dir),
+        `${slugOf(section)}-apply-converges.yml declares no expect.fixpoint`,
+      ).toBeDefined();
     },
   );
 
@@ -59,7 +74,7 @@ describe("the standard scenario set", () => {
     // At least one such section exists, or the branch below is never exercised.
     expect(writeOnly.length).toBeGreaterThan(0);
     for (const section of writeOnly) {
-      expect(standardSet(section)).toEqual([`${section.key.replaceAll("_", "-")}-apply-converges`]);
+      expect(standardSet(section)).toEqual([`${slugOf(section)}-apply-converges`]);
     }
   });
 

@@ -68,12 +68,16 @@ function repoTeams(state: {
   });
 }
 
+/** GitHub stores a team slug lowercase and matches the path's spelling case-insensitively: "Core-Team" reaches "core-team". */
+function slugKey(param: (name: string) => string): string {
+  return param("team_slug").toLowerCase();
+}
+
 export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
   "teams.org": orgProbeHandler,
   "teams.list": ({ state, query }) => ok(slicePage(repoTeams(state), query)),
   "teams.probe": ({ state, param, headers }) => {
-    const slug = param("team_slug");
-    const access = state.teams[slug];
+    const access = state.teams[slugKey(param)];
     if (!access) {
       // The spec documents this 404 with NO response content.
       return { status: 404, body: null };
@@ -88,12 +92,11 @@ export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, param, body }) => {
-    const slug = param("team_slug");
-    state.teams[slug] = teamRepoFromPut(asObject(body));
+    state.teams[slugKey(param)] = teamRepoFromPut(asObject(body));
     return noContent();
   },
   "teams.revoke": ({ state, param }) => {
-    state.teams[param("team_slug")] = null;
+    state.teams[slugKey(param)] = null;
     return noContent();
   },
 };
