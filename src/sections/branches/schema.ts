@@ -44,6 +44,68 @@ function duplicateIn(list: readonly string[]): string | null {
   return null;
 }
 
+function isPlainMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// --- Actor holders: restrictions, dismissal_restrictions, bypass_pull_request_allowances --------
+
+const ACTOR_LIST_EXAMPLE = {
+  users: { nameKey: "login", example: "octocat" },
+  teams: { nameKey: "slug", example: "platform-team" },
+  apps: { nameKey: "slug", example: "deploy-gate" },
+} as const;
+type ActorList = keyof typeof ACTOR_LIST_EXAMPLE;
+
+function copiedActorName(item: unknown): string | null {
+  if (!isPlainMapping(item)) {
+    return null;
+  }
+  for (const nameKey of ["login", "slug"] as const) {
+    if (typeof item[nameKey] === "string") {
+      return item[nameKey];
+    }
+  }
+  return null;
+}
+
+/**
+ * The GET expands each actor into an object ({login, id, ...} for a user, {slug, ...} for a team
+ * or App); the PUT takes the login/slug string, so a copied item is refused naming the string to
+ * write, and any other non-string item the type rule.
+ */
+function actorList(holder: string, list: ActorList) {
+  const site = `protection.${holder}.${list}`;
+  const { nameKey, example } = ACTOR_LIST_EXAMPLE[list];
+  const typeRule = `${site} lists each actor as its ${nameKey} string ("${example}")`;
+  return z
+    .array(
+      z.string({
+        error: (issue) => {
+          const copied = copiedActorName(issue.input);
+          return copied === null
+            ? typeRule
+            : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
+        },
+      }),
+      { error: typeRule },
+    )
+    .optional();
+}
+
+function actorHolder(holder: string) {
+  return z.looseObject(
+    {
+      users: actorList(holder, "users"),
+      teams: actorList(holder, "teams"),
+      apps: actorList(holder, "apps"),
+    },
+    {
+      error: `protection.${holder} must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")`,
+    },
+  );
+}
+
 // --- Controls whose wrong shapes the settings file alone reveals ---------------
 
 const STRICT_ERROR =
@@ -80,16 +142,18 @@ const RequiredPullRequestReviews = z.looseObject(
       .min(0, { error: REVIEW_COUNT_ERROR })
       .max(6, { error: REVIEW_COUNT_ERROR })
       .optional(),
+    dismissal_restrictions: actorHolder(
+      "required_pull_request_reviews.dismissal_restrictions",
+    ).optional(),
+    bypass_pull_request_allowances: actorHolder(
+      "required_pull_request_reviews.bypass_pull_request_allowances",
+    ).optional(),
   },
   {
     error:
       "required_pull_request_reviews must be a mapping of its keys (required_approving_review_count and the other review settings), or null to turn the requirement off",
   },
 );
-
-function isPlainMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** What carries the fact a GET-only echo repeats, so the message can say why removing it loses nothing. */
 const ECHO_CARRIER: Readonly<Record<string, string>> = {
@@ -162,6 +226,7 @@ export const BranchProtectionConfig = z
   .looseObject({
     required_status_checks: RequiredStatusChecks.nullable().optional(),
     required_pull_request_reviews: RequiredPullRequestReviews.nullable().optional(),
+    restrictions: actorHolder("restrictions").nullable().optional(),
     required_signatures: z
       .boolean({
         error:

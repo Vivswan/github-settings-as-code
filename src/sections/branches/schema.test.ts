@@ -83,6 +83,57 @@ describe("branches protection parse rules", () => {
     }
   });
 
+  // The GET expands each actor into an object; the PUT takes the login/slug string, so a copied
+  // list reached the PUT as objects and 422d there.
+  const holders = [
+    { holder: "restrictions", at: (holder: object) => ({ restrictions: holder }) },
+    {
+      holder: "required_pull_request_reviews.dismissal_restrictions",
+      at: (holder: object) => ({
+        required_pull_request_reviews: { dismissal_restrictions: holder },
+      }),
+    },
+    {
+      holder: "required_pull_request_reviews.bypass_pull_request_allowances",
+      at: (holder: object) => ({
+        required_pull_request_reviews: { bypass_pull_request_allowances: holder },
+      }),
+    },
+  ];
+  const lists = [
+    { list: "users", copied: { login: "octocat", id: 1, type: "User" }, name: "octocat" },
+    { list: "teams", copied: { slug: "platform", id: 2, name: "Platform" }, name: "platform" },
+    { list: "apps", copied: { slug: "deploy-gate", id: 3, owner: {} }, name: "deploy-gate" },
+  ];
+  test.each(holders.flatMap((h) => lists.map((l) => ({ ...h, ...l }))))(
+    "refuses a copied GET object in $list under $holder, naming the string to write",
+    ({ holder, at, list, copied, name }) => {
+      const found = issues([{ name: "main", protection: at({ [list]: [copied] }) }]);
+      expect(found).toEqual([
+        `0.protection.${holder}.${list}.0: protection.${holder}.${list} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${list === "users" ? "login" : "slug"} string; write "${name}" instead`,
+      ]);
+      expect(issues([{ name: "main", protection: at({ [list]: [name] }) }])).toEqual([]);
+    },
+  );
+
+  test("an actor item that is neither a string nor a GET object, and a holder that is not a mapping, are refused by the type rule", () => {
+    expect(
+      issues([
+        {
+          name: "main",
+          protection: {
+            restrictions: { users: [7], teams: "platform" },
+            required_pull_request_reviews: { dismissal_restrictions: true },
+          },
+        },
+      ]),
+    ).toEqual([
+      '0.protection.required_pull_request_reviews.dismissal_restrictions: protection.required_pull_request_reviews.dismissal_restrictions must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")',
+      '0.protection.restrictions.users.0: protection.restrictions.users lists each actor as its login string ("octocat")',
+      '0.protection.restrictions.teams: protection.restrictions.teams lists each actor as its slug string ("platform-team")',
+    ]);
+  });
+
   test("a protection copied from GitHub's GET response is refused key by key, while its snapshot projection parses clean", () => {
     // Without the refusal the {enabled} wrappers 422 at the PUT and the links and echoes never read back equal, so check reports drift forever.
     const getBody = {
@@ -109,15 +160,24 @@ describe("branches protection parse rules", () => {
           "https://api.github.com/repos/octocat/hello-world/branches/main/protection/restrictions/users",
       },
     };
+    // The actor object is a typed field's failure, and zod runs the mapping's own key sweep only
+    // once its fields parse: the copy is refused in two rounds, the string first, then the keys.
     expect(issues([{ name: "main", protection: getBody }])).toEqual([
+      '0.protection.restrictions.users.0: protection.restrictions.users carries an actor object copied from GitHub\'s GET response, which the protection PUT takes as the login string; write "octocat" instead',
+    ]);
+    const stringActors = {
+      ...getBody,
+      restrictions: { ...getBody.restrictions, users: ["octocat"] },
+    };
+    expect(issues([{ name: "main", protection: stringActors }])).toEqual([
       "0.protection.required_status_checks.contexts_url: protection.required_status_checks.contexts_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.required_status_checks.enforcement_level: protection.required_status_checks.enforcement_level is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)",
+      "0.protection.restrictions.users_url: protection.restrictions.users_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.url: protection.url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.name: protection.name is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the entry's name already names the branch)",
       "0.protection.enabled: protection.enabled is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the control's own key carries the toggle)",
       "0.protection.enforce_admins.url: protection.enforce_admins.url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.enforce_admins.enabled: protection.enforce_admins.enabled is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead",
-      "0.protection.restrictions.users_url: protection.restrictions.users_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
     ]);
     expect(issues([{ name: "main", protection: protectionSnapshot(getBody) }])).toEqual([]);
   });

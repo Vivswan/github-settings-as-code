@@ -373,7 +373,7 @@
           ]
         },
         "required_pull_request_reviews": {
-          "description": "Require pull request reviews before merging; `null` turns the requirement off. Every review setting beside the count (`dismiss_stale_reviews`, `require_code_owner_reviews`, `dismissal_restrictions`, ...) passes through to the PUT.",
+          "description": "Require pull request reviews before merging; `null` turns the requirement off. Every review setting beside the count and the two actor holders (`dismiss_stale_reviews`, `require_code_owner_reviews`, ...) passes through to the PUT.",
           "anyOf": [
             {
               "type": "object",
@@ -383,6 +383,97 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 6
+                },
+                "dismissal_restrictions": {
+                  "description": "Who may dismiss pull request reviews, as `users`, `teams`, and `apps` lists of login/slug strings; an empty mapping lets anyone with push access dismiss. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "description": "User logins (\"octocat\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "teams": {
+                      "description": "Team slugs (\"platform-team\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "apps": {
+                      "description": "GitHub App slugs (\"deploy-gate\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "bypass_pull_request_allowances": {
+                  "description": "Who may push without a pull request review, as `users`, `teams`, and `apps` lists of login/slug strings. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "description": "User logins (\"octocat\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "teams": {
+                      "description": "Team slugs (\"platform-team\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "apps": {
+                      "description": "GitHub App slugs (\"deploy-gate\").",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restrictions": {
+          "description": "Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings; an all-empty mapping lets nobody push, and `null` turns the push restriction off. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write. Literal branches only; wildcard rules point at the rulesets section.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "users": {
+                  "description": "User logins (\"octocat\").",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "teams": {
+                  "description": "Team slugs (\"platform-team\").",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "apps": {
+                  "description": "GitHub App slugs (\"deploy-gate\").",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "additionalProperties": {}

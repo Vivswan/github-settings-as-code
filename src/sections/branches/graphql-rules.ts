@@ -64,7 +64,10 @@ export type ExplicitKeys<T> = keyof {
  * or a REST-carried control the schema types for its parse-time rules; a new explicit key fails here
  * until it is sorted into ROUTED_KEYS or named as REST-carried.
  */
-export type RestCarriedKey = "required_status_checks" | "required_pull_request_reviews";
+export type RestCarriedKey =
+  | "required_status_checks"
+  | "required_pull_request_reviews"
+  | "restrictions";
 
 type _RoutedKeysCoverSchema = MustBeNever<
   Exclude<ExplicitKeys<BranchProtectionConfig>, RoutedKey | RestCarriedKey | "required_signatures">
