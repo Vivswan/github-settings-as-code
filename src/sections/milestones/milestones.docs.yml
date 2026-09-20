@@ -21,6 +21,7 @@ schema:
   MilestoneConfig.description: Longer explanation of the milestone.
   MilestoneConfig.state: Open or closed; untouched unless declared.
   MilestoneConfig.due_on: >-
-    The due day as `YYYY-MM-DD`. GitHub keeps only the day, so the day alone is compared and written;
-    a UTC timestamp `YYYY-MM-DDTHH:MM:SSZ` is accepted for its date part, and a snapshot reads the day
-    back as `YYYY-MM-DDT12:00:00Z`.
+    The due day as `YYYY-MM-DD`; GitHub keeps only the day, so only the day is compared. The day is
+    sent as noon UTC, `YYYY-MM-DDT12:00:00Z`, which GitHub stores on the same calendar day in PST and
+    PDT, and a snapshot reads it back in that form. A UTC timestamp `YYYY-MM-DDTHH:MM:SSZ` is
+    accepted for its date part.
