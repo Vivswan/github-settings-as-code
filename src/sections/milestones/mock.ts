@@ -5,7 +5,7 @@
  */
 
 import { type ListMockSpec, mockFragmentFor } from "../../../test/e2e/mock/list-fragment.js";
-import type { SectionRestHandlers } from "../../../test/e2e/mock/support.js";
+import { nextNumber, type SectionRestHandlers } from "../../../test/e2e/mock/support.js";
 import { milestonesSection } from "./index.js";
 
 const PACIFIC = "America/Los_Angeles";
@@ -35,13 +35,13 @@ export function githubStoresDueOn(sent: string): string {
   return `${day}T${hour === 0 ? "08" : "07"}:00:00Z`;
 }
 
-/** A seed without a number takes its id as the number, since the list is not at hand to count from. */
+/** The number is GitHub's per-repository sequence: a seed may pin one, a created milestone takes the next. */
 export const MILESTONES_MOCK: ListMockSpec = {
   collection: (state) => state.milestones,
   defaults: { state: "open", description: null },
-  owned: (id, _slug, milestone) => ({
+  owned: (id, _slug, milestone, siblings) => ({
     id,
-    number: typeof milestone.number === "number" ? milestone.number : id,
+    number: typeof milestone.number === "number" ? milestone.number : nextNumber(siblings),
     due_on: typeof milestone.due_on === "string" ? githubStoresDueOn(milestone.due_on) : null,
   }),
   unique: "identity",

@@ -188,7 +188,7 @@ describe("labels", () => {
       ],
     });
     const { second, changes, notes } = await provePlanIdempotent(labelsSection, api, [
-      { name: "Bug", new_name: "defect", color: "#D73A4A", description: "", tone: "warm" } as never,
+      { name: "Bug", new_name: "defect", color: "#D73A4A", description: "" },
       { name: "enhancement", color: "a2eeef", description: "New feature or request" },
     ]);
     expect(changes).toEqual([

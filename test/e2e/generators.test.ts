@@ -9,7 +9,12 @@ import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
-import { LAYERING_DIRECTIVES, type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
+import {
+  entriesOf,
+  LAYERING_DIRECTIVES,
+  type LiveWitnessKind,
+  UNDECLARED_KEY,
+} from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   canariesOf,
@@ -32,6 +37,7 @@ import {
   WITNESS_KINDS,
   WITNESS_SECTIONS,
 } from "./generators.js";
+import { grantablePermission } from "./mock/state.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
 import { collectYmlFiles, MASK_KEYS, parseScenario } from "./schema.js";
@@ -546,6 +552,32 @@ describe("genScenario", () => {
     expect(seen.matching).toBeGreaterThan(0);
     expect(seen["drift-update"]).toBeGreaterThan(0);
     expect(seen["extra-undeclared"]).toBeGreaterThan(0);
+  });
+
+  test("a personal account's collaborators declare only what its repository grants; an organization's keep maintain", () => {
+    // The runtime cannot refuse triage or maintain at parse (the owner is unknown until the repository read), so the
+    // generator holds the line the mock's grant check draws, or a fully-granted apply on a personal account 422s.
+    let personal = 0;
+    let organizationMaintain = 0;
+    for (let i = 0; i < 300; i++) {
+      const { scenario, meta } = genScenario(new Rng(i));
+      if (scenario.settings?.collaborators === undefined) {
+        continue;
+      }
+      const entries = entriesOf(scenario.settings.collaborators);
+      if (meta.ownerKind === "user") {
+        personal++;
+        for (const entry of entries) {
+          expect(grantablePermission("user", entry), `seed ${i}: ${JSON.stringify(entry)}`).toBe(
+            true,
+          );
+        }
+      } else if (entries.some((entry) => entry.permission === "maintain")) {
+        organizationMaintain++;
+      }
+    }
+    expect(personal).toBeGreaterThan(0);
+    expect(organizationMaintain).toBeGreaterThan(0);
   });
 
   test("declared branches and workflows are present in live_state so they converge", () => {

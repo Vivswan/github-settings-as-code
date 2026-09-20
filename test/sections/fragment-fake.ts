@@ -20,6 +20,7 @@ import {
   SECTION_BY_KEY,
 } from "../e2e/mock/grading.js";
 import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
+import { acceptedBody } from "../e2e/mock/request-body.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
 import type { Handler, Json } from "../e2e/mock/support.js";
 import type { DenialStyle, PermissionMask } from "../e2e/schema.js";
@@ -27,7 +28,7 @@ import { REPO } from "./section-run.js";
 
 export interface FragmentFake extends GitHubClient {
   readonly state: MockState;
-  /** Every write that reached a handler: "METHOD /path", or "GRAPHQL <opName>" for a mutation. */
+  /** Every write past routing and the permission grade, a closed body's 422 included: "METHOD /path", or "GRAPHQL <opName>" for a mutation. */
   readonly writes: string[];
 }
 
@@ -87,24 +88,34 @@ function handlerFake(
       if (method !== "GET") {
         writes.push(`${method} ${url.pathname}`);
       }
-      const response = handler({
-        state,
-        endpoint: matched.endpoint,
-        param: (name) => {
-          const value = matched.params[name];
-          if (value === undefined) {
-            throw new Error(`fragmentFake: ${matched.endpoint.route} declares no "${name}" param`);
-          }
-          return value;
-        },
-        query: Object.fromEntries(url.searchParams),
-        body: payload,
-        // The section's media type reaches the handler, so a probe whose reply GitHub shapes by Accept is proven here too.
-        headers: requestHeaders(options?.accept === undefined ? {} : { accept: options.accept }),
-        grants: (kind) =>
-          token === undefined ||
-          gradeRequirement(token.mask, { permission: requirement.permission, kind }).allowed,
-      });
+      // The stage the wire pipeline runs before its handler (routes.ts): the handler keeps only the body fields GitHub
+      // documents, so a section proof cannot converge on a key GitHub never stores.
+      const accepted = acceptedBody(matched.endpoint.route, payload);
+      const response =
+        "rejected" in accepted
+          ? accepted.rejected
+          : handler({
+              state,
+              endpoint: matched.endpoint,
+              param: (name) => {
+                const value = matched.params[name];
+                if (value === undefined) {
+                  throw new Error(
+                    `fragmentFake: ${matched.endpoint.route} declares no "${name}" param`,
+                  );
+                }
+                return value;
+              },
+              query: Object.fromEntries(url.searchParams),
+              body: accepted.body,
+              // The section's media type reaches the handler, so a probe whose reply GitHub shapes by Accept is proven here too.
+              headers: requestHeaders(
+                options?.accept === undefined ? {} : { accept: options.accept },
+              ),
+              grants: (kind) =>
+                token === undefined ||
+                gradeRequirement(token.mask, { permission: requirement.permission, kind }).allowed,
+            });
       if (response.status >= 400) {
         const error: ApiError = {
           status: response.status,

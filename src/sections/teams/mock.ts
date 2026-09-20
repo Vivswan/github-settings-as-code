@@ -3,13 +3,19 @@
  * seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
  */
 
-import { restRepoSurface, teamRepoFromPut } from "../../../test/e2e/mock/state.js";
+import {
+  GRANT_PERMISSIONS,
+  grantablePermission,
+  restRepoSurface,
+  teamRepoFromPut,
+} from "../../../test/e2e/mock/state.js";
 import {
   asObject,
   type Json,
   noContent,
   ok,
   orgProbeHandler,
+  PERMISSION_NOT_GRANTABLE,
   type SectionRestHandlers,
   slicePage,
 } from "../../../test/e2e/mock/support.js";
@@ -17,15 +23,6 @@ import { permissionForRole } from "../shared/roles.js";
 
 /** The Accept media type the probe's role_name body is served under; the section sends it (probeTeamRole, index.ts). */
 export const TEAM_REPOSITORY_MEDIA_TYPE = "application/vnd.github.v3.repository+json";
-
-/** The base roles the listing's `permission` can spell; a custom role collapses to "push" there. */
-const BASE_PERMISSIONS: ReadonlySet<string> = new Set([
-  "pull",
-  "triage",
-  "push",
-  "maintain",
-  "admin",
-]);
 
 /**
  * The teams with access, in the team GET shape, one per non-null access entry. The listing's
@@ -54,7 +51,7 @@ function repoTeams(state: {
         privacy: "closed",
         notification_setting: "notifications_enabled",
         permission:
-          permission !== undefined && BASE_PERMISSIONS.has(permission) ? permission : "push",
+          permission !== undefined && GRANT_PERMISSIONS.has(permission) ? permission : "push",
         url: `https://api.github.com/organizations/${orgId}/team/${id}`,
         html_url: `https://github.com/orgs/${org}/teams/${slug}`,
         members_url: `https://api.github.com/organizations/${orgId}/team/${id}/members{/member}`,
@@ -92,6 +89,9 @@ export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, param, body }) => {
+    if (!grantablePermission(state.ownerKind, asObject(body))) {
+      return PERMISSION_NOT_GRANTABLE;
+    }
     state.teams[slugKey(param)] = teamRepoFromPut(asObject(body));
     return noContent();
   },

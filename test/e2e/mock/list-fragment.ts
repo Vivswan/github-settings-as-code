@@ -19,8 +19,12 @@ export interface ListMockSpec {
   readonly collection: (state: MockState) => Json[];
   /** GET-shape fields the server fills on create when the body omits them (a label's color, its null description). */
   readonly defaults: Json;
-  /** The server-owned fields of one item (minted on create, re-applied after every update); a body can never set them. */
-  readonly owned: (id: number, slug: string, item: Json) => Json;
+  /**
+   * The server-owned fields of one item (minted on create, re-applied after every update); a body can never set
+   * them. `siblings` is the repository's collection (the item itself included once stored), for a per-repository
+   * sequence like a milestone number.
+   */
+  readonly owned: (id: number, slug: string, item: Json, siblings: readonly Json[]) => Json;
   /**
    * What the server holds unique per repository, so a create repeating it answers GitHub's 422:
    * the folded identity field, or another key (deploy keys repeat titles but never material).
@@ -75,7 +79,7 @@ export function mockFragmentFor<
     if (name !== undefined) {
       item[identity.field] = name;
     }
-    Object.assign(item, spec.owned(id, state.slug, item));
+    Object.assign(item, spec.owned(id, state.slug, item, spec.collection(state)));
     return ok(item);
   };
   const roles: Readonly<Record<string, Handler>> = {
@@ -95,7 +99,7 @@ export function mockFragmentFor<
       }
       const id = state.nextId++;
       const item: Json = { ...spec.defaults, ...payload };
-      Object.assign(item, spec.owned(id, state.slug, item));
+      Object.assign(item, spec.owned(id, state.slug, item, spec.collection(state)));
       spec.collection(state).push(item);
       return { status: 201, body: item };
     },

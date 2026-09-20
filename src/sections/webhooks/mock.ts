@@ -9,7 +9,6 @@ import type { ListMockSpec } from "../../../test/e2e/mock/list-fragment.js";
 import { completeHook } from "../../../test/e2e/mock/state.js";
 import {
   asObject,
-  HOOK_CANONICAL_KEYS,
   maskedConfig,
   maskHookSecret,
   noContent,
@@ -61,11 +60,6 @@ export const webhooksMockHandlers: SectionRestHandlers<"webhooks"> = {
     }
     if (payload.active !== undefined) {
       hook.active = payload.active;
-    }
-    for (const [key, value] of Object.entries(payload)) {
-      if (!HOOK_CANONICAL_KEYS.has(key)) {
-        hook[key] = value;
-      }
     }
     return ok(maskHookSecret(hook));
   },
