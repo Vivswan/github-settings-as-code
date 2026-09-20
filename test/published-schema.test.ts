@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
+import addFormats from "ajv-formats";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
@@ -19,7 +20,10 @@ const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json")
 };
 
 // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
+// The format plugin is loaded so a format keyword, should one ever be emitted, is judged here the way editors and CI linters judge it.
 const ajv = new Ajv({ strict: false, allErrors: true });
+const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
+(add as typeof addFormats)(ajv);
 const validate: ValidateFunction = ajv.compile(schema);
 
 const runtimeAccepts = (doc: Record<string, unknown>): boolean =>
@@ -143,6 +147,77 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
       ).toBe(valid);
     }
   });
+});
+
+describe("format keywords stay out of the published schema", () => {
+  // ajv-formats judges a format keyword by its own grammar, and two of zod's differ from the runtime's: format: "uri" refuses the
+  // non-ASCII hosts, paths, and spaces the runtime's new URL() takes, and format: "date-time" rounds a long fractional second into
+  // an invalid :60. The generator strips every format keyword, and this walk keeps future ones out too (zod's pattern stays and is
+  // the runtime's grammar for the ISO types, so the two validators agree on every date form).
+  test("no definition in the published schema carries a format keyword", () => {
+    const formatted: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        for (const [index, item] of node.entries()) {
+          walk(item, `${path}[${index}]`);
+        }
+        return;
+      }
+      if (typeof node !== "object" || node === null) {
+        return;
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "format") {
+          formatted.push(`${path}.format=${String(value)}`);
+        }
+        walk(value, `${path}.${key}`);
+      }
+    };
+    walk(schema.definitions, "definitions");
+    expect(formatted).toEqual([]);
+  });
+
+  test.each([
+    "https://例え.example.com/ci",
+    "https://hooks.example.com/ci/例え",
+    "https://hooks.example.com/ci with space",
+  ])("both validators accept the webhook url %s", (url) => {
+    const doc = { webhooks: [{ config: { url } }] };
+    expect(validate(doc), "published schema").toBe(true);
+    expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(true);
+  });
+
+  test("a scheme with no host is the stated place where the runtime is the stricter side", () => {
+    // Recorded, allowed: the runtime may refuse what the published schema accepts, never the reverse.
+    const doc = { webhooks: [{ config: { url: "https://" } }] };
+    expect(validate(doc)).toBe(true);
+    expect(runtimeAccepts(doc)).toBe(false);
+  });
+
+  test.each([
+    ["2026-02-28", "a full-date", true],
+    ["2026-02-28T12:00:00Z", "a Z-designated timestamp", true],
+    ["2026-02-28T12:00:59.9999999999999999Z", "a timestamp ajv-formats would round into :60", true],
+    ["2026-02-28T12:00:00+02:00", "a numeric offset", false],
+    ["2026-02-28t12:00:00z", "lowercase designators", false],
+    ["2026-02-28T23:59:60Z", "a leap second", false],
+  ])("both validators agree on the milestone due_on %s (%s): %p", (due_on, _label, accepted) => {
+    const doc = { milestones: [{ title: "v1", due_on }] };
+    expect(validate(doc), "published schema").toBe(accepted);
+    expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(accepted);
+  });
+
+  test.each([
+    ["2026-02-28T12:00:59.9999999999999999Z", "refuses what the runtime accepts", false],
+    ["2026-02-28T12:00:00+02:00", "accepts what the runtime refuses", true],
+  ])(
+    "ajv's date-time keyword alone %s (%s), which is why the generator strips it",
+    (due_on, _label, ajvAccepts) => {
+      const dateTimeOnly = ajv.compile({ type: "string", format: "date-time" });
+      expect(dateTimeOnly(due_on), "ajv format keyword by itself").toBe(ajvAccepts);
+      expect(runtimeAccepts({ milestones: [{ title: "v1", due_on }] })).toBe(!ajvAccepts);
+    },
+  );
 });
 
 describe("the document-level _layering directive", () => {

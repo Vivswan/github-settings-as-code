@@ -8,9 +8,11 @@
 
 import { undocumentedRoutes } from "./gap.js";
 import { GAP as lfs } from "./lfs.js";
+import { GAP as webhookEvents } from "./webhook-events.js";
 
 const GAPS = [
   lfs,
+  webhookEvents,
 ] as const;
 
 type GapUnion = (typeof GAPS)[number];

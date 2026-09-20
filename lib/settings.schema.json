@@ -930,12 +930,10 @@
           "anyOf": [
             {
               "type": "string",
-              "format": "date",
               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
             },
             {
               "type": "string",
-              "format": "date-time",
               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
             }
           ]
@@ -2204,10 +2202,67 @@
           ]
         },
         "events": {
-          "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"].",
+          "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"]. Each name is one GitHub delivers to repository webhooks, or \"*\" for every event; anything else is refused at parse time, since GitHub would 422 it at apply time. The list is src/upstream-gaps/webhook-events.ts, kept from GitHub's webhook events reference, so an event GitHub adds is refused until a release adds the line.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "branch_protection_configuration",
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "code_scanning_alert",
+              "commit_comment",
+              "create",
+              "custom_property_values",
+              "delete",
+              "dependabot_alert",
+              "deploy_key",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issue_comment",
+              "issue_dependencies",
+              "issues",
+              "label",
+              "member",
+              "meta",
+              "milestone",
+              "package",
+              "page_build",
+              "ping",
+              "project",
+              "project_card",
+              "project_column",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "pull_request_review_thread",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_advisory",
+              "repository_import",
+              "repository_ruleset",
+              "repository_vulnerability_alert",
+              "secret_scanning_alert",
+              "secret_scanning_alert_location",
+              "secret_scanning_scan",
+              "security_and_analysis",
+              "star",
+              "status",
+              "sub_issues",
+              "team_add",
+              "watch",
+              "workflow_job",
+              "workflow_run",
+              "*"
+            ]
           }
         },
         "active": {
@@ -2224,22 +2279,39 @@
       "type": "object",
       "properties": {
         "url": {
-          "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared).",
+          "description": "The delivery URL, the natural key: a changed url declares a NEW hook (the old one becomes undeclared). Must be an absolute URL; GitHub refuses anything else.",
           "type": "string"
         },
         "content_type": {
-          "description": "Payload encoding: \"json\" or \"form\".",
-          "type": "string"
+          "description": "Payload encoding: exactly \"json\" or \"form\" (GitHub's default); other spellings such as \"JSON\" or a MIME type are refused at parse time.",
+          "type": "string",
+          "enum": [
+            "json",
+            "form"
+          ]
         },
         "secret": {
           "description": "The shared delivery secret, as a whole-value `$NAME` reference to an environment variable on the action step (never a literal: settings files are committed plaintext). Resolved at apply time; GitHub echoes it back as \"********\", so check mode cannot verify it and apply re-sends it on every run so rotations propagate.",
           "type": "string"
         },
         "insecure_ssl": {
-          "description": "Whether to skip TLS verification (\"0\" verify / \"1\" skip); GitHub stores it as a string.",
-          "type": [
-            "string",
-            "number"
+          "description": "Whether to skip TLS verification: \"0\" (verify) or \"1\" (skip), as the string or the number; GitHub stores the string, and any other spelling is refused at parse time.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "number",
+              "const": 0
+            },
+            {
+              "type": "number",
+              "const": 1
+            }
           ]
         }
       },
