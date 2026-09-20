@@ -228,26 +228,16 @@ function stripMapping(
   return out;
 }
 
-/** A nested list in its wrapper form: the wrapper's knobs are markers or data like any mapping key, its entries a keyed list. */
+/** A wrapper as a scope: its knobs are mapping keys (a null one a marker), its `entries` the keyed list. */
+function wrapperScope(keyed: KeyedListLayering): EntryScope {
+  return { nested: { entries: keyed }, nullValued: new Set(), prefix: "" };
+}
+
+/** A nested list in either form: the wrapper is a mapping whose `entries` is the keyed list, the bare list the keyed list itself. */
 function stripNested(value: unknown, keyed: KeyedListLayering, descent: Descent): unknown {
-  if (!isPlainObject(value) || !Array.isArray(value.entries)) {
-    return stripKeyedList(value, keyed, descent);
-  }
-  const enclosing = descent.get(value);
-  if (enclosing !== undefined) {
-    return enclosing;
-  }
-  const out: Record<string, unknown> = {};
-  descent.set(value, out);
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "entries") {
-      put(out, key, stripKeyedList(child, keyed, descent));
-    } else if (child !== null) {
-      put(out, key, stripValue(child, undefined, descent));
-    }
-  }
-  descent.delete(value);
-  return out;
+  return isPlainObject(value) && Array.isArray(value.entries)
+    ? stripMapping(value, wrapperScope(keyed), descent)
+    : stripKeyedList(value, keyed, descent);
 }
 
 /** Mirrors unionKeyed under deep: the same lists are entered. */
@@ -304,12 +294,7 @@ export function stripNulls(doc: unknown, run: Layering): unknown {
     if (!isListSection(key) || effectiveLayering(value, file, run) !== "deep") {
       stripped = stripValue(value, undefined, descent);
     } else if (isPlainObject(value)) {
-      const wrapper: EntryScope = {
-        nested: { entries: listLayering(key) },
-        nullValued: new Set(),
-        prefix: "",
-      };
-      stripped = stripMapping(value, wrapper, descent);
+      stripped = stripMapping(value, wrapperScope(listLayering(key)), descent);
     } else {
       stripped = stripKeyedList(value, listLayering(key), descent);
     }

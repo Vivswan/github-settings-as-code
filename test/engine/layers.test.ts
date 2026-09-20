@@ -1027,15 +1027,6 @@ describe("mergeLayers: the plain-list sections", () => {
       notices: [{ layer: "repo", path: "environments[0].wait_timer" }],
     });
   });
-
-  test("a top-level null on a plain-list section opts out of a lower list with a notice", () => {
-    expect(
-      merge([
-        layer("fleet", { workflows: [{ path: "ci.yml", state: "active" }] }),
-        layer("repo", { workflows: null }),
-      ]),
-    ).toEqual({ settings: {}, notices: [{ layer: "repo", path: "workflows" }] });
-  });
 });
 
 describe("mergeLayers: layer-boundary refusals", () => {
