@@ -29,6 +29,8 @@ The one Probot-family feature without a direct equivalent is suborg-level groupi
 
 Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped `{_undeclared, entries}` form is this action's own extension on top. This list is the parity claim the contract tests pin. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
+YAML anchors, aliases, and merge keys (`<<`) resolve as they did under the app's js-yaml parser, so a label list built from one `&base` entry and `<<: *base` variants keeps its meaning.
+
 ## What changed on purpose
 
 The delivery model is a workflow plus a fine-grained PAT, not an app installation. You mint the token, scope it to exactly the sections your file declares, and save it as a repository secret; permission errors name the exact grant to add. See [Token permissions](../reference/permissions.md).

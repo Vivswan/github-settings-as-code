@@ -15,10 +15,12 @@ import type { ProblemOf, SettingsFileRole } from "../problem.js";
  *
  * "error"   -> warnings silent; a syntax error still throws into the error path
  * "silent"  -> would also swallow the syntax errors
+ *
+ * `merge: true` resolves `<<` merge keys as the Probot app's js-yaml did; off, the key survives as literal data.
  */
 export function parseSettingsDoc(raw: string): Result<unknown, ProblemOf<"yaml-invalid">> {
   try {
-    return ok(parseYaml(raw, { logLevel: "error" }) ?? {});
+    return ok(parseYaml(raw, { logLevel: "error", merge: true }) ?? {});
   } catch (error) {
     return err({ code: "yaml-invalid", reason: String(error) });
   }
