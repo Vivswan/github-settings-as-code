@@ -118,7 +118,7 @@ export const teamsSection = {
   key: "teams",
   undeclaredDefault: "keep",
   // The fold plan() passes to rejectDuplicates: slugs fold case-insensitively.
-  layering: keyedBy("name", (name) => name.toLowerCase()),
+  layering: keyedBy("name", { fold: (name) => name.toLowerCase() }),
   permission,
   // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
   ownerSensitivity: "org",

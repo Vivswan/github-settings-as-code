@@ -227,7 +227,9 @@ export const INPUT_DECLS = {
       "outside the list sections are replaced by the higher layer's. Fails when set in apply or check.",
     default: "",
     summary:
-      "`mode: render` only: how every list section's entries combine across layers, by the section's key; `replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and merges a same-key pair field by field; a layer's `_layering` overrides it",
+      "`mode: render` only: how every list section's entries combine across layers, by the section's key; " +
+      "`replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and " +
+      "merges a same-key pair field by field; a layer's `_layering` overrides it",
     shownDefault: "`deep`",
   },
   "private-repos": {

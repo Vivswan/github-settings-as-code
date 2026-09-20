@@ -1123,6 +1123,26 @@ describe("stripNulls", () => {
     },
   );
 
+  test("a null at a null-valued entry path is the value under deep, in the per-layer view and the fold alike; a null elsewhere in the entry is still a marker", () => {
+    // custom_properties' `value: null` unsets the property, so a lone layer saying it validates and a higher one writes it over the lower value with no notice.
+    const lower = { custom_properties: [{ property_name: "pilot", value: "true", note: "lower" }] };
+    const higher = deepFreeze({
+      custom_properties: [{ property_name: "pilot", value: null, note: null }],
+    });
+    expect(stripNulls(higher, "deep")).toEqual({
+      custom_properties: [{ property_name: "pilot", value: null }],
+    });
+    expect(merge([layer("fleet", lower), layer("repo", higher)])).toEqual({
+      settings: {
+        custom_properties: {
+          _undeclared: "keep",
+          entries: [{ property_name: "pilot", value: null }],
+        },
+      },
+      notices: [{ layer: "repo", path: "custom_properties[0].note" }],
+    });
+  });
+
   test("the merge agrees: a lower layer declaring every stripped key is deleted with a notice, the kept nulls survive as data or as the section value", () => {
     const fleet = layer("fleet", {
       a: 1,

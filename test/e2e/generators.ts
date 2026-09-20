@@ -60,6 +60,7 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   maybeWrapUndeclared,
+  NULL_VALUED_ENTRY_PATHS,
   UNDECLARED_KEY,
 } from "./gen-support.js";
 import type { LiveState } from "./mock/state.js";
@@ -1588,23 +1589,33 @@ function isPlainMapping(value: unknown): value is Json {
 /**
  * A layer as its standalone validation sees it, in the harness's own words: every null the fold reads as a marker is
  * dropped. A knobbed section's entries are entered only under an effective `deep` (the wrapper's directive, else the
- * file's, else the run's), a ruleset's rules with them; under `shallow` and `replace` the fold copies entries as
- * written, so a null inside one stays for the validator to judge, as does a null inside any other list.
+ * file's, else the run's), a ruleset's rules with them, and a null at a NULL_VALUED_ENTRY_PATHS path stays as the
+ * value; under `shallow` and `replace` the fold copies entries as written, so a null inside one stays for the validator
+ * to judge, as does a null inside any other list.
  */
 function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
-  const dropDeep = (value: unknown, lists: readonly string[] = []): unknown => {
+  const dropDeep = (
+    value: unknown,
+    lists: readonly string[] = [],
+    valued: readonly string[] = [],
+    prefix = "",
+  ): unknown => {
     if (!isPlainMapping(value)) {
       return value;
     }
     const out: Json = {};
     for (const [key, child] of Object.entries(value)) {
+      const path = prefix === "" ? key : `${prefix}.${key}`;
       if (child === null) {
+        if (valued.includes(path)) {
+          out[key] = null;
+        }
         continue;
       }
       out[key] =
-        lists.includes(key) && Array.isArray(child)
+        prefix === "" && lists.includes(key) && Array.isArray(child)
           ? child.map((item) => dropDeep(item))
-          : dropDeep(child);
+          : dropDeep(child, [], valued, path);
     }
     return out;
   };
@@ -1625,7 +1636,8 @@ function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
       continue;
     }
     const nested = key === "rulesets" ? ["rules"] : [];
-    const entries = entriesOf(value).map((entry) => dropDeep(entry, nested) as Json);
+    const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
+    const entries = entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json);
     out[key] = Array.isArray(value) ? entries : { ...(value as Json), entries };
   }
   return out;
@@ -1992,7 +2004,6 @@ export function genMergeScenario(
     const name = mergeLayerName(i, count);
     const layerPool = force?.kind === "valid" ? pool.filter((key) => !heldMappings.has(key)) : pool;
     const draft = drawLayer(layerRng, layerPool);
-    dropMarkerEntries(draft, effectiveRunLayering);
     const lower = drafts[i - 1];
     if (lower !== undefined) {
       renameLabelsIntoHeld(layerRng.fork("rename"), draft, held, effectiveRunLayering, present);
@@ -2197,23 +2208,6 @@ function effectiveLayering(
   run: LayeringDirective,
 ): LayeringDirective {
   return draft.wrapperDirectives[key] ?? draft.fileDirective ?? run;
-}
-
-/**
- * Under deep a null field inside an entry is a marker the per-layer validation strips, and a custom property without
- * its `value` (the one nullable entry field a knobbed section has) is invalid, so a drawn entry carrying a null is
- * dropped from a section that folds under deep; placeNulls adds its own, probed, later.
- */
-function dropMarkerEntries(draft: LayerDraft, run: LayeringDirective): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = draft.doc[key];
-    if (value === undefined || value === null || effectiveLayering(draft, key, run) !== "deep") {
-      continue;
-    }
-    const entries = entriesOf(value);
-    const kept = entries.filter((entry) => !Object.values(entry).some((field) => field === null));
-    entries.splice(0, entries.length, ...kept);
-  }
 }
 
 /**

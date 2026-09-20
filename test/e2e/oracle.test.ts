@@ -1576,6 +1576,9 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
       const declared = listLayering(key);
       const oracle = KEYED_MERGE_SECTIONS[key];
       expect(oracle.keyField, key).toBe(declared.keyField);
+      expect([...(oracle.nullValued ?? [])].sort(), key).toEqual(
+        [...(declared.nullValued ?? [])].sort(),
+      );
       expect(Object.keys(oracle.nested ?? {}).sort()).toEqual(
         Object.keys(declared.nested ?? {}).sort(),
       );

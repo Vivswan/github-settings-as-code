@@ -360,9 +360,10 @@ interface ListSectionDeclFields<
   };
   /**
    * The pairing itself is derived from `identity`, the very claims the planner's duplicate check reads, so the
-   * merge and the planner cannot disagree about which entries are one; a declaration adds only the nested keyed lists.
+   * merge and the planner cannot disagree about which entries are one; a declaration adds only the nested keyed
+   * lists and the null-valued paths.
    */
-  readonly layering?: Pick<KeyedListLayering, "nested">;
+  readonly layering?: Pick<KeyedListLayering, "nested" | "nullValued">;
 }
 
 /** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
@@ -1028,6 +1029,7 @@ export function listSection<
       keys: (entry) => identityClaims(erased.identity, entry),
       keyField: decl.identity.field,
       ...(decl.layering?.nested === undefined ? {} : { nested: decl.layering.nested }),
+      ...(decl.layering?.nullValued === undefined ? {} : { nullValued: decl.layering.nullValued }),
     },
     plan: (ctx, desired) =>
       planList(

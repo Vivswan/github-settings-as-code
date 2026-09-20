@@ -29,6 +29,7 @@ import {
   LAYERING_DIRECTIVES,
   LAYERING_KEY,
   type LayeringDirective,
+  NULL_VALUED_ENTRY_PATHS,
   UNDECLARED_KEY,
 } from "./gen-support.js";
 import {
@@ -722,6 +723,8 @@ interface KeyedList {
   /** The entry field the keys are read from, for naming a keyless entry the fold cannot place. */
   keyField: string;
   nested?: Readonly<Record<string, KeyedList>>;
+  /** Dotted paths within the entry whose null is a value, not a marker. */
+  nullValued?: readonly string[];
 }
 
 function labelKeys(entry: Json): readonly string[] | null {
@@ -771,7 +774,10 @@ export const KEYED_MERGE_SECTIONS: Readonly<Record<UndeclaredPolicySection, Keye
   actions_variables: keyedBy("name", upper),
   agents_variables: keyedBy("name", upper),
   webhooks: keyedBy("config.url"),
-  custom_properties: keyedBy("property_name"),
+  custom_properties: {
+    ...keyedBy("property_name"),
+    nullValued: NULL_VALUED_ENTRY_PATHS.custom_properties,
+  },
   deploy_keys: keyedBy("title"),
   secret_scanning_custom_patterns: keyedBy("name"),
 };
@@ -815,17 +821,18 @@ function at(path: string, key: string): string {
   return path === "" ? key : `${path}.${key}`;
 }
 
-/**
- * The dialect's one sentence about a higher value, transcribed. `keyedFields` names the fields of two
- * mappings whose lists combine by key (a ruleset's rules) instead of replacing.
- */
-function settle(
-  slot: Slot,
-  higher: unknown,
-  path: string,
-  site: Site,
-  keyedFields?: Readonly<Record<string, KeyedList>>,
-): Slot {
+/** Where a higher value sits inside a keyed entry: the entry's nested lists (top only) and null-valued paths, at `prefix`. */
+interface EntryScope {
+  keyed: KeyedList;
+  prefix: string;
+}
+
+function nullIsValue(scope: EntryScope | undefined, key: string): boolean {
+  return scope !== undefined && (scope.keyed.nullValued ?? []).includes(at(scope.prefix, key));
+}
+
+/** The dialect's one sentence about a higher value, transcribed; `scope` is set inside a keyed entry merging under deep. */
+function settle(slot: Slot, higher: unknown, path: string, site: Site, scope?: EntryScope): Slot {
   if (higher === null) {
     if (slot !== undefined && slot !== null) {
       site.notices.push({ layer: site.layer, path });
@@ -834,25 +841,24 @@ function settle(
     return null;
   }
   if (isMapping(slot) && isMapping(higher)) {
-    return mergeTrees(slot, higher, path, site, keyedFields);
+    return mergeTrees(slot, higher, path, site, scope);
   }
   return structuredClone(higher);
 }
 
-function mergeTrees(
-  lower: Json,
-  higher: Json,
-  path: string,
-  site: Site,
-  keyedFields?: Readonly<Record<string, KeyedList>>,
-): Json {
+function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?: EntryScope): Json {
   const out: Json = {};
   for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
     if (!(key in higher) || higher[key] === undefined) {
       out[key] = lower[key];
       continue;
     }
-    const keyed = keyedFields?.[key];
+    if (higher[key] === null && nullIsValue(scope, key)) {
+      out[key] = null;
+      continue;
+    }
+    const keyed = scope?.prefix === "" ? scope.keyed.nested?.[key] : undefined;
+    const below = scope === undefined ? undefined : { ...scope, prefix: at(scope.prefix, key) };
     // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too.
     const settled =
       keyed !== undefined && Array.isArray(lower[key]) && Array.isArray(higher[key])
@@ -864,7 +870,7 @@ function mergeTrees(
             at(path, key),
             site,
           )
-        : settle(lower[key], higher[key], at(path, key), site, undefined);
+        : settle(lower[key], higher[key], at(path, key), site, below);
     if (settled !== undefined) {
       out[key] = settled;
     }
@@ -921,7 +927,7 @@ function unionKeyed(
       const paired = claimedBy === 1 && claimsLower === 1;
       return [
         directive === "deep" && paired
-          ? mergeTrees(below, entry, `${path}[${h}]`, site, keyed.nested)
+          ? mergeTrees(below, entry, `${path}[${h}]`, site, { keyed, prefix: "" })
           : structuredClone(entry),
       ];
     });

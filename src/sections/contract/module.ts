@@ -111,19 +111,30 @@ export interface KeyedListLayering {
   readonly keyField: string;
   /** Fields of a merged entry that are themselves keyed lists (rulesets' `rules`). */
   readonly nested?: Readonly<Record<string, KeyedListLayering>>;
+  /**
+   * Dotted paths within the entry whose null the ENTRY SCHEMA types as a value (custom_properties' `value` unsets the
+   * property): the fold writes such a null as the value and the per-layer view keeps it, where every other null inside
+   * an entry is a delete-the-lower-key marker. test/sections/registry.test.ts pins each list to the published schema.
+   */
+  readonly nullValued?: readonly string[];
 }
 
 /** A list keyed by one string field of each entry, folded as the planner's duplicate check folds it. */
 export function keyedBy(
   keyField: string,
-  fold: (name: string) => string = (name) => name,
+  options: {
+    readonly fold?: (name: string) => string;
+    readonly nullValued?: readonly string[];
+  } = {},
 ): KeyedListLayering {
+  const fold = options.fold ?? ((name: string) => name);
   return {
     keyField,
     keys: (entry) => {
       const value = entry[keyField];
       return typeof value === "string" ? [fold(value)] : null;
     },
+    ...(options.nullValued === undefined ? {} : { nullValued: options.nullValued }),
   };
 }
 

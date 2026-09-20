@@ -119,14 +119,42 @@ function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
  */
 type Descent = WeakMap<object, unknown>;
 
-function stripValue(value: unknown, descent: Descent): unknown {
-  return isPlainObject(value) ? stripMapping(value, undefined, descent) : structuredClone(value);
+/**
+ * What the fold knows inside one keyed entry, at `prefix` below the entry's top: the nested keyed lists its module
+ * declares (reachable at the top only) and the paths whose null is a value, not a marker.
+ */
+interface EntryScope {
+  readonly nested: Readonly<Record<string, KeyedListLayering>> | undefined;
+  readonly nullValued: ReadonlySet<string>;
+  readonly prefix: string;
 }
 
-/** Mirrors mergeMappings: a null-valued key is a marker and drops, and `keyed` names the same fields it names there. */
+function entryScope(keyed: KeyedListLayering): EntryScope {
+  return { nested: keyed.nested, nullValued: new Set(keyed.nullValued ?? []), prefix: "" };
+}
+
+function within(scope: EntryScope | undefined, key: string): EntryScope | undefined {
+  return scope === undefined ? undefined : { ...scope, prefix: childPath(scope.prefix, key) };
+}
+
+function nullIsValue(scope: EntryScope | undefined, key: string): boolean {
+  return scope?.nullValued.has(childPath(scope.prefix, key)) === true;
+}
+
+function nestedList(scope: EntryScope | undefined, key: string): KeyedListLayering | undefined {
+  return scope === undefined || scope.prefix !== "" || scope.nested === undefined
+    ? undefined
+    : own(scope.nested, key);
+}
+
+function stripValue(value: unknown, scope: EntryScope | undefined, descent: Descent): unknown {
+  return isPlainObject(value) ? stripMapping(value, scope, descent) : structuredClone(value);
+}
+
+/** Mirrors mergeMappings: a null-valued key is a marker and drops unless the scope names it a value, and `scope` names the same lists. */
 function stripMapping(
   map: Readonly<Record<string, unknown>>,
-  keyed: Readonly<Record<string, KeyedListLayering>> | undefined,
+  scope: EntryScope | undefined,
   descent: Descent,
 ): Record<string, unknown> {
   const enclosing = descent.get(map);
@@ -137,13 +165,18 @@ function stripMapping(
   descent.set(map, out);
   for (const [key, value] of Object.entries(map)) {
     if (value === null) {
+      if (nullIsValue(scope, key)) {
+        put(out, key, null);
+      }
       continue;
     }
-    const nested = keyed === undefined ? undefined : own(keyed, key);
+    const nested = nestedList(scope, key);
     put(
       out,
       key,
-      nested === undefined ? stripValue(value, descent) : stripKeyedList(value, nested, descent),
+      nested === undefined
+        ? stripValue(value, within(scope, key), descent)
+        : stripKeyedList(value, nested, descent),
     );
   }
   descent.delete(map);
@@ -153,7 +186,7 @@ function stripMapping(
 /** Mirrors unionKeyed under deep: the same lists are entered. */
 function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descent): unknown {
   if (!Array.isArray(list)) {
-    return stripValue(list, descent);
+    return stripValue(list, undefined, descent);
   }
   const enclosing = descent.get(list);
   if (enclosing !== undefined) {
@@ -163,7 +196,7 @@ function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descen
   descent.set(list, out);
   for (const item of list) {
     out.push(
-      isPlainObject(item) ? stripMapping(item, keyed.nested, descent) : structuredClone(item),
+      isPlainObject(item) ? stripMapping(item, entryScope(keyed), descent) : structuredClone(item),
     );
   }
   descent.delete(list);
@@ -203,9 +236,14 @@ export function stripNulls(doc: unknown, run: Layering): unknown {
     const section = UNDECLARED_POLICY_SECTIONS.find((candidate) => candidate === key);
     let stripped: unknown;
     if (section === undefined || effectiveLayering(value, file, run) !== "deep") {
-      stripped = stripValue(value, descent);
+      stripped = stripValue(value, undefined, descent);
     } else if (isPlainObject(value)) {
-      stripped = stripMapping(value, { entries: listLayering(section) }, descent);
+      const wrapper: EntryScope = {
+        nested: { entries: listLayering(section) },
+        nullValued: new Set(),
+        prefix: "",
+      };
+      stripped = stripMapping(value, wrapper, descent);
     } else {
       stripped = stripKeyedList(value, listLayering(section), descent);
     }
@@ -474,10 +512,10 @@ function mergeValue(
   above: unknown,
   path: string,
   step: Step,
-  keyed?: Readonly<Record<string, KeyedListLayering>>,
+  scope?: EntryScope,
 ): unknown {
   if (isPlainObject(below) && isPlainObject(above)) {
-    return mergeMappings(below, above, path, step, keyed);
+    return mergeMappings(below, above, path, step, scope);
   }
   return structuredClone(above);
 }
@@ -487,7 +525,7 @@ function mergeMappings(
   above: Readonly<Record<string, unknown>>,
   path: string,
   step: Step,
-  keyed?: Readonly<Record<string, KeyedListLayering>>,
+  scope?: EntryScope,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...below };
   for (const [key, value] of Object.entries(above)) {
@@ -496,17 +534,21 @@ function mergeMappings(
     }
     const here = childPath(path, key);
     if (value === null) {
-      applyNull(out, key, here, step);
+      if (nullIsValue(scope, key)) {
+        put(out, key, null);
+      } else {
+        applyNull(out, key, here, step);
+      }
       continue;
     }
-    const nested = keyed === undefined ? undefined : own(keyed, key);
+    const nested = nestedList(scope, key);
     const lower = own(out, key);
     if (nested !== undefined && Array.isArray(lower) && Array.isArray(value)) {
       // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too.
       put(out, key, unionKeyed(lower, value, nested, "deep", here, step));
       continue;
     }
-    put(out, key, mergeValue(lower, value, here, step));
+    put(out, key, mergeValue(lower, value, here, step, within(scope, key)));
   }
   return out;
 }
@@ -568,7 +610,13 @@ function unionKeyed(
         ) === 1 && claims(placement.keys, lowerKeys) === 1;
       out.push(
         directive === "deep" && paired
-          ? mergeValue(below, placement.item, `${path}[${placement.index}]`, step, keyed.nested)
+          ? mergeValue(
+              below,
+              placement.item,
+              `${path}[${placement.index}]`,
+              step,
+              entryScope(keyed),
+            )
           : structuredClone(placement.item),
       );
     }

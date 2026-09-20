@@ -240,7 +240,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     permission: { repo: [resource] },
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
-    layering: keyedBy("name", variableKey),
+    layering: keyedBy("name", { fold: variableKey }),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

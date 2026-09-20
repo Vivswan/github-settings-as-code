@@ -131,7 +131,7 @@ export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
   // The fold plan() passes to rejectDuplicates: GitHub matches logins case-insensitively.
-  layering: keyedBy("username", (username) => username.toLowerCase()),
+  layering: keyedBy("username", { fold: (username) => username.toLowerCase() }),
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CollaboratorConfig)),

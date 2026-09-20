@@ -285,7 +285,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     shape: loosen(knobbed(SECRETS_ENTRIES[key])),
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
-    layering: keyedBy("name", secretKey),
+    layering: keyedBy("name", { fold: secretKey }),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
