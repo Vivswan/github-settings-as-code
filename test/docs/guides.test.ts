@@ -597,14 +597,7 @@ describe("docs/ guide pages", () => {
 
   test.each<[string, number, Array<{ layer: string; path: string }>]>([
     ["A first fold", 2, []],
-    [
-      "A worked example",
-      3,
-      [
-        { layer: "layer-1", path: "repository.has_projects" },
-        { layer: "layer-2", path: "pages" },
-      ],
-    ],
+    ["A worked example", 3, [{ layer: "layer-1", path: "repository.has_projects" }]],
   ])(
     'the layering guide\'s "%s" folds to the merged document it shows',
     (heading, count, notices) => {

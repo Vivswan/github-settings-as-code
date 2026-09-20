@@ -103,7 +103,7 @@ flowchart BT
   team["team.yml"]
   repo["repo.yml, the highest layer"]
   out["the merged document<br>src/engine/layers.ts mergeLayers()"]
-  fleet -->|mappings merge, lists replace, null deletes| team
+  fleet -->|mappings merge, lists replace, null deletes, or is the value on pages and interaction_limits| team
   team -->|labels and rulesets union by key| repo
   repo -->|_undeclared resolved, _layering consumed| out
 ```
@@ -111,7 +111,7 @@ flowchart BT
 The stack folds bottom up, one layer per step:
 
 - The higher layer's mappings merge key by key; its scalars and lists replace.
-- Its `null` deletes what a lower layer declared.
+- Its `null` deletes what a lower layer declared, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such.
 - The list sections with a layering key (`labels`, `rulesets`) union their entries by key instead of replacing.
 
 The [layering guide](../operate/layering.md) has the full rule table and a worked example.

@@ -34,7 +34,8 @@ const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
 /**
  * The layer as the standalone validation sees it; neither marker below may reach the section shapes.
  *
- * null on a known section  -> dropped: an opt-out marker, not a setting to judge
+ * null on a known section  -> dropped: an opt-out marker, not a setting to judge, except on `pages` and
+ *                             `interaction_limits`, where null is the section's value and stays for the shapes to judge
  * a wrapper's `_layering`  -> dropped: a directive the fold validates itself
  * null on an unknown key   -> kept: it opts out of nothing, and only this per-layer pass can name the file that misspelled it
  */

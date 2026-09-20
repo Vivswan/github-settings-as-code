@@ -77,7 +77,7 @@ The fold is not the v2 merge. Three differences to audit when you rebuild an old
 |---|---|
 | Lists always replaced: a target's `labels` replaced the defaults' | `labels` and `rulesets` union by key under the default `layering: merge`; set `layering: replace` (or `_layering: replace` on the section) to keep the old replacement |
 | A nested `null` in the target survived as a value (`pages.cname: null` removed the domain) | A `null` over a key a lower layer declared deletes the key from the merged document, with a notice; it only stays a value when nothing below declares it |
-| A `null` section in the target opted out of the defaults' section | The same, now with a notice naming the layer and path; over nothing it keeps its engine meaning |
+| A `null` section in the target opted out of the defaults' section | The same, now with a notice naming the layer and path; over nothing it keeps its engine meaning. Except `pages` and `interaction_limits`: there `null` is the section's value and is written over the defaults' declaration with no notice, so the merged file turns the site or the limit off rather than opting out |
 
 ## 4. Commas and newlines in a settings-file path
 

@@ -5,10 +5,11 @@
  *
  * higher plain mapping                  -> merged key by key
  * higher scalar, list, tagged           -> replaces
- * higher null over a lower declaration  -> deletes it (an opt-out notice)
+ * higher null over a lower declaration  -> deletes it (an opt-out notice), except on a section that takes null as its
+ *                                          value, where it is written (`pages: null` turns Pages off whatever a lower layer declared)
  * higher null over nothing, or a null   -> stays as written below the top level and on a section that takes null as its
- *                                          value (`pages: null` keeps its engine meaning); on any other section it opted
- *                                          out of nothing and drops, so a one-layer `labels: null` folds to no labels
+ *                                          value; on any other section it opted out of nothing and drops, so a one-layer
+ *                                          `labels: null` folds to no labels
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -173,6 +174,7 @@ function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descen
  *
  * `rulesets[main].bypass_actors: null`  -> dropped (a mapping key inside a keyed list the merge combines)
  * `branches[].protection: null`         -> kept (inside a list the merge copies as written)
+ * `pages: null`                         -> kept (the section's value; the merge writes it, never reads it as a marker)
  * a null list element                   -> kept
  */
 export function stripNulls(doc: unknown): unknown {
@@ -183,7 +185,7 @@ export function stripNulls(doc: unknown): unknown {
   const out: Record<string, unknown> = {};
   descent.set(doc, out);
   for (const [key, value] of Object.entries(doc)) {
-    if (value === null) {
+    if (value === null && !NULL_VALUED.has(key)) {
       continue;
     }
     const layering = sectionLayering(key);
@@ -438,9 +440,17 @@ function applyNull(
   }
 }
 
-/** A top-level null on an unknown key stays for the validator to name; on a section it opts out and is a value only where the section takes null. */
-function sectionNullStays(key: string): boolean {
-  return !KNOWN_SECTIONS.has(key) || NULL_VALUED.has(key);
+/**
+ * A top-level null is the section's value where the section takes null (`pages: null` is the only spelling of "Pages
+ * off", so it is written even over a lower site); elsewhere it opts out of a lower declaration, and over nothing it
+ * stays only on an unknown key, for the validator to name.
+ */
+function applyTopLevelNull(out: Record<string, unknown>, key: string, step: Step): void {
+  if (NULL_VALUED.has(key)) {
+    put(out, key, null);
+    return;
+  }
+  applyNull(out, key, key, step, !KNOWN_SECTIONS.has(key));
 }
 
 function mergeValue(
@@ -567,7 +577,7 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, notices: OptOutNotice[]):
       continue;
     }
     if (value === null) {
-      applyNull(out, key, key, step, sectionNullStays(key));
+      applyTopLevelNull(out, key, step);
       continue;
     }
     const section = layer.sections.get(key);

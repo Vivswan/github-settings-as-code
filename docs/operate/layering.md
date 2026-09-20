@@ -80,7 +80,7 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 |---|---|---|
 | A mapping | A mapping | Merged key by key. Lower keys keep their order, higher-only keys follow |
 | A scalar, a list, or a YAML-tagged value | Anything | Replaces |
-| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path |
+| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice |
 | `null` | Nothing, or another `null` | Below the top level, stays as written. At the top level it opted out of nothing and drops with no notice, except on `pages` and `interaction_limits`, where `null` is the section's value and stays (`pages: null` still means "disable Pages") |
 | `labels` entries, layering `merge` | `labels` entries | Union by name (case-folded). A same-name entry replaces the lower one in place, new names are appended |
 | `rulesets` entries, layering `merge` | `rulesets` entries | Union by name. A same-name ruleset merges key by key; its `rules` pair by `type`, a same-type rule replacing in place and new types appended |
@@ -139,7 +139,7 @@ rulesets:
       - type: non_fast_forward
 ```
 
-The repository layer sets its description, recolors `docs`, and opts out of Pages:
+The repository layer sets its description, recolors `docs`, and turns Pages off:
 
 ```yaml layer
 # .github/settings/repo.yml
@@ -175,18 +175,19 @@ rulesets:
       rules:
         - type: deletion
         - type: non_fast_forward
+pages: null
 ```
 
-And the run annotates the two deletions:
+And the run annotates the one deletion:
 
 ```text
 .github/settings/team.yml: null removed repository.has_projects declared by a lower layer
-.github/settings/repo.yml: null removed pages declared by a lower layer
 ```
 
 Reading it back:
 
-- `has_projects` and `pages` are gone: a higher `null` met a lower declaration.
+- `has_projects` is gone: a higher `null` met a lower declaration.
+- `pages` is `null`, not gone: on this section `null` is the value that turns Pages off, so it replaces the fleet's site with no notice.
 - `docs` kept its position and took the higher color.
 - The `main` ruleset kept `target` and `enforcement` from the fleet and gained a rule.
 - Both list sections came out in wrapper form with their section default filled in.

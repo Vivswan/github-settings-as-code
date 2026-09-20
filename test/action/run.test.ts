@@ -475,9 +475,10 @@ describe("run in mode: merge", () => {
       _undeclared: "keep",
       entries: [{ ...FLEET_RULESET, rules: [{ type: "deletion" }, { type: "non_fast_forward" }] }],
     },
+    pages: null,
   };
 
-  test("three layers fold into the merged file with no token and no API call; nulls opt out with notices", () =>
+  test("three layers fold into the merged file with no token and no API call; a null opts out with a notice, and pages: null is kept as the value", () =>
     withTempDir("merge-mode-", async (dir) => {
       const layers = [layer("fleet.yml"), layer("team.yml"), layer("repo.yml")];
       const mergedFile = setMergeEnv(dir, layers);
@@ -488,7 +489,6 @@ describe("run in mode: merge", () => {
       expect(outputs).toEqual({ result: "merged", "skipped-sections": "", "repos-result": "{}" });
       expect(captured).toEqual([
         `notice: ${layer("team.yml")}: null removed repository.has_projects declared by a lower layer`,
-        `notice: ${layer("repo.yml")}: null removed pages declared by a lower layer`,
         `merged 3 layers into ${mergedFile}`,
         "result: merged",
       ]);
@@ -517,6 +517,7 @@ describe("run in mode: merge", () => {
         repository: { has_wiki: false, has_projects: false, description: "mine" },
         labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
         rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
+        pages: null,
       });
     }));
 

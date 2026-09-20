@@ -1,14 +1,16 @@
-# mode: merge folds an ordered layer stack into one document without touching
-# GitHub: a fleet layer declares labels, a `main` ruleset, and Pages; the repo
-# layer on top recolors one label, adds another, appends a rule type to `main`,
-# and opts out of Pages with null. The written document is exactly what apply
-# would run (list sections in their resolved {_undeclared, entries} form), the
-# null opt-out is announced, and the mock sees ZERO requests.
+# mode: merge folds a layer stack into one document with ZERO requests. A
+# fleet layer declares labels, a `main` ruleset, Pages, and a repository knob;
+# the repo layer edits the labels and ruleset and nulls both Pages and the knob.
+# The merged file pins the contrast: `pages: null` is kept as the value with no
+# notice (the only spelling of "Pages off"), while `repository: null` is removed
+# with a notice.
 name: merge-union-optout
 inputs:
   mode: merge
 settings_layers:
-  - labels:
+  - repository:
+      has_wiki: false
+    labels:
       - name: bug
         color: d73a4a
         description: Something isn't working
@@ -30,6 +32,7 @@ settings_layers:
         branch: main
         path: /
 settings:
+  repository: null
   labels:
     - name: docs
       color: ffffff
@@ -45,7 +48,9 @@ expect:
   result: merged
   zero_requests: true
   stdout_contains:
-    - "settings.yml: null removed pages declared by a lower layer"
+    - "settings.yml: null removed repository declared by a lower layer"
+  stdout_lacks:
+    - "null removed pages"
   summary_contains:
     - "| 1 | "
     - "layer-0.yml |"
@@ -53,6 +58,7 @@ expect:
     - "settings.yml |"
     - "Merged document written to "
   merged:
+    pages: null
     labels:
       _undeclared: delete
       entries:

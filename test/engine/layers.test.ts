@@ -76,12 +76,12 @@ describe("mergeLayers: the mapping dialect", () => {
         pages: { build_type: "workflow" },
         actions: { enabled: true },
       }),
-      layer("repo", { pages: null, repository: { description: null } }),
+      layer("repo", { actions: null, repository: { description: null } }),
     ]);
     expect(result).toEqual({
-      settings: { repository: { has_wiki: false }, actions: { enabled: true } },
+      settings: { repository: { has_wiki: false }, pages: { build_type: "workflow" } },
       notices: [
-        { layer: "repo", path: "pages" },
+        { layer: "repo", path: "actions" },
         { layer: "repo", path: "repository.description" },
       ],
     });
@@ -89,13 +89,13 @@ describe("mergeLayers: the mapping dialect", () => {
 
   test("the top layer beats everything, re-declaring a key a middle layer nulled", () => {
     const result = merge([
-      layer("fleet", { pages: { build_type: "workflow" } }),
-      layer("team", { pages: null }),
-      layer("repo", { pages: { build_type: "legacy" } }),
+      layer("fleet", { actions: { enabled: true } }),
+      layer("team", { actions: null }),
+      layer("repo", { actions: { enabled: false } }),
     ]);
     expect(result).toEqual({
-      settings: { pages: { build_type: "legacy" } },
-      notices: [{ layer: "team", path: "pages" }],
+      settings: { actions: { enabled: false } },
+      notices: [{ layer: "team", path: "actions" }],
     });
   });
 
@@ -108,6 +108,28 @@ describe("mergeLayers: the mapping dialect", () => {
   ])("a null over %s stays as written with no notice", (_case, layers) => {
     expect(merge(layers)).toEqual({ settings: { pages: null }, notices: [] });
   });
+
+  // `pages: null` is the only spelling of "Pages off"; read as an opt-out marker it would leave a fleet-declared site running.
+  test.each([
+    ["pages", { build_type: "workflow" }, { settings: { pages: null }, notices: [] }],
+    [
+      "interaction_limits",
+      { limit: "collaborators_only" },
+      { settings: { interaction_limits: null }, notices: [] },
+    ],
+    [
+      "labels",
+      [{ name: "bug", color: "d73a4a" }],
+      { settings: {}, notices: [{ layer: "repo", path: "labels" }] },
+    ],
+  ])(
+    "a higher %s: null over a lower declaration is the section's value where the section takes null, and an opt-out elsewhere",
+    (key, lower, expected) => {
+      expect(merge([layer("fleet", { [key]: lower }), layer("repo", { [key]: null })])).toEqual(
+        expected,
+      );
+    },
+  );
 
   test("a null on a section that has no null value, over one layer, opts out of nothing: it drops, with no notice", () => {
     expect(merge([layer("repo", { repository: { has_wiki: false }, labels: null })])).toEqual({
@@ -830,6 +852,7 @@ describe("stripNulls", () => {
           rules: [null, { type: "pull_request", parameters: null }],
         },
       ],
+      pages: null,
       zero: 0,
     });
     expect(stripNulls(doc)).toEqual({
@@ -846,6 +869,7 @@ describe("stripNulls", () => {
           rules: [null, { type: "pull_request", parameters: null }],
         },
       ],
+      pages: null,
       zero: 0,
     });
   });
@@ -873,7 +897,7 @@ describe("stripNulls", () => {
     },
   );
 
-  test("the merge agrees: a lower layer declaring every stripped key is deleted with a notice, the kept nulls survive as data", () => {
+  test("the merge agrees: a lower layer declaring every stripped key is deleted with a notice, the kept nulls survive as data or as the section value", () => {
     const fleet = layer("fleet", {
       a: 1,
       b: { c: 2, e: { f: 3 } },
@@ -886,10 +910,12 @@ describe("stripNulls", () => {
           rules: [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
         },
       ],
+      pages: { build_type: "workflow" },
     });
     const repo = layer("repo", {
       a: null,
       b: { c: null, e: { f: null } },
+      pages: null,
       branches: [{ name: "release", protection: null }],
       labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
       rulesets: [
@@ -915,6 +941,7 @@ describe("stripNulls", () => {
             },
           ],
         },
+        pages: null,
         branches: [{ name: "release", protection: null }],
       },
       notices: [

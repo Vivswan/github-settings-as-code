@@ -1128,17 +1128,25 @@ function engineNotices(layers: readonly MergeLayer[]): OptOutNotice[] {
 }
 
 describe("foldMergeLayers (the oracle's own dialect)", () => {
-  test("a null removes a lower declaration with a notice, and stays when nothing below declares the key", () => {
+  test("a null removes a lower declaration with a notice, stays when nothing below declares the key, and is the value where the section takes null", () => {
     const { merged, notices } = foldMergeLayers(
       stack(
-        { pages: { build_type: "workflow" }, repository: { description: "x", homepage: "h" } },
-        { pages: null, repository: { homepage: null }, interaction_limits: null },
+        {
+          pages: { build_type: "workflow" },
+          repository: { description: "x", homepage: "h" },
+          actions: { enabled: true },
+        },
+        { pages: null, repository: { homepage: null }, interaction_limits: null, actions: null },
       ),
       "merge",
     );
-    expect(merged).toEqual({ repository: { description: "x" }, interaction_limits: null });
+    expect(merged).toEqual({
+      repository: { description: "x" },
+      interaction_limits: null,
+      pages: null,
+    });
     expect(notices.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
-      { layer: "settings.yml", path: "pages" },
+      { layer: "settings.yml", path: "actions" },
       { layer: "settings.yml", path: "repository.homepage" },
     ]);
   });
