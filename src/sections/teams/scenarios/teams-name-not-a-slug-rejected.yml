@@ -1,0 +1,26 @@
+# A team declared by its display name ("Core Team") instead of its slug is
+# refused when the settings file is parsed, naming the entry and the slug it
+# probably means, before any API contact. The name is the team_slug in the API
+# path: the access probe for "Core%20Team" 404s, which the section reads as
+# "no access", so check would report a confident lie ("apply will grant") and
+# the grant PUT would 404 in turn - while the team, under its slug, has access.
+name: teams-name-not-a-slug-rejected
+settings:
+  teams:
+    - name: Core Team
+      permission: push
+inputs:
+  mode: check
+owner_kind: org
+live_state:
+  teams:
+    core-team:
+      role_name: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "teams[0].name"
+    - declared by its slug
+    - '"core-team"'
