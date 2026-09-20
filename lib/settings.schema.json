@@ -273,8 +273,9 @@
       "type": "object",
       "properties": {
         "app_id": {
-          "description": "The id of the GitHub App the preference applies to.",
-          "type": "integer"
+          "description": "The id of the GitHub App the preference applies to: a positive integer (the App's settings page shows it), declared once. 0, fractions, and a repeated app_id fail at parse time; GitHub has no app 0, rejects fractions, and would keep whichever duplicate it reads last with nothing to read it back.",
+          "type": "integer",
+          "exclusiveMinimum": 0
         },
         "setting": {
           "description": "Whether pushes automatically create check suites for this app; GitHub defaults each app to true.",
@@ -382,7 +383,7 @@
       "type": "object",
       "properties": {
         "auto_trigger_checks": {
-          "description": "Per-app toggles for whether pushes automatically create check suites.",
+          "description": "Per-app toggles for whether pushes automatically create check suites, one entry per app_id.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/AutoTriggerCheckConfig"

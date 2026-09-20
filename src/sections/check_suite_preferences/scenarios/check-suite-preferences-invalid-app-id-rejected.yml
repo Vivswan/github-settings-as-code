@@ -1,0 +1,27 @@
+# An app_id no GitHub App has (0) and a repeated app_id (GitHub keeps whichever
+# entry it reads last) are refused when the settings file is parsed, naming each
+# entry and its rule, before any API contact. Whatever GitHub answers a bad id,
+# the PATCH would report it late and on every run. The repeat is the mistake
+# nothing would ever report, since no read endpoint exists.
+name: check-suite-preferences-invalid-app-id-rejected
+settings:
+  check_suite_preferences:
+    auto_trigger_checks:
+      - app_id: 15368
+        setting: false
+      - app_id: 0
+        setting: true
+      - app_id: 15368
+        setting: true
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "check_suite_preferences.auto_trigger_checks[1].app_id"
+    - positive integer
+    - "check_suite_preferences.auto_trigger_checks[2].app_id"
+    - "repeats app_id 15368 from auto_trigger_checks[0]"
+    - one entry per app

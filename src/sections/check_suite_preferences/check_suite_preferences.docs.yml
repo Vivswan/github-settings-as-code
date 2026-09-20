@@ -23,12 +23,17 @@ schema:
     check mode cannot verify them and apply re-asserts the declared preferences on every run. The
     token owner must be a repository administrator.
   AutoTriggerCheckConfig: One per-app auto-trigger toggle. Extra fields pass through verbatim.
-  AutoTriggerCheckConfig.app_id: The id of the GitHub App the preference applies to.
+  AutoTriggerCheckConfig.app_id: >-
+    The id of the GitHub App the preference applies to: a positive integer (the App's settings page
+    shows it), declared once. 0, fractions, and a repeated app_id fail at parse time; GitHub has no
+    app 0, rejects fractions, and would keep whichever duplicate it reads last with nothing to read
+    it back.
   AutoTriggerCheckConfig.setting: >-
     Whether pushes automatically create check suites for this app; GitHub defaults each app to true.
   CheckSuitePreferencesConfig: >-
     PATCH /repos/{r}/check-suites/preferences, sent verbatim. Write-only upstream: GitHub exposes no
     read endpoint for these preferences, so check mode cannot verify them and apply re-asserts the
     declared preferences on every run.
-  CheckSuitePreferencesConfig.auto_trigger_checks: Per-app toggles for whether pushes automatically create check suites.
+  CheckSuitePreferencesConfig.auto_trigger_checks: >-
+    Per-app toggles for whether pushes automatically create check suites, one entry per app_id.
   CheckSuitePreferencesConfig.*: Future preference fields pass through verbatim.
