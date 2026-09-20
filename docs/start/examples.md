@@ -8,7 +8,7 @@ A cookbook of settings.yml files. Every settings example on this page runs throu
 
 One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing; the last two bend it where the API forces their hand, as the [Sections table](../reference/sections.md) notes:
 
-- **Full-payload entries:** a ruleset is applied with a full-payload PUT, so a key the entry omits but the live ruleset holds is drift in check and a refused write in apply; [Semantics](../reference/semantics.md) has the edges. `target` (branch) and `enforcement` (active) are filled when omitted.
+- **Full-payload entries:** a ruleset is applied with a full-payload PUT, so a key the entry omits but the live ruleset holds is drift in check and a refused write in apply; [Semantics](../reference/semantics.md) has the edges.
 - **Labels and milestones** work the other way: only the fields you declare are sent, so an omitted description or state is left alone.
 - **Classic `protection`:** inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below).
 - **`actions`:** declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise. Retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
