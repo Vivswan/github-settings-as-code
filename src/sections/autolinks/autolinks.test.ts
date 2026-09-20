@@ -178,7 +178,9 @@ describe("autolinks", () => {
         { key_prefix: "TICKET-", url_template: "https://t.test/<num>" },
       ]),
     ).rejects.toThrow(
-      'autolinks: the settings file declares conflicting autolinks: the key_prefix "TICKET-" begins the key_prefix "TICKET-A", and GitHub rejects an autolink whose prefix begins or extends another, so the second create would fail - choose prefixes where neither begins the other. Fix the settings file, then re-run',
+      'autolinks: the settings file declares conflicting autolinks: the key_prefix "TICKET-" begins the key_prefix "TICKET-A", ' +
+        "and GitHub rejects an autolink whose prefix begins or extends another, so the second create would fail - " +
+        "choose prefixes where neither begins the other. Fix the settings file, then re-run",
     );
     expect(api.calls).toHaveLength(0);
   });
