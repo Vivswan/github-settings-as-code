@@ -13,7 +13,8 @@ import type { Rng } from "../../../test/e2e/prng.js";
 import { SecretScanningPatternConfig } from "./schema.js";
 
 const NAMES = ["internal-api-token", "staging-key", "vendor-secret", "license-key"] as const;
-// The regexes are inert strings to this action (passthrough), so simple realistic shapes suffice.
+// Every pool value compiles as a flagless JS RegExp: the schema refuses anything else at parse, and the
+// uncompilable draw lives in the invalid-settings catalog (test/e2e/generators.ts).
 const PATTERNS = ["int_[a-z0-9]{8}", "key-[0-9]{6}", "tok_[A-Za-z0-9]{12}"] as const;
 
 export function genSecretScanningPatterns(rng: Rng): EntriesForm {

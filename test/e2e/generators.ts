@@ -701,6 +701,31 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
+    name: "secret-scanning-pattern-uncompilable",
+    build: (rng) => {
+      // Each field is a regex GitHub compiles as Hyperscan; the schema refuses what a flagless JavaScript RegExp cannot compile.
+      const { value, entries, index, itemToken } = validItems(
+        rng,
+        "secret_scanning_custom_patterns",
+      );
+      const field = rng.pick([
+        "pattern",
+        "start_delimiter",
+        "end_delimiter",
+        "must_match",
+        "must_not_match",
+      ]);
+      const broken = rng.pick(["([a-z", "*token", "(?i)key_[0-9]{6}"]);
+      const entry = entries[index] as Json;
+      const listField = field === "must_match" || field === "must_not_match";
+      entry[field] = listField ? ["[0-9]", broken] : broken;
+      return {
+        doc: { secret_scanning_custom_patterns: value },
+        offendingToken: `${itemToken}.${field}${listField ? "[1]" : ""}`,
+      };
+    },
+  },
+  {
     name: "pages-source-not-an-object",
     build: () => ({
       doc: { pages: { source: "main" } },
