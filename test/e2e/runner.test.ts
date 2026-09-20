@@ -411,6 +411,24 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
       expect(requestLogFailures(exp, recorded)).toEqual(want);
     });
   }
+
+  // The `{repo}` placeholder must expand in EVERY request-path list: a list left unexpanded is
+  // always-red under `requests_contain` and always-green under `never`, and no scenario would notice.
+  const onAdminRepo: LoggedRequest[] = [
+    { method: "GET", pathname: "/repos/e2e-owner/e2e-repo/labels", query: "", status: 200 },
+    { method: "POST", pathname: "/repos/e2e-owner/e2e-repo/labels", query: "", status: 201 },
+  ];
+  test.each<[label: string, exp: Parameters<typeof requestLogFailures>[0], want: string[]]>([
+    ["mutations", { mutations: ["POST /repos/{repo}/labels"] }, []],
+    ["requests_contain", { requests_contain: ["GET /repos/{repo}/labels"] }, []],
+    [
+      "never",
+      { never: ["GET /repos/{repo}/labels"] },
+      ["forbidden request present: GET /repos/e2e-owner/e2e-repo/labels"],
+    ],
+  ])("{repo} expands to the mock's owner/name under %s", (_label, exp, want) => {
+    expect(requestLogFailures(exp, onAdminRepo)).toEqual(want);
+  });
 });
 
 describe("stripMaskLines", () => {

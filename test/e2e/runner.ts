@@ -539,8 +539,12 @@ async function invoke(
   };
 }
 
-function expandRepo(pattern: string): string {
-  return pattern.replaceAll("{repo}", REPO_SLUG);
+/**
+ * `{repo}` in a request-path expectation is the mock's owner/name. Every list goes through this one
+ * expansion: a list left raw is always-red under requests_contain and always-green under never.
+ */
+function expandRepoPatterns(patterns: readonly string[] | undefined): string[] {
+  return (patterns ?? []).map((pattern) => pattern.replaceAll("{repo}", REPO_SLUG));
 }
 
 function stripLines(text: string, prefix: string): string {
@@ -625,21 +629,17 @@ export function requestLogFailures(
 ): string[] {
   const failures: string[] = [];
   const writes = requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
-  if (exp.mutations) {
-    const want = exp.mutations.map(expandRepo);
-    if (!isSubsequence(want, writes)) {
-      failures.push(
-        `mutations not found as a subsequence:\n  want: ${want.join(", ")}\n  writes: ${writes.join(", ")}`,
-      );
-    }
+  const mutations = expandRepoPatterns(exp.mutations);
+  if (!isSubsequence(mutations, writes)) {
+    failures.push(
+      `mutations not found as a subsequence:\n  want: ${mutations.join(", ")}\n  writes: ${writes.join(", ")}`,
+    );
   }
   const fullLog = requests.map((r) => renderRequest(r, true));
-  if (exp.never) {
-    for (const pattern of forbiddenPresent(exp.never.map(expandRepo), fullLog)) {
-      failures.push(`forbidden request present: ${pattern}`);
-    }
+  for (const pattern of forbiddenPresent(expandRepoPatterns(exp.never), fullLog)) {
+    failures.push(`forbidden request present: ${pattern}`);
   }
-  for (const needle of exp.requests_contain ?? []) {
+  for (const needle of expandRepoPatterns(exp.requests_contain)) {
     if (!fullLog.some((entry) => entry.includes(needle))) {
       failures.push(`no request contains: ${needle}`);
     }
