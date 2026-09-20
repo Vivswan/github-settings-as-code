@@ -1,7 +1,9 @@
 /**
  * The one way a test hands a planner its input: through the real validation phase (validateSettingsDoc), so the brand
  * is minted where the engine mints it, and a fixture the validator refuses fails the test naming the problem instead of
- * riding a cast into plan(). Every file-only check runs here, as it does before a run's first write.
+ * riding a cast into plan(). Every file-only check runs here, as it does before a run's first write. The value is
+ * deep-frozen: the engine hands one document to every section, so a planner that mutated its input would corrupt what
+ * the next section (and the report) reads; here that mutation throws instead.
  */
 
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
@@ -9,7 +11,7 @@ import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey } from "../../src/schema.js";
-import type { ValidatedInput } from "../../src/sections/contract/module.js";
+import { deepFreeze, type ValidatedInput } from "../../src/sections/contract/module.js";
 
 /**
  * The overload is the typed door: the implementation reads the section back off the validated document, whose value
@@ -33,5 +35,6 @@ export function validatedInput(key: SectionKey, declared: unknown): ValidatedInp
       `BUG: the validated document carries no "${key}" section although the fixture declared one; validation dropped it`,
     );
   }
+  deepFreeze(value);
   return value;
 }

@@ -5,14 +5,20 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { SectionOutcome, ValidatedSettings } from "../engine/orchestrate.js";
+import {
+  type SectionOutcome,
+  type ValidatedSettings,
+  validateSettingsDoc,
+} from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
+import { SectionSelection } from "../engine/section-selection.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { GitHubClient } from "../github/api.js";
-import type { CollectedLine, Io } from "../io.js";
+import { type CollectedLine, type Io, silentIo } from "../io.js";
 import type { Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
-import type { SectionKey } from "../schema.js";
+import { describeProblem } from "../problem.js";
+import type { SectionKey, SettingsFile } from "../schema.js";
 import { type ArtifactUploader, deliverArtifactReport } from "./artifact-report.js";
 import { composeReport } from "./composer.js";
 import {
@@ -80,7 +86,8 @@ export interface ReportRunMeta {
 
 /**
  * `on` is false when the channel is off or the target is not redacted. The notice is returned rather than emitted, so
- * the caller can route it through the target's capturing sink.
+ * the caller can route it through the target's capturing sink. An injected document is a new document, so it earns
+ * its brand where every document does: through validateSettingsDoc, the brand's one mint.
  */
 export function applyMarkerInjection(
   settings: ValidatedSettings,
@@ -89,26 +96,43 @@ export function applyMarkerInjection(
   if (!on) {
     return { settings };
   }
-  // The injection appends MARKER_LABEL_CONFIG (a constant, schema-valid entry) or strips a new_name, both keeping every
-  // section shape satisfied, so the brand survives; this cast is the one place that fact is asserted.
-  const injection = injectMarkerLabel(settings) as {
-    settings: ValidatedSettings;
-    outcome: "unchanged" | "injected" | "rename-refused";
-  };
+  const injection = injectMarkerLabel(settings);
   switch (injection.outcome) {
+    case "unchanged":
+      // The injection handed back the very document it was given, brand and all.
+      return { settings };
     case "rename-refused":
       return {
-        settings: injection.settings,
+        settings: revalidated(injection.settings),
         notice: `refused to rename the "${MARKER_LABEL}" marker label: private reporting reuses its issue by that exact name, so the rename was dropped`,
       };
-    case "unchanged":
-      return { settings: injection.settings };
     case "injected":
       return {
-        settings: injection.settings,
+        settings: revalidated(injection.settings),
         notice: `added the "${MARKER_LABEL}" marker label to the managed labels so private reporting can reuse its issue; it is managed like any declared label`,
       };
   }
+}
+
+/**
+ * The validator's parsed output holds section keys only, so this pass can raise no unknown-key warning and its sink
+ * stays silent. The injection appends MARKER_LABEL_CONFIG (a constant, schema-valid entry) or strips a new_name, both
+ * of which every label check accepts, so a refusal here is a defect in the injection, not a settings-file problem.
+ */
+function revalidated(injected: SettingsFile): ValidatedSettings {
+  return validateSettingsDoc(
+    injected,
+    "the marker-injected settings",
+    SectionSelection.ALL,
+    silentIo(),
+  ).match(
+    (settings) => settings,
+    (problem) => {
+      throw new Error(
+        `BUG: the marker label injection produced a document the validator refuses (${describeProblem(problem)}); the injection appends the constant marker label or strips a new_name, which every label check must accept`,
+      );
+    },
+  );
 }
 
 declare const CONCLUDED: unique symbol;
