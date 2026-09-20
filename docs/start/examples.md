@@ -6,7 +6,12 @@ order: 30
 
 A cookbook of settings.yml files. Every settings example on this page runs through the real document validation in CI, so the shapes stay current. What each section manages, which token permission it needs, and whether its undeclared entries are deleted or kept is specified in the [Sections table](../reference/sections.md); the cross-section rules live under [Semantics](../reference/semantics.md). This page shows shapes, not behavior.
 
-One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing. Some list entries are one full payload: a declared ruleset is applied with a full-payload PUT, so a partial ruleset entry silently narrows the live one; declare each ruleset completely. Labels and milestones work the other way: only the fields you declare are sent, so an omitted description or state is left alone. And two sections bend the rule where the API forces their hand, as the [Sections table](../reference/sections.md) notes: inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below), and in the `actions` section, declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise, while retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
+One rule frames everything below: only declared keys are applied or compared. A section, or a field inside one, that the file does not mention is never touched. The rule has edges worth knowing; the last two bend it where the API forces their hand, as the [Sections table](../reference/sections.md) notes:
+
+- **Full-payload entries:** a declared ruleset is applied with a full-payload PUT, so a partial ruleset entry silently narrows the live one; declare each ruleset completely.
+- **Labels and milestones** work the other way: only the fields you declare are sent, so an omitted description or state is left alone.
+- **Classic `protection`:** inside a declared `protection` object the classic API requires all four core keys, so apply fills the ones you omit with `null` (see [Classic branch protection](#classic-branch-protection) below).
+- **`actions`:** declaring any base permissions key (or `selected_actions`, which infers `allowed_actions: selected`) makes the base PUT carry `enabled: true` unless the file says otherwise. Retention-, cache-, workflow-token-, or access-only declarations leave the base policy alone.
 
 ## A minimal file
 
@@ -221,7 +226,9 @@ In `rulesets`, short ref names are auto-prefixed (`staging` becomes `refs/heads/
 
 ## Classic branch protection
 
-`branches` is the classic per-branch protection API, kept for Probot compatibility; rulesets are the modern replacement. The declared `protection` object is the PUT payload, with one adjustment: the classic API rejects a payload missing any of its four core keys (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`, `restrictions`), so apply fills omitted core keys with `null`. A `null` there means "off", so an omitted `enforce_admins` is turned off, not left alone; declare every core key you want to keep, and check mode reports an omitted-but-live core key as drift before an apply would null it away.
+`branches` is the classic per-branch protection API, kept for Probot compatibility; rulesets are the modern replacement. The declared `protection` object is the PUT payload, with one adjustment: the classic API rejects a payload missing any of its four core keys (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`, `restrictions`), so apply fills omitted core keys with `null`.
+
+A `null` there means "off", so an omitted `enforce_admins` is turned off, not left alone. Declare every core key you want to keep; check mode reports an omitted-but-live core key as drift before an apply would null it away.
 
 ```yaml settings
 branches:
@@ -236,7 +243,12 @@ branches:
       restrictions: null
 ```
 
-Two protection surfaces the REST API cannot express ride GraphQL under the hood, declared as ordinary keys: `force_push_bypassers` lists who may force push (a bare login is a user, `org/team-slug` a team, `app/slug` a GitHub App), and `required_deployments` requires deployments to the named environments before merging (`null` turns the requirement off; declare the environments in the same file - the `environments` section applies first). An entry whose name is a wildcard pattern (`release/*`) is a classic RULE rather than a branch: it reconciles entirely through GraphQL and its protection accepts only the keys with exact GraphQL equivalents, so prefer rulesets for new pattern-based configuration.
+Two protection surfaces the REST API cannot express ride GraphQL under the hood, declared as ordinary keys:
+
+- `force_push_bypassers` lists who may force push: a bare login is a user, `org/team-slug` a team, `app/slug` a GitHub App.
+- `required_deployments` requires deployments to the named environments before merging; `null` turns the requirement off. Declare the environments in the same file - the `environments` section applies first.
+
+An entry whose name is a wildcard pattern (`release/*`) is a classic RULE rather than a branch: it reconciles entirely through GraphQL and its protection accepts only the keys with exact GraphQL equivalents, so prefer rulesets for new pattern-based configuration.
 
 ```yaml settings
 environments:
@@ -282,11 +294,15 @@ branches:
 
 A `mode: render` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `branches` list replaces the lower one as written. Elsewhere a `null` over a key a lower layer declared removes that key from the rendered document; the [layering guide](../operate/layering.md) has the rules.
 
-A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above. A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
+A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above.
+
+A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
 
 ## Notes in the file
 
-Unknown top-level sections are hard errors, so a typo cannot silently do nothing (the one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it). An underscore key is not an escape hatch: the underscore marks this action's two directives, `_layering` and `_undeclared` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
+Unknown top-level sections are hard errors, so a typo cannot silently do nothing. The one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it.
+
+An underscore key is not an escape hatch: the underscore marks this action's two directives, `_layering` and `_undeclared` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
 
 ```yaml settings
 # owner: platform-team, see runbook RB-112

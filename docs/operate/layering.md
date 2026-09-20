@@ -110,9 +110,18 @@ So a fleet `Bug` and a repository `bug` are one label, and a fleet `MY_SECRET` a
 
 Under `deep` a lower entry that two higher entries both claim (a lower label renaming into a name one higher entry declares while another declares its old name) is superseded by both as written: only a one-to-one pair merges field by field, so the rendered document never carries two entries claiming one key.
 
-The rules above decide the content. The written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes: sections in the order the action applies them, keys as the schema declares them, the entries of every keyed list sorted by their identity.
+The rules above decide the content. The written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes:
 
-Reordering keys, or the entries of a keyed list, in a layer changes nothing in the rendered file. The lists kept as written do change it: `branches` (GitHub applies overlapping wildcard rules in creation order), the `pinned: true` environments (their order is the pin rank), the two mapping lists with no identity (`bypass_actors`, `reviewers`), and every scalar list (`topics`, `include` patterns).
+- sections in the order the action applies them
+- keys as the schema declares them
+- the entries of every keyed list sorted by their identity
+
+Reordering keys, or the entries of a keyed list, in a layer changes nothing in the rendered file. The lists kept as written do change it:
+
+- `branches`: GitHub applies overlapping wildcard rules in creation order
+- the `pinned: true` environments: their order is the pin rank
+- the two mapping lists with no identity: `bypass_actors`, `reviewers`
+- every scalar list: `topics`, `include` patterns
 
 The `_undeclared` knob across layers:
 

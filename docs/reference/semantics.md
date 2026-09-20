@@ -40,6 +40,8 @@ Rate limits (429 and secondary limits) and transient 5xx or network failures are
 
 ## The preflight barrier
 
-Under `on-missing-permission: fail`, every declared section is probed read-only before ANY write; if a section is inaccessible, nothing is applied at all (per repository in multi-repo mode; earlier targets in the same run are already done). The API has no transactions; a read-but-not-write token can still fail mid-apply, and a section whose reads need no grant at all (`custom_properties` - its values read is Metadata-gated) surfaces a missing write grant only at its first write. Re-running after fixing it converges because applies are idempotent.
+Under `on-missing-permission: fail`, every declared section is probed read-only before ANY write. If a section is inaccessible, nothing is applied at all (per repository in multi-repo mode; earlier targets in the same run are already done).
+
+The API has no transactions. A read-but-not-write token can still fail mid-apply, and a section whose reads need no grant at all (`custom_properties` - its values read is Metadata-gated) surfaces a missing write grant only at its first write. Re-running after fixing it converges because applies are idempotent.
 
 See [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md) for the full inventory: everything supported, every repo-scoped gap, and the user-scoped surface that is out of scope by design.
