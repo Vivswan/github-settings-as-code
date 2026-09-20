@@ -175,14 +175,16 @@ describe("runForRepo", () => {
 
     const [plainDesired] = (await receivedBy(rulesetsSection, plain)) as [object[]];
     expect(plainDesired).not.toBe(plain.rulesets);
-    expect(plainDesired).toEqual([{ name: "r" }]);
+    // The parsed copy also carries the slice's defaults (target, enforcement).
+    const parsedEntry = { name: "r", target: "branch", enforcement: "active" };
+    expect(plainDesired).toEqual([parsedEntry]);
     prototypeClean(plainDesired[0] as object);
 
     const [wrappedDesired] = (await receivedBy(rulesetsSection, wrapped)) as [
       { _undeclared: string; entries: object[] },
     ];
     expect(wrappedDesired).not.toBe(wrapped.rulesets);
-    expect(wrappedDesired).toEqual({ _undeclared: "keep", entries: [{ name: "r" }] });
+    expect(wrappedDesired).toEqual({ _undeclared: "keep", entries: [parsedEntry] });
     prototypeClean(wrappedDesired);
     prototypeClean(wrappedDesired.entries[0] as object);
   });

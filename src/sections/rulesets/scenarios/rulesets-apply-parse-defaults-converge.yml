@@ -1,0 +1,43 @@
+# A ruleset entry may leave target and enforcement out: the slice fills "branch" (the default GitHub
+# documents for a create) and "active" at parse, so the comparison sees a live ruleset holding those
+# values as declared, never as omitted. Check reads clean with no drift on either field, and apply
+# issues no PUT: the entry keeps converging as it did before the replace-write sweep existed.
+name: rulesets-apply-parse-defaults-converge
+settings:
+  rulesets:
+    - name: main-protection
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+live_state:
+  rulesets:
+    - id: 42
+      name: main-protection
+      source_type: Repository
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name:
+          include: ["~DEFAULT_BRANCH"]
+          exclude: []
+      rules:
+        - type: deletion
+      bypass_actors: []
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    rulesets: applied
+  never:
+    - "PUT /repos/{repo}/rulesets/42"
+    - "POST /repos/{repo}/rulesets"
+  fixpoint: converges
+  summary_lacks:
+    - "rulesets[main-protection].target"
+    - "rulesets[main-protection].enforcement"

@@ -16,6 +16,7 @@ Check reports each one as drift naming the key (`bypass_actors`, `conditions.ref
 For a ruleset or an environment, apply refuses that write: the entry fails with the same line and nothing of it is written, until the file says which is meant.
 
 Declare the key to keep the value, or declare it empty (`bypass_actors: []`, `reviewers: []`, `deployment_branch_policy: null`) to remove it on purpose. Empty values (an empty list, a zero, false, null) never count.
+A ruleset's `target` and `enforcement` never count either: an entry without them is parsed with `branch` and `active`, so a live value under either key is compared, not reported as omitted.
 
 The sweep stops where the settings schema stops naming keys, inside `rules[].parameters` and a bypass actor's own fields, because there it cannot tell a default GitHub filled from a value the file left out.
 A live `require_code_owner_review: true` beside a declared `pull_request` rule reads clean, and the PUT resets it.

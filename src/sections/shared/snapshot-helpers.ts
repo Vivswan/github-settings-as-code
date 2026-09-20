@@ -69,6 +69,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
   switch (def.type) {
     case "optional":
     case "nullable":
+    case "default":
       return project(def.innerType as z.ZodType, live);
     case "object": {
       if (!isPlainObject(live)) {
@@ -141,6 +142,7 @@ function collectSweep(
   const def = defOf(schema);
   switch (def.type) {
     case "optional":
+    case "default":
       collectSweep(def.innerType as z.ZodType, path, passthrough, nullable);
       return;
     case "nullable":

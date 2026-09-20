@@ -57,7 +57,12 @@ describe("section shape validation", () => {
       labels: [{ name: "v2", new_name: "2.0" }],
       pages: { source: { branch: "main" }, extra_field: true },
     };
-    expect(validateSectionShapes(happy, "f.yml")).toEqual(ok(happy));
+    // The slice fills a ruleset's target and enforcement at parse; nothing else changes.
+    const parsed = {
+      ...happy,
+      rulesets: [{ ...happy.rulesets[0], target: "branch" as const, enforcement: "active" }],
+    };
+    expect<unknown>(validateSectionShapes(happy, "f.yml")).toEqual(ok(parsed));
   });
 
   test("only the declared known sections make up the parsed document", () => {
@@ -152,7 +157,15 @@ describe("the wrapped undeclared-policy form", () => {
       rulesets: { _undeclared: "delete", entries: [{ name: "r" }] },
       milestones: { _undeclared: "delete", entries: [{ title: "v1" }] },
     };
-    expect<unknown>(validateSectionShapes(doc, "f.yml")).toEqual(ok(doc));
+    // The one slice with defaults fills them; every other entry parses as written.
+    const parsed = {
+      ...doc,
+      rulesets: {
+        _undeclared: "delete",
+        entries: [{ name: "r", target: "branch", enforcement: "active" }],
+      },
+    };
+    expect<unknown>(validateSectionShapes(doc, "f.yml")).toEqual(ok(parsed));
   });
 
   test("wrapper typos fail upfront: an unknown wrapper key, a bad policy value, and an own __proto__ key", () => {

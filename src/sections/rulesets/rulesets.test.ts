@@ -31,6 +31,7 @@ describe("normalizeRuleset", () => {
     const input = {
       name: "build-tags",
       target: "tag" as const,
+      enforcement: "active",
       conditions: { ref_name: { include: ["templates/*", "v*"], exclude: [] } },
     };
     const out = normalizeRuleset(input);
@@ -98,7 +99,7 @@ describe("rulesets", () => {
       "DELETE /repos/o/r/rulesets/*",
     );
 
-  test("a missing ruleset plans a create with normalized refs and defaults; undeclared ones are notes", async () => {
+  test("a missing ruleset plans a create with normalized refs; undeclared ones are notes", async () => {
     const api = writable({
       [listRoute]: { data: [{ id: 7, name: "legacy", source_type: "Repository" }] },
     });
@@ -106,6 +107,7 @@ describe("rulesets", () => {
       {
         name: "build-tags",
         target: "tag",
+        enforcement: "active",
         conditions: { ref_name: { include: ["templates/*"], exclude: [] } },
         rules: [{ type: "deletion" }],
       },
@@ -197,7 +199,7 @@ describe("rulesets", () => {
       },
     });
     const result = await plan(api, [
-      { name: "main", target: "branch", rules: [{ type: "deletion" }] },
+      { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
     ]);
     expect(result).toEqual({
       ops: [
@@ -214,8 +216,8 @@ describe("rulesets", () => {
           before: expect.any(Function),
           describe: 'updating ruleset "main"',
           drift: [
-            "rulesets[main].rules[non_fast_forward]: present live but not declared",
             'rulesets[main].enforcement: declared "active" != live "evaluate"; apply will set the declared value',
+            "rulesets[main].rules[non_fast_forward]: present live but not declared",
             'rulesets[main].bypass_actors: live has [{"actor_id":1,"actor_type":"Team","bypass_mode":"always"}] but the settings file omits it, so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to remove it on purpose',
           ],
           change: 'updated ruleset "main"',
@@ -242,7 +244,7 @@ describe("rulesets", () => {
       },
     });
     const planned = await plan(api, [
-      { name: "main", target: "branch", rules: [{ type: "deletion" }] },
+      { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
     ]);
     const execution = await executePlan(planned, rulesetsSection, api, REPO, {
       resolveSecret() {
@@ -268,14 +270,19 @@ describe("rulesets", () => {
       },
     });
     // A variable, not a literal, so the extra key is a passthrough field to the type checker rather than an excess property.
-    const misspelled = { name: "main", target: "branch" as const, enforcemant: "evaluate" };
+    const misspelled = {
+      name: "main",
+      target: "branch" as const,
+      enforcement: "active",
+      enforcemant: "evaluate",
+    };
     const result = await plan(api, [misspelled]);
     expect(result).toEqual({
       ops: [
         {
           role: "update",
           params: { ruleset_id: "9" },
-          payload: { ...misspelled, enforcement: "active" },
+          payload: misspelled,
           describe: 'updating ruleset "main"',
           drift: [
             'rulesets[main].enforcemant: declared "evaluate" but the API response has no such field (new or write-only field?)',
@@ -296,7 +303,12 @@ describe("rulesets", () => {
       [{ id: 9, name: "main", source_type: "Repository", target: "branch", enforcement: "active" }],
       ["enforcemant"],
     );
-    const misspelled = { name: "main", target: "branch" as const, enforcemant: "evaluate" };
+    const misspelled = {
+      name: "main",
+      target: "branch" as const,
+      enforcement: "active",
+      enforcemant: "evaluate",
+    };
     const pass = async () =>
       rulesetsSection.plan(planContext(rulesetsSection, api, REPO), [misspelled]);
     const first = await pass();
@@ -317,7 +329,7 @@ describe("rulesets", () => {
         {
           role: "update",
           params: { ruleset_id: "9" },
-          payload: { ...misspelled, enforcement: "active" },
+          payload: misspelled,
           describe: 'updating ruleset "main"',
           drift: [
             'rulesets[main].enforcemant: declared "evaluate" but the API response has no such field (new or write-only field?)',
@@ -495,6 +507,8 @@ describe("rulesets", () => {
     const result = await plan(api, [
       {
         name: "main",
+        target: "branch",
+        enforcement: "active",
         conditions: { ref_name: { include: ["main"] } },
         rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
       },
@@ -510,8 +524,8 @@ describe("rulesets", () => {
     const api = new MockApi({});
     await expect(
       plan(api, [
-        { name: "main", target: "branch" },
-        { name: "main", target: "tag" },
+        { name: "main", target: "branch", enforcement: "active" },
+        { name: "main", target: "tag", enforcement: "active" },
       ]),
     ).rejects.toThrow(/same rulesets entry/);
     expect(api.calls).toHaveLength(0);
@@ -519,6 +533,7 @@ describe("rulesets", () => {
 
   test("a repeated rule type is a settings-file error before any read, and a live body repeating one fails loudly naming the ruleset", async () => {
     // Rules pair by type, so a repeat has no pairing; the settings-file case names the fix, the live case the defect.
+    const bare = { name: "main", target: "branch" as const, enforcement: "active" };
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {
@@ -532,14 +547,14 @@ describe("rulesets", () => {
       },
     });
     await expect(
-      plan(api, [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }]),
+      plan(api, [{ ...bare, rules: [{ type: "deletion" }, { type: "deletion" }] }]),
     ).rejects.toThrow(
       'rulesets: the settings file declares conflicting rulesets: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once. Fix the settings file, then re-run',
     );
     await expect(
       plan(api, [
         {
-          name: "main",
+          ...bare,
           rules: [
             { type: "deletion" },
             { type: "deletion" },
@@ -550,7 +565,7 @@ describe("rulesets", () => {
       ]),
     ).rejects.toThrow('lists the rule types "deletion", "creation" more than once');
     expect(api.calls).toHaveLength(0);
-    await expect(plan(api, [{ name: "main", rules: [{ type: "deletion" }] }])).rejects.toThrow(
+    await expect(plan(api, [{ ...bare, rules: [{ type: "deletion" }] }])).rejects.toThrow(
       'rulesets: GitHub returned the ruleset "main" (id 9) with the rule type "deletion" more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run',
     );
     expect(api.mutations()).toEqual([]);
@@ -570,7 +585,9 @@ describe("rulesets", () => {
     });
     const result = await plan(api, {
       _undeclared: "delete",
-      entries: [{ name: "main", target: "branch", rules: [{ type: "deletion" }] }],
+      entries: [
+        { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
+      ],
     });
     expect(result).toEqual({
       ops: [
@@ -585,8 +602,8 @@ describe("rulesets", () => {
           },
           describe: 'updating ruleset "main"',
           drift: [
-            "rulesets[main].rules[deletion]: missing live",
             'rulesets[main].enforcement: declared "active" != live "disabled"; apply will set the declared value',
+            "rulesets[main].rules[deletion]: missing live",
           ],
           change: 'updated ruleset "main"',
         },
@@ -657,7 +674,12 @@ describe("rulesets", () => {
       _undeclared: "delete",
       entries: [
         { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
-        { name: "tags", target: "tag", conditions: { ref_name: { include: ["v*"] } } },
+        {
+          name: "tags",
+          target: "tag",
+          enforcement: "active",
+          conditions: { ref_name: { include: ["v*"] } },
+        },
       ],
     });
     expect(changes).toEqual([

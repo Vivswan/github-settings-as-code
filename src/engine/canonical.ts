@@ -201,6 +201,7 @@ function admits(schema: z.ZodType, value: unknown): boolean {
     case "record":
       return isPlainObject(value);
     case "optional":
+    case "default":
       return value === undefined || admits(def.innerType as z.ZodType, value);
     case "nullable":
       return value === null || admits(def.innerType as z.ZodType, value);
@@ -245,6 +246,7 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
   switch (def.type) {
     case "optional":
     case "nullable":
+    case "default":
       return canonicalNode(value, def.innerType as z.ZodType, path);
     case "object": {
       if (!isPlainObject(value)) {

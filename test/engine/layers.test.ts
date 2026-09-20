@@ -1216,7 +1216,9 @@ describe("stripNulls", () => {
         issues: [expect.stringContaining("rulesets")],
       }),
     );
-    expect(validate(stripNulls(upper, "deep"))).toEqual(ok({ rulesets: [{ name: "main" }] }));
+    expect(validate(stripNulls(upper, "deep"))).toEqual(
+      ok({ rulesets: [{ name: "main", target: "branch", enforcement: "active" }] }),
+    );
     const merged = merge([layer("fleet", lower), layer("repo", upper)]);
     expect(merged).toEqual({
       settings: { rulesets: { _undeclared: "keep", entries: [MAIN_RULESET] } },

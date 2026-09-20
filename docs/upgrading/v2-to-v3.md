@@ -34,6 +34,7 @@ Twenty-six breaks (the ninth, the twenty-third, and the twenty-fourth are for li
 | The merged file is the fold in the canonical order, and a null over nothing drops | `mode: merge` wrote the validated parse, keys in the schema's order; `labels: null` with nothing below failed the merge | The fold rendered in the one canonical order (sections in execution order, keys as the schema declares them, the entries of every keyed list by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), byte for byte what `mergeSettings` returns as `yaml`; the null drops without a notice | No error: a committed merged file reorders once, and a one-layer read of a fleet layer carrying `labels: null` succeeds; [section 24](#24-the-merged-file-is-the-fold-in-the-canonical-order-and-a-null-over-nothing-drops) |
 | Every live read is parsed at the port | A body off the documented shape flowed into the comparison (a null Actions body read as drift on every key) | Every read fails loudly naming the endpoint and the field | The section fails with `returned a body outside the documented shape`; [section 25](#25-every-live-read-is-parsed-at-the-port) |
 | The snapshot file is canonical and undated | The second header line read `# Snapshot of owner/name taken <instant>`; list entries sat in the order GitHub listed them | No dated line: the run's notice and the step summary say `snapshot taken <instant>`; the document renders in the canonical order the merged file shares | No error: a committed snapshot reorders once and loses its dated second line; a script reading the instant from the file reads the run's notice instead; [section 26](#26-the-snapshot-file-is-canonical-and-undated) |
+| Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2322`, naming the missing key); parse the document through `validateSettings`, or declare both keys; [section 27](#27-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
 
 ## 1. The defaults-file fallback
 
@@ -417,6 +418,24 @@ The canonical order, the same for the snapshot and the merged file:
 | Each section's header notes | By code point within the section |
 
 The snapshot's notes are sorted the same way, in the file header and in the annotations. A snapshot committed under v2 reorders once.
+
+## 27. Library: a parsed ruleset entry carries `target` and `enforcement`
+
+For `@vivswan/github-settings-as-code` consumers. The settings file is unchanged: both keys stay optional there, and the parse fills `target: branch` and `enforcement: active`.
+
+The parsed entry always carries both, so the full-payload PUT sends them and the comparison never reads a live value under either key as omitted. The parsed type says so, and a typed literal that omits them stops compiling.
+
+```text
+v2   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // compiles
+
+v3   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // TS2322: target and enforcement are missing
+     const { settings } = validateSettings({ rulesets: [{ name: "main" }] })._unsafeUnwrap();  // parsed: both keys filled
+     const doc: SettingsFile = { rulesets: [{ name: "main", target: "branch", enforcement: "active" }] };
+```
+
+`sectionModule("rulesets").plan` takes the parsed entry, so a hand-built entry handed to it needs both keys too.
+
+An entry cast past the type gets two omitted-key drift lines, since nothing fills them after the parse.
 
 ## Order of operations
 

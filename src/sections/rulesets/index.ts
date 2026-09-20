@@ -1,6 +1,8 @@
 /**
- * `rulesets:` section: upsert by name with a full-payload PUT, because a partial PUT silently narrows a
- * ruleset. The list carries summaries, so each matched ruleset is read whole before the comparison.
+ * `rulesets:` section: upsert by name with a full-payload PUT. The write replaces the ruleset whole, so the
+ * comparison sweeps the live body for a non-empty value the entry omits (drift in check, a refused write in apply);
+ * target and enforcement are never omitted, since the slice fills them at parse.
+ * The list carries summaries, so each matched ruleset is read whole before the comparison.
  */
 
 import { z } from "zod";
@@ -30,9 +32,6 @@ export function normalizeRefName(value: string, target: string): string {
 
 export function normalizeRuleset(ruleset: RulesetConfig): RulesetConfig {
   const copy = structuredClone(ruleset);
-  copy.target = copy.target ?? "branch";
-  // The create endpoint requires enforcement; "active" is the useful default.
-  copy.enforcement = copy.enforcement ?? "active";
   const target = copy.target;
   const refName = copy.conditions?.ref_name;
   if (refName && target !== "push") {
@@ -170,7 +169,7 @@ export const rulesetsSection = listSection({
   identity: { field: "name", fold: exactName },
   address: (live) => ({ ruleset_id: String(live.id) }),
   lens: {
-    // The full ruleset is the wire body (a partial PUT narrows a ruleset). The slice types rule
+    // The full ruleset is the wire body (the PUT replaces it whole). The slice types rule
     // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
     toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
     fromLive: (live) => comparableRuleset(live),

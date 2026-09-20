@@ -5,8 +5,11 @@ import { z } from "zod";
 export const RulesetConfig = z
   .object({
     name: z.string(),
-    target: z.enum(["branch", "tag", "push"]).optional(),
-    enforcement: z.string().optional(),
+    // The file may omit both: target takes the default GitHub documents for a create, enforcement the value chosen
+    // here (the create requires one). The parsed entry carries both, so the PUT sends them and the comparison never
+    // reads a live value under either key as omitted.
+    target: z.enum(["branch", "tag", "push"]).default("branch"),
+    enforcement: z.string().default("active"),
     conditions: z
       .object({
         ref_name: z
