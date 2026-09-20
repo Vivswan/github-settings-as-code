@@ -1,13 +1,27 @@
 /** The `code_quality_setup:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
+import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
-import { languagesSchema, refineSetup, type SetupLanguages } from "../shared/setup-schema.js";
+import type { MustBeNever } from "../../types.js";
+import {
+  languagesSchema,
+  refineSetup,
+  type SetupLanguages,
+  type VocabularyDrift,
+} from "../shared/setup-schema.js";
 
 /** The PATCH's vocabulary; the GET also reports "rust", which has no declarable form. */
 export const CODE_QUALITY_LANGUAGES = {
   declarable: ["csharp", "go", "java-kotlin", "javascript-typescript", "python", "ruby"],
   getOnly: { rust: null },
 } as const satisfies SetupLanguages;
+type _VocabularyIsTheVendoredSpec = MustBeNever<
+  VocabularyDrift<
+    typeof CODE_QUALITY_LANGUAGES,
+    components["schemas"]["code-quality-setup"],
+    components["schemas"]["code-quality-setup-update"]
+  >
+>;
 
 export const CodeQualitySetupConfig = z
   .object({

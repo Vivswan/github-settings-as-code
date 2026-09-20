@@ -39,8 +39,6 @@ interface SetupFacts<K extends SetupKey> {
   knownAbsent: Declared<K>;
   /** A language only the GET reports, and the exact refusal it earns in a settings file. */
   getOnlyLanguage: [string, string];
-  /** zod's own refusal of a name neither the PATCH nor the GET knows. */
-  unknownLanguageIssue: string;
   /** The mock's seeded setup whose `languages` carry the GET's spellings, and what they read back as. */
   seeded: LiveState;
   languagesRead: Languages<K>;
@@ -71,8 +69,6 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
       "javascript",
       '"javascript" is the spelling GitHub reports, not one the PATCH accepts; write "javascript-typescript"',
     ],
-    unknownLanguageIssue:
-      'Invalid option: expected one of "actions"|"c-cpp"|"csharp"|"go"|"java-kotlin"|"javascript-typescript"|"python"|"ruby"|"swift"',
     seeded: {
       code_scanning: { state: "configured", languages: ["javascript", "typescript", "python"] },
     },
@@ -105,8 +101,6 @@ const SETUP_FACTS: { readonly [K in SetupKey]: SetupFacts<K> } = {
       "rust",
       '"rust" is reported by GitHub but the PATCH cannot set it; remove it from the settings file (it stays as GitHub detected it)',
     ],
-    unknownLanguageIssue:
-      'Invalid option: expected one of "csharp"|"go"|"java-kotlin"|"javascript-typescript"|"python"|"ruby"',
     seeded: { code_quality: { state: "configured", languages: ["python", "rust"] } },
     languagesRead: ["python"],
     undeclarable: ["rust"],
@@ -184,7 +178,6 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       driftLine,
       knownAbsent,
       getOnlyLanguage,
-      unknownLanguageIssue,
       seeded,
       languagesRead,
       undeclarable,
@@ -224,11 +217,6 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
           [["languages.1", languageIssue]],
         ],
         [
-          "a name off both vocabularies that is a prototype property, refused by zod alone",
-          { languages: ["toString"] },
-          [["languages.0", unknownLanguageIssue]],
-        ],
-        [
           "a labeled runner without its label",
           { runner_type: "labeled", runner_label: null },
           [
@@ -262,6 +250,14 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       for (const [why, document, issues] of refused) {
         expect(issuesOf(document), why).toEqual(issues);
       }
+      // A name off both vocabularies that is a prototype property: zod's own enum refusal (whose
+      // wording is zod's to change), never the getOnly fold wording, since the fold table is read as
+      // own properties only. Both fold messages name GitHub; zod's does not.
+      const prototypeName = section.shape.safeParse({ languages: ["toString"] });
+      const [issue, ...more] = prototypeName.error?.issues ?? [];
+      expect(more).toEqual([]);
+      expect([issue?.code, issue?.path.join(".")]).toEqual(["invalid_value", "languages.0"]);
+      expect(issue?.message).not.toMatch(/GitHub/);
       // The pairs GitHub takes, and a clearing null label under the standard runner, still parse.
       for (const accepted of [
         { state: "configured", runner_type: "labeled", runner_label: "gpu" },

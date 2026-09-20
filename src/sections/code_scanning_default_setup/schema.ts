@@ -1,7 +1,14 @@
 /** The `code_scanning_default_setup:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
+import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
-import { languagesSchema, refineSetup, type SetupLanguages } from "../shared/setup-schema.js";
+import type { MustBeNever } from "../../types.js";
+import {
+  languagesSchema,
+  refineSetup,
+  type SetupLanguages,
+  type VocabularyDrift,
+} from "../shared/setup-schema.js";
 
 /** The PATCH's vocabulary; the GET still spells JavaScript and TypeScript apart, and both fold onto the pair. */
 export const CODE_SCANNING_LANGUAGES = {
@@ -18,6 +25,13 @@ export const CODE_SCANNING_LANGUAGES = {
   ],
   getOnly: { javascript: "javascript-typescript", typescript: "javascript-typescript" },
 } as const satisfies SetupLanguages;
+type _VocabularyIsTheVendoredSpec = MustBeNever<
+  VocabularyDrift<
+    typeof CODE_SCANNING_LANGUAGES,
+    components["schemas"]["code-scanning-default-setup"],
+    components["schemas"]["code-scanning-default-setup-update"]
+  >
+>;
 
 export const CodeScanningDefaultSetupConfig = z
   .object({

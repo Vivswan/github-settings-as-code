@@ -27,6 +27,27 @@ export interface SetupLanguages<Declarable extends Names = Names> {
   readonly getOnly: Readonly<Record<string, string | null>>;
 }
 
+/** A vendored setup body's `languages` items. */
+type LanguagesOf<Body extends { languages?: readonly string[] | null }> = NonNullable<
+  Body["languages"]
+>[number];
+
+/**
+ * The names on which a hand-written vocabulary and the vendored spec disagree, in either direction:
+ * `declarable` must be exactly the PATCH's enum, and `getOnly`'s keys exactly the GET's names the
+ * PATCH lacks. Never while they agree; each slice pins its constant under MustBeNever, so a name the
+ * spec adds or drops fails the typecheck by that name instead of becoming a silent false refusal.
+ */
+export type VocabularyDrift<
+  Vocabulary extends SetupLanguages,
+  Get extends { languages?: readonly string[] | null },
+  Patch extends { languages?: readonly string[] | null },
+> =
+  | Exclude<Vocabulary["declarable"][number], LanguagesOf<Patch>>
+  | Exclude<LanguagesOf<Patch>, Vocabulary["declarable"][number]>
+  | Exclude<keyof Vocabulary["getOnly"], Exclude<LanguagesOf<Get>, LanguagesOf<Patch>>>
+  | Exclude<Exclude<LanguagesOf<Get>, LanguagesOf<Patch>>, keyof Vocabulary["getOnly"]>;
+
 /** The `languages` items: the PATCH enum, with the GET's own spellings refused by name and fix. */
 export function languagesSchema<const Declarable extends Names>(
   vocabulary: SetupLanguages<Declarable>,
