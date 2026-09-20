@@ -1418,13 +1418,13 @@ export const MERGE_FEATURES = [
   "label-rename-union",
   /** A unioned ruleset re-declaring a held rule type with different parameters, so replacement is observable. */
   "rule-parameters",
-  /** A top-level null over a section the fold holds. */
+  /** A top-level null over a section the fold holds, where null is not the section's value. */
   "null-deletes",
   /** A null inside a mapping section (a nested key deletion). */
   "null-nested",
   /** A null field inside a ruleset entry. */
   "null-entry-field",
-  /** A top-level null over a section the fold does not hold, where null is the section's value (NULLABLE_SECTIONS). */
+  /** A top-level null on a section whose value null is (NULLABLE_SECTIONS), held below or not: the fold keeps it. */
   "null-stays",
   /** A top-level null over a section the fold does not hold and whose value null is not: it drops. */
   "null-drops",
@@ -1750,9 +1750,14 @@ export function mergeFeaturesOf(
     for (const key of keys) {
       const value = doc[key];
       if (value === null) {
-        features.add(
-          present.has(key) ? "null-deletes" : isNullValued(key) ? "null-stays" : "null-drops",
-        );
+        if (isNullValued(key)) {
+          // The fold writes `key: null` as the section's value, so the section stays held and a later declaration
+          // over it is an override, not a first declaration.
+          features.add("null-stays");
+          present.add(key);
+          continue;
+        }
+        features.add(present.has(key) ? "null-deletes" : "null-drops");
         present.delete(key);
         if (key === "labels" || key === "rulesets") {
           advanceHeld(held, key, null, false);

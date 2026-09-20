@@ -1210,6 +1210,55 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
   });
 });
 
+describe("mergeFeaturesOf (a top-level null read the way the fold writes it)", () => {
+  // On pages and interaction_limits the fold writes a higher null as the section's value, so the section stays held:
+  // the null is never a deletion, and a later declaration over it is an override. Every other section keeps the
+  // marker reading, pinned by the controls.
+  const site = { build_type: "workflow", source: { branch: "main", path: "/" } };
+  const cases: Array<[string, Record<string, unknown>[], string[]]> = [
+    [
+      "a null over a held pages declaration stays, and deletes nothing",
+      [{ pages: site }, { pages: null }],
+      ["null-stays"],
+    ],
+    [
+      "a pages declaration above the kept null overrides it",
+      [
+        { pages: site },
+        { pages: null },
+        { pages: { build_type: "legacy", source: { branch: "gh-pages", path: "/" } } },
+      ],
+      ["override", "null-stays"],
+    ],
+    [
+      "a null over held interaction limits stays too",
+      [{ interaction_limits: { limit: "existing_users" } }, { interaction_limits: null }],
+      ["null-stays"],
+    ],
+    [
+      "control: a null over held labels deletes them",
+      [{ labels: [{ name: "a" }] }, { labels: null }],
+      ["null-deletes"],
+    ],
+    [
+      "control: a null over nothing on a marker section drops",
+      [{ pages: site }, { labels: null }],
+      ["null-drops"],
+    ],
+  ];
+  test.each(cases)("%s", (_name, docs, expected) => {
+    const layers = docs.map((doc, i) => ({
+      name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
+      doc,
+    }));
+    expect(mergeFeaturesOf(layers, "merge", false)).toEqual(
+      MERGE_FEATURES.filter(
+        (feature) => feature === "run-layering-merge" || expected.includes(feature),
+      ),
+    );
+  });
+});
+
 describe("merge oracle against the curated merge scenarios", () => {
   // The hand-written scenarios pin what the dialect means; the oracle's own fold must reproduce every pinned document
   // exactly, or the fuzz would be checking the engine against a mirror of itself.
