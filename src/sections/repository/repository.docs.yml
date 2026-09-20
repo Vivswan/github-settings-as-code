@@ -15,12 +15,11 @@ coverage:
       allow_update_branch, allow_auto_merge, web_commit_signoff_required, is_template, archived,
       default_branch)
     notes: >-
-      PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository/index.ts), so a
-      field GitHub adds to the PATCH body works day one; GET-only fields (ids, urls, counts,
-      has_downloads, custom_properties), a commit message without its title, and illegal squash
-      title/message pairs are refused at parse, since they would drift or 422 on every run. Check
-      mode = subsetDiff of declared keys against GET /repos. Snapshot reads back the PATCH fields,
-      topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
+      PATCH /repos/{owner}/{repo} passthrough: documented fields are typed (toggles true or false;
+      description and homepage also null, the API's clear); a field GitHub adds later works day one.
+      GET-only fields, a commit message without its title, and illegal squash pairs are refused at
+      parse: each would drift or 422 every run. Check diffs the declared keys against GET /repos;
+      snapshot reads back the PATCH fields, topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
   - area: >-
       [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
       Security, secret scanning, push protection, delegated bypass, validity checks)
@@ -112,16 +111,45 @@ schema:
   SettingsFile.repository: >-
     Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents.
   RepositoryConfig: >-
-    The `repository:` section, where only declared keys are ever applied or compared. Every field
-    not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so future repo fields
-    work unchanged, while the keys below either carry GitHub's vocabulary, so a wrong value fails at
-    parse, or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads,
-    has_pages, custom_properties) are refused, since they would drift on every run.
+    The `repository:` section, where only declared keys are ever applied or compared. A field not
+    documented here is sent verbatim to PATCH /repos/{r}, so a field GitHub adds later works
+    unchanged; the keys below carry GitHub's types (a toggle is true or false, never null or quoted)
+    or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads, has_pages,
+    custom_properties) are refused, since they would drift on every run.
   RepositoryConfig.topics: >-
     Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a
     list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens,
     starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list
     removes every topic.
+  RepositoryConfig.description: >-
+    A short description of the repository; null clears it.
+  RepositoryConfig.homepage: >-
+    A URL with more information about the repository; null clears it.
+  RepositoryConfig.visibility: >-
+    public, private, or internal (Enterprise); a free string, since the spec omits internal.
+  RepositoryConfig.default_branch: The default branch; an existing branch name.
+  RepositoryConfig.pull_request_creation_policy: >-
+    Who may create pull requests: "all" (everyone) or "collaborators_only".
+  RepositoryConfig.private: Make the repository private (true) or public (false).
+  RepositoryConfig.has_issues: Enable issues (true) or disable them (false).
+  RepositoryConfig.has_projects: >-
+    Enable projects (true) or disable them (false); an organization that disabled repository projects rejects true.
+  RepositoryConfig.has_wiki: Enable the wiki (true) or disable it (false).
+  RepositoryConfig.has_discussions: >-
+    Enable discussions (true) or disable them (false); accepted by the PATCH though the descriptor omits it.
+  RepositoryConfig.has_pull_requests: Allow pull requests (true) or prevent them (false).
+  RepositoryConfig.is_template: Offer the repository as a template (true) or not (false).
+  RepositoryConfig.allow_squash_merge: Allow squash-merging pull requests (true) or not (false).
+  RepositoryConfig.allow_merge_commit: Allow merge commits on pull requests (true) or not (false).
+  RepositoryConfig.allow_rebase_merge: Allow rebase-merging pull requests (true) or not (false).
+  RepositoryConfig.allow_auto_merge: Allow auto-merge on pull requests (true) or not (false).
+  RepositoryConfig.delete_branch_on_merge: Delete head branches when pull requests merge (true) or keep them (false).
+  RepositoryConfig.allow_update_branch: Offer to update a pull request branch behind its base (true) or not (false).
+  RepositoryConfig.use_squash_pr_title_as_default: >-
+    Deprecated by GitHub in favor of squash_merge_commit_title: use the PR title as the squash commit title (true) or not (false).
+  RepositoryConfig.archived: Archive the repository (true) or unarchive it (false).
+  RepositoryConfig.allow_forking: Allow private forks (true) or not (false).
+  RepositoryConfig.web_commit_signoff_required: Require contributors to sign off on web-based commits (true) or not (false).
   RepositoryConfig.security_and_analysis: >-
     The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning,
     push protection, and the other nested feature toggles.

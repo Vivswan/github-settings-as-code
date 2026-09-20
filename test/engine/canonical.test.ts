@@ -19,10 +19,10 @@ import { SECTIONS } from "../../src/sections/registry.js";
 /** A document spelled in the canonical order, so the shuffled twin below has something to converge on. */
 const ORDERED: Record<string, unknown> = {
   repository: {
-    topics: ["b", "a"],
-    enable_vulnerability_alerts: true,
     has_issues: true,
     has_wiki: false,
+    topics: ["b", "a"],
+    enable_vulnerability_alerts: true,
   },
   labels: {
     _undeclared: "keep",
@@ -150,10 +150,10 @@ describe("canonicalDocument", () => {
       rulesets: [{ name: "r", rules: [{ type: "t", parameters: { z: 1, m: 2, a: 3 } }] }],
     }) as { repository: object; rulesets: Array<{ rules: Array<{ parameters: object }> }> };
     expect(Object.keys(canonical.repository)).toEqual([
+      "has_wiki",
       "topics",
       "enable_vulnerability_alerts",
       "aaa",
-      "has_wiki",
       "zzz",
     ]);
     expect(Object.keys(canonical.rulesets[0]?.rules[0]?.parameters ?? {})).toEqual(["a", "m", "z"]);
@@ -216,8 +216,8 @@ describe("canonicalDocument", () => {
       repository: { toString: "b", has_wiki: true, constructor: "a" },
     }) as { repository: Record<string, unknown> };
     expect(Object.entries(canonical.repository)).toEqual([
-      ["constructor", "a"],
       ["has_wiki", true],
+      ["constructor", "a"],
       ["toString", "b"],
     ]);
   });

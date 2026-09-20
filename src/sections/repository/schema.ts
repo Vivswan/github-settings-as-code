@@ -29,10 +29,21 @@ function repositoryToggle() {
   return z
     .boolean({
       error: (issue) =>
-        `${describeValue(issue.input)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
+        issue.input === null
+          ? "null is not a boolean, and a toggle has no empty state; write true or false"
+          : `${describeValue(issue.input)} is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans)`,
     })
     .optional();
 }
+
+/** A PATCH string field; the callers that take null as "clear it" add `.nullable()` with the hint. */
+function patchString(hint = "") {
+  return z.string({
+    error: (issue) => `${describeValue(issue.input)} is not a string; quote the value${hint}`,
+  });
+}
+
+const CLEARABLE = patchString(", or write null to clear the field").nullable().optional();
 
 /** The repo PATCH body as GitHub documents it: the fields the passthrough can send back. */
 export type RepoPatchBody = NonNullable<
@@ -41,6 +52,13 @@ export type RepoPatchBody = NonNullable<
 
 /** PATCH fields the API accepts (verified live) that its OpenAPI descriptor omits, so the pin cannot see them. */
 export type UndocumentedPatchField = "has_discussions";
+
+/** A PATCH field the spec types as boolean; the undocumented one is a boolean by the REST reference. */
+type PatchToggleKey =
+  | {
+      [K in keyof RepoPatchBody]-?: NonNullable<RepoPatchBody[K]> extends boolean ? K : never;
+    }[keyof RepoPatchBody]
+  | UndocumentedPatchField;
 
 type FullRepository = components["schemas"]["full-repository"];
 
@@ -441,32 +459,87 @@ function refineTopics(raw: unknown, ctx: z.RefinementCtx): void {
   });
 }
 
+// --- The PATCH body -----------------------------------------------------------------
+
+type PullRequestCreationPolicy = NonNullable<RepoPatchBody["pull_request_creation_policy"]>;
+
+/** The two-value vocabulary both creation policies share; pinned both ways to the PATCH's enum. */
+const CREATION_POLICIES = [
+  "all",
+  "collaborators_only",
+] as const satisfies readonly PullRequestCreationPolicy[];
+type _CreationPoliciesComplete = MustBeNever<
+  Exclude<PullRequestCreationPolicy, (typeof CREATION_POLICIES)[number]>
+>;
+
+function creationPolicy() {
+  return z
+    .enum(CREATION_POLICIES, {
+      error: (issue) =>
+        `${describeValue(issue.input)} is not a recognized policy. Use "all" (everyone) or "collaborators_only"`,
+    })
+    .optional();
+}
+
+/**
+ * Every PATCH field but `name`, typed as the API takes it, so null and a quoted boolean fail at
+ * parse instead of as GitHub's 422. `satisfies` pins the table both ways: a PATCH field missing here,
+ * or a key the PATCH lacks, fails to compile. `name` stays passthrough and out of the snapshot: a
+ * settings file reused on another repository would rename it.
+ */
+const patchFieldShape = {
+  description: CLEARABLE,
+  homepage: CLEARABLE,
+  private: repositoryToggle(),
+  // A free string: `internal` is valid on Enterprise, and the pinned spec omits it.
+  visibility: patchString().optional(),
+  // Nullable as the PATCH body documents it; the object form stays closed.
+  security_and_analysis: SecurityAndAnalysisConfig.nullable().optional(),
+  has_issues: repositoryToggle(),
+  has_projects: repositoryToggle(),
+  has_wiki: repositoryToggle(),
+  has_discussions: repositoryToggle(),
+  has_pull_requests: repositoryToggle(),
+  pull_request_creation_policy: creationPolicy(),
+  is_template: repositoryToggle(),
+  default_branch: patchString().optional(),
+  allow_squash_merge: repositoryToggle(),
+  allow_merge_commit: repositoryToggle(),
+  allow_rebase_merge: repositoryToggle(),
+  allow_auto_merge: repositoryToggle(),
+  delete_branch_on_merge: repositoryToggle(),
+  allow_update_branch: repositoryToggle(),
+  use_squash_pr_title_as_default: repositoryToggle(),
+  squash_merge_commit_title: SQUASH_COMMIT.title.optional(),
+  squash_merge_commit_message: SQUASH_COMMIT.message.optional(),
+  merge_commit_title: MERGE_COMMIT.title.optional(),
+  merge_commit_message: MERGE_COMMIT.message.optional(),
+  archived: repositoryToggle(),
+  allow_forking: repositoryToggle(),
+  web_commit_signoff_required: repositoryToggle(),
+} satisfies Record<Exclude<keyof RepoPatchBody, "name"> | UndocumentedPatchField, z.ZodType>;
+
+/** The PATCH fields the snapshot reads back, in lockstep with the table above. */
+export const PATCH_FIELDS = Object.keys(
+  patchFieldShape,
+) as readonly (keyof typeof patchFieldShape)[];
+
 // --- The section --------------------------------------------------------------------
 
 export const RepositoryConfig = z
   .looseObject({
+    ...patchFieldShape,
     topics: z
       .union([z.string(), z.array(z.string())])
       .superRefine(refineTopics)
       .optional(),
-    // Nullable as the PATCH body documents it; the object form stays closed.
-    security_and_analysis: SecurityAndAnalysisConfig.nullable().optional(),
-    squash_merge_commit_title: SQUASH_COMMIT.title.optional(),
-    squash_merge_commit_message: SQUASH_COMMIT.message.optional(),
-    merge_commit_title: MERGE_COMMIT.title.optional(),
-    merge_commit_message: MERGE_COMMIT.message.optional(),
     enable_vulnerability_alerts: repositoryToggle(),
     enable_automated_security_fixes: repositoryToggle(),
     enable_private_vulnerability_reporting: repositoryToggle(),
     enable_git_lfs: repositoryToggle(),
     enable_immutable_releases: repositoryToggle(),
     enable_sponsorships: repositoryToggle(),
-    issue_creation_policy: z
-      .enum(["all", "collaborators_only"], {
-        error: (issue) =>
-          `${describeValue(issue.input)} is not a recognized policy. Use "all" (everyone) or "collaborators_only"`,
-      })
-      .optional(),
+    issue_creation_policy: creationPolicy(),
   })
   .catchall(z.unknown())
   .superRefine((declared, ctx) => {
@@ -486,4 +559,9 @@ type _CommitMessageFieldsNarrow = MustBeNever<
   {
     [K in CommitMessageKey]: Exclude<NonNullable<RepositoryConfig[K]>, CommitMessageValue<K>>;
   }[CommitMessageKey]
+>;
+
+/** A PATCH boolean left as passthrough would parse as unknown here, so null and "true" would ride to the 422. */
+type _PatchTogglesAreBooleans = MustBeNever<
+  { [K in PatchToggleKey]: Exclude<NonNullable<RepositoryConfig[K]>, boolean> }[PatchToggleKey]
 >;

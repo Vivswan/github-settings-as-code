@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
-import type { MustBeNever } from "../../types.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
 import {
@@ -23,10 +22,9 @@ import {
 import { readOrNote } from "../shared/snapshot-helpers.js";
 import {
   normalizeTopics,
-  type RepoPatchBody,
+  PATCH_FIELDS,
   RepositoryConfig,
   SECURITY_AND_ANALYSIS_PATCH_FIELDS,
-  type UndocumentedPatchField,
 } from "./schema.js";
 
 /**
@@ -129,46 +127,6 @@ const ENDPOINTS = {
 
 // GitHub may return topics as null or omit them; the rest of the body rides into subsetDiff as passthrough.
 const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
-
-/**
- * The GET also reports what nobody can PATCH (ids, urls, counts, has_downloads), so the fields the
- * snapshot reads back are spelled out and pinned below; schema.ts refuses the rest at parse.
- * `name` stays out: a settings file reused on another repository would rename it.
- */
-const SNAPSHOT_PATCH_FIELDS = [
-  "description",
-  "homepage",
-  "private",
-  "visibility",
-  "security_and_analysis",
-  "has_issues",
-  "has_projects",
-  "has_wiki",
-  "has_discussions",
-  "has_pull_requests",
-  "pull_request_creation_policy",
-  "is_template",
-  "default_branch",
-  "allow_squash_merge",
-  "allow_merge_commit",
-  "allow_rebase_merge",
-  "allow_auto_merge",
-  "delete_branch_on_merge",
-  "allow_update_branch",
-  "use_squash_pr_title_as_default",
-  "squash_merge_commit_title",
-  "squash_merge_commit_message",
-  "merge_commit_title",
-  "merge_commit_message",
-  "archived",
-  "allow_forking",
-  "web_commit_signoff_required",
-] as const satisfies readonly (keyof RepoPatchBody | UndocumentedPatchField)[];
-
-/** A PATCH field octokit documents that the list above neither reads back nor leaves out by name. */
-type _SnapshotPatchFieldsComplete = MustBeNever<
-  Exclude<keyof RepoPatchBody, (typeof SNAPSHOT_PATCH_FIELDS)[number] | "name">
->;
 
 /** The live security_and_analysis object narrowed to its PATCHable sub-keys; undefined when none. */
 function snapshotSecurityAndAnalysis(live: unknown): Record<string, unknown> | undefined {
@@ -648,7 +606,7 @@ export const repositorySection = {
     const notes: string[] = [];
     const live = await ctx.read.get.call(LiveRepository);
     const value: Record<string, unknown> = {};
-    for (const field of SNAPSHOT_PATCH_FIELDS) {
+    for (const field of PATCH_FIELDS) {
       const read =
         field === "security_and_analysis" ? snapshotSecurityAndAnalysis(live[field]) : live[field];
       if (read !== undefined && read !== null) {

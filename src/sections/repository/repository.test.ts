@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import {
@@ -15,7 +16,7 @@ import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { sectionGrant } from "../contract/module.js";
 import { FEATURE_TOGGLES, repositorySection } from "./index.js";
-import { normalizeTopics } from "./schema.js";
+import { normalizeTopics, PATCH_FIELDS, RepositoryConfig } from "./schema.js";
 
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
@@ -1209,5 +1210,62 @@ describe("repository parse refusals", () => {
 
   test("topics: [] parses; it is the one spelling of the wholesale clear", () => {
     expect(refusals({ topics: [] })).toEqual([]);
+  });
+
+  const TOGGLE_NULL = "null is not a boolean, and a toggle has no empty state; write true or false";
+  const TOGGLE_QUOTED =
+    " is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false " +
+    '(YAML parses "no"/"off"/"yes" as strings, not booleans)';
+
+  /** The PATCH fields the schema types as booleans, read off the shape so the rows follow the table. */
+  const PATCH_TOGGLES = PATCH_FIELDS.filter(
+    (key) => RepositoryConfig.shape[key].unwrap() instanceof z.ZodBoolean,
+  );
+
+  test("every PATCH toggle takes true and false, and refuses null and a quoted boolean naming the two values", () => {
+    // The control: an empty list would pass the loop below without pinning anything.
+    expect(PATCH_TOGGLES).toContain("has_wiki");
+    for (const key of PATCH_TOGGLES) {
+      expect(refusals({ [key]: true })).toEqual([]);
+      expect(refusals({ [key]: false })).toEqual([]);
+      expect(refusals({ [key]: null })).toEqual([`repository.${key}: ${TOGGLE_NULL}`]);
+      expect(refusals({ [key]: "true" })).toEqual([`repository.${key}: "true"${TOGGLE_QUOTED}`]);
+    }
+  });
+
+  test.each([
+    [
+      "default_branch: null",
+      { default_branch: null },
+      "repository.default_branch: null is not a string; quote the value",
+    ],
+    [
+      "description: 7",
+      { description: 7 },
+      "repository.description: 7 is not a string; quote the value, or write null to clear the field",
+    ],
+    [
+      "pull_request_creation_policy: everyone",
+      { pull_request_creation_policy: "everyone" },
+      'repository.pull_request_creation_policy: "everyone" is not a recognized policy. Use "all" (everyone) or "collaborators_only"',
+    ],
+  ])(
+    "a PATCH field outside its type (%s) is refused at parse instead of as GitHub's 422",
+    (_what, declared, message) => {
+      expect(refusals({ has_issues: true, ...declared })).toEqual([message]);
+    },
+  );
+
+  test("the PATCH strings take what GitHub does: null clears description and homepage, and default_branch and visibility are plain strings", () => {
+    expect(
+      refusals({
+        description: null,
+        homepage: null,
+        default_branch: "trunk",
+        visibility: "internal",
+        pull_request_creation_policy: "collaborators_only",
+      }),
+    ).toEqual([]);
+    expect(refusals({ description: "docs", homepage: "https://example.com" })).toEqual([]);
   });
 });

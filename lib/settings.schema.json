@@ -1480,22 +1480,30 @@
       "additionalProperties": {}
     },
     "RepositoryConfig": {
-      "description": "The `repository:` section, where only declared keys are ever applied or compared. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so future repo fields work unchanged, while the keys below either carry GitHub's vocabulary, so a wrong value fails at parse, or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads, has_pages, custom_properties) are refused, since they would drift on every run.",
+      "description": "The `repository:` section, where only declared keys are ever applied or compared. A field not documented here is sent verbatim to PATCH /repos/{r}, so a field GitHub adds later works unchanged; the keys below carry GitHub's types (a toggle is true or false, never null or quoted) or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads, has_pages, custom_properties) are refused, since they would drift on every run.",
       "type": "object",
       "properties": {
-        "topics": {
-          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list removes every topic.",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
+        "description": {
+          "description": "A short description of the repository; null clears it.",
+          "type": [
+            "string",
+            "null"
           ]
+        },
+        "homepage": {
+          "description": "A URL with more information about the repository; null clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "private": {
+          "description": "Make the repository private (true) or public (false).",
+          "type": "boolean"
+        },
+        "visibility": {
+          "description": "public, private, or internal (Enterprise); a free string, since the spec omits internal.",
+          "type": "string"
         },
         "security_and_analysis": {
           "description": "The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning, push protection, and the other nested feature toggles.",
@@ -1507,6 +1515,70 @@
               "type": "null"
             }
           ]
+        },
+        "has_issues": {
+          "description": "Enable issues (true) or disable them (false).",
+          "type": "boolean"
+        },
+        "has_projects": {
+          "description": "Enable projects (true) or disable them (false); an organization that disabled repository projects rejects true.",
+          "type": "boolean"
+        },
+        "has_wiki": {
+          "description": "Enable the wiki (true) or disable it (false).",
+          "type": "boolean"
+        },
+        "has_discussions": {
+          "description": "Enable discussions (true) or disable them (false); accepted by the PATCH though the descriptor omits it.",
+          "type": "boolean"
+        },
+        "has_pull_requests": {
+          "description": "Allow pull requests (true) or prevent them (false).",
+          "type": "boolean"
+        },
+        "pull_request_creation_policy": {
+          "description": "Who may create pull requests: \"all\" (everyone) or \"collaborators_only\".",
+          "type": "string",
+          "enum": [
+            "all",
+            "collaborators_only"
+          ]
+        },
+        "is_template": {
+          "description": "Offer the repository as a template (true) or not (false).",
+          "type": "boolean"
+        },
+        "default_branch": {
+          "description": "The default branch; an existing branch name.",
+          "type": "string"
+        },
+        "allow_squash_merge": {
+          "description": "Allow squash-merging pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_merge_commit": {
+          "description": "Allow merge commits on pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_rebase_merge": {
+          "description": "Allow rebase-merging pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_auto_merge": {
+          "description": "Allow auto-merge on pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "delete_branch_on_merge": {
+          "description": "Delete head branches when pull requests merge (true) or keep them (false).",
+          "type": "boolean"
+        },
+        "allow_update_branch": {
+          "description": "Offer to update a pull request branch behind its base (true) or not (false).",
+          "type": "boolean"
+        },
+        "use_squash_pr_title_as_default": {
+          "description": "Deprecated by GitHub in favor of squash_merge_commit_title: use the PR title as the squash commit title (true) or not (false).",
+          "type": "boolean"
         },
         "squash_merge_commit_title": {
           "description": "The default title of a squash merge commit: PR_TITLE or COMMIT_OR_PR_TITLE. Required beside squash_merge_commit_message; legal pairs are PR_TITLE with PR_BODY, BLANK, or COMMIT_MESSAGES, and COMMIT_OR_PR_TITLE with COMMIT_MESSAGES.",
@@ -1540,6 +1612,32 @@
             "PR_BODY",
             "BLANK",
             "PR_TITLE"
+          ]
+        },
+        "archived": {
+          "description": "Archive the repository (true) or unarchive it (false).",
+          "type": "boolean"
+        },
+        "allow_forking": {
+          "description": "Allow private forks (true) or not (false).",
+          "type": "boolean"
+        },
+        "web_commit_signoff_required": {
+          "description": "Require contributors to sign off on web-based commits (true) or not (false).",
+          "type": "boolean"
+        },
+        "topics": {
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list removes every topic.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           ]
         },
         "enable_vulnerability_alerts": {
