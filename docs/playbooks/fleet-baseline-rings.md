@@ -83,14 +83,14 @@ labels:
     color: "b60205"
 ```
 
-Under `mode: merge` the same-name ruleset merges key by key, so ring 1's `enforcement: evaluate` lands on the baseline ruleset without repeating its rules; `labels` union by name, so the baseline's labels stay. The [layering guide](../operate/layering.md) has the full rules.
+Under `mode: render` the same-name ruleset merges key by key, so ring 1's `enforcement: evaluate` lands on the baseline ruleset without repeating its rules; `labels` union by name, so the baseline's labels stay. The [layering guide](../operate/layering.md) has the full rules.
 
 ## The workflow
 
 Three jobs per run, both rings applying (ring 1 applies the evaluate ruleset):
 
 - `plan` lists the curated files.
-- `curated` folds three layers per file and applies the merged document to that repository.
+- `curated` folds three layers per file and applies the rendered document to that repository.
 - `fileless` folds the baseline and the ring layer once and hands the result to discovery as the `defaults-file`, which reaches every ring-topic repository that has no `.github/settings.yml` of its own. The curated names are excluded from discovery, so no repository is applied twice.
 
 ```yaml
@@ -133,12 +133,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
-          mode: merge
+          mode: render
           settings-file: |
             .github/settings/baseline.yml
             .github/settings/rings/${{ matrix.ring }}.yml
             .github/repos/${{ matrix.ring }}/${{ matrix.repo }}.yml
-          merged-file: merged/${{ matrix.repo }}.yml
+          rendered-file: merged/${{ matrix.repo }}.yml
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
@@ -156,11 +156,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
-          mode: merge
+          mode: render
           settings-file: |
             .github/settings/baseline.yml
             .github/settings/rings/${{ matrix.ring }}.yml
-          merged-file: merged/${{ matrix.ring }}.yml
+          rendered-file: merged/${{ matrix.ring }}.yml
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
@@ -171,9 +171,9 @@ jobs:
           defaults-file: merged/${{ matrix.ring }}.yml
 ```
 
-`fail-fast: false` keeps one repository's failure from cancelling the rest of the matrix, and the `if` skips the `curated` job while the tree is empty (a matrix cannot include nothing). The merge steps need no token: they fold local files and write the merged documents the apply steps read. The `exclude` input takes the curated names as wildcard patterns, so a curated repository that still carries a ring topic is never applied by both jobs.
+`fail-fast: false` keeps one repository's failure from cancelling the rest of the matrix, and the `if` skips the `curated` job while the tree is empty (a matrix cannot include nothing). The render steps need no token: they fold local files and write the rendered documents the apply steps read. The `exclude` input takes the curated names as wildcard patterns, so a curated repository that still carries a ring topic is never applied by both jobs.
 
-The `curated` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split only the `curated` job by cohort folder into copies; the `fileless` job stays single, and its `exclude` keeps listing every curated name across all cohorts, or a cohort's fallback run would apply the bare baseline to another cohort's curated repository that has no remote settings file. To preview a baseline change before it lands, run the same merged documents through `mode: check` on pull requests, as in [Preview the blast radius](preview-blast-radius.md).
+The `curated` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split only the `curated` job by cohort folder into copies; the `fileless` job stays single, and its `exclude` keeps listing every curated name across all cohorts, or a cohort's fallback run would apply the bare baseline to another cohort's curated repository that has no remote settings file. To preview a baseline change before it lands, run the same rendered documents through `mode: check` on pull requests, as in [Preview the blast radius](preview-blast-radius.md).
 
 ## Enrollment and promotion
 

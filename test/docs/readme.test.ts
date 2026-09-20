@@ -221,11 +221,11 @@ describe("private repositories guide", () => {
   });
 
   test("the overall-result enumeration names exactly the per-target RUN_RESULTS words", () => {
-    // A merge has no target, so `merged` never heads a per-target row; every other word can.
+    // A render has no target, so `rendered` never heads a per-target row; every other word can.
     assertBacktickedEnumeration(
       section.replace(/\n/g, " "),
       /the overall result \(([^)]*)\)/,
-      RUN_RESULTS.filter((result) => result !== "merged"),
+      RUN_RESULTS.filter((result) => result !== "rendered"),
       'the guide must enumerate the result values in "the overall result (...)"',
     );
   });

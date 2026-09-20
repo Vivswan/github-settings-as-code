@@ -14,6 +14,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  keyedBy,
   loosen,
   missingDrift,
   type SectionMeta,
@@ -155,6 +156,8 @@ const key = "secret_scanning_custom_patterns";
 export const secretScanningPatternsSection = {
   key,
   undeclaredDefault: "keep",
+  // Verbatim, as plan() passes to rejectDuplicates: GitHub matches pattern names exactly.
+  layering: keyedBy("name"),
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(SecretScanningPatternConfig)),

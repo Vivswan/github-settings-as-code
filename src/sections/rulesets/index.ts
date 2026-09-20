@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { keyedBy } from "../contract/module.js";
 import { exactName, type ListWrite, listSection } from "../shared/list-section.js";
 import { RulesetConfig } from "./schema.js";
 
@@ -171,14 +172,5 @@ export const rulesetsSection = listSection({
           },
         ],
   prose: { undeclaredAction: "DELETE it" },
-  layering: {
-    combine: "merge",
-    nested: {
-      rules: {
-        keys: (rule) => (typeof rule.type === "string" ? [rule.type] : null),
-        keyField: "type",
-        combine: "replace",
-      },
-    },
-  },
+  layering: { nested: { rules: keyedBy("type") } },
 });

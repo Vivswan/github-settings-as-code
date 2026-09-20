@@ -7,10 +7,10 @@ import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
-import { concludeMerge, concludeRun, failRun } from "./deliver.js";
+import { concludeRender, concludeRun, failRun } from "./deliver.js";
 import type { RunConfig } from "./inputs.js";
-import { runMerge } from "./merge.js";
 import { runMulti } from "./multi.js";
+import { runRender } from "./render.js";
 import { runSingle } from "./single.js";
 import { concludeSnapshot, runSnapshot } from "./snapshot.js";
 
@@ -36,9 +36,9 @@ export function executeRun(cfg: RunConfig, deps: RunDeps): Promise<RunEnd> {
   const { io } = deps;
   const fail = (problem: Problem): RunEnd => ({ exitCode: failRun(io, problem), fatal: problem });
   const end = (exitCode: number): RunEnd => ({ exitCode });
-  if (cfg.kind === "merge") {
+  if (cfg.kind === "render") {
     return Promise.resolve(
-      runMerge(cfg, io).match((merged) => end(concludeMerge(io, merged)), fail),
+      runRender(cfg, io).match((merged) => end(concludeRender(io, merged)), fail),
     );
   }
   const api = deps.createClient(cfg.token, io, cfg.apiVersion);

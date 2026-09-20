@@ -8,7 +8,7 @@
  * chaos      -> one corrupt response is absorbed, a persistent one fails loudly
  * multi      -> per-target outcome classes plus the worst-of rollup
  * discovery  -> a `repos: "*"` pool filtered by the independent predictDiscovery mirror
- * merge      -> a layered mode: merge stack whose written document the oracle's fold predicts whole
+ * render     -> a layered mode: render stack whose written document the oracle's fold predicts whole
  */
 
 import { canonicalDocument } from "../../src/engine/canonical.js";
@@ -17,7 +17,12 @@ import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
-import type { LiveWitness, LiveWitnessKind } from "./gen-support.js";
+import {
+  LAYERING_DIRECTIVES,
+  type LayeringDirective,
+  type LiveWitness,
+  type LiveWitnessKind,
+} from "./gen-support.js";
 import {
   canariesOf,
   displayKeyOf,
@@ -999,7 +1004,7 @@ async function mergeFuzzIteration(
 /** The valid force guarantees a merged fold, so the whole-document comparison runs every soak per layering. */
 async function mergeValidBatteryRun(
   seed: number,
-  layering: "merge" | "replace",
+  layering: LayeringDirective,
 ): Promise<IterationResult> {
   const { scenario, meta } = genMergeScenario(new Rng(seed), {
     force: { kind: "valid", layering },
@@ -1025,13 +1030,13 @@ async function runMergePredicted(
       ? { exit_code: 1, result: "failed", zero_requests: true }
       : {
           exit_code: 0,
-          result: "merged",
+          result: "rendered",
           zero_requests: true,
           // The oracle predicts the fold's content; the file is that fold in the canonical order, whose rules
           // test/engine/canonical.test.ts pins on its own, so this pin is content, never the layers' order.
-          merged: canonicalDocument(prediction.merged),
+          rendered: canonicalDocument(prediction.merged),
           stdout_contains: prediction.notices.map(describeOptOut),
-          summary_contains: ["Merged document written to "],
+          summary_contains: ["Rendered document written to "],
         };
   const report = await runScenario(scenario);
   const problems = [...report.failures];
@@ -1046,11 +1051,11 @@ async function runMergePredicted(
       problems.push(`refused stack: no ::error:: line names the refused layer ${prediction.layer}`);
     }
   } else if (prediction.kind === "invalid") {
-    if (!errorNames("the merged settings document")) {
-      problems.push("invalid fold: no ::error:: line names the merged settings document");
+    if (!errorNames("the rendered settings document")) {
+      problems.push("invalid fold: no ::error:: line names the rendered settings document");
     }
   } else {
-    // mode: merge emits no other notices, so the count catches a deletion the oracle did not predict.
+    // mode: render emits no other notices, so the count catches a deletion the oracle did not predict.
     const announced = report.stdout.split("\n").filter((line) => line.startsWith("::notice::"));
     if (announced.length !== prediction.notices.length) {
       problems.push(
@@ -1662,7 +1667,7 @@ async function main(): Promise<number> {
       mode = "discovery";
       result = await discoveryFuzzIteration(seed);
     } else if (new Rng(seed ^ 0x27d4eb2f).int(4) === 0) {
-      mode = "merge";
+      mode = "render";
       result = await mergeFuzzIteration(seed, { sections: flags.sections });
     } else {
       mode = "standard";
@@ -1683,7 +1688,7 @@ async function main(): Promise<number> {
       failingSeeds.push(seed);
       // The seed alone draws from the full section pool, so a replay must carry the same --sections.
       const sectionsFlag =
-        (mode === "standard" || mode === "merge") && flags.sections
+        (mode === "standard" || mode === "render") && flags.sections
           ? ` --sections ${flags.sections.join(",")}`
           : "";
       const replay = `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sectionsFlag}`;
@@ -1813,7 +1818,7 @@ async function main(): Promise<number> {
 
     // Forced by the generator, so every refusal kind fires each soak instead of waiting on the ~1/30 random draw.
     await runBattery("merge battery (directed layered merges)", 0x600000, [
-      ...(["merge", "replace"] as const).map(
+      ...LAYERING_DIRECTIVES.map(
         (layering): BatteryEntry => [
           `merge/valid/${layering}`,
           (seed) => mergeValidBatteryRun(seed, layering),

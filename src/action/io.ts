@@ -6,8 +6,8 @@ import { type Io, maskRegistry, type OutputName } from "../index.js";
 export const OUTPUT_DECLS = {
   result: {
     description:
-      "The worst result across the run's targets: failed | drift | partial | skipped | applied | clean | snapshot | merged " +
-      "(drift and clean in mode: check, applied in apply, snapshot in mode: snapshot, merged in mode: merge; skipped only " +
+      "The worst result across the run's targets: failed | drift | partial | skipped | applied | clean | snapshot | rendered " +
+      "(drift and clean in mode: check, applied in apply, snapshot in mode: snapshot, rendered in mode: render; skipped only " +
       "across a fleet). Exit 1 exactly when it is failed, or drift in mode: check.",
   },
   "skipped-sections": {
@@ -19,7 +19,7 @@ export const OUTPUT_DECLS = {
     description:
       "JSON map of owner/name to {result, source, skipped-sections} for every target of a multi-repo run (repos, " +
       'repos-dir, or the snapshot-dir form of mode: snapshot). A redacted private target is keyed by its "private ' +
-      'repository #N" placeholder instead of its slug. The empty map {} for a run over one repository or a merge.',
+      'repository #N" placeholder instead of its slug. The empty map {} for a run over one repository or a render.',
   },
 } as const satisfies Record<OutputName, { readonly description: string }>;
 

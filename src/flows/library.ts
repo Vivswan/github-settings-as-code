@@ -29,7 +29,7 @@ import { SNAPSHOT_SCHEMA_URL } from "./snapshot.js";
 
 const UNNAMED_SOURCE = "the settings document";
 
-const MERGED_SOURCE = "the merged settings document";
+const MERGED_SOURCE = "the rendered settings document";
 
 /** The Io a verb prints through, and the lines the report carries: the caller's own Io leaves the log empty. */
 function sink(io: Io | undefined): { io: Io; log: () => CollectedLine[] } {
@@ -72,12 +72,12 @@ export function validateSettings(
 export interface MergeOptions {
   /** How the merged document is named in problems and warnings. */
   source?: string;
-  /** How the list sections fold across layers; the action's `layering` input, "merge" unless set. */
+  /** How the list sections fold across layers; the action's `layering` input, "deep" unless set. */
   layering?: Layering;
   io?: Io;
 }
 
-/** The fold's result: the merged document, its opt-out notices, and the file text mode: merge writes, byte for byte. */
+/** The fold's result: the merged document, its opt-out notices, and the file text mode: render writes, byte for byte. */
 export interface MergeReport {
   settings: ValidatedSettings;
   notices: OptOutNotice[];
@@ -85,7 +85,7 @@ export interface MergeReport {
   log: CollectedLine[];
 }
 
-/** Fold an ordered list of layers into one validated document, as mode: merge does. */
+/** Fold an ordered list of layers into one validated document, as mode: render does. */
 export function mergeSettings(
   layers: readonly Layer[],
   options: MergeOptions = {},
@@ -94,7 +94,7 @@ export function mergeSettings(
   return foldLayers(
     layers,
     options.source ?? MERGED_SOURCE,
-    options.layering ?? "merge",
+    options.layering ?? "deep",
     out.io,
   ).map((folded) => ({ ...folded, log: out.log() }));
 }

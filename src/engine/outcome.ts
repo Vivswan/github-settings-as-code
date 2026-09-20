@@ -6,7 +6,7 @@
 
 /**
  * Worst-first. The healthy words never share a run (clean and drift belong to check, applied to apply, snapshot to
- * snapshot, merged to merge), so their order against each other is never exercised; skipped appears only across a fleet.
+ * snapshot, rendered to render), so their order against each other is never exercised; skipped appears only across a fleet.
  */
 export const RUN_RESULTS = [
   "failed",
@@ -16,7 +16,7 @@ export const RUN_RESULTS = [
   "applied",
   "clean",
   "snapshot",
-  "merged",
+  "rendered",
 ] as const;
 
 export type RunOutcome = (typeof RUN_RESULTS)[number];

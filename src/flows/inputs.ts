@@ -14,7 +14,7 @@ import {
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
-import type { Layering } from "../engine/layers.js";
+import { LAYERINGS, type Layering } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
 import type { Problem } from "../problem.js";
@@ -23,9 +23,9 @@ import { PRIVATE_REPORT_CHANNELS, type PrivateReportChannel } from "../report/de
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import type { MustBeNever } from "../types.js";
 import type { RunFlowConfig } from "./deliver.js";
-import type { MergeConfig } from "./merge.js";
 import { DEFAULT_SETTINGS_FILE, type MultiConfig } from "./multi.js";
 import { PRIVATE_REPOS_POLICIES, type PrivateReposPolicy } from "./redact.js";
+import type { RenderConfig } from "./render.js";
 import type { SingleConfig } from "./single.js";
 import type { SnapshotConfig } from "./snapshot.js";
 
@@ -34,6 +34,9 @@ export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
 
 /** Default `private-report`, pinned against action.yml by the contract test. */
 const DEFAULT_PRIVATE_REPORT = "none" satisfies PrivateReportChannel;
+
+/** The `layering` input's effective default; its declared default stays empty so "explicitly set" is detectable. */
+const DEFAULT_LAYERING = "deep" satisfies Layering;
 
 /**
  * One input's action.yml entry and its row in the generated Inputs table on docs/reference/inputs.md. The runner
@@ -81,46 +84,46 @@ export const INPUT_DECLS = {
   },
   "settings-file": {
     description:
-      "Path to the settings YAML file: exactly one in apply and check. In mode: merge, the ordered " +
+      "Path to the settings YAML file: exactly one in apply and check. In mode: render, the ordered " +
       "list of settings files to fold instead, newline- or comma-separated, lowest layer first. " +
       "Newlines and commas are list separators in every mode, so a settings-file path can never " +
-      "contain a comma. Single-repo and merge modes only; multi-repo targets read repos-dir files " +
+      "contain a comma. Single-repo and render modes only; multi-repo targets read repos-dir files " +
       "or each repository's own .github/settings.yml, so overriding it alongside repos or " +
       "repos-dir fails the run.",
     default: DEFAULT_SETTINGS_FILE,
     summary:
-      "Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high",
+      "Settings file path (single-repo mode); in `mode: render`, the ordered list of layers to fold, low to high",
     list: true,
   },
   mode: {
     description:
-      "apply (mutate), check (report drift, exit 1 on any), merge (fold the settings-file layers " +
-      "into one document written to merged-file, with no token and no GitHub API call; merge reads " +
-      "only settings-file, merged-file, and layering, ignores token, and rejects every other input " +
+      "apply (mutate), check (report drift, exit 1 on any), render (fold the settings-file layers " +
+      "into one document written to rendered-file, with no token and no GitHub API call; render reads " +
+      "only settings-file, rendered-file, and layering, ignores token, and rejects every other input " +
       "set to a non-default value, since each controls an apply or check run), or snapshot (read " +
       "the live settings of the target repositories back and write each as a settings document to " +
       "snapshot-file or under snapshot-dir; nothing is written to GitHub, the document reaches only " +
-      "the file, and every input that controls an apply, a check, or a merge is rejected). check " +
+      "the file, and every input that controls an apply, a check, or a render is rejected). check " +
       "makes no settings changes, though a private report may still be delivered.",
     default: "apply",
     summary:
       "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a " +
-      "private report may still be delivered); `merge` folds the settings-file layers into " +
-      "merged-file without touching GitHub; `snapshot` writes the live settings to snapshot-file " +
+      "private report may still be delivered); `render` folds the settings-file layers into " +
+      "rendered-file without touching GitHub; `snapshot` writes the live settings to snapshot-file " +
       "or snapshot-dir",
   },
-  "merged-file": {
+  "rendered-file": {
     description:
-      "mode: merge only, and required there: the path the merged settings document is written to " +
+      "mode: render only, and required there: the path the rendered settings document is written to " +
       "(parent directories are created). The file holds exactly what apply would run: every " +
       "section validated, each section that takes an undeclared policy in its policy-wrapper form " +
       "with the policy made explicit, the other sections in their own shape, and the _layering " +
       "directives dropped. Feed it to a later apply or check " +
-      "step as its settings-file. Must not name one of the settings-file layers (the merge would " +
+      "step as its settings-file. Must not name one of the settings-file layers (the render would " +
       "overwrite it). Fails when set in apply or check.",
     default: "",
     summary:
-      "`mode: merge` only (required there): where the merged document is written, exactly what `apply` would run",
+      "`mode: render` only (required there): where the rendered document is written, exactly what `apply` would run",
   },
   "snapshot-file": {
     description:
@@ -132,7 +135,7 @@ export const INPUT_DECLS = {
       "never reveals become $NAME references to export before an apply. Must not be " +
       ".github/settings.yml, the file apply and check read: the snapshot would overwrite the " +
       "document you author, so write it beside that file and copy it over deliberately. Fails " +
-      "when set in apply, check, or merge.",
+      "when set in apply, check, or render.",
     default: "",
     summary:
       "`mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document",
@@ -146,7 +149,7 @@ export const INPUT_DECLS = {
       "discovery filters included; defaults-file does not apply. Must be disjoint from the " +
       "repos-dir (not the same directory, not above it, not below it): the snapshots would " +
       "overwrite the central files or be read back as central files. Fails when set in apply, " +
-      "check, or merge.",
+      "check, or render.",
     default: "",
     summary:
       "`mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target",
@@ -169,10 +172,10 @@ export const INPUT_DECLS = {
   },
   sections: {
     description:
-      "Optional comma-separated allowlist of sections to process. apply, check, and snapshot only: mode: merge writes every section its layers declare, so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
+      "Optional comma-separated allowlist of sections to process. apply, check, and snapshot only: mode: render writes every section its layers declare, so the allowlist belongs on the step that runs the rendered document and fails the render when set.",
     default: "",
     summary:
-      "Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: merge`)",
+      "Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: render`)",
     shownDefault: "(all declared)",
     list: true,
   },
@@ -214,15 +217,20 @@ export const INPUT_DECLS = {
   },
   layering: {
     description:
-      "mode: merge only: merge (default) or replace, the run-wide default for how the keyed list " +
-      "sections (labels, rulesets) combine with the layers below them; a layer's own _layering " +
-      "directive, at its top level or on a section's {entries} wrapper, overrides it per file or " +
-      "per section. Every other list is replaced by the higher layer's. Fails when set in apply " +
-      "or check.",
+      "mode: render only: replace, shallow, or deep (default), the run-wide default for how every " +
+      "list section's entries combine with the layers below them, each section by its own key (a " +
+      "label's name, a ruleset's name, a secret's name, ...). replace lets the higher list win " +
+      "wholesale; shallow unions the entries by key and swaps a same-key entry for the higher one; " +
+      "deep unions by key and merges a same-key pair field by field, a nested keyed list (a " +
+      "ruleset's rules, by type) unioning the same way. A layer's own _layering directive, at its " +
+      "top level or on a section's {entries} wrapper, overrides it per file or per section. Lists " +
+      "outside the list sections are replaced by the higher layer's. Fails when set in apply or check.",
     default: "",
     summary:
-      "`mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it",
-    shownDefault: "`merge`",
+      "`mode: render` only: how every list section's entries combine across layers, by the section's key; " +
+      "`replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and " +
+      "merges a same-key pair field by field; a layer's `_layering` overrides it",
+    shownDefault: "`deep`",
   },
   "private-repos": {
     description:
@@ -394,19 +402,16 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-export const MODES = ["apply", "check", "merge", "snapshot"] as const;
+export const MODES = ["apply", "check", "render", "snapshot"] as const;
 
 export type Mode = (typeof MODES)[number];
-
-const LAYERINGS = ["merge", "replace"] as const satisfies readonly Layering[];
-type _UnlistedLayering = MustBeNever<Exclude<Layering, (typeof LAYERINGS)[number]>>;
 
 /**
  * Their declared defaults are empty so "explicitly set" is detectable, as with the discovery filters; apply and check
  * reject a set one instead of silently ignoring it.
  */
-export const MERGE_ONLY_INPUTS = [
-  "merged-file",
+export const RENDER_ONLY_INPUTS = [
+  "rendered-file",
   "layering",
 ] as const satisfies readonly InputName[];
 export const SNAPSHOT_ONLY_INPUTS = [
@@ -463,7 +468,7 @@ interface CommonConfig extends RunFlowConfig {
 
 export type RunConfig =
   | (CommonConfig & (({ kind: "single" } & SingleConfig) | ({ kind: "multi" } & MultiConfig)))
-  | ({ kind: "merge" } & MergeConfig)
+  | ({ kind: "render" } & RenderConfig)
   | ({ kind: "snapshot" } & Pick<CommonConfig, "token" | "apiVersion"> & SnapshotConfig);
 
 /**
@@ -471,36 +476,36 @@ export type RunConfig =
  * apply/check control, so the merge rejects it unless it holds its declared default, which the runner supplies whether
  * or not the workflow set the input.
  */
-export const MERGE_INPUTS = [
+export const RENDER_INPUTS = [
   "mode",
   "settings-file",
-  "merged-file",
+  "rendered-file",
   "layering",
   "token",
 ] as const satisfies readonly InputName[];
 
 /**
- * Derived from the declarations, so a future input is rejected by the merge until listed in MERGE_INPUTS; exported so
+ * Derived from the declarations, so a future input is rejected by the merge until listed in RENDER_INPUTS; exported so
  * the layering guide's table is pinned to the whole set.
  */
-export const MERGE_REJECTED_INPUTS: readonly InputName[] = (
+export const RENDER_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
-).filter((name) => !(MERGE_INPUTS as readonly string[]).includes(name));
+).filter((name) => !(RENDER_INPUTS as readonly string[]).includes(name));
 
-function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "merge" }>, Problem> {
+function parseRenderConfig(input: Inputs): Result<Extract<RunConfig, { kind: "render" }>, Problem> {
   return safeTry(function* () {
-    const rejected = MERGE_REJECTED_INPUTS.filter((name) => {
+    const rejected = RENDER_REJECTED_INPUTS.filter((name) => {
       const value = input.value(name);
       return value !== "" && value !== INPUT_DECLS[name].default;
     });
     if (rejected.length > 0) {
-      return err({ code: "input-rejected-in-merge", inputs: rejected });
+      return err({ code: "input-rejected-in-render", inputs: rejected });
     }
-    const mergedFile = input.value("merged-file");
-    if (!mergedFile) {
-      return err({ code: "input-merged-file-missing" });
+    const renderedFile = input.value("rendered-file");
+    if (!renderedFile) {
+      return err({ code: "input-rendered-file-missing" });
     }
-    const layering = yield* readEnum(input, "layering", LAYERINGS, "merge", "layering");
+    const layering = yield* readEnum(input, "layering", LAYERINGS, DEFAULT_LAYERING, "layering");
     const settingsFiles = input.list("settings-file");
     if (settingsFiles.length === 0) {
       return err({
@@ -508,7 +513,7 @@ function parseMergeConfig(input: Inputs): Result<Extract<RunConfig, { kind: "mer
         value: input.orDefault("settings-file"),
       });
     }
-    return ok({ kind: "merge", settingsFiles, mergedFile, layering });
+    return ok({ kind: "render", settingsFiles, renderedFile, layering });
   });
 }
 
@@ -778,15 +783,15 @@ export function parseConfig(
   return safeTry(function* () {
     // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
     const mode = yield* readEnum(input, "mode", MODES, INPUT_DECLS.mode.default, "mode");
-    if (mode === "merge") {
-      return parseMergeConfig(input);
+    if (mode === "render") {
+      return parseRenderConfig(input);
     }
     if (mode === "snapshot") {
       return parseSnapshotConfig(input, env);
     }
-    const mergeOnly = MERGE_ONLY_INPUTS.filter((name) => input.value(name) !== "");
-    if (mergeOnly.length > 0) {
-      return err({ code: "input-merge-only", inputs: mergeOnly, mode });
+    const renderOnly = RENDER_ONLY_INPUTS.filter((name) => input.value(name) !== "");
+    if (renderOnly.length > 0) {
+      return err({ code: "input-render-only", inputs: renderOnly, mode });
     }
     const snapshotOnly = SNAPSHOT_ONLY_INPUTS.filter((name) => input.value(name) !== "");
     if (snapshotOnly.length > 0) {

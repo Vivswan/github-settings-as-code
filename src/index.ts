@@ -30,9 +30,9 @@ export { RUN_RESULTS, type RunOutcome, worstOf } from "./engine/outcome.js";
 export { SectionSelection } from "./engine/section-selection.js";
 export type { SectionSnapshotOutcome } from "./engine/snapshot.js";
 export {
-  concludeMerge,
+  concludeRender,
   concludeRun,
-  type FinishedMerge,
+  type FinishedRender,
   failRun,
 } from "./flows/deliver.js";
 export { executeRun, type RunDeps, type RunEnd } from "./flows/execute.js";
@@ -62,9 +62,9 @@ export {
   type ValidateReport,
   validateSettings,
 } from "./flows/library.js";
-export { type MergeConfig, runMerge } from "./flows/merge.js";
 export { type MultiConfig, runMulti } from "./flows/multi.js";
 export type { TargetOutcome } from "./flows/redact.js";
+export { type RenderConfig, runRender } from "./flows/render.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
 export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
 export {

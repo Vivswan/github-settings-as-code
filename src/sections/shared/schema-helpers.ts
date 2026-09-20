@@ -11,10 +11,18 @@ import { renamedKeyError } from "./renamed-key.js";
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
 /**
- * engine/layers.ts declares the same value set in its own Layering type and acts on the parsed value, so a
- * new value lands in both. Described in shared.docs.yml and src/schema.docs.yml.
+ * The one value set of the `_layering` directive and the `layering` run input; engine/layers.ts acts on it and
+ * re-exports it to the flows. Described in shared.docs.yml and src/schema.docs.yml.
+ *
+ *   replace  -> the higher list replaces the whole lower list
+ *   shallow  -> union by key; a same-key entry is swapped for the higher one
+ *   deep     -> union by key; a same-key pair merges field by field, nested keyed lists included
  */
-export const LayeringSchema = z.enum(["merge", "replace"]);
+export const LAYERINGS = ["replace", "shallow", "deep"] as const;
+
+export type Layering = (typeof LAYERINGS)[number];
+
+export const LayeringSchema = z.enum(LAYERINGS);
 
 const renamedPolicyKeyError = renamedKeyError(
   "wrapper's policy",

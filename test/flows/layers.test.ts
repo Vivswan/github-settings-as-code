@@ -2,9 +2,11 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
+import type { Layering } from "../../src/engine/layers.js";
 import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
 import { silentIo } from "../../src/io.js";
+import { describeProblem } from "../../src/problem.js";
 import { withTempDir } from "../temp-dir.js";
 
 describe("readLayerFiles", () => {
@@ -51,6 +53,39 @@ describe("readLayerFiles", () => {
 });
 
 describe("foldLayers", () => {
+  test.each<[string, Record<string, unknown>, Layering]>([
+    ["the run directive", { labels: [{ name: "bug", description: null }] }, "shallow"],
+    [
+      "the file directive",
+      { _layering: "replace", labels: [{ name: "bug", description: null }] },
+      "deep",
+    ],
+    [
+      "the wrapper directive",
+      { labels: { _layering: "shallow", entries: [{ name: "bug", description: null }] } },
+      "deep",
+    ],
+  ])(
+    "a null inside an entry reaches the per-layer validation when %s says the entry is copied as written; under deep the same null is a marker the fold consumes",
+    (_case, repo, run) => {
+      // Under shallow and replace the fold never opens the entry, so the null is data the validator must judge and name;
+      // under deep it deletes the lower description with a notice, and the layer validates.
+      const fleet = { name: "fleet.yml", doc: { labels: [{ name: "bug", description: "fleet" }] } };
+      const fold = (doc: Record<string, unknown>, layering: Layering) =>
+        foldLayers([fleet, { name: "repo.yml", doc }], "merged", layering, silentIo());
+      expect(fold(repo, run).match(() => null, describeProblem)).toMatch(
+        /^repo\.yml has malformed section entries: labels(\.entries)?\[0\]\.description/,
+      );
+      const deep = fold({ labels: [{ name: "bug", description: null }] }, "deep");
+      expect(deep.map((folded): unknown[] => [folded.notices, folded.settings])).toEqual(
+        ok([
+          [{ layer: "repo.yml", path: "labels[0].description" }],
+          { labels: { _undeclared: "delete", entries: [{ name: "bug" }] } },
+        ]),
+      );
+    },
+  );
+
   test("a wrapper's malformed _layering is the fold's refusal, not the layer's own shape problem", () => {
     // The standalone view hides the directive from the per-layer parse, so the fold, which owns it, is what names the fix;
     // a well-formed one folds. Without the strip the parse would report a bare enum mismatch first.
@@ -63,17 +98,18 @@ describe("foldLayers", () => {
           },
         ],
         "merged",
-        "merge",
+        "deep",
         silentIo(),
       );
-    expect(fold("union")).toEqual(
+    expect(fold("merge")).toEqual(
       err({
         layer: "repo.yml",
         site: "labels._layering",
         code: "layer-bad-directive",
-        actual: "union",
+        actual: "merge",
+        allowed: ["replace", "shallow", "deep"],
       }),
     );
-    expect(fold("merge").isOk()).toBe(true);
+    expect(fold("shallow").isOk()).toBe(true);
   });
 });

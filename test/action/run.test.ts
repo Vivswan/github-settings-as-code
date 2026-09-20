@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { run } from "../../src/action/run.js";
+import type { Layering } from "../../src/engine/layers.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
@@ -402,14 +403,14 @@ describe("run in multi-repo mode (env glue)", () => {
   });
 });
 
-describe("run in mode: merge", () => {
+describe("run in mode: render", () => {
   const ENV_KEYS = [
     "INPUT_TOKEN",
     "GITHUB_TOKEN",
     "INPUT_MODE",
     "INPUT_REPOSITORY",
     "INPUT_SETTINGS-FILE",
-    "INPUT_MERGED-FILE",
+    "INPUT_RENDERED-FILE",
     "INPUT_LAYERING",
     "INPUT_SECTIONS",
     "GITHUB_REPOSITORY",
@@ -428,22 +429,22 @@ describe("run in mode: merge", () => {
   });
 
   /** A merge run's env: NO token anywhere, the layers low to high, the output path under `dir`, which is returned. */
-  function setMergeEnv(
+  function setRenderEnv(
     dir: string,
     layers: string[],
-    inputs: { layering?: "merge" | "replace" } = {},
+    inputs: { layering?: Layering } = {},
   ): string {
-    const mergedFile = join(dir, "out", "merged.yml");
+    const renderedFile = join(dir, "out", "merged.yml");
     for (const key of ENV_KEYS) {
       delete process.env[key];
     }
-    process.env.INPUT_MODE = "merge";
+    process.env.INPUT_MODE = "render";
     process.env["INPUT_SETTINGS-FILE"] = layers.join("\n");
-    process.env["INPUT_MERGED-FILE"] = mergedFile;
+    process.env["INPUT_RENDERED-FILE"] = renderedFile;
     if (inputs.layering) {
       process.env.INPUT_LAYERING = inputs.layering;
     }
-    return mergedFile;
+    return renderedFile;
   }
 
   /** Write a layer document into the temp dir and return its path. */
@@ -460,7 +461,7 @@ describe("run in mode: merge", () => {
     rules: [{ type: "deletion" }],
   };
 
-  /** fleet < team < repo under the merge layering: what the three fixtures fold to. */
+  /** fleet < team < repo under the default deep layering: what the three fixtures fold to. */
   const THREE_LAYERS_MERGED = {
     repository: { has_wiki: false, description: "mine" },
     labels: {
@@ -479,22 +480,22 @@ describe("run in mode: merge", () => {
   };
 
   test("three layers fold into the merged file with no token and no API call; a null opts out with a notice, and pages: null is kept as the value", () =>
-    withTempDir("merge-mode-", async (dir) => {
+    withTempDir("render-mode-", async (dir) => {
       const layers = [layer("fleet.yml"), layer("team.yml"), layer("repo.yml")];
-      const mergedFile = setMergeEnv(dir, layers);
+      const renderedFile = setRenderEnv(dir, layers);
       const api = new MockApi({});
       expect(await run({ api, io: testIo })).toBe(0);
       expect(api.calls).toEqual([]);
-      expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual(THREE_LAYERS_MERGED);
-      expect(outputs).toEqual({ result: "merged", "skipped-sections": "", "repos-result": "{}" });
+      expect(parseYaml(readFileSync(renderedFile, "utf8"))).toEqual(THREE_LAYERS_MERGED);
+      expect(outputs).toEqual({ result: "rendered", "skipped-sections": "", "repos-result": "{}" });
       expect(captured).toEqual([
         `notice: ${layer("team.yml")}: null removed repository.has_projects declared by a lower layer`,
-        `merged 3 layers into ${mergedFile}`,
-        "result: merged",
+        `rendered 3 layers into ${renderedFile}`,
+        "result: rendered",
       ]);
       expect(summaries).toEqual([
         [
-          "## github-settings-as-code (merge)",
+          "## github-settings-as-code (render)",
           "",
           "| Layer | Settings file |",
           "|---|---|",
@@ -502,18 +503,18 @@ describe("run in mode: merge", () => {
           `| 2 | ${layer("team.yml")} |`,
           `| 3 | ${layer("repo.yml")} |`,
           "",
-          `Merged document written to ${mergedFile}.`,
+          `Rendered document written to ${renderedFile}.`,
         ].join("\n"),
       ]);
     }));
 
-  test("layering: replace lets the higher layer's keyed lists win while mappings still merge", () =>
-    withTempDir("merge-mode-", async (dir) => {
-      const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
+  test("layering: replace lets the higher layer's list sections win while mappings still merge", () =>
+    withTempDir("render-mode-", async (dir) => {
+      const renderedFile = setRenderEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
         layering: "replace",
       });
       expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
-      expect(parseYaml(readFileSync(mergedFile, "utf8"))).toEqual({
+      expect(parseYaml(readFileSync(renderedFile, "utf8"))).toEqual({
         repository: { has_wiki: false, has_projects: false, description: "mine" },
         labels: { _undeclared: "delete", entries: [{ name: "docs", color: "ffffff" }] },
         rulesets: { _undeclared: "keep", entries: [FLEET_RULESET] },
@@ -528,14 +529,14 @@ describe("run in mode: merge", () => {
   ])(
     "a layer with an unknown top-level key set to %s fails naming the layer: a merge has no allowlist to tolerate it",
     (_case, value) =>
-      withTempDir("merge-mode-", async (dir) => {
+      withTempDir("render-mode-", async (dir) => {
         const top = tempLayer(dir, "top.yml", {
           future: value,
           rulesets: [{ name: "tags", target: "tag" }],
         });
-        const mergedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
+        const renderedFile = setRenderEnv(dir, [layer("fleet.yml"), top]);
         expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
-        expect(existsSync(mergedFile)).toBe(false);
+        expect(existsSync(renderedFile)).toBe(false);
         expect(captured).toEqual([
           `error: unknown top-level section in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or set the "sections" input to limit processing`,
           "result: failed",

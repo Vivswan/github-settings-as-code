@@ -29,6 +29,7 @@ import {
   LAYERING_DIRECTIVES,
   LAYERING_KEY,
   type LayeringDirective,
+  NULL_VALUED_ENTRY_PATHS,
   UNDECLARED_KEY,
 } from "./gen-support.js";
 import {
@@ -698,7 +699,7 @@ export function predictDiscovery(pool: DiscoveryRepo[], filters: DiscoveryFilter
   return kept;
 }
 
-// --- mode: merge -------------------------------------------------------------
+// --- mode: render -------------------------------------------------------------
 
 /**
  * The engine's own notice record, so the fuzz shares its wording (describeOptOut) with the action;
@@ -721,8 +722,9 @@ interface KeyedList {
   keysOf: (entry: Json) => readonly string[] | null;
   /** The entry field the keys are read from, for naming a keyless entry the fold cannot place. */
   keyField: string;
-  combine: "replace" | "merge";
   nested?: Readonly<Record<string, KeyedList>>;
+  /** Dotted paths within the entry whose null is a value, not a marker. */
+  nullValued?: readonly string[];
 }
 
 function labelKeys(entry: Json): readonly string[] | null {
@@ -733,22 +735,51 @@ function labelKeys(entry: Json): readonly string[] | null {
   return [...new Set(names.map((name) => name.toLowerCase()))];
 }
 
-function singleKey(field: string): KeyedList["keysOf"] {
-  return (entry) => (typeof entry[field] === "string" ? [entry[field]] : null);
+const same = (name: string): string => name;
+const lower = (name: string): string => name.toLowerCase();
+const upper = (name: string): string => name.toUpperCase();
+
+/** One string field, read through a dotted path (a webhook's `config.url`), folded as GitHub matches it. */
+function keyedBy(field: string, fold: (name: string) => string = same): KeyedList {
+  return {
+    keyField: field,
+    keysOf: (entry) => {
+      const value = field.split(".").reduce<unknown>((node, segment) => {
+        return isMapping(node) ? node[segment] : undefined;
+      }, entry);
+      return typeof value === "string" ? [fold(value)] : null;
+    },
+  };
 }
 
 /**
- * The keyed sections in the oracle's OWN words, not read off the section modules, so a module whose
+ * Every knobbed section's key in the oracle's OWN words, not read off the section modules, so a module whose
  * layering declaration drifts is a disagreement the fuzz surfaces; oracle.test.ts pins the two as data.
+ *
+ *   case-folded  -> labels, collaborators, teams (GitHub matches them case-insensitively)
+ *   uppercased   -> the secrets and variables families (GitHub stores the names uppercase)
+ *   verbatim     -> everything else
  */
-export const KEYED_MERGE_SECTIONS: Readonly<Partial<Record<UndeclaredPolicySection, KeyedList>>> = {
-  labels: { keysOf: labelKeys, keyField: "name", combine: "replace" },
-  rulesets: {
-    keysOf: singleKey("name"),
-    keyField: "name",
-    combine: "merge",
-    nested: { rules: { keysOf: singleKey("type"), keyField: "type", combine: "replace" } },
+export const KEYED_MERGE_SECTIONS: Readonly<Record<UndeclaredPolicySection, KeyedList>> = {
+  labels: { keysOf: labelKeys, keyField: "name" },
+  rulesets: { ...keyedBy("name"), nested: { rules: keyedBy("type") } },
+  autolinks: keyedBy("key_prefix"),
+  actions_secrets: keyedBy("name", upper),
+  dependabot_secrets: keyedBy("name", upper),
+  codespaces_secrets: keyedBy("name", upper),
+  agents_secrets: keyedBy("name", upper),
+  collaborators: keyedBy("username", lower),
+  teams: keyedBy("name", lower),
+  milestones: keyedBy("title"),
+  actions_variables: keyedBy("name", upper),
+  agents_variables: keyedBy("name", upper),
+  webhooks: keyedBy("config.url"),
+  custom_properties: {
+    ...keyedBy("property_name"),
+    nullValued: NULL_VALUED_ENTRY_PATHS.custom_properties,
   },
+  deploy_keys: keyedBy("title"),
+  secret_scanning_custom_patterns: keyedBy("name"),
 };
 
 const UNDECLARED_DEFAULTS: Record<UndeclaredPolicySection, "keep" | "delete"> = Object.fromEntries(
@@ -790,17 +821,18 @@ function at(path: string, key: string): string {
   return path === "" ? key : `${path}.${key}`;
 }
 
-/**
- * The dialect's one sentence about a higher value, transcribed. `keyedFields` names the fields of two
- * mappings whose lists combine by key (a ruleset's rules) instead of replacing.
- */
-function settle(
-  slot: Slot,
-  higher: unknown,
-  path: string,
-  site: Site,
-  keyedFields?: Readonly<Record<string, KeyedList>>,
-): Slot {
+/** Where a higher value sits inside a keyed entry: the entry's nested lists (top only) and null-valued paths, at `prefix`. */
+interface EntryScope {
+  keyed: KeyedList;
+  prefix: string;
+}
+
+function nullIsValue(scope: EntryScope | undefined, key: string): boolean {
+  return scope !== undefined && (scope.keyed.nullValued ?? []).includes(at(scope.prefix, key));
+}
+
+/** The dialect's one sentence about a higher value, transcribed; `scope` is set inside a keyed entry merging under deep. */
+function settle(slot: Slot, higher: unknown, path: string, site: Site, scope?: EntryScope): Slot {
   if (higher === null) {
     if (slot !== undefined && slot !== null) {
       site.notices.push({ layer: site.layer, path });
@@ -809,29 +841,36 @@ function settle(
     return null;
   }
   if (isMapping(slot) && isMapping(higher)) {
-    return mergeTrees(slot, higher, path, site, keyedFields);
+    return mergeTrees(slot, higher, path, site, scope);
   }
   return structuredClone(higher);
 }
 
-function mergeTrees(
-  lower: Json,
-  higher: Json,
-  path: string,
-  site: Site,
-  keyedFields?: Readonly<Record<string, KeyedList>>,
-): Json {
+function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?: EntryScope): Json {
   const out: Json = {};
   for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
     if (!(key in higher) || higher[key] === undefined) {
       out[key] = lower[key];
       continue;
     }
-    const keyed = keyedFields?.[key];
+    if (higher[key] === null && nullIsValue(scope, key)) {
+      out[key] = null;
+      continue;
+    }
+    const keyed = scope?.prefix === "" ? scope.keyed.nested?.[key] : undefined;
+    const below = scope === undefined ? undefined : { ...scope, prefix: at(scope.prefix, key) };
+    // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too.
     const settled =
       keyed !== undefined && Array.isArray(lower[key]) && Array.isArray(higher[key])
-        ? unionKeyed(lower[key] as Json[], higher[key] as Json[], keyed, at(path, key), site)
-        : settle(lower[key], higher[key], at(path, key), site, undefined);
+        ? unionKeyed(
+            lower[key] as Json[],
+            higher[key] as Json[],
+            keyed,
+            "deep",
+            at(path, key),
+            site,
+          )
+        : settle(lower[key], higher[key], at(path, key), site, below);
     if (settled !== undefined) {
       out[key] = settled;
     }
@@ -854,13 +893,16 @@ function sameResource(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * Matching reads the lower list as it stood before this layer, so two higher entries claiming one
- * lower entry both take its slot, in their order. A notice inside a merged entry names it by its
- * INDEX in the higher layer's list (where the null was written), never by a key value.
+ * lower entry both take its slot, in their order. Only a one-to-one pair merges field by field under
+ * deep; an entry claiming or claimed by more than one across the two lists is placed as written. A
+ * notice inside a merged entry names it by its INDEX in the higher layer's list (where the null was
+ * written), never by a key value.
  */
 function unionKeyed(
   lower: Json[],
   higher: Json[],
   keyed: KeyedList,
+  directive: Exclude<LayeringDirective, "replace">,
   path: string,
   site: Site,
 ): Json[] {
@@ -869,16 +911,26 @@ function unionKeyed(
   const slotOf = higherKeys.map((keys) =>
     lowerKeys.findIndex((below) => sameResource(below, keys)),
   );
-  const combine = (below: Json, entry: Json, h: number): Json =>
-    keyed.combine === "replace"
-      ? structuredClone(entry)
-      : mergeTrees(below, entry, `${path}[${h}]`, site, keyed.nested);
   const out = lower.flatMap((below, index) => {
     const keys = lowerKeys[index] as readonly string[];
     if (!higherKeys.some((claims) => sameResource(claims, keys))) {
       return [below];
     }
-    return higher.flatMap((entry, h) => (slotOf[h] === index ? [combine(below, entry, h)] : []));
+    const claimedBy = higherKeys.filter((claims) => sameResource(claims, keys)).length;
+    return higher.flatMap((entry, h) => {
+      if (slotOf[h] !== index) {
+        return [];
+      }
+      const claimsLower = lowerKeys.filter((claims) =>
+        sameResource(claims, higherKeys[h] ?? []),
+      ).length;
+      const paired = claimedBy === 1 && claimsLower === 1;
+      return [
+        directive === "deep" && paired
+          ? mergeTrees(below, entry, `${path}[${h}]`, site, { keyed, prefix: "" })
+          : structuredClone(entry),
+      ];
+    });
   });
   out.push(...higher.flatMap((entry, h) => (slotOf[h] === -1 ? [structuredClone(entry)] : [])));
   return out;
@@ -908,12 +960,12 @@ function reduceKnobbed(
     const effective = (isDirective(directive) ? directive : undefined) ?? fileDirective ?? run;
     const below = isMapping(slot) ? slot : {};
     const { entries: belowEntries, ...belowKnobs } = below;
-    const unite = effective === "merge" && keyed !== undefined && Array.isArray(belowEntries);
     slot = {
       ...mergeTrees(belowKnobs, knobs, key, site),
-      entries: unite
-        ? unionKeyed(belowEntries as Json[], entries as Json[], keyed, key, site)
-        : structuredClone(entries),
+      entries:
+        effective !== "replace" && Array.isArray(belowEntries)
+          ? unionKeyed(belowEntries as Json[], entries as Json[], keyed, effective, key, site)
+          : structuredClone(entries),
     };
   }
   if (isMapping(slot) && Array.isArray(slot.entries) && slot[UNDECLARED_KEY] === undefined) {
@@ -1021,11 +1073,7 @@ export function refusedMergeLayer(layers: readonly MergeLayer[]): string | undef
       if (directive !== undefined && !isDirective(directive)) {
         return layer.name;
       }
-      const keyed = KEYED_MERGE_SECTIONS[key];
-      if (keyed === undefined && (directive ?? fileDirective) === "merge") {
-        return layer.name;
-      }
-      if (keyed !== undefined && keyedListRefused(wrapper.entries, keyed)) {
+      if (keyedListRefused(wrapper.entries, KEYED_MERGE_SECTIONS[key])) {
         return layer.name;
       }
     }
@@ -1033,7 +1081,7 @@ export function refusedMergeLayer(layers: readonly MergeLayer[]): string | undef
   return undefined;
 }
 
-/** A mode: merge run never contacts the mock: it is refused, invalid, or written from the fold alone. */
+/** A mode: render run never contacts the mock: it is refused, invalid, or written from the fold alone. */
 export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
   const refused = refusedMergeLayer(meta.layers);
   if (refused !== undefined) {

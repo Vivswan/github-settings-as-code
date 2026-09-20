@@ -30,7 +30,7 @@ Three details carry the pattern:
 - The OIDC endpoints need the `Actions` PAT permission rather than the Administration grant the rest of the section uses (the [Sections table](../reference/sections.md) notes it).
 - A claim key the job cannot supply becomes a requirement the moment it is included; GitHub documents `job_workflow_ref` for reusable-workflow jobs only, and says exactly that for `environment`, which turns mandatory once listed.
 
-The fleet story is two layers. `[repo, context]` belongs in the fleet baseline layer, turning every repository's subject shape into one reviewed line; `job_workflow_ref` belongs in the layer of a repository whose OIDC jobs flow through reusable workflows. In a `mode: merge` fold the higher layer's `include_claim_keys` list replaces the baseline's wholesale (lists never concatenate; see the [layering guide](../operate/layering.md)), so the repository's template is exactly what it wrote.
+The fleet story is two layers. `[repo, context]` belongs in the fleet baseline layer, turning every repository's subject shape into one reviewed line; `job_workflow_ref` belongs in the layer of a repository whose OIDC jobs flow through reusable workflows. In a `mode: render` fold the higher layer's `include_claim_keys` list replaces the baseline's wholesale (lists never concatenate; see the [layering guide](../operate/layering.md)), so the repository's template is exactly what it wrote.
 
 A repository with no settings file of its own takes the baseline through the `defaults-file` fallback instead.
 

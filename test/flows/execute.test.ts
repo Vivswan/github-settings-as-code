@@ -56,17 +56,17 @@ function deps(api: MockApi, overrides: Partial<RunDeps> = {}) {
 }
 
 describe("executeRun", () => {
-  test("a merge opens no client and ends at the merge conclusion", () =>
+  test("a render opens no client and ends at the render conclusion", () =>
     withTempDir("gsac-execute-", async (dir) => {
-      const mergedFile = join(dir, "merged.yml");
+      const renderedFile = join(dir, "merged.yml");
       const api = new MockApi({});
       const d = deps(api);
       const code = await executeRun(
         {
-          kind: "merge",
+          kind: "render",
           settingsFiles: [join(LAYERS, "fleet.yml"), join(LAYERS, "team.yml")],
-          mergedFile,
-          layering: "merge",
+          renderedFile,
+          layering: "deep",
         },
         d.run,
       );
@@ -74,13 +74,13 @@ describe("executeRun", () => {
       expect(d.opened()).toBe(0);
       expect(api.calls).toEqual([]);
       expect(d.collected.outputs).toEqual({
-        result: "merged",
+        result: "rendered",
         "skipped-sections": "",
         "repos-result": "{}",
       });
       expect(d.collected.lines.slice(-2)).toEqual([
-        { line: `merged 2 layers into ${mergedFile}` },
-        { line: "result: merged" },
+        { line: `rendered 2 layers into ${renderedFile}` },
+        { line: "result: rendered" },
       ]);
     }));
 

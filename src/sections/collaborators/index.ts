@@ -9,6 +9,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  keyedBy,
   loosen,
   type SectionMeta,
   type SectionModule,
@@ -129,6 +130,8 @@ function isOwner(ctx: CollaboratorsContext, login: string): boolean {
 export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
+  // The fold plan() passes to rejectDuplicates: GitHub matches logins case-insensitively.
+  layering: keyedBy("username", { fold: (username) => username.toLowerCase() }),
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CollaboratorConfig)),

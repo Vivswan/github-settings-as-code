@@ -10,8 +10,8 @@ coverage:
     notes: >-
       POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the
       rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring
-      branches' protection: null. In a mode: merge fold, pages: null is written as the section's
-      value even over a lower layer's pages declaration, so the merged file turns the site off (the
+      branches' protection: null. In a mode: render fold, pages: null is written as the section's
+      value even over a lower layer's pages declaration, so the rendered file turns the site off (the
       layering guide owns that rule); a multi-repo defaults-file never merges into a target's file.
       Snapshot reads the live site back on the declared keys; a repository without Pages is omitted
       rather than declared null.

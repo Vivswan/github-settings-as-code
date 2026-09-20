@@ -15,7 +15,7 @@ const STATUS_ICON: Record<
   applied: "white_check_mark",
   clean: "white_check_mark",
   snapshot: "white_check_mark",
-  merged: "white_check_mark",
+  rendered: "white_check_mark",
   drift: "warning",
   partial: "warning",
   skipped: "fast_forward",
@@ -68,19 +68,19 @@ export function writeSummary(
   io.summary([...lines, ...outcomeRows(view.outcomes)].join("\n"));
 }
 
-export function writeMergeSummary(
+export function writeRenderSummary(
   io: SummaryIo,
   layers: readonly string[],
-  mergedFile: string,
+  renderedFile: string,
 ): void {
   const lines = [
-    "## github-settings-as-code (merge)",
+    "## github-settings-as-code (render)",
     "",
     "| Layer | Settings file |",
     "|---|---|",
     ...layers.map((path, index) => `| ${index + 1} | ${markdownCell(path)} |`),
     "",
-    `Merged document written to ${markdownCell(mergedFile)}.`,
+    `Rendered document written to ${markdownCell(renderedFile)}.`,
   ];
   io.summary(lines.join("\n"));
 }

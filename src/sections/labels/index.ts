@@ -84,5 +84,4 @@ export const labelsSection = listSection({
     matchBy: {},
   },
   prose: { undeclaredAction: "DELETE it" },
-  layering: { combine: "replace" },
 });

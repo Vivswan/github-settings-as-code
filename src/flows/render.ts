@@ -1,5 +1,5 @@
 /**
- * The mode: merge run flow. The written document is exactly what a later apply or check runs from that path; nothing
+ * The mode: render run flow. The written document is exactly what a later apply or check runs from that path; nothing
  * here touches GitHub, so the flow takes no client and needs no token.
  */
 
@@ -7,17 +7,17 @@ import { err, ok, type Result } from "neverthrow";
 import { describeOptOut, type Layering } from "../engine/layers.js";
 import type { Io } from "../io.js";
 import type { Problem, ProblemOf } from "../problem.js";
-import type { FinishedMerge } from "./deliver.js";
+import type { FinishedRender } from "./deliver.js";
 import { foldLayers, readLayerFiles } from "./layers.js";
 import { readEntries, renameEntry, writeReplacing } from "./settings-write.js";
 
-export interface MergeConfig {
+export interface RenderConfig {
   settingsFiles: string[];
-  mergedFile: string;
+  renderedFile: string;
   layering: Layering;
 }
 
-const MERGED_LABEL = "the merged settings document";
+const RENDERED_LABEL = "the rendered settings document";
 
 /**
  * An input layer is never the destination, under any name the read follows or the rename reaches: the entry the
@@ -27,8 +27,10 @@ const MERGED_LABEL = "the merged settings document";
  * admitted: the write replaces the link and leaves the layer intact. Guarded beside the write: the next run would
  * fold the merged document as if it were a layer.
  */
-function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-file-is-layer">> {
-  const replaced = renameEntry(cfg.mergedFile);
+function renderedFileCollision(
+  cfg: RenderConfig,
+): Result<void, ProblemOf<"rendered-file-is-layer">> {
+  const replaced = renameEntry(cfg.renderedFile);
   if (replaced === null) {
     return ok();
   }
@@ -36,21 +38,25 @@ function mergedFileCollision(cfg: MergeConfig): Result<void, ProblemOf<"merged-f
   const layer = cfg.settingsFiles[index];
   return layer === undefined
     ? ok()
-    : err({ code: "merged-file-is-layer", mergedFile: cfg.mergedFile, index, layer });
+    : err({ code: "rendered-file-is-layer", renderedFile: cfg.renderedFile, index, layer });
 }
 
-export function runMerge(cfg: MergeConfig, io: Io): Result<FinishedMerge, Problem> {
-  return mergedFileCollision(cfg)
+export function runRender(cfg: RenderConfig, io: Io): Result<FinishedRender, Problem> {
+  return renderedFileCollision(cfg)
     .andThen(() => readLayerFiles(cfg.settingsFiles))
-    .andThen((layers) => foldLayers(layers, MERGED_LABEL, cfg.layering, io))
-    .andThen((folded): Result<FinishedMerge, Problem> => {
+    .andThen((layers) => foldLayers(layers, RENDERED_LABEL, cfg.layering, io))
+    .andThen((folded): Result<FinishedRender, Problem> => {
       for (const notice of folded.notices) {
         io.annotate("notice", describeOptOut(notice));
       }
-      return writeReplacing(cfg.mergedFile, folded.yaml)
+      return writeReplacing(cfg.renderedFile, folded.yaml)
         .mapErr(
-          (reason): Problem => ({ code: "merged-file-unwritable", path: cfg.mergedFile, reason }),
+          (reason): Problem => ({
+            code: "rendered-file-unwritable",
+            path: cfg.renderedFile,
+            reason,
+          }),
         )
-        .map(() => ({ layers: cfg.settingsFiles, mergedFile: cfg.mergedFile }));
+        .map(() => ({ layers: cfg.settingsFiles, renderedFile: cfg.renderedFile }));
     });
 }

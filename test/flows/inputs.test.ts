@@ -21,12 +21,12 @@ function single(inputs: Partial<Record<InputName, string>>, env: ConfigEnv = {})
   return parse({ token: "t", repository: "o/r", ...inputs }, env);
 }
 
-/** A mode: merge run's inputs: no token anywhere, the two layers, the output path, plus `inputs`. */
+/** A mode: render run's inputs: no token anywhere, the two layers, the output path, plus `inputs`. */
 function merge(inputs: Partial<Record<InputName, string>>) {
   return parse({
-    mode: "merge",
+    mode: "render",
     "settings-file": "fleet.yml\nrepo.yml",
-    "merged-file": "out/merged.yml",
+    "rendered-file": "out/merged.yml",
     ...inputs,
   });
 }
@@ -45,7 +45,7 @@ function engineConfig(
   parsed: ReturnType<typeof parseConfig>,
 ): Extract<RunConfig, { kind: "single" | "multi" }> {
   const config = parsed._unsafeUnwrap();
-  if (config.kind === "merge" || config.kind === "snapshot") {
+  if (config.kind === "render" || config.kind === "snapshot") {
     throw new Error(`expected an engine config, got: ${JSON.stringify(config)}`);
   }
   return config;
@@ -156,7 +156,7 @@ describe("the mode input", () => {
       input: "mode",
       value: "dry-run",
       noun: "mode",
-      allowed: ["apply", "check", "merge", "snapshot"],
+      allowed: ["apply", "check", "render", "snapshot"],
       fallback: "apply",
     });
   });
@@ -164,13 +164,13 @@ describe("the mode input", () => {
   test.each([
     ["layering", { layering: "replace" }, ["layering"]],
     [
-      "both merge-only inputs",
-      { layering: "merge", "merged-file": "out.yml" },
-      ["merged-file", "layering"],
+      "both render-only inputs",
+      { layering: "deep", "rendered-file": "out.yml" },
+      ["rendered-file", "layering"],
     ],
-  ] as const)("%s outside merge mode is rejected", (_case, inputs, named) => {
+  ] as const)("%s outside render mode is rejected", (_case, inputs, named) => {
     expect(rejection(single({ mode: "check", ...inputs }))).toEqual({
-      code: "input-merge-only",
+      code: "input-render-only",
       inputs: named,
       mode: "check",
     });
@@ -191,10 +191,10 @@ describe("the mode input", () => {
     });
   });
 
-  test("a merge-only input set beside a snapshot-only one is reported first: the first problem wins", () => {
+  test("a render-only input set beside a snapshot-only one is reported first: the first problem wins", () => {
     expect(
-      rejection(single({ mode: "check", "merged-file": "out.yml", "snapshot-dir": "snapshots" })),
-    ).toEqual({ code: "input-merge-only", inputs: ["merged-file"], mode: "check" });
+      rejection(single({ mode: "check", "rendered-file": "out.yml", "snapshot-dir": "snapshots" })),
+    ).toEqual({ code: "input-render-only", inputs: ["rendered-file"], mode: "check" });
   });
 
   // A stray separator is refused rather than repaired: "only.yml," is one path to a splitter and still not a file.
@@ -241,22 +241,22 @@ describe("the mode input", () => {
   });
 });
 
-describe("mode: merge", () => {
+describe("mode: render", () => {
   /** What the two-layer merge inputs parse to; the tests below vary one input around it. */
-  const MERGE_CONFIG: Extract<RunConfig, { kind: "merge" }> = {
-    kind: "merge",
+  const RENDER_CONFIG: Extract<RunConfig, { kind: "render" }> = {
+    kind: "render",
     settingsFiles: ["fleet.yml", "repo.yml"],
-    mergedFile: "out/merged.yml",
-    layering: "merge",
+    renderedFile: "out/merged.yml",
+    layering: "deep",
   };
 
   test("parses without any token, carrying the ordered layers, the output path, and the layering", () => {
-    expect(merge({ layering: "replace" })).toEqual(ok({ ...MERGE_CONFIG, layering: "replace" }));
+    expect(merge({ layering: "replace" })).toEqual(ok({ ...RENDER_CONFIG, layering: "replace" }));
   });
 
-  test("the layering input defaults to merge and a comma list of layers works too", () => {
+  test("the layering input defaults to deep and a comma list of layers works too", () => {
     expect(merge({ "settings-file": " fleet.yml , team.yml ,repo.yml" })).toEqual(
-      ok({ ...MERGE_CONFIG, settingsFiles: ["fleet.yml", "team.yml", "repo.yml"] }),
+      ok({ ...RENDER_CONFIG, settingsFiles: ["fleet.yml", "team.yml", "repo.yml"] }),
     );
   });
 
@@ -267,28 +267,30 @@ describe("mode: merge", () => {
     });
   });
 
-  test("a missing merged-file is rejected", () => {
-    expect(rejection(merge({ "merged-file": "" }))).toEqual({ code: "input-merged-file-missing" });
-  });
-
-  test("a merged-file beside the layers is accepted; the collision with a layer is the fold's to refuse", () => {
-    expect(merge({ "merged-file": "./merged.yml" })).toEqual(
-      ok({ ...MERGE_CONFIG, mergedFile: "./merged.yml" }),
-    );
-  });
-
-  test("an unsupported layering is rejected", () => {
-    expect(rejection(merge({ layering: "union" }))).toEqual({
-      code: "input-unsupported-value",
-      input: "layering",
-      value: "union",
-      noun: "layering",
-      allowed: ["merge", "replace"],
-      fallback: "merge",
+  test("a missing rendered-file is rejected", () => {
+    expect(rejection(merge({ "rendered-file": "" }))).toEqual({
+      code: "input-rendered-file-missing",
     });
   });
 
-  // MERGE_REJECTED_INPUTS is every declared input outside MERGE_INPUTS; test/docs/guides.test.ts pins the set against
+  test("a rendered-file beside the layers is accepted; the collision with a layer is the fold's to refuse", () => {
+    expect(merge({ "rendered-file": "./merged.yml" })).toEqual(
+      ok({ ...RENDER_CONFIG, renderedFile: "./merged.yml" }),
+    );
+  });
+
+  test("an unsupported layering is rejected, the retired `merge` like any other", () => {
+    expect(rejection(merge({ layering: "merge" }))).toEqual({
+      code: "input-unsupported-value",
+      input: "layering",
+      value: "merge",
+      noun: "layering",
+      allowed: ["replace", "shallow", "deep"],
+      fallback: "deep",
+    });
+  });
+
+  // RENDER_REJECTED_INPUTS is every declared input outside RENDER_INPUTS; test/docs/guides.test.ts pins the set against
   // the layering guide. The rows here hold the filter's two clauses (an empty default, a non-empty one) and the order.
   test.each([
     ["repos, whose default is empty", { repos: "o/a" }, ["repos"]],
@@ -305,7 +307,7 @@ describe("mode: merge", () => {
   ] as const)(
     "%s is rejected: a merge has no repository, API, report, or allowlist",
     (_case, inputs, named) => {
-      expect(rejection(merge(inputs))).toEqual({ code: "input-rejected-in-merge", inputs: named });
+      expect(rejection(merge(inputs))).toEqual({ code: "input-rejected-in-render", inputs: named });
     },
   );
 
@@ -315,23 +317,23 @@ describe("mode: merge", () => {
     // runner resolves it, which is why token is tolerated at any value).
     const defaults = Object.fromEntries(
       Object.entries(INPUT_DECLS)
-        .filter(([name]) => !["mode", "settings-file", "merged-file"].includes(name))
+        .filter(([name]) => !["mode", "settings-file", "rendered-file"].includes(name))
         .map(([name, decl]) => [name, decl.default]),
     );
-    expect(merge(defaults)).toEqual(ok(MERGE_CONFIG));
+    expect(merge(defaults)).toEqual(ok(RENDER_CONFIG));
   });
 
   test("token is tolerated and never carried: the config has no field to read it from", () => {
     const parsed = parse(
       {
-        mode: "merge",
+        mode: "render",
         "settings-file": "fleet.yml\nrepo.yml",
-        "merged-file": "out/merged.yml",
+        "rendered-file": "out/merged.yml",
         token: "ghp_stepwide",
       },
       { GITHUB_TOKEN: "ghp_envwide" },
     );
-    expect(parsed).toEqual(ok(MERGE_CONFIG));
+    expect(parsed).toEqual(ok(RENDER_CONFIG));
     expect(JSON.stringify(parsed)).not.toContain("ghp_");
   });
 });
@@ -478,7 +480,7 @@ describe("mode: snapshot", () => {
     ],
     [
       "several at once, every one named in declaration order",
-      { "defaults-file": "d.yml", "settings-file": "s.yml", layering: "merge" },
+      { "defaults-file": "d.yml", "settings-file": "s.yml", layering: "deep" },
       ["settings-file", "defaults-file", "layering"],
     ],
   ] as const)(

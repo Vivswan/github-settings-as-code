@@ -660,8 +660,7 @@ describe("freezeDeclarations", () => {
       layering: {
         keys: () => ["x"],
         keyField: "name",
-        combine: "merge",
-        nested: { rules: { keys: () => null, keyField: "type", combine: "replace" } },
+        nested: { rules: { keys: () => null, keyField: "type" } },
       },
       closedSurface: {
         known: { name: true },

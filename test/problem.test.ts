@@ -23,7 +23,7 @@ type FieldlessCode = {
 
 const FIELDLESS: Record<FieldlessCode, true> = {
   "input-report-key-missing": true,
-  "input-merged-file-missing": true,
+  "input-rendered-file-missing": true,
   "input-snapshot-destination-missing": true,
   "input-snapshot-destinations-both": true,
   "input-snapshot-file-with-multi": true,
@@ -59,10 +59,10 @@ const SPECIMENS = {
       input: "mode",
       value: "dry-run",
       noun: "mode",
-      allowed: ["apply", "check", "merge"],
+      allowed: ["apply", "check", "render"],
       fallback: "apply",
     },
-    'the "mode" input is "dry-run", which is not a supported mode. Set it to "apply" (default), "check", "merge"',
+    'the "mode" input is "dry-run", which is not a supported mode. Set it to "apply" (default), "check", "render"',
   ],
   "input-unknown-sections": [
     {
@@ -88,20 +88,20 @@ const SPECIMENS = {
     { code: "input-report-key-invalid", reason: "invalid recipient" },
     'the "report-public-key" input is not a valid age recipient: invalid recipient. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)',
   ],
-  "input-rejected-in-merge": [
-    { code: "input-rejected-in-merge", inputs: ["repos", "repos-dir"] },
-    'the "repos", "repos-dir" inputs do not apply to mode: merge, which only folds the ' +
-      "settings-file layers into merged-file: it never targets a repository, calls the GitHub API, " +
+  "input-rejected-in-render": [
+    { code: "input-rejected-in-render", inputs: ["repos", "repos-dir"] },
+    'the "repos", "repos-dir" inputs do not apply to mode: render, which only folds the ' +
+      "settings-file layers into rendered-file: it never targets a repository, calls the GitHub API, " +
       "delivers a report, or narrows the sections it writes. Remove the inputs, or move them to " +
-      "the apply or check step that runs the merged document",
+      "the apply or check step that runs the rendered document",
   ],
   "input-settings-file-empty": [
     { code: "input-settings-file-empty", value: "," },
-    'the "settings-file" input is ",", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file',
+    'the "settings-file" input is ",", which lists no file. In mode: render it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file',
   ],
-  "input-merge-only": [
-    { code: "input-merge-only", inputs: ["merged-file", "layering"], mode: "check" },
-    'the "merged-file", "layering" inputs only apply to mode: merge, but this run is in check mode, so they would never be used. Remove the inputs, or set mode: merge to fold settings files',
+  "input-render-only": [
+    { code: "input-render-only", inputs: ["rendered-file", "layering"], mode: "check" },
+    'the "rendered-file", "layering" inputs only apply to mode: render, but this run is in check mode, so they would never be used. Remove the inputs, or set mode: render to fold settings files',
   ],
   "input-snapshot-only": [
     { code: "input-snapshot-only", inputs: ["snapshot-file"], mode: "check" },
@@ -112,7 +112,7 @@ const SPECIMENS = {
     'the "settings-file", "layering" inputs do not apply to mode: snapshot, which only reads the ' +
       "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
       "document, folds no layers, and delivers no report. Remove the inputs, or move them to " +
-      "the apply, check, or merge step they belong to",
+      "the apply, check, or render step they belong to",
   ],
   "input-affiliation-unsupported": [
     {
@@ -133,8 +133,8 @@ const SPECIMENS = {
   "input-settings-file-is-list": [
     { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "apply" },
     'the "settings-file" input is "a.yml,b.yml", which contains a list separator: apply mode ' +
-      "reads exactly one settings file, and only mode: merge takes a newline- or comma-separated " +
-      "list. Name one file, or set mode: merge to fold the list into one document",
+      "reads exactly one settings file, and only mode: render takes a newline- or comma-separated " +
+      "list. Name one file, or set mode: render to fold the list into one document",
   ],
   "input-repository-not-slug": [
     { code: "input-repository-not-slug", value: "nope" },
@@ -196,12 +196,14 @@ const SPECIMENS = {
     'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a mapping without an entries list',
   ],
   "layer-bad-directive": [
-    { code: "layer-bad-directive", layer: "repo", site: "labels._layering", actual: "union" },
-    'layer "repo": labels._layering must be "merge" or "replace"; got a string that is neither',
-  ],
-  "layer-no-layering-key": [
-    { code: "layer-no-layering-key", layer: "repo", site: "milestones" },
-    'layer "repo": milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive',
+    {
+      code: "layer-bad-directive",
+      layer: "repo",
+      site: "labels._layering",
+      actual: "merge",
+      allowed: ["replace", "shallow", "deep"],
+    },
+    'layer "repo": labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them',
   ],
   "layer-no-key": [
     { code: "layer-no-key", layer: "repo", site: "labels[1]", keyField: "name" },
@@ -218,15 +220,15 @@ const SPECIMENS = {
     },
     'layer "repo": labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer',
   ],
-  "merged-file-is-layer": [
-    { code: "merged-file-is-layer", mergedFile: "./repo.yml", index: 1, layer: "repo.yml" },
-    'the "merged-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
-      "the merge would overwrite that layer with the folded document, and the next run would fold " +
-      "the merged document as a layer. Write the merged document to a path outside the layer list",
+  "rendered-file-is-layer": [
+    { code: "rendered-file-is-layer", renderedFile: "./repo.yml", index: 1, layer: "repo.yml" },
+    'the "rendered-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
+      "the render would overwrite that layer with the folded document, and the next run would fold " +
+      "the rendered document as a layer. Write the rendered document to a path outside the layer list",
   ],
-  "merged-file-unwritable": [
-    { code: "merged-file-unwritable", path: "out/merged.yml", reason: "EACCES" },
-    'cannot write the merged document to out/merged.yml: EACCES. Check that the "merged-file" input names a writable path',
+  "rendered-file-unwritable": [
+    { code: "rendered-file-unwritable", path: "out/merged.yml", reason: "EACCES" },
+    'cannot write the rendered document to out/merged.yml: EACCES. Check that the "rendered-file" input names a writable path',
   ],
   "snapshot-file-is-settings-file": [
     {
@@ -317,9 +319,9 @@ describe("describeProblem", () => {
     ],
     [
       "one rejected merge input reads in the singular",
-      { code: "input-rejected-in-merge", inputs: ["repos"] },
-      'the "repos" input does not apply to mode: merge, which only folds the settings-file layers into merged-file: it never targets a repository, ' +
-        "calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input, or move it to the apply or check step that runs the merged document",
+      { code: "input-rejected-in-render", inputs: ["repos"] },
+      'the "repos" input does not apply to mode: render, which only folds the settings-file layers into rendered-file: it never targets a repository, ' +
+        "calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input, or move it to the apply or check step that runs the rendered document",
     ],
     [
       "two snapshot-only inputs read in the plural",
@@ -330,7 +332,7 @@ describe("describeProblem", () => {
       "one rejected snapshot input reads in the singular",
       { code: "input-rejected-in-snapshot", inputs: ["layering"] },
       'the "layering" input does not apply to mode: snapshot, which only reads the target repositories\' live settings into snapshot-file or snapshot-dir: ' +
-        "it applies no document, folds no layers, and delivers no report. Remove the input, or move it to the apply, check, or merge step it belongs to",
+        "it applies no document, folds no layers, and delivers no report. Remove the input, or move it to the apply, check, or render step it belongs to",
     ],
     [
       "two filters beside a single-repo snapshot read in the plural",
@@ -373,9 +375,9 @@ describe("describeProblem", () => {
       'repos-dir "repos" has 1 invalid settings file:\n- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes',
     ],
     [
-      "one merge-only input reads in the singular",
-      { code: "input-merge-only", inputs: ["layering"], mode: "apply" },
-      'the "layering" input only applies to mode: merge, but this run is in apply mode, so it would never be used. Remove the input, or set mode: merge to fold settings files',
+      "one render-only input reads in the singular",
+      { code: "input-render-only", inputs: ["layering"], mode: "apply" },
+      'the "layering" input only applies to mode: render, but this run is in apply mode, so it would never be used. Remove the input, or set mode: render to fold settings files',
     ],
     [
       "filters beside an explicit repos list",
@@ -414,7 +416,7 @@ describe("describeProblem", () => {
     [
       "init's settings-file spelled as a list",
       { code: "input-settings-file-is-list", value: "a.yml,b.yml", mode: "init" },
-      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
+      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file',
     ],
     [
       "no targets with nothing filtered",
@@ -449,8 +451,14 @@ describe("describeProblem", () => {
     ],
     [
       "a non-string directive is described by shape alone",
-      { code: "layer-bad-directive", layer: "repo", site: "_layering", actual: true },
-      'layer "repo": _layering must be "merge" or "replace"; got a boolean',
+      {
+        code: "layer-bad-directive",
+        layer: "repo",
+        site: "_layering",
+        actual: true,
+        allowed: ["replace", "shallow", "deep"],
+      },
+      'layer "repo": _layering must be one of "replace", "shallow", "deep"; got a boolean',
     ],
     [
       "a tagged value where a list belongs is described by its class",

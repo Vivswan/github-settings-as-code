@@ -1,7 +1,8 @@
 /**
  * The layered merge, folded low to high; pure (no Io, no GitHub), and layers are trees: a document aliasing a node
- * inside itself is refused. Lists never combine except a knobbed section's entries under "merge", unioned by the
- * module's key (and the nested lists that key declares).
+ * inside itself is refused. Lists never combine except a knobbed section's entries, unioned by the module's key
+ * (and the nested lists that key declares) under the effective directive: the wrapper's `_layering`, else the file's,
+ * else the run's.
  *
  * higher plain mapping                  -> merged key by key
  * higher scalar, list, tagged           -> replaces
@@ -10,6 +11,9 @@
  * higher null over nothing, or a null   -> stays as written below the top level and on a section that takes null as its
  *                                          value; on any other section it opted out of nothing and drops, so a one-layer
  *                                          `labels: null` folds to no labels
+ * knobbed entries under replace         -> the higher list wins
+ * knobbed entries under shallow         -> union by key; a same-key entry is swapped for the higher one
+ * knobbed entries under deep            -> union by key; a same-key pair merges field by field, nested keyed lists too
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -23,16 +27,18 @@ import {
   type UndeclaredPolicySection,
 } from "../schema.js";
 import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
-import { sectionModule } from "../sections/registry.js";
+import { listLayering, sectionModule } from "../sections/registry.js";
+import { LAYERINGS, type Layering } from "../sections/shared/schema-helpers.js";
 import type { DistributiveOmit, MustBeNever, UndeclaredPolicy } from "../types.js";
+
+// The flows may not import src/sections (architecture.yml), so the value set reaches them through the engine.
+export { LAYERINGS, type Layering };
 
 /** One settings document in the stack, named for notices and refusals. */
 export interface Layer {
   readonly name: string;
   readonly doc: unknown;
 }
-
-export type Layering = "merge" | "replace";
 
 /** A lower declaration a higher layer deleted with `null`. */
 export interface OptOutNotice {
@@ -42,17 +48,20 @@ export interface OptOutNotice {
 
 const LAYERING_KEY = "_layering";
 
-const LAYERINGS: readonly Layering[] = ["merge", "replace"];
-
 function isLayering(value: unknown): value is Layering {
   return LAYERINGS.some((layering) => layering === value);
 }
+
+/** The directives under which a knobbed list unions by key instead of being replaced. */
+type Uniting = Exclude<Layering, "replace">;
 
 const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
 
 /**
  * The sections whose null is a document value (Pages disabled, no interaction limits), the only top-level nulls the
  * fold may leave standing; the two pins fail to compile when a section's schema starts or stops admitting null.
+ * This set governs whole top-level sections; the `nullValued` facet on a list declaration governs nullable fields
+ * inside an entry; no key can be both.
  */
 const NULL_VALUED_SECTIONS = [
   "pages",
@@ -112,19 +121,42 @@ function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
  */
 type Descent = WeakMap<object, unknown>;
 
-function sectionLayering(key: string): KeyedListLayering | undefined {
-  const section = UNDECLARED_POLICY_SECTIONS.find((candidate) => candidate === key);
-  return section === undefined ? undefined : sectionModule(section).layering;
+/**
+ * What the fold knows inside one keyed entry, at `prefix` below the entry's top: the nested keyed lists its module
+ * declares (reachable at the top only) and the paths whose null is a value, not a marker.
+ */
+interface EntryScope {
+  readonly nested: Readonly<Record<string, KeyedListLayering>> | undefined;
+  readonly nullValued: ReadonlySet<string>;
+  readonly prefix: string;
 }
 
-function stripValue(value: unknown, descent: Descent): unknown {
-  return isPlainObject(value) ? stripMapping(value, undefined, descent) : structuredClone(value);
+function entryScope(keyed: KeyedListLayering): EntryScope {
+  return { nested: keyed.nested, nullValued: new Set(keyed.nullValued ?? []), prefix: "" };
 }
 
-/** Mirrors mergeMappings: a null-valued key is a marker and drops, and `keyed` names the same fields it names there. */
+function within(scope: EntryScope | undefined, key: string): EntryScope | undefined {
+  return scope === undefined ? undefined : { ...scope, prefix: childPath(scope.prefix, key) };
+}
+
+function nullIsValue(scope: EntryScope | undefined, key: string): boolean {
+  return scope?.nullValued.has(childPath(scope.prefix, key)) === true;
+}
+
+function nestedList(scope: EntryScope | undefined, key: string): KeyedListLayering | undefined {
+  return scope === undefined || scope.prefix !== "" || scope.nested === undefined
+    ? undefined
+    : own(scope.nested, key);
+}
+
+function stripValue(value: unknown, scope: EntryScope | undefined, descent: Descent): unknown {
+  return isPlainObject(value) ? stripMapping(value, scope, descent) : structuredClone(value);
+}
+
+/** Mirrors mergeMappings: a null-valued key is a marker and drops unless the scope names it a value, and `scope` names the same lists. */
 function stripMapping(
   map: Readonly<Record<string, unknown>>,
-  keyed: Readonly<Record<string, KeyedListLayering>> | undefined,
+  scope: EntryScope | undefined,
   descent: Descent,
 ): Record<string, unknown> {
   const enclosing = descent.get(map);
@@ -135,23 +167,28 @@ function stripMapping(
   descent.set(map, out);
   for (const [key, value] of Object.entries(map)) {
     if (value === null) {
+      if (nullIsValue(scope, key)) {
+        put(out, key, null);
+      }
       continue;
     }
-    const nested = keyed === undefined ? undefined : own(keyed, key);
+    const nested = nestedList(scope, key);
     put(
       out,
       key,
-      nested === undefined ? stripValue(value, descent) : stripKeyedList(value, nested, descent),
+      nested === undefined
+        ? stripValue(value, within(scope, key), descent)
+        : stripKeyedList(value, nested, descent),
     );
   }
   descent.delete(map);
   return out;
 }
 
-/** Mirrors unionKeyed: the same lists are entered. */
+/** Mirrors unionKeyed under deep: the same lists are entered. */
 function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descent): unknown {
-  if (!Array.isArray(list) || keyed.combine === "replace") {
-    return stripValue(list, descent);
+  if (!Array.isArray(list)) {
+    return stripValue(list, undefined, descent);
   }
   const enclosing = descent.get(list);
   if (enclosing !== undefined) {
@@ -161,26 +198,36 @@ function stripKeyedList(list: unknown, keyed: KeyedListLayering, descent: Descen
   descent.set(list, out);
   for (const item of list) {
     out.push(
-      isPlainObject(item) ? stripMapping(item, keyed.nested, descent) : structuredClone(item),
+      isPlainObject(item) ? stripMapping(item, entryScope(keyed), descent) : structuredClone(item),
     );
   }
   descent.delete(list);
   return out;
 }
 
+/** The directive a knobbed section folds under, read as admitSection reads it; a value outside the set is not a directive. */
+function effectiveLayering(wrapper: unknown, file: Layering | undefined, run: Layering): Layering {
+  const directive = isPlainObject(wrapper) ? wrapper[LAYERING_KEY] : undefined;
+  return (isLayering(directive) ? directive : undefined) ?? file ?? run;
+}
+
 /**
  * A layer validated on its own is seen as the merge could leave it: every null the merge would read as a marker drops,
- * every other null stays for the validator to judge. A cyclic input yields a cyclic clone; the merge is what refuses those.
+ * every other null stays for the validator to judge. A knobbed section's entries are entered only under `deep`, the
+ * one directive that merges a same-key pair; under `shallow` and `replace` an entry is copied as written. A cyclic
+ * input yields a cyclic clone; the merge is what refuses those.
  *
- * `rulesets[main].bypass_actors: null`  -> dropped (a mapping key inside a keyed list the merge combines)
- * `branches[].protection: null`         -> kept (inside a list the merge copies as written)
- * `pages: null`                         -> kept (the section's value; the merge writes it, never reads it as a marker)
- * a null list element                   -> kept
+ * `rulesets[main].bypass_actors: null` under deep  -> dropped (a mapping key inside an entry the merge combines)
+ * the same under `_layering: shallow`              -> kept (the merge swaps the entry in whole)
+ * `branches[].protection: null`                    -> kept (inside a list the merge copies as written)
+ * `pages: null`                                    -> kept (the section's value; the merge writes it, never reads it as a marker)
+ * a null list element                              -> kept
  */
-export function stripNulls(doc: unknown): unknown {
+export function stripNulls(doc: unknown, run: Layering): unknown {
   if (!isPlainObject(doc)) {
     return structuredClone(doc);
   }
+  const file = isLayering(doc[LAYERING_KEY]) ? doc[LAYERING_KEY] : undefined;
   const descent: Descent = new WeakMap();
   const out: Record<string, unknown> = {};
   descent.set(doc, out);
@@ -188,14 +235,19 @@ export function stripNulls(doc: unknown): unknown {
     if (value === null && !NULL_VALUED.has(key)) {
       continue;
     }
-    const layering = sectionLayering(key);
+    const section = UNDECLARED_POLICY_SECTIONS.find((candidate) => candidate === key);
     let stripped: unknown;
-    if (layering === undefined) {
-      stripped = stripValue(value, descent);
+    if (section === undefined || effectiveLayering(value, file, run) !== "deep") {
+      stripped = stripValue(value, undefined, descent);
     } else if (isPlainObject(value)) {
-      stripped = stripMapping(value, { entries: layering }, descent);
+      const wrapper: EntryScope = {
+        nested: { entries: listLayering(section) },
+        nullValued: new Set(),
+        prefix: "",
+      };
+      stripped = stripMapping(value, wrapper, descent);
     } else {
-      stripped = stripKeyedList(value, layering, descent);
+      stripped = stripKeyedList(value, listLayering(section), descent);
     }
     put(out, key, stripped);
   }
@@ -216,7 +268,7 @@ function refuse(layer: string, site: string, refusal: Refusal): Result<never, La
   return err({ layer, site, ...refusal });
 }
 
-/** Value-free under the refusals' invariant: mode: merge has no redaction context, so no document value may reach a log through the merge. */
+/** Value-free under the refusals' invariant: mode: render has no redaction context, so no document value may reach a log through the merge. */
 export function describeOptOut(notice: OptOutNotice): string {
   return `${notice.layer}: null removed ${notice.path} declared by a lower layer`;
 }
@@ -231,7 +283,7 @@ interface AdmittedSection {
   readonly knobs: Readonly<Record<string, unknown>>;
   readonly entries: readonly Readonly<Record<string, unknown>>[];
   readonly layering: Layering;
-  readonly keyed: KeyedListLayering | undefined;
+  readonly keyed: KeyedListLayering;
 }
 
 interface AdmittedLayer {
@@ -312,7 +364,11 @@ function fileLayering(
     return ok(undefined);
   }
   if (!isLayering(value)) {
-    return refuse(layer, LAYERING_KEY, { code: "layer-bad-directive", actual: value });
+    return refuse(layer, LAYERING_KEY, {
+      code: "layer-bad-directive",
+      actual: value,
+      allowed: LAYERINGS,
+    });
   }
   return ok(value);
 }
@@ -337,17 +393,17 @@ function admitSection(
       return refuse(layer, `${key}.${LAYERING_KEY}`, {
         code: "layer-bad-directive",
         actual: directive,
+        allowed: LAYERINGS,
       });
     }
-    const explicit = directive ?? fallback.file;
-    const keyed = sectionModule(key).layering;
-    if (keyed === undefined && explicit === "merge") {
-      return refuse(layer, key, { code: "layer-no-layering-key" });
-    }
-    const section: AdmittedSection = { knobs, entries, layering: explicit ?? fallback.run, keyed };
-    return keyed === undefined
-      ? ok(section)
-      : checkKeyed(layer, entries, keyed, key).map(() => section);
+    const keyed = listLayering(key);
+    const section: AdmittedSection = {
+      knobs,
+      entries,
+      layering: directive ?? fallback.file ?? fallback.run,
+      keyed,
+    };
+    return checkKeyed(layer, entries, keyed, key).map(() => section);
   });
 }
 
@@ -458,10 +514,10 @@ function mergeValue(
   above: unknown,
   path: string,
   step: Step,
-  keyed?: Readonly<Record<string, KeyedListLayering>>,
+  scope?: EntryScope,
 ): unknown {
   if (isPlainObject(below) && isPlainObject(above)) {
-    return mergeMappings(below, above, path, step, keyed);
+    return mergeMappings(below, above, path, step, scope);
   }
   return structuredClone(above);
 }
@@ -471,7 +527,7 @@ function mergeMappings(
   above: Readonly<Record<string, unknown>>,
   path: string,
   step: Step,
-  keyed?: Readonly<Record<string, KeyedListLayering>>,
+  scope?: EntryScope,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...below };
   for (const [key, value] of Object.entries(above)) {
@@ -480,16 +536,21 @@ function mergeMappings(
     }
     const here = childPath(path, key);
     if (value === null) {
-      applyNull(out, key, here, step);
+      if (nullIsValue(scope, key)) {
+        put(out, key, null);
+      } else {
+        applyNull(out, key, here, step);
+      }
       continue;
     }
-    const nested = keyed === undefined ? undefined : own(keyed, key);
+    const nested = nestedList(scope, key);
     const lower = own(out, key);
     if (nested !== undefined && Array.isArray(lower) && Array.isArray(value)) {
-      put(out, key, unionKeyed(lower, value, nested, here, step));
+      // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too.
+      put(out, key, unionKeyed(lower, value, nested, "deep", here, step));
       continue;
     }
-    put(out, key, mergeValue(lower, value, here, step));
+    put(out, key, mergeValue(lower, value, here, step, within(scope, key)));
   }
   return out;
 }
@@ -506,13 +567,17 @@ type Placement =
 
 /**
  * Matching reads the lower list as it stood before this layer, so which entries result does not depend on the higher
- * entries' order; a lower entry two higher entries claim is superseded by both, and checkKeyed's key-disjointness keeps
- * the result one the section's planner accepts.
+ * entries' order. Only a one-to-one pair merges field by field under deep: an entry that claims, or is claimed by, more
+ * than one entry across the two lists is placed as written. Merging a lower entry into one of two higher claimants
+ * would carry its rename target into a second entry (a document the section's planner refuses), and merging a higher
+ * entry with the first of two lower entries it claims would make the fold depend on the lower order. An empty higher
+ * list adds nothing: clearing a list takes `replace`.
  */
 function unionKeyed(
   lower: readonly unknown[],
   higher: readonly unknown[],
   keyed: KeyedListLayering,
+  directive: Uniting,
   path: string,
   step: Step,
 ): unknown[] {
@@ -527,20 +592,35 @@ function unionKeyed(
       : { item, slot: undefined };
   });
   const placed = placements.flatMap((p) => (p.slot === undefined ? [] : [p]));
+  const claims = (keys: readonly string[], among: readonly (readonly string[])[]): number =>
+    among.filter((other) => intersect(keys, other)).length;
   const out: unknown[] = [];
   lower.forEach((below, index) => {
-    if (!placed.some((p) => intersect(lowerKeys[index] ?? [], p.keys))) {
+    const keys = lowerKeys[index] ?? [];
+    if (!placed.some((p) => intersect(keys, p.keys))) {
       out.push(below);
       return;
     }
     for (const placement of placed) {
-      if (placement.slot === index) {
-        out.push(
-          keyed.combine === "replace"
-            ? structuredClone(placement.item)
-            : mergeValue(below, placement.item, `${path}[${placement.index}]`, step, keyed.nested),
-        );
+      if (placement.slot !== index) {
+        continue;
       }
+      const paired =
+        claims(
+          keys,
+          placed.map((p) => p.keys),
+        ) === 1 && claims(placement.keys, lowerKeys) === 1;
+      out.push(
+        directive === "deep" && paired
+          ? mergeValue(
+              below,
+              placement.item,
+              `${path}[${placement.index}]`,
+              step,
+              entryScope(keyed),
+            )
+          : structuredClone(placement.item),
+      );
     }
   });
   for (const { item, slot } of placements) {
@@ -560,11 +640,10 @@ function mergeSection(
   const wrapper = isPlainObject(lower) ? lower : {};
   const { entries: lowerEntries, ...lowerKnobs } = wrapper;
   const out = mergeMappings(lowerKnobs, section.knobs, key, step);
-  const unite =
-    section.layering === "merge" && section.keyed !== undefined && Array.isArray(lowerEntries);
-  out.entries = unite
-    ? unionKeyed(lowerEntries, section.entries, section.keyed, key, step)
-    : structuredClone(section.entries);
+  out.entries =
+    section.layering !== "replace" && Array.isArray(lowerEntries)
+      ? unionKeyed(lowerEntries, section.entries, section.keyed, section.layering, key, step)
+      : structuredClone(section.entries);
   return out;
 }
 

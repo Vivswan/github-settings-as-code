@@ -15,8 +15,8 @@ coverage:
       chosen expiry to keep it armed. The declared expiry is write-only (GitHub reads back only the
       computed expires_at), so check verifies the limit value, not the duration.
       `interaction_limits: null` clears a live repo-level limit - the base limit only, never the cap
-      or bypass list below. In a mode: merge fold, interaction_limits: null is written as the
-      section's value even over a lower layer's declaration, mirroring pages: null, so the merged
+      or bypass list below. In a mode: render fold, interaction_limits: null is written as the
+      section's value even over a lower layer's declaration, mirroring pages: null, so the rendered
       file clears the limit. A 409 means an organization- or user-level limit overrides the
       repository's; writes surface that as a note, not a failure, while check mode still reports a
       mismatched declaration as drift - the org is the place to change it.

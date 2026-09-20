@@ -3,10 +3,11 @@
 # applies the six-layer merge of this file with the fleet layers; the sync
 # renders the same merge into .github/settings.yml.
 # Rendered once, repo-owned: template sync never rewrites it. Fleet defaults
-# merge UNDER this file - keys here win, null opts out, labels replace by
-# name, rulesets MERGE by name (rules append by type, nested objects merge
-# key by key, other arrays replace wholesale). The fleet invariants (squash-only merging, the main
-# and non-bypassable rulesets) sit ABOVE and cannot be overridden.
+# merge UNDER this file - keys here win, null opts out, and every list section
+# unions by its key (labels and rulesets by name): a same-key entry merges field
+# by field (a ruleset's rules by type), other arrays replace wholesale. The fleet
+# invariants (squash-only merging, the main and non-bypassable rulesets) sit ABOVE
+# and cannot be overridden.
 # Undeclared labels are deleted against the MERGED roster; undeclared
 # rulesets are left alone.
 #

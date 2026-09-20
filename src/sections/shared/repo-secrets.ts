@@ -17,6 +17,8 @@ import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
+  type KeyedListLayering,
+  keyedBy,
   loosen,
   type SectionModule,
   type SectionSnapshot,
@@ -39,6 +41,7 @@ import {
   planSecrets,
   type SecretEntry,
   type SecretsPlanScope,
+  secretKey,
 } from "./secrets-engine.js";
 import { knobbedSnapshot, unreadableSecretNote } from "./snapshot-helpers.js";
 
@@ -171,6 +174,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly shape: z.ZodType;
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: typeof CLOSED_SURFACE;
+  readonly layering: KeyedListLayering;
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>, GraphqlDict, K>,
@@ -281,6 +285,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     shape: loosen(knobbed(SECRETS_ENTRIES[key])),
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
+    layering: keyedBy("name", { fold: secretKey }),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

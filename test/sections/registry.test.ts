@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type SECTION_KEYS,
   type SettingsFile,
@@ -37,6 +39,7 @@ import { labelsSection } from "../../src/sections/labels/index.js";
 import {
   allEndpoints,
   allGraphqlOps,
+  listLayering,
   type MisdeclaredPlanModule,
   type MisdeclaredSnapshotModule,
   type ReadingModuleWithoutSnapshot,
@@ -46,16 +49,7 @@ import {
 import { workflowsSection } from "../../src/sections/workflows/index.js";
 import type { MustBeNever } from "../../src/types.js";
 import { denialResponse } from "../e2e/mock/grading.js";
-
-/** The identity facet of a list section's declaration, as the erased registry view exposes it. */
-interface ListDeclView {
-  readonly identity: {
-    readonly field: string;
-    readonly fold: (name: string) => string;
-    readonly renameKey?: string;
-    readonly aliases?: (entry: object) => readonly string[];
-  };
-}
+import { ROOT } from "../root.js";
 
 const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
@@ -84,7 +78,7 @@ describe("section permissions", () => {
 
   test("_layering is accepted on every top-level knobbed wrapper and rejected on the nested ones", () => {
     // A list nested in an entry is replaced wholesale by the merge, so a _layering accepted there would validate and never act.
-    const wrapper = { entries: [], _layering: "merge" };
+    const wrapper = { entries: [], _layering: "deep" };
     const nested = {
       deployment_branch_policies: wrapper,
       deployment_protection_rules: wrapper,
@@ -111,40 +105,6 @@ describe("section permissions", () => {
         ])
         .sort(),
     });
-  });
-
-  test("a layered section is knobbed, and its layering keys are the identities its planner folds and claims", () => {
-    // The merge pairs entries by these keys and the planner by the folded identity plus its aliases (a rename's old name), so a key the
-    // planner would not claim pairs entries it treats as distinct, or leaves a document it refuses.
-    const knobbed: readonly string[] = UNDECLARED_POLICY_SECTIONS;
-    const entries: Record<string, string>[] = [
-      { name: "Bug" },
-      { name: "Bug", new_name: "Defect" },
-    ];
-    const at = (entry: Record<string, string>, field: string | undefined): string | undefined =>
-      field === undefined ? undefined : entry[field];
-    const layered = SECTIONS.filter((module) => module.layering !== undefined);
-    expect(layered.length).toBeGreaterThan(0);
-    for (const module of layered) {
-      const layering = module.layering;
-      if (layering === undefined) {
-        continue;
-      }
-      expect(knobbed, `${module.key} layers without the undeclared knob`).toContain(module.key);
-      const identity = "decl" in module ? (module.decl as ListDeclView).identity : undefined;
-      for (const entry of entries) {
-        const claimed =
-          identity === undefined
-            ? [at(entry, layering.keyField) ?? ""]
-            : [
-                identity.fold(at(entry, identity.renameKey) ?? at(entry, identity.field) ?? ""),
-                ...(identity.aliases?.(entry) ?? []).map(identity.fold),
-              ];
-        expect(layering.keys(entry), `${module.key} keys of ${JSON.stringify(entry)}`).toEqual(
-          claimed,
-        );
-      }
-    }
   });
 
   test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {
@@ -222,6 +182,165 @@ describe("section permissions", () => {
           `${sibling.key} and ${first?.key} both declare "${route}" but disagree on its contract; the mock resolves the first match, so they must stay identical`,
         ).toBe(first?.contract ?? "");
       }
+    }
+  });
+});
+
+describe("null-valued entry paths", () => {
+  /**
+   * The published schema's view of one definition's nullable paths: a `null` type, alone or in an arm of an
+   * anyOf/oneOf/allOf, at a property, dotted through nested objects and refs; lists are not entered (a null inside a
+   * list is data to the fold).
+   */
+  type JsonSchema = {
+    type?: string | string[];
+    anyOf?: JsonSchema[];
+    oneOf?: JsonSchema[];
+    allOf?: JsonSchema[];
+    properties?: Record<string, JsonSchema>;
+    additionalProperties?: JsonSchema | boolean;
+    description?: string;
+    items?: JsonSchema;
+    $ref?: string;
+  };
+  const published = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
+    definitions: Record<string, JsonSchema>;
+  };
+  const resolve = (schema: JsonSchema): JsonSchema =>
+    schema.$ref === undefined
+      ? schema
+      : resolve(
+          published.definitions[
+            decodeURIComponent(schema.$ref.replace("#/definitions/", ""))
+          ] as JsonSchema,
+        );
+  /** Keys that describe a schema without constraining it; a catchall carrying only these permits what `{}` permits. */
+  const ANNOTATIONS = new Set([
+    "description",
+    "title",
+    "examples",
+    "default",
+    "$comment",
+    "deprecated",
+  ]);
+  const constrains = (schema: JsonSchema | boolean | undefined): boolean =>
+    typeof schema === "object" && Object.keys(schema).some((key) => !ANNOTATIONS.has(key));
+  /** Every shape a value may take: the definition itself and each arm of its anyOf/oneOf/allOf, refs followed. */
+  const arms = (schema: JsonSchema): JsonSchema[] => {
+    const own = resolve(schema);
+    return [
+      own,
+      ...[...(own.anyOf ?? []), ...(own.oneOf ?? []), ...(own.allOf ?? [])].flatMap(arms),
+    ];
+  };
+  const admitsNull = (schema: JsonSchema): boolean =>
+    arms(schema).some((arm) => {
+      const types = Array.isArray(arm.type) ? arm.type : arm.type === undefined ? [] : [arm.type];
+      return types.includes("null");
+    });
+  const nullablePaths = (schema: JsonSchema, prefix = ""): string[] => [
+    ...new Set(
+      arms(schema).flatMap((arm) => {
+        // A passthrough object forwards unknown keys as opaque data; a TYPED dictionary's keys are the author's, so
+        // no fixed path can name a nullable value under them: refuse to guess.
+        if (constrains(arm.additionalProperties)) {
+          throw new Error(
+            `${prefix || "the entry"} takes arbitrary keys, so nullable paths under it cannot be enumerated`,
+          );
+        }
+        return Object.entries(arm.properties ?? {}).flatMap(([key, child]) => {
+          const path = prefix === "" ? key : `${prefix}.${key}`;
+          return [...(admitsNull(child) ? [path] : []), ...nullablePaths(child, path)];
+        });
+      }),
+    ),
+  ];
+  /** The entry definition a knobbed section's plain-array form lists. */
+  const entrySchema = (key: string): JsonSchema => {
+    const section = published.definitions.SettingsFile?.properties?.[key];
+    const list = section?.anyOf?.find((option) => resolve(option).type === "array");
+    if (list?.items === undefined) {
+      throw new Error(`${key}: the published schema shows no entry list`);
+    }
+    return list.items;
+  };
+
+  test("every knobbed section declares exactly the entry paths its published schema types nullable, nested lists included", () => {
+    // A field that admits null is a value there, never a delete marker; a schema gaining one tomorrow fails here
+    // until the module says so, instead of the fold silently deleting a lower field the author meant to set to null.
+    for (const key of UNDECLARED_POLICY_SECTIONS) {
+      const declared = listLayering(key);
+      const entry = entrySchema(key);
+      expect([...(declared.nullValued ?? [])].sort(), key).toEqual(nullablePaths(entry).sort());
+      for (const [field, nested] of Object.entries(declared.nested ?? {})) {
+        const items = resolve(entry).properties?.[field]?.items;
+        if (items === undefined) {
+          throw new Error(`${key}.${field}: the published schema shows no nested list`);
+        }
+        expect([...(nested.nullValued ?? [])].sort(), `${key}.${field}`).toEqual(
+          nullablePaths(items).sort(),
+        );
+      }
+    }
+    // The instrument's positive control: the walk reaches a definition and reads a nullable field there.
+    expect(nullablePaths(entrySchema("custom_properties"))).toEqual(["value"]);
+  });
+
+  test.each<[string, JsonSchema, string[] | "throws"]>([
+    ["a type list", { properties: { a: { type: ["string", "null"] } } }, ["a"]],
+    [
+      "a null arm of a union",
+      { properties: { a: { anyOf: [{ type: "string" }, { type: "null" }] } } },
+      ["a"],
+    ],
+    [
+      "a nullable child under an allOf-wrapped ref, as the generator emits nested definitions",
+      { properties: { config: { allOf: [{ $ref: "#/definitions/RegistryTestNullableChild" }] } } },
+      ["config.b"],
+    ],
+    [
+      "a nullable child under one object arm of a union",
+      {
+        properties: {
+          c: {
+            oneOf: [{ type: "object", properties: { d: { type: "null" } } }, { type: "string" }],
+          },
+        },
+      },
+      ["c.d"],
+    ],
+    [
+      "a null inside a list's items is data, not a path",
+      { properties: { l: { type: "array", items: { type: "null" } } } },
+      [],
+    ],
+    [
+      "an annotation-only catchall permits what {} permits",
+      {
+        properties: { a: { type: "null" } },
+        additionalProperties: { description: "pass through" },
+      },
+      ["a"],
+    ],
+    [
+      "a typed dictionary cannot be enumerated",
+      { additionalProperties: { type: ["string", "null"] } },
+      "throws",
+    ],
+  ])("the schema walk reads %s", (_case, schema, expected) => {
+    // Hand-written shapes the published schema uses or could grow; the walk above is the guard, so its blind spots are pinned here.
+    published.definitions.RegistryTestNullableChild = {
+      type: "object",
+      properties: { b: { type: ["number", "null"] } },
+    };
+    try {
+      if (expected === "throws") {
+        expect(() => nullablePaths(schema)).toThrow(/arbitrary keys/);
+      } else {
+        expect(nullablePaths(schema)).toEqual(expected);
+      }
+    } finally {
+      delete published.definitions.RegistryTestNullableChild;
     }
   });
 });

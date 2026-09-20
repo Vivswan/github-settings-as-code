@@ -13,19 +13,19 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 |---|---|---|
 | `token` | `github.token` | Token for the API calls (see [Token permissions](permissions.md)) |
 | `repository` | current repo | Target `owner/name` (single-repo mode only) |
-| `settings-file` | `.github/settings.yml` | Settings file path (single-repo mode); in `mode: merge`, the ordered list of layers to fold, low to high |
-| `mode` | `apply` | `apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `merge` folds the settings-file layers into merged-file without touching GitHub; `snapshot` writes the live settings to snapshot-file or snapshot-dir |
-| `merged-file` | (empty) | `mode: merge` only (required there): where the merged document is written, exactly what `apply` would run |
+| `settings-file` | `.github/settings.yml` | Settings file path (single-repo mode); in `mode: render`, the ordered list of layers to fold, low to high |
+| `mode` | `apply` | `apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a private report may still be delivered); `render` folds the settings-file layers into rendered-file without touching GitHub; `snapshot` writes the live settings to snapshot-file or snapshot-dir |
+| `rendered-file` | (empty) | `mode: render` only (required there): where the rendered document is written, exactly what `apply` would run |
 | `snapshot-file` | (empty) | `mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document |
 | `snapshot-dir` | (empty) | `mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target |
 | `on-missing-permission` | `fail` | `warn` skips sections the token cannot access (partial success) |
 | `required-sections` | (empty) | Sections that must fully apply even under `warn` |
-| `sections` | (all declared) | Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: merge`) |
+| `sections` | (all declared) | Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: render`) |
 | `api-version` | `2022-11-28` | `X-GitHub-Api-Version` header; override to opt into a newer REST API version |
 | `repos` | (empty) | Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos |
 | `repos-dir` | (empty) | Multi-repo central mode: directory of per-repo settings files in this repo |
 | `defaults-file` | (empty) | YAML applied to every multi-repo target without a settings file (multi-repo mode only) |
-| `layering` | `merge` | `mode: merge` only: `merge` unions the keyed list sections (labels, rulesets) by key across layers, `replace` lets the higher layer's list win; a layer's `_layering` overrides it |
+| `layering` | `deep` | `mode: render` only: how every list section's entries combine across layers, by the section's key; `replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and merges a same-key pair field by field; a layer's `_layering` overrides it |
 | `private-repos` | `redact` | `redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them |
 | `private-report` | `none` | `issue` delivers each redacted target's full report to a reused issue on that target repository; `issue-on-failure` writes that issue only when the target fails or drifts, closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow artifact; rejected with `private-repos: show` |
 | `report-public-key` | (empty) | The `age1...` recipient the `artifact` channel encrypts reports to; required with `private-report: artifact`, rejected otherwise |
@@ -41,9 +41,9 @@ The discovery-only inputs apply to `repos: "*"`; the [multi-repo guide](../opera
 
 ## Outputs
 
-- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from RUN_RESULTS in src/engine/outcome.ts) -->`failed` / `drift` / `partial` / `skipped` / `applied` / `clean` / `snapshot` / `merged`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check<!-- END GENERATED: outputs-list -->. The [snapshot guide](../operate/snapshot.md) says what each snapshot word means.
+- `result`: <!-- BEGIN GENERATED: outputs-list (bun run build:docs; derived from RUN_RESULTS in src/engine/outcome.ts) -->`failed` / `drift` / `partial` / `skipped` / `applied` / `clean` / `snapshot` / `rendered`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check<!-- END GENERATED: outputs-list -->. The [snapshot guide](../operate/snapshot.md) says what each snapshot word means.
 - `skipped-sections`: the sections skipped for missing permissions under `on-missing-permission: warn`, comma-separated (a deduped union across targets in multi-repo mode); empty when none.
-- `repos-result`: a JSON map of `owner/name` to `{result, source, skipped-sections}`, one entry per target of a multi-repo run (`repos`, `repos-dir`, or the `snapshot-dir` form of `mode: snapshot`); the empty map `{}` for a run over one repository or a merge. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
+- `repos-result`: a JSON map of `owner/name` to `{result, source, skipped-sections}`, one entry per target of a multi-repo run (`repos`, `repos-dir`, or the `snapshot-dir` form of `mode: snapshot`); the empty map `{}` for a run over one repository or a render. A redacted private target is keyed by its `private repository #N` placeholder instead of its slug; see [Private repositories](../operate/private-repositories.md).
 
 All three outputs are set on every run, whatever the mode and however it ended.
 

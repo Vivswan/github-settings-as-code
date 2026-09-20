@@ -207,7 +207,7 @@ describe("validate and permissions", () => {
 
 describe("the --json failure envelope", () => {
   test("a missing required input: stdout is one failed envelope carrying the stderr line as its problem, exit 1", async () => {
-    const result = await cli(["merge", "--settings-file", SINGLE, "--json"]);
+    const result = await cli(["render", "--settings-file", SINGLE, "--json"]);
     expect(result.code).toBe(1);
     const lines = result.stdout.split("\n").filter((line) => line !== "");
     expect(lines).toHaveLength(1);
@@ -264,13 +264,13 @@ describe("the --json failure envelope", () => {
   });
 
   test("a mode command's failed envelope still carries the three outputs", async () => {
-    const result = await cli(["merge", "--settings-file", SINGLE, "--json"]);
+    const result = await cli(["render", "--settings-file", SINGLE, "--json"]);
     expect(JSON.parse(result.stdout)).toEqual({
       result: "failed",
       "skipped-sections": [],
       "repos-result": {},
       problem:
-        'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
+        'mode: render needs a "rendered-file" input: the path the rendered settings document is written to. Set it (for example .github/settings.rendered.yml) and feed that path to a later apply or check step as its settings-file',
     });
   });
 });

@@ -218,51 +218,51 @@ function cases(): Case[] {
     {
       name: "merge, layers as repeated flags",
       argv: [
-        "merge",
+        "render",
         "--settings-file",
         "a.yml",
         "--settings-file",
         "b.yml",
-        "--merged-file",
+        "--rendered-file",
         "out.yml",
         "--layering",
         "replace",
       ],
       inputs: {
-        mode: "merge",
+        mode: "render",
         "settings-file": "a.yml\nb.yml",
-        "merged-file": "out.yml",
+        "rendered-file": "out.yml",
         layering: "replace",
       },
     },
     {
       name: "merge, layers as one comma list, a token tolerated",
       argv: [
-        "merge",
+        "render",
         "--token",
         "ghp_flag",
         "--settings-file",
         "a.yml,b.yml",
-        "--merged-file",
+        "--rendered-file",
         "o.yml",
       ],
       inputs: {
-        mode: "merge",
+        mode: "render",
         token: "ghp_flag",
         "settings-file": "a.yml,b.yml",
-        "merged-file": "o.yml",
+        "rendered-file": "o.yml",
       },
     },
     {
-      name: "rejected: a merge-only flag on check",
-      argv: ["check", "--token", "ghp_flag", "--merged-file", "out.yml"],
-      inputs: { mode: "check", token: "ghp_flag", "merged-file": "out.yml" },
-      unknownFlag: "merged-file",
+      name: "rejected: a render-only flag on check",
+      argv: ["check", "--token", "ghp_flag", "--rendered-file", "out.yml"],
+      inputs: { mode: "check", token: "ghp_flag", "rendered-file": "out.yml" },
+      unknownFlag: "rendered-file",
     },
     {
-      name: "rejected: an engine flag on merge",
-      argv: ["merge", "--repository", "o/r", "--merged-file", "out.yml"],
-      inputs: { mode: "merge", repository: "o/r", "merged-file": "out.yml" },
+      name: "rejected: an engine flag on render",
+      argv: ["render", "--repository", "o/r", "--rendered-file", "out.yml"],
+      inputs: { mode: "render", repository: "o/r", "rendered-file": "out.yml" },
       unknownFlag: "repository",
     },
     {
@@ -342,11 +342,11 @@ describe("argv -> config equals env -> config", () => {
         continue;
       }
       kinds.add(result.value.kind);
-      if (result.value.kind !== "merge" && !argv.includes("--token")) {
+      if (result.value.kind !== "render" && !argv.includes("--token")) {
         envToken++;
       }
     }
-    expect([...kinds].sort()).toEqual(["merge", "multi", "single", "snapshot"]);
+    expect([...kinds].sort()).toEqual(["multi", "render", "single", "snapshot"]);
     expect(envToken).toBeGreaterThan(0);
     expect([...rejections].sort()).toEqual([
       "a flag the subcommand lacks",
@@ -360,7 +360,7 @@ describe("argv -> config equals env -> config", () => {
 const VALID: Record<Exclude<InputName, "mode" | "token">, string> = {
   repository: "o/r",
   "settings-file": "s.yml",
-  "merged-file": "out.yml",
+  "rendered-file": "out.yml",
   "snapshot-file": "snap.yml",
   "snapshot-dir": "snaps",
   "on-missing-permission": "warn",
@@ -397,8 +397,8 @@ const COMPANIONS: Partial<Record<InputName, Inputs>> = {
 /** The smallest input set each mode accepts. */
 function base(mode: Mode): Inputs {
   switch (mode) {
-    case "merge":
-      return { mode, "merged-file": "out.yml" };
+    case "render":
+      return { mode, "rendered-file": "out.yml" };
     case "snapshot":
       return { mode, token: "ghp", "snapshot-file": "snap.yml" };
     default:
@@ -453,7 +453,7 @@ describe("the per-mode flag split", () => {
             ),
             `${mode} --${name}`,
           ).toMatch(
-            /^input-(merge-only|snapshot-only|rejected-in-merge|rejected-in-snapshot|report-key-unused)$/,
+            /^input-(render-only|snapshot-only|rejected-in-render|rejected-in-snapshot|report-key-unused)$/,
           );
         }
       }
@@ -479,24 +479,24 @@ describe("the per-mode flag split", () => {
     token: "single",
     repository: "single",
     "settings-file": {
-      argv: ["merge", "--merged-file", "out.yml"],
+      argv: ["render", "--rendered-file", "out.yml"],
       pair: ["a.yml", "b.yml"],
-      kept: (cfg) => (cfg.kind === "merge" ? cfg.settingsFiles : []),
+      kept: (cfg) => (cfg.kind === "render" ? cfg.settingsFiles : []),
     },
     mode: "single",
-    "merged-file": "single",
+    "rendered-file": "single",
     "snapshot-file": "single",
     "snapshot-dir": "single",
     "on-missing-permission": "single",
     "required-sections": {
       argv: check,
       pair: ["labels", "milestones"],
-      kept: (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.required]),
+      kept: (cfg) => (cfg.kind === "render" ? [] : [...cfg.sections.required]),
     },
     sections: {
       argv: check,
       pair: ["labels", "milestones"],
-      kept: (cfg) => (cfg.kind === "merge" ? [] : [...cfg.sections.only]),
+      kept: (cfg) => (cfg.kind === "render" ? [] : [...cfg.sections.only]),
     },
     "api-version": "single",
     repos: {
@@ -553,8 +553,8 @@ describe("the per-mode flag split", () => {
         const base =
           inputsForMode("check").includes(name) || name === "token"
             ? check
-            : inputsForMode("merge").includes(name)
-              ? ["merge"]
+            : inputsForMode("render").includes(name)
+              ? ["render"]
               : ["snapshot", "--token", "ghp"];
         const flag = base.filter((argument, index) => {
           const value = index > 0 && base[index - 1] === `--${name}`;

@@ -43,7 +43,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 - [Semantics](reference/semantics.md): stateless, declared-keys-only, convergent applies, softenable errors, retries, and the preflight barrier.
 - [Architecture](reference/architecture.md): how the action works in diagrams, from one settings file's journey to the module map, each pinned to the code.
 - [Token permissions](reference/permissions.md): which grant each section needs, how a denial surfaces, and the `on-missing-permission` / `required-sections` policy.
-- [The undeclared policy](reference/undeclared-policy.md): the `_undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers in `mode: merge`.
+- [The undeclared policy](reference/undeclared-policy.md): the `_undeclared` knob on the list sections, per-section defaults, the milestone-deletion caveat, and how the policy layers in `mode: render`.
 - [Forward compatibility](reference/forward-compatibility.md): where payloads pass through verbatim and which sections are deliberately closed.
 - [Secrets and vaults](reference/secrets-and-vaults.md): the `$NAME` references secret fields take, wiring them from GitHub Secrets or a vault action, and what check mode can and cannot verify.
 - [Library](reference/library.md): the npm package `@vivswan/github-settings-as-code`, how it is built, the API by group with one example each, and how its version tracks the action's.
@@ -52,7 +52,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 
 - [Check mode](operate/check-mode.md): drift detection on a schedule, exit codes, and what a "cannot verify" note is telling you.
 - [Snapshot mode](operate/snapshot.md): `mode: snapshot` writes the live settings as a settings file, the `$NAME` placeholders secrets become, the round trip and its exceptions, and the per-repo directory form.
-- [Layering settings files](operate/layering.md): `mode: merge` folds an ordered list of files into one document, the rules of the fold, the `_layering` directive, and the two-step workflow.
+- [Layering settings files](operate/layering.md): `mode: render` folds an ordered list of files into one document, the rules of the fold, the `_layering` directive, and the two-step workflow.
 - [Multi-repo mode](operate/multi-repo.md): manage a fleet from one admin repository with per-repo files, discovery, and a defaults-file fallback for repositories without a file.
 - [Private repositories](operate/private-repositories.md): the redaction that keeps private targets out of public logs, and the private-report channels.
 - [Troubleshooting](operate/troubleshooting.md): permission denials, ambiguous 403s, rate limits, debug logging, and a missing or stale bundle.
@@ -77,4 +77,4 @@ Generated regions carry the load-bearing facts. Each is rendered from its declar
 
 Contract tests pin the remaining authored claims in [forward compatibility](reference/forward-compatibility.md), [private repositories](operate/private-repositories.md), and [troubleshooting](operate/troubleshooting.md): the commands and enumerations that must not drift. The rest is walkthrough prose. When a walkthrough disagrees with a generated or pinned claim, the claim wins, so guides link to the claims rather than duplicating their exact wording.
 
-The settings examples in these pages are validated in CI against the real schema (`test/docs/guides.test.ts`): every fenced block tagged `yaml settings` must be a valid settings document, every block tagged `yaml layer` must validate as one layer of a merge (nulls stripped first, as the merge step does), and a settings-shaped block without a tag fails the build. Every `mermaid` diagram must name real files and exported symbols and link the test that demonstrates it (`test/docs/diagrams.test.ts`). If you edit a guide, tag your example blocks.
+The settings examples in these pages are validated in CI against the real schema (`test/docs/guides.test.ts`): every fenced block tagged `yaml settings` must be a valid settings document, every block tagged `yaml layer` must validate as one layer of a merge (nulls stripped first, as the render step does), and a settings-shaped block without a tag fails the build. Every `mermaid` diagram must name real files and exported symbols and link the test that demonstrates it (`test/docs/diagrams.test.ts`). If you edit a guide, tag your example blocks.

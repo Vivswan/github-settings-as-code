@@ -32,13 +32,13 @@ export const VIOLATION_PREFIX = "E2E MOCK VIOLATION:";
 /**
  * The files the runner itself keeps at the root of the child's working directory. A snapshot
  * destination may not start with one of them: the run would overwrite a harness file, or the dir
- * form's walk would collect it as a written snapshot. layerFile(i) names a mode: merge layer.
+ * form's walk would collect it as a written snapshot. layerFile(i) names a mode: render layer.
  */
 export const RUNNER_ROOT_FILES = {
   settings: "settings.yml",
   output: "output.txt",
   summary: "summary.md",
-  merged: "merged.yml",
+  rendered: "rendered.yml",
   defaults: "defaults.yml",
 } as const;
 export const LAYER_FILE_PREFIX = "layer-";

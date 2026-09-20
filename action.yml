@@ -23,38 +23,38 @@ inputs:
   settings-file:
     description: >-
       Path to the settings YAML file: exactly one in apply and check. In mode:
-      merge, the ordered list of settings files to fold instead, newline- or
+      render, the ordered list of settings files to fold instead, newline- or
       comma-separated, lowest layer first. Newlines and commas are list
       separators in every mode, so a settings-file path can never contain a
-      comma. Single-repo and merge modes only; multi-repo targets read
+      comma. Single-repo and render modes only; multi-repo targets read
       repos-dir files or each repository's own .github/settings.yml, so
       overriding it alongside repos or repos-dir fails the run.
     required: false
     default: ".github/settings.yml"
   mode:
     description: >-
-      apply (mutate), check (report drift, exit 1 on any), merge (fold the
-      settings-file layers into one document written to merged-file, with no
-      token and no GitHub API call; merge reads only settings-file,
-      merged-file, and layering, ignores token, and rejects every other input
-      set to a non-default value, since each controls an apply or check run),
-      or snapshot (read the live settings of the target repositories back and
-      write each as a settings document to snapshot-file or under
+      apply (mutate), check (report drift, exit 1 on any), render (fold the
+      settings-file layers into one document written to rendered-file, with no
+      token and no GitHub API call; render reads only settings-file,
+      rendered-file, and layering, ignores token, and rejects every other
+      input set to a non-default value, since each controls an apply or check
+      run), or snapshot (read the live settings of the target repositories
+      back and write each as a settings document to snapshot-file or under
       snapshot-dir; nothing is written to GitHub, the document reaches only
-      the file, and every input that controls an apply, a check, or a merge is
-      rejected). check makes no settings changes, though a private report may
-      still be delivered.
+      the file, and every input that controls an apply, a check, or a render
+      is rejected). check makes no settings changes, though a private report
+      may still be delivered.
     required: false
     default: "apply"
-  merged-file:
+  rendered-file:
     description: >-
-      mode: merge only, and required there: the path the merged settings
+      mode: render only, and required there: the path the rendered settings
       document is written to (parent directories are created). The file holds
       exactly what apply would run: every section validated, each section that
       takes an undeclared policy in its policy-wrapper form with the policy
       made explicit, the other sections in their own shape, and the _layering
       directives dropped. Feed it to a later apply or check step as its
-      settings-file. Must not name one of the settings-file layers (the merge
+      settings-file. Must not name one of the settings-file layers (the render
       would overwrite it). Fails when set in apply or check.
     required: false
     default: ""
@@ -70,7 +70,7 @@ inputs:
       before an apply. Must not be .github/settings.yml, the file apply and
       check read: the snapshot would overwrite the document you author, so
       write it beside that file and copy it over deliberately. Fails when set
-      in apply, check, or merge.
+      in apply, check, or render.
     required: false
     default: ""
   snapshot-dir:
@@ -83,7 +83,7 @@ inputs:
       discovery filters included; defaults-file does not apply. Must be
       disjoint from the repos-dir (not the same directory, not above it, not
       below it): the snapshots would overwrite the central files or be read
-      back as central files. Fails when set in apply, check, or merge.
+      back as central files. Fails when set in apply, check, or render.
     required: false
     default: ""
   on-missing-permission:
@@ -104,9 +104,9 @@ inputs:
   sections:
     description: >-
       Optional comma-separated allowlist of sections to process. apply, check,
-      and snapshot only: mode: merge writes every section its layers declare,
-      so the allowlist belongs on the step that runs the merged document and
-      fails the merge when set.
+      and snapshot only: mode: render writes every section its layers declare,
+      so the allowlist belongs on the step that runs the rendered document and
+      fails the render when set.
     required: false
     default: ""
   api-version:
@@ -145,12 +145,17 @@ inputs:
     default: ""
   layering:
     description: >-
-      mode: merge only: merge (default) or replace, the run-wide default for
-      how the keyed list sections (labels, rulesets) combine with the layers
-      below them; a layer's own _layering directive, at its top level or on a
-      section's {entries} wrapper, overrides it per file or per section. Every
-      other list is replaced by the higher layer's. Fails when set in apply or
-      check.
+      mode: render only: replace, shallow, or deep (default), the run-wide
+      default for how every list section's entries combine with the layers
+      below them, each section by its own key (a label's name, a ruleset's
+      name, a secret's name, ...). replace lets the higher list win wholesale;
+      shallow unions the entries by key and swaps a same-key entry for the
+      higher one; deep unions by key and merges a same-key pair field by
+      field, a nested keyed list (a ruleset's rules, by type) unioning the
+      same way. A layer's own _layering directive, at its top level or on a
+      section's {entries} wrapper, overrides it per file or per section. Lists
+      outside the list sections are replaced by the higher layer's. Fails when
+      set in apply or check.
     required: false
     default: ""
   private-repos:
@@ -250,10 +255,10 @@ outputs:
   result:
     description: >-
       The worst result across the run's targets: failed | drift | partial |
-      skipped | applied | clean | snapshot | merged (drift and clean in mode:
-      check, applied in apply, snapshot in mode: snapshot, merged in mode:
-      merge; skipped only across a fleet). Exit 1 exactly when it is failed,
-      or drift in mode: check.
+      skipped | applied | clean | snapshot | rendered (drift and clean in
+      mode: check, applied in apply, snapshot in mode: snapshot, rendered in
+      mode: render; skipped only across a fleet). Exit 1 exactly when it is
+      failed, or drift in mode: check.
   skipped-sections:
     description: >-
       Comma-separated sections skipped for missing permissions under
@@ -265,7 +270,7 @@ outputs:
       target of a multi-repo run (repos, repos-dir, or the snapshot-dir form
       of mode: snapshot). A redacted private target is keyed by its "private
       repository #N" placeholder instead of its slug. The empty map {} for a
-      run over one repository or a merge.
+      run over one repository or a render.
 # END GENERATED: action-outputs
 
 runs:

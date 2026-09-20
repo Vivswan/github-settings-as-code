@@ -7,6 +7,7 @@ import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
+import { LAYERINGS } from "../../src/engine/layers.js";
 import { RESERVED_REF_PREFIXES } from "../../src/engine/secret-refs.js";
 import { FILTER_INPUTS } from "../../src/flows/inputs.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
@@ -89,9 +90,9 @@ const SnapshotDestinationSchema = z
 /** The action inputs a scenario can set; the list inputs stay comma-separated strings, the action's own wire format. */
 const InputsSchema = z
   .object({
-    mode: z.enum(["apply", "check", "merge", "snapshot"]).optional(),
-    /** The mode: merge run default for the keyed list sections (INPUT_LAYERING). */
-    layering: z.enum(["merge", "replace"]).optional(),
+    mode: z.enum(["apply", "check", "render", "snapshot"]).optional(),
+    /** The mode: render run default for the list sections (INPUT_LAYERING). */
+    layering: z.enum(LAYERINGS).optional(),
     /**
      * mode: snapshot only, exactly one of the two: where the child writes,
      * relative to the scenario's temp dir (its working directory), forwarded
@@ -212,10 +213,10 @@ const ExpectSchema = z
       /** Multi-repo: the per-target rollup from the `repos-result` output, "owner/name" -> result string. */
       repos_result: z.record(z.string(), z.string()).optional(),
       /**
-       * mode: merge only: the EXACT document the run must write to merged-file, compared whole after a
-       * YAML parse. A merge never runs the engine, so it cannot combine with a fixpoint re-run proof.
+       * mode: render only: the EXACT document the run must write to rendered-file, compared whole after a
+       * YAML parse. A render never runs the engine, so it cannot combine with a fixpoint re-run proof.
        */
-      merged: SettingsSchema.optional(),
+      rendered: SettingsSchema.optional(),
       /**
        * mode: snapshot, file form only: the EXACT document the run must write to
        * snapshot_file, compared whole after a YAML parse (so the comment header
@@ -233,8 +234,8 @@ const ExpectSchema = z
     },
     { error: fixpointKeyError },
   )
-  .refine((expected) => expected.merged === undefined || expected.fixpoint === undefined, {
-    message: "merged pins a mode: merge run, which has no fixpoint re-run to prove",
+  .refine((expected) => expected.rendered === undefined || expected.fixpoint === undefined, {
+    message: "rendered pins a mode: render run, which has no fixpoint re-run to prove",
   })
   // A snapshot applies nothing, so the apply-mode fixpoint proofs have no run to re-run.
   .refine(
@@ -365,7 +366,7 @@ const ScenarioSchema = z
      */
     settings_raw: z.string().optional(),
     /**
-     * mode: merge only: the documents BELOW `settings`, lowest first; the runner lists them before
+     * mode: render only: the documents BELOW `settings`, lowest first; the runner lists them before
      * settings.yml in INPUT_SETTINGS-FILE, so `settings` is always the top layer.
      */
     settings_layers: z.array(SettingsSchema).optional(),
@@ -408,16 +409,16 @@ const ScenarioSchema = z
     message:
       "settings_raw is single-repo only; a multi-repo target's raw file is `repos.<slug>.settings_raw`",
   })
-  // Only a mode: merge run reads the layer files and writes the merged file the pin compares against.
-  .refine((s) => s.settings_layers === undefined || s.inputs?.mode === "merge", {
-    message: "settings_layers only applies with inputs.mode: merge",
+  // Only a mode: render run reads the layer files and writes the rendered file the pin compares against.
+  .refine((s) => s.settings_layers === undefined || s.inputs?.mode === "render", {
+    message: "settings_layers only applies with inputs.mode: render",
   })
-  .refine((s) => s.expect.merged === undefined || s.inputs?.mode === "merge", {
-    message: "expect.merged only applies with inputs.mode: merge",
+  .refine((s) => s.expect.rendered === undefined || s.inputs?.mode === "render", {
+    message: "expect.rendered only applies with inputs.mode: render",
   })
   // A merge runs no engine: a fixpoint re-run would be a check against nothing.
-  .refine((s) => s.inputs?.mode !== "merge" || s.expect.fixpoint === undefined, {
-    message: "a mode: merge scenario cannot arm a fixpoint proof",
+  .refine((s) => s.inputs?.mode !== "render" || s.expect.fixpoint === undefined, {
+    message: "a mode: render scenario cannot arm a fixpoint proof",
   })
   // The snapshot destinations and their pins describe a mode: snapshot run and
   // nothing else; anywhere else they would be dead configuration.

@@ -240,12 +240,12 @@ const {
   settings: SETTINGS_FILE,
   output: OUTPUT_FILE,
   summary: SUMMARY_FILE,
-  merged: MERGED_FILE,
+  rendered: RENDERED_FILE,
   defaults: DEFAULTS_FILE,
 } = RUNNER_ROOT_FILES;
 
-function mergedFilePath(dir: string): string {
-  return join(dir, MERGED_FILE);
+function renderedFilePath(dir: string): string {
+  return join(dir, RENDERED_FILE);
 }
 
 function documentFileFailures(
@@ -437,14 +437,14 @@ function childEnv(
   // settings-file is a single-repo input the action rejects beside the multi-repo inputs and in
   // snapshot mode. A merge lists every layer file below settings.yml, lowest first; a snapshot names
   // its destination relative to the child's working directory (this temp dir).
-  if (inputs.mode === "merge") {
+  if (inputs.mode === "render") {
     const layers = (scenario.settings_layers ?? []).map((layer, i) => {
       const path = join(dir, layerFile(i));
       writeFileSync(path, stringifyYaml(layer));
       return path;
     });
     env["INPUT_SETTINGS-FILE"] = [...layers, join(dir, SETTINGS_FILE)].join("\n");
-    env["INPUT_MERGED-FILE"] = mergedFilePath(dir);
+    env["INPUT_RENDERED-FILE"] = renderedFilePath(dir);
   } else if (inputs.mode === "snapshot") {
     if (inputs.snapshot_file !== undefined) {
       env["INPUT_SNAPSHOT-FILE"] = inputs.snapshot_file;
@@ -751,8 +751,8 @@ export async function runScenario(
     if (exp.result !== undefined && first.outputs.result !== exp.result) {
       failures.push(`result "${first.outputs.result}" != expected "${exp.result}"`);
     }
-    if (exp.merged !== undefined) {
-      failures.push(...documentFileFailures("merged", mergedFilePath(dir), exp.merged));
+    if (exp.rendered !== undefined) {
+      failures.push(...documentFileFailures("rendered", renderedFilePath(dir), exp.rendered));
     }
     // 3-snapshot. The snapshot document(s) a mode: snapshot run wrote, each
     // compared whole after a YAML parse, so the comment header is ignored.

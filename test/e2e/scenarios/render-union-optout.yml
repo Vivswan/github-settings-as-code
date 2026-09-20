@@ -1,12 +1,12 @@
-# mode: merge folds a layer stack into one document with ZERO requests. A
+# mode: render folds a layer stack into one document with ZERO requests. A
 # fleet layer declares labels, a `main` ruleset, Pages, and a repository knob;
 # the repo layer edits the labels and ruleset and nulls both Pages and the knob.
-# The merged file pins the contrast: `pages: null` is kept as the value with no
+# The rendered file pins the contrast: `pages: null` is kept as the value with no
 # notice (the only spelling of "Pages off"), while `repository: null` is removed
 # with a notice.
-name: merge-union-optout
+name: render-union-optout
 inputs:
-  mode: merge
+  mode: render
 settings_layers:
   - repository:
       has_wiki: false
@@ -45,7 +45,7 @@ settings:
   pages: null
 expect:
   exit_code: 0
-  result: merged
+  result: rendered
   zero_requests: true
   stdout_contains:
     - "settings.yml: null removed repository declared by a lower layer"
@@ -56,8 +56,8 @@ expect:
     - "layer-0.yml |"
     - "| 2 | "
     - "settings.yml |"
-    - "Merged document written to "
-  merged:
+    - "Rendered document written to "
+  rendered:
     pages: null
     labels:
       _undeclared: delete

@@ -15,6 +15,8 @@ import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import {
   defaultUndeclaredPolicy,
   type GraphqlDict,
+  type KeyedListLayering,
+  keyedBy,
   loosen,
   type SectionSnapshot,
   undeclaredPolicy,
@@ -35,6 +37,7 @@ import {
   planVariables,
   type VariableEntry,
   type VariablesPlanScope,
+  variableKey,
 } from "./variables-engine.js";
 
 export type RepoVariablesKey = "actions_variables" | "agents_variables";
@@ -138,6 +141,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly permission: { readonly repo: readonly [PatResource] };
   readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
+  readonly layering: KeyedListLayering;
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>, GraphqlDict, K>,
@@ -236,6 +240,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     permission: { repo: [resource] },
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
+    layering: keyedBy("name", { fold: variableKey }),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
