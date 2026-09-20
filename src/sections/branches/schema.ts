@@ -117,12 +117,42 @@ const CHECK_LIST_ERROR =
 const REVIEW_COUNT_ERROR =
   "required_pull_request_reviews.required_approving_review_count must be a whole number from 0 to 6 (GitHub accepts 1 to 6, or 0 to require no approvals)";
 
+const CHECK_ITEM_ERROR =
+  "each required_status_checks.checks item is a {context, app_id} mapping naming one required check; a bare name goes under contexts: [names]";
+
+const CHECK_CONTEXT_ERROR =
+  "required_status_checks.checks[].context must be the check's name, as a string";
+
+const CHECK_APP_ID_ERROR =
+  "required_status_checks.checks[].app_id must be a whole number: the id of the GitHub App that must report the check, or -1 to let any App report it; omit it to pin whichever App reported it last";
+
+/** The unknown keys of a check item, each named with the fix: GitHub's PUT takes no other field there. */
+function checkItemKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+  if (issue.code !== "unrecognized_keys") {
+    return CHECK_ITEM_ERROR;
+  }
+  const keys = issue.keys.map((key) => JSON.stringify(key)).join(", ");
+  return `a required_status_checks.checks item takes only context and app_id (GitHub's protection PUT has no other field there); remove ${keys}`;
+}
+
+/**
+ * One required check, GitHub's PUT vocabulary exactly: the check's name and the App that must report
+ * it (`null` reads back from GitHub as "any App" and is sent as -1, see index.ts putStatusChecks).
+ */
+const RequiredStatusCheck = z.strictObject(
+  {
+    context: z.string({ error: CHECK_CONTEXT_ERROR }),
+    app_id: z.int({ error: CHECK_APP_ID_ERROR }).nullable().optional(),
+  },
+  { error: checkItemKeyError },
+);
+
 const RequiredStatusChecks = z
   .looseObject(
     {
       strict: z.boolean({ error: STRICT_ERROR }),
       contexts: z.array(z.string()).optional(),
-      checks: z.array(z.unknown()).optional(),
+      checks: z.array(RequiredStatusCheck).optional(),
     },
     {
       error:

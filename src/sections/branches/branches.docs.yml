@@ -33,7 +33,9 @@ coverage:
       empty one back.
       Every write is drift-gated: the PUT is planned when a declared key diverges or when the
       replacing PUT would remove a live setting the file omits, and a converged branch plans
-      nothing. Three routed keys never ride the PUT: required_signatures (the PUT silently drops it)
+      nothing. A live restrictions holder with empty users, teams, and apps is such a setting (it
+      lets nobody push, and GitHub omits the key only when the branch is unrestricted), so a file
+      that omits restrictions is told the PUT would lift it; declaring the all-empty holder keeps it. Three routed keys never ride the PUT: required_signatures (the PUT silently drops it)
       goes through its own POST/DELETE .../protection/required_signatures sub-endpoint when it
       drifts and again after any planned PUT (declared true POSTs, false DELETEs, undeclared
       untouched; a GET that omits the field reads as false; GitHub does not document whether the PUT
@@ -118,9 +120,13 @@ schema:
     The required checks by name; `[]` keeps the requirement on while requiring none.
   BranchProtectionConfig.required_status_checks|0.checks: >-
     The required checks as {context, app_id} pairs, the PUT's second spelling of the list; the names
-    are derived into `contexts` for the PUT when the file declares only `checks`. An `app_id` of
-    `-1` lets any App report the check (`null`, GitHub's read-back spelling of the same, is sent as
-    `-1`); an omitted id pins whichever App reported it last.
+    are derived into `contexts` for the PUT when the file declares only `checks`. GitHub's PUT takes
+    no other field in an item, so any other key is refused upfront, named, with the fix.
+  BranchProtectionConfig.required_status_checks|0.checks[].context: The name of the required check.
+  BranchProtectionConfig.required_status_checks|0.checks[].app_id: >-
+    The id of the GitHub App that must report the check. `-1` lets any App report it (`null`,
+    GitHub's read-back spelling of the same, is sent as `-1`); an omitted id pins whichever App
+    reported it last.
   BranchProtectionConfig.required_pull_request_reviews: >-
     Require pull request reviews before merging; `null` turns the requirement off. Every review
     setting beside the count and the two actor holders (`dismiss_stale_reviews`,

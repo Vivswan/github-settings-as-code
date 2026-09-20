@@ -23,6 +23,7 @@ import {
   type GraphqlHandlerResult,
   integrationBody,
   type Json,
+  type MockResponse,
   noContent,
   ok,
   rejected,
@@ -33,6 +34,7 @@ import {
 } from "../../../test/e2e/mock/support.js";
 import { MISSING_BRANCH } from "./endpoints.js";
 import { classicViewOfRule, RuleNode } from "./graphql-rules.js";
+import { BOOLEAN_CONTROL_SET, NULLABLE_CONTROLS } from "./keys.js";
 
 /**
  * GitHub's fnmatch (Ruby's, FNM_PATHNAME) for classic rule patterns: `*` and `?` stop at a slash,
@@ -180,6 +182,43 @@ function actorsAsGitHubReadsBack(payload: Json): Json {
   return out;
 }
 
+/**
+ * The boolean controls the protection PUT takes: the GET-wrapped ones minus required_signatures,
+ * which is its own sub-resource. GitHub 422s a non-boolean there, the {url, enabled} wrapper a
+ * copied GET response carries included; null passes only under the NULLABLE_CONTROLS.
+ */
+const PUT_BOOLEAN_CONTROLS = [...BOOLEAN_CONTROL_SET].filter(
+  (key) => key !== "required_signatures",
+);
+
+/** GitHub's "Validation Error Simple" for the first boolean control whose value the PUT schema refuses. */
+function invalidBooleanControlResponse(payload: Json): MockResponse | null {
+  for (const key of PUT_BOOLEAN_CONTROLS) {
+    if (!Object.hasOwn(payload, key)) {
+      continue;
+    }
+    const value = payload[key];
+    const nullable = NULLABLE_CONTROLS.has(key);
+    if (typeof value === "boolean" || (value === null && nullable)) {
+      continue;
+    }
+    const expected = nullable ? "a boolean or null" : "a boolean";
+    return {
+      status: 422,
+      body: {
+        message: "Validation Failed",
+        errors: [
+          `Invalid request.\n\nFor 'properties/${key}', ${JSON.stringify(value)} is not ${expected}.`,
+        ],
+        documentation_url:
+          "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
+      },
+      requestOffSpec: true,
+    };
+  }
+  return null;
+}
+
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
   "branches.listProtected": ({ state, param, query }) => {
     // A branch a wildcard rule matches is protected too, as on GitHub, where the REST view serves
@@ -223,7 +262,12 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
     if (!state.branches.includes(branch)) {
       return rejected(MISSING_BRANCH);
     }
-    const stored = protectionFromPut(actorsAsGitHubReadsBack(asObject(body)));
+    const payload = asObject(body);
+    const invalid = invalidBooleanControlResponse(payload);
+    if (invalid !== null) {
+      return invalid;
+    }
+    const stored = protectionFromPut(actorsAsGitHubReadsBack(payload));
     // required_signatures is its own sub-resource and absent from the PUT's request schema. Whether
     // GitHub's PUT PRESERVES an existing requirement is undocumented; the mock carries it across as
     // the conservative reading, and the docs tell users to DECLARE the toggle, which pins the state

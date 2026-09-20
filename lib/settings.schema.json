@@ -358,9 +358,28 @@
                   }
                 },
                 "checks": {
-                  "description": "The required checks as {context, app_id} pairs, the PUT's second spelling of the list; the names are derived into `contexts` for the PUT when the file declares only `checks`. An `app_id` of `-1` lets any App report the check (`null`, GitHub's read-back spelling of the same, is sent as `-1`); an omitted id pins whichever App reported it last.",
+                  "description": "The required checks as {context, app_id} pairs, the PUT's second spelling of the list; the names are derived into `contexts` for the PUT when the file declares only `checks`. GitHub's PUT takes no other field in an item, so any other key is refused upfront, named, with the fix.",
                   "type": "array",
-                  "items": {}
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "context": {
+                        "description": "The name of the required check.",
+                        "type": "string"
+                      },
+                      "app_id": {
+                        "description": "The id of the GitHub App that must report the check. `-1` lets any App report it (`null`, GitHub's read-back spelling of the same, is sent as `-1`); an omitted id pins whichever App reported it last.",
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "context"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [

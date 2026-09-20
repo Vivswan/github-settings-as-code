@@ -27,3 +27,12 @@ const BOOLEAN_CONTROLS = [
 ] as const;
 export type BooleanControl = (typeof BOOLEAN_CONTROLS)[number];
 export const BOOLEAN_CONTROL_SET: ReadonlySet<string> = new Set(BOOLEAN_CONTROLS);
+
+/**
+ * The controls whose PUT schema marks the boolean nullable, null being the "off" spelling; the PUT
+ * 422s null under any other control.
+ */
+export const NULLABLE_CONTROLS: ReadonlySet<string> = new Set<BooleanControl>([
+  "enforce_admins",
+  "allow_force_pushes",
+]);

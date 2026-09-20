@@ -63,20 +63,22 @@ const STATUS_CHECK_ALIASES: Readonly<Record<string, string>> = {
 
 /**
  * Nothing the replacing PUT would need to preserve: GitHub's default fill under a declared block,
- * an empty list, or an actor holder with empty lists. Any other nested object is a control that is
- * ON by its presence.
+ * an empty list, or a review-side actor holder with empty lists (GitHub reads it as off and omits
+ * it). Any other nested object is a control that is ON by its presence, `restrictions` included:
+ * an all-empty one restricts pushes to nobody, and the GET omits the key only when unrestricted.
  */
-function isEmptySetting(value: unknown): boolean {
+function isEmptySetting(key: string, value: unknown): boolean {
   if (value === null || value === undefined || value === false || value === "" || value === 0) {
     return true;
   }
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (isPlainMapping(value)) {
+  if (isPlainMapping(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
     const keys = Object.keys(value);
     return (
-      keys.length > 0 && keys.every((key) => ACTOR_LIST_KEYS.has(key) && isEmptySetting(value[key]))
+      keys.length > 0 &&
+      keys.every((inner) => ACTOR_LIST_KEYS.has(inner) && isEmptySetting(inner, value[inner]))
     );
   }
   return false;
@@ -106,7 +108,7 @@ function omittedLiveDrift(
     if (alias !== undefined && Object.hasOwn(declared, alias.slice(alias.lastIndexOf(".") + 1))) {
       continue;
     }
-    if (isEmptySetting(value)) {
+    if (isEmptySetting(key, value)) {
       continue;
     }
     drift.push(
@@ -548,8 +550,9 @@ function foldActorNames(protection: Record<string, unknown>): Record<string, unk
 }
 
 // The two actor holders GitHub serves only when they name someone: an all-empty one is "no
-// restriction", and the GET omits the key.
+// restriction", and the GET omits the key. The top-level `restrictions` is NOT one of them.
 const REVIEW_ACTOR_HOLDERS = ["dismissal_restrictions", "bypass_pull_request_allowances"] as const;
+const REVIEW_ACTOR_HOLDER_SET: ReadonlySet<string> = new Set(REVIEW_ACTOR_HOLDERS);
 
 /**
  * A live review block without a holder reads as the all-empty holder, so a declared empty one is

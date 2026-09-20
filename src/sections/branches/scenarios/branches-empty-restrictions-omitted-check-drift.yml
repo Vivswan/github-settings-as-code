@@ -1,0 +1,36 @@
+# A live restrictions holder with empty users, teams, and apps is a push
+# restriction that lets nobody through: GitHub serves the three lists whenever
+# the restriction is on and omits the key only when the branch is unrestricted.
+# The settings file omits restrictions, so the replacing PUT would send
+# restrictions: null and lift it. Check mode names that line, exits 1, and
+# writes nothing; the fix is to declare the all-empty holder.
+name: branches-empty-restrictions-omitted-check-drift
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+      restrictions:
+        users: []
+        teams: []
+        apps: []
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  summary_contains:
+    - "branches[main].protection.restrictions: set live but omitted from the settings file, so apply would REMOVE it; add restrictions to the branch's protection in the settings file to keep it"
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"

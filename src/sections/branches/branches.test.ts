@@ -320,6 +320,18 @@ describe("branches", () => {
       { enforce_admins: true, allow_deletions: true },
     ],
     [
+      // GitHub's GET omits restrictions when the branch is unrestricted and serves the three lists,
+      // empty or not, when it is restricted; only the review-side holders read all-empty as off.
+      "an all-empty restrictions holder (nobody may push)",
+      { enforce_admins: { enabled: true }, restrictions: { users: [], teams: [], apps: [] } },
+      { enforce_admins: true },
+      "restrictions",
+      {
+        enforce_admins: true,
+        restrictions: { users: [] as string[], teams: [] as string[], apps: [] as string[] },
+      },
+    ],
+    [
       "a nested review setting",
       {
         enforce_admins: { enabled: true },
@@ -1848,6 +1860,57 @@ describe("branches snapshot", () => {
         apps: [{ slug: "deploy-gate" }],
       },
     });
+  });
+
+  test.each([
+    [
+      "the GET wrapper",
+      "enforce_admins",
+      { url: "https://api.github.com/x/enforce_admins", enabled: true },
+      "is not a boolean or null",
+    ],
+    ["a quoted boolean", "enforce_admins", "true", "is not a boolean or null"],
+    // Only enforce_admins and allow_force_pushes are nullable in the PUT schema; null elsewhere is a 422.
+    ["null under a non-nullable control", "allow_deletions", null, "is not a boolean"],
+  ])(
+    "the mock answers GitHub's 422 to a PUT whose boolean control carries %s, and stores nothing",
+    async (_what, control, value, verdict) => {
+      const api = registryFake({ branches: ["main"] });
+      const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
+        [control]: value,
+        required_status_checks: null,
+        required_pull_request_reviews: null,
+        restrictions: null,
+      });
+      expect("error" in put ? [put.error.status, JSON.parse(put.error.body)] : put).toEqual([
+        422,
+        {
+          message: "Validation Failed",
+          errors: [
+            `Invalid request.\n\nFor 'properties/${control}', ${JSON.stringify(value)} ${verdict}.`,
+          ],
+          documentation_url:
+            "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
+        },
+      ]);
+      const served = await api.tryRequest("GET", "/repos/o/r/branches/main/protection");
+      expect("error" in served && served.error.status).toBe(404);
+    },
+  );
+
+  test("the mock takes null as the off spelling on the two controls the PUT schema marks nullable", async () => {
+    const api = registryFake({ branches: ["main"] });
+    const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
+      enforce_admins: null,
+      allow_force_pushes: null,
+      required_status_checks: null,
+      required_pull_request_reviews: null,
+      restrictions: null,
+    });
+    expect("data" in put).toBe(true);
+    const served = await api.tryRequest("GET", "/repos/o/r/branches/main/protection");
+    // An unset control has no key in GitHub's GET shape, so the read-back carries neither.
+    expect("data" in served ? served.data : served).toEqual({});
   });
 
   test("the mock serves a wildcard rule's protection only under an EXISTING matching branch, signatures included", async () => {

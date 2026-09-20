@@ -54,6 +54,9 @@ export const LIST_IDENTITY: Readonly<Record<string, string>> = {
   custom_properties: "property_name",
   deploy_keys: "title",
   secret_scanning_custom_patterns: "name",
+  // GitHub keys a required check by (context, app_id) and allows one context under two Apps; the
+  // walk takes one field, so the name sorts and the canonical-JSON tiebreak orders the App ids.
+  "branches[].protection.required_status_checks.checks": "context",
 };
 
 /**
