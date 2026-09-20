@@ -1,0 +1,32 @@
+# A protection block copied from GitHub's GET response carries vocabulary the
+# protection PUT has no word for: the {url, enabled} wrappers, the links, and
+# enforcement_level. Applied, the wrappers 422 and the rest never reads back
+# equal, so check would report drift forever. The document is refused before
+# any request, each key named with its fix.
+name: branches-get-response-copied-rejected
+settings:
+  branches:
+    - name: main
+      protection:
+        url: https://api.github.com/repos/octocat/hello-world/branches/main/protection
+        enforce_admins:
+          url: https://api.github.com/repos/octocat/hello-world/branches/main/protection/enforce_admins
+          enabled: true
+        required_status_checks:
+          strict: true
+          contexts: [ci]
+          enforcement_level: everyone
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "branches[0].protection.url: protection.url is a link"
+    - "branches[0].protection.enforce_admins.enabled:"
+    - "declare enforce_admins: true instead"
+    - "branches[0].protection.required_status_checks.enforcement_level:"

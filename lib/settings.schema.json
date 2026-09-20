@@ -336,9 +336,62 @@
       ]
     },
     "BranchProtectionConfig": {
-      "description": "The protection PUT payload, passed through verbatim except its routed keys.",
+      "description": "The protection PUT payload, passed through verbatim except its routed keys. What the file alone shows wrong is refused upfront, naming the fix: the GET-only keys a copied GET response carries (`name`, `enabled`, `enforcement_level`, `url` and `*_url`, at any depth), a status-check requirement without `strict` or a check list, and a review count outside 0-6.",
       "type": "object",
       "properties": {
+        "required_status_checks": {
+          "description": "Require status checks to pass before merging; `null` turns the requirement off. A mapping carries `strict` and one of `contexts` or `checks`, since GitHub's protection PUT rejects the requirement without either.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "strict": {
+                  "description": "Whether the branch must also be up to date with its base before merging; `false` requires only the checks to pass.",
+                  "type": "boolean"
+                },
+                "contexts": {
+                  "description": "The required checks by name; `[]` keeps the requirement on while requiring none.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "checks": {
+                  "description": "The required checks as {context, app_id} pairs, the PUT's second spelling of the list; the names are derived into `contexts` for the PUT when the file declares only `checks`. An `app_id` of `-1` lets any App report the check (`null`, GitHub's read-back spelling of the same, is sent as `-1`); an omitted id pins whichever App reported it last.",
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              "required": [
+                "strict"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_pull_request_reviews": {
+          "description": "Require pull request reviews before merging; `null` turns the requirement off. Every review setting beside the count (`dismiss_stale_reviews`, `require_code_owner_reviews`, `dismissal_restrictions`, ...) passes through to the PUT.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "required_approving_review_count": {
+                  "description": "Approving reviews required before merging: 1 to 6, or 0 to require no approvals. GitHub accepts no other value, so the file is refused upfront instead of the PUT failing at apply.",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 6
+                }
+              },
+              "additionalProperties": {}
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "required_signatures": {
           "description": "Require signed commits on the branch. On a literal branch this is a routed key the protection PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures sub-endpoint: when it drifts, and again after any protection PUT (GitHub does not document whether the PUT preserves an existing requirement), so declare the toggle on any branch that carries one - a declared value is pinned either way. On a wildcard rule it rides the GraphQL rule mutation like every other key.",
           "type": "boolean"

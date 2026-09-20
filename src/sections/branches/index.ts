@@ -39,6 +39,7 @@ import {
   WILDCARD_KEYS,
   wildcardSnapshot,
 } from "./graphql-rules.js";
+import { isGetOnlyKey } from "./keys.js";
 import { type BranchConfig, BranchesConfig, type BranchProtectionConfig } from "./schema.js";
 
 const REQUIRED_PROTECTION_KEYS = [
@@ -186,26 +187,14 @@ export const branchesSection = {
         }
       }
       // The structured pairs translate NAMED sub-keys only, so an unknown sub-key would be silently
-      // lost; a non-object value is rejected too, since nothing downstream could translate it.
+      // lost; the schema already holds each pair to a mapping or null.
       const nested: Array<[string, Record<string, string>]> = [
         ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
         ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
       ];
       for (const [key, twins] of nested) {
         const value = protection[key];
-        if (value === null || value === undefined) {
-          continue;
-        }
-        if (typeof value !== "object" || Array.isArray(value)) {
-          refineCtx.addIssue({
-            code: "custom",
-            path: [index, "protection", key],
-            message:
-              `the wildcard entry "${entry.name}" declares protection.${key} as ` +
-              `${Array.isArray(value) ? "a list" : JSON.stringify(value)}, but on a wildcard ` +
-              `rule it must be a mapping of its sub-keys [${Object.keys(twins).join(", ")}], or ` +
-              `null to turn the control off`,
-          });
+        if (!isPlainMapping(value)) {
           continue;
         }
         for (const subKey of Object.keys(value)) {
@@ -508,17 +497,10 @@ async function planLiteralEntry(
  * like. Exported so the e2e state tests can assert their protectionFromPut inverts this exact function.
  */
 export function flattenProtection(live: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(live)) {
-    if (GET_ONLY_KEYS.has(key) || isUrlKey(key)) {
-      continue;
-    }
-    out[key] = flattenValue(value);
-  }
+  const out = flattenValue(live) as Record<string, unknown>;
   const checks = out.required_status_checks;
   if (isPlainMapping(checks)) {
-    const { enforcement_level: _level, ...status } = checks;
-    out.required_status_checks = putStatusChecks(status);
+    out.required_status_checks = putStatusChecks(checks);
   }
   return out;
 }
@@ -530,7 +512,7 @@ export function flattenProtection(live: Record<string, unknown>): Record<string,
  * the PUT still requires `contexts` beside `checks`, so a body carrying only `checks` (a mock
  * storing a PUT verbatim) gets the names derived from it.
  */
-function putStatusChecks(status: Record<string, unknown>): Record<string, unknown> {
+function putStatusChecks<T extends Record<string, unknown>>(status: T): T {
   if (!Array.isArray(status.checks)) {
     return status;
   }
@@ -544,11 +526,6 @@ function putStatusChecks(status: Record<string, unknown>): Record<string, unknow
       );
   return { ...status, checks, contexts };
 }
-
-// GET-only metadata the PUT vocabulary has no word for (url keys drop generically).
-const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled"]);
-
-const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url");
 
 const ACTOR_NAME_KEYS = ["login", "slug"] as const;
 const ACTOR_LIST_KEYS = new Set(["users", "teams", "apps"]);
@@ -622,8 +599,8 @@ function flattenValue(value: unknown): unknown {
         }
         return actor;
       });
-    } else if (isUrlKey(key)) {
-      // URLs never appear in the PUT shape.
+    } else if (isGetOnlyKey(key)) {
+      // The GET-only vocabulary at any depth (keys.ts); the schema refuses the same keys in a declaration.
     } else {
       out[key] = flattenValue(inner);
     }
