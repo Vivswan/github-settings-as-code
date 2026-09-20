@@ -1159,21 +1159,24 @@ describe("repository parse refusals", () => {
     expect(refusals(declared)).toEqual([]);
   });
 
+  const TOPIC_RULE =
+    "is not a topic GitHub accepts: a topic is 1 to 50 characters, each a letter, digit, or hyphen, starting with a letter or digit (uppercase is lowercased on the wire)";
+
   test.each([
     [
       "a space inside a topic",
       ["GitHub Actions"],
-      'repository.topics[0]: "github actions" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+      `repository.topics[0]: "GitHub Actions" ${TOPIC_RULE}`,
     ],
     [
       "a leading hyphen, in the comma-string form",
       "ci, -lead",
-      'repository.topics[1]: "-lead" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+      `repository.topics: "-lead" (entry 2 of the comma list) ${TOPIC_RULE}`,
     ],
     [
       "a 51-character topic",
       ["a".repeat(51)],
-      `repository.topics[0]: "${"a".repeat(51)}" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
+      `repository.topics[0]: "${"a".repeat(51)}" ${TOPIC_RULE}`,
     ],
     [
       "21 topics",
@@ -1187,14 +1190,33 @@ describe("repository parse refusals", () => {
     },
   );
 
+  const EMPTY_TOPIC =
+    "is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic";
+
   test.each([
-    ["an empty list item, once dropped silently", ["ci", ""], 1],
-    ["an empty comma-string segment, once dropped silently", "ci,,tooling", 1],
-    ["an empty string, once the wholesale clear", "", 0],
-  ])("topics: %s is refused at parse by index", (_what, topics, index) => {
-    expect(refusals({ topics })).toEqual([
-      `repository.topics[${index}]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic`,
-    ]);
+    [
+      "an empty list item, once dropped silently",
+      ["ci", ""],
+      `repository.topics[1]: an empty topic ${EMPTY_TOPIC}`,
+    ],
+    [
+      "an empty comma-string segment, once dropped silently",
+      "ci,,tooling",
+      `repository.topics: an empty topic (entry 2 of the comma list) ${EMPTY_TOPIC}`,
+    ],
+    [
+      "an empty string, once the wholesale clear",
+      "",
+      `repository.topics: an empty topic ${EMPTY_TOPIC}`,
+    ],
+  ])("topics: %s is refused at parse, the refusal naming the entry", (_what, topics, message) => {
+    expect(refusals({ topics })).toEqual([message]);
+  });
+
+  test("topics: the cap counts distinct topics after the fold, so 22 entries naming 2 topics parse", () => {
+    expect(
+      refusals({ topics: [...Array.from({ length: 20 }, () => "CI"), "ci", "tooling"] }),
+    ).toEqual([]);
   });
 
   test("topics: 20 well-formed topics, a 50-character one and uppercase input among them, parse", () => {

@@ -483,8 +483,8 @@ export const repositorySection = {
         });
       }
     }
-    if ("topics" in desired) {
-      const names = normalizeTopics(desired.topics);
+    if (declared.topics !== undefined) {
+      const names = normalizeTopics(declared.topics);
       const drift = subsetDiff(
         [...names].sort(),
         [...(live.topics ?? [])].sort(),

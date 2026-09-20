@@ -3,6 +3,7 @@
 import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
 import type { MustBeNever } from "../../types.js";
+import { conditional } from "../shared/schema-helpers.js";
 
 /**
  * JSON.stringify on an arbitrary YAML value would throw on a cyclic alias and kill the run before
@@ -411,52 +412,80 @@ function refineCommitMessagePairs(declared: Record<string, unknown>, ctx: z.Refi
   }
 }
 
+/**
+ * The published-schema twins of refineCommitMessagePairs, read from the same tables: a message key requires its
+ * title key beside it, and a title with a documented matrix narrows the message enum. A refinement does not reach
+ * z.toJSONSchema, so these ride the section's meta (EnvironmentConfig attaches its twins the same way).
+ */
+function commitMessagePairRules(): Record<string, unknown>[] {
+  return COMMIT_MESSAGE_FAMILIES.flatMap((family) => [
+    conditional({ required: [family.messageKey] }, { required: [family.titleKey] }),
+    ...Object.entries(family.pairs ?? {}).map(([title, messages]) =>
+      conditional(
+        { required: [family.titleKey], properties: { [family.titleKey]: { const: title } } },
+        { properties: { [family.messageKey]: { enum: [...messages] } } },
+      ),
+    ),
+  ]);
+}
+
 // --- Topics -----------------------------------------------------------------------
 
 /**
- * Each declared topic in declaration order, trimmed in the comma form and lowercased. Nothing is
- * dropped: an empty entry stays so the rule below refuses it by index, instead of `topics: [""]`
- * silently becoming the wholesale clear that only `topics: []` spells.
+ * GitHub's topic rule, matched on the declared spelling: 1 to 50 characters, each a letter, digit, or hyphen,
+ * starting with a letter or digit. Uppercase passes and folds to lowercase on the wire (normalizeTopics), so the
+ * grammar spells [A-Za-z]: the published schema cannot fold, and a lowercase-only pattern there would refuse the
+ * `Copier` the runtime accepts. The pattern is the grammar on both sides; a refinement would not reach the schema.
  */
-function declaredTopics(raw: unknown): string[] {
-  const values = Array.isArray(raw)
-    ? raw.map(String)
-    : String(raw ?? "")
-        .split(",")
-        .map((t) => t.trim());
-  return values.map((t) => t.toLowerCase());
-}
-
-export function normalizeTopics(raw: unknown): string[] {
-  return [...new Set(declaredTopics(raw))];
-}
-
-/** GitHub's topic rule: lowercase letters, digits, and hyphens, 50 characters at most, starting with a letter or digit. */
-const TOPIC_PATTERN = /^[a-z0-9][a-z0-9-]{0,49}$/;
+const TOPIC_GRAMMAR = "[A-Za-z0-9][A-Za-z0-9-]{0,49}";
+const TOPIC_PATTERN = new RegExp(`^${TOPIC_GRAMMAR}$`);
+/** The comma form: the same grammar per segment, with the whitespace around a segment trimmed away. */
+const TOPIC_LIST_PATTERN = new RegExp(`^\\s*${TOPIC_GRAMMAR}\\s*(,\\s*${TOPIC_GRAMMAR}\\s*)*$`);
 const MAX_TOPICS = 20;
 
-function refineTopics(raw: unknown, ctx: z.RefinementCtx): void {
-  const names = declaredTopics(raw);
-  const distinct = new Set(names).size;
+function topicRefusal(name: string, where = ""): string {
+  return name === ""
+    ? `an empty topic${where} is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic`
+    : `${JSON.stringify(name)}${where} is not a topic GitHub accepts: a topic is 1 to 50 characters, each a letter, digit, or hyphen, starting with a letter or digit (uppercase is lowercased on the wire)`;
+}
+
+/** Each declared topic in declaration order, trimmed in the comma form; an empty segment stays so a refusal can name it. */
+function declaredTopics(raw: string | readonly string[]): string[] {
+  return typeof raw === "string" ? raw.split(",").map((t) => t.trim()) : [...raw];
+}
+
+/** The wire form: lowercased and deduped. */
+export function normalizeTopics(raw: string | readonly string[]): string[] {
+  return [...new Set(declaredTopics(raw).map((t) => t.toLowerCase()))];
+}
+
+const topicName = z.string().regex(TOPIC_PATTERN, {
+  error: (issue) => topicRefusal(String(issue.input)),
+});
+
+/** The comma form fails as one string, so the refusal names the segment at fault. */
+const topicList = z.string().regex(TOPIC_LIST_PATTERN, {
+  error: (issue) => {
+    const segments = declaredTopics(String(issue.input));
+    const index = segments.findIndex((segment) => !TOPIC_PATTERN.test(segment));
+    const where = segments.length > 1 ? ` (entry ${index + 1} of the comma list)` : "";
+    return topicRefusal(segments[index] ?? "", where);
+  },
+});
+
+/**
+ * The cap counts topics as GitHub stores them, distinct after the fold: `[ci, CI]` is one topic. JSON Schema
+ * cannot count that, so the cap stays the runtime's alone; a maxItems would refuse a duplicate-laden list the
+ * runtime accepts, which is the one direction the published schema must never take.
+ */
+function refineTopicCount(raw: string | readonly string[], ctx: z.RefinementCtx): void {
+  const distinct = normalizeTopics(raw).length;
   if (distinct > MAX_TOPICS) {
     ctx.addIssue({
       code: "custom",
       message: `${distinct} topics declared; GitHub allows at most ${MAX_TOPICS}`,
     });
   }
-  names.forEach((name, index) => {
-    if (TOPIC_PATTERN.test(name)) {
-      return;
-    }
-    ctx.addIssue({
-      code: "custom",
-      path: [index],
-      message:
-        name === ""
-          ? "an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic"
-          : `${JSON.stringify(name)} is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
-    });
-  });
 }
 
 // --- The PATCH body -----------------------------------------------------------------
@@ -530,8 +559,8 @@ export const RepositoryConfig = z
   .looseObject({
     ...patchFieldShape,
     topics: z
-      .union([z.string(), z.array(z.string())])
-      .superRefine(refineTopics)
+      .union([topicList, z.array(topicName)])
+      .superRefine(refineTopicCount)
       .optional(),
     enable_vulnerability_alerts: repositoryToggle(),
     enable_automated_security_fixes: repositoryToggle(),
@@ -551,7 +580,7 @@ export const RepositoryConfig = z
     }
     refineCommitMessagePairs(declared, ctx);
   })
-  .meta({ id: "RepositoryConfig" });
+  .meta({ id: "RepositoryConfig", allOf: commitMessagePairRules() });
 export type RepositoryConfig = z.infer<typeof RepositoryConfig>;
 
 /** The parsed commit-message fields are the spec's unions; a widened enum would type them as string. */

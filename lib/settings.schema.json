@@ -1627,15 +1627,17 @@
           "type": "boolean"
         },
         "topics": {
-          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list removes every topic.",
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 letters, digits, and hyphens, starting with a letter or digit (uppercase is lowercased on the wire); at most 20 distinct topics. An empty entry is refused; an empty list removes every topic.",
           "anyOf": [
             {
-              "type": "string"
+              "type": "string",
+              "pattern": "^\\s*[A-Za-z0-9][A-Za-z0-9-]{0,49}\\s*(,\\s*[A-Za-z0-9][A-Za-z0-9-]{0,49}\\s*)*$"
             },
             {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,49}$"
               }
             }
           ]
@@ -1675,7 +1677,77 @@
       },
       "additionalProperties": {
         "description": "Everything else passes through to PATCH /repos/{r} verbatim."
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_message"
+            ]
+          },
+          "then": {
+            "required": [
+              "squash_merge_commit_title"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_title"
+            ],
+            "properties": {
+              "squash_merge_commit_title": {
+                "const": "PR_TITLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "squash_merge_commit_message": {
+                "enum": [
+                  "PR_BODY",
+                  "BLANK",
+                  "COMMIT_MESSAGES"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_title"
+            ],
+            "properties": {
+              "squash_merge_commit_title": {
+                "const": "COMMIT_OR_PR_TITLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "squash_merge_commit_message": {
+                "enum": [
+                  "COMMIT_MESSAGES"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "merge_commit_message"
+            ]
+          },
+          "then": {
+            "required": [
+              "merge_commit_title"
+            ]
+          }
+        }
+      ]
     },
     "RequiredReviewerConfig": {
       "description": "A team and the file patterns whose changes it must approve.",
