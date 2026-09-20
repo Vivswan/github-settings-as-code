@@ -1,7 +1,7 @@
 /** The `webhooks:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
-import { GAP as WEBHOOK_EVENTS } from "../../upstream-gaps/webhook-events.js";
+import { REPOSITORY_WEBHOOK_EVENTS, WEBHOOK_EVENTS_REFERENCE } from "./events.js";
 
 /**
  * JSON.stringify on an arbitrary YAML value would throw on a cyclic alias and kill the run before the normal failure
@@ -23,11 +23,13 @@ function spell(value: unknown): string {
   return String(value);
 }
 
-// GitHub 422s each of these at apply time ("is not a valid event", "Url is not a valid URL"); the wire types are
-// bare strings, so the parser carries what GitHub documents and refuses the rest naming the fix.
-const WebhookEvent = z.enum([...WEBHOOK_EVENTS.values, "*"] as const, {
+// GitHub 422s each of these at apply time ("is not a valid event", "Url is not a valid URL"); the REST wire types are
+// bare strings, so the parser carries the list GitHub's webhooks description publishes and refuses the rest naming it.
+const WebhookEvent = z.enum([...REPOSITORY_WEBHOOK_EVENTS, "*"] as const, {
   error: (issue) =>
-    `${spell(issue.input)} is not a repository webhook event this release knows ("*" means every event); GitHub's list is ${WEBHOOK_EVENTS.reference}, and an event added there since is a new line in src/upstream-gaps/webhook-events.ts`,
+    `${spell(issue.input)} is not an event GitHub delivers to repository webhooks ("*" means every event); ` +
+    `the accepted names are GitHub's list at ${WEBHOOK_EVENTS_REFERENCE}, read from @octokit/openapi-webhooks, ` +
+    "so an event GitHub added since arrives in the release that bumps that package",
 });
 
 const WebhookDeliveryConfig = z

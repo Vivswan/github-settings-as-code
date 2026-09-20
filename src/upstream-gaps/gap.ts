@@ -27,20 +27,7 @@ export interface SpecOnlyGap<R extends string = string> {
   readonly routes: readonly [R, ...R[]];
 }
 
-/**
- * A value vocabulary GitHub validates server-side (422) while every pinned upstream artifact types the wire field
- * as a bare string, so the schema refuses unknown values from this hand-kept list at parse time. Graduates by hand:
- * the file's tripwire fires (TS2322, which graduate-upstream-gaps.ts refuses to touch) once @octokit/openapi-types
- * narrows the wire type to a literal union; derive the schema from that union and delete the file.
- */
-export interface VocabularyGap<V extends string = string> {
-  readonly kind: "vocabulary";
-  readonly values: readonly [V, ...V[]];
-  /** GitHub's page listing the vocabulary; the refusal message points the reader there. */
-  readonly reference: string;
-}
-
-export type UpstreamGap<R extends string = string> = OctokitGap<R> | SpecOnlyGap<R> | VocabularyGap;
+export type UpstreamGap<R extends string = string> = OctokitGap<R> | SpecOnlyGap<R>;
 
 /** `const G` preserves the routes tuple's literals, so index.ts derives SupplementalRoute as a literal union. */
 export function defineGap<const G extends Omit<OctokitGap, "kind">>(
@@ -59,13 +46,6 @@ export function defineSpecOnlyGap<const G extends Omit<SpecOnlyGap<keyof Endpoin
   return { ...gap, kind: "spec-only" };
 }
 
-/** `const G` keeps the values tuple's literals, so a schema can build its enum from them. */
-export function defineVocabularyGap<const G extends Omit<VocabularyGap, "kind">>(
-  gap: G,
-): G & { readonly kind: "vocabulary" } {
-  return { ...gap, kind: "vocabulary" };
-}
-
 /**
  * Generic over the caller's route union so the result keeps its literal typing WITHOUT a cast, and total
  * on an empty gaps list, where an inline flatMap over the literal tuple would stop compiling.
@@ -73,10 +53,7 @@ export function defineVocabularyGap<const G extends Omit<VocabularyGap, "kind">>
 export function undocumentedRoutes<R extends string>(
   gaps: readonly UpstreamGap<R>[],
 ): readonly R[] {
-  return gaps.flatMap((gap) => {
-    if (gap.kind === "vocabulary") {
-      return [];
-    }
-    return gap.kind === "spec-only" || !gap.documentedInSpec ? gap.routes : [];
-  });
+  return gaps.flatMap((gap) =>
+    gap.kind === "spec-only" || !gap.documentedInSpec ? gap.routes : [],
+  );
 }

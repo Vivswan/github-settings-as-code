@@ -10,7 +10,7 @@ import {
   maybeWrapUndeclared,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
-import { GAP as WEBHOOK_EVENTS } from "../../upstream-gaps/webhook-events.js";
+import { REPOSITORY_WEBHOOK_EVENTS } from "./events.js";
 
 const E2E_SECRET_REFS = Object.keys(E2E_SECRET_ENV).map((name) => `$${name}`);
 
@@ -38,7 +38,7 @@ export function genWebhooks(rng: Rng): EntriesForm {
         ? ["*"]
         : [
             ...new Set(
-              Array.from({ length: rng.int(3) + 1 }, () => rng.pick(WEBHOOK_EVENTS.values)),
+              Array.from({ length: rng.int(3) + 1 }, () => rng.pick(REPOSITORY_WEBHOOK_EVENTS)),
             ),
           ];
     }

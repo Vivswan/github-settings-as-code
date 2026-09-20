@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
-import { GAP as WEBHOOK_EVENTS } from "../../src/upstream-gaps/webhook-events.js";
+import { WEBHOOK_EVENTS_REFERENCE } from "../../src/sections/webhooks/events.js";
 
 /** The issue lines the run prints before exiting 1, or null when the document parses. */
 function problems(webhooks: unknown): string[] | null {
@@ -14,7 +14,9 @@ function problems(webhooks: unknown): string[] | null {
 const HOOK_URL = "https://hooks.example.com/ci";
 
 const UNKNOWN_EVENT = (spelled: string) =>
-  `${spelled} is not a repository webhook event this release knows ("*" means every event); GitHub's list is ${WEBHOOK_EVENTS.reference}, and an event added there since is a new line in src/upstream-gaps/webhook-events.ts`;
+  `${spelled} is not an event GitHub delivers to repository webhooks ("*" means every event); ` +
+  `the accepted names are GitHub's list at ${WEBHOOK_EVENTS_REFERENCE}, read from @octokit/openapi-webhooks, ` +
+  "so an event GitHub added since arrives in the release that bumps that package";
 const INSECURE_SSL = (spelled: string) =>
   `${spelled} is not a value GitHub accepts; use "0" (verify the TLS certificate) or "1" (skip verification), as a string or a number`;
 

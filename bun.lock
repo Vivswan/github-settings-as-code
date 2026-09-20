@@ -28,6 +28,7 @@
         "@actions/core": "3.0.1",
         "@arethetypeswrong/cli": "0.18.5",
         "@biomejs/biome": "2.5.11",
+        "@octokit/openapi-webhooks": "12.1.0",
         "@types/bun": "1.4.0",
         "@types/node": "26.4.1",
         "ajv": "8.20.0",
@@ -146,6 +147,8 @@
     "@octokit/graphql": ["@octokit/graphql@9.0.5", "", { "dependencies": { "@octokit/request": "^10.0.16", "@octokit/types": "^18.0.0", "universal-user-agent": "^7.0.0" } }, "sha512-bt/hm03LeU6Vy7FwTrkkC9p3XGT/lBwClglMqxBSe5/q0E5CdJTXeAqEI0vlw89/LF/G6tryTIH8HirZ3prMVg=="],
 
     "@octokit/openapi-types": ["@octokit/openapi-types@29.0.1", "", {}, "sha512-9qWOMFNxxLokERcms42rU0PTLqQmVs7g5E41TI4mCOxmpFayD1rfC7XxOL55cG9MBZLFlC31BrR37myMKardwg=="],
+
+    "@octokit/openapi-webhooks": ["@octokit/openapi-webhooks@12.1.0", "", {}, "sha512-Z5eDsLCUNbx1zHpZb1LNQirADqdMTvWJQ/deahi0ws+tWWnwHXB+Pr4jfmM9OrETS9Y5iW8ZRu1fdbudObhLrg=="],
 
     "@octokit/plugin-paginate-rest": ["@octokit/plugin-paginate-rest@14.0.0", "", { "dependencies": { "@octokit/types": "^16.0.0" }, "peerDependencies": { "@octokit/core": ">=6" } }, "sha512-fNVRE7ufJiAA3XUrha2omTA39M6IXIc6GIZLvlbsm8QOQCYvpq/LkMNGyFlB1d8hTDzsAXa3OKtybdMAYsV/fw=="],
 

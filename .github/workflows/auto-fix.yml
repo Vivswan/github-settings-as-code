@@ -1,5 +1,6 @@
 # The commit-back fixes a same-repo PR can need, pushed to its branch; an already-clean tree gets no commit. A PR
 # with unrelated type errors fails the build job by design: the graduation script refuses to half-fix a red build.
+#   src/sections/webhooks/events.ts              -> build:events (a Dependabot @octokit/openapi-webhooks bump changes the event list on a branch nobody builds)
 #   lib/settings.schema.json                     -> build:schema (a Dependabot generator bump changes its bytes on a branch nobody builds)
 #   README, COVERAGE, action.yml, docs/ regions  -> build:docs, build:action-docs
 #   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with
@@ -38,6 +39,7 @@ on:
       - "bun.lock"
       - "tsconfig.json"
       - ".bun-version"
+      - ".github/scripts/gen-webhook-events.ts"
       - ".github/scripts/gen-settings-schema.ts"
       - ".github/scripts/graduate-upstream-gaps.ts"
       - ".github/scripts/gen-gaps-index.ts"
@@ -72,31 +74,33 @@ jobs:
       - name: Graduate upstream gaps octokit now ships
         shell: bash
         run: bun .github/scripts/graduate-upstream-gaps.ts
-      - name: Regenerate the schema and docs and stage the fix patch
+      - name: Regenerate the webhook events, schema, and docs and stage the fix patch
         id: rebuild
         shell: bash
         run: |
+          # The schema enum reads the events file, so the events render first.
+          bun run build:events
           bun run build:schema
           bun run build:docs
           bun run build:action-docs
           # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
           # patch holds exactly the allowed paths.
           git reset -q
-          git add -A -- lib/settings.schema.json README.md COVERAGE.md action.yml \
+          git add -A -- src/sections/webhooks/events.ts lib/settings.schema.json README.md COVERAGE.md action.yml \
             docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md \
             docs/reference/sections.md docs/reference/inputs.md docs/start/getting-started.md src/upstream-gaps/
           git diff --cached --binary > "$RUNNER_TEMP/autofix.patch"
           if [ ! -s "$RUNNER_TEMP/autofix.patch" ]; then
-            echo "schema and upstream gaps already fresh"
+            echo "webhook events, schema, and upstream gaps already fresh"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "pruned=false" >> "$GITHUB_OUTPUT"
           else
             git diff --cached --stat
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            # A patch touching src/ means gap files graduated; the push job picks the commit subject from this.
-            # --quiet exits 1 on a staged src/ change and, unlike piping --name-only into grep -q, cannot trip
-            # pipefail on an early-exiting reader.
-            if git diff --cached --quiet -- src/; then
+            # A patch touching src/upstream-gaps/ means gap files graduated; the push job picks the commit subject
+            # from this. --quiet exits 1 on a staged change there and, unlike piping --name-only into grep -q, cannot
+            # trip pipefail on an early-exiting reader.
+            if git diff --cached --quiet -- src/upstream-gaps/; then
               echo "pruned=false" >> "$GITHUB_OUTPUT"
             else
               echo "pruned=true" >> "$GITHUB_OUTPUT"
@@ -154,12 +158,13 @@ jobs:
           # of a protected path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
-              lib/settings.schema.json | README.md | COVERAGE.md | action.yml | \
+              src/sections/webhooks/events.ts | lib/settings.schema.json | README.md | COVERAGE.md | action.yml | \
               docs/reference/undeclared-policy.md | docs/reference/permissions.md | \
               docs/operate/check-mode.md | docs/reference/sections.md | docs/reference/inputs.md | \
               docs/start/getting-started.md | src/upstream-gaps/*) ;;
               *)
-                echo "::error::the fix patch staged '$path', outside lib/settings.schema.json, the generated docs" \
+                echo "::error::the fix patch staged '$path', outside src/sections/webhooks/events.ts," \
+                  "lib/settings.schema.json, the generated docs" \
                   "(README.md, COVERAGE.md, action.yml, docs/reference/undeclared-policy.md," \
                   "docs/reference/permissions.md, docs/operate/check-mode.md, docs/reference/sections.md," \
                   "docs/reference/inputs.md, docs/start/getting-started.md), and src/upstream-gaps/; refusing to push"
@@ -174,7 +179,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           subject="build: regenerate settings schema"
-          if git diff --cached --quiet -- lib/settings.schema.json src/upstream-gaps/; then
+          if ! git diff --cached --quiet -- src/sections/webhooks/events.ts; then
+            subject="build: regenerate webhook events and settings schema"
+          fi
+          if git diff --cached --quiet -- src/sections/webhooks/events.ts lib/settings.schema.json src/upstream-gaps/; then
             subject="docs: regenerate generated docs"
           fi
           if [ "$PRUNED" = "true" ]; then

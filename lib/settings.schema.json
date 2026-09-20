@@ -2302,7 +2302,7 @@
           ]
         },
         "events": {
-          "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"]. Each name is one GitHub delivers to repository webhooks, or \"*\" for every event; anything else is refused at parse time, since GitHub would 422 it at apply time. The list is src/upstream-gaps/webhook-events.ts, kept from GitHub's webhook events reference, so an event GitHub adds is refused until a release adds the line.",
+          "description": "Events that trigger deliveries, compared order-insensitively; GitHub defaults a new hook to [\"push\"]. Each name is one GitHub delivers to repository webhooks, or \"*\" for every event; anything else is refused at parse time, since GitHub would 422 it at apply time. The accepted names come from GitHub's webhooks OpenAPI description, pinned through the @octokit/openapi-webhooks package, so an event GitHub adds is accepted once a release bumps that package.",
           "type": "array",
           "items": {
             "type": "string",

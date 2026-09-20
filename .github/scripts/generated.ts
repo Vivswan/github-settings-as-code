@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { GENERATED_REGIONS } from "./gen-action-docs.js";
 import { COVERAGE_PATH, PAGE_REGIONS } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
+import { EVENTS_PATH } from "./gen-webhook-events.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -23,8 +24,10 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
   return paths.map((path) => ({ path, generator, kind: "regions" }));
 }
 
-/** A page two generators write into (docs/reference/inputs.md) has one row per generator. */
+/** A page two generators write into (docs/reference/inputs.md) has one row per generator. Table order is run order:
+ * the webhook events feed the schema, so they render first, or a package bump would leave the two inconsistent for a run. */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
+  { path: EVENTS_PATH, generator: ".github/scripts/gen-webhook-events.ts", kind: "file" },
   {
     path: "lib/settings.schema.json",
     generator: ".github/scripts/gen-settings-schema.ts",
