@@ -31,4 +31,4 @@ schema:
     in any case.
   ActionsVariableConfig.value: >-
     The plain-text value workflows read through the vars context. GitHub caps one variable at 48 KB;
-    a value over 49152 characters is refused when the file is parsed, before any API call.
+    a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.

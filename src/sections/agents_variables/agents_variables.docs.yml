@@ -29,4 +29,4 @@ schema:
     in any case.
   AgentsVariableConfig.value: >-
     The plain-text value Copilot coding agents read. GitHub caps one variable at 48 KB; a value over
-    49152 characters is refused when the file is parsed, before any API call.
+    49152 bytes of UTF-8 is refused when the file is parsed, before any API call.

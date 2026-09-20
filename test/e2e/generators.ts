@@ -42,7 +42,7 @@ import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/regist
 import { genRepository } from "../../src/sections/repository/generators.js";
 import { genRulesets } from "../../src/sections/rulesets/generators.js";
 import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
-import { MAX_VARIABLE_VALUE_LENGTH } from "../../src/sections/shared/schema-helpers.js";
+import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
 import { genTeams } from "../../src/sections/teams/generators.js";
 import { genWebhooks } from "../../src/sections/webhooks/generators.js";
 import { genWorkflows } from "../../src/sections/workflows/generators.js";
@@ -540,7 +540,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     build: (rng) => {
       const key = rng.pick(["actions_variables", "agents_variables"] as const);
       const { value, entries, index, itemToken } = validItems(rng, key);
-      (entries[index] as Json).value = "x".repeat(MAX_VARIABLE_VALUE_LENGTH + 1);
+      (entries[index] as Json).value = "x".repeat(MAX_VARIABLE_VALUE_BYTES + 1);
       return { doc: { [key]: value }, offendingToken: `${itemToken}.value` };
     },
   },

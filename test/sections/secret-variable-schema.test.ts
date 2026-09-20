@@ -88,23 +88,29 @@ describe("secret and variable names", () => {
 describe("variable values", () => {
   // GitHub's documented cap, spelled here independently of the source so a moved constant fails this test.
   const cap = 49152;
+  // A CJK character is three UTF-8 bytes, so a row lands exactly on the cap or one character over it while its
+  // character count stays far below the cap.
+  const threeByte = "\u4e2d";
+  const refused = (bytes: number, path: string) =>
+    `${path}.value: the variable value is ${bytes} bytes of UTF-8; GitHub caps a variable at 48 KB (${cap} bytes). Shorten it, or move the content into a file the workflow reads`;
 
   test.each(VARIABLE_FAMILIES)(
-    "$path: a value over GitHub's 48 KB cap fails the parse; the cap counts code points, and a mapping never reaches the length check",
+    "$path: a value over GitHub's 48 KB cap fails the parse; the cap counts UTF-8 bytes, and a mapping never reaches the size check",
     (family) => {
-      // The emoji string is twice the cap in UTF-16 units and exactly the cap in code points.
       const outcomes = {
-        atCap: issuesOf(family.doc({ name: "BIG", value: "a".repeat(cap) })),
-        overCap: issuesOf(family.doc({ name: "BIG", value: "a".repeat(cap + 1) })),
-        astralAtCap: issuesOf(family.doc({ name: "BIG", value: "\u{1F600}".repeat(cap) })),
+        asciiAtCap: issuesOf(family.doc({ name: "BIG", value: "a".repeat(cap) })),
+        asciiOverCap: issuesOf(family.doc({ name: "BIG", value: "a".repeat(cap + 1) })),
+        threeByteAtCap: issuesOf(family.doc({ name: "BIG", value: threeByte.repeat(cap / 3) })),
+        threeByteOverCap: issuesOf(
+          family.doc({ name: "BIG", value: threeByte.repeat(cap / 3 + 1) }),
+        ),
         mapping: issuesOf(family.doc({ name: "BIG", value: { length: cap + 1 } })),
       };
       expect(outcomes).toEqual({
-        atCap: "accepted",
-        overCap: [
-          `${family.path}.value: the variable value is ${cap + 1} characters long; GitHub caps a variable at 48 KB (${cap} characters). Shorten it, or move the content into a file the workflow reads`,
-        ],
-        astralAtCap: "accepted",
+        asciiAtCap: "accepted",
+        asciiOverCap: [refused(cap + 1, family.path)],
+        threeByteAtCap: "accepted",
+        threeByteOverCap: [refused(cap + 3, family.path)],
         mapping: [`${family.path}.value: Invalid input: expected string, received object`],
       });
     },

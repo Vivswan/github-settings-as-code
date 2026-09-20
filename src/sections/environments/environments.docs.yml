@@ -185,4 +185,4 @@ schema:
     starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case.
   EnvironmentVariableConfig.value: >-
     The plain-text value; environment secrets are the place for secrets. GitHub caps one variable at
-    48 KB; a value over 49152 characters is refused when the file is parsed, before any API call.
+    48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.
