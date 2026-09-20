@@ -292,7 +292,7 @@ branches:
     protection: null
 ```
 
-A `mode: render` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `branches` list replaces the lower one as written. Elsewhere a `null` over a key a lower layer declared removes that key from the rendered document; the [layering guide](../operate/layering.md) has the rules.
+A `mode: render` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `protection: null` is the branch entry's value where the two `branches` lists union by name. Elsewhere a `null` over a key a lower layer declared removes that key from the rendered document; the [layering guide](../operate/layering.md) has the rules.
 
 A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above.
 

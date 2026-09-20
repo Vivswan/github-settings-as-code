@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { describeOptOut } from "../../src/engine/layers.js";
+import { describeOptOut, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
@@ -11,6 +11,7 @@ import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
 import {
   entriesOf,
+  type Json,
   LAYERING_DIRECTIVES,
   type LiveWitnessKind,
   UNDECLARED_KEY,
@@ -28,6 +29,7 @@ import {
   INVALID_SETTINGS_CASES,
   MERGE_FEATURES,
   MERGE_REFUSAL_KINDS,
+  markerNullsDropped,
   mergeFeaturesOf,
   NON_MAPPING_YAML,
   ORG_GATED_SECTIONS,
@@ -1159,6 +1161,40 @@ describe("genMergeScenario", () => {
   test("is deterministic for a seed", () => {
     const draw = () => JSON.stringify(genMergeScenario(new Rng(77)));
     expect(draw()).toBe(draw());
+  });
+});
+
+describe("markerNullsDropped (the harness's per-layer view)", () => {
+  test("agrees with the engine's stripNulls on every null placement a layer can spell", () => {
+    // The harness's view decides which generated layers are valid on their own; a placement it judges differently from
+    // the engine would either hide a fold the run refuses or refuse a layer the run accepts.
+    const doc: Json = {
+      pages: null,
+      interaction_limits: null,
+      actions: null,
+      repository: { description: null, has_wiki: false },
+      labels: {
+        _undeclared: null,
+        _layering: "deep",
+        entries: [{ name: "bug", description: null }],
+      },
+      rulesets: { _undeclared: "keep", entries: [{ name: "main", bypass_actors: null }] },
+      milestones: { _layering: "shallow", entries: [{ title: "v1", due_on: null }] },
+      environments: [
+        {
+          name: "prod",
+          wait_timer: null,
+          deployment_branch_policy: null,
+          variables: { _undeclared: null, entries: [{ name: "A", value: null }] },
+          secrets: [{ name: "B", value: null }],
+        },
+      ],
+      branches: [{ name: "main", protection: null, extra: null }],
+      custom_properties: [{ property_name: "team", value: null, note: null }],
+    };
+    for (const run of LAYERING_DIRECTIVES) {
+      expect(markerNullsDropped(doc, run), run).toEqual(stripNulls(doc, run) as Json);
+    }
   });
 });
 

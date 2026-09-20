@@ -4,7 +4,7 @@ import { describeProblem } from "../../src/problem.js";
 import { LIST_SECTIONS } from "../../src/schema.js";
 import { listLayering } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
-import { LAYERING_KEY, type LayeringDirective, UNDECLARED_KEY } from "./gen-support.js";
+import { type Json, LAYERING_KEY, type LayeringDirective, UNDECLARED_KEY } from "./gen-support.js";
 import type { MergeLayer, MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
   type AbortVerdict,
@@ -1131,6 +1131,37 @@ function engineNotices(
 }
 
 describe("foldMergeLayers (the oracle's own dialect)", () => {
+  test("keys named after Object.prototype members are ordinary document keys, inside a nested list too, as the engine reads them", () => {
+    // The oracle reads own properties only: an inherited `constructor` is not a lower declaration to delete, and an own
+    // `__proto__` is a key to carry, so the two folds agree on documents the generators never draw but a file can spell.
+    const proto = "__proto__";
+    const higher = JSON.parse(
+      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "environments": [{"name": "prod", "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
+    ) as Json;
+    const layers = stack(
+      { repository: {}, environments: [{ name: "prod", variables: [{ name: "A", value: "x" }] }] },
+      higher,
+    );
+    const oracle = foldMergeLayers(layers, "deep");
+    const engine = mergeLayers(layers, { layering: "deep" });
+    expect(engine.isOk() ? engine.value : engine.error).toEqual({
+      settings: oracle.merged,
+      notices: oracle.notices,
+    });
+    expect(oracle).toEqual({
+      merged: {
+        repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
+        environments: [{ name: "prod", variables: [{ name: "A", value: "y", constructor: null }] }],
+      },
+      notices: [],
+    });
+    const repository = oracle.merged.repository as object;
+    expect([Object.hasOwn(repository, proto), Object.getPrototypeOf(repository)]).toEqual([
+      true,
+      Object.prototype,
+    ]);
+  });
+
   test("a null removes a lower declaration with a notice, stays when nothing below declares the key, and is the value where the section takes null", () => {
     const { merged, notices } = foldMergeLayers(
       stack(

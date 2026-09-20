@@ -822,6 +822,21 @@ function isMapping(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** An own property's value: an inherited name (`constructor`) is not a document key, as the engine reads it. */
+function own(record: Json, key: string): unknown {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/** Set an own data property whatever the key; assigning `__proto__` would set the prototype. */
+function put(record: Json, key: string, value: unknown): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 function isKnobbed(key: string): key is UndeclaredPolicySection {
   return (UNDECLARED_POLICY_SECTIONS as readonly string[]).includes(key);
 }
@@ -891,18 +906,20 @@ function settle(slot: Slot, higher: unknown, path: string, site: Site, scope?: E
 function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?: EntryScope): Json {
   const out: Json = {};
   for (const key of new Set([...Object.keys(lower), ...Object.keys(higher)])) {
-    if (!(key in higher) || higher[key] === undefined) {
-      out[key] = lower[key];
+    const above = own(higher, key);
+    const below = own(lower, key);
+    if (above === undefined) {
+      put(out, key, below);
       continue;
     }
-    if (higher[key] === null && nullIsValue(scope, key)) {
-      out[key] = null;
+    if (above === null && nullIsValue(scope, key)) {
+      put(out, key, null);
       continue;
     }
     const keyed = scope?.prefix === "" ? scope.keyed.nested?.[key] : undefined;
-    const below = scope === undefined ? undefined : { ...scope, prefix: at(scope.prefix, key) };
-    const lowerForm = keyed === undefined ? null : nestedForm(lower[key]);
-    const higherForm = keyed === undefined ? null : nestedForm(higher[key]);
+    const within = scope === undefined ? undefined : { ...scope, prefix: at(scope.prefix, key) };
+    const lowerForm = keyed === undefined ? null : nestedForm(below);
+    const higherForm = keyed === undefined ? null : nestedForm(above);
     // Only a deep merge of two entries reaches a nested keyed list, so its pairs merge field by field too. Two bare
     // lists fold to a bare list; a wrapper on either side keeps the form, its knobs merged like the top-level ones.
     let settled: unknown;
@@ -923,10 +940,10 @@ function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?:
               entries,
             };
     } else {
-      settled = settle(lower[key], higher[key], at(path, key), site, below);
+      settled = settle(below, above, at(path, key), site, within);
     }
     if (settled !== undefined) {
-      out[key] = settled;
+      put(out, key, settled);
     }
   }
   return out;

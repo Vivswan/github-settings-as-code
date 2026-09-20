@@ -1724,7 +1724,7 @@ function isPlainMapping(value: unknown): value is Json {
  * marker too), and a null at a NULL_VALUED_ENTRY_PATHS path stays as the value; under `shallow` and `replace` the fold
  * copies entries as written, so a null inside one stays for the validator to judge, as does a null inside any other list.
  */
-function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
+export function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
   const dropDeep = (
     value: unknown,
     lists: readonly string[] = [],
@@ -1764,6 +1764,10 @@ function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
   const out: Json = {};
   for (const [key, value] of Object.entries(doc)) {
     if (value === null) {
+      // The section's own value where null is one (`pages: null`); a marker everywhere else.
+      if (isNullValued(key)) {
+        out[key] = null;
+      }
       continue;
     }
     if (!isListSectionKey(key)) {
@@ -1779,7 +1783,13 @@ function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
     const nested = NESTED_LIST_FIELDS[key] ?? [];
     const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
     const entries = entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json);
-    out[key] = Array.isArray(value) ? entries : { ...(value as Json), entries };
+    if (Array.isArray(value)) {
+      out[key] = entries;
+      continue;
+    }
+    // The wrapper's own knobs are mapping keys to the fold, so a null one (`_undeclared: null`) is a marker too.
+    const { entries: _entries, ...knobs } = value as Json;
+    out[key] = { ...(dropDeep(knobs) as Json), entries };
   }
   return out;
 }
