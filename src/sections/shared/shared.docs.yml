@@ -1,6 +1,9 @@
 schema:
   "{ActionsSecretConfig,AgentsSecretConfig,CodespacesSecretConfig,DependabotSecretConfig,EnvironmentSecretConfig}.name": >-
-    The secret name, the natural key; compared case-insensitively and written uppercase.
+    The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's
+    naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and
+    underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix
+    in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).
   "{ActionsSecretConfig,AgentsSecretConfig,CodespacesSecretConfig,DependabotSecretConfig,EnvironmentSecretConfig}.value": >-
     A whole-value `$NAME` reference to an environment variable holding the secret - never a literal
     (settings files are committed plaintext). Resolved from the action step's env at run time and

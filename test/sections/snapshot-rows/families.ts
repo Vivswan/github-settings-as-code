@@ -19,7 +19,7 @@ export function secretsRow(section: SnapshotSection, store: string, family: keyo
     live: {
       [family]: [
         { name: "DEPLOY_TOKEN", ...STAMPS },
-        { name: "GITHUB_PAT", ...STAMPS },
+        { name: "RELEASE_PAT", ...STAMPS },
       ],
     },
     expected: {
@@ -27,12 +27,12 @@ export function secretsRow(section: SnapshotSection, store: string, family: keyo
         _undeclared: "keep",
         entries: [
           { name: "DEPLOY_TOKEN", value: `$SECRET_${STORE}_DEPLOY_TOKEN` },
-          { name: "GITHUB_PAT", value: `$SECRET_${STORE}_GITHUB_PAT` },
+          { name: "RELEASE_PAT", value: `$SECRET_${STORE}_RELEASE_PAT` },
         ],
       },
       notes: [
         `${section.key}[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_${STORE}_DEPLOY_TOKEN before apply`,
-        `${section.key}[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_${STORE}_GITHUB_PAT before apply`,
+        `${section.key}[RELEASE_PAT]: value of RELEASE_PAT is not readable; export it into the environment as SECRET_${STORE}_RELEASE_PAT before apply`,
       ],
     },
   };

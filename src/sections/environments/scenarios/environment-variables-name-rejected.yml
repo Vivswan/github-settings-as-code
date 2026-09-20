@@ -1,0 +1,22 @@
+name: environment-variables-name-rejected
+description: >
+  A per-environment variable name GitHub refuses (a space) fails when the
+  settings file is parsed, before any API contact, with the nested path and
+  the rule - not as a 422 from the variables POST that would otherwise land
+  only after the environment PUT had already been written.
+settings:
+  environments:
+    - name: production
+      variables:
+        - name: log level
+          value: debug
+inputs:
+  mode: apply
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'environments[0].variables[0].name: the variable name "log level" has characters outside ASCII letters, digits, and underscore'

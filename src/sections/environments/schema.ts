@@ -8,7 +8,7 @@
  */
 
 import { z } from "zod";
-import { nestedKnobbed } from "../shared/schema-helpers.js";
+import { nestedKnobbed, secretName, variableConfig } from "../shared/schema-helpers.js";
 
 /** GitHub's cap on wait_timer, in minutes (30 days). */
 const MAX_WAIT_TIMER_MINUTES = 43_200;
@@ -52,17 +52,12 @@ export const DeploymentProtectionRuleConfig = z
   .meta({ id: "DeploymentProtectionRuleConfig" });
 export type DeploymentProtectionRuleConfig = z.infer<typeof DeploymentProtectionRuleConfig>;
 
-export const EnvironmentVariableConfig = z
-  .object({
-    name: z.string(),
-    value: z.string(),
-  })
-  .meta({ id: "EnvironmentVariableConfig" });
+export const EnvironmentVariableConfig = variableConfig("EnvironmentVariableConfig");
 export type EnvironmentVariableConfig = z.infer<typeof EnvironmentVariableConfig>;
 
 export const EnvironmentSecretConfig = z
   .strictObject({
-    name: z.string(),
+    name: secretName,
     value: z.string(),
   })
   .meta({ id: "EnvironmentSecretConfig" });

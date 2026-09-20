@@ -179,5 +179,10 @@ schema:
     uppercase). Keys other than name and value are rejected: the API body is built from the sealed
     value alone, so an extra key would silently do nothing.
   EnvironmentVariableConfig: One per-environment Actions variable, matched by case-insensitive name.
-  EnvironmentVariableConfig.name: The variable name, the natural key (case-insensitive on GitHub).
-  EnvironmentVariableConfig.value: The plain-text value; environment secrets are the place for secrets.
+  EnvironmentVariableConfig.name: >-
+    The variable name, the natural key (case-insensitive on GitHub). GitHub's naming rule is checked
+    when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not
+    starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case.
+  EnvironmentVariableConfig.value: >-
+    The plain-text value; environment secrets are the place for secrets. GitHub caps one variable at
+    48 KB; a value over 49152 characters is refused when the file is parsed, before any API call.

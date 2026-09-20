@@ -42,6 +42,7 @@ import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/regist
 import { genRepository } from "../../src/sections/repository/generators.js";
 import { genRulesets } from "../../src/sections/rulesets/generators.js";
 import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
+import { MAX_VARIABLE_VALUE_LENGTH } from "../../src/sections/shared/schema-helpers.js";
 import { genTeams } from "../../src/sections/teams/generators.js";
 import { genWebhooks } from "../../src/sections/webhooks/generators.js";
 import { genWorkflows } from "../../src/sections/workflows/generators.js";
@@ -382,6 +383,16 @@ const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
   secret_scanning_custom_patterns: "name",
 };
 
+/** The sections whose entry `name` is a GitHub secret or variable name (the environments section nests the same two lists). */
+const GITHUB_NAMED_SECTIONS = [
+  ...SECRET_LIST_SECTIONS,
+  "actions_variables",
+  "agents_variables",
+] as const satisfies readonly (typeof ARRAY_SECTIONS)[number][];
+
+/** A hyphen, a leading digit, and the reserved prefix in both cases; `github_token` folds to GITHUB_TOKEN once uppercased. */
+const REFUSED_GITHUB_NAMES = ["my-secret", "2_TOKEN", "GITHUB_TOKEN", "github_token"] as const;
+
 /** Entries come back by reference, so a case's mutation lands inside whichever form was drawn; itemToken spells that form's validator path. */
 function validItems(
   rng: Rng,
@@ -501,6 +512,36 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       const { value, entries, index, itemToken } = validItems(rng, key);
       (entries[index] as Json)[NATURAL_KEYS[key]] = 42;
       return { doc: { [key]: value }, offendingToken: `${itemToken}.${NATURAL_KEYS[key]}` };
+    },
+  },
+  {
+    name: "secret-or-variable-name-refused",
+    build: (rng) => {
+      const key = rng.pick(GITHUB_NAMED_SECTIONS);
+      const { value, entries, index, itemToken } = validItems(rng, key);
+      (entries[index] as Json).name = rng.pick(REFUSED_GITHUB_NAMES);
+      return { doc: { [key]: value }, offendingToken: `${itemToken}.name` };
+    },
+  },
+  {
+    name: "environment-nested-name-refused",
+    build: (rng) => {
+      const list = rng.pick(["variables", "secrets"] as const);
+      const value = list === "secrets" ? "$E2E_SECRET_A" : "debug";
+      const entry = { name: rng.pick(REFUSED_GITHUB_NAMES), value };
+      return {
+        doc: { environments: [{ name: "prod", [list]: [entry] }] },
+        offendingToken: `environments[0].${list}[0].name`,
+      };
+    },
+  },
+  {
+    name: "variable-value-over-cap",
+    build: (rng) => {
+      const key = rng.pick(["actions_variables", "agents_variables"] as const);
+      const { value, entries, index, itemToken } = validItems(rng, key);
+      (entries[index] as Json).value = "x".repeat(MAX_VARIABLE_VALUE_LENGTH + 1);
+      return { doc: { [key]: value }, offendingToken: `${itemToken}.value` };
     },
   },
   {
