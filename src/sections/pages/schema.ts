@@ -16,7 +16,7 @@ type ReadOnlySiteField = Exclude<
   keyof PagesPutBody | "public"
 >;
 
-/** The fix each refusal names. Exhaustive over ReadOnlySiteField, so a new GET field fails to compile here. */
+/** The fix each refusal names. */
 const READ_ONLY_SITE_FIELDS = {
   url: "GitHub mints the API address from the repository",
   html_url:
