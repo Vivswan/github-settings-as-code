@@ -10,9 +10,9 @@ The check is existence only: a caption-only box (`mode`, `rendered-file`) names 
 
 The [module map](#the-module-map) at the end is generated from [architecture.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/architecture.yml). The `lint:arch` script keeps that declaration equal to the import graph, so the map cannot show an edge the code does not draw.
 
-It also enforces the never-throw rule: errors are values, a neverthrow `Result` carrying a typed `Problem`. A `throw` is allowed only as a `BUG:` invariant, a bare rethrow directly in its `catch`, or in a file the `throws` block of architecture.yml names.
+The same lint enforces the never-throw rule: a function that can fail returns a `Result` carrying a typed `Problem`, so an error is a value the caller handles. A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or in a file the `throws` block of `architecture.yml` names.
 
-That block counts the remaining throws per file. The lint fails when the block and the tree disagree in either direction; that a count only goes down is the review rule in AGENTS.md.
+That block counts the remaining throws per file. The lint fails when the count and the tree disagree in either direction, and a converted throw retires its entry; that a count only goes down is the review rule in AGENTS.md.
 
 ## The journey of one settings file
 
@@ -22,7 +22,7 @@ flowchart TD
   mode{"mode"}
   fold["src/engine/layers.ts<br>standaloneView() mergeLayers()"]
   validate["src/engine/orchestrate.ts<br>validateSettingsDoc()"]
-  merged["rendered-file"]
+  rendered["rendered-file"]
   repo["src/engine/orchestrate.ts<br>runForRepo()"]
   sections["src/sections/registry.ts<br>SECTIONS"]
   plan["each section plans<br>src/sections/contract/plan.ts planContext() SectionPlan<br>src/engine/diff.ts deltas()"]
@@ -32,11 +32,11 @@ flowchart TD
   report["src/flows/deliver.ts<br>concludeRun()"]
   read -->|YAML text, parsed to an unknown document per file| mode
   mode -->|render: every layer, each validated on its own first| fold
-  fold -->|one folded document, a notice per removal| validate
+  fold -->|one folded document, its directives consumed, a notice per removal| validate
   mode -->|check or apply: the one file| validate
-  validate -->|ValidatedSettings, in render mode| merged
+  validate -->|the fold, proven valid, in canonical order| rendered
   validate -->|ValidatedSettings, in check or apply| repo
-  repo -->|the declared value of each active section| sections
+  repo -->|the validated value of each active section| sections
   sections -->|one section at a time| plan
   plan -->|read-only calls for the live state| api
   api -->|live values, diffed into the plan's ops| plan
@@ -49,7 +49,7 @@ flowchart TD
 
 - A settings file is YAML text until the reader parses it, and an unknown document until validation brands it.
 - `mode: render` is the only path through the fold: every layer is validated on its own, folded, validated again, and written to `rendered-file`.
-- Check and apply take one file straight to validation, then through each active section module.
+- Check and apply take one file straight to validation, then through each active section module. Every check that reads only the file runs there, before the first request ([the validation phase](#the-validation-phase)).
 - Planning is where the reads happen: a section reads its live state through the client, diffs it against the declaration, and returns a plan of ops, each carrying its drift line.
 - Check renders the plan's drift lines and never calls the API again. Apply executes the plan's writes, reading only what a write needs on the way (a public key before sealing a secret).
 - The run ends with a summary, outputs, and an exit code.
@@ -75,8 +75,8 @@ flowchart LR
 
 - You declare, the engine diffs the declaration against the live repository, and apply converges the two.
 - A key you do not declare is never compared or touched.
-- The one knob on the live axis is `_undeclared`: what happens to a live resource the file does not declare, per list section.
-- Re-running an apply rewrites nothing the engine can read back, and a check right after it reads clean. Two writes recur by design because their values cannot be read back: `interaction_limits` re-arms its expiry on every apply, and every declared secret is re-sealed and rewritten on every apply.
+- The one knob on the live axis is `_undeclared`: what happens to a live resource the file does not declare. A list section's wrapper sets it; a file's top-level `_undeclared` sets it for every list section of that file, and the run input `undeclared` for every file; the section's own default applies where none is set.
+- Re-running an apply rewrites nothing the engine can read back, and a check right after it reads clean. Writes whose value GitHub does not read back recur by design: `interaction_limits` re-arms its expiry, every declared secret is re-sealed, and the Git LFS toggle and `check_suite_preferences` are re-sent on every apply.
 
 Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml), [src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
 
@@ -84,10 +84,10 @@ Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https:/
 
 ```mermaid
 flowchart LR
-  merge["mode: render<br>src/engine/layers.ts mergeLayers()"]
+  render["mode: render<br>src/flows/render.ts runRender()"]
   check["mode: check<br>src/engine/orchestrate.ts runForRepo()"]
   apply["mode: apply<br>src/engine/execute.ts executePlan()"]
-  merge -->|writes rendered-file, no token, no API call| check
+  render -->|writes rendered-file, no token, no API call| check
   check -->|the same document, plans and diffs only, exit 1 on drift| apply
 ```
 
@@ -97,30 +97,97 @@ Each rung is safe to run before the next, and moving a file up the ladder change
 - Check plans and diffs every active section; nothing executes.
 - Apply executes the plan. Under the default `on-missing-permission: fail`, a read-only preflight over the active sections runs first and refuses to write anything when one is denied.
 
-Demonstrated by: [test/engine/check-purity.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/check-purity.test.ts), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
+Demonstrated by: [test/engine/check-purity.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/check-purity.test.ts), [test/flows/render.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/flows/render.test.ts).
 
-## The layering fold as a stack
+## The validation phase
 
 ```mermaid
-flowchart BT
-  fleet["fleet.yml, the lowest layer"]
-  team["team.yml"]
-  repo["repo.yml, the highest layer"]
-  out["the merged document<br>src/engine/layers.ts mergeLayers()"]
-  fleet -->|mappings merge, list sections union by key, every other value wins whole, null included| team
-  team -->|list sections union by key| repo
-  repo -->|_undeclared resolved, _layering consumed| out
+flowchart TD
+  doc["one unknown document<br>src/flows/settings-read.ts readSettingsFile()"]
+  top["the top level<br>src/engine/orchestrate.ts validateSettingsDoc()"]
+  shapes["every section, in turn<br>src/engine/validate.ts validateSectionShapes()"]
+  hook["the section's validate hook<br>src/sections/contract/module.ts SectionModule"]
+  issues["one collected list of issues, exit 1, zero requests"]
+  minted["src/engine/orchestrate.ts<br>ValidatedSettings"]
+  plan["src/sections/contract/plan.ts<br>planContext() SectionPlan"]
+  doc --> top
+  top -->|a plain mapping of known sections and directives| shapes
+  shapes -->|the zod shape's output| hook
+  hook -->|issues with paths under the section key| shapes
+  top -->|an unknown directive, an unknown section the sections input did not exclude| issues
+  shapes -->|a shape issue, a hook issue, a non-plain value| issues
+  shapes -->|every check passed| minted
+  minted -->|the only input a planner accepts| plan
 ```
 
-The stack folds bottom up, one layer per step:
+One rule decides what belongs here: what the settings file alone shows wrong is refused when the file is parsed, naming the key and the fix, never discovered at apply time. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
 
-- The higher layer's mappings merge key by key; its scalars and lists replace.
-- Its `null` wins like any value and is written as such: the empty or off state on GitHub, refused by validation where a key has none. Its `_remove: true` on a keyed entry drops the lower entry under that key.
-- The list sections (`labels`, `rulesets`, every other section with an `_undeclared` knob, and the three plain lists `environments`, `branches`, and `workflows`) union their entries by the section's key instead of replacing; a same-key pair merges field by field under `deep`, is swapped under `shallow`, and the whole list is replaced under `replace`.
+The phase runs in every mode before the first request, and in render mode on every layer and on the fold. Three kinds of check take part:
+
+- The zod shape of each section, with its cross-field rules. A rule still runs beside a sibling that failed, so one run reports the bad enum and the contradictory pair together.
+- The section's `validate` hook, required on every list section: duplicates by the section's key, a rename that collides, a nested list's own duplicates. Its issues carry paths under the section key, like the shape's.
+- Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite.
+
+Every issue the phase finds lands in one list: unknown directives, then unknown sections, then each section's issues in the order the action applies sections. The run exits 1 with zero requests. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
+
+Two limits. A shape's own issues are capped at five per section, with a count of the rest; and a section's hook runs once its shape parsed, so a shape error in an entry can hide a duplicate until it is fixed.
+
+The success path mints the input a planner accepts: a section's `plan()` takes the section's value carrying a type-level brand that names the section it was validated as. A hand-built entry list does not compile, so no path reaches a planner around the phase.
+
+Secret references are the exception. The `$NAME` syntax is judged per section when the run starts, because the verdict needs the document's provenance ([Trust and provenance](#trust-and-provenance)).
+
+Demonstrated by: [test/engine/validate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/validate.test.ts), [test/engine/orchestrate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/orchestrate.test.ts), [src/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/src/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml).
+
+## The layering fold
+
+```mermaid
+flowchart TD
+  layers["settings-file, the layers lowest first<br>src/flows/layers.ts readLayerFiles() foldLayers()"]
+  each["each layer validated alone, as its standalone view<br>src/engine/layers.ts standaloneView()<br>src/engine/orchestrate.ts validateSettingsDoc()"]
+  fold["the fold, low to high<br>src/engine/layers.ts mergeLayers()"]
+  directive{"a list section's directive"}
+  replace["replace<br>the higher list wins whole"]
+  shallow["shallow<br>union by key, a same-key entry swapped whole"]
+  deep["deep, the default<br>union by key, a same-key pair merged field by field"]
+  whole["the fold validated once more<br>src/engine/orchestrate.ts validateSettingsDoc()"]
+  out["rendered-file, in canonical order<br>src/engine/canonical.ts renderCanonicalYaml()"]
+  layers --> each
+  each -->|mappings merge key by key, every other value wins whole, null included| fold
+  fold -->|the wrapper's _layering, else the file's, else the run input layering| directive
+  directive --> replace
+  directive --> shallow
+  directive --> deep
+  replace --> whole
+  shallow --> whole
+  deep --> whole
+  whole -->|directives consumed, the plain-list wrapper unwrapped, _undeclared resolved| out
+```
+
+The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value. Every list section is keyed by what its planner matches entries by, so a fleet `Bug` and a repository `bug` are one label. Three directives say how a keyed list meets the list below it; here the highest layer, in a run with `layering: replace`:
+
+```yaml layer
+_layering: shallow          # every list section of this file, unless it says otherwise
+labels:
+  _layering: deep           # this section only
+  entries:
+    - name: bug
+      color: d73a4a         # merged field by field into the fleet's bug
+    - name: wontfix
+      _remove: true         # drops the fleet's wontfix; the marker never reaches the file
+rulesets:
+  - name: main              # swaps the fleet's main whole, under the file's shallow
+    enforcement: active
+```
+
+- Under `deep` a same-key pair's nested keyed lists union too: a ruleset's `rules` by type, an environment's `variables` by name.
+- The sixteen sections with an `_undeclared` knob take `_layering` beside it. `environments`, `branches`, and `workflows` take it in a `{_layering, entries}` wrapper of their own, which the render unwraps to the bare list.
+- `null` is the empty or off state on GitHub, written as such: `pages: null` turns Pages off, `protection: null` strips a branch's protection. A key with no empty state refuses `null` at validation, naming the values that exist.
+- `_remove: true` on a keyed entry drops the lower entry under that key, with a notice, and is consumed. It is refused under `replace`, inside an entry copied whole, and where no lower layer declares the key. A single document in check or apply is nobody's higher layer, so validation refuses the marker there and names the fold.
+- `_undeclared` travels through the fold and is resolved in the rendered file, so the apply step reads a policy on each of the sixteen sections that carry one.
 
 The [layering guide](../operate/layering.md) has the full rule table and a worked example.
 
-Demonstrated by: [test/e2e/scenarios/render-null-wins.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-null-wins.yml), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
+Demonstrated by: [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts), [test/flows/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/flows/layers.test.ts), [test/e2e/scenarios/render-null-wins.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-null-wins.yml), [test/e2e/scenarios/render-file-directive.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-file-directive.yml), [test/e2e/scenarios/render-replace-section.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-replace-section.yml).
 
 ## Trust and provenance
 
@@ -155,6 +222,7 @@ flowchart LR
   endpoints["ENDPOINTS"]
   undeclared["undeclaredDefault"]
   layering["layering"]
+  validate["validate"]
   grant["the PAT grant prose<br>src/sections/contract/permissions.ts grantFor()"]
   gate["the mock's permission gate<br>test/e2e/mock/handlers.ts"]
   oracle["the fuzz oracle<br>test/e2e/oracle.ts"]
@@ -164,10 +232,12 @@ flowchart LR
   column["the Sections table column<br>.github/scripts/gen-docs.ts"]
   policy["src/sections/contract/module.ts<br>defaultUndeclaredPolicy()"]
   fold["src/engine/layers.ts<br>mergeLayers()"]
+  phase["the validation phase<br>src/engine/validate.ts validateSectionShapes()"]
   module --> permission
   module --> endpoints
   module --> undeclared
   module --> layering
+  module --> validate
   permission --> grant
   permission --> gate
   permission --> oracle
@@ -177,6 +247,7 @@ flowchart LR
   undeclared --> column
   undeclared --> policy
   layering --> fold
+  validate --> phase
 ```
 
 One section declares each fact once and the rest of the system derives from it:
@@ -184,7 +255,8 @@ One section declares each fact once and the rest of the system derives from it:
 - `permission` drives the grant advice a denial prints, the mock's permission gate, and the fuzz oracle.
 - `ENDPOINTS` drives the paths the handlers call, the mock's routes, and the OpenAPI path set.
 - `undeclaredDefault` drives the Sections table column and the policy a plain list falls back to.
-- `layering` tells the fold how the section's entries union across layers.
+- `layering` tells the fold how the section's entries union across layers; every list section declares one, and the registry refuses a list module without it.
+- `validate` is the section's file-only check, run by the validation phase; the list-section factory derives it from the key, and a hand-written list module implements it.
 
 Change the declaration and every consumer follows.
 
