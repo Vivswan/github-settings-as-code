@@ -74,9 +74,12 @@ export const actionsMockHandlers: SectionRestHandlers<"actions"> = {
   // bare), so either mock behavior would be a guess, and the engine has no visibility branch on this path.
   "actions.getForkPrPrivate": ({ state }) => ok(state.fork_pr_workflows_private_repos),
   "actions.putForkPrPrivate": ({ state, body }) => {
-    // Stored verbatim: the shape requires the complete four-toggle policy, so the mock never models
-    // GitHub's UNDOCUMENTED handling of an omitted toggle (preserve vs reset).
-    state.fork_pr_workflows_private_repos = asObject(body);
+    // The GET answers all four toggles while the PUT requires only the first, and GitHub does not
+    // document what an omitted toggle becomes; merging keeps it, as the permissions PUT does.
+    state.fork_pr_workflows_private_repos = {
+      ...asObject(state.fork_pr_workflows_private_repos),
+      ...asObject(body),
+    };
     return noContent();
   },
 };

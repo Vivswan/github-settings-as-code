@@ -185,6 +185,28 @@ describe("actions", () => {
     );
   });
 
+  test("sha_pinning_required is a base-permissions key the PUT takes: it plans without the unrecognized-key note", async () => {
+    // The PUT body documents it beside enabled and allowed_actions; unknown to this action it would converge
+    // under a note telling the operator to remove it.
+    const api = new MockApi({
+      [PERMISSIONS]: {
+        data: { enabled: true, allowed_actions: "all", sha_pinning_required: false },
+      },
+    });
+    expect(await plan(api, { sha_pinning_required: true })).toEqual({
+      ops: [
+        {
+          role: "putPermissions",
+          payload: { sha_pinning_required: true, enabled: true },
+          drift: ["actions.permissions.sha_pinning_required: true != false"],
+          change: "applied actions permissions",
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+  });
+
   test("selected_actions implies allowed_actions: selected; a contradiction fails upfront shape validation", async () => {
     const api = new MockApi({
       [PERMISSIONS]: { data: { enabled: true, allowed_actions: "all" } },
@@ -273,25 +295,185 @@ describe("actions", () => {
     ]);
   });
 
-  test("the shape rejects unrecognized, null, and scalar cache declarations upfront", () => {
-    // An `in`-based check would walk the prototype chain and let "constructor" silently no-op; an own "__proto__" key (JSON.parse creates one) is
-    // unrecognized as well.
-    for (const cache of [
-      { max_cache_size: 25 },
-      { constructor: 5 },
-      JSON.parse('{"__proto__": 5}'),
-      null,
-      5,
-    ]) {
-      const parsed = actionsSection.shape.safeParse({ cache });
-      expect(parsed.success).toBe(false);
+  test("the shape refuses upfront what would otherwise re-PUT forever or 422 at apply time", () => {
+    // Each case names the silent failure the refusal prevents. Cases on zod's own wording pin only the
+    // path and the offending key, so a zod wording change does not break them; the messages this
+    // section writes are pinned whole. The prototype-chain cache keys: an `in`-based check would let
+    // "constructor" no-op silently, and JSON.parse creates an own "__proto__" key.
+    const refused: [reason: string, actions: Record<string, unknown>, rendered: string[]][] = [
+      [
+        "a misspelled cache key has no endpoint",
+        { cache: { max_cache_size: 25 } },
+        ["actions.cache", '"max_cache_size"'],
+      ],
+      [
+        "a prototype-chain cache key is a typo too",
+        { cache: { constructor: 5 } },
+        ["actions.cache", '"constructor"'],
+      ],
+      [
+        "an own __proto__ cache key is a typo too",
+        { cache: JSON.parse('{"__proto__": 5}') },
+        ["actions.cache", '"__proto__"'],
+      ],
+      ["a null cache is not a limit", { cache: null }, ["actions.cache"]],
+      ["a scalar cache is not a limit", { cache: 5 }, ["actions.cache"]],
+      [
+        "a fractional cache size 400s at apply",
+        { cache: { max_cache_size_gb: 2.5 } },
+        ["actions.cache.max_cache_size_gb"],
+      ],
+      [
+        "a zero cache retention 400s at apply",
+        { cache: { max_cache_retention_days: 0 } },
+        ["actions.cache.max_cache_retention_days"],
+      ],
+      [
+        "a fractional retention 422s at apply",
+        { artifact_and_log_retention: { days: 30.5 } },
+        ["actions.artifact_and_log_retention.days"],
+      ],
+      [
+        "a zero retention 422s at apply",
+        { artifact_and_log_retention: { days: 0 } },
+        ["actions.artifact_and_log_retention.days"],
+      ],
+      [
+        "the plan maximum is reported by the GET and never taken by the PUT: declared, it would diff and re-PUT forever",
+        { artifact_and_log_retention: { days: 30, maximum_allowed_days: 400 } },
+        [
+          "actions.artifact_and_log_retention.maximum_allowed_days: maximum_allowed_days is a value GitHub reports, not a setting it accepts " +
+            "(the GET returns it, the PUT does not take it), so a declared value could never be applied; remove it from the settings file",
+        ],
+      ],
+      [
+        "the allowlist URL is reported by the permissions GET and never taken by its PUT",
+        {
+          selected_actions_url:
+            "https://api.github.com/repos/octocat/hello/actions/permissions/selected-actions",
+        },
+        [
+          "actions.selected_actions_url: selected_actions_url is a value GitHub reports, not a setting it accepts",
+        ],
+      ],
+      [
+        "the subject prefix is reported by the OIDC GET and never taken by its PUT",
+        { oidc_customization_sub: { use_default: true, sub_claim_prefix: "repo:octocat/hello" } },
+        [
+          "actions.oidc_customization_sub.sub_claim_prefix: sub_claim_prefix is a value GitHub reports, not a setting it accepts",
+        ],
+      ],
+      [
+        "a misspelled allowlist key would ride the selected-actions PUT on every run: that PUT has no unrecognized-key note",
+        { selected_actions: { pattern_allowed: ["docker/*"] } },
+        ["actions.selected_actions", '"pattern_allowed"'],
+      ],
+      [
+        "a scalar pattern list 422s at apply",
+        { selected_actions: { patterns_allowed: "docker/*" } },
+        ["actions.selected_actions.patterns_allowed"],
+      ],
+      [
+        "an unknown approval policy 422s at apply",
+        { fork_pr_contributor_approval: { approval_policy: "everyone" } },
+        ["actions.fork_pr_contributor_approval.approval_policy"],
+      ],
+      [
+        "an empty approval object 422s at apply",
+        { fork_pr_contributor_approval: {} },
+        ["actions.fork_pr_contributor_approval.approval_policy"],
+      ],
+      [
+        "a hyphenated claim key 422s at apply",
+        {
+          oidc_customization_sub: {
+            use_default: false,
+            include_claim_keys: ["repo", "job-workflow-ref"],
+          },
+        },
+        [
+          "actions.oidc_customization_sub.include_claim_keys[1]: a claim key holds only letters, digits, and underscores " +
+            '(such as "repo" or "job_workflow_ref")',
+        ],
+      ],
+      [
+        "a repeated claim key 422s at apply",
+        {
+          oidc_customization_sub: {
+            use_default: false,
+            include_claim_keys: ["repo", "context", "repo"],
+          },
+        },
+        [
+          'actions.oidc_customization_sub.include_claim_keys[2]: "repo" repeats an earlier claim key; GitHub requires the keys to be unique',
+        ],
+      ],
+      [
+        "a claim-key list under the default template is ignored by GitHub, so it would never take",
+        { oidc_customization_sub: { use_default: true, include_claim_keys: ["repo"] } },
+        [
+          "actions.oidc_customization_sub.include_claim_keys: GitHub ignores include_claim_keys under use_default: true, " +
+            "so the declared list could never take; set use_default: false for a custom template, or remove the list",
+        ],
+      ],
+      [
+        "a YAML-quoted use_default is truthy on the wire",
+        { oidc_customization_sub: { use_default: "false" } },
+        ["actions.oidc_customization_sub.use_default"],
+      ],
+      [
+        "a YAML-quoted use_immutable_subject is truthy on the wire",
+        { oidc_customization_sub: { use_default: true, use_immutable_subject: "false" } },
+        ["actions.oidc_customization_sub.use_immutable_subject"],
+      ],
+      [
+        "the one toggle the PUT requires is missing: a 422 at apply",
+        { fork_pr_workflows_private_repos: { send_secrets_and_variables: false } },
+        ["actions.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests"],
+      ],
+      [
+        "a YAML-quoted toggle is truthy on the wire",
+        { fork_pr_workflows_private_repos: { run_workflows_from_fork_pull_requests: "true" } },
+        ["actions.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests"],
+      ],
+    ];
+    for (const [reason, actions, rendered] of refused) {
+      const error = shapeError({ actions }, "f.yml");
+      expect(error, reason).not.toBeNull();
+      for (const fragment of rendered) {
+        expect(error, reason).toContain(fragment);
+      }
     }
+    // The control: every rule above leaves a well-formed document alone, its open objects still passing
+    // unknown keys through (a base-permissions key GitHub adds, a field on the fork PR policy).
     expect(
-      actionsSection.shape.safeParse({
-        cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
-        some_added_key: "passes through",
-      }).success,
-    ).toBe(true);
+      shapeError(
+        {
+          actions: {
+            allowed_actions: "selected",
+            sha_pinning_required: true,
+            some_added_key: "passes through",
+            selected_actions: {
+              github_owned_allowed: true,
+              verified_allowed: false,
+              patterns_allowed: ["docker/*", "octocat/hello-world@v2"],
+            },
+            artifact_and_log_retention: { days: 30 },
+            cache: { max_cache_retention_days: 3, max_cache_size_gb: 25 },
+            oidc_customization_sub: {
+              use_default: false,
+              include_claim_keys: ["repo", "context", "job_workflow_ref"],
+            },
+            fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
+            fork_pr_workflows_private_repos: {
+              run_workflows_from_fork_pull_requests: true,
+              extra_field: "passes through",
+            },
+          },
+        },
+        "f.yml",
+      ),
+    ).toBeNull();
   });
 
   test("the OIDC template is planned verbatim to its own endpoint on any divergence", async () => {
@@ -332,25 +514,27 @@ describe("actions", () => {
     expect(clean.ops).toEqual([]);
   });
 
-  test("an omitted claim-key list on a custom template, and any list on the default one, are not compared", async () => {
+  test("an omitted claim-key list on a custom template is not compared", async () => {
     // {use_default: false} with no list is the documented opt-in to the ORGANIZATION template, whose keys then appear live, so comparing the omitted
-    // list would be permanent false drift; GitHub ignores include_claim_keys under use_default: true.
+    // list would be permanent false drift.
     const custom = new MockApi({
       [OIDC]: { data: { use_default: false, include_claim_keys: ["repo", "context"] } },
     });
     expect((await plan(custom, { oidc_customization_sub: { use_default: false } })).ops).toEqual(
       [],
     );
-    const standard = new MockApi({
-      [OIDC]: { data: { use_default: true, include_claim_keys: ["job_workflow_ref"] } },
+  });
+
+  test("a claim-key list handed to plan() beside use_default: true is ignored, as GitHub ignores it", async () => {
+    // The shape refuses the pair in a settings file, but the library's direct plan() takes the typed object with no parse; the plan narrows on the
+    // flag, so the ignored list is never compared and never planned as drift.
+    const api = new MockApi({
+      [OIDC]: { data: { use_default: true, include_claim_keys: ["context"] } },
     });
-    expect(
-      (
-        await plan(standard, {
-          oidc_customization_sub: { use_default: true, include_claim_keys: ["repo"] },
-        })
-      ).ops,
-    ).toEqual([]);
+    const bypassed = { use_default: true, include_claim_keys: ["repo"] } as unknown as NonNullable<
+      ActionsConfig["oidc_customization_sub"]
+    >;
+    expect((await plan(api, { oidc_customization_sub: bypassed })).ops).toEqual([]);
   });
 
   test("a declared use_immutable_subject rides the remainder diff", async () => {
@@ -370,16 +554,6 @@ describe("actions", () => {
     expect(result.ops[0]?.drift).toEqual([
       "actions.oidc_customization_sub.use_immutable_subject: false != true",
     ]);
-  });
-
-  test("the oidc shape rejects quoted booleans upfront", () => {
-    // A YAML '"false"' is truthy on the wire.
-    for (const bad of [
-      { use_default: "false" },
-      { use_default: true, use_immutable_subject: "false" },
-    ]) {
-      expect(actionsSection.shape.safeParse({ oidc_customization_sub: bad }).success).toBe(false);
-    }
   });
 
   test("a denied fork-pr-private read renders the ambiguity denialHint", async () => {
@@ -435,7 +609,7 @@ describe("actions", () => {
         },
       },
     });
-    const approval = { approval_policy: "first_time_contributors" };
+    const approval = { approval_policy: "first_time_contributors" as const };
     const privateRepos = {
       run_workflows_from_fork_pull_requests: true,
       send_write_tokens_to_workflows: false,
@@ -463,44 +637,6 @@ describe("actions", () => {
     // No base-permissions read: these keys alone must not imply enabled: true.
     expect(roles(api)).toEqual([FORK_APPROVAL, FORK_PRIVATE]);
     expect(result.notes).toEqual([]);
-  });
-
-  test("the private-repos shape requires the complete policy and stays loose otherwise", () => {
-    // GitHub does not document whether an omitted toggle is preserved or reset by the PUT, so the shape demands all four booleans (a YAML-quoted
-    // "true" included).
-    for (const bad of [
-      { send_secrets_and_variables: false },
-      {
-        run_workflows_from_fork_pull_requests: "true",
-        send_write_tokens_to_workflows: false,
-        send_secrets_and_variables: false,
-        require_approval_for_fork_pr_workflows: true,
-      },
-      {
-        run_workflows_from_fork_pull_requests: true,
-        send_write_tokens_to_workflows: false,
-        send_secrets_and_variables: false,
-      },
-    ]) {
-      expect(actionsSection.shape.safeParse({ fork_pr_workflows_private_repos: bad }).success).toBe(
-        false,
-      );
-    }
-    expect(
-      actionsSection.shape.safeParse({
-        fork_pr_contributor_approval: { approval_policy: "first_time_contributors" },
-        fork_pr_workflows_private_repos: {
-          run_workflows_from_fork_pull_requests: true,
-          send_write_tokens_to_workflows: false,
-          send_secrets_and_variables: false,
-          require_approval_for_fork_pr_workflows: true,
-          extra_field: "passes through",
-        },
-      }).success,
-    ).toBe(true);
-    expect(actionsSection.shape.safeParse({ fork_pr_contributor_approval: {} }).success).toBe(
-      false,
-    );
   });
 
   test("executing the plan converges: every routed PUT lands once, then nothing", async () => {
@@ -629,12 +765,16 @@ describe("actions snapshot", () => {
       [BASE]: {
         enabled: true,
         allowed_actions: "selected",
+        sha_pinning_required: true,
         selected_actions_url: `https://api.github.com${BASE}/selected-actions`,
       },
+      // The allowlist slice is closed, so a key GitHub adds is left out rather than emitted into a
+      // document the shape then refuses.
       [`${BASE}/selected-actions`]: {
         github_owned_allowed: true,
         verified_allowed: false,
         patterns_allowed: ["actions/*"],
+        future_allowed: true,
       },
       [`${BASE}/workflow`]: {
         default_workflow_permissions: "read",
@@ -660,6 +800,7 @@ describe("actions snapshot", () => {
       value: {
         enabled: true,
         allowed_actions: "selected",
+        sha_pinning_required: true,
         default_workflow_permissions: "read",
         can_approve_pull_request_reviews: false,
         selected_actions: {
@@ -682,6 +823,61 @@ describe("actions snapshot", () => {
       notes: [],
     });
     expect(api.writes).toEqual([]);
+  });
+
+  test("the OIDC template reads back as a document the shape accepts: an inactive or null claim-key list and the prefix fall away", async () => {
+    // GitHub keeps reporting the last custom list (and sub_claim_prefix) after a switch back to the default template, and answers null for a list
+    // never set; either read back verbatim would be a snapshot the shape itself refuses.
+    const cases: [
+      live: Record<string, unknown>,
+      expected: ActionsConfig["oidc_customization_sub"],
+    ][] = [
+      [
+        {
+          use_default: true,
+          include_claim_keys: ["repo", "context"],
+          sub_claim_prefix: "repo:octocat/hello-world",
+        },
+        { use_default: true },
+      ],
+      [{ use_default: false, include_claim_keys: null }, { use_default: false }],
+      [
+        {
+          use_default: false,
+          include_claim_keys: ["repo"],
+          sub_claim_prefix: "repo:octocat/hello-world",
+        },
+        { use_default: false, include_claim_keys: ["repo"] },
+      ],
+    ];
+    for (const [live, expected] of cases) {
+      const api = liveActions({
+        [BASE]: { enabled: true, allowed_actions: "all" },
+        [`${BASE}/workflow`]: {
+          default_workflow_permissions: "read",
+          can_approve_pull_request_reviews: false,
+        },
+        [`${BASE}/access`]: { access_level: "none" },
+        [`${BASE}/artifact-and-log-retention`]: { days: 90, maximum_allowed_days: 400 },
+        "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
+        "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 10 },
+        "/repos/o/r/actions/oidc/customization/sub": live,
+        [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
+        [`${BASE}/fork-pr-workflows-private-repos`]: {
+          run_workflows_from_fork_pull_requests: false,
+          send_write_tokens_to_workflows: false,
+          send_secrets_and_variables: false,
+          require_approval_for_fork_pr_workflows: true,
+        },
+      });
+      const read = await snapshot(api);
+      expect(read.notes, JSON.stringify(live)).toEqual([]);
+      expect(read.value?.oidc_customization_sub, JSON.stringify(live)).toEqual(expected);
+      expect(
+        shapeError({ actions: read.value as Record<string, unknown> }, "snapshot.yml"),
+        JSON.stringify(live),
+      ).toBeNull();
+    }
   });
 
   test("an unset cache limit answering {} is left out of the cache key; the other limit still reads back", async () => {

@@ -1,0 +1,25 @@
+# sha_pinning_required is a documented field of the permissions PUT body, so
+# it rides that PUT as a known key: no "not recognized by this action" note.
+# Live has it off, the file requires it, so apply PUTs the permissions body;
+# the convergence rerun reads it back and finds it matching.
+name: actions-sha-pinning-apply-converges
+settings:
+  actions:
+    sha_pinning_required: true
+live_state:
+  actions_permissions:
+    enabled: true
+    allowed_actions: all
+    sha_pinning_required: false
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    actions: applied
+  mutations:
+    - "PUT /repos/{repo}/actions/permissions"
+  stdout_lacks:
+    - "not recognized by this action"
+  fixpoint: converges

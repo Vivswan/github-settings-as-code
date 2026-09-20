@@ -170,6 +170,9 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "schema-looser: the allowed_actions/selected_actions contradiction is a superRefine (cross-field), rejected at runtime upfront",
   "actions-selected-contradiction-rejected-check.yml settings":
     "schema-looser: same contradiction, check mode",
+  "actions-retention-reported-field-rejected.yml settings":
+    "schema-looser: the reported-only field sweep (a key the GET returns and the PUT does not take) is a superRefine " +
+    "over open passthrough objects, rejected at runtime upfront",
   "collaborators-unknown-key-rejected.yml settings":
     "schema-looser: collaborators is a closedSurface section; the shape stays open for passthrough parity and validateSectionShapes rejects the typo key",
   "environment-pins-cap-rejected.yml settings":

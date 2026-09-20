@@ -61,8 +61,8 @@ export function genActions(rng: Rng): Json {
   }
   const privateReposRng = rng.fork("fork-pr-private");
   if (privateReposRng.bool(0.3)) {
-    // The shape requires the COMPLETE policy (GitHub does not document whether the PUT preserves
-    // an omitted toggle), so every draw carries all four booleans.
+    // Only the first toggle is required; every draw still carries all four so the document leaves
+    // no toggle unwatched.
     actions.fork_pr_workflows_private_repos = {
       run_workflows_from_fork_pull_requests: privateReposRng.bool(),
       send_write_tokens_to_workflows: privateReposRng.bool(),

@@ -8,6 +8,7 @@ export const row: Row = {
     actions_permissions: {
       enabled: true,
       allowed_actions: "selected",
+      sha_pinning_required: true,
       selected_actions_url: "https://api.github.com/repos/o/r/actions/permissions/selected-actions",
     },
     selected_actions: {
@@ -26,6 +27,7 @@ export const row: Row = {
     value: {
       enabled: true,
       allowed_actions: "selected",
+      sha_pinning_required: true,
       default_workflow_permissions: "write",
       can_approve_pull_request_reviews: true,
       selected_actions: {
