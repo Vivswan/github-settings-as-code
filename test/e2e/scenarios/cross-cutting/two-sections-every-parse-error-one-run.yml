@@ -1,0 +1,19 @@
+# Two sections each carry a shape failure: a numeric label name and a null
+# pages source. Both are listed in this one run, each under its own section
+# path, and no section writes.
+name: two-sections-every-parse-error-one-run
+settings:
+  labels:
+    - name: 1
+  pages:
+    source: null
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "POST /repos/{repo}/labels"
+    - "PUT /repos/{repo}/pages"
+    - "POST /repos/{repo}/pages"
+  stdout_contains:
+    - "labels[0].name: Invalid input: expected string, received number"
+    - "pages.source: Invalid input: expected object, received null"

@@ -4,7 +4,7 @@ import { err, ok, type Result } from "neverthrow";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../schema.js";
-import type { DeclaredIssue } from "../sections/contract/module.js";
+import { checksReportingBesideFailures, type DeclaredIssue } from "../sections/contract/module.js";
 import { sectionModule, sectionShape } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
 
@@ -135,7 +135,8 @@ export function validateSectionShapes(
       problems.push(nonPlain);
       continue;
     }
-    const parsed = sectionShape(key).safeParse(declared);
+    // The section may compose a rule onto its loosened shape; loosen() itself covers every check beneath.
+    const parsed = checksReportingBesideFailures(sectionShape(key)).safeParse(declared);
     if (!parsed.success) {
       const issues = parsed.error.issues;
       for (const issue of issues.slice(0, 5)) {

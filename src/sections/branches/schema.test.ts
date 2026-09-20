@@ -210,16 +210,9 @@ describe("branches protection parse rules", () => {
           "https://api.github.com/repos/octocat/hello-world/branches/main/protection/restrictions/users",
       },
     };
-    // The actor object is a typed field's failure, and zod runs the mapping's own key sweep only
-    // once its fields parse: the copy is refused in two rounds, the string first, then the keys.
-    expect(issues([{ name: "main", protection: getBody }])).toEqual([
-      '0.protection.restrictions.users.0: protection.restrictions.users carries an actor object copied from GitHub\'s GET response, which the protection PUT takes as the login string; write "octocat" instead',
-    ]);
-    const stringActors = {
-      ...getBody,
-      restrictions: { ...getBody.restrictions, users: ["octocat"] },
-    };
-    expect(issues([{ name: "main", protection: stringActors }])).toEqual([
+    // The actor object is a typed field's failure; the mapping's own key sweep runs beside it (loosen() rewires
+    // every check to report beside a failed sibling), so the whole copy is refused in one round.
+    const keySweep = [
       "0.protection.required_status_checks.contexts_url: protection.required_status_checks.contexts_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.required_status_checks.enforcement_level: protection.required_status_checks.enforcement_level is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)",
       "0.protection.restrictions.users_url: protection.restrictions.users_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
@@ -228,7 +221,16 @@ describe("branches protection parse rules", () => {
       "0.protection.enabled: protection.enabled is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the control's own key carries the toggle)",
       "0.protection.enforce_admins.url: protection.enforce_admins.url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.enforce_admins.enabled: protection.enforce_admins.enabled is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead",
+    ];
+    expect(issues([{ name: "main", protection: getBody }])).toEqual([
+      '0.protection.restrictions.users.0: protection.restrictions.users carries an actor object copied from GitHub\'s GET response, which the protection PUT takes as the login string; write "octocat" instead',
+      ...keySweep,
     ]);
+    const stringActors = {
+      ...getBody,
+      restrictions: { ...getBody.restrictions, users: ["octocat"] },
+    };
+    expect(issues([{ name: "main", protection: stringActors }])).toEqual(keySweep);
     expect(issues([{ name: "main", protection: protectionSnapshot(getBody) }])).toEqual([]);
   });
 

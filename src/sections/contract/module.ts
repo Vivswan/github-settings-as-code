@@ -703,12 +703,74 @@ function defOf(schema: z.ZodType): LoosenDef {
   return (schema as unknown as { _zod: { def: LoosenDef } })._zod.def;
 }
 
+/** Every clone's own checks are rewired to report beside a failed nested value (reportingBesideFailures). */
 function cloneWith(schema: z.ZodType, patch: Partial<LoosenDef>): z.ZodType {
   const def = (schema as unknown as { _zod: { def: Record<string, unknown> } })._zod.def;
+  const checks = (def.checks as readonly z.core.$ZodCheck[] | undefined)?.map(
+    reportingBesideFailures,
+  );
   return z.util.clone(
     schema as unknown as Parameters<typeof z.util.clone>[0],
-    { ...def, ...patch } as never,
+    { ...def, ...patch, checks } as never,
   ) as unknown as z.ZodType;
+}
+
+/** The rewire for a check attached AFTER loosen(): a section composing a rule onto its loosened shape. */
+export function checksReportingBesideFailures(schema: z.ZodType): z.ZodType {
+  return cloneWith(schema, {});
+}
+
+const REPORTS_BESIDE_FAILURES = new WeakSet<z.core.$ZodCheck>();
+
+/** The paths of the issues that abort a parse (a wrong type, a refused option); a rule's own finding and an unrecognized key do not. */
+function failedPaths(issues: readonly z.core.$ZodRawIssue[]): PropertyKey[][] {
+  return issues.flatMap((issue) => (issue.continue === true ? [] : [issue.path ?? []]));
+}
+
+function isUnder(path: readonly PropertyKey[], failed: readonly PropertyKey[]): boolean {
+  return failed.length <= path.length && failed.every((step, index) => step === path[index]);
+}
+
+/**
+ * zod skips a node's own checks once a nested value failed; rewired, a check runs unless the node itself was refused
+ * (a pathless failure). The contract for a rule, which then meets the raw value at a failed property: a finding under
+ * a failed path is dropped (the shape's issue stands there), a throw ends the rule with its findings so far, and a
+ * rule branching on a sibling's type guards that read itself. With no failure a throw propagates.
+ */
+function reportingBesideFailures(check: z.core.$ZodCheck): z.core.$ZodCheck {
+  if (REPORTS_BESIDE_FAILURES.has(check)) {
+    return check;
+  }
+  const { when, ...def } = check._zod.def;
+  const inner = check._zod.check;
+  const clone: z.core.$ZodCheck = {
+    _zod: {
+      def: {
+        ...def,
+        when: (payload) =>
+          (when?.(payload) ?? true) && !failedPaths(payload.issues).some((p) => p.length === 0),
+      },
+      onattach: check._zod.onattach,
+      check: (payload) => {
+        const failed = failedPaths(payload.issues);
+        if (failed.length === 0) {
+          return inner(payload);
+        }
+        const before = payload.issues.length;
+        try {
+          inner(payload);
+        } catch {
+          // The rule tripped on a raw value whose own shape issue is already listed.
+        }
+        const findings = payload.issues.splice(before);
+        payload.issues.push(
+          ...findings.filter((f) => !failed.some((path) => isUnder(f.path ?? [], path))),
+        );
+      },
+    },
+  };
+  REPORTS_BESIDE_FAILURES.add(clone);
+  return clone;
 }
 
 /**
@@ -822,7 +884,9 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
         for (const issue of parsed.error.issues) {
           ctx.addIssue({ ...issue });
         }
-        return z.NEVER;
+        // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
+        // entry (reportingBesideFailures) and must meet the entries, raw where they failed. The parse fails regardless.
+        return value;
       }
       return parsed.data;
     });

@@ -402,3 +402,98 @@ describe("a long problem list is cut, and the remainder is counted", () => {
     },
   );
 });
+
+describe("every parse error in a document is reported in one run", () => {
+  // zod skips an object's own refinements once a nested value failed; the sections' cross-field rules would then
+  // surface one run after the typo beside them, and the user fixes the file one run at a time.
+  const pinned = Array.from({ length: 11 }, (_, i) => ({ name: `env-${i}`, pinned: true }));
+  pinned[0] = { name: "env-0", pinned: true, reviewers: [{ type: "Bot", id: 1 }] } as never;
+  test.each<[what: string, doc: Record<string, unknown>, issues: (string | RegExp)[]]>([
+    [
+      "a property-level enum failure and the object-level pair rule in one environment entry",
+      {
+        environments: [
+          {
+            name: "production",
+            reviewers: [{ type: "Bot", id: 1 }],
+            deployment_branch_policies: [{ name: "release/*" }],
+          },
+        ],
+      },
+      [
+        /^environments\[0\]\.reviewers\[0\]\.type: Invalid option/,
+        /^environments\[0\]\.deployment_branch_policies: the "production" entry declares deployment_branch_policies, so it must also declare deployment_branch_policy with custom_branch_policies: true/,
+      ],
+    ],
+    [
+      "a property-level enum failure and the object-level contradiction rule in the actions mapping",
+      {
+        actions: { allowed_actions: "sometimes", selected_actions: { github_owned_allowed: true } },
+      },
+      [
+        /^actions\.allowed_actions: Invalid option/,
+        'actions.selected_actions: selected_actions is declared together with allowed_actions: "sometimes", but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions',
+      ],
+    ],
+    [
+      "a property-level type failure and the object-level misplaced-key rule in one webhook entry",
+      {
+        webhooks: [{ config: { url: "https://hooks.example/x" }, active: "yes", secret: "$HOOK" }],
+      },
+      [
+        /^webhooks\[0\]\.active: Invalid input: expected boolean/,
+        /^webhooks\[0\]\.secret: a webhook secret belongs under config\.secret/,
+      ],
+    ],
+    [
+      "a failed entry and the list-level cap rule over its siblings (environments pinned)",
+      { environments: pinned },
+      [
+        /^environments\[0\]\.reviewers\[0\]\.type: Invalid option/,
+        /^environments\[10\]\.pinned: .*GitHub allows at most 10 pinned environments per repository/,
+      ],
+    ],
+    [
+      "a failed entry and a rule the section attaches to its loosened list (branches wildcard keys)",
+      {
+        branches: [
+          { name: 1, protection: null },
+          { name: "release/*", protection: { restrictions: { users: [], teams: [], apps: [] } } },
+        ],
+      },
+      [
+        /^branches\[0\]\.name: Invalid input: expected string/,
+        /^branches\[1\]\.protection\.restrictions: the wildcard entry "release\/\*" declares protection\.restrictions, which this section does not manage on wildcard rules/,
+      ],
+    ],
+    [
+      "a rule branching on a failed sibling's type guards the read: no false wildcard finding for a mapping name",
+      {
+        branches: [
+          {
+            name: { main: true },
+            protection: { restrictions: { users: [], teams: [], apps: [] } },
+          },
+        ],
+      },
+      [/^branches\[0\]\.name: Invalid input: expected string/],
+    ],
+    [
+      "a rule judging the failed value itself adds nothing: the shape's own issue there is the report",
+      { branches: [{ name: "release/*", protection: "yes" }] },
+      [/^branches\[0\]\.protection: Invalid input: expected object/],
+    ],
+    [
+      "two sections each with a shape failure",
+      { labels: [{ name: 1 }], pages: { source: null } },
+      [
+        /^labels\[0\]\.name: Invalid input: expected string/,
+        /^pages\.source: Invalid input: expected object/,
+      ],
+    ],
+  ])("%s", (_what, doc, issues) => {
+    expect(issuesOf(doc)).toEqual(
+      issues.map((issue) => (typeof issue === "string" ? issue : expect.stringMatching(issue))),
+    );
+  });
+});
