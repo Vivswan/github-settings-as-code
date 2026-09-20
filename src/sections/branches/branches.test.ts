@@ -1862,6 +1862,27 @@ describe("branches snapshot", () => {
     });
   });
 
+  test("the mock answers GitHub's 422 to a PUT whose restrictions omit users or teams (the PUT schema requires both), and stores nothing", async () => {
+    const api = registryFake({ branches: ["main"] });
+    const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
+      enforce_admins: true,
+      required_status_checks: null,
+      required_pull_request_reviews: null,
+      restrictions: { users: [] },
+    });
+    expect("error" in put ? [put.error.status, JSON.parse(put.error.body)] : put).toEqual([
+      422,
+      {
+        message: "Validation Failed",
+        errors: [`Invalid request.\n\n"teams" wasn't supplied.`],
+        documentation_url:
+          "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
+      },
+    ]);
+    const served = await api.tryRequest("GET", "/repos/o/r/branches/main/protection");
+    expect("error" in served && served.error.status).toBe(404);
+  });
+
   test.each([
     [
       "the GET wrapper",

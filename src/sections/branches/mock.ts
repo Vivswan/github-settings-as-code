@@ -146,9 +146,11 @@ const isMapping = (value: unknown): value is Json =>
 
 /**
  * The actor holders of a PUT body as GitHub reads them back: logins and slugs in their canonical
- * lowercase, and a review-side holder naming nobody dropped, since GitHub serves
+ * lowercase, a list the review-side holders omit served empty (the PUT takes each of theirs as
+ * optional), and a review-side holder naming nobody dropped, since GitHub serves
  * dismissal_restrictions and bypass_pull_request_allowances only when they name someone.
- * `restrictions` stays whole: an all-empty one restricts pushes to nobody.
+ * `restrictions` stays whole: an all-empty one restricts pushes to nobody, and a list it omits
+ * never reaches here (missingRestrictionListResponse answers the 422 first).
  */
 function actorsAsGitHubReadsBack(payload: Json): Json {
   const canonical = (holder: Json): ActorHolder => {
@@ -191,7 +193,21 @@ const PUT_BOOLEAN_CONTROLS = [...BOOLEAN_CONTROL_SET].filter(
   (key) => key !== "required_signatures",
 );
 
-/** GitHub's "Validation Error Simple" for the first boolean control whose value the PUT schema refuses. */
+/** GitHub's "Validation Error Simple" to a PUT body off the protection schema; the validator skips only the body check. */
+function validationFailed(error: string): MockResponse {
+  return {
+    status: 422,
+    body: {
+      message: "Validation Failed",
+      errors: [`Invalid request.\n\n${error}`],
+      documentation_url:
+        "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
+    },
+    requestOffSpec: true,
+  };
+}
+
+/** The first boolean control whose value the PUT schema refuses. */
 function invalidBooleanControlResponse(payload: Json): MockResponse | null {
   for (const key of PUT_BOOLEAN_CONTROLS) {
     if (!Object.hasOwn(payload, key)) {
@@ -203,20 +219,24 @@ function invalidBooleanControlResponse(payload: Json): MockResponse | null {
       continue;
     }
     const expected = nullable ? "a boolean or null" : "a boolean";
-    return {
-      status: 422,
-      body: {
-        message: "Validation Failed",
-        errors: [
-          `Invalid request.\n\nFor 'properties/${key}', ${JSON.stringify(value)} is not ${expected}.`,
-        ],
-        documentation_url:
-          "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
-      },
-      requestOffSpec: true,
-    };
+    return validationFailed(
+      `For 'properties/${key}', ${JSON.stringify(value)} is not ${expected}.`,
+    );
   }
   return null;
+}
+
+/** The PUT schema requires users and teams under restrictions (apps is optional); GitHub names the first list not supplied. */
+const REQUIRED_RESTRICTION_LISTS = ["users", "teams"] as const;
+
+function missingRestrictionListResponse(payload: Json): MockResponse | null {
+  if (!isMapping(payload.restrictions)) {
+    return null;
+  }
+  const missing = REQUIRED_RESTRICTION_LISTS.find(
+    (list) => !Object.hasOwn(payload.restrictions as Json, list),
+  );
+  return missing === undefined ? null : validationFailed(`"${missing}" wasn't supplied.`);
 }
 
 export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
@@ -263,7 +283,8 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
       return rejected(MISSING_BRANCH);
     }
     const payload = asObject(body);
-    const invalid = invalidBooleanControlResponse(payload);
+    const invalid =
+      invalidBooleanControlResponse(payload) ?? missingRestrictionListResponse(payload);
     if (invalid !== null) {
       return invalid;
     }

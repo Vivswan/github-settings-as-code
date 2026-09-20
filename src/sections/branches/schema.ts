@@ -70,35 +70,48 @@ function copiedActorName(item: unknown): string | null {
 }
 
 /**
+ * GitHub's protection PUT requires users and teams under restrictions (apps stays optional) and
+ * takes every list of the two review-side holders as optional, reading an empty one as "disabled";
+ * a required list missing from the file would 422 at apply, so it is refused at parse instead.
+ */
+const REQUIRED_RESTRICTION_LISTS: ReadonlySet<ActorList> = new Set(["users", "teams"]);
+
+function missingListError(holder: string): string {
+  return `protection.${holder} must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; ${holder}: null lifts the push restriction`;
+}
+
+/**
  * The GET expands each actor into an object ({login, id, ...} for a user, {slug, ...} for a team
  * or App); the PUT takes the login/slug string, so a copied item is refused naming the string to
  * write, and any other non-string item the type rule.
  */
-function actorList(holder: string, list: ActorList) {
+function actorList(holder: string, list: ActorList, required: boolean) {
   const site = `protection.${holder}.${list}`;
   const { nameKey, example } = ACTOR_LIST_EXAMPLE[list];
   const typeRule = `${site} lists each actor as its ${nameKey} string ("${example}")`;
-  return z
-    .array(
-      z.string({
-        error: (issue) => {
-          const copied = copiedActorName(issue.input);
-          return copied === null
-            ? typeRule
-            : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
-        },
-      }),
-      { error: typeRule },
-    )
-    .optional();
+  const names = z.array(
+    z.string({
+      error: (issue) => {
+        const copied = copiedActorName(issue.input);
+        return copied === null
+          ? typeRule
+          : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
+      },
+    }),
+    {
+      error: (issue) =>
+        required && issue.input === undefined ? missingListError(holder) : typeRule,
+    },
+  );
+  return required ? names : names.optional();
 }
 
-function actorHolder(holder: string) {
+function actorHolder(holder: string, required: ReadonlySet<ActorList> = new Set()) {
   return z.looseObject(
     {
-      users: actorList(holder, "users"),
-      teams: actorList(holder, "teams"),
-      apps: actorList(holder, "apps"),
+      users: actorList(holder, "users", required.has("users")),
+      teams: actorList(holder, "teams", required.has("teams")),
+      apps: actorList(holder, "apps", required.has("apps")),
     },
     {
       error: `protection.${holder} must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")`,
@@ -163,7 +176,10 @@ const RequiredStatusChecks = z
     if (status.contexts === undefined && status.checks === undefined) {
       refineCtx.addIssue({ code: "custom", message: CHECK_LIST_ERROR });
     }
-  });
+  })
+  // The refinement's published-schema twin: zod refinements do not reach z.toJSONSchema, and
+  // test/published-schema.test.ts holds the two sides to the same verdicts.
+  .meta({ anyOf: [{ required: ["contexts"] }, { required: ["checks"] }] });
 
 const RequiredPullRequestReviews = z.looseObject(
   {
@@ -256,7 +272,7 @@ export const BranchProtectionConfig = z
   .looseObject({
     required_status_checks: RequiredStatusChecks.nullable().optional(),
     required_pull_request_reviews: RequiredPullRequestReviews.nullable().optional(),
-    restrictions: actorHolder("restrictions").nullable().optional(),
+    restrictions: actorHolder("restrictions", REQUIRED_RESTRICTION_LISTS).nullable().optional(),
     required_signatures: z
       .boolean({
         error:

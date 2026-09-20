@@ -136,26 +136,29 @@ schema:
     no other value, so the file is refused upfront instead of the PUT failing at apply.
   BranchProtectionConfig.required_pull_request_reviews|0.dismissal_restrictions: >-
     Who may dismiss pull request reviews, as `users`, `teams`, and `apps` lists of login/slug
-    strings; an empty mapping lets anyone with push access dismiss. GitHub's GET expands each actor
-    into an object, which the PUT rejects, so a copied one is refused naming the string to write.
+    strings, each list optional; an empty mapping lets anyone with push access dismiss. GitHub's GET
+    expands each actor into an object, which the PUT rejects, so a copied one is refused naming the
+    string to write.
   BranchProtectionConfig.required_pull_request_reviews|0.dismissal_restrictions.users: User logins ("octocat").
   BranchProtectionConfig.required_pull_request_reviews|0.dismissal_restrictions.teams: Team slugs ("platform-team").
   BranchProtectionConfig.required_pull_request_reviews|0.dismissal_restrictions.apps: GitHub App slugs ("deploy-gate").
   BranchProtectionConfig.required_pull_request_reviews|0.bypass_pull_request_allowances: >-
     Who may push without a pull request review, as `users`, `teams`, and `apps` lists of login/slug
-    strings. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one
-    is refused naming the string to write.
+    strings, each list optional. GitHub's GET expands each actor into an object, which the PUT
+    rejects, so a copied one is refused naming the string to write.
   BranchProtectionConfig.required_pull_request_reviews|0.bypass_pull_request_allowances.users: User logins ("octocat").
   BranchProtectionConfig.required_pull_request_reviews|0.bypass_pull_request_allowances.teams: Team slugs ("platform-team").
   BranchProtectionConfig.required_pull_request_reviews|0.bypass_pull_request_allowances.apps: GitHub App slugs ("deploy-gate").
   BranchProtectionConfig.restrictions: >-
-    Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings; an
-    all-empty mapping lets nobody push, and `null` turns the push restriction off. GitHub's GET
-    expands each actor into an object, which the PUT rejects, so a copied one is refused naming the
-    string to write. Literal branches only; wildcard rules point at the rulesets section.
-  BranchProtectionConfig.restrictions|0.users: User logins ("octocat").
-  BranchProtectionConfig.restrictions|0.teams: Team slugs ("platform-team").
-  BranchProtectionConfig.restrictions|0.apps: GitHub App slugs ("deploy-gate").
+    Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings. GitHub's
+    protection PUT requires `users` and `teams` (`[]` when none) and takes `apps` as optional, so a
+    mapping without either is refused upfront; an all-empty mapping lets nobody push, and `null`
+    turns the push restriction off. GitHub's GET expands each actor into an object, which the PUT
+    rejects, so a copied one is refused naming the string to write. Literal branches only; wildcard
+    rules point at the rulesets section.
+  BranchProtectionConfig.restrictions|0.users: User logins ("octocat"); required, `[]` when none.
+  BranchProtectionConfig.restrictions|0.teams: Team slugs ("platform-team"); required, `[]` when none.
+  BranchProtectionConfig.restrictions|0.apps: GitHub App slugs ("deploy-gate"); optional.
   BranchProtectionConfig.required_signatures: >-
     Require signed commits on the branch. On a literal branch this is a routed key the protection
     PUT silently drops, so it is applied through the POST/DELETE .../protection/required_signatures

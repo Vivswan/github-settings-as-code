@@ -1,0 +1,39 @@
+# GitHub's protection PUT requires restrictions.users and restrictions.teams
+# (apps is optional), so a restrictions mapping without them parsed clean and
+# 422d at apply. Each missing list is refused before any request, naming the
+# two required lists and the null form that lifts the push restriction; the
+# review-side holders keep every list optional, since GitHub reads an empty
+# dismissal_restrictions or bypass_pull_request_allowances as "disabled".
+name: branches-restrictions-missing-lists-rejected
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        required_pull_request_reviews:
+          required_approving_review_count: 1
+          dismissal_restrictions: {}
+          bypass_pull_request_allowances: {}
+        restrictions: {}
+    - name: develop
+      protection:
+        restrictions:
+          users: [octocat]
+          apps: [deploy-gate]
+live_state:
+  branches: ["main", "develop"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "branches[0].protection.restrictions.users: protection.restrictions must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; restrictions: null lifts the push restriction"
+    - "branches[0].protection.restrictions.teams: protection.restrictions must carry both users and teams"
+    - "branches[1].protection.restrictions.teams: protection.restrictions must carry both users and teams"
+  stdout_lacks:
+    - "dismissal_restrictions"
+    - "bypass_pull_request_allowances"
+    - "branches[1].protection.restrictions.users"
