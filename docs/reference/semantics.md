@@ -25,21 +25,23 @@ Apply is convergent: re-running preserves the declared state (some sections diff
 
 ## What the parse refuses
 
-Anything the settings file alone proves wrong is refused when the file is parsed, before any API call, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
+Anything the settings file alone proves wrong is refused when the file is parsed, before any section reads or writes the repository, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
+
+In multi-repo mode the flow reads the settings file first: a remote target's file is fetched from that repository, a `repos-dir` target's from the local directory. Under `private-repos: redact` it also looks up the visibility of every target but the workflow's own repository. Those are the flow's own reads; no section has run for that target.
 
 The field GitHub reports but cannot set is the case that motivated the rule:
 
 | | `repository.has_downloads: false` in the file |
 | --- | --- |
 | Before | The GET reports `has_downloads`, the PATCH cannot set it, so every check saw drift and every apply re-sent it without converging. |
-| Now | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No API call is made. |
+| Now | The parse refuses the file with an error naming `repository.has_downloads` and telling you to remove the key. No section reads or writes the repository. |
 
 An unknown key has two fates, decided by the shape it sits in:
 
 | Shape | Unknown key | What you see |
 | --- | --- | --- |
 | Closed: the write carries only the fields the shape names, so an extra key has nowhere to go | refused at parse | the error names the key and the shape it sits in |
-| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent | a check-time note when GitHub does not echo the key back: if GitHub ignores it, every apply re-sends it without converging |
+| Open passthrough: extra fields ride into the write verbatim, so a field GitHub ships tomorrow works today | kept and sent | on the sections that already print it, a check-time note when GitHub does not echo the key: if GitHub ignores it, every apply re-sends it without converging |
 
 The [forward compatibility page](forward-compatibility.md#the-closed-sections) lists which sections and nested shapes are closed.
 
