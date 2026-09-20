@@ -12,7 +12,7 @@ The [module map](#the-module-map) at the end is generated from [architecture.yml
 
 It also enforces the never-throw rule: errors are values, a neverthrow `Result` carrying a typed `Problem`. A `throw` is allowed only as a `BUG:` invariant, a bare rethrow directly in its `catch`, or in a file the `throws` block of architecture.yml names.
 
-Phase one is this gate: the GitHub request layer is spared, and every other remaining throw is listed per file in a ratchet that only shrinks. Phase two converts the response-shape and request-layer throws to `Result`s and takes the ratchet to zero.
+That block counts the remaining throws per file. The lint fails when the block and the tree disagree in either direction; that a count only goes down is the review rule in AGENTS.md.
 
 ## The journey of one settings file
 

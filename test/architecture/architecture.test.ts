@@ -6,12 +6,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { err } from "neverthrow";
 import {
   ARCHITECTURE_PATH,
   type Architecture,
   importSpecifiers,
   lintArchitecture,
   lintThrows,
+  parseArchitecture,
   readArchitecture,
   renderArchitectureMermaid,
 } from "../../.github/scripts/arch-lint.js";
@@ -104,7 +106,7 @@ describe("lintThrows", () => {
   const OUTSIDE =
     "throws outside the rule: not a BUG: invariant, not a bare rethrow inside its catch clause, and the file is not in throws.requestLayer; return a Result, or add the file to throws.ratchet";
 
-  test("each class lands in the census; a throw outside the rule, a rethrow from another scope, and a file that does not parse are reported", () =>
+  test("each class lands in the census; a throw outside the rule, a rethrow from another scope, and a file that does not parse are reported, and a type alias does not shadow the binding", () =>
     withTempDir("arch-lint-throws-", (dir) => {
       const files = {
         "src/bug.ts": [
@@ -152,6 +154,10 @@ describe("lintThrows", () => {
           "      default:",
           "        throw error;",
           "    }",
+          "    {",
+          "      type error = number;",
+          "      throw error;",
+          "    }",
           "  }",
           "}",
         ].join("\n"),
@@ -171,7 +177,7 @@ describe("lintThrows", () => {
           `src/shadow.ts:16 ${OUTSIDE}`,
           `src/shadow.ts:20 ${OUTSIDE}`,
         ],
-        census: { bug: 2, rethrow: 1, requestLayer: 1, ratchet: 7 },
+        census: { bug: 2, rethrow: 2, requestLayer: 1, outside: 7 },
       });
     }));
 
@@ -199,7 +205,7 @@ describe("lintThrows", () => {
         };
         expect(lint(dir, files, { requestLayer: [], ratchet: { "src/two.ts": listed } })).toEqual({
           problems,
-          census: { bug: 0, rethrow: 0, requestLayer: 0, ratchet: 2 },
+          census: { bug: 0, rethrow: 0, requestLayer: 0, outside: 2 },
         });
       }),
   );
@@ -220,7 +226,87 @@ describe("lintThrows", () => {
           "stale allowance throws.requestLayer src/clean.ts: no throw remains there; remove it",
           "stale allowance throws.requestLayer src/gone.ts: no throw remains there; remove it",
         ],
-        census: { bug: 1, rethrow: 0, requestLayer: 0, ratchet: 0 },
+        census: { bug: 1, rethrow: 0, requestLayer: 0, outside: 0 },
       });
     }));
+});
+
+describe("parseArchitecture", () => {
+  /** A declaration with `throws` replaced, beside one src/ file and one test/ file (so a path that leaves src/
+   * through `..` still names a real file), parsed from a temp root. */
+  function parse(dir: string, throws: string) {
+    for (const file of ["src/x.ts", "test/x.ts"]) {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), "export const x = 1;\n");
+    }
+    writeFileSync(
+      join(dir, ARCHITECTURE_PATH),
+      `layers: {}\nexclude: []\nedges: {}\n${throws}`.replaceAll("|", "\n"),
+    );
+    return parseArchitecture(dir);
+  }
+
+  test.each<[string, string, string]>([
+    ["a word", "typo", "'typo'"],
+    ["a yaml NaN", ".nan", "NaN"],
+    ["a map", "{count: 1}", "{ count: 1 }"],
+    ["a quoted number", '"1"', "'1'"],
+    ["a fraction", "1.5", "1.5"],
+    ["a negative", "-1", "-1"],
+  ])("a ratchet count that is %s fails naming the key and the value", (_case, value, shown) =>
+    withTempDir("arch-lint-parse-", (dir) => {
+      const throws = `throws:|  requestLayer: []|  ratchet:|    src/x.ts: ${value}`;
+      expect(parse(dir, throws)).toEqual(
+        err([
+          `${ARCHITECTURE_PATH}: throws.ratchet["src/x.ts"] is ${shown}; expected a whole number of throws`,
+        ]),
+      );
+    }),
+  );
+
+  test.each<[string, string, string[]]>([
+    ["a missing ratchet", "throws:|  requestLayer: []", ["throws.ratchet is missing"]],
+    [
+      "a misspelled ratchet",
+      "throws:|  requestLayer: []|  ratchets: {}",
+      ["throws.ratchet is missing", "unknown key throws.ratchets"],
+    ],
+    ["a misspelled throws", "throw: {}", ["throws is missing", "unknown key throw"]],
+    [
+      "a ratchet path that is no file",
+      "throws:|  requestLayer: []|  ratchet:|    src/gone.ts: 1",
+      [`throws.ratchet["src/gone.ts"] names no file under src/: 'src/gone.ts'`],
+    ],
+    [
+      "a spared path outside src/",
+      "throws:|  requestLayer: [test/x.ts]|  ratchet: {}",
+      ["throws.requestLayer[0] names no file under src/: 'test/x.ts'"],
+    ],
+    [
+      "a spared path through a file",
+      "throws:|  requestLayer: [src/x.ts/y.ts]|  ratchet: {}",
+      ["throws.requestLayer[0] names no file under src/: 'src/x.ts/y.ts'"],
+    ],
+    [
+      "a spared path that leaves src/ through a parent segment",
+      "throws:|  requestLayer: [src/../test/x.ts]|  ratchet: {}",
+      ["throws.requestLayer[0] names no file under src/: 'src/../test/x.ts'"],
+    ],
+    [
+      "an unresolved yaml alias",
+      "throws: {requestLayer: [], ratchet: *missing}",
+      ["Unresolved alias (the anchor must be set before the alias): missing"],
+    ],
+    [
+      "a yaml syntax error",
+      "throws: [",
+      [
+        "Flow sequence in block collection must be sufficiently indented and end with a ] at line 4, column 10",
+      ],
+    ],
+  ])("%s fails naming the key", (_case, throws, problems) =>
+    withTempDir("arch-lint-parse-", (dir) => {
+      expect(parse(dir, throws)).toEqual(err(problems.map((p) => `${ARCHITECTURE_PATH}: ${p}`)));
+    }),
+  );
 });
