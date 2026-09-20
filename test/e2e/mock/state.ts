@@ -21,7 +21,11 @@ import { LABELS_MOCK } from "../../../src/sections/labels/mock.js";
 import { MILESTONES_MOCK } from "../../../src/sections/milestones/mock.js";
 import { RULESETS_MOCK } from "../../../src/sections/rulesets/mock.js";
 import type { ListSectionKey } from "../../../src/sections/shared/list-section.js";
-import { INVITATION_ROLES, roleForPermission } from "../../../src/sections/shared/roles.js";
+import {
+  INVITATION_ROLES,
+  permissionForRole,
+  roleForPermission,
+} from "../../../src/sections/shared/roles.js";
 import { WEBHOOKS_MOCK } from "../../../src/sections/webhooks/mock.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { ADMIN_OWNER } from "../constants.js";
@@ -1375,17 +1379,36 @@ export const GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
 const CUSTOM_REPOSITORY_ROLES: ReadonlySet<string> = new Set(["security-team", "security-auditor"]);
 
 /**
- * Whether a grant PUT's `permission` is one GitHub takes: a standard permission or a defined custom role,
- * spelled exactly. An absent key is the default grant. "write", "read", or a mis-cased "Admin" is the 422 the
- * runtime's parse rules exist to avoid (src/sections/shared/roles.ts).
+ * What a personal account's repository takes. The spec text calls the PUT's `permission` "only valid on
+ * organization-owned repositories", but live GitHub honors these three there and 422s triage, maintain, and every
+ * custom role name (an organization feature); the invitation PATCH narrows to their read vocabulary the same way.
  */
-export function grantablePermission(payload: Json): boolean {
+const PERSONAL_GRANT_PERMISSIONS: ReadonlySet<string> = new Set(["pull", "push", "admin"]);
+
+/**
+ * Whether a grant PUT's `permission` is one GitHub takes on this owner's repository, spelled exactly; an absent key
+ * is the default grant. "write", "read", or a mis-cased "Admin" is the 422 the runtime's parse rules exist to avoid
+ * (src/sections/shared/roles.ts); triage or maintain on a personal repository is the 422 they cannot.
+ */
+export function grantablePermission(ownerKind: OwnerKind, payload: Json): boolean {
   const permission = payload.permission;
-  return (
-    permission === undefined ||
-    (typeof permission === "string" &&
-      (GRANT_PERMISSIONS.has(permission) || CUSTOM_REPOSITORY_ROLES.has(permission)))
-  );
+  if (permission === undefined) {
+    return true;
+  }
+  if (typeof permission !== "string") {
+    return false;
+  }
+  return ownerKind === "user"
+    ? PERSONAL_GRANT_PERMISSIONS.has(permission)
+    : GRANT_PERMISSIONS.has(permission) || CUSTOM_REPOSITORY_ROLES.has(permission);
+}
+
+/** Whether the invitation PATCH takes `permissions`: the spec's enum, and on a personal account only the roles its grants read back as. */
+export function settableInvitationRole(ownerKind: OwnerKind, role: string): boolean {
+  if (!INVITATION_ROLES.has(role)) {
+    return false;
+  }
+  return ownerKind === "org" || PERSONAL_GRANT_PERMISSIONS.has(permissionForRole(role) ?? role);
 }
 
 /**

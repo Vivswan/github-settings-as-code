@@ -233,6 +233,23 @@ function suppressMaskedCustomProperties(
   }
 }
 
+/**
+ * A personal account's repository takes pull, push, admin and 422s the rest (mock/state.ts, grantablePermission), and
+ * the runtime cannot refuse a triage or maintain there at parse: the owner is unknown until the repository read. So a
+ * generated file never declares one on a personal account; maintain folds to push, GitHub's own default. A post-draw
+ * rewrite, not a different draw, so the main stream and every recorded seed stay stable.
+ */
+function personalizeCollaborators(settings: Json, ownerKind: OwnerKind): void {
+  if (ownerKind !== "user" || settings.collaborators === undefined) {
+    return;
+  }
+  for (const entry of entriesOf(settings.collaborators)) {
+    if (entry.permission === "maintain") {
+      entry.permission = "push";
+    }
+  }
+}
+
 const SETTINGS_GENERATORS: Record<SectionKey, (rng: Rng) => unknown> = {
   repository: genRepository,
   labels: genLabels,
@@ -957,6 +974,7 @@ export function genScenario(
   const mode = rng.pick(["apply", "check"] as const);
   const policy = rng.pick(["fail", "warn"] as const);
   const ownerKind: OwnerKind = rng.pick(["org", "user"] as const);
+  personalizeCollaborators(settings, ownerKind);
   // 404 answers every denial with Not Found, but the client still classifies a 404 on a write as a permission denial
   // (src/github/api.ts), so its outcome classes equal fine_grained's for every operation generated today; 403 discriminates.
   const denialStyle: DenialStyle = rng.pick(["fine_grained", 403, 404] as const);

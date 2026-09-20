@@ -529,10 +529,14 @@ export function maskHookSecret(hook: Json): Json {
   return config.secret === undefined ? hook : { ...hook, config: maskedConfig(config) };
 }
 
-/** GitHub's reply to a grant PUT whose `permission` is neither a standard permission nor a defined custom role. */
+/**
+ * GitHub's reply to a grant PUT whose `permission` the owner's repository does not take (state.ts, grantablePermission).
+ * The schema types the field as a free string, so the body is off the documented contract, not the schema.
+ */
 export const PERMISSION_NOT_GRANTABLE: MockResponse = {
   status: 422,
   body: { message: "Validation Failed", errors: [{ field: "permission", code: "invalid" }] },
+  requestOffSpec: true,
 };
 
 export function nextNumber(items: readonly Json[]): number {

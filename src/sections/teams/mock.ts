@@ -89,7 +89,7 @@ export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
     return ok({ ...restRepoSurface(state.repo), role_name: access.role_name });
   },
   "teams.grant": ({ state, param, body }) => {
-    if (!grantablePermission(asObject(body))) {
+    if (!grantablePermission(state.ownerKind, asObject(body))) {
       return PERMISSION_NOT_GRANTABLE;
     }
     state.teams[slugKey(param)] = teamRepoFromPut(asObject(body));
