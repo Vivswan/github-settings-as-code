@@ -1,0 +1,21 @@
+# Three mistakes of three classes in one file: an underscore key that is no
+# directive, a misspelled section, and a workflow state outside its enum.
+# Each once stopped the run alone, so the file took three runs to fix; now
+# the one collected list names all three, in that order, and nothing writes.
+name: every-document-error-one-run
+settings:
+  _owner: platform-team
+  labls:
+    - name: bug
+  workflows:
+    - path: ci.yml
+      state: paused
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - "has malformed section entries: unknown underscore key: _owner."
+    - "unknown top-level section: labls (known: "
+    - "workflows[0].state: Invalid option"

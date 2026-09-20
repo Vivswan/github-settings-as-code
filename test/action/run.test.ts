@@ -8,7 +8,6 @@ import type { Layering } from "../../src/engine/layers.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
-import { SECTION_KEYS } from "../../src/schema.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -538,7 +537,11 @@ describe("run in mode: render", () => {
         expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
         expect(existsSync(renderedFile)).toBe(false);
         expect(captured).toEqual([
-          `error: unknown top-level section in ${top}: future (known: ${SECTION_KEYS.join(", ")}). Fix the typo, or set the "sections" input to limit processing`,
+          expect.stringMatching(
+            new RegExp(
+              `^error: ${top.replaceAll(".", "\\.")} has malformed section entries: unknown top-level section: future \\(known: `,
+            ),
+          ),
           "result: failed",
         ]);
       }),

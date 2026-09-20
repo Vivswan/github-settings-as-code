@@ -7,7 +7,12 @@ import { err, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
-import type { SettingsProblem, TopLevelShape } from "../problem.js";
+import {
+  type SettingsProblem,
+  type TopLevelShape,
+  unknownDirectivesIssue,
+  unknownSectionsIssue,
+} from "../problem.js";
 import {
   DOCUMENT_DIRECTIVE_KEYS,
   SECTION_KEYS,
@@ -121,35 +126,35 @@ export function validateSettingsDoc(
   const strangers = Object.keys(settings).filter(
     (key) => !knownSections.has(key) && !directives.has(key),
   );
+  // Every document problem is collected into one list, so one run names every fix: the strange keys first, then
+  // what each section's shape found.
+  const issues: string[] = [];
   const unknownDirectives = strangers.filter((key) => key.startsWith("_"));
   if (unknownDirectives.length > 0) {
-    return err({
-      code: "settings-unknown-directives",
-      source: sourceLabel,
-      unknown: unknownDirectives,
-    });
+    issues.push(unknownDirectivesIssue(unknownDirectives));
   }
   const unknownKeys = strangers.filter((key) => !key.startsWith("_"));
   if (unknownKeys.length > 0) {
     if (allowed.size === 0 || unknownKeys.some((key) => allowed.has(key))) {
-      return err({
-        code: "settings-unknown-sections",
-        source: sourceLabel,
-        unknown: unknownKeys,
-        known: SECTION_KEYS,
-      });
+      issues.push(unknownSectionsIssue(unknownKeys, SECTION_KEYS));
+    } else {
+      // A `sections` allowlist lets an older action version coexist with a config written for a newer one.
+      const them = agree(unknownKeys.length, "it", "them");
+      io.annotate(
+        "warning",
+        `ignoring unknown top-level ${agree(unknownKeys.length, "section", "sections")} outside the "sections" allowlist: ${unknownKeys.join(", ")}. ` +
+          `Upgrade the action to a version that knows ${them}, or remove ${them} from ${sourceLabel}`,
+      );
     }
-    // A `sections` allowlist lets an older action version coexist with a config written for a newer one.
-    const them = agree(unknownKeys.length, "it", "them");
-    io.annotate(
-      "warning",
-      `ignoring unknown top-level ${agree(unknownKeys.length, "section", "sections")} outside the "sections" allowlist: ${unknownKeys.join(", ")}. ` +
-        `Upgrade the action to a version that knows ${them}, or remove ${them} from ${sourceLabel}`,
-    );
   }
-  return validateSectionShapes(settings as Record<string, unknown>, sourceLabel).map(
-    (parsed) => parsed as ValidatedSettings,
-  );
+  const shapes = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
+  if (shapes.isErr()) {
+    issues.push(...shapes.error.issues);
+  }
+  if (issues.length > 0) {
+    return err({ code: "settings-malformed-sections", source: sourceLabel, issues });
+  }
+  return shapes.map((parsed) => parsed as ValidatedSettings);
 }
 
 /** A non-mapping document's top level in typeof terms; the only object left by the caller's guard is null. */
