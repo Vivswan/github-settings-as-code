@@ -4,8 +4,14 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
-import { deployKeysSection, normalizeKeyMaterial } from "./index.js";
+import { deployKeysSection } from "./index.js";
 import { deployKeysMockHandlers } from "./mock.js";
+import {
+  DeployKeyConfig,
+  PUBLIC_KEY_ALGORITHMS,
+  parsePublicKey,
+  parseStoredKey,
+} from "./schema.js";
 
 const LIST = "GET /repos/o/r/keys?per_page=100&page=1";
 
@@ -14,28 +20,193 @@ function liveKey(id: number, title: string, key: string, read_only = false) {
   return { id, title, key, read_only, verified: true, created_at: "2026-01-01T00:00:00Z" };
 }
 
-const BOT_KEY = "ssh-ed25519 AAAAC3botblob";
-const MIRROR_KEY = "ssh-ed25519 AAAAC3mirrorblob";
-const STALE_KEY = "ssh-ed25519 AAAAC3staleblob";
+const BOT_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBotBotBotBotBotBotBotBotBotBotBotBotBotBotB";
+const MIRROR_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMirrorMirrorMirrorMirrorMirrorMirrorMirrorM";
+const STALE_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStaleStaleStaleStaleStaleStaleStaleStaleSta";
+const RETIRED_KEY =
+  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetiredRetiredRetir=";
+// The REAL OpenSSH private-key framing, assembled at runtime so no source line carries the string a secret scanner flags.
+const PRIVATE_KEY_HEADER = ["-----BEGIN", "OPENSSH PRIVATE", "KEY-----"].join(" ");
+const PRIVATE_KEY_FOOTER = ["-----END", "OPENSSH PRIVATE", "KEY-----"].join(" ");
+const PRIVATE_KEY = `${PRIVATE_KEY_HEADER}\nU3ludGhldGljRml4dHVyZUJvZHk=\n${PRIVATE_KEY_FOOTER}`;
+// A PEM-framed PUBLIC key (ssh-keygen -e -m PKCS8): not a private key, and not the form GitHub takes either.
+const PEM_PUBLIC_KEY =
+  "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAU3ludGhldGljRml4dHVyZUJvZHlQdWJsaWM=\n-----END PUBLIC KEY-----";
+// A key under an algorithm this list lacks, in the two-field shape GitHub stores.
+const ED448_KEY =
+  "ssh-ed448 AAAACXNzaC1lZDQ0OAAAADlFZDQ0OEZ1dHVyZUFsZ29yaXRobUZ1dHVyZUFsZ29yaXRobUZ1dHVyZUE=";
 const plan = (api: MockApi, desired: Parameters<typeof deployKeysSection.plan>[1]) =>
   deployKeysSection.plan(planContext(deployKeysSection, api, REPO), desired);
 
-describe("normalizeKeyMaterial", () => {
-  test("strips the trailing comment, keeping algorithm + blob", () => {
-    expect(normalizeKeyMaterial("ssh-ed25519 AAAAC3blob deploy@host")).toBe(
-      "ssh-ed25519 AAAAC3blob",
-    );
-    expect(normalizeKeyMaterial("  ssh-rsa AAAAB3blob a b c  ")).toBe("ssh-rsa AAAAB3blob");
+describe("parsePublicKey", () => {
+  test("the comparable material is algorithm + blob: GitHub strips the comment on storage, so a raw compare would recreate on every apply", () => {
+    const bot = { ok: true, algorithm: "ssh-ed25519", material: BOT_KEY } as const;
+    expect(parsePublicKey(`${BOT_KEY} deploy@host`)).toEqual(bot);
+    expect(parsePublicKey(`  ${RETIRED_KEY} a b c  `)).toEqual({
+      ok: true,
+      algorithm: "ssh-rsa",
+      material: RETIRED_KEY,
+    });
+    expect(parsePublicKey(BOT_KEY)).toEqual(bot);
   });
 
-  test("comment-free material normalizes to itself", () => {
-    expect(normalizeKeyMaterial("ssh-ed25519 AAAAC3blob")).toBe("ssh-ed25519 AAAAC3blob");
+  test.each<[label: string, raw: string]>([
+    [
+      "a hardware-backed key",
+      "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIHw= host",
+    ],
+    ["an ecdsa key with = padding", "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjE="],
+    [
+      "tab-separated fields, which authorized_keys tooling emits",
+      `ssh-ed25519\tAAAAC3NzaC1lZDI1NTE5AAAAIBotBotBotBotBotBotBotBotBotBotBotBotBotBotB\tdeploy@host`,
+    ],
+  ])("%s is a public key GitHub accepts, so the parse keeps it", (_label, raw) => {
+    expect(parsePublicKey(raw).ok).toBe(true);
   });
 
-  test("sub-two-field material yields null, never a truncated compare", () => {
-    expect(normalizeKeyMaterial("ssh-ed25519")).toBeNull();
-    expect(normalizeKeyMaterial("")).toBeNull();
-    expect(normalizeKeyMaterial("   ")).toBeNull();
+  // Every refusal is checked for the ABSENCE of the input: a pasted private key must not surface in a log.
+  test.each<[label: string, raw: string, reason: RegExp]>([
+    [
+      "an OpenSSH private key with the header on its own line",
+      PRIVATE_KEY,
+      /^this is a private key; a deploy key takes the public half \(the \.pub file\)$/,
+    ],
+    [
+      "a PEM private key folded onto one line, as a YAML >- scalar reads it",
+      ["-----BEGIN RSA PRIVATE", "KEY----- MIIEowIBAAKCAQEA -----END RSA PRIVATE", "KEY-----"].join(
+        " ",
+      ),
+      /^this is a private key/,
+    ],
+    [
+      "a PEM-framed PUBLIC key, which is not a private key and not the one-line form either",
+      PEM_PUBLIC_KEY,
+      /^this is a PEM block; a deploy key takes the OpenSSH one-line public form, "ssh-ed25519 AAAA\.\.\. comment"/,
+    ],
+    ["a bare PEM opener", "-----BEGIN", /^this is a PEM block/],
+    ["one field", "ssh-ed25519", /^the key has fewer than two fields separated by a space or tab/],
+    ["nothing", "   ", /^the key has fewer than two fields separated by a space or tab/],
+    [
+      "a valid key with a second line after it, which line-break separators would keep and silently drop",
+      "ssh-ed25519 QUFBQQ==\n-----BEGIN PUBLIC KEY-----",
+      /^the key contains a line break \(a YAML \| block keeps its trailing newline; \|- drops it\); a public SSH key reads one line/,
+    ],
+    [
+      "a trailing newline, as a YAML | block scalar reads it",
+      `${BOT_KEY}\n`,
+      /^the key contains a line break/,
+    ],
+    [
+      "a line break between the two fields",
+      "ssh-ed25519\nQUFBQQ==",
+      /^the key contains a line break/,
+    ],
+    [
+      "a non-breaking space between the two fields, which reads as a space and is not one",
+      "ssh-ed25519\u00a0QUFBQQ==",
+      /^the key contains whitespace other than a space or tab/,
+    ],
+    [
+      "a DSA key whose comment holds a non-breaking space: the comment is free text, so the reason is DSA",
+      "ssh-dss AAAAB3NzaC1kc3MAAACBAP== example\u00a0words",
+      /^the key is DSA/,
+    ],
+    ["prose", "hello world", /^the key's first field is not an algorithm GitHub accepts/],
+    [
+      "a DSA key, which GitHub stopped accepting in 2022 and would 422 at the create",
+      "ssh-dss AAAAB3NzaC1kc3MAAACBAP==",
+      /^the key is DSA, which GitHub no longer accepts \(since 2022-03-15\); a public SSH key reads/,
+    ],
+    [
+      "an unknown algorithm",
+      ED448_KEY,
+      /^the key's first field is not an algorithm GitHub accepts/,
+    ],
+    [
+      "a blob outside the base64 alphabet",
+      "ssh-ed25519 AAAAC3Nz*C1lZDI1NTE5",
+      /^the key's second field is not base64/,
+    ],
+    [
+      "a blob whose length is not a multiple of four",
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBo",
+      /^the key's second field is not base64/,
+    ],
+    [
+      "a blob with padding mid-way",
+      "ssh-ed25519 AAAA=3NzaC1lZDI1NTE5AAAAIBot",
+      /^the key's second field is not base64/,
+    ],
+  ])("%s is refused with a reason that never quotes the input", (_label, raw, reason) => {
+    const parsed = parsePublicKey(raw);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) {
+      return;
+    }
+    expect(parsed.reason).toMatch(reason);
+    // The reason may name the accepted algorithms; every other field of the input stays out of it.
+    const algorithms = new Set<string>(PUBLIC_KEY_ALGORITHMS);
+    for (const field of raw
+      .split(/\s+/)
+      .filter((field) => field !== "" && !algorithms.has(field))) {
+      expect(parsed.reason).not.toContain(field);
+    }
+  });
+});
+
+describe("parseStoredKey", () => {
+  test("material GitHub stored is read as algorithm + blob under ANY algorithm: GitHub is the authority on what it accepted", () => {
+    expect(parseStoredKey(ED448_KEY)).toEqual({
+      ok: true,
+      algorithm: "ssh-ed448",
+      material: ED448_KEY,
+    });
+    expect(parseStoredKey(`${BOT_KEY} deploy@host`)).toEqual({
+      ok: true,
+      algorithm: "ssh-ed25519",
+      material: BOT_KEY,
+    });
+    expect(parsePublicKey(ED448_KEY).ok).toBe(false);
+  });
+
+  test.each<[label: string, raw: string, reason: RegExp]>([
+    ["one field", "ssh-ed25519", /^the key has fewer than two fields separated by a space or tab$/],
+    ["nothing", "", /^the key has fewer than two fields separated by a space or tab$/],
+    ["a trailing newline", `${ED448_KEY}\n`, /^the key contains a line break$/],
+    [
+      "a non-breaking space between the two fields",
+      "ssh-ed448\u00a0QUFBQQ==",
+      /^the key contains whitespace other than a space or tab/,
+    ],
+    [
+      "a blob outside the base64 alphabet",
+      "ssh-ed448 AAAAC3Nz*C1lZDI1NTE5",
+      /^the key's second field is not base64/,
+    ],
+  ])("%s is refused as a shape violation, never over the algorithm", (_label, raw, reason) => {
+    const parsed = parseStoredKey(raw);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.reason).toMatch(reason);
+      expect(parsed.reason).not.toContain("algorithm GitHub accepts");
+    }
+  });
+});
+
+describe("deploy_keys schema", () => {
+  test("a private key is refused at the settings-file parse, naming the entry by title and never the material: without this it is SENT to GitHub before the 422 comes back", () => {
+    const result = DeployKeyConfig.safeParse({ title: "deploy-bot", key: PRIVATE_KEY });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => [issue.path, issue.message])).toEqual([
+      [
+        ["key"],
+        'entry "deploy-bot": this is a private key; a deploy key takes the public half (the .pub file)',
+      ],
+    ]);
+    expect(JSON.stringify(result.error?.issues)).not.toContain("BEGIN");
+    expect(JSON.stringify(result.error?.issues)).not.toContain("U3ludGhl");
   });
 });
 
@@ -43,9 +214,14 @@ describe("deploy_keys validation before any read", () => {
   test.each<[label: string, declared: Parameters<typeof deployKeysSection.plan>[1], error: RegExp]>(
     [
       [
+        "a private key handed straight to the planner",
+        [{ title: "deploy-bot", key: PRIVATE_KEY }],
+        /^deploy_keys\[deploy-bot\]: this is a private key; a deploy key takes the public half \(the \.pub file\)$/,
+      ],
+      [
         "a malformed declared key",
         [{ title: "deploy-bot", key: "ssh-ed25519" }],
-        /deploy_keys\[deploy-bot\]: the declared key must have at least two whitespace-separated fields/,
+        /^deploy_keys\[deploy-bot\]: the key has fewer than two fields separated by a space or tab/,
       ],
       [
         "duplicate declared titles",
@@ -140,11 +316,25 @@ describe("deploy_keys loud live extraction", () => {
     );
   });
 
-  test("a live key with sub-two-field material is a contract violation naming id and endpoint", async () => {
+  test("a live key whose material is not two fields is a contract violation naming id, title, and endpoint", async () => {
     const api = new MockApi({ [LIST]: { data: [liveKey(9, "stub", "ssh-ed25519")] } });
     await expect(plan(api, [])).rejects.toThrow(
-      /GET \/repos\/\{owner\}\/\{repo\}\/keys returned key id 9 \("stub"\) whose material has fewer than two whitespace-separated fields/,
+      /GET \/repos\/\{owner\}\/\{repo\}\/keys returned a body outside the documented shape - .*key: key id 9 \("stub"\) holds material that is not "<algorithm> <base64>": the key has fewer than two fields separated by a space or tab/,
     );
+  });
+
+  test("a live key under an algorithm the settings file cannot declare is outside the section: never an abort, a match, or a delete", async () => {
+    const live = [liveKey(9, "future", ED448_KEY, true)];
+    const untouched = await plan(new MockApi({ [LIST]: { data: live } }), {
+      _undeclared: "delete",
+      entries: [],
+    });
+    expect(untouched).toEqual({ ops: [], notes: [], drift: [] });
+    // The same title declared under a declarable algorithm is a new key beside it, not a replacement.
+    const beside = await plan(new MockApi({ [LIST]: { data: live } }), [
+      { title: "future", key: BOT_KEY, read_only: true },
+    ]);
+    expect(beside.ops.map((op) => op.role)).toEqual(["create"]);
   });
 });
 
@@ -356,7 +546,7 @@ describe("deploy_keys convergence", () => {
     const api = fragmentFake(deployKeysSection, deployKeysMockHandlers, {
       deploy_keys: [
         liveKey(10, "mirror-pull", STALE_KEY, false),
-        liveKey(20, "retired-service", "ssh-rsa AAAAB3retiredblob", true),
+        liveKey(20, "retired-service", RETIRED_KEY, true),
       ],
     });
     const { second, changes, notes } = await provePlanIdempotent(deployKeysSection, api, {

@@ -17,7 +17,9 @@ coverage:
       fails loudly naming the live holder; delete or rename the live key on GitHub first. Material
       is compared as algorithm + base64 blob with the trailing comment ignored, because GitHub may
       strip or rewrite comments on storage - a raw-string compare would replace the key on every
-      apply. A 422 on create can mean the public key is already attached to another repository (one
+      apply. A live key under an algorithm the settings file cannot declare is outside the section:
+      GitHub accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it
+      out with a note. A 422 on create can mean the public key is already attached to another repository (one
       repository per key, account-wide); the error says so. Undeclared keys are KEPT by default
       (deleting a live deploy key breaks whatever service authenticates with it, and deployment
       tooling installs its own keys); the wrapped `_undeclared: delete` form opts into deletion.
@@ -35,9 +37,11 @@ schema:
     fields pass through to the create call verbatim.
   DeployKeyConfig.title: The key title shown in the settings UI, the natural key.
   DeployKeyConfig.key: >-
-    The PUBLIC key material, e.g. "ssh-ed25519 AAAAC3... comment". Public by nature, so it is safe
-    in a committed file. Compared as algorithm + blob with the trailing comment ignored (GitHub may
-    strip or rewrite comments on storage); keys are immutable upstream, so a changed key is applied
-    as delete plus recreate.
+    The PUBLIC key as one line, "<algorithm> <base64> [comment]" (the .pub file), the algorithm one
+    of ssh-ed25519, ssh-rsa, ecdsa-sha2-nistp256/384/521, sk-ssh-ed25519@openssh.com,
+    sk-ecdsa-sha2-nistp256@openssh.com (GitHub dropped DSA in 2022). Anything else, a line break
+    included, is refused when the settings file is read; a private key is named, never echoed.
+    Compared as
+    algorithm + blob, comment ignored; immutable upstream, so a changed key is delete plus recreate.
   DeployKeyConfig.read_only: >-
     Whether the key is restricted to read-only access; GitHub defaults to false (read/write).

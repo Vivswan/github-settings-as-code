@@ -1,0 +1,31 @@
+name: deploy-keys-pem-block-rejected
+description: >-
+  A PEM-framed PUBLIC key (the ssh-keygen -e -m PKCS8 export) under
+  deploy_keys[].key is refused when the settings file is read, before any
+  API contact: the material never reaches a request (GitHub would only
+  refuse it with a 422 after receiving it), the refusal names the entry by
+  title and points at the one-line .pub form, and no public surface echoes
+  the material. This scenario proves the PEM branch of the -----BEGIN
+  refusal; the private-key branch is proven by the section's unit test,
+  which assembles the OpenSSH private-key header at runtime, because a
+  fixture carrying that header reads as a leaked key to a secret scanner
+  however the source lines split it.
+settings:
+  deploy_keys:
+    - title: deploy-bot
+      key: |-
+        -----BEGIN PUBLIC KEY-----
+        MCowBQYDK2VwAyEAU3ludGhldGljRml4dHVyZUJvZHlQdWJsaWM=
+        -----END PUBLIC KEY-----
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'deploy_keys[0].key: entry "deploy-bot": this is a PEM block; a deploy key takes the OpenSSH one-line public form,'
+    - '"ssh-ed25519 AAAA... comment" (the .pub file; ssh-keygen -i converts a PEM public key)'
+  leaks_nowhere:
+    - MCowBQYDK2VwAyEAU3ludGhldGljRml4dHVyZUJvZHlQdWJsaWM
+    - BEGIN PUBLIC KEY
