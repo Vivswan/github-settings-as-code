@@ -6,7 +6,7 @@ name: code-scanning-default-setup-unknown-key-noted
 settings:
   code_scanning_default_setup:
     state: configured
-    threat_modle: remote
+    threat_models: remote
 inputs:
   mode: check
 live_state:
@@ -21,6 +21,6 @@ expect:
   outcomes:
     code_scanning_default_setup: drift
   stdout_contains:
-    - 'declared key "threat_modle" does not exist on the live code scanning default setup, so if GitHub ignores it this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file'
+    - 'declared key "threat_models" does not exist on the live code scanning default setup, so if GitHub ignores it this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file'
   never:
     - "PATCH /repos/{repo}/code-scanning/default-setup"

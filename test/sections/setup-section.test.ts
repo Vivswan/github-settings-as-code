@@ -277,8 +277,11 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       // A prototype property's name is a phantom like any other typo, not a slice key.
       const typo = { ...knownAbsent, runer_type: "standard", toString: "standard" };
       const phantom = await plan(api, typo);
+      const noun = changeLine.slice("applied ".length);
       expect(phantom.notes).toEqual([
-        `${section.key}: declared keys "runer_type", "toString" do not exist on the live ${changeLine.slice("applied ".length)}, so if GitHub ignores them this PATCH will re-run on every apply without converging. Fix the key name, or remove it from the settings file`,
+        `${section.key}: declared keys "runer_type", "toString" do not exist on the live ${noun}, ` +
+          "so if GitHub ignores them this PATCH will re-run on every apply without converging. " +
+          "Fix the key name, or remove it from the settings file",
       ]);
       expect(phantom.ops.map((op) => [op.role, op.payload])).toEqual([["update", typo]]);
       const known = await plan(api, knownAbsent);
