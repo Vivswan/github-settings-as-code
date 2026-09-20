@@ -1,0 +1,41 @@
+# GitHub's protection GET expands every actor into an object ({login, id, ...}
+# for a user, {slug, ...} for a team or App) while the PUT takes login/slug
+# strings, so a copied actor list parsed clean and 422d at apply. Each copied
+# item is refused before any request, naming the string to write; the same
+# rule holds under restrictions, dismissal_restrictions, and
+# bypass_pull_request_allowances.
+name: branches-get-actor-list-copied-rejected
+settings:
+  branches:
+    - name: main
+      protection:
+        required_pull_request_reviews:
+          required_approving_review_count: 1
+          dismissal_restrictions:
+            users: [{login: octocat, id: 1, type: User}]
+            teams: []
+            apps: []
+          bypass_pull_request_allowances:
+            users: []
+            teams: [{slug: platform-team, id: 2, name: Platform Team}]
+            apps: []
+        restrictions:
+          users: []
+          teams: []
+          apps: [{slug: deploy-gate, id: 3}]
+live_state:
+  branches: ["main"]
+token_permissions:
+  administration: write
+  contents: read
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "branches[0].protection.required_pull_request_reviews.dismissal_restrictions.users[0]:"
+    - 'takes as the login string; write "octocat" instead'
+    - "branches[0].protection.required_pull_request_reviews.bypass_pull_request_allowances.teams[0]:"
+    - 'takes as the slug string; write "platform-team" instead'
+    - "branches[0].protection.restrictions.apps[0]:"
+    - 'takes as the slug string; write "deploy-gate" instead'

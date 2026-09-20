@@ -1,6 +1,7 @@
 /** The `branches:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
+import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
 
@@ -43,8 +44,189 @@ function duplicateIn(list: readonly string[]): string | null {
   return null;
 }
 
+function isPlainMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// --- Actor holders: restrictions, dismissal_restrictions, bypass_pull_request_allowances --------
+
+const ACTOR_LIST_EXAMPLE = {
+  users: { nameKey: "login", example: "octocat" },
+  teams: { nameKey: "slug", example: "platform-team" },
+  apps: { nameKey: "slug", example: "deploy-gate" },
+} as const;
+type ActorList = keyof typeof ACTOR_LIST_EXAMPLE;
+
+function copiedActorName(item: unknown): string | null {
+  if (!isPlainMapping(item)) {
+    return null;
+  }
+  for (const nameKey of ["login", "slug"] as const) {
+    if (typeof item[nameKey] === "string") {
+      return item[nameKey];
+    }
+  }
+  return null;
+}
+
+/**
+ * The GET expands each actor into an object ({login, id, ...} for a user, {slug, ...} for a team
+ * or App); the PUT takes the login/slug string, so a copied item is refused naming the string to
+ * write, and any other non-string item the type rule.
+ */
+function actorList(holder: string, list: ActorList) {
+  const site = `protection.${holder}.${list}`;
+  const { nameKey, example } = ACTOR_LIST_EXAMPLE[list];
+  const typeRule = `${site} lists each actor as its ${nameKey} string ("${example}")`;
+  return z
+    .array(
+      z.string({
+        error: (issue) => {
+          const copied = copiedActorName(issue.input);
+          return copied === null
+            ? typeRule
+            : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
+        },
+      }),
+      { error: typeRule },
+    )
+    .optional();
+}
+
+function actorHolder(holder: string) {
+  return z.looseObject(
+    {
+      users: actorList(holder, "users"),
+      teams: actorList(holder, "teams"),
+      apps: actorList(holder, "apps"),
+    },
+    {
+      error: `protection.${holder} must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")`,
+    },
+  );
+}
+
+// --- Controls whose wrong shapes the settings file alone reveals ---------------
+
+const STRICT_ERROR =
+  "required_status_checks.strict must be an unquoted true or false (GitHub's protection PUT rejects the requirement without it): true also requires the branch to be up to date with its base before merging, false only requires the checks to pass";
+
+const CHECK_LIST_ERROR =
+  "required_status_checks must list the required checks as contexts: [names] or checks: [{context, app_id}] (GitHub's protection PUT rejects the requirement without them); contexts: [] requires none";
+
+const REVIEW_COUNT_ERROR =
+  "required_pull_request_reviews.required_approving_review_count must be a whole number from 0 to 6 (GitHub accepts 1 to 6, or 0 to require no approvals)";
+
+const RequiredStatusChecks = z
+  .looseObject(
+    {
+      strict: z.boolean({ error: STRICT_ERROR }),
+      contexts: z.array(z.string()).optional(),
+      checks: z.array(z.unknown()).optional(),
+    },
+    {
+      error:
+        "required_status_checks must be a mapping of its keys (strict, then contexts or checks), or null to turn the requirement off",
+    },
+  )
+  .superRefine((status, refineCtx) => {
+    if (status.contexts === undefined && status.checks === undefined) {
+      refineCtx.addIssue({ code: "custom", message: CHECK_LIST_ERROR });
+    }
+  });
+
+const RequiredPullRequestReviews = z.looseObject(
+  {
+    required_approving_review_count: z
+      .int({ error: REVIEW_COUNT_ERROR })
+      .min(0, { error: REVIEW_COUNT_ERROR })
+      .max(6, { error: REVIEW_COUNT_ERROR })
+      .optional(),
+    dismissal_restrictions: actorHolder(
+      "required_pull_request_reviews.dismissal_restrictions",
+    ).optional(),
+    bypass_pull_request_allowances: actorHolder(
+      "required_pull_request_reviews.bypass_pull_request_allowances",
+    ).optional(),
+  },
+  {
+    error:
+      "required_pull_request_reviews must be a mapping of its keys (required_approving_review_count and the other review settings), or null to turn the requirement off",
+  },
+);
+
+/** What carries the fact a GET-only echo repeats, so the message can say why removing it loses nothing. */
+const ECHO_CARRIER: Readonly<Record<string, string>> = {
+  name: "the entry's name already names the branch",
+  enabled: "the control's own key carries the toggle",
+  enforcement_level: "strict and the check list carry the requirement",
+};
+
+/**
+ * The fix for each GET-only key a copied GET response carries. The bare-boolean advice is offered
+ * only under a control the PUT takes as a boolean: under a mapping-valued one such as
+ * required_pull_request_reviews, "declare required_pull_request_reviews: true" would itself be refused.
+ */
+function getOnlyKeyError(path: readonly (string | number)[], key: string, value: unknown): string {
+  const site = ["protection", ...path, key].join(".");
+  const parent = path.at(-1);
+  if (
+    key === "enabled" &&
+    typeof parent === "string" &&
+    BOOLEAN_CONTROL_SET.has(parent) &&
+    typeof value === "boolean"
+  ) {
+    return `${site} is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare ${parent}: ${value} instead`;
+  }
+  if (isUrlKey(key)) {
+    return `${site} is a link GitHub's GET response carries and the protection PUT has no word for; remove it`;
+  }
+  return `${site} is GitHub's GET-only echo, which the protection PUT has no word for; remove it (${ECHO_CARRIER[key]})`;
+}
+
+/**
+ * A YAML alias can point a mapping at one of its own ancestors; that container is skipped on
+ * re-entry and left to the engine's document-cycle diagnostic, while an alias shared between two
+ * sites is walked at both.
+ */
+function refuseGetOnlyKeys(
+  value: unknown,
+  path: (string | number)[],
+  refineCtx: z.RefinementCtx,
+  ancestors: Set<object> = new Set(),
+): void {
+  if (!Array.isArray(value) && !isPlainMapping(value)) {
+    return;
+  }
+  if (ancestors.has(value)) {
+    return;
+  }
+  ancestors.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      refuseGetOnlyKeys(item, [...path, index], refineCtx, ancestors);
+    });
+  } else {
+    for (const [key, inner] of Object.entries(value)) {
+      if (isGetOnlyKey(key)) {
+        refineCtx.addIssue({
+          code: "custom",
+          path: [...path, key],
+          message: getOnlyKeyError(path, key, inner),
+        });
+        continue;
+      }
+      refuseGetOnlyKeys(inner, [...path, key], refineCtx, ancestors);
+    }
+  }
+  ancestors.delete(value);
+}
+
 export const BranchProtectionConfig = z
   .looseObject({
+    required_status_checks: RequiredStatusChecks.nullable().optional(),
+    required_pull_request_reviews: RequiredPullRequestReviews.nullable().optional(),
+    restrictions: actorHolder("restrictions").nullable().optional(),
     required_signatures: z
       .boolean({
         error:
@@ -60,6 +242,10 @@ export const BranchProtectionConfig = z
       .strictObject({ environments: z.array(z.string()) })
       .nullable()
       .optional(),
+  })
+  // Every depth: the wrappers sit under each control, and the links under the actor holders too.
+  .superRefine((protection, refineCtx) => {
+    refuseGetOnlyKeys(protection, [], refineCtx);
   })
   .meta({ id: "BranchProtectionConfig" });
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;

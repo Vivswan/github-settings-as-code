@@ -30,7 +30,12 @@ import {
   pathSegments,
 } from "../contract/endpoints.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { type ExplicitKeys, ROUTED_KEYS, type RoutedKey } from "./graphql-rules.js";
+import {
+  type ExplicitKeys,
+  type RestCarriedKey,
+  ROUTED_KEYS,
+  type RoutedKey,
+} from "./graphql-rules.js";
 import {
   branchesSection,
   type ClassifiedEntry,
@@ -1266,26 +1271,6 @@ describe("branches wildcard entries", () => {
     expect(messages.some((m) => m.includes("bare user login"))).toBe(true);
   });
 
-  test("a scalar structured key on a wildcard entry fails the shape, not apply", () => {
-    // Without this rejection the value passes the looseObject and crashes translateWildcardProtection mid-plan with a raw TypeError.
-    for (const bad of [
-      { required_status_checks: true },
-      { required_pull_request_reviews: 5 },
-      { required_status_checks: ["ci"] },
-    ]) {
-      const parsed = branchesSection.shape.safeParse([{ name: "release/*", protection: bad }]);
-      expect(parsed.success).toBe(false);
-      const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
-      expect(messages.some((m) => m.includes("must be a mapping of its sub-keys"))).toBe(true);
-    }
-    // The same scalar on a LITERAL entry stays a passthrough (GitHub is the authority on the REST payload).
-    expect(
-      branchesSection.shape.safeParse([
-        { name: "main", protection: { required_status_checks: true } },
-      ]).success,
-    ).toBe(true);
-  });
-
   test("case-insensitive duplicates in the routed lists fail upfront", () => {
     const actors = branchesSection.shape.safeParse([
       { name: "main", protection: { force_push_bypassers: ["octocat", "OctoCat"] } },
@@ -1473,13 +1458,17 @@ describe("branches plan contract", () => {
     ).toEqual(["routed", "routed", "literal", "literal"]);
   });
 
-  test("ROUTED_KEYS covers every key the schema spells out beside the signatures toggle", () => {
+  test("every key the schema spells out is routed, REST-carried, or the signatures toggle", () => {
     // Compile-time only: the tripwire in graphql-rules.ts fires through this same alias, so a tuple missing a key is shown failing here, beside
     // the complete tuple that passes.
     type Explicit = ExplicitKeys<BranchProtectionConfig>;
-    type _Complete = MustBeNever<Exclude<Explicit, RoutedKey | "required_signatures">>;
-    // @ts-expect-error a tuple that forgot required_deployments leaves that schema key uncovered
-    type _Short = MustBeNever<Exclude<Explicit, "force_push_bypassers" | "required_signatures">>;
+    type _Complete = MustBeNever<
+      Exclude<Explicit, RoutedKey | RestCarriedKey | "required_signatures">
+    >;
+    type _Short = MustBeNever<
+      // @ts-expect-error a tuple that forgot required_deployments leaves that schema key uncovered
+      Exclude<Explicit, "force_push_bypassers" | RestCarriedKey | "required_signatures">
+    >;
     expect(ROUTED_KEYS).toEqual(["force_push_bypassers", "required_deployments"]);
   });
 });
@@ -1590,7 +1579,7 @@ describe("branches snapshot", () => {
       expected: { strict: true, contexts: ["ci"] },
     },
   ])("required_status_checks: $case", ({ checks, expected }) => {
-    expect(protectionSnapshot({ required_status_checks: checks })).toEqual({
+    expect<unknown>(protectionSnapshot({ required_status_checks: checks })).toEqual({
       required_status_checks: expected,
     });
   });
