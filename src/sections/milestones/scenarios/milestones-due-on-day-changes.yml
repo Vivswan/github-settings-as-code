@@ -1,0 +1,40 @@
+name: milestones-due-on-day-changes
+description: >-
+  One live milestone is due on a different day than the settings file declares, another has no
+  due date yet. Apply PATCHes each once, sending the day as a noon-UTC timestamp so GitHub keeps
+  that day rather than the previous one, and a check rerun over the stored Pacific-midnight values
+  converges.
+settings:
+  milestones:
+    - title: v1.0
+      due_on: 2026-07-15
+    - title: v2.0
+      due_on: 2026-12-31
+live_state:
+  milestones:
+    - id: 900001
+      number: 1
+      state: open
+      title: v1.0
+      description: null
+      due_on: 2026-06-30T07:00:00Z
+    - id: 900002
+      number: 2
+      state: open
+      title: v2.0
+      description: null
+      due_on: null
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    milestones: applied
+  mutations:
+    - "PATCH /repos/{repo}/milestones/1"
+    - "PATCH /repos/{repo}/milestones/2"
+  never:
+    - "POST /repos/{repo}/milestones"
+  stdout_contains:
+    - "updated milestone \"v1.0\""
+    - "updated milestone \"v2.0\""
+  fixpoint: converges

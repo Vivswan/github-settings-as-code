@@ -14,38 +14,44 @@ import {
   uniqueBy,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
+import { dueOnWire } from "./index.js";
+import { githubStoresDueOn } from "./mock.js";
 import { MilestoneConfig } from "./schema.js";
 
-/** A fixed pool, never Date.now, so generation stays deterministic. */
-const DUE_DATES = ["2026-01-15T00:00:00Z", "2026-06-30T00:00:00Z", "2026-12-31T00:00:00Z"] as const;
+/** A fixed pool, never Date.now, so generation stays deterministic; one day per DST state and one at the year's edge. */
+const DUE_DATES = ["2026-01-15", "2026-06-30", "2026-12-31"] as const;
 
 const genMilestone = generatorFromSlice(MilestoneConfig, {
   fields: {
     title: (rng) => rng.pick(["v1", "v2", "backlog"]),
     description: (rng) => rng.pick(["", "the milestone", genName(rng)]),
+    due_on: (rng) => rng.pick(DUE_DATES),
   },
+  present: { due_on: 0.4 },
 });
 
 export function genMilestones(rng: Rng): Json[] {
-  const milestones = Array.from({ length: rng.int(3) + 1 }, () => {
-    const milestone = genMilestone(rng);
-    // due_on is a passthrough field the slice does not name, sent verbatim and compared to the echo.
-    if (rng.bool(0.4)) {
-      milestone.due_on = rng.pick(DUE_DATES);
-    }
-    return milestone;
-  });
-  return uniqueBy(milestones, ["title"]);
+  return uniqueBy(
+    Array.from({ length: rng.int(3) + 1 }, () => genMilestone(rng)),
+    ["title"],
+  );
 }
 
-/** Passthrough fields (due_on) are compared too, so the whole declaration is spread over the server defaults. */
+/** The day as GitHub has it stored after the section wrote it: Pacific midnight, not the declared spelling. */
+function storedDueOn(day: string): string {
+  return githubStoresDueOn(dueOnWire(day));
+}
+
+/** Every declared field is compared, so the whole declaration is spread over the server defaults. */
 function matchingLiveMilestone(milestone: Json, index: number): Json {
+  const { due_on, ...declared } = milestone;
   return {
     id: 910_000 + index,
     number: index + 1,
     state: "open",
     description: null,
-    ...milestone,
+    ...declared,
+    due_on: typeof due_on === "string" ? storedDueOn(due_on) : null,
   };
 }
 
@@ -92,7 +98,7 @@ export function milestonesWitness(rng: Rng, declared: Json[], kind: LiveWitnessK
   } else if (field === "state") {
     live.state = source.state === "open" ? "closed" : "open";
   } else {
-    live.due_on = rng.pick(DUE_DATES.filter((d) => d !== source.due_on));
+    live.due_on = storedDueOn(rng.pick(DUE_DATES.filter((d) => d !== source.due_on)));
   }
   return { kind: "drift-update", state: { milestones } };
 }

@@ -134,7 +134,7 @@ const ROUTES = {
   // No team holds access, so the declared one is existence drift and the undeclared walk has nothing to note.
   "GET /repos/o/r/teams?per_page=100&page=1": { data: [] },
   "GET /repos/o/r/milestones?state=all&per_page=100&page=1": {
-    data: [{ number: 1, title: "old", description: null, state: "open" }],
+    data: [{ number: 1, title: "old", description: null, state: "open", due_on: null }],
   },
   // An empty body means "no live limit", which drifts against the fixture.
   "GET /repos/o/r/interaction-limits": { data: {} },

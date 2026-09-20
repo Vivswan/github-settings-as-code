@@ -153,21 +153,6 @@ describe("generator couplings and pools", () => {
     expect(deploymentDraws).toBeGreaterThan(0);
   });
 
-  test("milestones due_on, when present, is a fixed ISO date (deterministic)", () => {
-    const pool = new Set(["2026-01-15T00:00:00Z", "2026-06-30T00:00:00Z", "2026-12-31T00:00:00Z"]);
-    for (let i = 0; i < 200; i++) {
-      const milestones = genSettings(new Rng(i), "milestones") as Array<{ due_on?: string }>;
-      for (const m of milestones) {
-        if (m.due_on !== undefined) {
-          expect(
-            pool.has(m.due_on),
-            `seed ${i}: milestone due_on "${m.due_on}" is not from the fixed ISO date pool`,
-          ).toBe(true);
-        }
-      }
-    }
-  });
-
   test("labels never collide on name identities", () => {
     for (let i = 0; i < 200; i++) {
       const labels = genSettings(new Rng(i), "labels") as Array<{ name: string }>;
@@ -280,10 +265,9 @@ describe("genLiveWitness", () => {
     const labels = [{ name: "a", tone: "warm" }];
     const labelWitness = genLiveWitness(new Rng(1), "labels", labels, "matching");
     expect((labelWitness.state.labels as Array<{ tone?: string }>)[0]?.tone).toBe("warm");
-    const milestones = [{ title: "v1", due_on: "2026-01-15T00:00:00Z", closed_issues: 0 }];
+    const milestones = [{ title: "v1", closed_issues: 0 }];
     const milestoneWitness = genLiveWitness(new Rng(1), "milestones", milestones, "matching");
     const liveMilestone = (milestoneWitness.state.milestones as Array<Record<string, unknown>>)[0];
-    expect(liveMilestone?.due_on).toBe("2026-01-15T00:00:00Z");
     expect(liveMilestone?.closed_issues).toBe(0);
   });
 
@@ -337,7 +321,8 @@ describe("genLiveWitness", () => {
       declared.forEach((milestone, j) => {
         const entry = live[j] as Milestone;
         expect(entry.title).toBe(milestone.title);
-        // The handler diffs every DECLARED field verbatim; due_on omitted from a "matching" witness would read as drift.
+        // The handler diffs every DECLARED field; due_on omitted from a "matching" witness would read as drift,
+        // and a declared day seeded verbatim would too: GitHub stores it as that day's Pacific midnight in UTC.
         if (milestone.state !== undefined) {
           expect(entry.state).toBe(milestone.state);
         }
@@ -345,7 +330,8 @@ describe("genLiveWitness", () => {
           expect(entry.description).toBe(milestone.description);
         }
         if (milestone.due_on !== undefined) {
-          expect(entry.due_on).toBe(milestone.due_on);
+          expect(entry.due_on).toMatch(/^\d{4}-\d{2}-\d{2}T0[78]:00:00Z$/);
+          expect(entry.due_on?.slice(0, 10)).toBe(milestone.due_on);
         }
       });
     }
@@ -363,7 +349,10 @@ describe("genLiveWitness", () => {
         const entry = live[j] as Milestone;
         expect(entry.title).toBe(milestone.title);
         for (const field of ["description", "state", "due_on"] as const) {
-          if (milestone[field] !== undefined && entry[field] !== milestone[field]) {
+          const declared = milestone[field];
+          // A stored due_on carries the declared day with GitHub's Pacific-midnight time, so only its day part can diverge.
+          const live = field === "due_on" ? entry.due_on?.slice(0, 10) : entry[field];
+          if (declared !== undefined && live !== declared) {
             diverged++;
           }
         }
