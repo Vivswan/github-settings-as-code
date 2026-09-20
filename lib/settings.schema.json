@@ -236,15 +236,17 @@
       "type": "object",
       "properties": {
         "key_prefix": {
-          "description": "Text prefix that triggers the link (e.g. \"TICKET-\"), the natural key.",
-          "type": "string"
+          "description": "Text prefix that triggers the link (e.g. \"TICKET-\"), the natural key; letters, digits, and \". - _ + = : / #\" only, and no declared prefix may begin another.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9.\\-_+=:/#]+$"
         },
         "url_template": {
           "description": "Target URL template containing \"<num>\".",
-          "type": "string"
+          "type": "string",
+          "pattern": "<num>"
         },
         "is_alphanumeric": {
-          "description": "Whether <num> also matches letters; upstream default is true.",
+          "description": "Whether <num> also matches letters; upstream default is true on a create, and a recreate re-sends the live value when undeclared.",
           "type": "boolean"
         }
       },

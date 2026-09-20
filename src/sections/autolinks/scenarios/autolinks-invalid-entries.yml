@@ -1,0 +1,23 @@
+# Three entries GitHub would 422 on the create: a url_template without the
+# "<num>" placeholder, an empty key_prefix, and a key_prefix with a character
+# outside GitHub's charset. The document is refused upfront, each line naming
+# the key and the fix, so no request is made.
+name: autolinks-invalid-entries
+settings:
+  autolinks:
+    - key_prefix: "TICKET-"
+      url_template: "https://example.com/TICKET"
+    - key_prefix: ""
+      url_template: "https://example.com/<num>"
+    - key_prefix: "BUG "
+      url_template: "https://example.com/bug/<num>"
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - 'autolinks[0].url_template: url_template "https://example.com/TICKET" has no "<num>" placeholder'
+    - "autolinks[1].key_prefix: key_prefix is empty"
+    - 'autolinks[2].key_prefix: key_prefix "BUG " may only contain letters, digits, and . - _ + = : / #'
+  zero_requests: true

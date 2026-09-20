@@ -169,6 +169,66 @@ describe("autolinks", () => {
     expect(api.calls).toHaveLength(0);
   });
 
+  test("a prefix that begins another prefix is refused as a pair before any API call: GitHub rejects the second create, which would half-apply the run", async () => {
+    const api = new MockApi({});
+    await expect(
+      plan(api, [
+        { key_prefix: "TICKET-A", url_template: "https://a.test/<num>" },
+        { key_prefix: "JIRA-", url_template: "https://j.test/<num>" },
+        { key_prefix: "TICKET-", url_template: "https://t.test/<num>" },
+      ]),
+    ).rejects.toThrow(
+      'autolinks: the settings file declares conflicting autolinks: the key_prefix "TICKET-" begins the key_prefix "TICKET-A", ' +
+        "and GitHub rejects an autolink whose prefix begins or extends another, so the second create would fail - " +
+        "choose prefixes where neither begins the other. Fix the settings file, then re-run",
+    );
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test.each<[entry: Record<string, unknown>, issues: [path: string, message: string][]]>([
+    [
+      { key_prefix: "TICKET-", url_template: "https://example.com/TICKET" },
+      [
+        [
+          "[0].url_template",
+          'url_template "https://example.com/TICKET" has no "<num>" placeholder, so GitHub rejects the create; put "<num>" where the reference number goes, e.g. "https://example.com/TICKET/<num>"',
+        ],
+      ],
+    ],
+    [
+      { key_prefix: "", url_template: "https://example.com/<num>" },
+      [
+        [
+          "[0].key_prefix",
+          'key_prefix is empty; it is the text GitHub matches before the reference number, e.g. "TICKET-"',
+        ],
+      ],
+    ],
+    [
+      { key_prefix: "TICKET ", url_template: "https://example.com/<num>" },
+      [
+        [
+          "[0].key_prefix",
+          'key_prefix "TICKET " may only contain letters, digits, and . - _ + = : / #, which is all GitHub accepts; remove the other characters',
+        ],
+      ],
+    ],
+    [{ key_prefix: "TICKET_1.x:/#=+-", url_template: "https://example.com/<num>?x=<num>" }, []],
+  ])(
+    "the shape refuses what GitHub 422s on the create, naming the key and the fix: %j",
+    (entry, issues) => {
+      const parsed = autolinksSection.shape.safeParse([entry]);
+      expect(
+        parsed.success
+          ? []
+          : parsed.error.issues.map((issue) => [
+              issue.path.map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`)).join(""),
+              issue.message,
+            ]),
+      ).toEqual(issues);
+    },
+  );
+
   test("executing the plan against the derived mock converges: DELETE then POST for the replace, and the re-plan is empty", async () => {
     const api = fragmentFake(autolinksSection, autolinksMockHandlers, {
       autolinks: [
@@ -208,6 +268,39 @@ describe("autolinks", () => {
     expect(
       api.state.autolinks.map((a) => [a.key_prefix, a.url_template, a.is_alphanumeric]),
     ).toEqual([["TICKET-", "https://example.com/TICKET?q=<num>", false]]);
+  });
+
+  test("a recreate with is_alphanumeric undeclared re-sends the live flag: the create default is true, so replacing the template would otherwise flip a false flag with no drift line", async () => {
+    const api = fragmentFake(autolinksSection, autolinksMockHandlers, {
+      autolinks: [
+        {
+          id: 10,
+          key_prefix: "TICKET-",
+          url_template: "https://old.example.com/<num>",
+          is_alphanumeric: false,
+        },
+      ],
+    });
+    const { first, second, changes } = await provePlanIdempotent(autolinksSection, api, [
+      { key_prefix: "TICKET-", url_template: "https://example.com/TICKET/<num>" },
+    ]);
+    expect(first.ops.map((op) => (op.role === "create" ? op.payload : op.role))).toEqual([
+      "remove",
+      {
+        key_prefix: "TICKET-",
+        url_template: "https://example.com/TICKET/<num>",
+        is_alphanumeric: false,
+      },
+    ]);
+    expect(changes).toEqual([
+      'deleted autolink "TICKET-" to recreate it with the declared settings',
+      'recreated autolink "TICKET-"',
+    ]);
+    expect(api.writes).toEqual(["DELETE /repos/o/r/autolinks/10", "POST /repos/o/r/autolinks"]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
+    expect(
+      api.state.autolinks.map((a) => [a.key_prefix, a.url_template, a.is_alphanumeric]),
+    ).toEqual([["TICKET-", "https://example.com/TICKET/<num>", false]]);
   });
 
   test("the read port exposes exactly the list role in its denied posture", () => {

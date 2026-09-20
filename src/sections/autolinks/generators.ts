@@ -9,22 +9,28 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   lensWitness,
-  uniqueBy,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
 import { autolinksSection } from "./index.js";
 import { AutolinkConfig } from "./schema.js";
 
+// No pool prefix begins another: a suffixed collision ("TICKET-" and "TICKET--1") would be the
+// pair the section refuses before its first create.
+const KEY_PREFIXES = ["JIRA-", "TICKET-", "REF-"] as const;
+
 const genAutolink = generatorFromSlice(AutolinkConfig, {
   fields: {
-    key_prefix: (rng) => `${rng.pick(["JIRA", "TICKET", "REF"])}-`,
+    key_prefix: (rng) => rng.pick(KEY_PREFIXES),
     url_template: (rng) => `https://example.com/browse/<num>?ref=${rng.int(100)}`,
   },
 });
 
 export function genAutolinks(rng: Rng): Json[] {
-  const autolinks = Array.from({ length: rng.int(2) + 1 }, () => genAutolink(rng));
-  return uniqueBy(autolinks, ["key_prefix"]);
+  const pool = [...KEY_PREFIXES];
+  return Array.from({ length: rng.int(2) + 1 }, () => {
+    const key_prefix = pool.splice(rng.int(pool.length), 1)[0];
+    return { ...genAutolink(rng), key_prefix };
+  });
 }
 
 export function autolinksWitness(rng: Rng, declared: Json[], kind: LiveWitnessKind): LiveWitness {
