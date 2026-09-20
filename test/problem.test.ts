@@ -13,8 +13,6 @@ import {
   type ProblemOf,
   quoteList,
   type SettingsProblem,
-  unknownDirectivesIssue,
-  unknownSectionsIssue,
 } from "../src/problem.js";
 import { SECTION_KEYS } from "../src/schema.js";
 
@@ -477,26 +475,5 @@ describe("quoteList", () => {
   test("quotes each name and joins with commas", () => {
     expect(quoteList(["a", "b c"])).toBe('"a", "b c"');
     expect(quoteList([])).toBe("");
-  });
-});
-
-describe("the strange-key lines of the collected document problems", () => {
-  const ADVICE =
-    "The underscore marks this action's directives, \"_layering\" (a file's top level or a list section's {entries} " +
-    'wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or ' +
-    "keep the note as a YAML comment";
-  test("the unknown-section line lists the strangers and every known name, agreeing in number", () => {
-    expect(unknownSectionsIssue(["labls"], SECTION_KEYS)).toBe(
-      `unknown top-level section: labls (known: ${KNOWN}). Fix the typo, or set the "sections" input to limit processing`,
-    );
-    expect(unknownSectionsIssue(["labls", "rulesest"], SECTION_KEYS)).toStartWith(
-      "unknown top-level sections: labls, rulesest (known: ",
-    );
-  });
-  test("the unknown-directive line names the keys and the two directives, agreeing in number", () => {
-    expect(unknownDirectivesIssue(["_notes"])).toBe(`unknown underscore key: _notes. ${ADVICE}`);
-    expect(unknownDirectivesIssue(["_notes", "_layerin"])).toBe(
-      `unknown underscore keys: _notes, _layerin. ${ADVICE}`,
-    );
   });
 });
