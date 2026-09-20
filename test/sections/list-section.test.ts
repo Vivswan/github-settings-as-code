@@ -186,19 +186,16 @@ describe("listSection", () => {
     });
   });
 
-  test("two entries claiming one identity are rejected before any read", async () => {
-    const api = new MockApi({ [LIST]: { data: [] } });
-    await expect(
-      labelsSection.plan(planContext(labelsSection, api, REPO), [
-        { name: "a", new_name: "b" },
-        { name: "B" },
-      ]),
-    ).rejects.toThrow(
-      new Error(
-        'labels: the settings file declares entries that name the same labels entry: "b" and "B". Keep exactly one entry per resource',
-      ),
-    );
-    expect(api.calls).toEqual([]);
+  test("two entries claiming one identity (a rename target and a current name) are one validate issue at the later claim's field, in both declared forms", () => {
+    const entries = [{ name: "a", new_name: "b" }, { name: "B" }];
+    const issue = {
+      path: "[1].name",
+      message: '"B" names the same label as "b" declared earlier; keep exactly one entry per label',
+    };
+    expect(labelsSection.validate(entries)).toEqual([issue]);
+    expect(labelsSection.validate({ _undeclared: "keep", entries })).toEqual([
+      { ...issue, path: ".entries[1].name" },
+    ]);
   });
 
   test("the prose hooks reword the keep-note and the delete drift; nothing else is customizable", async () => {
@@ -483,7 +480,7 @@ describe("listSection conflicts", () => {
       declared: (writes) =>
         writes.flatMap((write, index) =>
           writes.slice(0, index).some((earlier) => earlier.color === write.color)
-            ? [`"${write.name}" repeats a declared color`]
+            ? [{ path: `[${index}].color`, message: `"${write.name}" repeats a declared color` }]
             : [],
         ),
       live: (writes, live) =>
@@ -502,18 +499,17 @@ describe("listSection conflicts", () => {
     { name: "docs", color: "0075ca", description: null },
   ];
 
-  test("a declared-only conflict fails before any request, every line in one error", async () => {
-    const api = new MockApi({});
-    await expect(
-      clashing.plan(planContext(clashing, api, REPO), [
+  test("a declared-only conflict is a validate issue per finding, so it fails the document before any request", () => {
+    expect(
+      clashing.validate([
         { name: "a", color: "000000" },
         { name: "b", color: "000000" },
         { name: "c", color: "000000" },
       ]),
-    ).rejects.toThrow(
-      'labels: the settings file declares conflicting labels: "b" repeats a declared color; "c" repeats a declared color. Fix the settings file, then re-run',
-    );
-    expect(api.calls).toEqual([]);
+    ).toEqual([
+      { path: "[1].color", message: '"b" repeats a declared color' },
+      { path: "[2].color", message: '"c" repeats a declared color' },
+    ]);
   });
 
   test("a live conflict fails after the one read and before any write, every line in one error", async () => {

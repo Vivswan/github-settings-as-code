@@ -3,12 +3,13 @@ import type { UndeclaredPolicy } from "../../types.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  type DeclaredIssue,
+  duplicateIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
   undeclaredNote,
 } from "../contract/module.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import type { EnvironmentsRestContext } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig } from "./schema.js";
@@ -138,6 +139,22 @@ export function enabledRulesBySlug(
   );
 }
 
+/** Two entries for one App would enable and re-enable the same rule on every run. */
+export function duplicateProtectionRuleIssues(
+  entries: readonly DeploymentProtectionRuleConfig[],
+  envName: string,
+): DeclaredIssue[] {
+  return duplicateIssues(
+    entries,
+    {
+      keyOf: (rule) => rule.app,
+      describe: (rule) => rule.app,
+      at: (_rule, index) => `[${index}].app`,
+    },
+    `deployment protection rule App of the "${envName}" environment`,
+  );
+}
+
 /** Every missing slug resolves from one Apps read before the first POST leaves, so an unlisted slug fails before any rule is half-enabled. */
 export async function planProtectionRules(
   ctx: EnvironmentsRestContext,
@@ -147,15 +164,6 @@ export async function planProtectionRules(
   entries: readonly DeploymentProtectionRuleConfig[],
   liveEnv: Record<string, unknown> | undefined,
 ): Promise<NestedPlan> {
-  raise(
-    rejectDuplicates(
-      section,
-      entries,
-      (rule) => rule.app,
-      (rule) => rule.app,
-      `deployment protection rule App of the "${envName}" environment`,
-    ),
-  );
   const params = { environment_name: envName };
   const live = liveEnv === undefined ? [] : await listProtectionRules(ctx, envName);
   const liveBySlug = enabledRulesBySlug(section, live, envName);

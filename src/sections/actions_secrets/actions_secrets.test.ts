@@ -216,15 +216,20 @@ describe("actions_secrets planning", () => {
     ]);
   });
 
-  test("case-insensitive duplicate names are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
-        { name: "token", value: "$A" },
-        { name: "TOKEN", value: "$B" },
-      ]),
-    ).rejects.toThrow(/same actions_secrets entry/);
-    expect(api.calls).toEqual([]);
+  test("case-insensitive duplicate names are a validate issue in both declared forms, so the document fails before any API call", () => {
+    const entries = [
+      { name: "token", value: "$A" },
+      { name: "TOKEN", value: "$B" },
+    ];
+    const issue = {
+      path: "[1].name",
+      message:
+        '"TOKEN" names the same secret as "token" declared earlier; keep exactly one entry per secret',
+    };
+    expect(actionsSecretsSection.validate(entries)).toEqual([issue]);
+    expect(actionsSecretsSection.validate({ _undeclared: "delete", entries })).toEqual([
+      { ...issue, path: ".entries[1].name" },
+    ]);
   });
 
   // Reference validation lives in engine/secret-refs.ts (test/engine/secret-refs.test.ts); the section only extracts and looks up values.

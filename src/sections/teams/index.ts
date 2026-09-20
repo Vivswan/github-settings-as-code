@@ -10,7 +10,9 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  declaredEntries,
   defaultUndeclaredPolicy,
+  duplicateIssues,
   keyedBy,
   loosen,
   ORG_PROBE,
@@ -24,7 +26,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
@@ -120,7 +121,7 @@ function teamsBySlug(section: SectionMeta, live: readonly LiveTeam[]): Map<strin
 export const teamsSection = {
   key: "teams",
   undeclaredDefault: "keep",
-  // The fold plan() passes to rejectDuplicates: slugs fold case-insensitively.
+  // The fold validate() rejects duplicates by: slugs fold case-insensitively.
   layering: keyedBy("name", { fold: (name) => name.toLowerCase() }),
   permission,
   // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
@@ -133,16 +134,21 @@ export const teamsSection = {
     describe: (t) => t.name,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
+  // A team's slug is its lowercased name, the identity every lookup below uses.
+  validate(declared) {
+    const { entries, path } = declaredEntries(declared);
+    return duplicateIssues(
+      entries,
+      {
+        keyOf: (t) => t.name.toLowerCase(),
+        describe: (t) => t.name,
+        at: (_t, index) => `${path}[${index}].name`,
+      },
+      "team",
+    );
+  },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    raise(
-      rejectDuplicates(
-        this,
-        desired,
-        (t) => t.name.toLowerCase(),
-        (t) => t.name,
-      ),
-    );
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants
     // below start from; a declared team's role still comes from the probe, which names a custom role.

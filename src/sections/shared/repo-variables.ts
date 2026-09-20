@@ -13,6 +13,8 @@ import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import {
+  type DeclaredIssue,
+  declaredEntries,
   defaultUndeclaredPolicy,
   type GraphqlDict,
   type KeyedListLayering,
@@ -32,6 +34,7 @@ import type {
 import { knobbed } from "./schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 import {
+  duplicateVariableNameIssues,
   LiveVariable,
   liveVariablesByKey,
   planVariables,
@@ -142,6 +145,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
   readonly layering: KeyedListLayering;
+  readonly validate: (declared: WideDeclared) => readonly DeclaredIssue[];
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>, GraphqlDict, K>,
@@ -241,6 +245,13 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     layering: keyedBy("name", { fold: variableKey }),
+    validate: (declared) => {
+      const { entries, path } = declaredEntries(declared);
+      return duplicateVariableNameIssues(entries, "variable").map((issue) => ({
+        ...issue,
+        path: `${path}${issue.path}`,
+      }));
+    },
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

@@ -393,6 +393,31 @@ describe("validateSettingsDoc", () => {
     );
   });
 
+  test("a document with a duplicate label and a malformed deploy key beside a valid repository section is refused whole, both issues with their paths, so runForRepo can never PATCH the repository first", () => {
+    const verdict = validateSettingsDoc(
+      {
+        repository: { description: "should never be written" },
+        labels: [{ name: "bug" }, { name: "Bug" }],
+        deploy_keys: [{ title: "ci", key: "ssh-ed25519" }],
+      },
+      "settings.yml",
+      SectionSelection.ALL,
+      silentIo(),
+    );
+    expect(verdict).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "settings.yml",
+        issues: [
+          'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
+          expect.stringMatching(
+            /^deploy_keys\[0\]\.key: entry "ci": the key has fewer than two fields separated by a space or tab/,
+          ),
+        ],
+      }),
+    );
+  });
+
   test("a valid document comes back branded, ready for runForRepo", () => {
     const { io } = captureIo();
     const doc = { repository: { has_wiki: false } };

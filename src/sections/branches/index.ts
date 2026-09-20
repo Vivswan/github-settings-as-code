@@ -14,6 +14,7 @@ import { matchesRejection } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  duplicateIssues,
   keyedBy,
   listEntries,
   loosen,
@@ -22,7 +23,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
@@ -224,7 +224,7 @@ export const branchesSection = {
       }
     });
   }),
-  // Branch names and patterns are verbatim keys, as plan() rejects duplicates. `protection: null` (no protection) and a
+  // Branch names and patterns are verbatim keys, as validate() rejects duplicates. `protection: null` (no protection) and a
   // null under it (a core control or required_deployments turned off) are values the entry schema types, never delete markers.
   layering: keyedBy("name", {
     nullValued: [
@@ -235,17 +235,22 @@ export const branchesSection = {
       "protection.restrictions",
     ],
   }),
+  // Two entries for one branch or pattern would overwrite each other's write on every run.
+  validate(desired) {
+    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
+    const at = Array.isArray(desired) ? "" : ".entries";
+    return duplicateIssues(
+      listEntries(desired),
+      {
+        keyOf: (b) => b.name,
+        describe: (b) => b.name,
+        at: (_b, index) => `${at}[${index}].name`,
+      },
+      "branch",
+    );
+  },
   async plan(ctx, desired): Promise<BranchesPlan> {
     const branches = listEntries(desired);
-    // Two entries for one branch or pattern would overwrite each other's write on every run.
-    raise(
-      rejectDuplicates(
-        this,
-        branches,
-        (b) => b.name,
-        (b) => b.name,
-      ),
-    );
     const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
     // The first entry that needs the GraphQL surface starts the one rules read, ahead of every REST
     // probe; a pure-REST declaration never starts it, so no separate predicate gates the fetch.

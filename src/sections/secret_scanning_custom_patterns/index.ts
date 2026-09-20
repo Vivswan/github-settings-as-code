@@ -14,7 +14,9 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  declaredEntries,
   defaultUndeclaredPolicy,
+  duplicateIssues,
   keyedBy,
   loosen,
   missingDrift,
@@ -27,7 +29,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import {
   knobbedSnapshot,
@@ -163,7 +164,7 @@ const key = "secret_scanning_custom_patterns";
 export const secretScanningPatternsSection = {
   key,
   undeclaredDefault: "keep",
-  // Verbatim, as plan() passes to rejectDuplicates: GitHub matches pattern names exactly.
+  // Verbatim, the key validate() rejects duplicates by: GitHub matches pattern names exactly.
   layering: keyedBy("name"),
   permission,
   endpoints: ENDPOINTS,
@@ -182,16 +183,20 @@ export const secretScanningPatternsSection = {
     consequence:
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },
+  validate(declared) {
+    const { entries, path } = declaredEntries(declared);
+    return duplicateIssues(
+      entries,
+      {
+        keyOf: (p) => p.name,
+        describe: (p) => p.name,
+        at: (_p, index) => `${path}[${index}].name`,
+      },
+      "custom pattern",
+    );
+  },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    raise(
-      rejectDuplicates(
-        this,
-        desired,
-        (p) => p.name,
-        (p) => p.name,
-      ),
-    );
     const live = (await ctx.read.list.listAll(LivePatternEntry)).map(liveFrom);
     const liveByName = patternsByName(this, live);
     const declaredNames = new Set(desired.map((p) => p.name));

@@ -70,14 +70,12 @@ throws:
     src/sections/branches/index.ts: 1
     src/sections/collaborators/index.ts: 2
     src/sections/contract/docs.ts: 2
-    src/sections/custom_properties/index.ts: 2
-    src/sections/deploy_keys/index.ts: 1
     src/sections/environments/branch-policies.ts: 2
     src/sections/environments/pins.ts: 2
     src/sections/environments/protection-rules.ts: 3
     src/sections/repository/index.ts: 4
     src/sections/rulesets/index.ts: 1
-    src/sections/shared/list-section.ts: 3
+    src/sections/shared/list-section.ts: 2
     src/sections/shared/roles.ts: 1
     src/sections/shared/sealed-box.ts: 1
     src/sections/shared/secrets-engine.ts: 4

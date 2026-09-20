@@ -306,12 +306,19 @@ describe("webhooks plan", () => {
     await expect(plan(api, [])).rejects.toThrow(refusal);
   });
 
-  test("two declared entries with the same url are rejected before any call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [{ config: { url: "https://x.test/h" } }, { config: { url: "https://x.test/h" } }]),
-    ).rejects.toThrow(/Keep exactly one entry per resource/);
-    expect(api.calls).toEqual([]);
+  test("two declared entries with the same url are a validate issue at the nested identity field, so the document fails before any call", () => {
+    expect(
+      webhooksSection.validate([
+        { config: { url: "https://x.test/h" } },
+        { config: { url: "https://x.test/h" } },
+      ]),
+    ).toEqual([
+      {
+        path: "[1].config.url",
+        message:
+          '"https://x.test/h" names the same webhook as "https://x.test/h" declared earlier; keep exactly one entry per webhook',
+      },
+    ]);
   });
 
   test("executing the plan against the mock fragment converges: the re-plan carries only the secret-bearing config PATCHes", async () => {

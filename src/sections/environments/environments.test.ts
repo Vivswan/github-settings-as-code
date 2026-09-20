@@ -328,10 +328,9 @@ describe("environments variables case-insensitive matching", () => {
     expect(patch?.payload).toEqual({ value: "new" });
   });
 
-  test("two declared names that collapse case-insensitively are rejected before any write", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("two declared names that collapse case-insensitively are a validate issue under the nested list, so the document fails before any write", () => {
+    expect(
+      environmentsSection.validate([
         {
           name: "prod",
           variables: [
@@ -340,11 +339,13 @@ describe("environments variables case-insensitive matching", () => {
           ],
         },
       ]),
-    ).rejects.toThrow(
-      'environments: the settings file declares entries that name the same variable of the "prod" environment: "Region" and "REGION". Keep exactly one entry per resource',
-    );
-    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
-    expect(api.mutations()).toEqual([]);
+    ).toEqual([
+      {
+        path: "[0].variables[1].name",
+        message:
+          '"REGION" names the same variable of the "prod" environment as "Region" declared earlier; keep exactly one entry per variable of the "prod" environment',
+      },
+    ]);
   });
 });
 
@@ -621,21 +622,26 @@ describe("environments nested secrets check mode", () => {
 });
 
 describe("environments nested secrets validation and shape", () => {
-  test("case-insensitive duplicate names are rejected upfront, naming the environment", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("case-insensitive duplicate names are a validate issue naming the environment, in the wrapped form under .entries", () => {
+    expect(
+      environmentsSection.validate([
         {
           name: "prod",
-          secrets: [
-            { name: "token", value: "$A" },
-            { name: "TOKEN", value: "$B" },
-          ],
+          secrets: {
+            entries: [
+              { name: "token", value: "$A" },
+              { name: "TOKEN", value: "$B" },
+            ],
+          },
         },
       ]),
-    ).rejects.toThrow(/the same secret of the "prod" environment: "token" and "TOKEN"/);
-    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
-    expect(api.mutations()).toEqual([]);
+    ).toEqual([
+      {
+        path: "[0].secrets.entries[1].name",
+        message:
+          '"TOKEN" names the same secret of the "prod" environment as "token" declared earlier; keep exactly one entry per secret of the "prod" environment',
+      },
+    ]);
   });
 
   test("secret entries are strict; the singular entry-level `secret` key is rejected by name", () => {
@@ -858,15 +864,18 @@ describe("environments parse rules", () => {
 });
 
 describe("environments deployment branch policies validation and shape", () => {
-  test("duplicate patterns are rejected upfront, naming the environment", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }])]),
-    ).rejects.toThrow(
-      'environments: the settings file declares entries that name the same deployment branch policy of the "prod" environment: "release/*" and "release/*". Keep exactly one entry per resource',
-    );
-    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
-    expect(api.mutations()).toEqual([]);
+  test("duplicate patterns are a validate issue naming the environment, so the document fails before any write", () => {
+    expect(
+      environmentsSection.validate([
+        envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
+      ]),
+    ).toEqual([
+      {
+        path: "[0].deployment_branch_policies[1].name",
+        message:
+          '"release/*" names the same deployment branch policy of the "prod" environment as "release/*" declared earlier; keep exactly one entry per deployment branch policy of the "prod" environment',
+      },
+    ]);
   });
 
   test("both declared forms parse; entries stay loose and the wrapper strict", () => {
@@ -1240,20 +1249,21 @@ describe("environments missing-environment planning across the nested families",
 });
 
 describe("environments deployment protection rules validation and shape", () => {
-  test("duplicate App slugs are rejected upfront, naming the environment", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("duplicate App slugs are a validate issue naming the environment, so the document fails before any write", () => {
+    expect(
+      environmentsSection.validate([
         {
           name: "prod",
           deployment_protection_rules: [{ app: "deploy-gate" }, { app: "deploy-gate" }],
         },
       ]),
-    ).rejects.toThrow(
-      'environments: the settings file declares entries that name the same deployment protection rule App of the "prod" environment: "deploy-gate" and "deploy-gate". Keep exactly one entry per resource',
-    );
-    // The engine guards the declared list ahead of its own read; the environment probe before it is the only request.
-    expect(api.mutations()).toEqual([]);
+    ).toEqual([
+      {
+        path: "[0].deployment_protection_rules[1].app",
+        message:
+          '"deploy-gate" names the same deployment protection rule App of the "prod" environment as "deploy-gate" declared earlier; keep exactly one entry per deployment protection rule App of the "prod" environment',
+      },
+    ]);
   });
 
   test("both declared forms parse; entries are STRICT (the POST carries only the resolved id)", () => {

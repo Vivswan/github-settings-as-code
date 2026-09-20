@@ -437,6 +437,83 @@ interface SectionModuleBase<
 }
 
 /**
+ * A finding of a section's file-only checks (SectionModule.validate). `path` follows the section key the way a
+ * zod issue's does (`[3].name`, `.entries[1].name`, "" for the whole value), so `labels[3].name: ...` reads alike
+ * whichever check raised it.
+ */
+export interface DeclaredIssue {
+  readonly path: string;
+  readonly message: string;
+}
+
+/**
+ * Every check that reads the declared value and nothing else (no API, no environment): a duplicated identity, a
+ * malformed key material, a list GitHub would fold. engine/validate.ts runs it inside document validation, in both
+ * modes, before the preflight barrier and the first write, and joins the findings to the settings-malformed-sections
+ * problem; the same check thrown from plan() would fire after earlier sections wrote (the preflight probe reports
+ * only denials). Required on a list section, since every entry list has an identity to keep unique; a mapping
+ * section may declare none. The erased view (SectionModule<SectionKey>) keeps it optional so every module erases.
+ */
+type ValidateFacet<K extends SectionKey> =
+  IsUnion<K> extends true
+    ? { validate?(declared: SectionInput<K>): readonly DeclaredIssue[] }
+    : [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
+      ? { validate?(declared: SectionInput<K>): readonly DeclaredIssue[] }
+      : { validate(declared: SectionInput<K>): readonly DeclaredIssue[] };
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (
+  x: infer I,
+) => void
+  ? I
+  : never;
+
+type IsUnion<T> = [T] extends [UnionToIntersection<T>] ? false : true;
+
+/**
+ * The entries of a knobbed list in either declared form, with the path prefix they sit under, so a file-only
+ * check's issue path matches the zod issue path for the same entry (`labels[1]` vs `labels.entries[1]`).
+ */
+export function declaredEntries<E>(declared: readonly E[] | UndeclaredPolicyList<E>): {
+  readonly entries: readonly E[];
+  readonly path: "" | ".entries";
+} {
+  return Array.isArray(declared)
+    ? { entries: declared, path: "" }
+    : { entries: (declared as UndeclaredPolicyList<E>).entries, path: ".entries" };
+}
+
+/**
+ * Two entries resolving to one natural key would fight each other on every run. Every collision is reported, each
+ * against the first entry under its key, so N duplicates cost one run to discover. `what` names the resource
+ * ("label", `secret of the "prod" environment`); `at` is the offending item's path within the list (`[3].name`).
+ */
+export function duplicateIssues<T>(
+  items: readonly T[],
+  identity: {
+    keyOf(item: T): string;
+    describe(item: T): string;
+    at(item: T, index: number): string;
+  },
+  what: string,
+): DeclaredIssue[] {
+  const seen = new Map<string, string>();
+  const issues: DeclaredIssue[] = [];
+  items.forEach((item, index) => {
+    const key = identity.keyOf(item);
+    const first = seen.get(key);
+    if (first === undefined) {
+      seen.set(key, identity.describe(item));
+      return;
+    }
+    issues.push({
+      path: identity.at(item, index),
+      message: `"${identity.describe(item)}" names the same ${what} as "${first}" declared earlier; keep exactly one entry per ${what}`,
+    });
+  });
+  return issues;
+}
+
+/**
  * What a section reads back as a settings document: its live state in the section's own declared
  * form, or `undefined` when nothing exists (the engine omits the key). `notes` carry what the value
  * cannot: a secret's unreadable value, a feature the repository lacks.
@@ -462,7 +539,8 @@ export type SectionModule<
   E extends EndpointDict = EndpointDict,
   G extends GraphqlDict = GraphqlDict,
 > = SectionModuleBase<K, E, G> &
-  SnapshotFacet<K, E, G> & {
+  SnapshotFacet<K, E, G> &
+  ValidateFacet<K> & {
     plan(
       ctx: PlanContext<E, G, K>,
       desired: SectionInput<K>,
@@ -514,7 +592,7 @@ const DECLARATION_FIELDS = [
 ] as const satisfies readonly (keyof SectionModule)[];
 
 /** `shape` stays as zod built it; the rest are handlers. */
-type HandlerField = "shape" | "plan" | "snapshot" | "secretValues" | "run";
+type HandlerField = "shape" | "plan" | "snapshot" | "secretValues" | "validate" | "run";
 
 type _EveryModuleFieldSorted = MustBeNever<
   Exclude<keyof SectionModule, (typeof DECLARATION_FIELDS)[number] | HandlerField>

@@ -190,6 +190,12 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "schema-looser: the GET-only schedule/updated_at refusal is a superRefine reading the passthrough record (setup-schema.ts); the shape stays open for passthrough parity",
   "code-quality-setup-runner-label-without-labeled-rejected.yml settings":
     "schema-looser: the runner_type/runner_label pairing is a cross-field superRefine (setup-schema.ts), rejected at runtime upfront",
+  "labels-duplicate-rejected-before-any-write.yml settings":
+    "schema-looser: two entries folding to one label name are the section's validate hook (a file-only check over the whole list), which JSON Schema cannot express",
+  "autolinks-overlapping-prefixes.yml settings":
+    "schema-looser: one key_prefix beginning another is the autolinks section's validate hook (a file-only check over every pair in the list), which JSON Schema cannot express",
+  "environment-duplicate-secret-rejected-before-any-write.yml settings":
+    "schema-looser: two nested secrets folding to one name are the environments validate hook over the nested list, which JSON Schema cannot express",
 };
 
 describe("published schema agrees with the runtime over the corpus", () => {

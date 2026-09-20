@@ -37,8 +37,9 @@ const META = {
   permission: { repo: ["secrets"] },
   undeclaredDefault: "keep",
   shape: actionsSecretsSection.shape,
-  // A reading section must read back; these synthetic modules exercise plan() alone.
+  // A reading section must read back, and a list section must carry its file-only checks; these synthetic modules exercise plan() alone.
   snapshot: async () => ({ value: undefined, notes: [] }),
+  validate: () => [],
 } as const;
 
 /** The declared entries, whichever form the knobbed section value takes. */

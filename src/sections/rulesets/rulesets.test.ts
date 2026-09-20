@@ -521,20 +521,52 @@ describe("rulesets", () => {
     ]);
   });
 
-  test("duplicate ruleset names are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("duplicate ruleset names are a validate issue, so the document fails before any API call", () => {
+    expect(
+      rulesetsSection.validate([
         { name: "main", target: "branch", enforcement: "active" },
         { name: "main", target: "tag", enforcement: "active" },
       ]),
-    ).rejects.toThrow(/same rulesets entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"main" names the same ruleset as "main" declared earlier; keep exactly one entry per ruleset',
+      },
+    ]);
   });
 
-  test("a repeated rule type is a settings-file error before any read, and a live body repeating one fails loudly naming the ruleset", async () => {
+  test("a repeated rule type is a validate issue at the ruleset's rules, and a live body repeating one fails loudly naming the ruleset", async () => {
     // Rules pair by type, so a repeat has no pairing; the settings-file case names the fix, the live case the defect.
     const bare = { name: "main", target: "branch" as const, enforcement: "active" as const };
+    expect(
+      rulesetsSection.validate([{ ...bare, rules: [{ type: "deletion" }, { type: "deletion" }] }]),
+    ).toEqual([
+      {
+        path: "[0].rules",
+        message:
+          'the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once',
+      },
+    ]);
+    expect(
+      rulesetsSection.validate([
+        {
+          ...bare,
+          rules: [
+            { type: "deletion" },
+            { type: "deletion" },
+            { type: "creation" },
+            { type: "creation" },
+          ],
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'lists the rule types "deletion", "creation" more than once',
+        ),
+      }),
+    ]);
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {
@@ -547,25 +579,6 @@ describe("rulesets", () => {
         },
       },
     });
-    await expect(
-      plan(api, [{ ...bare, rules: [{ type: "deletion" }, { type: "deletion" }] }]),
-    ).rejects.toThrow(
-      'rulesets: the settings file declares conflicting rulesets: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once. Fix the settings file, then re-run',
-    );
-    await expect(
-      plan(api, [
-        {
-          ...bare,
-          rules: [
-            { type: "deletion" },
-            { type: "deletion" },
-            { type: "creation" },
-            { type: "creation" },
-          ],
-        },
-      ]),
-    ).rejects.toThrow('lists the rule types "deletion", "creation" more than once');
-    expect(api.calls).toHaveLength(0);
     await expect(plan(api, [{ ...bare, rules: [{ type: "deletion" }] }])).rejects.toThrow(
       'rulesets: GitHub returned the ruleset "main" (id 9) with the rule type "deletion" more than once, so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run',
     );

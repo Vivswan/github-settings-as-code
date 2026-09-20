@@ -156,33 +156,38 @@ describe("autolinks", () => {
     },
   );
 
-  test("duplicate prefixes inside the wrapper are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, {
+  test("duplicate prefixes inside the wrapper are a validate issue under .entries, so the document fails before any API call", () => {
+    expect(
+      autolinksSection.validate({
         entries: [
           { key_prefix: "JIRA-", url_template: "https://x.test/<num>" },
           { key_prefix: "JIRA-", url_template: "https://y.test/<num>" },
         ],
       }),
-    ).rejects.toThrow(/same autolinks entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: ".entries[1].key_prefix",
+        message:
+          '"JIRA-" names the same autolink as "JIRA-" declared earlier; keep exactly one entry per autolink',
+      },
+    ]);
   });
 
-  test("a prefix that begins another prefix is refused as a pair before any API call: GitHub rejects the second create, which would half-apply the run", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("a prefix that begins another prefix is refused as a pair before any API call: GitHub rejects the second create, which would half-apply the run", () => {
+    expect(
+      autolinksSection.validate([
         { key_prefix: "TICKET-A", url_template: "https://a.test/<num>" },
         { key_prefix: "JIRA-", url_template: "https://j.test/<num>" },
         { key_prefix: "TICKET-", url_template: "https://t.test/<num>" },
       ]),
-    ).rejects.toThrow(
-      'autolinks: the settings file declares conflicting autolinks: the key_prefix "TICKET-" begins the key_prefix "TICKET-A", ' +
-        "and GitHub rejects an autolink whose prefix begins or extends another, so the second create would fail - " +
-        "choose prefixes where neither begins the other. Fix the settings file, then re-run",
-    );
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[2].key_prefix",
+        message:
+          'the key_prefix "TICKET-" begins the key_prefix "TICKET-A", and GitHub rejects an autolink whose prefix begins or extends another, ' +
+          "so the second create would fail - choose prefixes where neither begins the other",
+      },
+    ]);
   });
 
   test.each<[entry: Record<string, unknown>, issues: [path: string, message: string][]]>([

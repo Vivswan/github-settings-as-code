@@ -11,7 +11,9 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   cannotVerifyNote,
+  type DeclaredIssue,
   type DeclaredSecretValue,
+  duplicateIssues,
   missingDrift,
   type SectionMeta,
   secretValuesOf,
@@ -19,7 +21,6 @@ import {
   undeclaredNote,
 } from "../contract/module.js";
 import type { ExecTools, SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { decodeBase64, SEALED_BOX_PUBLIC_KEY_BYTES, sealForGithub } from "./sealed-box.js";
 
 export interface SecretEntry {
@@ -49,8 +50,6 @@ export interface SecretsScopeProse {
   where?: string;
   /** Appended to change and describe lines (` in environment "prod"`). */
   suffix?: string;
-  /** What two declared entries under one name are reported as naming, when `<section> entry` understates it (`secret of the "prod" environment`). */
-  what?: string;
 }
 
 /** The payload thunk resolves and seals only when executed, so the plan carries the `$NAME` reference and nothing derived from a value. */
@@ -112,23 +111,22 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
 }
 
 /**
- * GitHub folds two names equal uppercased into one secret, so the last write would silently win on
- * every run. planSecrets runs it before its read, so no scope can skip it; `what` names the resource
- * when "<section> entry" understates it (a nested scope's).
+ * GitHub folds two names equal uppercased into one secret, so the last write would silently win on every
+ * run. Every scope's validate hook runs it (planSecrets trusts the document); `what` names the resource
+ * ("secret", `secret of the "prod" environment`).
  */
-export function rejectDuplicateSecretNames(
-  section: SectionMeta,
+export function duplicateSecretNameIssues(
   entries: readonly SecretEntry[],
-  what?: string,
-): void {
-  raise(
-    rejectDuplicates(
-      section,
-      entries,
-      (entry) => secretKey(entry.name),
-      (entry) => entry.name,
-      what,
-    ),
+  what: string,
+): DeclaredIssue[] {
+  return duplicateIssues(
+    entries,
+    {
+      keyOf: (entry) => secretKey(entry.name),
+      describe: (entry) => entry.name,
+      at: (_entry, index) => `[${index}].name`,
+    },
+    what,
   );
 }
 
@@ -263,7 +261,6 @@ export async function planSecrets<Put extends AnyPlannedOp, Remove extends AnyPl
   const suffix = scope.suffix ?? "";
   const plan: SectionPlan<Put | Remove> = { ops: [], notes: [], drift: [] };
 
-  rejectDuplicateSecretNames(section, entries, scope.what);
   const liveByKey = liveSecretsByKey(section, scope.noun, await scope.list());
   const declaredKeys = new Set(entries.map((entry) => secretKey(entry.name)));
 

@@ -100,15 +100,19 @@ describe("workflows", () => {
     ]);
   });
 
-  test("duplicate declarations for the same file are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("duplicate declarations for the same file under two spellings are a validate issue, so the document fails before any API call", () => {
+    expect(
+      workflowsSection.validate([
         { path: "ci.yml", state: "disabled" },
         { path: ".github/workflows/ci.yml", state: "active" },
       ]),
-    ).rejects.toThrow(/same workflows entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].path",
+        message:
+          '".github/workflows/ci.yml" names the same workflow as "ci.yml" declared earlier; keep exactly one entry per workflow',
+      },
+    ]);
   });
 
   test("the workflows envelope paginates past the first page", async () => {

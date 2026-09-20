@@ -15,6 +15,8 @@ import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import {
+  type DeclaredIssue,
+  declaredEntries,
   defaultUndeclaredPolicy,
   type GraphqlDict,
   type KeyedListLayering,
@@ -35,6 +37,7 @@ import type {
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
+  duplicateSecretNameIssues,
   LiveSecretName,
   listSecretValues,
   liveSecretsByKey,
@@ -175,6 +178,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: typeof CLOSED_SURFACE;
   readonly layering: KeyedListLayering;
+  readonly validate: (declared: WideDeclared) => readonly DeclaredIssue[];
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>, GraphqlDict, K>,
@@ -286,6 +290,13 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
     layering: keyedBy("name", { fold: secretKey }),
+    validate: (declared) => {
+      const { entries, path } = declaredEntries(declared);
+      return duplicateSecretNameIssues(entries, "secret").map((issue) => ({
+        ...issue,
+        path: `${path}${issue.path}`,
+      }));
+    },
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

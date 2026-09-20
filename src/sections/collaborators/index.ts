@@ -9,7 +9,9 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  declaredEntries,
   defaultUndeclaredPolicy,
+  duplicateIssues,
   keyedBy,
   loosen,
   type SectionMeta,
@@ -21,7 +23,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import {
   DEFAULT_ROLE,
   INVITATION_ROLES,
@@ -135,7 +136,7 @@ function isOwner(ctx: CollaboratorsContext, login: string): boolean {
 export const collaboratorsSection = {
   key: "collaborators",
   undeclaredDefault: "delete",
-  // The fold plan() passes to rejectDuplicates: GitHub matches logins case-insensitively.
+  // The fold validate() rejects duplicates by: GitHub matches logins case-insensitively.
   layering: keyedBy("username", { fold: (username) => username.toLowerCase() }),
   permission,
   endpoints: ENDPOINTS,
@@ -146,16 +147,21 @@ export const collaboratorsSection = {
     describe: (c) => c.username,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
+  // Logins are case-insensitive on GitHub, the fold every lookup below uses.
+  validate(declared) {
+    const { entries, path } = declaredEntries(declared);
+    return duplicateIssues(
+      entries,
+      {
+        keyOf: (c) => c.username.toLowerCase(),
+        describe: (c) => c.username,
+        at: (_c, index) => `${path}[${index}].username`,
+      },
+      "collaborator",
+    );
+  },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    raise(
-      rejectDuplicates(
-        this,
-        desired,
-        (c) => c.username.toLowerCase(),
-        (c) => c.username,
-      ),
-    );
     // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
     // undeclared in the other pool; email invitations (null invitee, which no username can declare)
     // split into their own pool.

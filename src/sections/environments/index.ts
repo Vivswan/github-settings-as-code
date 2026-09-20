@@ -4,6 +4,7 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
+  duplicateIssues,
   type KeyedListLayering,
   keyedBy,
   listEntries,
@@ -14,13 +15,12 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { ENDPOINTS } from "./endpoints.js";
-import { NESTED_KEYS, planNested, splitEntry } from "./nested.js";
+import { NESTED_KEYS, planNested, splitEntry, validateNested } from "./nested.js";
 import {
   type EnvironmentsPlan,
   environmentNodeId,
@@ -121,16 +121,29 @@ export const environmentsSection = {
       }));
     });
   },
+  // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
+  validate(desired) {
+    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
+    const at = Array.isArray(desired) ? "" : ".entries";
+    const environments = listEntries(desired);
+    const issues = duplicateIssues(
+      environments,
+      {
+        keyOf: (env) => env.name.toLowerCase(),
+        describe: (env) => env.name,
+        at: (_env, index) => `${at}[${index}].name`,
+      },
+      "environment",
+    );
+    environments.forEach((env, index) => {
+      issues.push(
+        ...validateNested(env).map((issue) => ({ ...issue, path: `${at}[${index}]${issue.path}` })),
+      );
+    });
+    return issues;
+  },
   async plan(ctx, desired) {
     const environments = listEntries(desired);
-    raise(
-      rejectDuplicates(
-        this,
-        environments,
-        (env) => env.name.toLowerCase(),
-        (env) => env.name,
-      ),
-    );
     const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
     /** Each entry's declared pin state, in file order (order IS the pin order). */
     const pins: PinDeclaration[] = [];

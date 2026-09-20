@@ -1,0 +1,23 @@
+# Two entries fold to one label ("bug" and "Bug"; GitHub matches label names
+# case-insensitively). The check reads nothing but the settings file, so it
+# runs inside document validation, BEFORE the preflight barrier and the first
+# write, in either mode. The repository section pins that ordering: were the
+# check inside labels' handler, repository would have PATCHed first and the
+# run would be half-applied. The issue names the offending entry by path.
+name: labels-duplicate-rejected-before-any-write
+settings:
+  repository:
+    description: should never be written
+  labels:
+    - name: bug
+      color: d73a4a
+    - name: Bug
+      color: ffffff
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label'

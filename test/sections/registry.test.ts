@@ -921,6 +921,7 @@ describe("handler contracts", () => {
       permission: { repo: ["actions"] },
       endpoints: {},
       shape: workflowsSection.shape,
+      validate: () => [],
     } as const;
     const planOnly = {
       ...base,

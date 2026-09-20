@@ -211,48 +211,36 @@ describe("deploy_keys schema", () => {
 });
 
 describe("deploy_keys validation before any read", () => {
-  test.each<[label: string, declared: Parameters<typeof deployKeysSection.plan>[1], error: RegExp]>(
+  test.each<
+    [label: string, declared: Parameters<typeof deployKeysSection.validate>[0], issue: RegExp]
+  >([
     [
+      "duplicate declared titles",
       [
-        "a private key handed straight to the planner",
-        [{ title: "deploy-bot", key: PRIVATE_KEY }],
-        /^deploy_keys\[deploy-bot\]: this is a private key; a deploy key takes the public half \(the \.pub file\)$/,
+        { title: "deploy-bot", key: BOT_KEY },
+        { title: "deploy-bot", key: MIRROR_KEY },
       ],
-      [
-        "a malformed declared key",
-        [{ title: "deploy-bot", key: "ssh-ed25519" }],
-        /^deploy_keys\[deploy-bot\]: the key has fewer than two fields separated by a space or tab/,
-      ],
-      [
-        "duplicate declared titles",
-        [
-          { title: "deploy-bot", key: BOT_KEY },
-          { title: "deploy-bot", key: MIRROR_KEY },
-        ],
-        /same deploy_keys entry/,
-      ],
+      /^\[1\]\.title: "deploy-bot" names the same deploy key as "deploy-bot" declared earlier/,
     ],
-  )("%s is a settings-file error, before any API call", async (_label, declared, error) => {
-    const api = new MockApi({});
-    await expect(plan(api, declared)).rejects.toThrow(error);
-    expect(api.calls).toHaveLength(0);
-  });
+    [
+      "duplicate declared MATERIAL under different titles (comments ignored)",
+      [
+        { title: "deploy-bot", key: `${BOT_KEY} deploy@bot` },
+        { title: "mirror-pull", key: `${BOT_KEY} mirror@other-comment` },
+      ],
+      /^\[1\]\.key: the entries "deploy-bot" and "mirror-pull" declare the same key material.*keep one entry per key$/s,
+    ],
+  ])(
+    "%s is one validate issue at the offending field, so the document fails before any API call",
+    (_label, declared, issue) => {
+      expect(
+        deployKeysSection.validate(declared).map((found) => `${found.path}: ${found.message}`),
+      ).toEqual([expect.stringMatching(issue)]);
+    },
+  );
 });
 
 describe("deploy_keys conflicts", () => {
-  test("duplicate declared MATERIAL under different titles (comments ignored) is rejected before any request", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
-        { title: "deploy-bot", key: `${BOT_KEY} deploy@bot` },
-        { title: "mirror-pull", key: `${BOT_KEY} mirror@other-comment` },
-      ]),
-    ).rejects.toThrow(
-      /^deploy_keys: the settings file declares conflicting deploy keys: the entries "deploy-bot" and "mirror-pull" declare the same key material.*keep one entry per key\. Fix the settings file, then re-run$/s,
-    );
-    expect(api.calls).toHaveLength(0);
-  });
-
   test("material a live key holds under ANOTHER title is named after the one read, before any write", async () => {
     const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", MIRROR_KEY)] } });
     await expect(

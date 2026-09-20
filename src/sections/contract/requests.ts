@@ -421,9 +421,7 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   }
 }
 
-/**
- * Shared by the declared-side and live-side duplicate rejections, so both name a collision the same way.
- */
+/** Every collision among live items, each against the first item under its key (contract/live.ts names them). */
 export function collidingPairs<T>(
   items: readonly T[],
   keyOf: (item: T) => string,
@@ -441,26 +439,4 @@ export function collidingPairs<T>(
     seen.set(key, describe(item));
   }
   return collisions;
-}
-
-/**
- * Two entries resolving to one natural key would fight each other on every run. Every collision is
- * collected and reported once (each against the first entry under its key), so N duplicates cost one run
- * to discover. `what` names the resource when "<section> entry" understates it (a nested list's items).
- */
-export function rejectDuplicates<T>(
-  section: SectionMeta,
-  items: readonly T[],
-  keyOf: (item: T) => string,
-  describe: (item: T) => string,
-  what = `${section.key} entry`,
-): Result<void, SectionFailure> {
-  const collisions = collidingPairs(items, keyOf, describe);
-  if (collisions.length > 0) {
-    return err({
-      kind: "declared-duplicate",
-      message: `${section.key}: the settings file declares entries that name the same ${what}: ${collisions.join("; ")}. Keep exactly one entry per resource`,
-    });
-  }
-  return ok(undefined);
 }

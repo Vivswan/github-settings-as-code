@@ -74,6 +74,49 @@ describe("section shape validation", () => {
   });
 });
 
+describe("file-only checks run inside document validation", () => {
+  // Thrown from a section's plan() instead, a duplicate would surface only after the sections before it had written.
+  test("a duplicated identity is a malformed-sections issue at the later entry's field, beside a sibling section's shape issue", () => {
+    expect(
+      issuesOf({
+        labels: [{ name: "bug" }, { name: "Bug" }],
+        pages: { source: null },
+      }),
+    ).toEqual([
+      'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
+      expect.stringMatching(/^pages\.source: .*expected object/),
+    ]);
+  });
+
+  test("the wrapped form's issue path goes through .entries, as a zod issue on the same entry would", () => {
+    expect(
+      issuesOf({ labels: { _undeclared: "keep", entries: [{ name: "a" }, { name: "A" }] } }),
+    ).toEqual([
+      'labels.entries[1].name: "A" names the same label as "a" declared earlier; keep exactly one entry per label',
+    ]);
+  });
+
+  test("a non-finite number in a passthrough field is refused at the boundary: a typed field's shape already refuses it, and plan()'s payload proof would throw only after earlier sections wrote", () => {
+    expect(
+      issuesOf({
+        repository: { description: "changed" },
+        actions_variables: [{ name: "REGION", value: "eu", extra: Number.NaN }],
+      }),
+    ).toEqual([
+      "actions_variables[0].extra is NaN, which JSON cannot carry (it would become null); declare a finite number or remove the key",
+    ]);
+    expect(
+      issuesOf({ actions: { cache: { max_cache_size_gb: Number.POSITIVE_INFINITY } } }),
+    ).toEqual([expect.stringMatching(/^actions\.cache\.max_cache_size_gb: .*received Infinity/)]);
+  });
+
+  test("a section whose shape failed is not handed to its hook: the shape issue is the one reported", () => {
+    expect(issuesOf({ labels: [{ name: "a" }, { name: 2 }] })).toEqual([
+      expect.stringMatching(/^labels\[1\]\.name: .*expected string/),
+    ]);
+  });
+});
+
 describe("YAML-tagged values are rejected anywhere in a section", () => {
   // zod object schemas accept a Date or Set as an empty mapping, so without the plain-data gate these would validate and silently configure nothing.
   test("a tagged section VALUE is rejected for a mapping section that has no required key", () => {
@@ -91,11 +134,24 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
     ]);
   });
 
-  test("a cyclic document (YAML anchors) does not hang the validator", () => {
-    const cyclic: Record<string, unknown> = { description: "x" };
-    cyclic.self = cyclic;
-    // Not endorsed, but the walk must terminate; the shape parse still rules.
-    expect(() => issuesOf({ repository: cyclic } as Record<string, unknown>)).not.toThrow();
+  test("a YAML alias cycle in a passthrough field is refused at the boundary with its path, where plan()'s payload proof would otherwise throw after earlier sections wrote; a typed field keeps its shape's message, and a shared alias between siblings is plain data", () => {
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(issuesOf({ repository: { enable_git_lfs: loop } })).toEqual([
+      expect.stringMatching(/^repository\.enable_git_lfs: .*a mapping is not a boolean/),
+    ]);
+    expect(
+      issuesOf({
+        repository: { description: "changed" },
+        actions_variables: [{ name: "REGION", value: "eu", extra: loop }],
+      }),
+    ).toEqual([
+      "actions_variables[0].extra.self refers back to one of its own containers (a YAML alias cycle), which JSON cannot carry; spell the value out instead",
+    ]);
+    const shared = { enabled: true };
+    expect(
+      validateSectionShapes({ repository: { first: shared, second: shared } }, "f.yml").isOk(),
+    ).toBe(true);
   });
 });
 
