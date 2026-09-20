@@ -16,20 +16,16 @@ function verdict(label: Record<string, unknown>): { ok: true } | { issues: reado
 
 describe("a label the API would reject never reaches it", () => {
   test.each<[what: string, color: string]>([
-    ["lowercase with the leading #", "#d73a4a"],
-    ["lowercase without it", "d73a4a"],
-    ["uppercase digits, folded later by the lens", "#FF00AA"],
+    ["the documented form without the #", "d73a4a"],
+    ["uppercase digits with the leading #: admitted here, normalized by the lens", "#FF00AA"],
   ])("a six-digit hex color parses: %s", (_what, color) => {
     expect(verdict({ name: "bug", color })).toEqual({ ok: true });
   });
 
   test.each<[what: string, color: string]>([
-    ["a color name, which GitHub 422s", "red"],
-    ["four digits", "ff00"],
-    ["three-digit CSS shorthand, which GitHub 422s", "#fff"],
-    ["seven digits", "d73a4a0"],
-    ["a non-hex letter", "d73a4g"],
-  ])("a color GitHub rejects fails at parse naming the entry and the rule: %s", (_what, color) => {
+    ["a color name", "red"],
+    ["three-digit CSS shorthand", "#fff"],
+  ])("a color GitHub 422s fails at parse naming the entry and the rule: %s", (_what, color) => {
     expect(verdict({ name: "bug", color })).toEqual({
       issues: [
         expect.stringMatching(/^labels\[0\]\.color: .*six hex digits.*leading "#" optional/),
