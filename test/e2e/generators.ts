@@ -447,7 +447,8 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
     },
   },
   {
-    // The section has no read endpoint, so an id GitHub 422s or a pair it silently collapses can only be refused here.
+    // Parse refuses an id no GitHub App has or GitHub rejects; otherwise the PATCH would report it late and on every run.
+    // The pair GitHub collapses is what nothing reads back, since the section has no read endpoint.
     name: "check-suite-app-id-not-positive-integer",
     build: (rng) => ({
       doc: {

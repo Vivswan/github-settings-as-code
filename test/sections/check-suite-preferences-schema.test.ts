@@ -1,8 +1,9 @@
 /**
- * GitHub's check-suite preference rules the platform never reports back to us: an app_id is a positive integer (no app 0
- * exists and a fraction 422s), and one app gets one entry (GitHub keeps whichever it reads last). The section has no
- * read endpoint and its PATCH recurs every run, so a rule missing here misapplies silently forever. Parsed through the
- * loosened document shape, so a rule that survives here reaches the run.
+ * GitHub's check-suite preference rules, enforced before the PATCH. An app_id is a positive integer: no app 0 exists
+ * and GitHub rejects fractions. One app gets one entry: GitHub keeps whichever it reads last. Without the bound the
+ * PATCH reports whatever GitHub answers, late and on every run. Without the pair rule the lost entry is never
+ * reported, since no read endpoint exists. Parsed through the loosened document shape, so a rule that survives here
+ * reaches the run.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -22,7 +23,7 @@ function verdict(entries: readonly unknown[]): { parsed: unknown } | { issues: r
 const APP_ID_RULE =
   /^check_suite_preferences\.auto_trigger_checks\[(\d)\]\.app_id: .*positive integer/;
 
-describe("a check suite preference GitHub would 422 or silently overwrite never reaches the PATCH", () => {
+describe("a check suite preference GitHub would reject or silently overwrite never reaches the PATCH", () => {
   test("distinct positive integer app_ids parse in any order, and an unknown field rides through to the PATCH payload", () => {
     const entries = [
       { app_id: 62410, setting: true },
