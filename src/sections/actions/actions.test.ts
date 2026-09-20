@@ -341,7 +341,8 @@ describe("actions", () => {
         "the plan maximum is reported by the GET and never taken by the PUT: declared, it would diff and re-PUT forever",
         { artifact_and_log_retention: { days: 30, maximum_allowed_days: 400 } },
         [
-          "actions.artifact_and_log_retention.maximum_allowed_days: maximum_allowed_days is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), so a declared value could never be applied; remove it from the settings file",
+          "actions.artifact_and_log_retention.maximum_allowed_days: maximum_allowed_days is a value GitHub reports, not a setting it accepts " +
+            "(the GET returns it, the PUT does not take it), so a declared value could never be applied; remove it from the settings file",
         ],
       ],
       [
