@@ -1,0 +1,27 @@
+# The retention GET reports maximum_allowed_days (the plan's ceiling) beside
+# days, and the PUT takes only days. Declared, the field would diff against
+# live and re-PUT on every run without ever taking, so upfront document
+# validation refuses it by name - BEFORE any request, in either mode. The
+# repository section here pins that ordering, mirroring
+# actions-cache-unknown-key-rejected.
+name: actions-retention-reported-field-rejected
+settings:
+  repository:
+    description: should never be written
+  actions:
+    artifact_and_log_retention:
+      days: 30
+      maximum_allowed_days: 400
+live_state:
+  actions_retention:
+    days: 90
+    maximum_allowed_days: 90
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "actions.artifact_and_log_retention.maximum_allowed_days"
+    - "remove it from the settings file"

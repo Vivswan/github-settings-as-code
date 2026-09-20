@@ -189,9 +189,14 @@ function sameClaimKeyOrder(declared: readonly string[], live: readonly string[])
   return declared.length === live.length && declared.every((key, index) => live[index] === key);
 }
 
-// GitHub may return include_claim_keys as null or omit it; the rest of the body rides into
-// subsetDiff as passthrough.
-const LiveOidcSub = z.looseObject({ include_claim_keys: z.array(z.string()).nullish() });
+// GitHub answers an unset list as null or omits it; both read as absent, so the snapshot's projection
+// onto the template variants never sees a null. The rest of the body rides into subsetDiff as passthrough.
+const LiveOidcSub = z.looseObject({
+  include_claim_keys: z
+    .array(z.string())
+    .nullish()
+    .transform((keys) => keys ?? undefined),
+});
 
 /** The base permissions GET: the policy flag and the allowlist selector the file declares. */
 const LivePermissions = z.looseObject({
@@ -290,6 +295,7 @@ function sliceOf<K extends keyof ActionsConfig>(key: K): (live: unknown) => Acti
 const KEY_DESTINATION = {
   enabled: "base",
   allowed_actions: "base",
+  sha_pinning_required: "base",
   selected_actions: {
     plan: async (ctx, _section, declared, plan) => {
       // A 409 (policy not "selected") or 404 (no allowlist) is drift, not a failure; both are
@@ -379,18 +385,22 @@ const KEY_DESTINATION = {
   oidc_customization_sub: {
     plan: async (ctx, _section, declared, plan) => {
       const live = await ctx.read.getOidcSub.call(LiveOidcSub);
-      const { include_claim_keys, ...comparable } = declared;
+      // The list leaves the remainder diff: it is compared positionally below, on the custom
+      // template alone. An OMITTED list there is itself meaningful upstream (it opts the repository
+      // into the organization template, whose keys then show up live), so only a declared one is compared.
+      const { include_claim_keys: _positional, ...comparable } = declared as Record<
+        string,
+        unknown
+      >;
       const drift = subsetDiff(comparable, live, "actions.oidc_customization_sub");
-      // GitHub ignores include_claim_keys when use_default is true, and an OMITTED list on a custom
-      // template is itself meaningful upstream (it opts the repository into the organization
-      // template, whose keys then show up live), so the list is compared only when the file declares it.
-      if (declared.use_default === false && include_claim_keys !== undefined) {
+      const claimKeys = declared.use_default ? undefined : declared.include_claim_keys;
+      if (claimKeys !== undefined) {
         const liveKeys = live.include_claim_keys ?? [];
-        if (!sameClaimKeyOrder(include_claim_keys, liveKeys)) {
+        if (!sameClaimKeyOrder(claimKeys, liveKeys)) {
           drift.push(
             valueDrift(
               "actions.oidc_customization_sub.include_claim_keys",
-              JSON.stringify(include_claim_keys),
+              JSON.stringify(claimKeys),
               JSON.stringify(liveKeys),
               { qualifier: "claim-key order defines the subject format, so order counts" },
             ),

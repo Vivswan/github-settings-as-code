@@ -20,10 +20,31 @@
             "selected"
           ]
         },
+        "sha_pinning_required": {
+          "description": "Whether actions must be pinned to a full-length commit SHA.",
+          "type": "boolean"
+        },
         "selected_actions": {
-          "description": "PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected)",
+          "description": "PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected): the allowlist, e.g. { github_owned_allowed: true, patterns_allowed: [octocat/*] }. Only the three documented keys are accepted, so a misspelled one is refused instead of re-sent on every run.",
           "type": "object",
-          "additionalProperties": {}
+          "properties": {
+            "github_owned_allowed": {
+              "description": "Whether actions in GitHub's own organizations (such as actions/*) may run.",
+              "type": "boolean"
+            },
+            "verified_allowed": {
+              "description": "Whether actions by GitHub Marketplace verified creators may run.",
+              "type": "boolean"
+            },
+            "patterns_allowed": {
+              "description": "Patterns naming the actions and reusable workflows allowed to run, e.g. octocat/hello-world@v2 or octocat/*; GitHub applies them to public repositories only.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "default_workflow_permissions": {
           "description": "PUT /repos/{r}/actions/permissions/workflow: the default GITHUB_TOKEN grant.",
@@ -47,12 +68,13 @@
           ]
         },
         "artifact_and_log_retention": {
-          "description": "PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many days artifacts and workflow logs are kept, e.g. { days: 90 }. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "description": "PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many days artifacts and workflow logs are kept, e.g. { days: 90 }. The body passes through verbatim, so future fields GitHub adds work unchanged; maximum_allowed_days, which the GET reports and the PUT does not take, is refused.",
           "type": "object",
           "properties": {
             "days": {
-              "description": "How many days artifacts and workflow logs are kept.",
-              "type": "number"
+              "description": "How many days artifacts and workflow logs are kept; a whole number of days within the plan's maximum.",
+              "type": "integer",
+              "exclusiveMinimum": 0
             }
           },
           "required": [
@@ -65,46 +87,76 @@
           "properties": {
             "max_cache_retention_days": {
               "description": "How many days an unused cache entry is kept before GitHub evicts it.",
-              "type": "number"
+              "type": "integer",
+              "exclusiveMinimum": 0
             },
             "max_cache_size_gb": {
               "description": "The total cache storage the repository may use, in GB.",
-              "type": "number"
+              "type": "integer",
+              "exclusiveMinimum": 0
             }
           },
           "additionalProperties": false
         },
         "oidc_customization_sub": {
-          "description": "PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] } (keys must be unique). Claim-key ORDER defines the subject format, so check mode compares a declared list positionally; an omitted list on a custom template opts into the organization template and is not compared. use_immutable_subject switches the whole subject to the stable repository-ID-based format; omitted, the organization setting or the repository's creation date decides, and only a declared value is compared. Unlike the rest of this section, these endpoints need the \"Actions\" PAT permission rather than Administration.",
-          "type": "object",
-          "properties": {
-            "use_default": {
-              "description": "Use GitHub's default subject claim format instead of a custom template.",
-              "type": "boolean"
+          "description": "PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] } (keys are unique and hold only letters, digits, and underscores; a list under use_default: true is refused, since GitHub ignores it). Claim-key ORDER defines the subject format, so check mode compares a declared list positionally; an omitted list on a custom template opts into the organization template and is not compared. sub_claim_prefix, which the GET reports and the PUT does not take, is refused. use_immutable_subject switches the whole subject to the stable repository-ID-based format; omitted, the organization setting or the repository's creation date decides, and only a declared value is compared. Unlike the rest of this section, these endpoints need the \"Actions\" PAT permission rather than Administration.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "use_default": {
+                  "description": "true: GitHub's default subject claim format; this variant carries no claim-key list.",
+                  "type": "boolean",
+                  "const": true
+                },
+                "use_immutable_subject": {
+                  "description": "Switch the whole subject to the stable repository-ID-based format.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "use_default"
+              ]
             },
-            "include_claim_keys": {
-              "description": "The claim keys the custom subject joins, in order (e.g. repo, context); the order defines the subject format.",
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "use_immutable_subject": {
-              "description": "Switch the whole subject to the stable repository-ID-based format.",
-              "type": "boolean"
+            {
+              "type": "object",
+              "properties": {
+                "use_default": {
+                  "description": "false: a custom template, joined from include_claim_keys.",
+                  "type": "boolean",
+                  "const": false
+                },
+                "include_claim_keys": {
+                  "description": "The claim keys the custom subject joins, in order (e.g. repo, context); the order defines the subject format.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_]+$"
+                  }
+                },
+                "use_immutable_subject": {
+                  "description": "Switch the whole subject to the stable repository-ID-based format.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "use_default"
+              ]
             }
-          },
-          "required": [
-            "use_default"
           ]
         },
         "fork_pr_contributor_approval": {
-          "description": "PUT /repos/{r}/actions/permissions/fork-pr-contributor-approval: when workflows triggered by fork pull requests need a maintainer's approval before they run, e.g. { approval_policy: first_time_contributors }. The policies GitHub accepts today are first_time_contributors_new_to_github, first_time_contributors, and all_external_contributors. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "description": "PUT /repos/{r}/actions/permissions/fork-pr-contributor-approval: when workflows triggered by fork pull requests need a maintainer's approval before they run, e.g. { approval_policy: first_time_contributors }. The policies GitHub accepts are first_time_contributors_new_to_github, first_time_contributors, and all_external_contributors; any other value is refused when the file is parsed. The body passes through verbatim, so future fields GitHub adds work unchanged.",
           "type": "object",
           "properties": {
             "approval_policy": {
               "description": "Which fork contributors need a maintainer's approval before their workflows run: first_time_contributors_new_to_github, first_time_contributors, or all_external_contributors.",
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "first_time_contributors_new_to_github",
+                "first_time_contributors",
+                "all_external_contributors"
+              ]
             }
           },
           "required": [
@@ -112,7 +164,7 @@
           ]
         },
         "fork_pr_workflows_private_repos": {
-          "description": "PUT /repos/{r}/actions/permissions/fork-pr-workflows-private-repos: whether pull requests from forks may run workflows on this private repository, and what those workflows receive. All four toggles are required: GitHub does not document whether the PUT preserves or resets an omitted toggle, so the file declares the complete policy - which is also the posture that leaves no toggle unwatched. The body passes through verbatim, so future fields GitHub adds work unchanged.",
+          "description": "PUT /repos/{r}/actions/permissions/fork-pr-workflows-private-repos: whether pull requests from forks may run workflows on this private repository, and what those workflows receive. Only run_workflows_from_fork_pull_requests is required, as in the request body; GitHub does not document whether the PUT preserves or resets an omitted toggle, so declaring all four is the posture that leaves no toggle unwatched. The body passes through verbatim, so future fields GitHub adds work unchanged.",
           "type": "object",
           "properties": {
             "run_workflows_from_fork_pull_requests": {
@@ -133,10 +185,7 @@
             }
           },
           "required": [
-            "run_workflows_from_fork_pull_requests",
-            "send_write_tokens_to_workflows",
-            "send_secrets_and_variables",
-            "require_approval_for_fork_pr_workflows"
+            "run_workflows_from_fork_pull_requests"
           ]
         }
       }
