@@ -1,8 +1,9 @@
 name: milestones-snapshot-roundtrip
 description: >-
   mode: snapshot reads the live milestones back into snapshot.yml and writes nothing to GitHub. Open
-  and closed milestones read back by title, description, and state; a null description is omitted.
-  The written file, fed back to a check run against the same state, reads clean.
+  and closed milestones read back by title, description, state, and due day; a null description or
+  due_on is omitted, and a stored Pacific-midnight due_on reads back as the noon-UTC form the section
+  writes. The written file, fed back to a check run against the same state, reads clean.
 settings: {}
 live_state:
   milestones:
@@ -11,6 +12,7 @@ live_state:
       title: v1.0
       state: open
       description: First stable release.
+      due_on: 2026-06-30T07:00:00Z
     - id: 2
       number: 2
       title: v2.0
@@ -32,6 +34,7 @@ expect:
         - title: v1.0
           description: First stable release.
           state: open
+          due_on: 2026-06-30T12:00:00Z
         - title: v2.0
           state: closed
   never:

@@ -5,13 +5,13 @@ import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { milestonesSection } from "./index.js";
-import { milestonesMockHandlers } from "./mock.js";
+import { githubStoresDueOn, milestonesMockHandlers } from "./mock.js";
 
 /** Closed milestones are listed too: the read asks for state=all. */
 const LIST = "GET /repos/o/r/milestones?state=all&per_page=100&page=1";
 const liveMilestones = [
-  { number: 1, title: "v1", description: null, state: "open" },
-  { number: 2, title: "old", description: null, state: "open" },
+  { number: 1, title: "v1", description: null, state: "open", due_on: null },
+  { number: 2, title: "old", description: null, state: "open", due_on: null },
 ];
 const KEEP_NOTE =
   'milestone "old" exists on the repo but is not declared in the settings file; kept under ' +
@@ -73,21 +73,115 @@ describe("milestones", () => {
     const api = new MockApi({ [LIST]: { data: liveMilestones } });
     const result = await plan(api, {
       _undeclared: "keep",
-      entries: [{ title: "v1", due_on: "2026-01-15T00:00:00Z" } as never],
+      entries: [{ title: "v1", due_date: "2026-01-15" } as never],
     });
     expect(result.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
       [
         "update",
-        { title: "v1", due_on: "2026-01-15T00:00:00Z" },
+        { title: "v1", due_date: "2026-01-15" },
         [
-          'milestones[v1].due_on: declared "2026-01-15T00:00:00Z" but the API response has no such field (new or write-only field?)',
+          'milestones[v1].due_date: declared "2026-01-15" but the API response has no such field (new or write-only field?)',
         ],
       ],
     ]);
     expect(result.notes).toEqual([
-      'milestones[v1]: declared key "due_on" does not exist on the live milestone, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+      'milestones[v1]: declared key "due_date" does not exist on the live milestone, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
       KEEP_NOTE,
     ]);
+  });
+
+  test("a declared day matches the Pacific-midnight timestamp GitHub stores it as, in either DST state, so no PATCH recurs", async () => {
+    const api = new MockApi({
+      [LIST]: {
+        data: [
+          {
+            number: 1,
+            title: "winter",
+            description: null,
+            state: "open",
+            due_on: "2026-01-15T08:00:00Z",
+          },
+          {
+            number: 2,
+            title: "summer",
+            description: null,
+            state: "open",
+            due_on: "2026-07-01T07:00:00Z",
+          },
+        ],
+      },
+    });
+    const result = await plan(api, [
+      { title: "winter", due_on: "2026-01-15" },
+      // A timestamp declares the same day: GitHub would discard its time anyway.
+      { title: "summer", due_on: "2026-07-01T00:00:00Z" },
+    ]);
+    expect(result).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
+  test("a due_on differing by a day, or missing live, is drift, and the update sends the day as noon UTC so GitHub keeps that day", async () => {
+    const api = new MockApi({
+      [LIST]: {
+        data: [
+          {
+            number: 1,
+            title: "v1",
+            description: null,
+            state: "open",
+            due_on: "2026-01-15T08:00:00Z",
+          },
+          { number: 2, title: "v2", description: null, state: "open", due_on: null },
+        ],
+      },
+    });
+    const result = await plan(api, [
+      { title: "v1", due_on: "2026-01-16" },
+      { title: "v2", due_on: "2026-12-31" },
+    ]);
+    expect(result).toEqual({
+      ops: [
+        {
+          role: "update",
+          params: { milestone_number: "1" },
+          payload: { title: "v1", due_on: "2026-01-16T12:00:00Z" },
+          describe: 'updating milestone "v1"',
+          drift: [
+            'milestones[v1].due_on: declared "2026-01-16T12:00:00Z" != live "2026-01-15T12:00:00Z"; apply will set the declared value',
+          ],
+          change: 'updated milestone "v1"',
+        },
+        {
+          role: "update",
+          params: { milestone_number: "2" },
+          payload: { title: "v2", due_on: "2026-12-31T12:00:00Z" },
+          describe: 'updating milestone "v2"',
+          drift: [
+            'milestones[v2].due_on: declared "2026-12-31T12:00:00Z" != live null; apply will set the declared value',
+          ],
+          change: 'updated milestone "v2"',
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+  });
+
+  test.each([
+    [
+      "2022-11-14T07:00:00Z",
+      "2022-11-13T08:00:00Z",
+      "07:00Z is still the 13th under PST, the reported off-by-one",
+    ],
+    [
+      "2026-01-15T00:00:00Z",
+      "2026-01-14T08:00:00Z",
+      "a UTC midnight is the previous evening in Pacific",
+    ],
+    ["2026-01-15T12:00:00Z", "2026-01-15T08:00:00Z", "noon UTC keeps its day under PST"],
+    ["2026-07-01T12:00:00Z", "2026-07-01T07:00:00Z", "noon UTC keeps its day under PDT"],
+    ["2026-07-01T07:00:00Z", "2026-07-01T07:00:00Z", "a stored value is a fixed point"],
+  ])("the mock stores due_on %s as GitHub does, %s: %s", (sent, stored) => {
+    expect(githubStoresDueOn(sent)).toBe(stored);
   });
 
   test.each<
@@ -150,18 +244,14 @@ describe("milestones", () => {
           state: "open",
           title: "v1.0",
           description: "Outdated description.",
-          due_on: null,
+          due_on: "2026-01-15T08:00:00Z",
         },
       ],
     });
     const { second, changes, notes } = await provePlanIdempotent(milestonesSection, api, {
       _undeclared: "delete",
       entries: [
-        {
-          title: "v1.0",
-          description: "First stable release.",
-          due_on: "2026-06-30T00:00:00Z",
-        } as never,
+        { title: "v1.0", description: "First stable release.", due_on: "2026-06-30" },
         { title: "v2.0", state: "closed" },
       ],
     });
@@ -177,9 +267,10 @@ describe("milestones", () => {
       "DELETE /repos/o/r/milestones/1",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
+    // The mock stored the day as GitHub does: Pacific midnight, in PDT for June.
     expect(api.state.milestones.map((m) => [m.title, m.description, m.state, m.due_on])).toEqual([
-      ["v1.0", "First stable release.", "open", "2026-06-30T00:00:00Z"],
-      ["v2.0", null, "closed", undefined],
+      ["v1.0", "First stable release.", "open", "2026-06-30T07:00:00Z"],
+      ["v2.0", null, "closed", null],
     ]);
   });
 

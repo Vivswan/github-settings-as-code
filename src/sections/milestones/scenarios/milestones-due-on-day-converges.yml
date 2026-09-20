@@ -1,0 +1,38 @@
+name: milestones-due-on-day-converges
+description: >-
+  Two live milestones carry the due dates GitHub stores, Pacific midnight in UTC: 08:00Z in
+  winter (PST) and 07:00Z in summer (PDT). The settings file declares each as a calendar day, one
+  of them spelled as a UTC-midnight timestamp. Neither is drift: apply has no changes to make and
+  PATCHes nothing, and a check rerun converges.
+settings:
+  milestones:
+    - title: v1.0
+      due_on: 2026-01-15
+    - title: v2.0
+      due_on: 2026-07-01T00:00:00Z
+live_state:
+  milestones:
+    - id: 900001
+      number: 1
+      state: open
+      title: v1.0
+      description: null
+      due_on: 2026-01-15T08:00:00Z
+    - id: 900002
+      number: 2
+      state: open
+      title: v2.0
+      description: null
+      due_on: 2026-07-01T07:00:00Z
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    milestones: applied
+  never:
+    - "PATCH /repos/{repo}/milestones/1"
+    - "PATCH /repos/{repo}/milestones/2"
+    - "POST /repos/{repo}/milestones"
+  summary_contains:
+    - "no changes needed"
+  fixpoint: converges

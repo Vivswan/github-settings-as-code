@@ -5,10 +5,37 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { exactName, listSection } from "../shared/list-section.js";
+import {
+  exactName,
+  type ListComparable,
+  type ListWrite,
+  listSection,
+} from "../shared/list-section.js";
 import { MilestoneConfig } from "./schema.js";
 
-const LiveMilestone = z.looseObject({ number: z.number(), title: z.string() });
+/**
+ * GitHub keeps only the day of a due_on, read off the sent instant in US Pacific, and echoes it as that
+ * day's Pacific midnight (07:00Z or 08:00Z): a UTC midnight lands on the previous day, and only a
+ * Pacific-midnight timestamp reads back verbatim. Both lens sides spell the day as noon UTC, which
+ * GitHub stores on the same day in either DST state, so the write is what a converged milestone reads back as.
+ */
+declare const milestoneDueOn: unique symbol;
+type DueOnWire = string & { readonly [milestoneDueOn]: true };
+
+/** `dueOn` is a day or an ISO 8601 UTC timestamp (the schema and LiveMilestone admit nothing else). */
+export function dueOnWire(dueOn: string): DueOnWire {
+  return `${dueOn.slice(0, 10)}T12:00:00Z` as DueOnWire;
+}
+
+type MilestoneWrite = ListWrite<"title"> & { readonly due_on?: DueOnWire };
+
+type MilestoneComparable = ListComparable<"title"> & { readonly due_on: DueOnWire | null };
+
+const LiveMilestone = z.looseObject({
+  number: z.number(),
+  title: z.string(),
+  due_on: z.iso.datetime().nullable(),
+});
 
 const ENDPOINTS = {
   list: {
@@ -46,8 +73,12 @@ export const milestonesSection = listSection({
   identity: { field: "title", fold: exactName },
   address: (live) => ({ milestone_number: String(live.number) }),
   lens: {
-    toWrite: (milestone) => ({ ...milestone }),
-    fromLive: (live) => live,
+    toWrite: ({ due_on, ...rest }): MilestoneWrite =>
+      due_on === undefined ? rest : { ...rest, due_on: dueOnWire(due_on) },
+    fromLive: (live): MilestoneComparable => ({
+      ...live,
+      due_on: live.due_on === null ? null : dueOnWire(live.due_on),
+    }),
     matchBy: {},
   },
   prose: {

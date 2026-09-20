@@ -7,7 +7,8 @@ coverage:
   - area: "[Milestones](https://docs.github.com/en/rest/issues/milestones)"
     notes: >-
       POST/PATCH/DELETE /repos/{owner}/{repo}/milestones, matched by title, declared-keys-only
-      (description/state untouched unless declared); undeclared milestones kept by default and
+      (description/state/due_on untouched unless declared; a due_on is a calendar day, compared and
+      converged as the day GitHub keeps); undeclared milestones kept by default and
       surfaced as notes, because deleting a milestone DETACHES it from every issue carrying it - the
       wrapped `_undeclared: delete` form opts into exactly that.
       Snapshot reads every milestone, open and closed, back as entries under the keep default.
@@ -19,3 +20,8 @@ schema:
   MilestoneConfig.title: The milestone title, the natural key.
   MilestoneConfig.description: Longer explanation of the milestone.
   MilestoneConfig.state: Open or closed; untouched unless declared.
+  MilestoneConfig.due_on: >-
+    The due day as `YYYY-MM-DD`; GitHub keeps only the day, so only the day is compared. The day is
+    sent as noon UTC, `YYYY-MM-DDT12:00:00Z`, which GitHub stores on the same calendar day in PST and
+    PDT, and a snapshot reads it back in that form. A UTC timestamp `YYYY-MM-DDTHH:MM:SSZ` is
+    accepted for its date part.
