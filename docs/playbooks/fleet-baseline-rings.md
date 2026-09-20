@@ -173,7 +173,7 @@ jobs:
 
 `fail-fast: false` keeps one repository's failure from cancelling the rest of the matrix, and the `if` skips the `curated` job while the tree is empty (a matrix cannot include nothing). The render steps need no token: they fold local files and write the rendered documents the apply steps read. The `exclude` input takes the curated names as wildcard patterns, so a curated repository that still carries a ring topic is never applied by both jobs.
 
-The `curated` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split only the `curated` job by cohort folder into copies; the `fileless` job stays single, and its `exclude` keeps listing every curated name across all cohorts, or a cohort's fallback run would apply the bare baseline to another cohort's curated repository that has no remote settings file. To preview a baseline change before it lands, run the same merged documents through `mode: check` on pull requests, as in [Preview the blast radius](preview-blast-radius.md).
+The `curated` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split only the `curated` job by cohort folder into copies; the `fileless` job stays single, and its `exclude` keeps listing every curated name across all cohorts, or a cohort's fallback run would apply the bare baseline to another cohort's curated repository that has no remote settings file. To preview a baseline change before it lands, run the same rendered documents through `mode: check` on pull requests, as in [Preview the blast radius](preview-blast-radius.md).
 
 ## Enrollment and promotion
 
