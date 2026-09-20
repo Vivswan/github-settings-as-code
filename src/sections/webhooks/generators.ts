@@ -10,6 +10,7 @@ import {
   maybeWrapUndeclared,
 } from "../../../test/e2e/gen-support.js";
 import type { Rng } from "../../../test/e2e/prng.js";
+import { GAP as WEBHOOK_EVENTS } from "../../upstream-gaps/webhook-events.js";
 
 const E2E_SECRET_REFS = Object.keys(E2E_SECRET_ENV).map((name) => `$${name}`);
 
@@ -32,13 +33,14 @@ export function genWebhooks(rng: Rng): EntriesForm {
     }
     const hook: Json = { config };
     if (rng.bool(0.6)) {
-      hook.events = [
-        ...new Set(
-          Array.from({ length: rng.int(2) + 1 }, () =>
-            rng.pick(["push", "pull_request", "issues", "release"]),
-          ),
-        ),
-      ];
+      // The wildcard rides alone: it already means every event, and GitHub documents no mixed form.
+      hook.events = rng.bool(0.1)
+        ? ["*"]
+        : [
+            ...new Set(
+              Array.from({ length: rng.int(3) + 1 }, () => rng.pick(WEBHOOK_EVENTS.values)),
+            ),
+          ];
     }
     if (rng.bool(0.5)) {
       hook.active = rng.bool();

@@ -1,0 +1,26 @@
+name: webhooks-known-wrong-values-rejected
+description: >-
+  Values GitHub would refuse with 422 at apply time (an event it does not
+  deliver to repository webhooks, a content type other than json or form, an
+  insecure_ssl spelling other than "0"/"1"/0/1, a url that is not an absolute
+  URL) are refused when the file is parsed, every offender named in one run,
+  before any API contact.
+settings:
+  webhooks:
+    - config:
+        url: hooks.example.com/ci
+        content_type: JSON
+        insecure_ssl: true
+      events: [push, pushes]
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL'
+    - 'webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"'
+    - 'webhooks[0].config.insecure_ssl: true is not a value GitHub accepts; use "0"'
+    - 'webhooks[0].events[1]: "pushes" is not a repository webhook event this release knows'
+    - https://docs.github.com/webhooks/webhook-events-and-payloads

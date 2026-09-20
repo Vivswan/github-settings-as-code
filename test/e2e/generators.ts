@@ -577,6 +577,26 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
       offendingToken: "pages.source.branch",
     }),
   },
+  {
+    // Each is a value GitHub 422s at apply time; the parser refuses it first, naming the field.
+    name: "webhooks-value-github-refuses",
+    build: (rng) => {
+      const { value, entries, index, itemToken } = validItems(rng, "webhooks");
+      const hook = entries[index] as Json;
+      const config = hook.config as Json;
+      const [field, mutate] = rng.pick<[string, () => void]>([
+        ["events[0]", () => (hook.events = ["pushes"])],
+        [
+          "config.content_type",
+          () => (config.content_type = rng.pick(["JSON", "application/json"])),
+        ],
+        ["config.insecure_ssl", () => (config.insecure_ssl = rng.pick([true, 2, "yes"]))],
+        ["config.url", () => (config.url = rng.pick(["hooks.example.com/ci", "not a url"]))],
+      ]);
+      mutate();
+      return { doc: { webhooks: value }, offendingToken: `${itemToken}.${field}` };
+    },
+  },
 ];
 
 /** Tagged with the case name, so failures are labeled and coverage checks can prove every case is drawn. */
