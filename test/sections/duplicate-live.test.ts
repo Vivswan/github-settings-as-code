@@ -366,7 +366,15 @@ const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
   teams: [
     {
       list: "teams",
-      live: { teams: { Platform: { role_name: "write" }, platform: { role_name: "read" } } },
+      // The mock keys teams by the lowercase slug GitHub stores, so a pair with two spellings is served straight.
+      live: {},
+      served: {
+        path: "/repos/o/r/teams",
+        body: [
+          { id: 7000, slug: "Platform" },
+          { id: 7001, slug: "platform" },
+        ],
+      },
       declared: [],
       refusal: refusal(
         "teams",
