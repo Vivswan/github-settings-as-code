@@ -5,9 +5,10 @@
  *                        target's settings, the defaults_file, or a merge layer); default all
  *   --scenario <name>    only the scenario with this exact name
  *   --print-stdout       echo each scenario's captured stdout under its PASS or FAIL line, minus its
- *                        ::add-mask:: lines (indented, they would print the secret as plain text); a
- *                        failure's artifact directory holds the whole of it anyway, a pass otherwise
- *                        leaves no trace of it
+ *                        ::add-mask:: lines, with every masked value printed as *** (indented, the
+ *                        runner registers no mask, so the echo redacts on its own); a failure's
+ *                        artifact directory holds the whole of it anyway, a pass otherwise leaves no
+ *                        trace of it
  */
 
 import { corpusUnwitnessedExemptEndpoints } from "./apply-idempotence-proof.js";

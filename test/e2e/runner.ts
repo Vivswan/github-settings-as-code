@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
-import type { OutputName } from "../../src/io.js";
+import { type OutputName, redactRanges } from "../../src/io.js";
 import { ROOT } from "../root.js";
 import {
   assertApplyIdempotent,
@@ -554,23 +554,64 @@ function stripLines(text: string, prefix: string): string {
     .join("\n");
 }
 
+const MASK_PREFIX = "::add-mask::";
+
+/**
+ * @actions/core command-encodes every payload it prints, mask and annotation alike: `%`, CR, LF as
+ * %25, %0D, %0A. A masked value with any of those sits decoded in the registry and encoded in the
+ * annotation line, so the redaction has to know both spellings.
+ */
+const COMMAND_ENCODING: ReadonlyArray<[raw: string, encoded: string]> = [
+  ["%", "%25"],
+  ["\r", "%0D"],
+  ["\n", "%0A"],
+];
+
+function decodeCommandData(encoded: string): string {
+  return encoded.replace(
+    /%(25|0D|0A)/g,
+    (code) => COMMAND_ENCODING.find(([, e]) => e === code)?.[0] ?? code,
+  );
+}
+
+function encodeCommandData(raw: string): string {
+  return COMMAND_ENCODING.reduce((text, [r, e]) => text.replaceAll(r, e), raw);
+}
+
 /**
  * The `::add-mask::<value>` lines core.setSecret emits legitimately carry the raw slug so the real
- * runner can mask every later line; the runner consumes and never echoes them, so they go before
- * checking that a redacted slug leaked NOWHERE else on stdout.
+ * runner can mask every later line; the runner consumes and never echoes them. A CRLF stdout leaves
+ * the line's CR on the payload, which is not part of the value.
  */
+function partitionMaskLines(stdout: string): { values: string[]; rest: string } {
+  const values: string[] = [];
+  const rest: string[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith(MASK_PREFIX)) {
+      values.push(decodeCommandData(line.slice(MASK_PREFIX.length).replace(/\r$/, "")));
+    } else {
+      rest.push(line);
+    }
+  }
+  return { values, rest: rest.join("\n") };
+}
+
+/** What stdout carries once the mask lines are gone: the surface a redacted slug must leak NOWHERE on. */
 export function stripMaskLines(stdout: string): string {
-  return stripLines(stdout, "::add-mask::");
+  return partitionMaskLines(stdout).rest;
 }
 
 /**
  * A scenario's captured stdout as --print-stdout echoes it, indented under the PASS or FAIL line.
- * The `::add-mask::` lines go first: indented, a workflow command is plain text to the Actions
- * runner, so the secret it carries would print unmasked in the job log.
+ * The mask lines go, and every value they named prints as `***` wherever it occurs, raw or
+ * command-encoded: indented, a workflow command is plain text to the Actions runner, so no mask is
+ * registered for the echo and a leaked value (the very thing a FAIL reports) would print in clear.
  */
 export function indentedStdout(stdout: string): string {
-  const kept = stripMaskLines(stdout).trimEnd();
-  return kept === "" ? "" : kept.replace(/^/gm, "        ");
+  const { values, rest } = partitionMaskLines(stdout);
+  const spellings = new Set(values.flatMap((value) => [value, encodeCommandData(value)]));
+  const redacted = redactRanges(rest, spellings).trimEnd();
+  return redacted === "" ? "" : redacted.replace(/^/gm, "        ");
 }
 
 /**

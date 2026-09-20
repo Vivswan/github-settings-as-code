@@ -447,14 +447,67 @@ describe("stripMaskLines", () => {
 });
 
 describe("indentedStdout (what --print-stdout echoes)", () => {
-  test("indents every line and drops the ::add-mask:: lines, so no workflow command carries a secret off column zero", () => {
-    const stdout =
-      "::add-mask::abc\nresult: clean\n::add-mask::acme/secret-repo\nrepository: 1 op\n";
-    expect(indentedStdout(stdout)).toBe("        result: clean\n        repository: 1 op");
-  });
-
-  test("stdout that is only mask lines echoes nothing", () => {
-    expect(indentedStdout("::add-mask::abc\n")).toBe("");
+  // The Actions runner registers a mask only from a column-zero command, so the indented echo gets
+  // no masking from it: every value a mask line named must already read `***` in the echo.
+  test.each([
+    [
+      "mask lines dropped, the rest indented",
+      "::add-mask::abc\nresult: clean\n::add-mask::acme/secret-repo\nrepository: 1 op\n",
+      "        result: clean\n        repository: 1 op",
+    ],
+    [
+      "a masked value on a later line prints as ***",
+      "::add-mask::secret\nvalue: secret\n",
+      "        value: ***",
+    ],
+    [
+      "a value masked after it printed is redacted too",
+      "value: secret\n::add-mask::secret\n",
+      "        value: ***",
+    ],
+    [
+      "a value containing another masked value is redacted whole",
+      "::add-mask::acme\n::add-mask::acme/secret-repo\nrepository: acme/secret-repo by acme\n",
+      "        repository: *** by ***",
+    ],
+    [
+      "two values crossing in the text leave no fragment",
+      "::add-mask::ABC\n::add-mask::BCD\nvalue: ABCD\n",
+      "        value: ***",
+    ],
+    [
+      "a value overlapping itself leaves no fragment",
+      "::add-mask::aba\nvalue: ababa\n",
+      "        value: ***",
+    ],
+    [
+      "an annotation carries the value command-encoded, and that spelling is redacted too",
+      "::add-mask::line1%0Aline2%25tail\n::error::value: line1%0Aline2%25tail\n",
+      "        ::error::value: ***",
+    ],
+    [
+      "the mask's %0A and %25 encoding is decoded, so a value spanning lines is found",
+      "::add-mask::a%0Ab%25c\nvalue: a\nb%c\n",
+      "        value: ***",
+    ],
+    [
+      "CRLF stdout: the line's CR is not part of the value",
+      "::add-mask::secret\r\nvalue: secret\r\n",
+      "        value: ***",
+    ],
+    [
+      "a value's regex-special characters match literally only",
+      "::add-mask::a.b*\nvalue: a.b* not axbbb\n",
+      "        value: *** not axbbb",
+    ],
+    ["stdout that is only mask lines echoes nothing", "::add-mask::abc\n", ""],
+    [
+      "an empty mask value redacts nothing",
+      "::add-mask::\nresult: clean\n",
+      "        result: clean",
+    ],
+  ])("%s", (_label, stdout, want) => {
+    expect(indentedStdout(stdout)).toBe(want);
   });
 });
 
