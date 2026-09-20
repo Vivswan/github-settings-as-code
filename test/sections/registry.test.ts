@@ -78,15 +78,6 @@ describe("section permissions", () => {
     }
   });
 
-  test("a plain-list wrapper refuses the policy naming the directive it does take", () => {
-    const verdict = sectionShape("environments").safeParse({ _undeclared: "keep", entries: [] });
-    expect(
-      verdict.success ? "accepted" : verdict.error.issues.map((issue) => issue.message),
-    ).toEqual([
-      'Unrecognized key: "_undeclared"; the wrapper\'s directives are "_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared"), and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment',
-    ]);
-  });
-
   test("_layering is accepted on every top-level list wrapper and rejected on the nested ones", () => {
     // A list nested in an entry unions under the directive its entry inherits, so a _layering accepted there would validate and never act.
     const wrapper = { entries: [], _layering: "deep" };

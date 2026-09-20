@@ -109,7 +109,9 @@ Every list section layers by the key its planner matches entries by, folded the 
 | `deploy_keys` | `title` | verbatim |
 | `secret_scanning_custom_patterns` | `name` | verbatim |
 
-So a fleet `Bug` and a repository `bug` are one label, a fleet `MY_SECRET` and a repository `my_secret` are one secret, and a fleet `Prod` environment and a repository `prod` are one environment, their variables unioned by name. When the spellings differ, the higher layer's spelling is the one written, under every directive. Within one layer two entries may not share a key, at any depth; the fold refuses that layer (see [Refusals](#refusals)).
+So a fleet `Bug` and a repository `bug` are one label, a fleet `MY_SECRET` and a repository `my_secret` are one secret, and a fleet `Prod` environment and a repository `prod` are one environment, their variables unioned by name. When the spellings differ, the higher layer's spelling is the one written, under every directive.
+
+Within one layer two entries may not share a key, at any depth; the fold refuses that layer (see [Refusals](#refusals)).
 
 Under `shallow` a same-key entry is swapped whole, its nested lists with it: only `deep` enters an entry, so only `deep` unions an environment's variables with the fleet's.
 
@@ -233,7 +235,8 @@ Reading it back:
 
 The rendered file is exactly what apply runs, so it is worth knowing its shape:
 
-- Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list keeps the form its layers gave it, a wrapper if any layer wrote one.
+- Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`.
+- `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list is written as the higher entry declared it, except where `deep` merged a pair through it: then a wrapper on either side keeps the wrapper form.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
 - A top-level `null` that met nothing below is gone, except `pages: null` and `interaction_limits: null`, which keep their engine meaning; a nested one stays as written.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.

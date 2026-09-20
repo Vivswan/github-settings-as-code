@@ -1135,11 +1135,17 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     // The oracle reads own properties only: an inherited `constructor` is not a lower declaration to delete, and an own
     // `__proto__` is a key to carry, so the two folds agree on documents the generators never draw but a file can spell.
     const proto = "__proto__";
+    // `constructor` beside the nested lists too: as a field it is data to union, never Object.prototype.constructor read as a keyed list.
     const higher = JSON.parse(
-      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "environments": [{"name": "prod", "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
+      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "environments": [{"name": "prod", "constructor": [{"name": "B"}], "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
     ) as Json;
     const layers = stack(
-      { repository: {}, environments: [{ name: "prod", variables: [{ name: "A", value: "x" }] }] },
+      {
+        repository: {},
+        environments: [
+          { name: "prod", constructor: [{ name: "A" }], variables: [{ name: "A", value: "x" }] },
+        ],
+      },
       higher,
     );
     const oracle = foldMergeLayers(layers, "deep");
@@ -1151,7 +1157,13 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     expect(oracle).toEqual({
       merged: {
         repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
-        environments: [{ name: "prod", variables: [{ name: "A", value: "y", constructor: null }] }],
+        environments: [
+          {
+            name: "prod",
+            constructor: [{ name: "B" }],
+            variables: [{ name: "A", value: "y", constructor: null }],
+          },
+        ],
       },
       notices: [],
     });
@@ -1747,9 +1759,12 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
     expect(keys.environments.nested?.variables?.keysOf({ name: "log_level" })).toEqual([
       "LOG_LEVEL",
     ]);
-    expect(keys.environments.nested?.reviewers?.keysOf({ type: "Team", id: 7 })).toEqual([
-      "Team:7",
-    ]);
+    // A user and a team may share an id; the key tells them apart without either being keyless.
+    const reviewers = keys.environments.nested?.reviewers;
+    expect(reviewers?.keysOf({ type: "User", id: 7 })).not.toBeNull();
+    expect(reviewers?.keysOf({ type: "User", id: 7 })).not.toEqual(
+      reviewers?.keysOf({ type: "Team", id: 7 }),
+    );
     expect(keys.workflows.keysOf({ path: "ci.yml" })).toEqual([".github/workflows/ci.yml"]);
     expect(keys.webhooks.keysOf({ config: { url: "https://hooks.example.com/A" } })).toEqual([
       "https://hooks.example.com/A",

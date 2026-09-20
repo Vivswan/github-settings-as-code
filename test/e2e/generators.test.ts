@@ -1178,7 +1178,8 @@ describe("markerNullsDropped (the harness's per-layer view)", () => {
         _layering: "deep",
         entries: [{ name: "bug", description: null }],
       },
-      rulesets: { _undeclared: "keep", entries: [{ name: "main", bypass_actors: null }] },
+      // No wrapper directive: this one follows the run, so shallow and replace copy its entries as written and still drop the null knob.
+      rulesets: { _undeclared: null, entries: [{ name: "main", bypass_actors: null }] },
       milestones: { _layering: "shallow", entries: [{ title: "v1", due_on: null }] },
       environments: [
         {
@@ -1191,9 +1192,13 @@ describe("markerNullsDropped (the harness's per-layer view)", () => {
       ],
       branches: [{ name: "main", protection: null, extra: null }],
       custom_properties: [{ property_name: "team", value: null, note: null }],
+      // An own __proto__ key, as a YAML file can spell it: a document field, not the entry's prototype.
+      ...(JSON.parse('{"actions": {"__proto__": {"a": null, "b": 1}}}') as Json),
     };
     for (const run of LAYERING_DIRECTIVES) {
-      expect(markerNullsDropped(doc, run), run).toEqual(stripNulls(doc, run) as Json);
+      const view = markerNullsDropped(doc, run);
+      expect(view, run).toEqual(stripNulls(doc, run) as Json);
+      expect(Object.hasOwn(view.actions as object, "__proto__"), run).toBe(true);
     }
   });
 });

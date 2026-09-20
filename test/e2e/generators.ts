@@ -1739,14 +1739,17 @@ export function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
       const path = prefix === "" ? key : `${prefix}.${key}`;
       if (child === null) {
         if (valued.includes(path)) {
-          out[key] = null;
+          put(out, key, null);
         }
         continue;
       }
-      out[key] =
+      put(
+        out,
+        key,
         prefix === "" && lists.includes(key)
           ? dropNested(child)
-          : dropDeep(child, [], valued, path);
+          : dropDeep(child, [], valued, path),
+      );
     }
     return out;
   };
@@ -1776,22 +1779,32 @@ export function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
     }
     const wrapper = wrapperDirective(value);
     const effective = (isLayeringDirective(wrapper) ? wrapper : undefined) ?? file ?? run;
-    if (effective !== "deep") {
-      out[key] = value;
-      continue;
-    }
     const nested = NESTED_LIST_FIELDS[key] ?? [];
     const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
-    const entries = entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json);
+    // Under shallow and replace the entries are copied as written; only deep enters them.
+    const entries =
+      effective === "deep"
+        ? entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json)
+        : entriesOf(value);
     if (Array.isArray(value)) {
       out[key] = entries;
       continue;
     }
-    // The wrapper's own knobs are mapping keys to the fold, so a null one (`_undeclared: null`) is a marker too.
+    // The wrapper's own knobs are mapping keys to the fold under every directive, so a null one (`_undeclared: null`) is a marker.
     const { entries: _entries, ...knobs } = value as Json;
     out[key] = { ...(dropDeep(knobs) as Json), entries };
   }
   return out;
+}
+
+/** Set an own data property whatever the key; assigning `__proto__` would set the prototype, as the engine's copier avoids too. */
+function put(record: Json, key: string, value: unknown): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 /**

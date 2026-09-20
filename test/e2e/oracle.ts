@@ -916,7 +916,8 @@ function mergeTrees(lower: Json, higher: Json, path: string, site: Site, scope?:
       put(out, key, null);
       continue;
     }
-    const keyed = scope?.prefix === "" ? scope.keyed.nested?.[key] : undefined;
+    const nested = scope?.prefix === "" ? scope.keyed.nested : undefined;
+    const keyed = nested !== undefined && Object.hasOwn(nested, key) ? nested[key] : undefined;
     const within = scope === undefined ? undefined : { ...scope, prefix: at(scope.prefix, key) };
     const lowerForm = keyed === undefined ? null : nestedForm(below);
     const higherForm = keyed === undefined ? null : nestedForm(above);
