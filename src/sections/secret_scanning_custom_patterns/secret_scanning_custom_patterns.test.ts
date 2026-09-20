@@ -418,7 +418,11 @@ describe("secret_scanning_custom_patterns snapshot", () => {
         detail: [
           // The engine's own reason sits in each parenthesis; its wording is the runtime's, not pinned.
           expect.stringMatching(
-            /^secret_scanning_custom_patterns\[odd-one\]: left out of the snapshot - its pattern \(Invalid regular expression: .+\), must_match\[0\] \(Invalid regular expression: .+\) cannot be verified as regular expressions by this tool; the pattern stays live and undeclared under the keep default$/,
+            new RegExp(
+              "^secret_scanning_custom_patterns\\[odd-one\\]: left out of the snapshot - " +
+                "its pattern \\(Invalid regular expression: .+\\), must_match\\[0\\] \\(Invalid regular expression: .+\\) " +
+                "cannot be verified as regular expressions by this tool; the pattern stays live and undeclared under the keep default$",
+            ),
           ),
         ],
       },
