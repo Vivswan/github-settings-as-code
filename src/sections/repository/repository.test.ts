@@ -14,7 +14,8 @@ import { validateSectionShapes } from "../../engine/validate.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { sectionGrant } from "../contract/module.js";
-import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
+import { FEATURE_TOGGLES, repositorySection } from "./index.js";
+import { normalizeTopics } from "./schema.js";
 
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
@@ -998,5 +999,232 @@ describe("repository snapshot", () => {
         `repository.enable_sponsorships and repository.issue_creation_policy: left out of the snapshot - the token was denied GRAPHQL RepositoryFeatures: 403 Forbidden. To fix, ${sectionGrant(repositorySection)}`,
       ],
     });
+  });
+});
+
+describe("repository parse refusals", () => {
+  /** The section's own issue lines, without the document-level wrapper prose around them. */
+  const refusals = (repository: Record<string, unknown>): readonly string[] =>
+    validateSectionShapes({ repository }, "f.yml").match(
+      () => [],
+      (problem) => problem.issues,
+    );
+
+  const SQUASH_PAIRS =
+    "PR_TITLE with PR_BODY or BLANK or COMMIT_MESSAGES; COMMIT_OR_PR_TITLE with COMMIT_MESSAGES";
+  const MERGE_PAIRS = "PR_TITLE with PR_BODY or BLANK; MERGE_MESSAGE with PR_TITLE";
+
+  test.each([
+    [
+      "has_downloads",
+      { has_downloads: false },
+      "repository.has_downloads: has_downloads is reported by GitHub but cannot be set through the API; remove it",
+    ],
+    [
+      "custom_properties",
+      { custom_properties: { team: "docs" } },
+      "repository.custom_properties: custom_properties is reported by GitHub but cannot be set through the repository PATCH; declare it in the custom_properties section instead",
+    ],
+    [
+      "has_pages",
+      { has_pages: true },
+      "repository.has_pages: has_pages is reported by GitHub but cannot be set through the repository PATCH; declare it in the pages section instead",
+    ],
+  ])(
+    "a GET-only key (%s) is refused at parse: the PATCH ignores it, so check would report the same drift on every run",
+    (_key, declared, message) => {
+      expect(refusals({ has_issues: true, ...declared })).toEqual([message]);
+    },
+  );
+
+  test("a key in neither the GET nor the PATCH still passes through, so a field GitHub adds tomorrow works day one", () => {
+    const declared = { name: "renamed", future_field: 1, has_issues: true };
+    expect(
+      validateSectionShapes({ repository: declared }, "f.yml").match(
+        (parsed) => parsed.repository,
+        (problem) => problem.issues,
+      ),
+    ).toEqual(declared);
+  });
+
+  test.each([
+    [
+      "the GET-only dependabot_security_updates",
+      { dependabot_security_updates: { status: "enabled" } },
+      'repository.security_and_analysis: "dependabot_security_updates" is reported by GitHub here but the PATCH rejects it; declare enable_automated_security_fixes instead',
+    ],
+    [
+      "an unknown sub-key",
+      { secret_scaning: { status: "enabled" } },
+      'repository.security_and_analysis: "secret_scaning" is not a key security_and_analysis accepts (GitHub rejects it with a 422); remove it. Known keys: "advanced_security", "code_security", "secret_scanning", "secret_scanning_push_protection", "secret_scanning_ai_detection", "secret_scanning_non_provider_patterns", "secret_scanning_delegated_alert_dismissal", "secret_scanning_delegated_bypass", "secret_scanning_delegated_bypass_options", "secret_scanning_validity_checks"',
+    ],
+    [
+      "a status outside enabled/disabled",
+      { secret_scanning: { status: "on" } },
+      'repository.security_and_analysis.secret_scanning.status: "on" is not a feature status; use "enabled" or "disabled"',
+    ],
+    [
+      "a key beside status",
+      { secret_scanning: { status: "enabled", enabled: true } },
+      'repository.security_and_analysis.secret_scanning: "enabled" is not a key a security_and_analysis feature accepts (GitHub rejects it with a 422); remove it. Known keys: "status"',
+    ],
+    [
+      "a reviewer type outside TEAM/ROLE",
+      {
+        secret_scanning_delegated_bypass_options: {
+          reviewers: [{ reviewer_id: 7, reviewer_type: "USER" }],
+        },
+      },
+      'repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0].reviewer_type: Invalid option: expected one of "TEAM"|"ROLE"',
+    ],
+    [
+      "a reviewer id that is not an integer",
+      {
+        secret_scanning_delegated_bypass_options: {
+          reviewers: [{ reviewer_id: "7", reviewer_type: "TEAM" }],
+        },
+      },
+      "repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0].reviewer_id: Invalid input: expected number, received string",
+    ],
+    [
+      "an unknown reviewer key",
+      {
+        secret_scanning_delegated_bypass_options: {
+          reviewers: [{ reviewer_id: 7, reviewer_type: "TEAM", exempt: true }],
+        },
+      },
+      'repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0]: "exempt" is not a key a bypass reviewer accepts (GitHub rejects it with a 422); remove it. Known keys: "reviewer_id", "reviewer_type", "mode"',
+    ],
+  ])(
+    "security_and_analysis refuses %s at parse instead of surfacing GitHub's 422 at apply",
+    (_what, declared, message) => {
+      expect(refusals({ security_and_analysis: declared })).toEqual([message]);
+    },
+  );
+
+  test("the full PATCHable security_and_analysis object, validity checks and bypass reviewers included, parses, and so does the null the PATCH body documents", () => {
+    expect(refusals({ security_and_analysis: null })).toEqual([]);
+    expect(
+      refusals({
+        security_and_analysis: {
+          advanced_security: { status: "enabled" },
+          code_security: { status: "disabled" },
+          secret_scanning: { status: "enabled" },
+          secret_scanning_push_protection: { status: "enabled" },
+          secret_scanning_ai_detection: { status: "disabled" },
+          secret_scanning_non_provider_patterns: { status: "enabled" },
+          secret_scanning_delegated_alert_dismissal: { status: "disabled" },
+          secret_scanning_delegated_bypass: { status: "enabled" },
+          secret_scanning_delegated_bypass_options: {
+            reviewers: [
+              { reviewer_id: 12, reviewer_type: "TEAM" },
+              { reviewer_id: 3, reviewer_type: "ROLE", mode: "EXEMPT" },
+            ],
+          },
+          secret_scanning_validity_checks: { status: "enabled" },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  test.each([
+    [
+      "a squash message without its title",
+      { squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_message: squash_merge_commit_message needs squash_merge_commit_title declared beside it (GitHub requires the pair). Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "COMMIT_OR_PR_TITLE with PR_BODY",
+      { squash_merge_commit_title: "COMMIT_OR_PR_TITLE", squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_message: squash_merge_commit_title COMMIT_OR_PR_TITLE cannot pair with squash_merge_commit_message PR_BODY (GitHub answers 422). Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "a squash title outside the vocabulary",
+      { squash_merge_commit_title: "COMMIT_TITLE", squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_title: "COMMIT_TITLE" is not a squash_merge_commit_title value; use "PR_TITLE", "COMMIT_OR_PR_TITLE". Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "a merge message without its title",
+      { merge_commit_message: "PR_TITLE" },
+      `repository.merge_commit_message: merge_commit_message needs merge_commit_title declared beside it (GitHub requires the pair). Legal pairs: ${MERGE_PAIRS}`,
+    ],
+    [
+      "MERGE_MESSAGE with PR_BODY",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
+      `repository.merge_commit_message: merge_commit_title MERGE_MESSAGE cannot pair with merge_commit_message PR_BODY (GitHub answers 422). Legal pairs: ${MERGE_PAIRS}`,
+    ],
+    [
+      "a merge message outside the vocabulary",
+      { merge_commit_title: "PR_TITLE", merge_commit_message: "COMMIT_MESSAGES" },
+      `repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "BLANK", "PR_TITLE". Legal pairs: ${MERGE_PAIRS}`,
+    ],
+  ])(
+    "commit message defaults: %s is refused at parse, naming the legal pairs GitHub would otherwise 422 on",
+    (_what, declared, message) => {
+      expect(refusals(declared)).toEqual([message]);
+    },
+  );
+
+  test.each([
+    [
+      "every legal squash pair",
+      { squash_merge_commit_title: "PR_TITLE", squash_merge_commit_message: "COMMIT_MESSAGES" },
+    ],
+    [
+      "the default squash pair",
+      {
+        squash_merge_commit_title: "COMMIT_OR_PR_TITLE",
+        squash_merge_commit_message: "COMMIT_MESSAGES",
+      },
+    ],
+    [
+      "the default merge pair",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
+    ],
+    [
+      "a lone title, whose pair is only decidable against the live message",
+      { squash_merge_commit_title: "PR_TITLE", merge_commit_title: "PR_TITLE" },
+    ],
+  ])("commit message defaults: %s parses", (_what, declared) => {
+    expect(refusals(declared)).toEqual([]);
+  });
+
+  test.each([
+    [
+      "a space inside a topic",
+      ["GitHub Actions"],
+      'repository.topics: "github actions" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+    ],
+    [
+      "a leading hyphen, in the comma-string form",
+      "ci, -lead",
+      'repository.topics: "-lead" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+    ],
+    [
+      "a 51-character topic",
+      ["a".repeat(51)],
+      `repository.topics: "${"a".repeat(51)}" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
+    ],
+    [
+      "21 topics",
+      Array.from({ length: 21 }, (_, index) => `topic-${index}`),
+      "repository.topics: 21 topics declared; GitHub allows at most 20",
+    ],
+  ])(
+    "topics: %s is refused at parse instead of as a 422 from PUT /topics",
+    (_what, topics, message) => {
+      expect(refusals({ topics })).toEqual([message]);
+    },
+  );
+
+  test("topics: 20 well-formed topics, a 50-character one and uppercase input among them, parse", () => {
+    const topics = [
+      "Copier",
+      "a".repeat(50),
+      "9lives",
+      ...Array.from({ length: 17 }, (_, index) => `topic-${index}`),
+    ];
+    expect(refusals({ topics })).toEqual([]);
+    expect(refusals({ topics: topics.join(", ") })).toEqual([]);
   });
 });

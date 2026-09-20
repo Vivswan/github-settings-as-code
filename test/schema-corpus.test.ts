@@ -184,6 +184,8 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "`format: regex` would be a flagless new RegExp that also rejects a `\\Z` anchor after another character, refusing a delimiter Hyperscan holds, so the fields stay plain strings in the schema",
   "branches-get-response-copied-rejected.yml settings":
     "schema-looser: the GET-only key sweep is a recursive superRefine over the passthrough protection mapping (branches/schema.ts), which JSON Schema cannot express; the published schema types the two structured controls but forbids no key",
+  "repository-get-only-key-rejected.yml settings":
+    "schema-looser: the GET-only key refusal is a superRefine over the repository passthrough mapping, which stays open in the schema for the PATCH fields GitHub adds later",
   "code-scanning-default-setup-get-only-key-rejected.yml settings":
     "schema-looser: the GET-only schedule/updated_at refusal is a superRefine reading the passthrough record (setup-schema.ts); the shape stays open for passthrough parity",
   "code-quality-setup-runner-label-without-labeled-rejected.yml settings":

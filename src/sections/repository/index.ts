@@ -1,4 +1,3 @@
-import type { operations } from "@octokit/openapi-types";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
@@ -22,16 +21,13 @@ import {
   type SectionPlan,
 } from "../contract/plan.js";
 import { readOrNote } from "../shared/snapshot-helpers.js";
-import { RepositoryConfig } from "./schema.js";
-
-export function normalizeTopics(raw: unknown): string[] {
-  const values = Array.isArray(raw)
-    ? raw.map(String)
-    : String(raw ?? "")
-        .split(",")
-        .map((t) => t.trim());
-  return [...new Set(values.map((t) => t.toLowerCase()).filter(Boolean))];
-}
+import {
+  normalizeTopics,
+  type RepoPatchBody,
+  RepositoryConfig,
+  SECURITY_AND_ANALYSIS_PATCH_FIELDS,
+  type UndocumentedPatchField,
+} from "./schema.js";
 
 /**
  * Typing the toggle and routed-key tables with it keeps them in lockstep with schema.ts: a toggle
@@ -134,17 +130,9 @@ const ENDPOINTS = {
 // GitHub may return topics as null or omit them; the rest of the body rides into subsetDiff as passthrough.
 const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
 
-/** The repo PATCH body as GitHub documents it: the fields the passthrough can send back. */
-type RepoPatchBody = NonNullable<
-  operations["repos/update"]["requestBody"]
->["content"]["application/json"];
-
-/** PATCH fields the API accepts (verified live) that its OpenAPI descriptor omits, so the pin cannot see them. */
-type UndocumentedPatchField = "has_discussions";
-
 /**
- * The GET also reports what nobody can PATCH (ids, urls, counts, has_downloads) and the passthrough
- * slice cannot tell those apart, so the PATCH fields are spelled out and pinned below.
+ * The GET also reports what nobody can PATCH (ids, urls, counts, has_downloads), so the fields the
+ * snapshot reads back are spelled out and pinned below; schema.ts refuses the rest at parse.
  * `name` stays out: a settings file reused on another repository would rename it.
  */
 const SNAPSHOT_PATCH_FIELDS = [
@@ -180,33 +168,6 @@ const SNAPSHOT_PATCH_FIELDS = [
 /** A PATCH field octokit documents that the list above neither reads back nor leaves out by name. */
 type _SnapshotPatchFieldsComplete = MustBeNever<
   Exclude<keyof RepoPatchBody, (typeof SNAPSHOT_PATCH_FIELDS)[number] | "name">
->;
-
-type SecurityAndAnalysisPatch = NonNullable<RepoPatchBody["security_and_analysis"]>;
-
-/** A nested key the API accepts (see the coverage notes) that the descriptor's PATCH body omits. */
-type UndocumentedSecurityField = "secret_scanning_validity_checks";
-
-/**
- * The GET's dependabot_security_updates is the automated-security-fixes toggle, already emitted from
- * its own endpoint, and the PATCH rejects an unknown sub-key, so the nested object is pinned too.
- */
-const SECURITY_AND_ANALYSIS_PATCH_FIELDS = [
-  "advanced_security",
-  "code_security",
-  "secret_scanning",
-  "secret_scanning_push_protection",
-  "secret_scanning_ai_detection",
-  "secret_scanning_non_provider_patterns",
-  "secret_scanning_delegated_alert_dismissal",
-  "secret_scanning_delegated_bypass",
-  "secret_scanning_delegated_bypass_options",
-  "secret_scanning_validity_checks",
-] as const satisfies readonly (keyof SecurityAndAnalysisPatch | UndocumentedSecurityField)[];
-
-/** A nested PATCH sub-key octokit documents that the list above does not read back. */
-type _SecurityAndAnalysisFieldsComplete = MustBeNever<
-  Exclude<keyof SecurityAndAnalysisPatch, (typeof SECURITY_AND_ANALYSIS_PATCH_FIELDS)[number]>
 >;
 
 /** The live security_and_analysis object narrowed to its PATCHable sub-keys; undefined when none. */
