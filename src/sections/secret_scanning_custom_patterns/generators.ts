@@ -13,8 +13,17 @@ import type { Rng } from "../../../test/e2e/prng.js";
 import { SecretScanningPatternConfig } from "./schema.js";
 
 const NAMES = ["internal-api-token", "staging-key", "vendor-secret", "license-key"] as const;
-// The regexes are inert strings to this action (passthrough), so simple realistic shapes suffice.
-const PATTERNS = ["int_[a-z0-9]{8}", "key-[0-9]{6}", "tok_[A-Za-z0-9]{12}"] as const;
+// Every pool value passes the syntax check (generatorFromSlice validates each draw against the slice), and
+// three spell Hyperscan-only forms the check translates; the refused draw lives in the invalid-settings
+// catalog (test/e2e/generators.ts), predicted by the same check.
+const PATTERNS = [
+  "int_[a-z0-9]{8}",
+  "key-[0-9]{6}",
+  "tok_[A-Za-z0-9]{12}",
+  "(?P<token>vnd_[a-z0-9]{10})",
+  "(?#vendor)vnd-[0-9]{8}",
+  "lic_[\\x{41}-\\x{5A}]{6}",
+] as const;
 
 export function genSecretScanningPatterns(rng: Rng): EntriesForm {
   // The index suffix keeps names unique under the exact-name natural key; applied inside the pool

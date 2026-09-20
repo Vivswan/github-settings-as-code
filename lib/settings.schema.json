@@ -1423,28 +1423,28 @@
           "type": "string"
         },
         "pattern": {
-          "description": "The regular expression the secret format must match.",
+          "description": "The regular expression the secret format must match. Like every regex field here it passes a syntax check at parse, or the file is refused naming the field: the PCRE-only forms Hyperscan accepts (`(?P<name>`, `(?#comment)`, `\\x{HH}`, `(?i)`, atomic and possessive forms, `\\Q...\\E`) are translated, then the result must compile as a flagless JavaScript RegExp. GitHub can still refuse at apply what Hyperscan alone refuses (lookbehind, backreferences, option modifiers).",
           "type": "string"
         },
         "start_delimiter": {
-          "description": "Regular expression for the characters that must come before the secret. An empty string is rejected: a delimiter cannot be cleared through the update call - remove the pattern and redeclare it without the field instead.",
+          "description": "Regular expression for the characters that must come before the secret; it passes the syntax check, like `pattern`. An empty string is rejected: a delimiter cannot be cleared through the update call - remove the pattern and redeclare it without the field instead.",
           "type": "string",
           "minLength": 1
         },
         "end_delimiter": {
-          "description": "Regular expression for the characters that must come after the secret. An empty string is rejected, like start_delimiter.",
+          "description": "Regular expression for the characters that must come after the secret; it passes the syntax check, like `pattern`. An empty string is rejected, like start_delimiter.",
           "type": "string",
           "minLength": 1
         },
         "must_match": {
-          "description": "Additional regular expressions a match must also satisfy, compared in order.",
+          "description": "Additional regular expressions a match must also satisfy, compared in order; each passes the syntax check, like `pattern`.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "must_not_match": {
-          "description": "Regular expressions a match must NOT satisfy, compared in order.",
+          "description": "Regular expressions a match must NOT satisfy, compared in order; each passes the syntax check, like `pattern`.",
           "type": "array",
           "items": {
             "type": "string"

@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
 import { SectionSelection } from "../../engine/section-selection.js";
+import { snapshotRepository } from "../../engine/snapshot.js";
 import { silentIo } from "../../io.js";
 import { describeProblem } from "../../problem.js";
 import { type PlainData, planContext, type SectionPlan } from "../contract/plan.js";
@@ -365,5 +367,98 @@ describe("secret_scanning_custom_patterns closed surface", () => {
       expect(message).toContain(`"${key}"`);
       expect(message).toContain("read-only");
     }
+  });
+});
+
+describe("secret_scanning_custom_patterns snapshot", () => {
+  const snapshot = (patterns: Array<Record<string, unknown>>) =>
+    snapshotRepository(
+      new MockApi(listRoute(patterns)),
+      {
+        repo: REPO,
+        sections: SectionSelection.of({
+          only: ["secret_scanning_custom_patterns"],
+        })._unsafeUnwrap(),
+        onMissingPermission: "fail",
+      },
+      captureIo().io,
+    );
+
+  // GitHub compiles these with Hyperscan and holds them; a JavaScript RegExp alone refuses each, and
+  // a live value has no file-side fix, so the snapshot must translate rather than fail.
+  test.each([
+    ["a plain pattern (control)", "key_[A-Z0-9]{32}"],
+    ["a Python-style named group", "(?P<token>key_[A-Z0-9]{32})"],
+    ["an inline comment", "(?#vendor)key_[A-Z0-9]{32}"],
+    ["a braced hex escape in a class range", "[\\x{41}-\\x{5A}]{32}"],
+  ])("a live pattern with %s reads back verbatim", async (_form, pattern) => {
+    const result = await snapshot([livePattern({ id: 7, name: "vendor-key", pattern })]);
+    expect(result.result).toBe("snapshot");
+    expect(result.outcomes).toEqual([
+      { key: "secret_scanning_custom_patterns", status: "snapshot", detail: [] },
+    ]);
+    expect(result.settings?.secret_scanning_custom_patterns).toEqual({
+      _undeclared: "keep",
+      entries: [{ name: "vendor-key", pattern }],
+    });
+  });
+
+  test("a live pattern no dialect parses is left out with a note naming it, never a failed snapshot", async () => {
+    // GitHub would not hold an unbalanced group, but the mock can, and the guard must hold for
+    // whatever the translation table does not cover: the entry is left out, the rest is written.
+    const result = await snapshot([
+      livePattern({ id: 7, name: "vendor-key", pattern: "key_[A-Z0-9]{32}" }),
+      livePattern({ id: 8, name: "odd-one", pattern: "(key_[A-Z0-9]{32}", must_match: ["[0-9"] }),
+    ]);
+    expect(result.result).toBe("snapshot");
+    expect(result.outcomes).toEqual([
+      {
+        key: "secret_scanning_custom_patterns",
+        status: "snapshot",
+        detail: [
+          // The engine's own reason sits in each parenthesis; its wording is the runtime's, not pinned.
+          expect.stringMatching(
+            new RegExp(
+              "^secret_scanning_custom_patterns\\[odd-one\\]: left out of the snapshot - " +
+                "its pattern \\(Invalid regular expression: .+\\), must_match\\[0\\] \\(Invalid regular expression: .+\\) " +
+                "cannot be verified as regular expressions by this tool; the pattern stays live and undeclared under the keep default$",
+            ),
+          ),
+        ],
+      },
+    ]);
+    expect(result.settings?.secret_scanning_custom_patterns).toEqual({
+      _undeclared: "keep",
+      entries: [{ name: "vendor-key", pattern: "key_[A-Z0-9]{32}" }],
+    });
+  });
+
+  test.each<[form: string, live: Record<string, unknown>]>([
+    ["a list where a string belongs", { pattern: ["("] }],
+    [
+      "a number where a string belongs, beside an unverifiable list",
+      { pattern: 7, must_match: ["("] },
+    ],
+  ])("a live entry with %s is still the engine's BUG, not a left-out note", async (_form, live) => {
+    // The left-out path is for values the check cannot verify, never for a body outside the shape.
+    const result = await snapshot([livePattern({ id: 8, name: "odd-one", ...live })]);
+    expect(result.result).toBe("failed");
+    expect(result.outcomes[0]?.detail).toEqual([expect.stringMatching(/^BUG: /)]);
+  });
+
+  test("a live set whose every pattern is left out snapshots as an empty declaration under keep, with only the notes", async () => {
+    // Something exists on the repository, so the outcome must not also say nothing does: the left-out
+    // pattern stays live under the keep policy the empty declaration spells.
+    const result = await snapshot([livePattern({ id: 8, name: "odd-one", pattern: "(key" })]);
+    expect(result.result).toBe("snapshot");
+    expect(result.settings?.secret_scanning_custom_patterns).toEqual({
+      _undeclared: "keep",
+      entries: [],
+    });
+    expect(result.outcomes[0]?.detail).toEqual([
+      expect.stringMatching(
+        /^secret_scanning_custom_patterns\[odd-one\]: left out of the snapshot - its pattern \(/,
+      ),
+    ]);
   });
 });
