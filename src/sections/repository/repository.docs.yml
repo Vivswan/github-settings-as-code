@@ -36,7 +36,8 @@ coverage:
       PUT /repos/{owner}/{repo}/topics. Normalization: string-to-list splitting (normalizeTopics),
       lowercasing, and order-insensitive compare in check mode. GitHub's topic rule (1 to 50
       lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics) is
-      checked at parse, so a bad topic fails before any request instead of as a 422.
+      checked at parse on every entry, empty ones included, so a bad topic fails before any request
+      instead of as a 422; `topics: []` is the one spelling of the wholesale clear.
   - area: >-
       [Dependabot alerts](https://docs.github.com/en/rest/repos/repos) (vulnerability alerts)
     keys: enable_vulnerability_alerts
@@ -119,7 +120,8 @@ schema:
   RepositoryConfig.topics: >-
     Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a
     list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens,
-    starting with a letter or digit; at most 20 topics.
+    starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list
+    removes every topic.
   RepositoryConfig.security_and_analysis: >-
     The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning,
     push protection, and the other nested feature toggles.

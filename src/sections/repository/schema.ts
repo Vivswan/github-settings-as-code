@@ -395,13 +395,22 @@ function refineCommitMessagePairs(declared: Record<string, unknown>, ctx: z.Refi
 
 // --- Topics -----------------------------------------------------------------------
 
-export function normalizeTopics(raw: unknown): string[] {
+/**
+ * Each declared topic in declaration order, trimmed in the comma form and lowercased. Nothing is
+ * dropped: an empty entry stays so the rule below refuses it by index, instead of `topics: [""]`
+ * silently becoming the wholesale clear that only `topics: []` spells.
+ */
+function declaredTopics(raw: unknown): string[] {
   const values = Array.isArray(raw)
     ? raw.map(String)
     : String(raw ?? "")
         .split(",")
         .map((t) => t.trim());
-  return [...new Set(values.map((t) => t.toLowerCase()).filter(Boolean))];
+  return values.map((t) => t.toLowerCase());
+}
+
+export function normalizeTopics(raw: unknown): string[] {
+  return [...new Set(declaredTopics(raw))];
 }
 
 /** GitHub's topic rule: lowercase letters, digits, and hyphens, 50 characters at most, starting with a letter or digit. */
@@ -409,21 +418,27 @@ const TOPIC_PATTERN = /^[a-z0-9][a-z0-9-]{0,49}$/;
 const MAX_TOPICS = 20;
 
 function refineTopics(raw: unknown, ctx: z.RefinementCtx): void {
-  const names = normalizeTopics(raw);
-  if (names.length > MAX_TOPICS) {
+  const names = declaredTopics(raw);
+  const distinct = new Set(names).size;
+  if (distinct > MAX_TOPICS) {
     ctx.addIssue({
       code: "custom",
-      message: `${names.length} topics declared; GitHub allows at most ${MAX_TOPICS}`,
+      message: `${distinct} topics declared; GitHub allows at most ${MAX_TOPICS}`,
     });
   }
-  for (const name of names) {
-    if (!TOPIC_PATTERN.test(name)) {
-      ctx.addIssue({
-        code: "custom",
-        message: `${JSON.stringify(name)} is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
-      });
+  names.forEach((name, index) => {
+    if (TOPIC_PATTERN.test(name)) {
+      return;
     }
-  }
+    ctx.addIssue({
+      code: "custom",
+      path: [index],
+      message:
+        name === ""
+          ? "an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic"
+          : `${JSON.stringify(name)} is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
+    });
+  });
 }
 
 // --- The section --------------------------------------------------------------------

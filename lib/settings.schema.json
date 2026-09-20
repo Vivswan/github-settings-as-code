@@ -1484,7 +1484,7 @@
       "type": "object",
       "properties": {
         "topics": {
-          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics.",
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 lowercase letters, digits, and hyphens, starting with a letter or digit; at most 20 topics. An empty entry is refused; an empty list removes every topic.",
           "anyOf": [
             {
               "type": "string"

@@ -135,7 +135,7 @@ describe("normalizeTopics", () => {
   test.each([
     [
       "a comma string",
-      "Copier, template , ,GitHub-Actions",
+      "Copier, template ,GitHub-Actions",
       ["copier", "template", "github-actions"],
     ],
     ["an array, deduped", ["A", "a", "b"], ["a", "b"]],
@@ -1162,17 +1162,32 @@ describe("repository parse refusals", () => {
     [
       "a space inside a topic",
       ["GitHub Actions"],
-      'repository.topics: "github actions" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+      'repository.topics[0]: "github actions" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
     ],
     [
       "a leading hyphen, in the comma-string form",
       "ci, -lead",
-      'repository.topics: "-lead" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
+      'repository.topics[1]: "-lead" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit',
     ],
     [
       "a 51-character topic",
       ["a".repeat(51)],
-      `repository.topics: "${"a".repeat(51)}" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
+      `repository.topics[0]: "${"a".repeat(51)}" is not a topic GitHub accepts: after lowercasing, a topic is 1 to 50 characters of letters, digits, and hyphens, starting with a letter or digit`,
+    ],
+    [
+      "an empty list item, which would otherwise clear every topic as topics: [] does",
+      ["ci", ""],
+      "repository.topics[1]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
+    ],
+    [
+      "an empty comma-string segment",
+      "ci,,tooling",
+      "repository.topics[1]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
+    ],
+    [
+      "an empty string",
+      "",
+      "repository.topics[0]: an empty topic is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic",
     ],
     [
       "21 topics",
@@ -1195,5 +1210,9 @@ describe("repository parse refusals", () => {
     ];
     expect(refusals({ topics })).toEqual([]);
     expect(refusals({ topics: topics.join(", ") })).toEqual([]);
+  });
+
+  test("topics: [] parses; it is the one spelling of the wholesale clear", () => {
+    expect(refusals({ topics: [] })).toEqual([]);
   });
 });
