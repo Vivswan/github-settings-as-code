@@ -100,13 +100,13 @@ describe("init: argv -> config", () => {
       "a settings file spelled as a list",
       ["--repository", "o/r", "--settings-file", "a.yml,b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
+      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file',
     ],
     [
       "a repeated settings file",
       ["--repository", "o/r", "--settings-file", "a.yml", "--settings-file", "b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the "settings-file" input is "a.yml\nb.yml", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file',
+      'the "settings-file" input is "a.yml\nb.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file',
     ],
   ])(
     "%s is refused before any config exists, with a remedy a terminal can follow",

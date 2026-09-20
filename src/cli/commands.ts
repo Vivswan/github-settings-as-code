@@ -1,6 +1,6 @@
 /**
  * What the file-only subcommands and init render for the program to print;
- * check, apply, merge, and snapshot run through the library's executor from
+ * check, apply, render, and snapshot run through the library's executor from
  * the program.
  */
 

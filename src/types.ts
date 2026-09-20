@@ -13,8 +13,8 @@ export type UndeclaredPolicy = "keep" | "delete";
 export interface UndeclaredPolicyList<E> {
   _undeclared?: UndeclaredPolicy;
   entries: E[];
-  /** Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()). */
-  _layering?: "merge" | "replace";
+  /** Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()); the values are LAYERINGS in src/sections/shared/schema-helpers.ts, pinned there. */
+  _layering?: "replace" | "shallow" | "deep";
 }
 
 export type MustBeNever<T extends never> = T;

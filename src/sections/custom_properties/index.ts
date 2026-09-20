@@ -10,6 +10,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  keyedBy,
   loosen,
   ORG_PROBE,
   type SectionMeta,
@@ -131,6 +132,8 @@ interface PendingUpdate {
 export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
+  // Verbatim, as plan() passes to rejectDuplicates: GitHub documents no case folding for property names.
+  layering: keyedBy("property_name"),
   permission,
   // Custom properties exist only under an organization owner; the registry's owner gate (contract/owner.ts)
   // probes the `org` role and no-ops with a note on a personal account.

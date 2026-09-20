@@ -359,10 +359,10 @@ interface ListSectionDeclFields<
     readonly undeclaredDrift?: DriftWording;
   };
   /**
-   * Omitted, the list always replaces. The pairing itself is derived from `identity`, the very claims the
-   * planner's duplicate check reads, so the merge and the planner cannot disagree about which entries are one.
+   * The pairing itself is derived from `identity`, the very claims the planner's duplicate check reads, so the
+   * merge and the planner cannot disagree about which entries are one; a declaration adds only the nested keyed lists.
    */
-  readonly layering?: Pick<KeyedListLayering, "combine" | "nested">;
+  readonly layering?: Pick<KeyedListLayering, "nested">;
 }
 
 /** The module listSection() mints: SectionModule<K, Ends> at the registry, plus its declaration. */
@@ -380,7 +380,7 @@ export interface ListSectionModule<
   readonly endpoints: Ends;
   readonly shape: z.ZodType;
   readonly secretValues?: (declared: Declared<K>) => DeclaredSecretValue[];
-  readonly layering?: KeyedListLayering;
+  readonly layering: KeyedListLayering;
   readonly plan: (
     ctx: PlanContext<Ends, GraphqlDict, K>,
     desired: Declared<K>,
@@ -1024,16 +1024,11 @@ export function listSection<
     ...(decl.secrets === undefined
       ? {}
       : { secretValues: (declared: Declared<K>) => secretValuesFor(erased, declared) }),
-    ...(decl.layering === undefined
-      ? {}
-      : {
-          layering: {
-            keys: (entry) => identityClaims(erased.identity, entry),
-            keyField: decl.identity.field,
-            combine: decl.layering.combine,
-            ...(decl.layering.nested === undefined ? {} : { nested: decl.layering.nested }),
-          },
-        }),
+    layering: {
+      keys: (entry) => identityClaims(erased.identity, entry),
+      keyField: decl.identity.field,
+      ...(decl.layering?.nested === undefined ? {} : { nested: decl.layering.nested }),
+    },
     plan: (ctx, desired) =>
       planList(
         erased,

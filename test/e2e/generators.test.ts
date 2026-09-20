@@ -9,7 +9,7 @@ import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
-import { type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
+import { LAYERING_DIRECTIVES, type LiveWitnessKind, UNDECLARED_KEY } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   canariesOf,
@@ -1001,11 +1001,11 @@ describe("dead-corner knobs", () => {
 describe("genMergeScenario", () => {
   const SEEDS = Array.from({ length: 300 }, (_, i) => i);
 
-  test("produces schema-valid mode: merge scenarios whose layers the runner files in meta order", () => {
+  test("produces schema-valid mode: render scenarios whose layers the runner files in meta order", () => {
     for (const seed of SEEDS) {
       const { scenario, meta } = genMergeScenario(new Rng(seed));
       expect(() => parseScenario(scenario, `seed-${seed}`)).not.toThrow();
-      expect(scenario.inputs?.mode).toBe("merge");
+      expect(scenario.inputs?.mode).toBe("render");
       expect(meta.layers.length).toBeGreaterThanOrEqual(2);
       expect(meta.layers.length).toBeLessThanOrEqual(5);
       // The runner writes settings_layers[i] as layer-i.yml and settings as settings.yml, the names the action's refusals and notices carry.
@@ -1018,7 +1018,7 @@ describe("genMergeScenario", () => {
         name: "settings.yml",
         doc: scenario.settings as Record<string, unknown>,
       });
-      expect(meta.layering).toBe(scenario.inputs?.layering ?? "merge");
+      expect(meta.layering).toBe(scenario.inputs?.layering ?? "deep");
     }
   });
 
@@ -1089,7 +1089,7 @@ describe("genMergeScenario", () => {
 
   test("forces construct their eligibility: a pinned run layering, or the named refusal", () => {
     for (let seed = 0; seed < 60; seed++) {
-      for (const layering of ["merge", "replace"] as const) {
+      for (const layering of LAYERING_DIRECTIVES) {
         const { scenario, meta } = genMergeScenario(new Rng(seed), {
           force: { kind: "valid", layering },
         });
@@ -1192,8 +1192,8 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
       name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
       doc,
     }));
-    const always: string[] = ["override", "run-layering-merge"];
-    expect(mergeFeaturesOf(layers, "merge", false)).toEqual(
+    const always: string[] = ["override", "run-layering-deep"];
+    expect(mergeFeaturesOf(layers, "deep", false)).toEqual(
       MERGE_FEATURES.filter((feature) => always.includes(feature) || expected.includes(feature)),
     );
   });
@@ -1240,9 +1240,9 @@ describe("mergeFeaturesOf (a top-level null read the way the fold writes it)", (
       name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
       doc,
     }));
-    expect(mergeFeaturesOf(layers, "merge", false)).toEqual(
+    expect(mergeFeaturesOf(layers, "deep", false)).toEqual(
       MERGE_FEATURES.filter(
-        (feature) => feature === "run-layering-merge" || expected.includes(feature),
+        (feature) => feature === "run-layering-deep" || expected.includes(feature),
       ),
     );
   });
@@ -1252,7 +1252,7 @@ describe("merge oracle against the curated merge scenarios", () => {
   // The hand-written scenarios pin what the dialect means; the oracle's own fold must reproduce every pinned document
   // exactly, or the fuzz would be checking the engine against a mirror of itself.
   const files = collectYmlFiles(join(import.meta.dir, "scenarios")).filter((file) =>
-    basename(file).startsWith("merge-"),
+    basename(file).startsWith("render-"),
   );
 
   test("the corpus carries the three curated merge scenarios", () => {
@@ -1260,12 +1260,12 @@ describe("merge oracle against the curated merge scenarios", () => {
   });
 
   test.each(files.map((file) => [basename(file), file]))(
-    "%s: the oracle's fold reproduces expect.merged",
+    "%s: the oracle's fold reproduces expect.rendered",
     (_name, file) => {
       const scenario = parseScenario(parseYaml(readFileSync(file, "utf8")), file);
       // Without a pinned document this comparison is vacuous; the corpus count above cannot tell.
-      if (scenario.expect.merged === undefined) {
-        throw new Error(`${file}: a curated merge scenario must pin expect.merged`);
+      if (scenario.expect.rendered === undefined) {
+        throw new Error(`${file}: a curated render scenario must pin expect.rendered`);
       }
       const layers = [
         ...(scenario.settings_layers ?? []).map((doc, i) => ({ name: `layer-${i}.yml`, doc })),
@@ -1273,12 +1273,12 @@ describe("merge oracle against the curated merge scenarios", () => {
       ];
       const prediction = predictMerge({
         layers,
-        layering: scenario.inputs?.layering ?? "merge",
+        layering: scenario.inputs?.layering ?? "deep",
         features: [],
       });
       expect(prediction.kind).toBe("merged");
       if (prediction.kind === "merged") {
-        expect(prediction.merged).toEqual(scenario.expect.merged);
+        expect(prediction.merged).toEqual(scenario.expect.rendered);
         // Every notice the fold predicts is one the scenario pins on stdout, in the action's words (the e2e run itself
         // catches the converse, a pinned line the engine never prints).
         for (const notice of prediction.notices) {

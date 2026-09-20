@@ -7,13 +7,13 @@ import { parse as parseYaml } from "yaml";
 import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
-import { MERGE_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flows/inputs.js";
+import { RENDER_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flows/inputs.js";
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
-import { SECTION_KEYS } from "../../src/schema.js";
+import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
-import { SECTIONS } from "../../src/sections/registry.js";
+import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 import { STALE_VERSION_HINT } from "../../src/sections/secret_scanning_custom_patterns/index.js";
 import { ROOT } from "../root.js";
 import { deleteEnumerationProblems } from "./claims.js";
@@ -504,7 +504,7 @@ describe("docs/ guide pages", () => {
     });
 
     test(`docs/${page}: every \`yaml layer\` block is a valid layer`, () => {
-      // Judged as the merge step judges a layer: stripNulls first, then document validation, then the fold's own gates.
+      // Judged as the render step judges a layer: stripNulls first, then document validation, then the fold's own gates.
       for (const block of fencedBlocks(markdown, "yaml layer")) {
         let doc: unknown;
         try {
@@ -512,8 +512,8 @@ describe("docs/ guide pages", () => {
         } catch (error) {
           throw new Error(`docs/${page} has an unparseable layer example: ${error}`);
         }
-        assertValidSettingsExample(stripNulls(doc), `docs/${page} layer example`);
-        const folded = mergeLayers([{ name: `docs/${page}`, doc }], { layering: "merge" });
+        assertValidSettingsExample(stripNulls(doc, "deep"), `docs/${page} layer example`);
+        const folded = mergeLayers([{ name: `docs/${page}`, doc }], { layering: "deep" });
         expect("error" in folded ? folded.error : null).toBeNull();
       }
     });
@@ -610,22 +610,41 @@ describe("docs/ guide pages", () => {
       expect(layers).toHaveLength(count);
       const results = fencedBlocks(section, "yaml settings").map((block) => parseYaml(block));
       expect(results).toHaveLength(1);
-      expect(mergeLayers(layers, { layering: "merge" })).toEqual(
+      expect(mergeLayers(layers, { layering: "deep" })).toEqual(
         ok({ settings: results[0], notices }),
       );
     },
   );
 
-  test("the layering guide's inputs table names every input mode: merge rejects", () => {
-    // MERGE_REJECTED_INPUTS grows with the input declarations, so the table must name each one or the page under-reports the refusal.
+  test("the layering guide's inputs table names every input mode: render rejects", () => {
+    // RENDER_REJECTED_INPUTS grows with the input declarations, so the table must name each one or the page under-reports the refusal.
     const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-    const section = sectionLines(markdown, "Inputs in mode: merge", "docs/operate/layering.md");
+    const section = sectionLines(markdown, "Inputs in mode: render", "docs/operate/layering.md");
     const rejectedRow = section.find((line) => line.includes("| Rejected"));
     if (rejectedRow === undefined) {
       throw new Error('docs/operate/layering.md has no "Rejected" row in its inputs table');
     }
     const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
-    expect(new Set(named)).toEqual(new Set(MERGE_REJECTED_INPUTS));
+    expect(new Set(named)).toEqual(new Set(RENDER_REJECTED_INPUTS));
+  });
+
+  test("the layering guide's key table names every list section with the key field its module declares", () => {
+    // The roster and the key fields live in sixteen module declarations; a section added or rekeyed without its row
+    // would leave the page claiming a fold the engine no longer performs.
+    const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
+    const section = sectionLines(markdown, "The rules", "docs/operate/layering.md");
+    const rows = section.filter((line) => /^\| `[a-z_]+`(, `[a-z_]+`)* \| `/.test(line));
+    const documented = new Map<string, string>();
+    for (const row of rows) {
+      const [sections, keyCell] = row.split("|").slice(1, 3) as [string, string];
+      const keyField = keyCell.match(/`([a-z_.]+)`/)?.[1];
+      for (const key of sections.matchAll(/`([a-z_]+)`/g)) {
+        documented.set(key[1] as string, keyField ?? "");
+      }
+    }
+    expect(documented).toEqual(
+      new Map(UNDECLARED_POLICY_SECTIONS.map((key) => [key, listLayering(key).keyField])),
+    );
   });
 
   test("the snapshot guide's inputs table names every input mode: snapshot rejects", () => {
@@ -642,7 +661,7 @@ describe("docs/ guide pages", () => {
     expect(new Set(named)).toEqual(new Set(SNAPSHOT_REJECTED_INPUTS));
   });
 
-  describe("the layering guide's refusal tables quote the messages the merge step emits", () => {
+  describe("the layering guide's refusal tables quote the messages the render step emits", () => {
     // The quoted message is compared against the whole error its layer raises (wrapped in that layer's prefix), so no row can quote a message its
     // own layer does not raise.
     const PAGE = "docs/operate/layering.md";
@@ -672,7 +691,7 @@ describe("docs/ guide pages", () => {
           row.gate === "validation"
             ? malformedSectionEntries(layerName, row.quoted)
             : `layer "${layerName}": ${row.quoted}`;
-        const folded = foldLayers([{ name: layerName, doc }], "merged", "merge", silentIo());
+        const folded = foldLayers([{ name: layerName, doc }], "merged", "deep", silentIo());
         expect(
           folded.match(() => null, describeProblem),
           `layer ${input}`,

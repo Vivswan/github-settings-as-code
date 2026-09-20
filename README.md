@@ -81,7 +81,7 @@ The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node
 | Feed secret values from GitHub Secrets or a vault | [Secrets and vaults](docs/reference/secrets-and-vaults.md) |
 | Detect drift without changing anything | [Check mode](docs/operate/check-mode.md) |
 | Manage a fleet from one repository | [Multi-repo mode](docs/operate/multi-repo.md) |
-| Layer settings files and fold them with `mode: merge` | [Layering settings files](docs/operate/layering.md) |
+| Layer settings files and fold them with `mode: render` | [Layering settings files](docs/operate/layering.md) |
 | Keep private targets out of public logs | [Private repositories](docs/operate/private-repositories.md) |
 | Replace the Probot Settings app | [Migrating from Probot](docs/start/migrating-from-probot.md) |
 | Adapt a complete platform-team workflow | [Playbooks](docs/playbooks/README.md) |

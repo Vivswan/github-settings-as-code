@@ -1,9 +1,10 @@
-# Under the default merge layering, a wrapper's `_layering: replace` lets the
-# top layer's labels win outright while its rulesets still union with the
-# fleet's; the directive itself never reaches the written document.
-name: merge-replace-section
+# A top-level `_layering: replace` governs every list section of its layer
+# (the labels list replaces the fleet's), and one section's wrapper opts back
+# into `deep` (the rulesets union). Both directives are consumed by the fold:
+# neither key appears in the written document.
+name: render-file-directive
 inputs:
-  mode: merge
+  mode: render
 settings_layers:
   - labels:
       - name: bug
@@ -14,19 +15,20 @@ settings_layers:
       - name: main
         target: branch
 settings:
+  _layering: replace
   labels:
-    _layering: replace
-    entries:
-      - name: infra
-        color: "111111"
+    - name: infra
+      color: "111111"
   rulesets:
-    - name: tags
-      target: tag
+    _layering: deep
+    entries:
+      - name: tags
+        target: tag
 expect:
   exit_code: 0
-  result: merged
+  result: rendered
   zero_requests: true
-  merged:
+  rendered:
     labels:
       _undeclared: delete
       entries:

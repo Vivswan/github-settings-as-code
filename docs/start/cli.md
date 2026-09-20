@@ -5,7 +5,7 @@ order: 40
 # Command line
 
 The engine behind the action is also a command in the npm package `@vivswan/github-settings-as-code`: `github-settings-as-code`, or `gsac` for short.
-It runs the same checks, applies, merges, and snapshots the action runs, from a terminal or any CI, plus three commands the action has no step for:
+It runs the same checks, applies, renders, and snapshots the action runs, from a terminal or any CI, plus three commands the action has no step for:
 start managing a repository from its live settings (`init`), validate a settings file, and print the PAT grant it needs.
 
 ## Install
@@ -32,7 +32,7 @@ The package needs Node 22.14 or newer; `bunx` fetches it the same way and honors
 |---|---|---|
 | `check` | Report drift between a settings file and the live repository; exits 1 on any drift | yes |
 | `apply` | Apply a settings file to the repository | yes |
-| `merge` | Fold an ordered list of settings files into one document | no |
+| `render` | Fold an ordered list of settings files into one rendered document | no |
 | `snapshot` | Write a repository's live settings as a settings file, or one file per multi-repo target | yes |
 | `init` | Write a repository's live settings to `.github/settings.yml` and print the PAT grant that file needs | yes |
 | `validate <file>` | Validate a settings file against the schema | no |
@@ -59,13 +59,13 @@ gsac apply --repository octo-org/api --settings-file .github/settings.yml --on-m
 Every flag of the action's `apply` and `check` inputs is a flag here, spelled the same way, with two exceptions below. `--repos` or `--repos-dir` switches to [multi-repo mode](../operate/multi-repo.md); `--defaults-file` and the discovery filters apply there, as in the action.
 Outside GitHub Actions there is no `GITHUB_REPOSITORY`, so single-repo runs need `--repository`.
 
-### merge
+### render
 
 ```bash
-gsac merge --settings-file fleet.yml --settings-file team.yml --merged-file merged.yml
+gsac render --settings-file fleet.yml --settings-file team.yml --rendered-file rendered.yml
 ```
 
-A repeated `--settings-file` builds the layer list, lowest first; a comma-separated value does the same. The merged file is exactly what `apply` would run ([layering](../operate/layering.md)).
+A repeated `--settings-file` builds the layer list, lowest first; a comma-separated value does the same. The rendered file is exactly what `apply` would run ([layering](../operate/layering.md)).
 
 ### snapshot
 
@@ -131,7 +131,7 @@ With `--json`: `{"result":"valid","file":"<path>","grant":{"labels":"<grant line
 
 The subcommand is the action's `mode` input. Every other input of that mode is a flag named `--<input>`, taking the value the action's `with:` key takes;
 the [inputs reference](../reference/inputs.md) lists each one with its default and meaning, and `gsac <command> --help` prints the same descriptions.
-A list input (`--settings-file` under merge, `--repos`, `--exclude`, `--topics`, `--affiliation`, `--sections`, `--required-sections`) takes a comma-separated value or the flag repeated; repeating any other value flag, `--token` and `--summary` included, is an error naming it.
+A list input (`--settings-file` under render, `--repos`, `--exclude`, `--topics`, `--affiliation`, `--sections`, `--required-sections`) takes a comma-separated value or the flag repeated; repeating any other value flag, `--token` and `--summary` included, is an error naming it.
 
 Two inputs have no command-line form: `--private-report artifact` is refused (the artifact upload needs the Actions runner; `issue`, `issue-on-failure`, and `none` work), and `report-public-key`, which only that channel reads, is not a flag.
 
@@ -170,7 +170,7 @@ The exit codes are the action's:
 | Command | Exits 1 when |
 |---|---|
 | `check` | drift, or a failure |
-| `apply`, `merge`, `snapshot` | a failure |
+| `apply`, `render`, `snapshot` | a failure |
 | `init` | a failure, a document that would declare no section, or a settings file it refuses to replace |
 | `validate` | the file is invalid |
 | `permissions` | never for a valid file |

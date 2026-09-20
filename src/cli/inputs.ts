@@ -13,10 +13,10 @@ import {
   INPUT_DECLS,
   type InputDecl,
   type InputName,
-  MERGE_INPUTS,
-  MERGE_ONLY_INPUTS,
   MODES,
   type Mode,
+  RENDER_INPUTS,
+  RENDER_ONLY_INPUTS,
   SNAPSHOT_INPUTS,
   SNAPSHOT_ONLY_INPUTS,
 } from "../internal.js";
@@ -36,11 +36,11 @@ export const CLI_UNSUPPORTED_INPUTS = ["report-public-key"] as const satisfies r
 /** The flags a mode's subcommand takes: the inputs its mode reads, in declaration order. */
 export function inputsForMode(mode: Mode): InputName[] {
   const hidden: readonly InputName[] = [...PROGRAM_INPUTS, ...CLI_UNSUPPORTED_INPUTS];
-  const modeOnly: readonly InputName[] = [...MERGE_ONLY_INPUTS, ...SNAPSHOT_ONLY_INPUTS];
+  const modeOnly: readonly InputName[] = [...RENDER_ONLY_INPUTS, ...SNAPSHOT_ONLY_INPUTS];
   const reads = (name: InputName): boolean => {
     switch (mode) {
-      case "merge":
-        return (MERGE_INPUTS as readonly InputName[]).includes(name);
+      case "render":
+        return (RENDER_INPUTS as readonly InputName[]).includes(name);
       case "snapshot":
         return (SNAPSHOT_INPUTS as readonly InputName[]).includes(name);
       case "apply":
@@ -139,7 +139,7 @@ const CLAUSES: readonly Clause[] = [
     input: "settings-file",
     text: declared(
       "settings-file",
-      " Single-repo and merge modes only; multi-repo targets read repos-dir files or each " +
+      " Single-repo and render modes only; multi-repo targets read repos-dir files or each " +
         "repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
     ),
     flags: MULTI_REPO_FLAGS,
@@ -153,8 +153,8 @@ const CLAUSES: readonly Clause[] = [
     input: "sections",
     text: declared(
       "sections",
-      " apply, check, and snapshot only: mode: merge writes every section its layers declare, " +
-        "so the allowlist belongs on the step that runs the merged document and fails the merge when set.",
+      " apply, check, and snapshot only: mode: render writes every section its layers declare, " +
+        "so the allowlist belongs on the step that runs the rendered document and fails the render when set.",
     ),
     modes: ["apply", "check", "snapshot"],
   },

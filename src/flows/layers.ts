@@ -1,4 +1,4 @@
-/** The action-side boundary of mode: merge; nothing here reaches GitHub. */
+/** The action-side boundary of mode: render; nothing here reaches GitHub. */
 
 import { ok, Result } from "neverthrow";
 import { renderCanonicalYaml } from "../engine/canonical.js";
@@ -39,8 +39,8 @@ const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
  * a wrapper's `_layering`  -> dropped: a directive the fold validates itself
  * null on an unknown key   -> kept: it opts out of nothing, and only this per-layer pass can name the file that misspelled it
  */
-function standaloneView(doc: unknown): unknown {
-  const stripped = stripNulls(doc);
+function standaloneView(doc: unknown, layering: Layering): unknown {
+  const stripped = stripNulls(doc, layering);
   if (!isPlainObject(doc) || !isPlainObject(stripped)) {
     return stripped;
   }
@@ -68,7 +68,7 @@ export interface FoldedLayers {
   /** The fold as validation parsed it: the branded document every other verb takes. */
   settings: ValidatedSettings;
   notices: OptOutNotice[];
-  /** The fold rendered in the canonical order (src/engine/canonical.ts), exactly as mode: merge writes it to merged-file. */
+  /** The fold rendered in the canonical order (src/engine/canonical.ts), exactly as mode: render writes it to rendered-file. */
   yaml: string;
 }
 
@@ -85,7 +85,7 @@ export function foldLayers(
 ): Result<FoldedLayers, SettingsProblem | LayerProblem> {
   return Result.combine(
     layers.map((layer) =>
-      validateSettingsDoc(standaloneView(layer.doc), layer.name, EVERY_SECTION, io),
+      validateSettingsDoc(standaloneView(layer.doc, layering), layer.name, EVERY_SECTION, io),
     ),
   )
     .andThen(() => mergeLayers(layers, { layering }))

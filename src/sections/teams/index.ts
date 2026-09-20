@@ -10,6 +10,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
+  keyedBy,
   loosen,
   ORG_PROBE,
   type SectionMeta,
@@ -116,6 +117,8 @@ function teamsBySlug(section: SectionMeta, live: readonly LiveTeam[]): Map<strin
 export const teamsSection = {
   key: "teams",
   undeclaredDefault: "keep",
+  // The fold plan() passes to rejectDuplicates: slugs fold case-insensitively.
+  layering: keyedBy("name", (name) => name.toLowerCase()),
   permission,
   // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
   ownerSensitivity: "org",

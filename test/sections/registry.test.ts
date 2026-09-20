@@ -47,16 +47,6 @@ import { workflowsSection } from "../../src/sections/workflows/index.js";
 import type { MustBeNever } from "../../src/types.js";
 import { denialResponse } from "../e2e/mock/grading.js";
 
-/** The identity facet of a list section's declaration, as the erased registry view exposes it. */
-interface ListDeclView {
-  readonly identity: {
-    readonly field: string;
-    readonly fold: (name: string) => string;
-    readonly renameKey?: string;
-    readonly aliases?: (entry: object) => readonly string[];
-  };
-}
-
 const CODE_SCANNING_CAVEAT =
   "a 403 on this endpoint can also mean GitHub Advanced Security (code security) is not enabled on the repository, or the repository is archived";
 
@@ -84,7 +74,7 @@ describe("section permissions", () => {
 
   test("_layering is accepted on every top-level knobbed wrapper and rejected on the nested ones", () => {
     // A list nested in an entry is replaced wholesale by the merge, so a _layering accepted there would validate and never act.
-    const wrapper = { entries: [], _layering: "merge" };
+    const wrapper = { entries: [], _layering: "deep" };
     const nested = {
       deployment_branch_policies: wrapper,
       deployment_protection_rules: wrapper,
@@ -111,40 +101,6 @@ describe("section permissions", () => {
         ])
         .sort(),
     });
-  });
-
-  test("a layered section is knobbed, and its layering keys are the identities its planner folds and claims", () => {
-    // The merge pairs entries by these keys and the planner by the folded identity plus its aliases (a rename's old name), so a key the
-    // planner would not claim pairs entries it treats as distinct, or leaves a document it refuses.
-    const knobbed: readonly string[] = UNDECLARED_POLICY_SECTIONS;
-    const entries: Record<string, string>[] = [
-      { name: "Bug" },
-      { name: "Bug", new_name: "Defect" },
-    ];
-    const at = (entry: Record<string, string>, field: string | undefined): string | undefined =>
-      field === undefined ? undefined : entry[field];
-    const layered = SECTIONS.filter((module) => module.layering !== undefined);
-    expect(layered.length).toBeGreaterThan(0);
-    for (const module of layered) {
-      const layering = module.layering;
-      if (layering === undefined) {
-        continue;
-      }
-      expect(knobbed, `${module.key} layers without the undeclared knob`).toContain(module.key);
-      const identity = "decl" in module ? (module.decl as ListDeclView).identity : undefined;
-      for (const entry of entries) {
-        const claimed =
-          identity === undefined
-            ? [at(entry, layering.keyField) ?? ""]
-            : [
-                identity.fold(at(entry, identity.renameKey) ?? at(entry, identity.field) ?? ""),
-                ...(identity.aliases?.(entry) ?? []).map(identity.fold),
-              ];
-        expect(layering.keys(entry), `${module.key} keys of ${JSON.stringify(entry)}`).toEqual(
-          claimed,
-        );
-      }
-    }
   });
 
   test("no endpoint keys a hint on 403/404 - the permission branch never reads hints", () => {

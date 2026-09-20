@@ -138,11 +138,11 @@ const cases: Case[] = [
   },
   {
     name: "merge, two layers",
-    ends: { code: 0, result: "merged" },
+    ends: { code: 0, result: "rendered" },
     inputs: (dir) => ({
-      mode: "merge",
+      mode: "render",
       "settings-file": `${join(LAYERS, "fleet.yml")},${join(LAYERS, "team.yml")}`,
-      "merged-file": join(dir, "merged.yml"),
+      "rendered-file": join(dir, "merged.yml"),
     }),
     routes: {},
     env: {},
@@ -335,7 +335,7 @@ describe("the action and the CLI run one arm to one result", () => {
     // A writing arm wrote something on both sides, or the byte comparison above compared nothing.
     if (
       c.ends.result !== "failed" &&
-      ["merge", "snapshot"].includes(c.inputs("<dir>").mode ?? "")
+      ["render", "snapshot"].includes(c.inputs("<dir>").mode ?? "")
     ) {
       expect(Object.keys(action.files).some((f) => f !== "settings.yml")).toBe(true);
     }
@@ -349,7 +349,13 @@ describe("the action and the CLI run one arm to one result", () => {
       })._unsafeUnwrap();
       arms.add(parsed.kind === "snapshot" ? `snapshot:${parsed.form}` : parsed.kind);
     }
-    expect([...arms].sort()).toEqual(["merge", "multi", "single", "snapshot:dir", "snapshot:file"]);
+    expect([...arms].sort()).toEqual([
+      "multi",
+      "render",
+      "single",
+      "snapshot:dir",
+      "snapshot:file",
+    ]);
     expect([...new Set(cases.map((c) => c.ends.code))].sort()).toEqual([0, 1]);
     expect(cases.filter((c) => c.ends.result === "partial").map((c) => c.name)).toEqual([
       "check, one repository, a denied section skipped under warn",

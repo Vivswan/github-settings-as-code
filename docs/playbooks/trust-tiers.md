@@ -8,11 +8,11 @@ A repository secret is readable from any workflow that anyone with push access c
 
 | Tier | Job | Credential |
 |---|---|---|
-| Merge | Fold each repository's layers into its merged document | None: `mode: merge` reads local files only |
-| Preview | `mode: check` over the merged documents on pull requests, as in [Preview the blast radius](preview-blast-radius.md) | A read-only PAT stored as a repository secret |
-| Apply | `mode: apply` over the same merged documents on `main` | The write PAT stored as an environment secret, released only after a human approves the run |
+| Render | Fold each repository's layers into its rendered document | None: `mode: render` reads local files only |
+| Preview | `mode: check` over the rendered documents on pull requests, as in [Preview the blast radius](preview-blast-radius.md) | A read-only PAT stored as a repository secret |
+| Apply | `mode: apply` over the same rendered documents on `main` | The write PAT stored as an environment secret, released only after a human approves the run |
 
-The apply workflow: `plan` lists the files in the flat `.github/repos/` directory, the merge job runs outside the gated environment, and the apply job inside it, so the write token only materializes after approval and never sits in a job that also computes anything. The `plan` and `merge` jobs are the ones from [Preview the blast radius](preview-blast-radius.md), with the same 256-job matrix cap: past 256 files, split the directory by cohort into copies of this workflow.
+The apply workflow: `plan` lists the files in the flat `.github/repos/` directory, the render job runs outside the gated environment, and the apply job inside it, so the write token only materializes after approval and never sits in a job that also computes anything. The `plan` and `render` jobs are the ones from [Preview the blast radius](preview-blast-radius.md), with the same 256-job matrix cap: past 256 files, split the directory by cohort into copies of this workflow.
 
 ```yaml
 name: Apply fleet settings
@@ -35,7 +35,7 @@ jobs:
         run: |
           echo "repos=$(find .github/repos -maxdepth 1 -name '*.yml' | sed -E 's#.*/(.+)\.yml$#\1#' | jq -Rsc 'split("\n") | map(select(. != ""))')" >> "$GITHUB_OUTPUT"
 
-  merge:
+  render:
     needs: plan
     runs-on: ubuntu-latest
     strategy:
@@ -45,18 +45,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
-          mode: merge
+          mode: render
           settings-file: |
             .github/settings/baseline.yml
             .github/repos/${{ matrix.repo }}.yml
-          merged-file: merged/${{ matrix.repo }}.yml
+          rendered-file: merged/${{ matrix.repo }}.yml
       - uses: actions/upload-artifact@v4
         with:
           name: merged-${{ matrix.repo }}
           path: merged/${{ matrix.repo }}.yml
 
   apply:
-    needs: merge
+    needs: render
     runs-on: ubuntu-latest
     environment: settings-apply
     steps:

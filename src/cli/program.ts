@@ -1,5 +1,5 @@
 /**
- * The command tree: check, apply, merge, and snapshot mirror the action's modes with
+ * The command tree: check, apply, render, and snapshot mirror the action's modes with
  * INPUT_DECLS as their flags; init snapshots one repository into the settings
  * file; validate and permissions read a file alone. `--token`, `--json`,
  * `--summary`, and `--verbose` are global. main() runs argv to its exit code
@@ -44,7 +44,7 @@ import { type CliStreams, cliIo, type MaskedStreams, maskedStreams } from "./io.
 export const CLI_COMMANDS = [
   "check",
   "apply",
-  "merge",
+  "render",
   "snapshot",
   "init",
   "validate",
@@ -56,7 +56,8 @@ type CliCommand = (typeof CLI_COMMANDS)[number];
 const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   check: "Report drift between a settings file and the live repository; exits 1 on any drift",
   apply: "Apply a settings file to the repository",
-  merge: "Fold an ordered list of settings files into one document, with no token and no API call",
+  render:
+    "Fold an ordered list of settings files into one rendered document, with no token and no API call",
   snapshot:
     "Write a repository's live settings as a settings file, or one file per multi-repo target under a directory",
   init: "Start managing a repository: write its live settings to the settings file (.github/settings.yml unless --settings-file says otherwise) and print the PAT grant that file needs",
@@ -64,11 +65,11 @@ const DESCRIPTION: Readonly<Record<CliCommand, string>> = {
   permissions: "Print the PAT grant each section a settings file declares needs",
 };
 
-/** The subcommands that run the engine or the merge, each under its mode. */
+/** The subcommands that run the engine or the render, each under its mode. */
 const MODE_COMMANDS = {
   check: "check",
   apply: "apply",
-  merge: "merge",
+  render: "render",
   snapshot: "snapshot",
 } as const satisfies Partial<Record<CliCommand, Mode>>;
 
@@ -133,7 +134,7 @@ export function buildProgram(options: ProgramOptions): {
   const program = new Command()
     .name("github-settings-as-code")
     .description(
-      "Apply, check, merge, and validate declarative GitHub repository settings (also installed as gsac)",
+      "Apply, check, render, and validate declarative GitHub repository settings (also installed as gsac)",
     )
     .addOption(
       new Option(

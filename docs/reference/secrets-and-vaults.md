@@ -99,7 +99,7 @@ Every resolved plaintext is registered with the runner's secret masker before it
 
 ## Multi-repo: operator files only
 
-References are honored only in settings sources the OPERATOR authors: the single-repo settings file, every `settings-file` layer of a `mode: merge` step, `repos-dir` files, and the `defaults-file` document. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
+References are honored only in settings sources the OPERATOR authors: the single-repo settings file, every `settings-file` layer of a `mode: render` step, `repos-dir` files, and the `defaults-file` document. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
 
 ## Repository Actions secrets
 

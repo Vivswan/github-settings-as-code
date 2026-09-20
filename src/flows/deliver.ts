@@ -40,7 +40,7 @@ import {
   toPublicView,
   WITHHELD_REPORT_NOTICE,
 } from "./redact.js";
-import { writeMergeSummary, writeMultiSummary, writeSummary } from "./summary.js";
+import { writeMultiSummary, writeRenderSummary, writeSummary } from "./summary.js";
 
 /** One target's end state as its flow hands it over: the result word plus everything the channel seals. */
 export interface TargetResult {
@@ -230,15 +230,15 @@ export function failRun(io: Io, problem: Problem): number {
   return conclude(io, failedTarget(message), false);
 }
 
-export interface FinishedMerge {
+export interface FinishedRender {
   layers: readonly string[];
-  mergedFile: string;
+  renderedFile: string;
 }
 
-export function concludeMerge(io: Io, run: FinishedMerge): number {
-  writeMergeSummary(io, run.layers, run.mergedFile);
-  io.log(`merged ${countNoun(run.layers.length, "layer", "layers")} into ${run.mergedFile}`);
-  return conclude(io, { result: "merged", outcomes: [] }, false);
+export function concludeRender(io: Io, run: FinishedRender): number {
+  writeRenderSummary(io, run.layers, run.renderedFile);
+  io.log(`rendered ${countNoun(run.layers.length, "layer", "layers")} into ${run.renderedFile}`);
+  return conclude(io, { result: "rendered", outcomes: [] }, false);
 }
 
 /** One target as the outputs see it: its result and the closed section statuses `skipped-sections` is filtered from. */

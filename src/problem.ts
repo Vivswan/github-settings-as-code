@@ -97,11 +97,11 @@ export type Problem =
   | { readonly code: "input-report-key-unused"; readonly channel: string }
   | { readonly code: "input-report-key-missing" }
   | { readonly code: "input-report-key-invalid"; readonly reason: string }
-  | { readonly code: "input-rejected-in-merge"; readonly inputs: readonly string[] }
-  | { readonly code: "input-merged-file-missing" }
+  | { readonly code: "input-rejected-in-render"; readonly inputs: readonly string[] }
+  | { readonly code: "input-rendered-file-missing" }
   | { readonly code: "input-settings-file-empty"; readonly value: string }
   | {
-      readonly code: "input-merge-only";
+      readonly code: "input-render-only";
       readonly inputs: readonly string[];
       readonly mode: EngineMode;
     }
@@ -187,8 +187,8 @@ export type Problem =
       readonly layer: string;
       readonly site: string;
       readonly actual: unknown;
+      readonly allowed: readonly string[];
     }
-  | { readonly code: "layer-no-layering-key"; readonly layer: string; readonly site: string }
   | {
       readonly code: "layer-no-key";
       readonly layer: string;
@@ -207,13 +207,13 @@ export type Problem =
   | { readonly code: "required-sections-excluded"; readonly excluded: readonly SectionKey[] }
   // The run flows
   | {
-      readonly code: "merged-file-is-layer";
-      readonly mergedFile: string;
+      readonly code: "rendered-file-is-layer";
+      readonly renderedFile: string;
       /** The colliding layer's position in the settings-file list, from 0. */
       readonly index: number;
       readonly layer: string;
     }
-  | { readonly code: "merged-file-unwritable"; readonly path: string; readonly reason: string }
+  | { readonly code: "rendered-file-unwritable"; readonly path: string; readonly reason: string }
   | {
       readonly code: "snapshot-file-is-settings-file";
       readonly snapshotFile: string;
@@ -387,7 +387,7 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
 /**
  * The ONE place a problem is worded. INVARIANT for the layer members: a
  * message names the layer as the layer list names it, the site's key path, and
- * the kind of problem - never a value from the document. mode: merge has no
+ * the kind of problem - never a value from the document. mode: render has no
  * private-repos redaction context, so a value echoed there (a label name, a
  * rule type, a mis-shaped section body) could land a private repository's
  * settings in a public log. `actual` reaches the prose only through
@@ -425,25 +425,25 @@ export function describeProblem(problem: Problem): string {
       );
     case "input-report-key-invalid":
       return `the "report-public-key" input is not a valid age recipient: ${problem.reason}. It must be an "age1..." public key from "age-keygen" (the recipient line, not the AGE-SECRET-KEY identity)`;
-    case "input-rejected-in-merge": {
+    case "input-rejected-in-render": {
       const { subject, verb, inputs, them } = inputsWording(problem.inputs);
       return (
-        `${subject} ${verb} not apply to mode: merge, which only folds ` +
-        "the settings-file layers into merged-file: it never targets a repository, calls the GitHub " +
+        `${subject} ${verb} not apply to mode: render, which only folds ` +
+        "the settings-file layers into rendered-file: it never targets a repository, calls the GitHub " +
         `API, delivers a report, or narrows the sections it writes. Remove the ${inputs}, or move ` +
         `${them} to the apply or check step that runs the merged document`
       );
     }
-    case "input-merged-file-missing":
-      return 'mode: merge needs a "merged-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file';
+    case "input-rendered-file-missing":
+      return 'mode: render needs a "rendered-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file';
     case "input-settings-file-empty":
-      return `the "settings-file" input is "${problem.value}", which lists no file. In mode: merge it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`;
-    case "input-merge-only": {
+      return `the "settings-file" input is "${problem.value}", which lists no file. In mode: render it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`;
+    case "input-render-only": {
       const { subject, applies, inputs, they } = inputsWording(problem.inputs);
       return (
-        `${subject} only ${applies} to mode: merge, but this run is in ` +
+        `${subject} only ${applies} to mode: render, but this run is in ` +
         `${problem.mode} mode, so ${they} would never be ` +
-        `used. Remove the ${inputs}, or set mode: merge to fold settings files`
+        `used. Remove the ${inputs}, or set mode: render to fold settings files`
       );
     }
     case "input-snapshot-only": {
@@ -460,7 +460,7 @@ export function describeProblem(problem: Problem): string {
         `${subject} ${verb} not apply to mode: snapshot, which only reads the ` +
         "target repositories' live settings into snapshot-file or snapshot-dir: it applies no " +
         `document, folds no layers, and delivers no report. Remove the ${inputs}, or move ${them} to ` +
-        `the apply, check, or merge step ${they} ${agree(problem.inputs.length, "belongs", "belong")} to`
+        `the apply, check, or render step ${they} ${agree(problem.inputs.length, "belongs", "belong")} to`
       );
     }
     case "input-snapshot-destination-missing":
@@ -495,10 +495,10 @@ export function describeProblem(problem: Problem): string {
       return 'the "defaults-file" input only applies to multi-repo mode, but this run is in single-repo mode, so the defaults would never apply. Remove the input, or add "repos" or "repos-dir" to switch to multi-repo mode';
     case "input-settings-file-is-list":
       return problem.mode === "init"
-        ? `the "settings-file" input is "${problem.value}", which contains a list separator: init writes exactly one settings file, and only mode: merge takes a newline- or comma-separated list. Name one file`
+        ? `the "settings-file" input is "${problem.value}", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file`
         : `the "settings-file" input is "${problem.value}", which contains a list separator: ` +
-            `${problem.mode} mode reads exactly one settings file, and only mode: merge takes a ` +
-            "newline- or comma-separated list. Name one file, or set mode: merge to fold the list into " +
+            `${problem.mode} mode reads exactly one settings file, and only mode: render takes a ` +
+            "newline- or comma-separated list. Name one file, or set mode: render to fold the list into " +
             "one document";
     case "input-repository-not-slug":
       return `cannot target a repository: "${problem.value}" is not an owner/name slug. Set the "repository" input (--repository on the command line) to a value like "octocat/hello-world"; inside GitHub Actions, GITHUB_REPOSITORY supplies it`;
@@ -527,22 +527,20 @@ export function describeProblem(problem: Problem): string {
     case "layer-wrong-shape":
       return `${layerSite(problem)} must be ${problem.expected}; got ${describeShape(problem.actual)}${problem.detail ?? ""}`;
     case "layer-bad-directive":
-      return `${layerSite(problem)} must be "merge" or "replace"; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is neither" : ""}`;
-    case "layer-no-layering-key":
-      return `${layerSite(problem)} has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive`;
+      return `${layerSite(problem)} must be one of ${problem.allowed.map(quote).join(", ")}; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is none of them" : ""}`;
     case "layer-no-key":
       return `${layerSite(problem)} carries no string ${quote(problem.keyField)}, which every entry needs to layer by`;
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
-    case "merged-file-is-layer":
+    case "rendered-file-is-layer":
       return (
-        `the "merged-file" input "${problem.mergedFile}" is layer ${problem.index + 1} of the ` +
-        `"settings-file" list ("${problem.layer}"): the merge would overwrite that layer with the ` +
+        `the "rendered-file" input "${problem.renderedFile}" is layer ${problem.index + 1} of the ` +
+        `"settings-file" list ("${problem.layer}"): the render would overwrite that layer with the ` +
         "folded document, and the next run would fold the merged document as a layer. Write the " +
         "merged document to a path outside the layer list"
       );
-    case "merged-file-unwritable":
-      return `cannot write the merged document to ${problem.path}: ${problem.reason}. Check that the "merged-file" input names a writable path`;
+    case "rendered-file-unwritable":
+      return `cannot write the merged document to ${problem.path}: ${problem.reason}. Check that the "rendered-file" input names a writable path`;
     case "snapshot-file-is-settings-file":
       return `the "snapshot-file" input "${problem.snapshotFile}" is the settings file apply and check read (${problem.settingsFile}): the snapshot would overwrite the document you author. Write it to another path and copy it over deliberately`;
     case "snapshot-dir-overlaps-repos-dir":

@@ -143,7 +143,7 @@ export function emitRedactedResult(
     case "applied":
     case "clean":
     case "snapshot":
-    case "merged":
+    case "rendered":
       // A healthy result prints nothing: the summary row already says so in closed values.
       return;
     default:

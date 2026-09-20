@@ -6,7 +6,7 @@ order: 180
 
 How the action works, one diagram at a time. Every box that names a file in this repository lists the symbols it exports, and a test checks that each one exists. Under each concept diagram, a "Demonstrated by" line links the test or scenario that covers it.
 
-The check is existence only: a caption-only box (`mode`, `merged-file`) names no file and is not checked, and a demonstration link is checked to resolve, not to test the claim above it.
+The check is existence only: a caption-only box (`mode`, `rendered-file`) names no file and is not checked, and a demonstration link is checked to resolve, not to test the claim above it.
 
 The [module map](#the-module-map) at the end is generated from [architecture.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/architecture.yml). The `lint:arch` script keeps that declaration equal to the import graph, so the map cannot show an edge the code does not draw.
 
@@ -18,7 +18,7 @@ flowchart TD
   mode{"mode"}
   fold["src/engine/layers.ts<br>stripNulls() mergeLayers()"]
   validate["src/engine/orchestrate.ts<br>validateSettingsDoc()"]
-  merged["merged-file"]
+  merged["rendered-file"]
   repo["src/engine/orchestrate.ts<br>runForRepo()"]
   sections["src/sections/registry.ts<br>SECTIONS"]
   plan["each section plans<br>src/sections/contract/plan.ts planContext() SectionPlan<br>src/engine/diff.ts deltas()"]
@@ -27,10 +27,10 @@ flowchart TD
   exec["apply: the plan's writes<br>src/engine/execute.ts executePlan()"]
   report["src/flows/deliver.ts<br>concludeRun()"]
   read -->|YAML text, parsed to an unknown document per file| mode
-  mode -->|merge: every layer, each validated on its own first| fold
+  mode -->|render: every layer, each validated on its own first| fold
   fold -->|one folded document, a notice per null opt-out| validate
   mode -->|check or apply: the one file| validate
-  validate -->|ValidatedSettings, in merge mode| merged
+  validate -->|ValidatedSettings, in render mode| merged
   validate -->|ValidatedSettings, in check or apply| repo
   repo -->|the declared value of each active section| sections
   sections -->|one section at a time| plan
@@ -44,7 +44,7 @@ flowchart TD
 ```
 
 - A settings file is YAML text until the reader parses it, and an unknown document until validation brands it.
-- `mode: merge` is the only path through the fold: every layer is validated on its own, folded, validated again, and written to `merged-file`.
+- `mode: render` is the only path through the fold: every layer is validated on its own, folded, validated again, and written to `rendered-file`.
 - Check and apply take one file straight to validation, then through each active section module.
 - Planning is where the reads happen: a section reads its live state through the client, diffs it against the declaration, and returns a plan of ops, each carrying its drift line.
 - Check renders the plan's drift lines and never calls the API again. Apply executes the plan's writes, reading only what a write needs on the way (a public key before sealing a secret).
@@ -80,16 +80,16 @@ Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https:/
 
 ```mermaid
 flowchart LR
-  merge["mode: merge<br>src/engine/layers.ts mergeLayers()"]
+  merge["mode: render<br>src/engine/layers.ts mergeLayers()"]
   check["mode: check<br>src/engine/orchestrate.ts runForRepo()"]
   apply["mode: apply<br>src/engine/execute.ts executePlan()"]
-  merge -->|writes merged-file, no token, no API call| check
+  merge -->|writes rendered-file, no token, no API call| check
   check -->|the same document, plans and diffs only, exit 1 on drift| apply
 ```
 
 Each rung is safe to run before the next, and moving a file up the ladder changes nothing about the file.
 
-- Merge touches only local files.
+- Render touches only local files.
 - Check plans and diffs every active section; nothing executes.
 - Apply executes the plan. Under the default `on-missing-permission: fail`, a read-only preflight over the active sections runs first and refuses to write anything when one is denied.
 
@@ -104,7 +104,7 @@ flowchart BT
   repo["repo.yml, the highest layer"]
   out["the merged document<br>src/engine/layers.ts mergeLayers()"]
   fleet -->|mappings merge, lists replace, null deletes, or is the value on pages and interaction_limits| team
-  team -->|labels and rulesets union by key| repo
+  team -->|list sections union by key| repo
   repo -->|_undeclared resolved, _layering consumed| out
 ```
 
@@ -112,11 +112,11 @@ The stack folds bottom up, one layer per step:
 
 - The higher layer's mappings merge key by key; its scalars and lists replace.
 - Its `null` deletes what a lower layer declared, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such.
-- The list sections with a layering key (`labels`, `rulesets`) union their entries by key instead of replacing.
+- The list sections (`labels`, `rulesets`, every other section with an `_undeclared` knob) union their entries by the section's key instead of replacing; a same-key pair merges field by field under `deep`, is swapped under `shallow`, and the whole list is replaced under `replace`.
 
 The [layering guide](../operate/layering.md) has the full rule table and a worked example.
 
-Demonstrated by: [test/e2e/scenarios/merge-union-optout.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/merge-union-optout.yml), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
+Demonstrated by: [test/e2e/scenarios/render-union-optout.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/render-union-optout.yml), [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
 
 ## Trust and provenance
 

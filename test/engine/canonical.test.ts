@@ -52,12 +52,12 @@ const ORDERED: Record<string, unknown> = {
   ],
   pages: null,
   webhooks: [{ config: { url: "https://a" } }, { config: { url: "https://b" } }],
-  _layering: "merge",
+  _layering: "deep",
 };
 
 /** The same content: every mapping's keys reversed, every identity-sorted list reversed, the pinned block kept. */
 const SHUFFLED: Record<string, unknown> = {
-  _layering: "merge",
+  _layering: "deep",
   webhooks: [{ config: { url: "https://b" } }, { config: { url: "https://a" } }],
   pages: null,
   environments: [
@@ -237,7 +237,7 @@ describe("canonicalDocument", () => {
 
 /** The directives as the schema declares them, spelled first so the test proves they move after the sections. */
 function _directivesFirst(): Array<[string, unknown]> {
-  return DOCUMENT_DIRECTIVE_KEYS.map((key) => [key, "merge"]);
+  return DOCUMENT_DIRECTIVE_KEYS.map((key) => [key, "deep"]);
 }
 
 interface Def {

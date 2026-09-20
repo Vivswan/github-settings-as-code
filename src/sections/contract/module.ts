@@ -8,6 +8,7 @@ import type {
   UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../../types.js";
+import type { Layering } from "../shared/schema-helpers.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -88,13 +89,17 @@ export interface SectionMeta<
    * The conditional type pins the pairing: a section in UNDECLARED_POLICY_SECTIONS says "delete" or "keep", one outside it "untouched".
    */
   readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
-  /** Read by engine/layers.ts for the layered merge; a knobbed section that declares none always replaces. */
+  /**
+   * Read by engine/layers.ts for the layered merge. Optional on the interface for the sections that take no
+   * list; ../registry.ts requires it of every knobbed section, so a knobbed module omitting it fails to compile.
+   */
   readonly layering?: K extends UndeclaredPolicySection ? KeyedListLayering : never;
 }
 
 /**
  * engine/layers.ts pairs two entries when their key sets intersect, the planner's own duplicate test,
- * so a merged document is always one the planner accepts.
+ * so a merged document is always one the planner accepts; the directive (replace, shallow, deep) is the
+ * layer's to choose, never the module's.
  */
 export interface KeyedListLayering {
   /**
@@ -104,11 +109,31 @@ export interface KeyedListLayering {
   readonly keys: (entry: Readonly<Record<string, unknown>>) => readonly string[] | null;
   /** The entry field the keys come from, for refusal prose ("name", "type"). */
   readonly keyField: string;
-  /** A matched pair: "replace" (higher wins wholesale) or "merge" (key by key, nested keyed lists below). */
-  readonly combine: "replace" | "merge";
   /** Fields of a merged entry that are themselves keyed lists (rulesets' `rules`). */
   readonly nested?: Readonly<Record<string, KeyedListLayering>>;
 }
+
+/** A list keyed by one string field of each entry, folded as the planner's duplicate check folds it. */
+export function keyedBy(
+  keyField: string,
+  fold: (name: string) => string = (name) => name,
+): KeyedListLayering {
+  return {
+    keyField,
+    keys: (entry) => {
+      const value = entry[keyField];
+      return typeof value === "string" ? [fold(value)] : null;
+    },
+  };
+}
+
+/** The wrapper type in ../../types.ts is zod-free and spells the directive's values itself; both pins fail when the two sets part. */
+type _WrapperLayeringComplete = MustBeNever<
+  Exclude<Layering, NonNullable<UndeclaredPolicyList<unknown>["_layering"]>>
+>;
+type _WrapperLayeringSound = MustBeNever<
+  Exclude<NonNullable<UndeclaredPolicyList<unknown>["_layering"]>, Layering>
+>;
 
 /** Used verbatim in permission errors; the Sections table on docs/reference/sections.md mirrors it in its PAT permission column. */
 export function sectionGrant(section: Pick<SectionMeta, "permission" | "grantCaveat">): string {

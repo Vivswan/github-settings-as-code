@@ -4,7 +4,7 @@ order: 250
 
 # Layering settings files
 
-`mode: merge` folds an ordered list of settings files into one settings document and writes it to a file. Apply and check never merge: each takes exactly one final document per target. So layering is a two-step workflow: a merge step, then an apply or check step on the written file.
+`mode: render` folds an ordered list of settings files into one settings document and writes it to a file. Apply and check never merge: each takes exactly one final document per target. So layering is a two-step workflow: a render step, then an apply or check step on the written file.
 
 The fold is pure: no token is read and no GitHub API call is made. The engine that does it is [src/engine/layers.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/engine/layers.ts); its worked cases are in [test/engine/layers.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/layers.test.ts).
 
@@ -32,7 +32,7 @@ labels:
     color: "b60205"
 ```
 
-`mode: merge` over the two writes this document, which apply then runs:
+`mode: render` over the two writes this document, which apply then runs:
 
 ```yaml settings
 repository:
@@ -49,26 +49,26 @@ labels:
 
 Mappings merged key by key, the two label lists unioned by name, and `labels` came out in its wrapper form with the section default filled in. The rest of this page is the full rule set behind that.
 
-## Inputs in mode: merge
+## Inputs in mode: render
 
-| Input | In `mode: merge` |
+| Input | In `mode: render` |
 |---|---|
-| `mode` | `merge` |
+| `mode` | `render` |
 | `settings-file` | The ordered list of layer paths, newline- or comma-separated, lowest layer first |
-| `merged-file` | Required: where the merged document is written (parent directories are created). It must not name one of the `settings-file` layers, compared as resolved paths: the run refuses that, naming the layer's position, because the merge would overwrite the layer and the next run would fold the merged document as one |
-| `layering` | `merge` (default) or `replace`: the run-wide default for the keyed list sections, see below |
-| `token` | Ignored: a merge makes no GitHub API call, so a token a workflow sets on every step does no harm |
-| `repository`, `repos`, `repos-dir`, `defaults-file`, `snapshot-file`, `snapshot-dir`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a merge addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the merged document |
+| `rendered-file` | Required: where the rendered document is written (parent directories are created). It must not name one of the `settings-file` layers, compared as resolved paths: the run refuses that, naming the layer's position, because the render would overwrite the layer and the next run would fold the rendered document as one |
+| `layering` | `replace`, `shallow`, or `deep` (default): the run-wide default for how every list section's entries combine, see below |
+| `token` | Ignored: a render makes no GitHub API call, so a token a workflow sets on every step does no harm |
+| `repository`, `repos`, `repos-dir`, `defaults-file`, `snapshot-file`, `snapshot-dir`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a render addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the rendered document |
 
-The step ends with `result: merged` and exit 0, or exit 1 with an error naming the layer that was refused.
+The step ends with `result: rendered` and exit 0, or exit 1 with an error naming the layer that was refused.
 
 ## Three knobs
 
 | Knob | Where | Axis | Meaning |
 |---|---|---|---|
-| `layering` | The action input | Merge time | Run-wide default for how a keyed list section combines with the layers below it: `merge` (default) unions entries by key, `replace` lets the higher list win |
-| `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the merge: the merged file never carries it |
-| `_undeclared` | A list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the merge and is resolved in the merged file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
+| `layering` | The action input | Merge time | Run-wide default for how a list section combines with the layers below it: `deep` (default) unions the entries by the section's key and merges a same-key pair field by field, `shallow` unions and swaps a same-key entry for the higher one, `replace` lets the higher list win |
+| `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it |
+| `_undeclared` | A list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
 
 The two underscore keys are this action's directives, never GitHub settings, and they are the whole underscore vocabulary: any other underscore key, at a file's top level or on a wrapper, fails validation with an error naming these two (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
 
@@ -80,22 +80,43 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 |---|---|---|
 | A mapping | A mapping | Merged key by key. Lower keys keep their order, higher-only keys follow |
 | A scalar, a list, or a YAML-tagged value | Anything | Replaces |
-| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice |
+| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice. Inside a list section's entry the deletion holds under `deep` only: under `shallow` and `replace` the entry is copied as written, so a `null` there is a value the section must accept |
 | `null` | Nothing, or another `null` | Below the top level, stays as written. At the top level it opted out of nothing and drops with no notice, except on `pages` and `interaction_limits`, where `null` is the section's value and stays (`pages: null` still means "disable Pages") |
-| `labels` entries, layering `merge` | `labels` entries | Union by name (case-folded). A same-name entry replaces the lower one in place, new names are appended |
-| `rulesets` entries, layering `merge` | `rulesets` entries | Union by name. A same-name ruleset merges key by key; its `rules` pair by `type`, a same-type rule replacing in place and new types appended |
-| Any list section under layering `replace`, or one without a key (`milestones`, `webhooks`, ...) | Its entries | The higher list wins. An omitted `_undeclared` still inherits the lower layer's |
+| A list section's entries, layering `deep` | Its entries | Union by the section's key (the table below). A same-key pair merges field by field, the higher fields winning, in the lower entry's place; a nested keyed list (a ruleset's `rules`, by `type`) unions the same way, its same-type pairs merging field by field too; new keys are appended in the higher order |
+| A list section's entries, layering `shallow` | Its entries | Union by the section's key. A same-key entry is swapped for the higher one in place, new keys are appended |
+| A list section's entries, layering `replace` | Its entries | The higher list wins. An omitted `_undeclared` still inherits the lower layer's |
 | Any other list (`branches`, `environments`, `topics`, ...) | A list | Replaces, whatever the run's layering |
 
-Only `labels` and `rulesets` declare a layering key today. Every other list section can only be replaced, and `_layering: merge` on one is refused.
+Under `shallow` and `deep` an empty higher list adds nothing. To clear a list, write `_layering: replace` with an empty list.
 
-The rules above decide the content; the written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes: sections in the order the action applies them, keys as the schema declares them, the entries of every keyed list sorted by their identity. Reordering keys, or the entries of a keyed list, in a layer changes nothing in the merged file. The lists kept as written do change it: `branches` (GitHub applies overlapping wildcard rules in creation order), the `pinned: true` environments (their order is the pin rank), the two mapping lists with no identity (`bypass_actors`, `reviewers`), and every scalar list (`topics`, `include` patterns).
+Every list section, the sections the [undeclared policy](../reference/undeclared-policy.md) counts, layers by the key its planner matches entries by, folded the same way:
+
+| Section | Key | Folded |
+|---|---|---|
+| `labels` | `name` (a renaming entry also claims its `new_name`) | case-insensitive |
+| `collaborators` | `username` | case-insensitive |
+| `teams` | `name` | case-insensitive |
+| `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets` | `name` | uppercased, as GitHub stores it |
+| `actions_variables`, `agents_variables` | `name` | uppercased, as GitHub stores it |
+| `rulesets` | `name`; its `rules` by `type` | verbatim |
+| `autolinks` | `key_prefix` | verbatim |
+| `milestones` | `title` | verbatim |
+| `webhooks` | `config.url` | verbatim |
+| `custom_properties` | `property_name` | verbatim |
+| `deploy_keys` | `title` | verbatim |
+| `secret_scanning_custom_patterns` | `name` | verbatim |
+
+So a fleet `Bug` and a repository `bug` are one label, and a fleet `MY_SECRET` and a repository `my_secret` are one secret. Within one layer two entries may not share a key; the fold refuses that layer (see [Refusals](#refusals)).
+
+Under `deep` a lower entry that two higher entries both claim (a lower label renaming into a name one higher entry declares while another declares its old name) is superseded by both as written: only a one-to-one pair merges field by field, so the rendered document never carries two entries claiming one key.
+
+The rules above decide the content; the written file's order is the canonical one every rendered document has, the same order `mode: snapshot` writes: sections in the order the action applies them, keys as the schema declares them, the entries of every keyed list sorted by their identity. Reordering keys, or the entries of a keyed list, in a layer changes nothing in the rendered file. The lists kept as written do change it: `branches` (GitHub applies overlapping wildcard rules in creation order), the `pinned: true` environments (their order is the pin rank), the two mapping lists with no identity (`bypass_actors`, `reviewers`), and every scalar list (`topics`, `include` patterns).
 
 The `_undeclared` knob across layers:
 
 - A plain list, or a bare `{entries}` wrapper, inherits the policy a lower layer set.
 - An explicit higher `_undeclared` wins.
-- After the fold, a section that still has no explicit policy takes the section default, so the merged file is self-describing.
+- After the fold, a section that still has no explicit policy takes the section default, so the rendered file is self-describing.
 
 ## A worked example
 
@@ -151,7 +172,7 @@ labels:
 pages: null
 ```
 
-Merged under the default `layering: merge`, the written file is:
+Rendered under the default `layering: deep`, the written file is:
 
 ```yaml settings
 repository:
@@ -188,13 +209,13 @@ Reading it back:
 
 - `has_projects` is gone: a higher `null` met a lower declaration.
 - `pages` is `null`, not gone: on this section `null` is the value that turns Pages off, so it replaces the fleet's site with no notice.
-- `docs` kept its position and took the higher color.
+- `docs` kept its position and took the higher color; under `deep` a same-key pair merges field by field, so a lower-only field would have survived too.
 - The `main` ruleset kept `target` and `enforcement` from the fleet and gained a rule.
 - Both list sections came out in wrapper form with their section default filled in.
 
-## What the merged file looks like
+## What the rendered file looks like
 
-The merged file is exactly what apply runs, so it is worth knowing its shape:
+The rendered file is exactly what apply runs, so it is worth knowing its shape:
 
 - Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`. Other lists (`branches`, `environments`, and the nested per-environment lists) stay as written.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
@@ -221,32 +242,32 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
-          mode: merge
+          mode: render
           settings-file: |
             .github/settings/fleet.yml
             .github/settings/team.yml
             .github/settings/repo.yml
-          merged-file: .github/settings/merged.yml
+          rendered-file: .github/settings/rendered.yml
       - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
-          settings-file: .github/settings/merged.yml
+          settings-file: .github/settings/rendered.yml
 ```
 
-Swap the second step to `mode: check` to preview what the merged document would change. The merge step is the same either way.
+Swap the second step to `mode: check` to preview what the rendered document would change. The render step is the same either way.
 
-Commit the merged file only if you want to review it in pull requests; the step rewrites it on every run.
+Commit the rendered file only if you want to review it in pull requests; the step rewrites it on every run.
 
 ## Validation per layer
 
-Each layer must be a valid settings document on its own, judged after its `null` markers are removed. So a layer may say `labels: null` or `rulesets: [{name: main, bypass_actors: null}]`.
+Each layer must be a valid settings document on its own, judged after its `null` markers are removed. So a layer may say `labels: null`, or `rulesets: [{name: main, bypass_actors: null}]` under `deep`, the one directive that opens an entry; under `shallow` or `replace` the same `bypass_actors: null` is copied as written and fails the layer's validation, since the section takes no null there.
 
 Whatever a standalone settings file may not say, a layer may not say either:
 
-- An unknown top-level section, a misspelled wrapper key, or a wrong shape in a closed section fails the merge step, naming the layer, before any fold happens.
+- An unknown top-level section, a misspelled wrapper key, or a wrong shape in a closed section fails the render step, naming the layer, before any fold happens.
 - Fields the validator passes through to GitHub (a misspelled `repository` key, say) pass through here too.
 
-The merge can never complete a broken declaration into a valid one.
+The render can never complete a broken declaration into a valid one.
 
 ## Refusals
 
@@ -261,7 +282,7 @@ The per-layer validation catches what a standalone settings file could not say, 
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 | An underscore key that is not a directive on a wrapper (`labels: {_notes: x, entries: [{name: bug}]}`) | Validation: `labels: Unrecognized key: "_notes"; the wrapper's directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment` |
 
-The fold itself refuses what only a merge can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the merge runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
+The fold itself refuses what only the fold can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the render runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
 
 That guarantee covers the fold alone. The per-layer validation prints the same messages an apply or check run prints, and these message families can name what they find:
 
@@ -280,17 +301,17 @@ That guarantee covers the fold alone. The per-layer validation prints the same m
 - A YAML syntax error, quoting the offending source line with a caret under the column; an unresolved alias names the alias instead, and an anchor whose name carries whitespace or a control character prints that name after `Anchor must not contain whitespace or control characters:`.
 - A YAML parser warning (an unresolved tag, an unknown directive, an ambiguous anchor, a collection used as a key) prints nothing: the parser runs with its warnings off, so such a document parses silently to the same object it always did, and only a parse failure reaches the log, printing what the bullet above describes.
 
-A merge-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
+A render-mode log can therefore show your settings file's structure and, through these messages, a value from it: treat it like any log that prints a parse error for a file the runner holds.
 
 | The layer has | The fold says |
 |---|---|
 | Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |
 | Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`) | `rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer` |
-| `_layering: merge` on a section with no layering key, on its wrapper or reached from the file level (`milestones: {_layering: merge, entries: [{title: v1}]}` or `{_layering: merge, milestones: [{title: v1}]}`) | `milestones has no layering key, so it cannot be layered by "merge"; declare _layering: replace or drop the directive` |
-| An unknown `_layering` value on a wrapper (`labels: {_layering: union, entries: [{name: bug}]}`) | `labels._layering must be "merge" or "replace"; got a string that is neither` |
-| An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be "merge" or "replace"; got a string that is neither` |
+| Two milestones under one title in one list (`milestones: [{title: v1}, {title: v1, state: closed}]`) | `milestones[0] and milestones[1] both claim one title; each title belongs to one entry within a layer` |
+| An unknown `_layering` value on a wrapper, the retired `merge` included (`labels: {_layering: merge, entries: [{name: bug}]}`) | `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
+| An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | A YAML anchor aliased inside its own node (`repository: &loop {self: *loop}`) | `the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees` |
 
 ## Where to go next
 
-[Multi-repo mode](multi-repo.md) explains how a `defaults-file` is a fallback for repositories without a settings file, not a layer. [The undeclared policy](../reference/undeclared-policy.md) owns the `_undeclared` knob the merged file resolves. [Architecture](../reference/architecture.md) shows where the fold sits in the pipeline.
+[Multi-repo mode](multi-repo.md) explains how a `defaults-file` is a fallback for repositories without a settings file, not a layer. [The undeclared policy](../reference/undeclared-policy.md) owns the `_undeclared` knob the rendered file resolves. [Architecture](../reference/architecture.md) shows where the fold sits in the pipeline.

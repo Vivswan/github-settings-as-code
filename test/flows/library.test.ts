@@ -311,7 +311,7 @@ describe("mergeSettings", () => {
     doc: { repository: { has_wiki: false, has_issues: true, enable_vulnerability_alerts: true } },
   };
 
-  test("folds the layers as mode: merge does and renders the file the merged-file gets", () => {
+  test("folds the layers as mode: render does and renders the file the rendered-file gets", () => {
     const report = mergeSettings([fleet, team])._unsafeUnwrap();
     expect(report.settings).toEqual(
       branded({

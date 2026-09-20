@@ -43,8 +43,8 @@ One table per group: the name, what kind of thing it is, and what it says. Each 
 
 How a call reports failure depends on its group:
 
-- A call that reads or parses input, or runs a whole flow (`validateSettings`, `mergeSettings`, `readSettingsFile`, `parseRepoSlug`, `discoverRepos`, `parseRecipient`, `runSingle`, `runMulti`, `runMerge`, ...), returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print.
-- The repository verbs, `checkRepository`, `applyRepository`, and `snapshotRepository`, always resolve to a report: its `result` field carries the outcome (`clean`, `drift`, `applied`, `partial`, `skipped`, `failed`, `snapshot`) and its `outcomes` say what each section did. Every result word of every mode, the merge's `merged` included, is a `RunOutcome`; `RUN_RESULTS` ranks them worst first and `worstOf` folds a run's targets through that ranking.
+- A call that reads or parses input, or runs a whole flow (`validateSettings`, `mergeSettings`, `readSettingsFile`, `parseRepoSlug`, `discoverRepos`, `parseRecipient`, `runSingle`, `runMulti`, `runRender`, ...), returns a [neverthrow](https://github.com/supermacro/neverthrow) `Result` (or `ResultAsync`) whose error is a typed `Problem`; `describeProblem` renders one as the message the action would print.
+- The repository verbs, `checkRepository`, `applyRepository`, and `snapshotRepository`, always resolve to a report: its `result` field carries the outcome (`clean`, `drift`, `applied`, `partial`, `skipped`, `failed`, `snapshot`) and its `outcomes` say what each section did. Every result word of every mode, the render's `rendered` included, is a `RunOutcome`; `RUN_RESULTS` ranks them worst first and `worstOf` folds a run's targets through that ranking.
 - Report delivery: `deliverArtifactReport` never throws and returns `{ uploaded: true }` or `{ warning }`. Two calls throw instead: `encryptReport` on a recipient `parseRecipient` would have rejected (validate it first), and `openReportChannel` when asked for the `artifact` channel without an `ArtifactUploader`.
 
 Every verb takes its inputs positionally and one options object of the same knobs, each defaulted as the action's input of the same name:
@@ -54,7 +54,7 @@ Every verb takes its inputs positionally and one options object of the same knob
 | `sections` | `SectionSelection.ALL`: every declared section, none required | validate, check, apply, snapshot |
 | `onMissingPermission` | `"fail"` | check, apply, snapshot |
 | `source` | `"the settings document"`, or `"the merged settings document"` for a merge | validate, merge |
-| `layering` | `"merge"` | merge |
+| `layering` | `"deep"` | merge |
 | `io` | A collector: the lines the call prints come back as the report's `log`, a `CollectedLine[]` (the annotation level beside each line); with your own `Io` the log is empty | every verb |
 
 The examples continue from one another and form one program (the docs tests compile them in page order): each name is imported once, in the first example that uses it, and later examples reuse it, as they do `settings` (the Validate group's validated document), `client` (the Client group's `GitHubApi`), `repo` (the Check group's parsed slug), and `config` in the Io example (a `SingleConfig`, the action's parsed inputs, declared there).
@@ -67,11 +67,11 @@ The examples continue from one another and form one program (the docs tests comp
 | `ValidateOptions` | type | `source`, `sections`, `io` |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
-| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: merge` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: merge` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every keyed list by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
-| `MergeOptions` | type | `source`, `layering`, `io` |
-| `MergeReport` | type | `settings`, `notices` (one per null that deleted a lower declaration; a top-level null that met nothing drops without one, or stays where null is the section's value: `pages`, `interaction_limits`), `yaml` (the file text `merged-file` gets), `log` |
+| `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
+| `MergeOptions` | type | `source`, `layering` (`"deep"` unless set), `io` |
+| `MergeReport` | type | `settings`, `notices` (one per null that deleted a lower declaration; a top-level null that met nothing drops without one, or stays where null is the section's value: `pages`, `interaction_limits`), `yaml` (the file text `rendered-file` gets), `log` |
 | `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
-| `Layering` | type | `"merge"` or `"replace"`: how the list sections with a layering key fold |
+| `Layering` | type | `"replace"`, `"shallow"`, or `"deep"`: how every list section's entries fold across layers, by the section's key |
 | `OptOutNotice` | type | A `null` that deleted what a lower layer declared: the layer and the path |
 | `describeOptOut` | function | One notice as the line the action prints |
 | `readLayerFiles` | function | Read paths into `Layer`s in order; the first unreadable file is the problem |
@@ -194,7 +194,7 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 | `executeRun` | function | The executor the action and the CLI share: a `RunConfig` plus a face's `RunDeps` runs to its `RunEnd` |
 | `RunDeps` | type | What a face hands in: the `io`, the client factory, and the artifact `uploader` only the Actions runner has |
 | `RunEnd` | type | How the run ended: its `exitCode`, and the fatal `Problem` when it never reached a target |
-| `RunConfig` | type | The action's parsed inputs: a `SingleConfig`, `MultiConfig`, `MergeConfig`, or `SnapshotConfig`, discriminated by `kind` |
+| `RunConfig` | type | The action's parsed inputs: a `SingleConfig`, `MultiConfig`, `RenderConfig`, or `SnapshotConfig`, discriminated by `kind` |
 | `parseConfig` | function | Build a `RunConfig` from an input reader, the environment, and the face's `RunCapabilities`, the way the action does; a face without an artifact upload is refused `private-report: artifact` here |
 | `RunCapabilities` | type | What the face can do: `artifactUpload`, whether it hands the run a workflow-artifact uploader |
 | `InputReader` | type | `(name) => string`: how `parseConfig` reads an input |
@@ -205,14 +205,14 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 | `runMulti` | function | The fleet: repos-dir files, the `repos` list, discovery, the defaults fallback |
 | `MultiConfig` | type | Its config |
 | `TargetOutcome` | type | One fleet target's result, with its `source` |
-| `runMerge` | function | Fold settings files into `merged-file`; no token, no API call |
-| `MergeConfig` | type | Its config: `settingsFiles`, `mergedFile`, `layering` |
-| `FinishedMerge` | type | Its result: the layers and the written file |
+| `runRender` | function | Fold settings files into `rendered-file`; no token, no API call |
+| `RenderConfig` | type | Its config: `settingsFiles`, `renderedFile`, `layering` |
+| `FinishedRender` | type | Its result: the layers and the written file |
 | `runSnapshot` | function | The live settings of one repository to a file, or of every fleet target to a directory |
 | `SnapshotConfig` | type | Its config, in the `file` or the `dir` form |
 | `FinishedSnapshot` | type | Its result: every target's public view |
 | `concludeRun` | function | A finished single or multi run into the outputs, the summary, and the exit code |
-| `concludeMerge` | function | The same for a finished merge |
+| `concludeRender` | function | The same for a finished render |
 | `concludeSnapshot` | function | The same for a finished snapshot |
 | `failRun` | function | A fatal `Problem` into the failed outputs and exit 1 |
 | `RunOutcome` | type | Every result word of every mode |
@@ -222,14 +222,14 @@ console.log(snapshot.result, snapshot.yaml ?? "(failed: no document)");
 All four flows conclude alike: the three outputs (`result`, `skipped-sections`, `repos-result`) are always set, the result is `worstOf` the targets, and the exit code is 1 exactly when it is `failed`, or `drift` in check mode.
 
 ```ts
-import { concludeMerge, failRun, runMerge, silentIo } from "@vivswan/github-settings-as-code";
+import { concludeRender, failRun, runRender, silentIo } from "@vivswan/github-settings-as-code";
 
 const io = silentIo();
-const mergeExitCode = runMerge(
-  { settingsFiles: ["base.yml", "team.yml"], mergedFile: "merged.yml", layering: "merge" },
+const renderExitCode = runRender(
+  { settingsFiles: ["base.yml", "team.yml"], renderedFile: "rendered.yml", layering: "deep" },
   io,
 ).match(
-  (finished) => concludeMerge(io, finished),
+  (finished) => concludeRender(io, finished),
   (problem) => failRun(io, problem),
 );
 ```
@@ -356,7 +356,7 @@ console.log(exitCode, collected.outputs.result, collected.lines.map((entry) => e
 
 ## CLI
 
-The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same flows from a terminal: `check`, `apply`, and `merge` take the action's inputs as `--flags`,
+The package's `bin` entries, `github-settings-as-code` and `gsac`, run the same flows from a terminal: `check`, `apply`, and `render` take the action's inputs as `--flags`,
 and `validate` and `permissions` read a settings file alone. The [command line guide](../start/cli.md) has every command, the flag rule, and the exit codes.
 
 ## Versioning

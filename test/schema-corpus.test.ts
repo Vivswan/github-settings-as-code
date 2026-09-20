@@ -24,7 +24,7 @@ const FRAGMENT_KINDS = [
   "defaults_file",
   "settings_layers[<i>]",
   "expect.snapshot",
-  "expect.merged",
+  "expect.rendered",
   "repos.<slug>.settings",
   "repos.<slug>.expect.snapshot",
 ] as const;
@@ -107,17 +107,17 @@ function scenarioDocs(): CorpusDoc[] {
     };
     push("settings", `${name} settings`, scenario.settings);
     push("defaults_file", `${name} defaults_file`, scenario.defaults_file);
-    // Every merge layer is a settings file the run reads, and the pinned merged document is what
-    // mode: merge writes for a later run to read, so both validators must accept each of them.
+    // Every layer is a settings file the run reads, and the pinned rendered document is what
+    // mode: render writes for a later run to read, so both validators must accept each of them.
     const layers = scenario.settings_layers as unknown[] | undefined;
     for (const [i, layer] of (layers ?? []).entries()) {
       push("settings_layers[<i>]", `${name} settings_layers[${i}]`, layer);
     }
     // A pinned snapshot document is what mode: snapshot writes for a later
     // apply to read, so both validators must accept it like any settings file.
-    const expected = scenario.expect as { snapshot?: unknown; merged?: unknown } | undefined;
+    const expected = scenario.expect as { snapshot?: unknown; rendered?: unknown } | undefined;
     push("expect.snapshot", `${name} expect.snapshot`, expected?.snapshot);
-    push("expect.merged", `${name} expect.merged`, expected?.merged);
+    push("expect.rendered", `${name} expect.rendered`, expected?.rendered);
     const repos = scenario.repos as
       | Record<string, { settings?: unknown; expect?: { snapshot?: unknown } }>
       | undefined;

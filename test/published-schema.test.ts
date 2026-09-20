@@ -231,7 +231,7 @@ describe("the document-level _layering directive", () => {
     const doc = { _layering: "union", labels: [{ name: "bug" }] };
     expect(validate(doc)).toBe(false);
     expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
-      ["/_layering", "enum", { allowedValues: ["merge", "replace"] }],
+      ["/_layering", "enum", { allowedValues: ["replace", "shallow", "deep"] }],
     ]);
     const parsed = SettingsFile.safeParse(doc);
     expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([

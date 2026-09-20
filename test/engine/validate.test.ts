@@ -176,7 +176,7 @@ describe("the wrapped undeclared-policy form", () => {
     ]);
     expect(
       issuesOf({
-        environments: [{ name: "prod", variables: { _layering: "merge", entries: [] } }],
+        environments: [{ name: "prod", variables: { _layering: "deep", entries: [] } }],
       }),
     ).toEqual([
       expect.stringMatching(/^environments\[0\]\.variables: Unrecognized key: "_layering"; /),

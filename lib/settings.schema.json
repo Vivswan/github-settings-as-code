@@ -1534,11 +1534,12 @@
           ]
         },
         "_layering": {
-          "description": "mode: merge only: a layer-level default for how this document's keyed list sections (labels, rulesets) combine with the layers below it, overriding the run's layering input; a section's own wrapper-level `_layering` overrides it again. `merge` reaches every section of this document that takes the `{_undeclared, entries}` wrapper, and only the keyed ones accept it, so a document declaring `merge` with a section whose entries have no layering identity (milestones, autolinks) is refused unless that section's wrapper says `_layering: replace`. Consumed by the merge, never applied: the merged document carries no `_layering`, and apply and check ignore it like any `_` key.",
+          "description": "mode: render only: a layer-level default for how this document's list sections combine with the layers below it, overriding the run's layering input; a section's own wrapper-level `_layering` overrides it again. `replace` lets each of this document's lists win wholesale; `shallow` unions the entries by the section's key and swaps a same-key entry for this document's; `deep` unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. Consumed by the render, never applied: the rendered document carries no `_layering`, and apply and check ignore it like any `_` key.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       }
@@ -1590,11 +1591,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1623,11 +1625,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1656,11 +1659,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1689,11 +1693,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1722,11 +1727,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1755,11 +1761,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1788,11 +1795,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1821,11 +1829,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1854,11 +1863,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -1887,11 +1897,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2020,11 +2031,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2053,11 +2065,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2086,11 +2099,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2119,11 +2133,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2152,11 +2167,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
@@ -2185,11 +2201,12 @@
           }
         },
         "_layering": {
-          "description": "A merge-time directive: how this section combines with the layers BELOW it in a layered merge. \"replace\" lets this layer's list win. \"merge\" unions the entries by identity and is accepted only on a section whose entries have one (labels by name, rulesets by name with their rules by type); on any other section it is refused, so declare \"replace\" or omit the key. Omitted, the run's layering applies. It has no effect on a single document, the merged document never carries it, and a list nested inside a section entry does not take it (a higher layer replaces such a list wholesale).",
+          "description": "A render-time directive: how this section combines with the layers BELOW it in a layered merge, by the section's key (a label's name, a secret's name, a webhook's URL, ...). \"replace\" lets this layer's list win wholesale; \"shallow\" unions the entries by key and swaps a same-key entry for this layer's; \"deep\" unions by key and merges a same-key pair field by field, a nested keyed list (a ruleset's rules, by type) unioning the same way. To clear a list, write \"replace\" with an empty list: under \"shallow\" and \"deep\" an empty list adds nothing. Omitted, the file's `_layering` applies, else the run's layering. It has no effect on a single document, the rendered document never carries it, and a list nested inside a section entry does not take it.",
           "type": "string",
           "enum": [
-            "merge",
-            "replace"
+            "replace",
+            "shallow",
+            "deep"
           ]
         }
       },
