@@ -22,9 +22,8 @@ const pacificHour = new Intl.DateTimeFormat("en-US", {
 });
 
 /**
- * GitHub stores a due_on as midnight US Pacific of the day the sent instant falls on there, and answers
- * that instant in UTC; the mock does the same, so a value only converges when the section sends a day
- * GitHub keeps.
+ * Stores a due_on the way GitHub does (the rule is at DueOnWire in index.ts), so a value only converges
+ * when the section sends a day GitHub keeps.
  *
  *   2022-11-14T07:00:00Z -> 2022-11-13T08:00:00Z   (PST: 07:00Z is still the 13th there)
  *   2026-07-01T12:00:00Z -> 2026-07-01T07:00:00Z   (PDT)

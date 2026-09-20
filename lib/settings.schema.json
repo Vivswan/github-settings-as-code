@@ -911,7 +911,7 @@
           ]
         },
         "due_on": {
-          "description": "The due day as `YYYY-MM-DD`. GitHub keeps only the day and reads back a Pacific-midnight timestamp, so the day alone is compared and written (as noon UTC, which GitHub stores on that day whatever the DST state); a full `YYYY-MM-DDTHH:MM:SSZ` is accepted for its date part, and a snapshot reads the day back in that form.",
+          "description": "The due day as `YYYY-MM-DD`. GitHub keeps only the day, so the day alone is compared and written; a UTC timestamp `YYYY-MM-DDTHH:MM:SSZ` is accepted for its date part, and a snapshot reads the day back as `YYYY-MM-DDT12:00:00Z`.",
           "anyOf": [
             {
               "type": "string",
