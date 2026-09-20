@@ -7,6 +7,8 @@
  *                             must accept future fields; only strictObject declarations stay closed, like the runtime
  *   url strings            -> UNFORMATTED: the format: "uri" z.url() emits is deleted, since ajv judges it by RFC 3986
  *                             and refuses hosts, paths, and spaces that the runtime's new URL() rule accepts
+ *   date strings           -> UNFORMATTED: the format: "date" / "date-time" z.iso emits is deleted too, since ajv-formats
+ *                             rounds long fractional seconds into an invalid :60; zod's pattern beside it stays and is the grammar
  *   root layout            -> zod's own, passed through verbatim
  *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the committed file diffs deterministically
  */
@@ -44,6 +46,11 @@ const generated = z.toJSONSchema(SettingsFile, {
     // z.url() parses with new URL(), which takes a non-ASCII host or path and a space; ajv's format: "uri" refuses all
     // three, so the keyword goes and the runtime alone judges the URL (the string stays typed and described).
     if (def.type === "string" && def.format === "url") {
+      delete json.format;
+    }
+    // z.iso.date()/datetime() emit a pattern that is the runtime's grammar plus a format keyword; ajv-formats parses a
+    // long fractional second as a number and rounds it into an invalid :60, refusing what the runtime accepts.
+    if (def.type === "string" && (def.format === "date" || def.format === "datetime")) {
       delete json.format;
     }
     // z.record's propertyNames: {type: "string"} is a no-op in JSON (keys are always strings).
