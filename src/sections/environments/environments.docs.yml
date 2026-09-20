@@ -131,9 +131,9 @@ schema:
     Minutes to wait before deployments proceed, 0 to 43200 (30 days). 0 declares the wait timer
     off and matches a live environment without one.
   EnvironmentConfig.prevent_self_review: >-
-    Whether the deployer may approve their own deployment. The flag lives on the required-reviewers
-    rule, so `true` needs at least one reviewer; `false` declares it off and matches a live
-    environment without the rule.
+    Whether to prevent the deployer from approving their own deployment. The flag lives on the
+    required-reviewers rule, so `true` needs at least one reviewer; `false` declares it off and
+    matches a live environment without the rule.
   EnvironmentConfig.reviewers: >-
     Required reviewers by numeric user/team id, at most 6. An empty list declares required
     reviewers off and matches a live environment without the rule.
