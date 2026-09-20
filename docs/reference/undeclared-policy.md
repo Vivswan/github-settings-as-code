@@ -72,7 +72,15 @@ Four lists carry the same wrapped form WITHOUT being top-level sections. Each en
 | `environments[].secrets` | keep | Matches the top-level secret sections: a deleted secret's value is unrecoverable, so deletion stays opt-in |
 | `environments[].deployment_protection_rules` | keep | GitHub Apps can enable themselves as deployment gates; silently disabling a gate the file never named would weaken a protection nobody asked to weaken, so `_undeclared: delete` opts in |
 
-The knob is set per environment entry, and it never inherits a policy through a layered merge. The `environments` list replaces wholesale in the fold, so a higher layer that declares `environments` replaces the whole lower list; individual entries never merge, and neither do the knobs inside them.
+The knob is set per environment entry, and in a `mode: render` fold (the [layering guide](../operate/layering.md) owns the rules) it travels the way the top-level knob does.
+
+Under the default `layering: deep` the fold unions `environments` by name, case-insensitively, and merges a same-name pair field by field; each nested list unions by its own key, the one [the layering guide's key table](../operate/layering.md#the-rules) names.
+
+Two bare nested lists fold to a bare list. A wrapper on either side keeps the wrapper form, its `_undeclared` merged as a top-level knob is: a higher bare list, or a wrapper without the knob, inherits the lower wrapper's policy, an explicit higher knob wins, and a higher `_undeclared: null` removes the lower policy with a notice.
+
+The fold spells out no nested default, so a nested list still without a knob after the fold takes its fixed default when apply runs.
+
+Only `deep` enters an entry. Under `shallow` a same-name environment is swapped whole, its nested lists and knobs with it, and under `replace` the higher `environments` list wins.
 
 ## Deleting milestones detaches issues
 
@@ -103,4 +111,6 @@ There is no way to set a policy without declaring an inventory: a wrapper requir
 
 The multi-repo `defaults-file` does not merge: it is applied whole to a repository that has no settings file, so a policy in it reaches exactly those repositories (see [multi-repo mode](../operate/multi-repo.md)).
 
-One boundary to know about: HAVING a policy and INHERITING one are different things. The top-level section lists take the policy through the fold as described above. The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults - they never inherit a policy from their section, from another list, or through a merge.
+One boundary to know about: HAVING a policy and INHERITING one are different things. The top-level section lists take the policy through the fold as described above.
+
+The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults. A nested list never inherits a policy from its section or from another list; it inherits from one place only, the same list of the same-named environment in a lower layer under `deep` (see [the nested knobs](#the-nested-variables-secrets-and-deployment-knobs)).
