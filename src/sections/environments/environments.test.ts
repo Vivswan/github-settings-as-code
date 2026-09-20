@@ -1560,7 +1560,7 @@ describe("environments snapshot", () => {
           { id: 7101, node_id: "DPR_7101", enabled: true, app: { id: 3515, slug: "deploy-gate" } },
         ],
       },
-      environment_secrets: { qa: [{ name: "github_pat", ...STAMPS }] },
+      environment_secrets: { qa: [{ name: "release_pat", ...STAMPS }] },
     });
     const snapshot = await environmentsSection.snapshot(
       snapshotContext(environmentsSection, api, REPO, "fail"),
@@ -1573,13 +1573,13 @@ describe("environments snapshot", () => {
           deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
           secrets: {
             _undeclared: "keep",
-            entries: [{ name: "GITHUB_PAT", value: "$SECRET_ENVIRONMENT_QA_GITHUB_PAT" }],
+            entries: [{ name: "RELEASE_PAT", value: "$SECRET_ENVIRONMENT_QA_RELEASE_PAT" }],
           },
           deployment_protection_rules: { _undeclared: "keep", entries: [{ app: "deploy-gate" }] },
         },
       ],
       notes: [
-        "environments[qa].secrets[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_QA_GITHUB_PAT before apply",
+        "environments[qa].secrets[RELEASE_PAT]: value of RELEASE_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_QA_RELEASE_PAT before apply",
       ],
     });
     expect(api.writes).toEqual([]);

@@ -1,11 +1,7 @@
 /** The agents_variables entry-config declaration (see index.ts for the section). */
 
-import { z } from "zod";
+import type { z } from "zod";
+import { variableConfig } from "../shared/schema-helpers.js";
 
-export const AgentsVariableConfig = z
-  .object({
-    name: z.string(),
-    value: z.string(),
-  })
-  .meta({ id: "AgentsVariableConfig" });
+export const AgentsVariableConfig = variableConfig("AgentsVariableConfig");
 export type AgentsVariableConfig = z.infer<typeof AgentsVariableConfig>;

@@ -1,0 +1,17 @@
+name: agents-variables-name-rejected
+description: >
+  A Copilot agents variable whose lowercase github_ prefix folds to the
+  reserved GITHUB_ prefix fails when the settings file is parsed, before any
+  API contact, naming the reservation - not as a 422 from the POST mid-apply.
+settings:
+  agents_variables:
+    - name: github_model
+      value: default
+inputs:
+  mode: check
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'agents_variables[0].name: the variable name "github_model" starts with the reserved GITHUB_ prefix'

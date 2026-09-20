@@ -99,8 +99,74 @@ export function nestedKnobbed<T extends z.ZodType>(entry: T) {
 export function sealedSecretConfig(id: string) {
   return z
     .object({
-      name: z.string(),
+      name: secretName,
       value: z.string(),
     })
     .meta({ id });
 }
+
+/** A repository-scope plain-text variable entry; the environments section's nested list is the same shape. */
+export function variableConfig(id: string) {
+  return z
+    .object({
+      name: variableName,
+      value: variableValue,
+    })
+    .meta({ id });
+}
+
+/**
+ * GitHub measures a value in bytes, so the refinement encodes the string as UTF-8 and compares that size. JSON Schema's
+ * maxLength counts code points and cannot say bytes; a code point is at least one byte, so the same number is the
+ * tightest bound an editor can check without refusing a value GitHub accepts.
+ */
+function utf8BoundedString(maximumBytes: number, message: (bytes: number) => string) {
+  const utf8 = new TextEncoder();
+  const byteLength = (value: string) => utf8.encode(value).byteLength;
+  return z
+    .string()
+    .refine((value) => byteLength(value) <= maximumBytes, {
+      error: (issue: z.core.$ZodRawIssue) => message(byteLength(issue.input as string)),
+    })
+    .meta({ maxLength: maximumBytes });
+}
+
+/** GitHub's documented cap on one variable's value, 48 KB, counted in UTF-8 bytes as GitHub does. */
+export const MAX_VARIABLE_VALUE_BYTES = 48 * 1024;
+
+const variableValue = utf8BoundedString(
+  MAX_VARIABLE_VALUE_BYTES,
+  (bytes) =>
+    `the variable value is ${bytes} bytes of UTF-8; GitHub caps a variable at 48 KB (${MAX_VARIABLE_VALUE_BYTES} bytes). Shorten it, or move the content into a file the workflow reads`,
+);
+
+/**
+ * The pattern doubles as the published schema's `pattern`, so it spells the case-insensitive prefix without a flag;
+ * the API uppercases before it compares, so `github_token` is the reserved GITHUB_TOKEN.
+ */
+const GITHUB_NAME_PATTERN = /^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$/;
+const GITHUB_NAME_RULE =
+  "GitHub accepts ASCII letters, digits, and underscores, not starting with a digit or with the reserved GITHUB_ prefix (in any case: names are stored uppercased)";
+
+function githubName(noun: "secret" | "variable") {
+  const reasonFor = (name: string): string => {
+    if (name === "") {
+      return "is empty";
+    }
+    if (/^github_/i.test(name)) {
+      return "starts with the reserved GITHUB_ prefix";
+    }
+    if (/^[0-9]/.test(name)) {
+      return "starts with a digit";
+    }
+    return "has characters outside ASCII letters, digits, and underscore";
+  };
+  return z.string().regex(GITHUB_NAME_PATTERN, {
+    error: (issue: z.core.$ZodRawIssue) =>
+      `the ${noun} name ${JSON.stringify(issue.input)} ${reasonFor(issue.input as string)} - ${GITHUB_NAME_RULE}`,
+  });
+}
+
+/** Secret and variable names share GitHub's one rule; the noun only tells the problem line which it is reading. */
+export const secretName = githubName("secret");
+const variableName = githubName("variable");

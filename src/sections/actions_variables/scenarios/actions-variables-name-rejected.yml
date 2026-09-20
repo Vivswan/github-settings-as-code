@@ -1,0 +1,19 @@
+name: actions-variables-name-rejected
+description: >
+  An Actions variable name GitHub refuses (a hyphen) fails when the settings
+  file is parsed, before any API contact, with the entry's path and the rule -
+  not as a 422 from the POST mid-apply, after earlier sections have written.
+settings:
+  actions_variables:
+    - name: DEPLOY_REGION
+      value: eu-west-1
+    - name: build-mode
+      value: release
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - 'actions_variables[1].name: the variable name "build-mode" has characters outside ASCII letters, digits, and underscore'

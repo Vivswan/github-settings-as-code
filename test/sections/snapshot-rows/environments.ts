@@ -40,7 +40,7 @@ export const row: Row = {
     environment_secrets: {
       production: [
         { name: "DEPLOY_TOKEN", ...STAMPS },
-        { name: "GITHUB_PAT", ...STAMPS },
+        { name: "RELEASE_PAT", ...STAMPS },
       ],
       staging: [{ name: "DEPLOY_TOKEN", ...STAMPS }],
     },
@@ -94,7 +94,7 @@ export const row: Row = {
           _undeclared: "keep",
           entries: [
             { name: "DEPLOY_TOKEN", value: "$SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN" },
-            { name: "GITHUB_PAT", value: "$SECRET_ENVIRONMENT_PRODUCTION_GITHUB_PAT" },
+            { name: "RELEASE_PAT", value: "$SECRET_ENVIRONMENT_PRODUCTION_RELEASE_PAT" },
           ],
         },
         deployment_branch_policies: {
@@ -109,7 +109,7 @@ export const row: Row = {
     ],
     notes: [
       "environments[production].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_DEPLOY_TOKEN before apply",
-      "environments[production].secrets[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_GITHUB_PAT before apply",
+      "environments[production].secrets[RELEASE_PAT]: value of RELEASE_PAT is not readable; export it into the environment as SECRET_ENVIRONMENT_PRODUCTION_RELEASE_PAT before apply",
       "environments[staging].secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ENVIRONMENT_STAGING_DEPLOY_TOKEN before apply",
     ],
   },

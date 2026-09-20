@@ -146,8 +146,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
           "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
@@ -164,12 +165,14 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
-          "type": "string"
+          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub). GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case.",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value workflows read through the vars context.",
-          "type": "string"
+          "description": "The plain-text value workflows read through the vars context. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "type": "string",
+          "maxLength": 49152
         }
       },
       "required": [
@@ -182,8 +185,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
           "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
@@ -200,12 +204,14 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub).",
-          "type": "string"
+          "description": "The variable name, the natural key; case-insensitive (stored uppercased by GitHub). GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case.",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value Copilot coding agents read.",
-          "type": "string"
+          "description": "The plain-text value Copilot coding agents read. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "type": "string",
+          "maxLength": 49152
         }
       },
       "required": [
@@ -442,8 +448,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
           "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
@@ -515,8 +522,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
           "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
@@ -794,8 +802,9 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The secret name, the natural key; compared case-insensitively and written uppercase.",
-          "type": "string"
+          "description": "The secret name, the natural key; compared case-insensitively and written uppercase. GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case (`github_token` is the reserved `GITHUB_TOKEN` once uppercased).",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
           "description": "A whole-value `$NAME` reference to an environment variable holding the secret - never a literal (settings files are committed plaintext). Resolved from the action step's env at run time and sealed client-side into the sealed box GitHub's secrets API expects (libsodium's crypto_box_seal format) before upload; GitHub cannot return the value, so check mode verifies existence only and apply re-seals it on every run.",
@@ -813,12 +822,14 @@
       "type": "object",
       "properties": {
         "name": {
-          "description": "The variable name, the natural key (case-insensitive on GitHub).",
-          "type": "string"
+          "description": "The variable name, the natural key (case-insensitive on GitHub). GitHub's naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix in any case.",
+          "type": "string",
+          "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value; environment secrets are the place for secrets.",
-          "type": "string"
+          "description": "The plain-text value; environment secrets are the place for secrets. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "type": "string",
+          "maxLength": 49152
         }
       },
       "required": [

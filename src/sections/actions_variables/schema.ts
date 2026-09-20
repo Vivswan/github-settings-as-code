@@ -1,11 +1,7 @@
 /** The actions_variables entry-config declaration (see index.ts for the section). */
 
-import { z } from "zod";
+import type { z } from "zod";
+import { variableConfig } from "../shared/schema-helpers.js";
 
-export const ActionsVariableConfig = z
-  .object({
-    name: z.string(),
-    value: z.string(),
-  })
-  .meta({ id: "ActionsVariableConfig" });
+export const ActionsVariableConfig = variableConfig("ActionsVariableConfig");
 export type ActionsVariableConfig = z.infer<typeof ActionsVariableConfig>;

@@ -9,8 +9,8 @@ import type { Row, SnapshotSection } from "../snapshot-roundtrip.js";
 export const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 
 /**
- * One secret family's row: the names read back as per-store references (so the same name in two
- * stores never shares a variable), one note each; a reserved-looking name needs no escape.
+ * One secret family's row: two names, each read back as its own per-store reference (so the same
+ * name in two stores never shares a variable), one note each.
  */
 export function secretsRow(section: SnapshotSection, store: string, family: keyof LiveState): Row {
   const STORE = store.toUpperCase();
@@ -19,7 +19,7 @@ export function secretsRow(section: SnapshotSection, store: string, family: keyo
     live: {
       [family]: [
         { name: "DEPLOY_TOKEN", ...STAMPS },
-        { name: "GITHUB_PAT", ...STAMPS },
+        { name: "RELEASE_PAT", ...STAMPS },
       ],
     },
     expected: {
@@ -27,12 +27,12 @@ export function secretsRow(section: SnapshotSection, store: string, family: keyo
         _undeclared: "keep",
         entries: [
           { name: "DEPLOY_TOKEN", value: `$SECRET_${STORE}_DEPLOY_TOKEN` },
-          { name: "GITHUB_PAT", value: `$SECRET_${STORE}_GITHUB_PAT` },
+          { name: "RELEASE_PAT", value: `$SECRET_${STORE}_RELEASE_PAT` },
         ],
       },
       notes: [
         `${section.key}[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_${STORE}_DEPLOY_TOKEN before apply`,
-        `${section.key}[GITHUB_PAT]: value of GITHUB_PAT is not readable; export it into the environment as SECRET_${STORE}_GITHUB_PAT before apply`,
+        `${section.key}[RELEASE_PAT]: value of RELEASE_PAT is not readable; export it into the environment as SECRET_${STORE}_RELEASE_PAT before apply`,
       ],
     },
   };
