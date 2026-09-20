@@ -420,6 +420,27 @@ describe("listSection without an update role", () => {
   });
 });
 
+describe("listSection derived mock fragment", () => {
+  test("update and remove reach a label whose live name differs only in case, as GitHub matches label names", async () => {
+    const api = fakeFor(labelsSection, [
+      { name: "bug", color: "d73a4a", description: null },
+      { name: "docs", color: "0075ca", description: null },
+    ]);
+    const patched = await api.tryRequest("PATCH", "/repos/o/r/labels/Bug", { color: "ffffff" });
+    expect("data" in patched ? patched.data : patched).toMatchObject({
+      name: "bug",
+      color: "ffffff",
+    });
+    expect(await api.tryRequest("DELETE", "/repos/o/r/labels/DOCS", undefined)).toEqual({
+      data: null,
+    });
+    // The control: a name no live label folds to still answers GitHub's 404.
+    const missing = await api.tryRequest("DELETE", "/repos/o/r/labels/triage", undefined);
+    expect("error" in missing ? missing.error.status : missing).toBe(404);
+    expect(api.state.labels.map((label) => [label.name, label.color])).toEqual([["bug", "ffffff"]]);
+  });
+});
+
 describe("listSection listing", () => {
   test("the query knob rides on every page of the list read", async () => {
     const queried = listSection({ ...base, listing: { query: { state: "all" } } });

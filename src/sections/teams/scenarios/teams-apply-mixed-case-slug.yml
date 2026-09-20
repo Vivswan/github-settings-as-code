@@ -1,0 +1,31 @@
+name: teams-apply-mixed-case-slug
+description: >-
+  The settings file spells a team slug in mixed case while GitHub stores it
+  lowercase. The probe and the grant address the slug as declared, which
+  GitHub folds, and the undeclared walk pairs the lowercase listing entry
+  with the declared team: under "_undeclared: delete" a failed pairing would
+  revoke the very team the file declares. A check rerun converges.
+settings:
+  teams:
+    _undeclared: delete
+    entries:
+      - name: Core-Team
+        permission: push
+owner_kind: org
+live_state:
+  teams:
+    core-team:
+      role_name: read
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    teams: applied
+  mutations:
+    - "PUT /orgs/e2e-owner/teams/Core-Team/repos/{repo}"
+  never:
+    - "DELETE /orgs/e2e-owner/teams/core-team/repos/{repo}"
+    - "DELETE /orgs/e2e-owner/teams/Core-Team/repos/{repo}"
+  stdout_contains:
+    - "granted team \"Core-Team\" push"
+  fixpoint: converges

@@ -1,0 +1,33 @@
+name: labels-apply-rename
+description: >
+  A declared label renames a live one through new_name: apply PATCHes the
+  label at its current name and neither creates nor deletes anything. The
+  check rerun over the renamed state converges, so the renaming entry owns
+  the label under its new name instead of recreating it or deleting the old
+  one as undeclared.
+settings:
+  labels:
+    - name: bug
+      new_name: defect
+      color: d73a4a
+      description: Something isn't working
+live_state:
+  labels:
+    - name: bug
+      color: d73a4a
+      description: Something isn't working
+inputs:
+  mode: apply
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    labels: applied
+  mutations:
+    - PATCH /repos/{repo}/labels/bug
+  never:
+    - POST /repos/{repo}/labels
+    - DELETE /repos/{repo}/labels
+  stdout_contains:
+    - updated label "defect"
+  fixpoint: converges
