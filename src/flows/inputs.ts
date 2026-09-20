@@ -789,9 +789,9 @@ export function parseConfig(
     if (mode === "snapshot") {
       return parseSnapshotConfig(input, env);
     }
-    const mergeOnly = RENDER_ONLY_INPUTS.filter((name) => input.value(name) !== "");
-    if (mergeOnly.length > 0) {
-      return err({ code: "input-render-only", inputs: mergeOnly, mode });
+    const renderOnly = RENDER_ONLY_INPUTS.filter((name) => input.value(name) !== "");
+    if (renderOnly.length > 0) {
+      return err({ code: "input-render-only", inputs: renderOnly, mode });
     }
     const snapshotOnly = SNAPSHOT_ONLY_INPUTS.filter((name) => input.value(name) !== "");
     if (snapshotOnly.length > 0) {

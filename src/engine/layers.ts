@@ -60,6 +60,8 @@ const KNOWN_SECTIONS: ReadonlySet<string> = new Set(SECTION_KEYS);
 /**
  * The sections whose null is a document value (Pages disabled, no interaction limits), the only top-level nulls the
  * fold may leave standing; the two pins fail to compile when a section's schema starts or stops admitting null.
+ * This set governs whole top-level sections; the `nullValued` facet on a list declaration governs nullable fields
+ * inside an entry; no key can be both.
  */
 const NULL_VALUED_SECTIONS = [
   "pages",

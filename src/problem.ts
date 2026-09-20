@@ -431,11 +431,11 @@ export function describeProblem(problem: Problem): string {
         `${subject} ${verb} not apply to mode: render, which only folds ` +
         "the settings-file layers into rendered-file: it never targets a repository, calls the GitHub " +
         `API, delivers a report, or narrows the sections it writes. Remove the ${inputs}, or move ` +
-        `${them} to the apply or check step that runs the merged document`
+        `${them} to the apply or check step that runs the rendered document`
       );
     }
     case "input-rendered-file-missing":
-      return 'mode: render needs a "rendered-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file';
+      return 'mode: render needs a "rendered-file" input: the path the rendered settings document is written to. Set it (for example .github/settings.rendered.yml) and feed that path to a later apply or check step as its settings-file';
     case "input-settings-file-empty":
       return `the "settings-file" input is "${problem.value}", which lists no file. In mode: render it is the ordered list of layers to fold, newline- or comma-separated, lowest first; name at least one settings file`;
     case "input-render-only": {
@@ -536,11 +536,11 @@ export function describeProblem(problem: Problem): string {
       return (
         `the "rendered-file" input "${problem.renderedFile}" is layer ${problem.index + 1} of the ` +
         `"settings-file" list ("${problem.layer}"): the render would overwrite that layer with the ` +
-        "folded document, and the next run would fold the merged document as a layer. Write the " +
-        "merged document to a path outside the layer list"
+        "folded document, and the next run would fold the rendered document as a layer. Write the " +
+        "rendered document to a path outside the layer list"
       );
     case "rendered-file-unwritable":
-      return `cannot write the merged document to ${problem.path}: ${problem.reason}. Check that the "rendered-file" input names a writable path`;
+      return `cannot write the rendered document to ${problem.path}: ${problem.reason}. Check that the "rendered-file" input names a writable path`;
     case "snapshot-file-is-settings-file":
       return `the "snapshot-file" input "${problem.snapshotFile}" is the settings file apply and check read (${problem.settingsFile}): the snapshot would overwrite the document you author. Write it to another path and copy it over deliberately`;
     case "snapshot-dir-overlaps-repos-dir":

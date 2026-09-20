@@ -254,13 +254,13 @@ function cases(): Case[] {
       },
     },
     {
-      name: "rejected: a merge-only flag on check",
+      name: "rejected: a render-only flag on check",
       argv: ["check", "--token", "ghp_flag", "--rendered-file", "out.yml"],
       inputs: { mode: "check", token: "ghp_flag", "rendered-file": "out.yml" },
       unknownFlag: "rendered-file",
     },
     {
-      name: "rejected: an engine flag on merge",
+      name: "rejected: an engine flag on render",
       argv: ["render", "--repository", "o/r", "--rendered-file", "out.yml"],
       inputs: { mode: "render", repository: "o/r", "rendered-file": "out.yml" },
       unknownFlag: "repository",

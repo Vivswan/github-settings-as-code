@@ -29,7 +29,7 @@ import { SNAPSHOT_SCHEMA_URL } from "./snapshot.js";
 
 const UNNAMED_SOURCE = "the settings document";
 
-const MERGED_SOURCE = "the merged settings document";
+const MERGED_SOURCE = "the rendered settings document";
 
 /** The Io a verb prints through, and the lines the report carries: the caller's own Io leaves the log empty. */
 function sink(io: Io | undefined): { io: Io; log: () => CollectedLine[] } {

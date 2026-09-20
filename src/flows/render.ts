@@ -17,7 +17,7 @@ export interface RenderConfig {
   layering: Layering;
 }
 
-const RENDERED_LABEL = "the merged settings document";
+const RENDERED_LABEL = "the rendered settings document";
 
 /**
  * An input layer is never the destination, under any name the read follows or the rename reaches: the entry the

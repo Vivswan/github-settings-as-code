@@ -53,7 +53,7 @@ Every verb takes its inputs positionally and one options object of the same knob
 |---|---|---|
 | `sections` | `SectionSelection.ALL`: every declared section, none required | validate, check, apply, snapshot |
 | `onMissingPermission` | `"fail"` | check, apply, snapshot |
-| `source` | `"the settings document"`, or `"the merged settings document"` for a merge | validate, merge |
+| `source` | `"the settings document"`, or `"the rendered settings document"` for a merge | validate, merge |
 | `layering` | `"deep"` | merge |
 | `io` | A collector: the lines the call prints come back as the report's `log`, a `CollectedLine[]` (the annotation level beside each line); with your own `Io` the log is empty | every verb |
 

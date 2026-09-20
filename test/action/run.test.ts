@@ -429,7 +429,7 @@ describe("run in mode: render", () => {
   });
 
   /** A merge run's env: NO token anywhere, the layers low to high, the output path under `dir`, which is returned. */
-  function setMergeEnv(
+  function setRenderEnv(
     dir: string,
     layers: string[],
     inputs: { layering?: Layering } = {},
@@ -482,7 +482,7 @@ describe("run in mode: render", () => {
   test("three layers fold into the merged file with no token and no API call; a null opts out with a notice, and pages: null is kept as the value", () =>
     withTempDir("render-mode-", async (dir) => {
       const layers = [layer("fleet.yml"), layer("team.yml"), layer("repo.yml")];
-      const renderedFile = setMergeEnv(dir, layers);
+      const renderedFile = setRenderEnv(dir, layers);
       const api = new MockApi({});
       expect(await run({ api, io: testIo })).toBe(0);
       expect(api.calls).toEqual([]);
@@ -510,7 +510,7 @@ describe("run in mode: render", () => {
 
   test("layering: replace lets the higher layer's list sections win while mappings still merge", () =>
     withTempDir("render-mode-", async (dir) => {
-      const renderedFile = setMergeEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
+      const renderedFile = setRenderEnv(dir, [layer("fleet.yml"), layer("repo.yml")], {
         layering: "replace",
       });
       expect(await run({ api: new MockApi({}), io: testIo })).toBe(0);
@@ -534,7 +534,7 @@ describe("run in mode: render", () => {
           future: value,
           rulesets: [{ name: "tags", target: "tag" }],
         });
-        const renderedFile = setMergeEnv(dir, [layer("fleet.yml"), top]);
+        const renderedFile = setRenderEnv(dir, [layer("fleet.yml"), top]);
         expect(await run({ api: new MockApi({}), io: testIo })).toBe(1);
         expect(existsSync(renderedFile)).toBe(false);
         expect(captured).toEqual([

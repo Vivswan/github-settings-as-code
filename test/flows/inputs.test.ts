@@ -164,7 +164,7 @@ describe("the mode input", () => {
   test.each([
     ["layering", { layering: "replace" }, ["layering"]],
     [
-      "both merge-only inputs",
+      "both render-only inputs",
       { layering: "deep", "rendered-file": "out.yml" },
       ["rendered-file", "layering"],
     ],
@@ -191,7 +191,7 @@ describe("the mode input", () => {
     });
   });
 
-  test("a merge-only input set beside a snapshot-only one is reported first: the first problem wins", () => {
+  test("a render-only input set beside a snapshot-only one is reported first: the first problem wins", () => {
     expect(
       rejection(single({ mode: "check", "rendered-file": "out.yml", "snapshot-dir": "snapshots" })),
     ).toEqual({ code: "input-render-only", inputs: ["rendered-file"], mode: "check" });

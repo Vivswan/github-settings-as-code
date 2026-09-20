@@ -93,7 +93,7 @@ const SPECIMENS = {
     'the "repos", "repos-dir" inputs do not apply to mode: render, which only folds the ' +
       "settings-file layers into rendered-file: it never targets a repository, calls the GitHub API, " +
       "delivers a report, or narrows the sections it writes. Remove the inputs, or move them to " +
-      "the apply or check step that runs the merged document",
+      "the apply or check step that runs the rendered document",
   ],
   "input-settings-file-empty": [
     { code: "input-settings-file-empty", value: "," },
@@ -224,11 +224,11 @@ const SPECIMENS = {
     { code: "rendered-file-is-layer", renderedFile: "./repo.yml", index: 1, layer: "repo.yml" },
     'the "rendered-file" input "./repo.yml" is layer 2 of the "settings-file" list ("repo.yml"): ' +
       "the render would overwrite that layer with the folded document, and the next run would fold " +
-      "the merged document as a layer. Write the merged document to a path outside the layer list",
+      "the rendered document as a layer. Write the rendered document to a path outside the layer list",
   ],
   "rendered-file-unwritable": [
     { code: "rendered-file-unwritable", path: "out/merged.yml", reason: "EACCES" },
-    'cannot write the merged document to out/merged.yml: EACCES. Check that the "rendered-file" input names a writable path',
+    'cannot write the rendered document to out/merged.yml: EACCES. Check that the "rendered-file" input names a writable path',
   ],
   "snapshot-file-is-settings-file": [
     {
@@ -321,7 +321,7 @@ describe("describeProblem", () => {
       "one rejected merge input reads in the singular",
       { code: "input-rejected-in-render", inputs: ["repos"] },
       'the "repos" input does not apply to mode: render, which only folds the settings-file layers into rendered-file: it never targets a repository, ' +
-        "calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input, or move it to the apply or check step that runs the merged document",
+        "calls the GitHub API, delivers a report, or narrows the sections it writes. Remove the input, or move it to the apply or check step that runs the rendered document",
     ],
     [
       "two snapshot-only inputs read in the plural",
@@ -375,7 +375,7 @@ describe("describeProblem", () => {
       'repos-dir "repos" has 1 invalid settings file:\n- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes',
     ],
     [
-      "one merge-only input reads in the singular",
+      "one render-only input reads in the singular",
       { code: "input-render-only", inputs: ["layering"], mode: "apply" },
       'the "layering" input only applies to mode: render, but this run is in apply mode, so it would never be used. Remove the input, or set mode: render to fold settings files',
     ],

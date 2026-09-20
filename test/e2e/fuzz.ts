@@ -1051,8 +1051,8 @@ async function runMergePredicted(
       problems.push(`refused stack: no ::error:: line names the refused layer ${prediction.layer}`);
     }
   } else if (prediction.kind === "invalid") {
-    if (!errorNames("the merged settings document")) {
-      problems.push("invalid fold: no ::error:: line names the merged settings document");
+    if (!errorNames("the rendered settings document")) {
+      problems.push("invalid fold: no ::error:: line names the rendered settings document");
     }
   } else {
     // mode: render emits no other notices, so the count catches a deletion the oracle did not predict.

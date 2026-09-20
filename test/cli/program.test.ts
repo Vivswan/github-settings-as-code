@@ -270,7 +270,7 @@ describe("the --json failure envelope", () => {
       "skipped-sections": [],
       "repos-result": {},
       problem:
-        'mode: render needs a "rendered-file" input: the path the merged settings document is written to. Set it (for example .github/settings.merged.yml) and feed that path to a later apply or check step as its settings-file',
+        'mode: render needs a "rendered-file" input: the path the rendered settings document is written to. Set it (for example .github/settings.rendered.yml) and feed that path to a later apply or check step as its settings-file',
     });
   });
 });
