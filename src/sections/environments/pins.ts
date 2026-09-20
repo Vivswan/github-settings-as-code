@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { agree, countNoun } from "../../text.js";
 import { repoVariables } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
@@ -145,12 +146,14 @@ function rankPins(
   const pins = nodes
     .map((node) => ({ position: node.position, name: node.environment.name }))
     .sort((a, b) => a.position - b.position);
-  liveByIdentity(
-    { key: ctx.section },
-    "pinned environment",
-    pins,
-    (pin) => pinKey(pin.name),
-    (pin) => liveIdentity(pin.name, { position: pin.position }),
+  raise(
+    liveByIdentity(
+      { key: ctx.section },
+      "pinned environment",
+      pins,
+      (pin) => pinKey(pin.name),
+      (pin) => liveIdentity(pin.name, { position: pin.position }),
+    ),
   );
   return pins;
 }

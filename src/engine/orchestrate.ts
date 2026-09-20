@@ -396,7 +396,7 @@ export async function runForRepo(
         failed = true;
         continue;
       }
-      // throwFor()-raised errors already carry section, cause, and fix; anything else gets the section prefixed. A landed
+      // failureFor() messages already carry section, cause, and fix; anything else gets the section prefixed. A landed
       // request is a real mutation with or without its line, so say so.
       const message = error instanceof Error ? error.message : String(error);
       const prefixed = message.startsWith(`${section.key}:`)

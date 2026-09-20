@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   missingDrift,
@@ -99,12 +100,14 @@ function rejectDuplicateVariableNames(
   entries: readonly VariableEntry[],
   what?: string,
 ): void {
-  rejectDuplicates(
-    section,
-    entries,
-    (variable) => variableKey(variable.name),
-    (variable) => variable.name,
-    what,
+  raise(
+    rejectDuplicates(
+      section,
+      entries,
+      (variable) => variableKey(variable.name),
+      (variable) => variable.name,
+      what,
+    ),
   );
 }
 
@@ -118,12 +121,14 @@ export function liveVariablesByKey(
   noun: string,
   live: readonly LiveVariable[],
 ): Map<string, LiveVariable> {
-  return liveByIdentity(
-    section,
-    noun,
-    live,
-    (variable) => variableKey(variable.name),
-    (variable) => liveIdentity(variable.name),
+  return raise(
+    liveByIdentity(
+      section,
+      noun,
+      live,
+      (variable) => variableKey(variable.name),
+      (variable) => liveIdentity(variable.name),
+    ),
   );
 }
 

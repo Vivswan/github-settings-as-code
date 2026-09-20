@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { overrideAdviceLevel, PermissionDenied } from "../../src/sections/contract/errors.js";
+import {
+  overrideAdviceLevel,
+  PermissionDenied,
+  raise,
+} from "../../src/sections/contract/errors.js";
 import {
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
@@ -45,7 +49,7 @@ describe("callGraphql", () => {
     const api = new MockApi({
       "GRAPHQL RepoToggles": { data: { repository: { id: "R_1" } } },
     });
-    const data = await callGraphql(ctx(api), section, READ_OP, { owner: "o", repo: "r" });
+    const data = raise(await callGraphql(ctx(api), section, READ_OP, { owner: "o", repo: "r" }));
     expect(data).toEqual({ repository: { id: "R_1" } });
     expect(api.calls).toEqual([
       {
@@ -65,12 +69,14 @@ describe("callGraphql", () => {
     });
     let thrown: unknown;
     try {
-      await callGraphql(
-        ctx(api),
-        section,
-        READ_OP,
-        { owner: "o", repo: "r" },
-        { describe: "reading repository toggles" },
+      raise(
+        await callGraphql(
+          ctx(api),
+          section,
+          READ_OP,
+          { owner: "o", repo: "r" },
+          { describe: "reading repository toggles" },
+        ),
       );
     } catch (error) {
       thrown = error;
@@ -86,7 +92,7 @@ describe("callGraphql", () => {
       "GRAPHQL RepoToggles": { error: { status: 422, message: "bad value", body: "" } },
     });
     await expect(
-      callGraphql(ctx(api), section, READ_OP, { owner: "o", repo: "r" }),
+      callGraphql(ctx(api), section, READ_OP, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(
       new Error(
         'repository: GRAPHQL RepoToggles: 422 bad value. The API rejected the request; fix the "repository" values in the settings file to satisfy the message above',
@@ -120,7 +126,7 @@ describe("callGraphql", () => {
     });
     let thrown: unknown;
     try {
-      await callGraphql(ctx(api), sectionWithWrite, op, { owner: "o", repo: "r" });
+      raise(await callGraphql(ctx(api), sectionWithWrite, op, { owner: "o", repo: "r" }));
     } catch (error) {
       thrown = error;
     }
@@ -147,20 +153,22 @@ describe("tryCallGraphql tolerance", () => {
         error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
       },
     });
-    const result = await tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" });
+    const result = raise(
+      await tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
+    );
     expect(result).toEqual({
       error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
     });
   });
 
-  test("an undeclared observed type still classifies through throwFor", async () => {
+  test("an undeclared observed type still classifies through failureFor", async () => {
     const api = new MockApi({
       "GRAPHQL RepoToggles": {
         error: { status: 403, message: "denied", body: "", graphqlTypes: ["FORBIDDEN"] },
       },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
+      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 
@@ -178,7 +186,7 @@ describe("tryCallGraphql tolerance", () => {
       },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
+      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 
@@ -187,7 +195,7 @@ describe("tryCallGraphql tolerance", () => {
       "GRAPHQL RepoToggles": { error: { status: 404, message: "Not Found", body: "" } },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
+      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 
@@ -198,7 +206,13 @@ describe("tryCallGraphql tolerance", () => {
       },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }, { tolerate: [] }),
+      tryCallGraphql(
+        ctx(api),
+        section,
+        tolerantOp,
+        { owner: "o", repo: "r" },
+        { tolerate: [] },
+      ).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 
@@ -213,7 +227,7 @@ describe("tryCallGraphql tolerance", () => {
         { owner: "o", repo: "r" },
         // @ts-expect-error - UNPROCESSABLE is not a declared outcome of this op
         { tolerate: ["UNPROCESSABLE"] },
-      );
+      ).then(raise);
     void smuggle;
     expect(api.calls).toEqual([]);
   });
@@ -232,7 +246,7 @@ describe("tryCallGraphql tolerance", () => {
       },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
+      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(
       new Error(
         "repository: GRAPHQL RepoToggles: 403 slow down. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit",
@@ -256,7 +270,7 @@ describe("tryCallGraphql tolerance", () => {
       },
     });
     await expect(
-      tryCallGraphql(ctx(api), section, forbiddenTolerant, { owner: "o", repo: "r" }),
+      tryCallGraphql(ctx(api), section, forbiddenTolerant, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 });
@@ -344,10 +358,12 @@ describe("listGraphqlConnection", () => {
 
   test("walks the cursor until hasNextPage is false, passing null first", async () => {
     const api = pagedApi([page(["a", "b"], "CUR1", true), page(["c"], null, false)]);
-    const listed = await listGraphqlConnection(ctx(api), section, pagedOp, {
-      owner: "o",
-      repo: "r",
-    });
+    const listed = raise(
+      await listGraphqlConnection(ctx(api), section, pagedOp, {
+        owner: "o",
+        repo: "r",
+      }),
+    );
     expect(listed).toEqual({ items: [{ id: "a" }, { id: "b" }, { id: "c" }] });
     expect(api.calls.map((c) => (c.payload as { cursor: unknown }).cursor)).toEqual([null, "CUR1"]);
   });
@@ -363,10 +379,12 @@ describe("listGraphqlConnection", () => {
         error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
       },
     });
-    const listed = await listGraphqlConnection(ctx(api), section, tolerantPaged, {
-      owner: "o",
-      repo: "r",
-    });
+    const listed = raise(
+      await listGraphqlConnection(ctx(api), section, tolerantPaged, {
+        owner: "o",
+        repo: "r",
+      }),
+    );
     expect(listed).toEqual({
       error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
     });
@@ -396,7 +414,9 @@ describe("listGraphqlConnection", () => {
       };
     };
     await expect(
-      listGraphqlConnection(ctx(api), section, tolerantPaged, { owner: "o", repo: "r" }),
+      listGraphqlConnection(ctx(api), section, tolerantPaged, { owner: "o", repo: "r" }).then(
+        raise,
+      ),
     ).rejects.toThrow(PermissionDenied);
   });
 
@@ -411,18 +431,20 @@ describe("listGraphqlConnection", () => {
 
   test("a caller-supplied cursor variable does not compile (the loop owns it)", async () => {
     const api = pagedApi([page([], null, false)]);
-    await listGraphqlConnection(ctx(api), section, pagedOp, {
-      owner: "o",
-      repo: "r",
-      // @ts-expect-error - the connection loop owns the cursor variable
-      cursor: "SMUGGLED",
-    });
+    raise(
+      await listGraphqlConnection(ctx(api), section, pagedOp, {
+        owner: "o",
+        repo: "r",
+        // @ts-expect-error - the connection loop owns the cursor variable
+        cursor: "SMUGGLED",
+      }),
+    );
   });
 
   test("a response without the connection shape fails loudly", async () => {
     const api = pagedApi([{ repository: { rules: { nodes: "not-a-list" } } }]);
     await expect(
-      listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
+      listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(
       new Error(
         'repository: GRAPHQL RepoRules returned a response without a "repository.rules" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation\'s query must select both under that path',
@@ -447,7 +469,7 @@ describe("listGraphqlConnection", () => {
         return serve(op, variables, slug, mark);
       };
       await expect(
-        listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
+        listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }).then(raise),
       ).rejects.toThrow(
         new Error(
           'repository: GRAPHQL RepoRules reported hasNextPage without a new endCursor at "repository.rules", so the pagination cannot advance. The operation\'s query must select pageInfo{hasNextPage, endCursor}',
@@ -456,12 +478,12 @@ describe("listGraphqlConnection", () => {
     }
   });
 
-  test("errors inside the loop classify through throwFor", async () => {
+  test("errors inside the loop classify through failureFor", async () => {
     const api = new MockApi({
       "GRAPHQL RepoRules": { error: { status: 403, message: "denied", body: "" } },
     });
     await expect(
-      listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
+      listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }).then(raise),
     ).rejects.toThrow(PermissionDenied);
   });
 });

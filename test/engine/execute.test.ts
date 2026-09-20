@@ -455,8 +455,8 @@ describe("executePlan", () => {
     ]);
   });
 
-  test("a tolerated status renders the operation's own outcome, never throwFor's", async () => {
-    // Neither tolerated 409 reaches throwFor, whose 409 text would tell the user to fix the settings file.
+  test("a tolerated status renders the operation's own outcome, never failureFor's", async () => {
+    // Neither tolerated 409 reaches failureFor, whose 409 text would tell the user to fix the settings file.
     const api = new MockApi({
       "POST /repos/o/r/labels": { error: CONFLICT },
       "GRAPHQL ExecutorWrite": { data: {} },
@@ -503,7 +503,7 @@ describe("executePlan", () => {
     });
   });
 
-  test("tolerated statuses default to the declared errors; an explicit list narrows them; the rest classify through throwFor", async () => {
+  test("tolerated statuses default to the declared errors; an explicit list narrows them; the rest classify through failureFor", async () => {
     const outcome = (error: { status: number }): ToleratedOutcome => ({
       note: `absorbed ${error.status}`,
     });
@@ -599,7 +599,7 @@ describe("executePlan", () => {
   });
 
   test("a rate-limited error is never a tolerated outcome, whatever the tolerance names", async () => {
-    // A rate limit can arrive as a 403; a tolerance naming 403 on an endpoint that declares it still hands the error to throwFor's rate-limit branch.
+    // A rate limit can arrive as a 403; a tolerance naming 403 on an endpoint that declares it still hands the error to failureFor's rate-limit branch.
     const limited = {
       ...SECTION,
       endpoints: {

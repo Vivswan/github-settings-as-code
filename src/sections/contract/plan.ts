@@ -4,6 +4,7 @@
  * planned operation can only name a write role, so "check mode issued a write" is unrepresentable.
  */
 
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { ApiError, GitHubClient } from "../../github/api.js";
@@ -14,6 +15,7 @@ import {
   endpointMethod,
   type PathParams,
 } from "./endpoints.js";
+import { raise } from "./errors.js";
 import type {
   GraphqlOpDecl,
   GraphqlPaginatedReadDecl,
@@ -435,7 +437,7 @@ export type Late<T> = (exec: ExecTools) => T | Promise<T>;
 
 /**
  * A tolerated status means the operation did not apply: a note in place of its change line, or a
- * failure carrying the section's own advice where throwFor's generic text would mislead.
+ * failure carrying the section's own advice where failureFor's generic text would mislead.
  */
 export type ToleratedOutcome =
   | { readonly note: string; readonly failure?: never }
@@ -583,28 +585,42 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
       continue;
     }
     const endpoint = snapshot(declaration);
-    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string): T =>
+    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string) =>
       parseLive(meta, endpoint, schema, data, describe);
     const bound: BoundRead<EndpointDecl> = {
       call: async (schema, ...args) =>
-        parse(schema, await call(ctx, meta, endpoint, ...args), args[0]?.describe),
-      tryCall: async (schema, ...args) => {
-        const result = await tryCall(ctx, meta, endpoint, ...args);
-        return "error" in result ? result : { data: parse(schema, result.data, args[0]?.describe) };
-      },
-      probeAbsent: async (schema, ...args) => {
-        const result = await probeAbsent(ctx, meta, endpoint, ...args);
-        return "missing" in result
-          ? result
-          : { data: parse(schema, result.data, args[0]?.describe) };
-      },
+        raise(
+          (await call(ctx, meta, endpoint, ...args)).andThen((data) =>
+            parse(schema, data, args[0]?.describe),
+          ),
+        ),
+      tryCall: async (schema, ...args) =>
+        raise(
+          (await tryCall(ctx, meta, endpoint, ...args)).andThen((result) =>
+            "error" in result
+              ? ok(result)
+              : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
+          ),
+        ),
+      probeAbsent: async (schema, ...args) =>
+        raise(
+          (await probeAbsent(ctx, meta, endpoint, ...args)).andThen((result) =>
+            "missing" in result
+              ? ok(result)
+              : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
+          ),
+        ),
       listAll: async (item, ...args) =>
-        parse(z.array(item), await listAll(ctx, meta, endpoint, ...args), args[0]?.describe),
+        raise(
+          (await listAll(ctx, meta, endpoint, ...args)).andThen((items) =>
+            parse(z.array(item), items, args[0]?.describe),
+          ),
+        ),
       listAllEnveloped: async (envelopeKey, item, ...args) =>
-        parse(
-          z.array(item),
-          await listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args),
-          args[0]?.describe,
+        raise(
+          (await listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args)).andThen((items) =>
+            parse(z.array(item), items, args[0]?.describe),
+          ),
         ),
     };
     port[role] = endpoint.phase === "execution" ? gated(bound) : bound;
@@ -614,25 +630,37 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
       continue;
     }
     const op = snapshot(declaration);
-    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string): T =>
+    const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string) =>
       parseLive(meta, op, schema, data, describe);
     const bound: BoundGraphqlRead<GraphqlOpDecl> = {
       call: async (schema, variables, opts) =>
-        parse(schema, await callGraphql(ctx, meta, op, variables, opts), opts?.describe),
-      tryCall: async (schema, variables, opts) => {
-        const result = await tryCallGraphql(ctx, meta, op, variables, opts);
-        return "error" in result ? result : { data: parse(schema, result.data, opts?.describe) };
-      },
+        raise(
+          (await callGraphql(ctx, meta, op, variables, opts)).andThen((data) =>
+            parse(schema, data, opts?.describe),
+          ),
+        ),
+      tryCall: async (schema, variables, opts) =>
+        raise(
+          (await tryCallGraphql(ctx, meta, op, variables, opts)).andThen((result) =>
+            "error" in result
+              ? ok(result)
+              : parse(schema, result.data, opts?.describe).map((data) => ({ data })),
+          ),
+        ),
       ...(op.connection === undefined
         ? {}
         : {
             listConnection: async <T>(
               node: z.ZodType<T>,
               variables: Readonly<Record<string, unknown>> & { cursor?: never },
-            ) => {
-              const result = await listGraphqlConnection(ctx, meta, op, variables);
-              return "error" in result ? result : { items: parse(z.array(node), result.items) };
-            },
+            ) =>
+              raise(
+                (await listGraphqlConnection(ctx, meta, op, variables)).andThen((result) =>
+                  "error" in result
+                    ? ok(result)
+                    : parse(z.array(node), result.items).map((items) => ({ items })),
+                ),
+              ),
           }),
     };
     port[role] = op.phase === "execution" ? gated(bound) : bound;

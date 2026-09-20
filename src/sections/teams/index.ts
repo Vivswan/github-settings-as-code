@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
@@ -105,12 +106,14 @@ async function probeTeamRole(
  * declared entries do); plan() and snapshot() both index through it.
  */
 function teamsBySlug(section: SectionMeta, live: readonly LiveTeam[]): Map<string, LiveTeam> {
-  return liveByIdentity(
-    section,
-    "team",
-    live,
-    (team) => team.slug.toLowerCase(),
-    (team) => liveIdentity(team.slug, { team_id: team.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "team",
+      live,
+      (team) => team.slug.toLowerCase(),
+      (team) => liveIdentity(team.slug, { team_id: team.id }),
+    ),
   );
 }
 
@@ -132,11 +135,13 @@ export const teamsSection = {
   },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    rejectDuplicates(
-      this,
-      desired,
-      (t) => t.name.toLowerCase(),
-      (t) => t.name,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (t) => t.name.toLowerCase(),
+        (t) => t.name,
+      ),
     );
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // The listing is read BEFORE the declared walk, so the undeclared teams are judged against the state the grants

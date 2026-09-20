@@ -1,11 +1,13 @@
 /**
  * The ONE place a section's operations touch the API. Operations go through the request helpers so error classification
- * (PermissionDenied vs hard error, the hints) matches the reads'.
+ * (a denial vs a hard failure, the hints) matches the reads'; a failure comes back as the thrown form the section loop
+ * classifies (errorOf), beside what landed before it.
  */
 
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import { endpointMethod } from "../sections/contract/endpoints.js";
+import { errorOf } from "../sections/contract/errors.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
 import {
@@ -117,12 +119,20 @@ export async function executePlan(
           describe: op.describe,
         };
         if (op.tolerate === undefined) {
-          response = await callDeclared(ctx, section, endpoint, request);
+          const called = await callDeclared(ctx, section, endpoint, request);
+          if (called.isErr()) {
+            return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+          }
+          response = called.value;
         } else {
-          const result = await tryCallDeclared(ctx, section, endpoint, {
+          const called = await tryCallDeclared(ctx, section, endpoint, {
             ...request,
             tolerated: declaredTolerance(endpoint, op.tolerate.statuses),
           });
+          if (called.isErr()) {
+            return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+          }
+          const result = called.value;
           if ("error" in result) {
             const outcome = op.tolerate.outcome(result.error);
             if (outcome.failure !== undefined) {
@@ -148,10 +158,14 @@ export async function executePlan(
         await op.before?.(exec);
         const variables =
           typeof op.variables === "function" ? await op.variables(exec) : op.variables;
-        response = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
+        const called = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
           describe: op.describe,
           carriesSecret: resolved(),
         });
+        if (called.isErr()) {
+          return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+        }
+        response = called.value;
       }
       landed++;
       const lines = typeof op.change === "function" ? op.change(response) : op.change;

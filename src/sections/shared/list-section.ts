@@ -20,6 +20,7 @@ import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
@@ -741,11 +742,13 @@ async function planList<Key extends string>(
     return { write, name, claims };
   });
   // Every identity an entry claims must be its alone: two entries resolving to one resource would fight on every run.
-  rejectDuplicates(
-    section,
-    writes.flatMap((w) => w.claims.map((claim) => ({ claim, name: w.name }))),
-    (c) => c.claim,
-    (c) => c.name,
+  raise(
+    rejectDuplicates(
+      section,
+      writes.flatMap((w) => w.claims.map((claim) => ({ claim, name: w.name }))),
+      (c) => c.claim,
+      (c) => c.name,
+    ),
   );
 
   const declaredConflicts = decl.conflicts?.declared?.(writes.map((w) => w.write)) ?? [];
@@ -762,12 +765,14 @@ async function planList<Key extends string>(
     return { item, comparable, name, key: fold(name) };
   });
   // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
-  const liveByKey = liveByIdentity(
-    section,
-    noun,
-    liveItems,
-    (item) => item.key,
-    (item) => liveIdentity(item.name, decl.address(item.item)),
+  const liveByKey = raise(
+    liveByIdentity(
+      section,
+      noun,
+      liveItems,
+      (item) => item.key,
+      (item) => liveIdentity(item.name, decl.address(item.item)),
+    ),
   );
   const liveConflicts =
     decl.conflicts?.live?.(
@@ -973,12 +978,14 @@ async function snapshotList(
     const name = nameOf(lens.fromLive(item), identity.field);
     return { item, name, key: identity.fold(name) };
   });
-  liveByIdentity(
-    section,
-    noun,
-    items,
-    (item) => item.key,
-    (item) => liveIdentity(item.name, decl.address(item.item)),
+  raise(
+    liveByIdentity(
+      section,
+      noun,
+      items,
+      (item) => item.key,
+      (item) => liveIdentity(item.name, decl.address(item.item)),
+    ),
   );
   const entries: object[] = [];
   for (const { item, name } of items) {

@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
@@ -32,12 +33,14 @@ function workflowsByPath(
   section: SectionMeta,
   live: readonly LiveWorkflow[],
 ): Map<string, LiveWorkflow> {
-  return liveByIdentity(
-    section,
-    "workflow",
-    live.filter((workflow) => workflow.state !== "deleted"),
-    (workflow) => workflow.path,
-    (workflow) => liveIdentity(workflow.path, { workflow_id: workflow.id }),
+  return raise(
+    liveByIdentity(
+      section,
+      "workflow",
+      live.filter((workflow) => workflow.state !== "deleted"),
+      (workflow) => workflow.path,
+      (workflow) => liveIdentity(workflow.path, { workflow_id: workflow.id }),
+    ),
   );
 }
 
@@ -73,11 +76,13 @@ export const workflowsSection = {
   },
   async plan(ctx, desired) {
     // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
-    rejectDuplicates(
-      this,
-      desired,
-      (w) => workflowPath(w.path),
-      (w) => w.path,
+    raise(
+      rejectDuplicates(
+        this,
+        desired,
+        (w) => workflowPath(w.path),
+        (w) => w.path,
+      ),
     );
     const present = workflowsByPath(
       this,

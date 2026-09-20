@@ -76,7 +76,7 @@ async function proveClassified(
   const fail = await snapshotOne(section, fake, "fail");
   expect(fail.status, `${section.key} under fail`).not.toBe("unsupported");
   if (fail.status === "failed") {
-    // A failure is a denial and nothing else: the detail is throwFor's grant advice, never a stray error.
+    // A failure is a denial and nothing else: the detail is failureFor's grant advice, never a stray error.
     expect(fail.detail[0], `${section.key} under fail`).toMatch(GRANT_ADVICE);
   }
   if (token.denialStyle === 403) {

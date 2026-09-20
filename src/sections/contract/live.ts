@@ -4,9 +4,11 @@
  * endpoint and the defects, instead of surfacing later as a silent misread.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import type { z } from "zod";
 import { countNoun } from "../../text.js";
 import { endpointMethod, endpointPath } from "./endpoints.js";
+import type { SectionFailure } from "./errors.js";
 import type { FailingOp, SectionMeta } from "./module.js";
 import { collidingPairs } from "./requests.js";
 
@@ -54,14 +56,15 @@ export function liveByIdentity<T, Key extends string>(
   items: readonly T[],
   keyOf: (item: T) => Key,
   describe: (item: T) => LiveIdentity,
-): Map<Key, T> {
+): Result<Map<Key, T>, SectionFailure> {
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {
-    throw new Error(
-      `${section.key}: GitHub holds ${plural(noun)} that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again`,
-    );
+    return err({
+      kind: "live-duplicate",
+      message: `${section.key}: GitHub holds ${plural(noun)} that resolve to one identity: ${collisions.join("; ")}. This section manages one ${noun} per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again`,
+    });
   }
-  return new Map(items.map((item) => [keyOf(item), item]));
+  return ok(new Map(items.map((item) => [keyOf(item), item])));
 }
 
 /**
@@ -75,10 +78,10 @@ export function parseLive<T>(
   schema: z.ZodType<T>,
   data: unknown,
   describe?: string,
-): T {
+): Result<T, SectionFailure> {
   const parsed = schema.safeParse(data);
   if (parsed.success) {
-    return parsed.data;
+    return ok(parsed.data);
   }
   const issues = parsed.error.issues;
   const shown = issues.slice(0, 3).map((issue) => {
@@ -96,7 +99,8 @@ export function parseLive<T>(
     "route" in op
       ? "GitHub REST docs for this endpoint"
       : "GitHub GraphQL reference for this operation";
-  throw new Error(
-    `${section.key}: ${request}${where} returned a body outside the documented shape - ${shown.join("; ")}${more}. Check the "api-version" input against the ${reference}`,
-  );
+  return err({
+    kind: "malformed",
+    message: `${section.key}: ${request}${where} returned a body outside the documented shape - ${shown.join("; ")}${more}. Check the "api-version" input against the ${reference}`,
+  });
 }

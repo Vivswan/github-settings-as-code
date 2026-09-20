@@ -1,3 +1,4 @@
+import { err, ok, type Result } from "neverthrow";
 import {
   type ApiError,
   isRateLimitError,
@@ -16,7 +17,7 @@ import {
   type PathParams,
   toleratedStatuses,
 } from "./endpoints.js";
-import { throwFor } from "./errors.js";
+import { failureFor, type SectionFailure } from "./errors.js";
 import {
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
@@ -38,7 +39,7 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
 /**
  * A request the executor marked as carrying a resolved secret has its failure rebuilt HERE, on the engine's side of
  * the client port, so the guarantee holds for a library caller's own GitHubClient: such a client's 422 body echoing a
- * webhook secret would otherwise render through throwFor into outcomes[].detail and a delivered report. A throw is
+ * webhook secret would otherwise render through failureFor into outcomes[].detail and a delivered report. A throw is
  * replaced too, since a transport error is free text that can quote the request body.
  *
  * The rate-limit classification is read from the message BEFORE the rebuild drops it: the port carries no headers,
@@ -49,28 +50,31 @@ async function issue<D>(
   label: string,
   carriesSecret: boolean,
   send: (mark: RequestMark | undefined) => Promise<{ data: D } | { error: ApiError }>,
-): Promise<{ data: D } | { error: ApiError }> {
+): Promise<Result<{ data: D } | { error: ApiError }, SectionFailure>> {
   if (!carriesSecret) {
-    return send(undefined);
+    return ok(await send(undefined));
   }
   let result: { data: D } | { error: ApiError };
   try {
     result = await send({ carriesSecret: true });
   } catch {
-    throw transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API");
+    return err({
+      kind: "transport",
+      message: transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API"),
+    });
   }
   if (!("error" in result)) {
-    return result;
+    return ok(result);
   }
   const classified = isRateLimitError(result.error)
     ? { ...result.error, rateLimited: true as const }
     : result.error;
-  return { error: withheld(classified, SECRET_RESPONSE_WITHHELD) };
+  return ok({ error: withheld(classified, SECRET_RESPONSE_WITHHELD) });
 }
 
 /**
- * Permission failures become PermissionDenied (the orchestrator's partial-success policy handles them); everything
- * else is a hard error carrying the API's message. `payload?: never` (here and on tryCall) is what makes a payload
+ * Permission failures classify as a denial (the orchestrator's partial-success policy handles them); everything
+ * else is a hard failure carrying the API's message. `payload?: never` (here and on tryCall) is what makes a payload
  * reach the wire only through the erased executor cores, whose `carriesSecret` is required: an optional-absent key
  * alone would still admit a widened variable, which excess-property checks do not see.
  */
@@ -82,7 +86,7 @@ export async function call<E extends EndpointDecl>(
     E,
     { query?: Readonly<Record<string, string>>; payload?: never; describe?: string }
   >
-): Promise<unknown> {
+): Promise<Result<unknown, SectionFailure>> {
   return callDeclared(ctx, section, endpoint, { ...args[0], carriesSecret: false });
 }
 
@@ -101,19 +105,22 @@ export async function callDeclared(
     carriesSecret: boolean;
     describe?: string;
   },
-): Promise<unknown> {
+): Promise<Result<unknown, SectionFailure>> {
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts.params, opts.query);
-  const result = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
+  const issued = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
     ctx.api.tryRequest(method, path, opts.payload, mark),
   );
-  if ("error" in result) {
-    throwFor(section, method, path, result.error, {
-      operation: opts.describe,
-      op: endpoint,
-    });
-  }
-  return result.data;
+  return issued.andThen((result) =>
+    "error" in result
+      ? err(
+          failureFor(section, method, path, result.error, {
+            operation: opts.describe,
+            op: endpoint,
+          }),
+        )
+      : ok(result.data),
+  );
 }
 
 /** Tolerated statuses come back as { error }; an explicit `tolerate` only ever tolerates FEWER than declared. */
@@ -130,7 +137,7 @@ export async function tryCall<E extends EndpointDecl>(
       describe?: string;
     }
   >
-): Promise<{ data: unknown } | { error: ApiError }> {
+): Promise<Result<{ data: unknown } | { error: ApiError }, SectionFailure>> {
   const opts = args[0];
   return tryCallDeclared(ctx, section, endpoint, {
     ...opts,
@@ -177,22 +184,22 @@ export async function tryCallDeclared(
     tolerated: (status: number) => boolean;
     describe?: string;
   },
-): Promise<{ data: unknown } | { error: ApiError }> {
+): Promise<Result<{ data: unknown } | { error: ApiError }, SectionFailure>> {
   const method = endpointMethod(endpoint.route);
   const path = expand(endpoint, ctx, opts.params, opts.query);
-  const result = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
+  const issued = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
     ctx.api.tryRequest(method, path, opts.payload, mark),
   );
-  if (
-    "error" in result &&
-    (isRateLimitError(result.error) || !opts.tolerated(result.error.status))
-  ) {
-    throwFor(section, method, path, result.error, {
-      operation: opts.describe,
-      op: endpoint,
-    });
-  }
-  return result;
+  return issued.andThen((result) =>
+    "error" in result && (isRateLimitError(result.error) || !opts.tolerated(result.error.status))
+      ? err(
+          failureFor(section, method, path, result.error, {
+            operation: opts.describe,
+            op: endpoint,
+          }),
+        )
+      : ok(result),
+  );
 }
 
 /**
@@ -212,7 +219,7 @@ export async function probeAbsent<E extends EndpointDecl>(
       describe?: string;
     }
   >
-): Promise<{ data: unknown } | { missing: true }> {
+): Promise<Result<{ data: unknown } | { missing: true }, SectionFailure>> {
   const options = args[0];
   const path = expand(endpoint, ctx, options?.params, options?.query);
   const tolerated = declaredTolerance(endpoint, options?.tolerate);
@@ -220,14 +227,16 @@ export async function probeAbsent<E extends EndpointDecl>(
   if ("error" in result) {
     // A rate-limited 403 is not an absent resource (the tryCallDeclared rule).
     if (!isRateLimitError(result.error) && tolerated(result.error.status)) {
-      return { missing: true };
+      return ok({ missing: true });
     }
-    throwFor(section, "GET", path, result.error, {
-      operation: options?.describe,
-      op: endpoint,
-    });
+    return err(
+      failureFor(section, "GET", path, result.error, {
+        operation: options?.describe,
+        op: endpoint,
+      }),
+    );
   }
-  return { data: result.data };
+  return ok({ data: result.data });
 }
 
 /** `extract` adapts the response shape (bare array, or a {total_count, <key>: []} envelope). */
@@ -239,17 +248,20 @@ async function listPages(
   extract: (data: unknown) => unknown[] | null,
   shape: string,
   describe?: string,
-): Promise<unknown[]> {
+): Promise<Result<unknown[], SectionFailure>> {
   const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
   if ("error" in result) {
-    throwFor(section, "GET", path, result.error, { operation: describe, op: endpoint });
-  }
-  if ("malformed" in result) {
-    throw new Error(
-      `${section.key}: GET ${path} returned a JSON value without ${shape}, so the response cannot be paginated. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    return err(
+      failureFor(section, "GET", path, result.error, { operation: describe, op: endpoint }),
     );
   }
-  return result.items;
+  if ("malformed" in result) {
+    return err({
+      kind: "malformed",
+      message: `${section.key}: GET ${path} returned a JSON value without ${shape}, so the response cannot be paginated. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+    });
+  }
+  return ok(result.items);
 }
 
 export async function listAll<E extends EndpointDecl>(
@@ -257,7 +269,7 @@ export async function listAll<E extends EndpointDecl>(
   section: SectionMeta,
   endpoint: E,
   ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
-): Promise<unknown[]> {
+): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
   return listPages(
@@ -278,7 +290,7 @@ export async function listAllEnveloped<E extends EndpointDecl>(
   endpoint: E,
   envelopeKey: string,
   ...args: OptsArg<E, { query?: Readonly<Record<string, string>>; describe?: string }>
-): Promise<unknown[]> {
+): Promise<Result<unknown[], SectionFailure>> {
   const opts = args[0];
   const path = expand(endpoint, ctx, opts?.params, opts?.query);
   return listPages(
@@ -302,14 +314,17 @@ export async function callGraphql<O extends GraphqlOpDecl>(
   op: O,
   variables: Readonly<GraphqlVariablesOf<O>>,
   opts?: { describe?: string; carriesSecret?: boolean },
-): Promise<Record<string, unknown>> {
-  const result = await issue(`GRAPHQL ${op.name}`, opts?.carriesSecret === true, (mark) =>
+): Promise<Result<Record<string, unknown>, SectionFailure>> {
+  const issued = await issue(`GRAPHQL ${op.name}`, opts?.carriesSecret === true, (mark) =>
     ctx.api.tryGraphql(op, variables, ctx.repo.slug, mark),
   );
-  if ("error" in result) {
-    throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
-  }
-  return result.data;
+  return issued.andThen((result) =>
+    "error" in result
+      ? err(
+          failureFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op }),
+        )
+      : ok(result.data),
+  );
 }
 
 /**
@@ -344,15 +359,15 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
     tolerate?: readonly (keyof O["outcomes"] & GraphqlTolerableError)[];
     describe?: string;
   },
-): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+): Promise<Result<{ data: Record<string, unknown> } | { error: ApiError }, SectionFailure>> {
   const tolerate: readonly GraphqlTolerableError[] = opts?.tolerate ?? toleratedGraphqlErrors(op);
   const result = await ctx.api.tryGraphql(op, variables, ctx.repo.slug);
-  if ("error" in result) {
-    if (!graphqlErrorTolerated(result.error, tolerate)) {
-      throwFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op });
-    }
+  if ("error" in result && !graphqlErrorTolerated(result.error, tolerate)) {
+    return err(
+      failureFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op }),
+    );
   }
-  return result;
+  return ok(result);
 }
 
 /**
@@ -366,7 +381,7 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   op: O,
   // The `cursor?: never` pin: the loop owns the variable, so a call site supplying its own does not compile.
   variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
-): Promise<{ items: unknown[] } | { error: ApiError }> {
+): Promise<Result<{ items: unknown[] } | { error: ApiError }, SectionFailure>> {
   const path = op.connection.path;
   const items: unknown[] = [];
   let cursor: string | null = null;
@@ -374,9 +389,9 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
     const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
     if ("error" in result) {
       if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
-        return result;
+        return ok(result);
       }
-      throwFor(section, "GRAPHQL", op.name, result.error, { op });
+      return err(failureFor(section, "GRAPHQL", op.name, result.error, { op }));
     }
     const connection = path.reduce<unknown>(
       (node, key) => (node as Record<string, unknown> | null)?.[key],
@@ -385,20 +400,22 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
     const nodes = connection?.nodes;
     const pageInfo = connection?.pageInfo;
     if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
-      throw new Error(
-        `${section.key}: GRAPHQL ${op.name} returned a response without a "${path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
-      );
+      return err({
+        kind: "malformed",
+        message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
+      });
     }
     items.push(...nodes);
     if (!pageInfo.hasNextPage) {
-      return { items };
+      return ok({ items });
     }
     const endCursor = pageInfo.endCursor;
     if (typeof endCursor !== "string" || endCursor === cursor) {
       // hasNextPage without a fresh endCursor would loop forever.
-      throw new Error(
-        `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
-      );
+      return err({
+        kind: "malformed",
+        message: `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
+      });
     }
     cursor = endCursor;
   }
@@ -437,11 +454,13 @@ export function rejectDuplicates<T>(
   keyOf: (item: T) => string,
   describe: (item: T) => string,
   what = `${section.key} entry`,
-): void {
+): Result<void, SectionFailure> {
   const collisions = collidingPairs(items, keyOf, describe);
   if (collisions.length > 0) {
-    throw new Error(
-      `${section.key}: the settings file declares entries that name the same ${what}: ${collisions.join("; ")}. Keep exactly one entry per resource`,
-    );
+    return err({
+      kind: "declared-duplicate",
+      message: `${section.key}: the settings file declares entries that name the same ${what}: ${collisions.join("; ")}. Keep exactly one entry per resource`,
+    });
   }
+  return ok(undefined);
 }

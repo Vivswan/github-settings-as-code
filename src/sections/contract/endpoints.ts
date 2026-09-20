@@ -7,7 +7,7 @@ import type { SectionPermission } from "./permissions.js";
 export type Route = keyof Endpoints | SupplementalRoute;
 
 /**
- * The statuses throwFor's permission branch swallows for a granted operation. A `hints` key on one is
+ * The statuses failureFor's permission branch swallows for a granted operation. A `hints` key on one is
  * dead advice (HintableStatus excludes them); `denialHint` carries an ambiguity, and `rejections` claims
  * back the one message GitHub reserves for a definite meaning.
  */
@@ -18,7 +18,7 @@ export type HintableStatus = 400 | 412 | 422;
 
 /**
  * A response whose status a denial shares but whose exact message GitHub reserves for one definite
- * meaning: the protection PUT's 404 "Branch not found". throwFor classifies a match ahead of its
+ * meaning: the protection PUT's 404 "Branch not found". failureFor classifies a match ahead of its
  * permission branch as a hard section error, so no on-missing-permission policy can skip it and the
  * grant advice never renders for it. The message must be one no denial body spells; the registry
  * test pins every declaration against the e2e mock's denial responses.
@@ -27,7 +27,7 @@ export interface DefinitiveRejection {
   readonly status: DenialStatus;
   /** Compared whole, never as a substring: "Not Found" is a fine-grained denial. */
   readonly message: string;
-  /** What to fix, as a lowercase clause without a trailing period; throwFor starts a sentence with it. */
+  /** What to fix, as a lowercase clause without a trailing period; failureFor starts a sentence with it. */
   readonly advice: string;
 }
 
@@ -98,7 +98,7 @@ interface EndpointDeclFields {
   readonly advisory?: boolean;
   /**
    * Payloads pass through verbatim, so a hint names the failure CLASS and points at the docs, never valid
-   * values that could go stale; throwFor appends it to the status's rejection message. Style: one or two sentences, no trailing period.
+   * values that could go stale; failureFor appends it to the status's rejection message. Style: one or two sentences, no trailing period.
    */
   readonly hints?: Readonly<Partial<Record<HintableStatus, string>>>;
   /**

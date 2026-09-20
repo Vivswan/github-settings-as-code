@@ -1,3 +1,4 @@
+import type { Result } from "neverthrow";
 import type { ApiError } from "../../github/api.js";
 import { isPermissionError, isRateLimitError } from "../../github/api.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
@@ -11,6 +12,38 @@ import {
 } from "./module.js";
 import { grantFor, type SectionPermission, samePermission } from "./permissions.js";
 
+/**
+ * What ends a section's work, as a value. `message` is the whole line the loops report; `kind` is read for policy
+ * alone (a denial's partial-success handling in engine/orchestrate.ts), never to rebuild prose.
+ */
+export type SectionFailure =
+  | {
+      readonly kind:
+        | "rate-limit"
+        | "rejected"
+        | "server-error"
+        | "unauthorized"
+        | "validation"
+        | "transport"
+        | "malformed"
+        | "declared-duplicate"
+        | "live-duplicate";
+      readonly message: string;
+    }
+  | {
+      readonly kind: "permission-denied";
+      readonly section: string;
+      readonly detail: string;
+      /** The HTTP status that raised the denial, for the redacted view's safe code. */
+      readonly status: number;
+      readonly message: string;
+    };
+
+function permissionDenied(section: string, detail: string, status: number): SectionFailure {
+  return { kind: "permission-denied", section, detail, status, message: `${section}: ${detail}` };
+}
+
+/** The thrown form of a denial, for the loops that still catch (engine/orchestrate.ts, engine/snapshot.ts). */
 export class PermissionDenied extends Error {
   constructor(
     readonly section: string,
@@ -20,6 +53,41 @@ export class PermissionDenied extends Error {
   ) {
     super(`${section}: ${detail}`);
   }
+}
+
+/**
+ * A failure as the section loops catch it: only a denial keeps its shape, since only a denial has a policy. The
+ * switch is exhaustive so a new kind is placed here deliberately instead of falling into the plain Error arm.
+ */
+export function errorOf(failure: SectionFailure): Error {
+  switch (failure.kind) {
+    case "permission-denied":
+      return new PermissionDenied(failure.section, failure.detail, failure.status);
+    case "rate-limit":
+    case "rejected":
+    case "server-error":
+    case "unauthorized":
+    case "validation":
+    case "transport":
+    case "malformed":
+    case "declared-duplicate":
+    case "live-duplicate":
+      return new Error(failure.message);
+    default:
+      return failure satisfies never;
+  }
+}
+
+/**
+ * The ONE seam where a failure value becomes a throw: sections still leave by throwing, so the read port
+ * (./plan.ts) and the duplicate checks raise here. It exists until sections return Results themselves; each
+ * call then becomes a match and this function, the last request-layer throw, goes with them.
+ */
+export function raise<T>(result: Result<T, SectionFailure>): T {
+  if (result.isErr()) {
+    throw errorOf(result.error);
+  }
+  return result.value;
 }
 
 /**
@@ -43,7 +111,7 @@ function sentence(clause: string): string {
   return clause.charAt(0).toUpperCase() + clause.slice(1);
 }
 
-export function throwFor(
+export function failureFor(
   section: SectionMeta,
   method: string,
   path: string,
@@ -57,7 +125,7 @@ export function throwFor(
      */
     op?: FailingOp;
   },
-): never {
+): SectionFailure {
   // The operation label says WHAT was being done in settings-file terms; the raw method/path keeps the request identifiable.
   //   creating ruleset "x" failed - POST /repos/...: 422 ...
   //   the token was denied POST /repos/... (creating ruleset "x"): 403 ...
@@ -67,15 +135,16 @@ export function throwFor(
   const denied = `${request}${context?.operation ? ` (${context.operation})` : ""}: ${outcome}`;
   if (isRateLimitError(error)) {
     // Secondary rate limits arrive as 403 and must not read as missing permissions.
-    throw new Error(
-      `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
-    );
+    return {
+      kind: "rate-limit",
+      message: `${section.key}: ${cause}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
+    };
   }
   const op = context?.op;
   // Ahead of the permission branch: the status is a denial's, the message is not.
   const rejection = op !== undefined && "route" in op ? definitiveRejection(op, error) : undefined;
   if (rejection !== undefined) {
-    throw new Error(`${section.key}: ${cause}. ${sentence(rejection.advice)}`);
+    return { kind: "rejected", message: `${section.key}: ${cause}. ${sentence(rejection.advice)}` };
   }
   const effective = op ? endpointPermission(section, op) : undefined;
   if (isPermissionError(error) && effective !== "none") {
@@ -86,21 +155,23 @@ export function throwFor(
       effective !== undefined && !samePermission(effective, section.permission)
         ? grantFor(effective, undefined, overrideAdviceLevel(section, effective))
         : sectionGrant(section);
-    throw new PermissionDenied(
+    return permissionDenied(
       section.key,
       `the token was denied ${denied}${alsoMissing}. To fix, ${grant}${denialHint}`,
       error.status,
     );
   }
   if (error.status >= 500) {
-    throw new Error(
-      `${section.key}: ${cause}. GitHub returned a server error; re-run the workflow, and retry later if it persists`,
-    );
+    return {
+      kind: "server-error",
+      message: `${section.key}: ${cause}. GitHub returned a server error; re-run the workflow, and retry later if it persists`,
+    };
   }
   if (error.status === 401) {
-    throw new Error(
-      `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
-    );
+    return {
+      kind: "unauthorized",
+      message: `${section.key}: ${cause}. The token was rejected as invalid or expired; update the token input (or the secret it reads) with a valid, unexpired PAT`,
+    };
   }
   // A GraphQL rejection carries error types, not a status; its declared outcomes stand in for status-keyed hints.
   const advice =
@@ -118,7 +189,8 @@ export function throwFor(
   const docs = error.documentationUrl
     ? `. The fields and values this endpoint accepts are documented at ${error.documentationUrl}`
     : "";
-  throw new Error(
-    `${section.key}: ${cause}. The API rejected the request; fix the "${section.key}" values in the settings file to satisfy the message above${hint}${docs}`,
-  );
+  return {
+    kind: "validation",
+    message: `${section.key}: ${cause}. The API rejected the request; fix the "${section.key}" values in the settings file to satisfy the message above${hint}${docs}`,
+  };
 }

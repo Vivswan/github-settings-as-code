@@ -14,6 +14,7 @@ import {
   CodeScanningDefaultSetupConfig,
 } from "../code_scanning_default_setup/schema.js";
 import { expand } from "../contract/endpoints.js";
+import { raise } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
 import {
   type GraphqlDict,
@@ -215,7 +216,7 @@ export function setupSection<K extends SetupKey>(setup: {
       role: "update",
       payload: plainData(desired),
       drift,
-      // 409 is a declared status of the PATCH, so the tolerance can give wait-and-retry advice instead of throwFor's generic text.
+      // 409 is a declared status of the PATCH, so the tolerance can give wait-and-retry advice instead of failureFor's generic text.
       tolerate: {
         statuses: [409],
         outcome: (error) => ({
@@ -223,7 +224,7 @@ export function setupSection<K extends SetupKey>(setup: {
         }),
       },
       change: (response) => {
-        const run = parseLive(section, wide.update, LiveConfigurationRun, response);
+        const run = raise(parseLive(section, wide.update, LiveConfigurationRun, response));
         if (run?.run_id === undefined) {
           return `applied ${noun}`;
         }
