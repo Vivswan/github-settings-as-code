@@ -151,7 +151,7 @@ const ExpectSchema = z
       mutations: z.array(z.string()).optional(),
       /**
        * Prefixes of "METHOD /path?query" (or "GRAPHQL <opName>") that must NEVER appear in the request log; a pattern
-       * with a query forbids one lookup on a path that other lookups share.
+       * with a query forbids one lookup on a path that other lookups share. `{repo}` expands as in `mutations`.
        */
       never: z.array(z.string()).optional(),
       summary_contains: z.array(z.string()).optional(),
@@ -192,7 +192,10 @@ const ExpectSchema = z
         })
         .strict()
         .optional(),
-      /** Requests of any method the log must contain, as substrings of "METHOD path": a `page=2` read proves pagination ran. */
+      /**
+       * Requests of any method the log must contain, as substrings of "METHOD path": a `page=2` read proves
+       * pagination ran. `{repo}` expands as in `mutations`.
+       */
       requests_contain: z.array(z.string()).optional(),
       /**
        * When true, the mock must have received ZERO requests: the failure under test (a settings_raw

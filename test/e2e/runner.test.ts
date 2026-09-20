@@ -15,6 +15,7 @@ import {
   exitCodeFailure,
   failureArtifacts,
   forbiddenPresent,
+  indentedStdout,
   isSubsequence,
   markReportTitle,
   parseGithubOutput,
@@ -411,6 +412,24 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
       expect(requestLogFailures(exp, recorded)).toEqual(want);
     });
   }
+
+  // The `{repo}` placeholder must expand in EVERY request-path list: a list left unexpanded is
+  // always-red under `requests_contain` and always-green under `never`, and no scenario would notice.
+  const onAdminRepo: LoggedRequest[] = [
+    { method: "GET", pathname: "/repos/e2e-owner/e2e-repo/labels", query: "", status: 200 },
+    { method: "POST", pathname: "/repos/e2e-owner/e2e-repo/labels", query: "", status: 201 },
+  ];
+  test.each<[label: string, exp: Parameters<typeof requestLogFailures>[0], want: string[]]>([
+    ["mutations", { mutations: ["POST /repos/{repo}/labels"] }, []],
+    ["requests_contain", { requests_contain: ["GET /repos/{repo}/labels"] }, []],
+    [
+      "never",
+      { never: ["GET /repos/{repo}/labels"] },
+      ["forbidden request present: GET /repos/e2e-owner/e2e-repo/labels"],
+    ],
+  ])("{repo} expands to the mock's owner/name under %s", (_label, exp, want) => {
+    expect(requestLogFailures(exp, onAdminRepo)).toEqual(want);
+  });
 });
 
 describe("stripMaskLines", () => {
@@ -424,6 +443,71 @@ describe("stripMaskLines", () => {
     expect(stripped).not.toContain("acme/secret-repo");
     expect(stripped).toContain("private repository #1: failed");
     expect(stripped).toContain("result: failed");
+  });
+});
+
+describe("indentedStdout (what --print-stdout echoes)", () => {
+  // The Actions runner registers a mask only from a column-zero command, so the indented echo gets
+  // no masking from it: every value a mask line named must already read `***` in the echo.
+  test.each([
+    [
+      "mask lines dropped, the rest indented",
+      "::add-mask::abc\nresult: clean\n::add-mask::acme/secret-repo\nrepository: 1 op\n",
+      "        result: clean\n        repository: 1 op",
+    ],
+    [
+      "a masked value on a later line prints as ***",
+      "::add-mask::secret\nvalue: secret\n",
+      "        value: ***",
+    ],
+    [
+      "a value masked after it printed is redacted too",
+      "value: secret\n::add-mask::secret\n",
+      "        value: ***",
+    ],
+    [
+      "a value containing another masked value is redacted whole",
+      "::add-mask::acme\n::add-mask::acme/secret-repo\nrepository: acme/secret-repo by acme\n",
+      "        repository: *** by ***",
+    ],
+    [
+      "two values crossing in the text leave no fragment",
+      "::add-mask::ABC\n::add-mask::BCD\nvalue: ABCD\n",
+      "        value: ***",
+    ],
+    [
+      "a value overlapping itself leaves no fragment",
+      "::add-mask::aba\nvalue: ababa\n",
+      "        value: ***",
+    ],
+    [
+      "an annotation carries the value command-encoded, and that spelling is redacted too",
+      "::add-mask::line1%0Aline2%25tail\n::error::value: line1%0Aline2%25tail\n",
+      "        ::error::value: ***",
+    ],
+    [
+      "the mask's %0A and %25 encoding is decoded, so a value spanning lines is found",
+      "::add-mask::a%0Ab%25c\nvalue: a\nb%c\n",
+      "        value: ***",
+    ],
+    [
+      "CRLF stdout: the line's CR is not part of the value",
+      "::add-mask::secret\r\nvalue: secret\r\n",
+      "        value: ***",
+    ],
+    [
+      "a value's regex-special characters match literally only",
+      "::add-mask::a.b*\nvalue: a.b* not axbbb\n",
+      "        value: *** not axbbb",
+    ],
+    ["stdout that is only mask lines echoes nothing", "::add-mask::abc\n", ""],
+    [
+      "an empty mask value redacts nothing",
+      "::add-mask::\nresult: clean\n",
+      "        result: clean",
+    ],
+  ])("%s", (_label, stdout, want) => {
+    expect(indentedStdout(stdout)).toBe(want);
   });
 });
 

@@ -433,6 +433,29 @@ export function named<T>(seed?: Record<string, T>): Record<string, T> {
   return Object.assign(Object.create(null), seed === undefined ? {} : clone(seed));
 }
 
+/**
+ * GitHub stores a team slug lowercase and the teams handlers look one up folded, so a seed spelled
+ * "Core-Team" lands under "core-team" or the scenario's team would read as having no access. Two
+ * seeds folding to one slug are an authoring error, not a last-one-wins.
+ */
+function foldedTeamSeed<T>(seed: Record<string, T> | undefined): Record<string, T> | undefined {
+  if (seed === undefined) {
+    return undefined;
+  }
+  const folded = new Map<string, [string, T]>();
+  for (const [slug, access] of Object.entries(seed)) {
+    const key = slug.toLowerCase();
+    const previous = folded.get(key);
+    if (previous !== undefined) {
+      throw new Error(
+        `live_state.teams: "${previous[0]}" and "${slug}" both fold to the slug "${key}"; seed one`,
+      );
+    }
+    folded.set(key, [slug, access]);
+  }
+  return Object.fromEntries([...folded].map(([key, [, access]]) => [key, access]));
+}
+
 function generateLabels(gen: LabelsGenerate): Json[] {
   return Array.from({ length: gen.count }, (_, i) => ({
     name: `${gen.prefix}-${i + 1}`,
@@ -741,7 +764,7 @@ export function buildState(
     invitations: (ls.invitations ?? []).map((invitation) =>
       completeInvitation(clone(invitation), takeId(), repo, stateSlug),
     ),
-    teams: named(ls.teams),
+    teams: named(foldedTeamSeed(ls.teams)),
     milestones: ls.milestones ? clone(ls.milestones) : [],
     interaction_limits: ls.interaction_limits ? clone(ls.interaction_limits) : null,
     interaction_limits_org_override: ls.interaction_limits_org_override ?? false,

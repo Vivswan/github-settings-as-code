@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { parse } from "yaml";
@@ -10,6 +10,7 @@ import { SECTION_KEYS } from "../src/schema.js";
 import { genSettings } from "./e2e/generators.js";
 import { Rng } from "./e2e/prng.js";
 import { collectYmlFiles, scenarioRoots } from "./e2e/schema.js";
+import { ROOT } from "./root.js";
 
 interface CorpusDoc {
   /** Where the fragment came from ("labels-apply-converges.yml settings"). */
@@ -17,24 +18,76 @@ interface CorpusDoc {
   doc: Record<string, unknown>;
 }
 
+/** The places a scenario carries a settings document; every kind must be witnessed by the corpus (scenarioDocs). */
+const FRAGMENT_KINDS = [
+  "settings",
+  "defaults_file",
+  "settings_layers[<i>]",
+  "expect.snapshot",
+  "expect.merged",
+  "repos.<slug>.settings",
+  "repos.<slug>.expect.snapshot",
+] as const;
+type FragmentKind = (typeof FRAGMENT_KINDS)[number];
+
+/** A curated fragment remembers its file and kind, so the loader guards derive from what was collected, not from side bookkeeping. */
+interface ScenarioFragment extends CorpusDoc {
+  file: string;
+  kind: FragmentKind;
+}
+
+/**
+ * The scenario roots, re-derived from the directories on disk (every `scenarios/` under a section
+ * directory, plus the cross-section root) so a root that scenarioRoots() drops is caught.
+ */
+function independentScenarioRoots(): string[] {
+  const sectionsDir = join(ROOT, "src", "sections");
+  const sectionRoots = readdirSync(sectionsDir, { withFileTypes: true })
+    .filter(
+      (entry) => entry.isDirectory() && existsSync(join(sectionsDir, entry.name, "scenarios")),
+    )
+    .map((entry) => join(sectionsDir, entry.name, "scenarios"));
+  return [join(ROOT, "test", "e2e", "scenarios"), ...sectionRoots].sort();
+}
+
+/** collectYmlFiles's walk, re-done with the platform's own recursive listing so a walker that stops descending is caught. */
+function independentYmlListing(roots: readonly string[]): string[] {
+  return roots
+    .flatMap((root) =>
+      (readdirSync(root, { recursive: true }) as string[])
+        .filter((entry) => entry.endsWith(".yml"))
+        .map((entry) => join(root, entry)),
+    )
+    .sort();
+}
+
 /**
  * Every settings fragment in the curated scenarios, walked by the same collectYmlFiles the scenario loader uses; each root is asserted non-empty so a
  * renamed directory fails here instead of shrinking the corpus.
  */
 function scenarioDocs(): CorpusDoc[] {
+  const roots = scenarioRoots();
+  expect(
+    [...roots].sort(),
+    "scenarioRoots disagrees with the scenarios/ directories on disk",
+  ).toEqual(independentScenarioRoots());
   const files: string[] = [];
-  for (const root of scenarioRoots()) {
+  for (const root of roots) {
     const inRoot = collectYmlFiles(root);
     if (inRoot.length === 0) {
       throw new Error(`scenario root ${root} contributed no .yml files - renamed or emptied?`);
     }
     files.push(...inRoot);
   }
-  const docs: CorpusDoc[] = [];
+  files.sort();
+  expect(files, "collectYmlFiles disagrees with the platform's own listing").toEqual(
+    independentYmlListing(roots),
+  );
+  const docs: ScenarioFragment[] = [];
   // Labels key KNOWN_DIVERGENCES, so basenames must stay unique corpus-wide; nothing else pins that (the YAML name field is not in lockstep with the
   // filename).
   const seenBasenames = new Map<string, string>();
-  for (const file of [...files].sort()) {
+  for (const file of files) {
     const dup = seenBasenames.get(basename(file));
     if (dup !== undefined) {
       throw new Error(
@@ -43,30 +96,53 @@ function scenarioDocs(): CorpusDoc[] {
     }
     seenBasenames.set(basename(file), file);
   }
-  const push = (label: string, value: unknown) => {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      docs.push({ label, doc: value as Record<string, unknown> });
-    }
-  };
-  for (const file of files.sort()) {
+  const rawTextScenarios = new Set<string>();
+  for (const file of files) {
     const scenario = parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     const name = basename(file);
-    push(`${name} settings`, scenario.settings);
-    push(`${name} defaults_file`, scenario.defaults_file);
+    const push = (kind: FragmentKind, label: string, value: unknown) => {
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        docs.push({ label, doc: value as Record<string, unknown>, file, kind });
+      }
+    };
+    push("settings", `${name} settings`, scenario.settings);
+    push("defaults_file", `${name} defaults_file`, scenario.defaults_file);
+    // Every merge layer is a settings file the run reads, and the pinned merged document is what
+    // mode: merge writes for a later run to read, so both validators must accept each of them.
+    const layers = scenario.settings_layers as unknown[] | undefined;
+    for (const [i, layer] of (layers ?? []).entries()) {
+      push("settings_layers[<i>]", `${name} settings_layers[${i}]`, layer);
+    }
     // A pinned snapshot document is what mode: snapshot writes for a later
     // apply to read, so both validators must accept it like any settings file.
-    const expected = scenario.expect as { snapshot?: unknown } | undefined;
-    push(`${name} expect.snapshot`, expected?.snapshot);
+    const expected = scenario.expect as { snapshot?: unknown; merged?: unknown } | undefined;
+    push("expect.snapshot", `${name} expect.snapshot`, expected?.snapshot);
+    push("expect.merged", `${name} expect.merged`, expected?.merged);
     const repos = scenario.repos as
       | Record<string, { settings?: unknown; expect?: { snapshot?: unknown } }>
       | undefined;
     for (const [repo, entry] of Object.entries(repos ?? {})) {
-      push(`${name} ${repo} settings`, entry?.settings);
-      push(`${name} ${repo} expect.snapshot`, entry?.expect?.snapshot);
+      push("repos.<slug>.settings", `${name} ${repo} settings`, entry?.settings);
+      push(
+        "repos.<slug>.expect.snapshot",
+        `${name} ${repo} expect.snapshot`,
+        entry?.expect?.snapshot,
+      );
+    }
+    if (typeof scenario.settings_raw === "string") {
+      rawTextScenarios.add(file);
     }
   }
-  // The corpus size is pinned exactly so a loader that silently drops a root, a file, or a document kind cannot pass.
-  expect(docs.length).toBe(376);
+  // Derived from the collected fragments rather than a pinned count, so adding a scenario never edits this
+  // file. The scenario schema requires `settings` unless the file carries `settings_raw` (test/e2e/schema.ts),
+  // so every walked file contributed a fragment or is a raw-text scenario, and every kind has a witness.
+  const contributing = new Set(docs.map((fragment) => fragment.file));
+  const dropped = files.filter((file) => !contributing.has(file) && !rawTextScenarios.has(file));
+  expect(dropped, "scenario files that yielded no fragment").toEqual([]);
+  const kindsWitnessed = new Set(docs.map((fragment) => fragment.kind));
+  expect([...kindsWitnessed].sort(), "fragment kinds no scenario witnesses").toEqual(
+    [...FRAGMENT_KINDS].sort(),
+  );
   return docs;
 }
 

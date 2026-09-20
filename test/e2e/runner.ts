@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
-import type { OutputName } from "../../src/io.js";
+import { type OutputName, redactRanges } from "../../src/io.js";
 import { ROOT } from "../root.js";
 import {
   assertApplyIdempotent,
@@ -539,8 +539,12 @@ async function invoke(
   };
 }
 
-function expandRepo(pattern: string): string {
-  return pattern.replaceAll("{repo}", REPO_SLUG);
+/**
+ * `{repo}` in a request-path expectation is the mock's owner/name. Every list goes through this one
+ * expansion: a list left raw is always-red under requests_contain and always-green under never.
+ */
+function expandRepoPatterns(patterns: readonly string[] | undefined): string[] {
+  return (patterns ?? []).map((pattern) => pattern.replaceAll("{repo}", REPO_SLUG));
 }
 
 function stripLines(text: string, prefix: string): string {
@@ -550,13 +554,64 @@ function stripLines(text: string, prefix: string): string {
     .join("\n");
 }
 
+const MASK_PREFIX = "::add-mask::";
+
+/**
+ * @actions/core command-encodes every payload it prints, mask and annotation alike: `%`, CR, LF as
+ * %25, %0D, %0A. A masked value with any of those sits decoded in the registry and encoded in the
+ * annotation line, so the redaction has to know both spellings.
+ */
+const COMMAND_ENCODING: ReadonlyArray<[raw: string, encoded: string]> = [
+  ["%", "%25"],
+  ["\r", "%0D"],
+  ["\n", "%0A"],
+];
+
+function decodeCommandData(encoded: string): string {
+  return encoded.replace(
+    /%(25|0D|0A)/g,
+    (code) => COMMAND_ENCODING.find(([, e]) => e === code)?.[0] ?? code,
+  );
+}
+
+function encodeCommandData(raw: string): string {
+  return COMMAND_ENCODING.reduce((text, [r, e]) => text.replaceAll(r, e), raw);
+}
+
 /**
  * The `::add-mask::<value>` lines core.setSecret emits legitimately carry the raw slug so the real
- * runner can mask every later line; the runner consumes and never echoes them, so they go before
- * checking that a redacted slug leaked NOWHERE else on stdout.
+ * runner can mask every later line; the runner consumes and never echoes them. A CRLF stdout leaves
+ * the line's CR on the payload, which is not part of the value.
  */
+function partitionMaskLines(stdout: string): { values: string[]; rest: string } {
+  const values: string[] = [];
+  const rest: string[] = [];
+  for (const line of stdout.split("\n")) {
+    if (line.startsWith(MASK_PREFIX)) {
+      values.push(decodeCommandData(line.slice(MASK_PREFIX.length).replace(/\r$/, "")));
+    } else {
+      rest.push(line);
+    }
+  }
+  return { values, rest: rest.join("\n") };
+}
+
+/** What stdout carries once the mask lines are gone: the surface a redacted slug must leak NOWHERE on. */
 export function stripMaskLines(stdout: string): string {
-  return stripLines(stdout, "::add-mask::");
+  return partitionMaskLines(stdout).rest;
+}
+
+/**
+ * A scenario's captured stdout as --print-stdout echoes it, indented under the PASS or FAIL line.
+ * The mask lines go, and every value they named prints as `***` wherever it occurs, raw or
+ * command-encoded: indented, a workflow command is plain text to the Actions runner, so no mask is
+ * registered for the echo and a leaked value (the very thing a FAIL reports) would print in clear.
+ */
+export function indentedStdout(stdout: string): string {
+  const { values, rest } = partitionMaskLines(stdout);
+  const spellings = new Set(values.flatMap((value) => [value, encodeCommandData(value)]));
+  const redacted = redactRanges(rest, spellings).trimEnd();
+  return redacted === "" ? "" : redacted.replace(/^/gm, "        ");
 }
 
 /**
@@ -625,21 +680,17 @@ export function requestLogFailures(
 ): string[] {
   const failures: string[] = [];
   const writes = requests.filter(isWriteRequest).map((r) => renderRequest(r, false));
-  if (exp.mutations) {
-    const want = exp.mutations.map(expandRepo);
-    if (!isSubsequence(want, writes)) {
-      failures.push(
-        `mutations not found as a subsequence:\n  want: ${want.join(", ")}\n  writes: ${writes.join(", ")}`,
-      );
-    }
+  const mutations = expandRepoPatterns(exp.mutations);
+  if (!isSubsequence(mutations, writes)) {
+    failures.push(
+      `mutations not found as a subsequence:\n  want: ${mutations.join(", ")}\n  writes: ${writes.join(", ")}`,
+    );
   }
   const fullLog = requests.map((r) => renderRequest(r, true));
-  if (exp.never) {
-    for (const pattern of forbiddenPresent(exp.never.map(expandRepo), fullLog)) {
-      failures.push(`forbidden request present: ${pattern}`);
-    }
+  for (const pattern of forbiddenPresent(expandRepoPatterns(exp.never), fullLog)) {
+    failures.push(`forbidden request present: ${pattern}`);
   }
-  for (const needle of exp.requests_contain ?? []) {
+  for (const needle of expandRepoPatterns(exp.requests_contain)) {
     if (!fullLog.some((entry) => entry.includes(needle))) {
       failures.push(`no request contains: ${needle}`);
     }

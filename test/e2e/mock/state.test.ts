@@ -14,8 +14,10 @@ import { flattenProtection } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
 import { roleForPermission } from "../../../src/sections/shared/roles.js";
+import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "../../../src/sections/teams/mock.js";
 import { genScenario } from "../generators.js";
 import { Rng } from "../prng.js";
+import { handlerTestContext } from "./handler-test-ctx.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {
   applyRuleInput,
@@ -47,6 +49,27 @@ describe("buildState overlay semantics", () => {
     expect(state.pages).toBeNull();
     expect(state.org).not.toBeNull();
     expect((state.org as Record<string, unknown>).login).toBe("e2e-owner");
+  });
+
+  // GitHub stores a team slug lowercase, so the section addresses "core-team" whatever the seed spelled;
+  // a seed kept verbatim would be unreachable and the scenario would read as "team has no access".
+  test("a mixed-case teams seed is reachable by the probe under GitHub's lowercase slug", () => {
+    const state = buildState({ teams: { "Core-Team": { role_name: "maintain" } } }, "org");
+    const response = teamsMockHandlers["teams.probe"](
+      handlerTestContext("teams.probe", state, {
+        params: { org: "e2e-owner", team_slug: "Core-Team", owner: "e2e-owner", repo: "e2e-repo" },
+        headers: { accept: TEAM_REPOSITORY_MEDIA_TYPE },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect((response.body as { role_name: unknown }).role_name).toBe("maintain");
+    expect(Object.keys(state.teams)).toEqual(["core-team"]);
+  });
+
+  test("two teams seeds folding to one slug fail loudly instead of one silently replacing the other", () => {
+    expect(() =>
+      buildState({ teams: { "Core-Team": { role_name: "write" }, "core-team": null } }, "org"),
+    ).toThrow(/live_state\.teams: "Core-Team" and "core-team" both fold to the slug "core-team"/);
   });
 
   test("repo overlay wins field-by-field, deep-merging nested objects", () => {

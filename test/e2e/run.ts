@@ -4,15 +4,21 @@
  *   --sections a,b|all   only scenarios touching one of these sections (a key of the settings, a multi
  *                        target's settings, the defaults_file, or a merge layer); default all
  *   --scenario <name>    only the scenario with this exact name
+ *   --print-stdout       echo each scenario's captured stdout under its PASS or FAIL line, minus its
+ *                        ::add-mask:: lines, with every masked value printed as *** (indented, the
+ *                        runner registers no mask, so the echo redacts on its own); a failure's
+ *                        artifact directory holds the whole of it anyway, a pass otherwise leaves no
+ *                        trace of it
  */
 
 import { corpusUnwitnessedExemptEndpoints } from "./apply-idempotence-proof.js";
-import { runScenario } from "./runner.js";
+import { indentedStdout, runScenario } from "./runner.js";
 import { loadScenarios, type Scenario, scenarioRoots } from "./schema.js";
 
 interface Flags {
   sections?: string[];
   scenario?: string;
+  printStdout?: boolean;
 }
 
 function parseFlags(argv: string[]): Flags {
@@ -26,6 +32,8 @@ function parseFlags(argv: string[]): Flags {
       }
     } else if (arg === "--scenario") {
       flags.scenario = argv[++i];
+    } else if (arg === "--print-stdout") {
+      flags.printStdout = true;
     }
   }
   return flags;
@@ -121,6 +129,12 @@ async function main(): Promise<number> {
       }
       if (report.artifactDir) {
         artifacts.push(report.artifactDir);
+      }
+    }
+    if (flags.printStdout) {
+      const stdout = indentedStdout(report.stdout);
+      if (stdout !== "") {
+        console.log(stdout);
       }
     }
   }
