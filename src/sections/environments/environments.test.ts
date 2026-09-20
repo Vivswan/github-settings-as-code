@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { matchEndpoint, paramAccessor } from "../../../test/e2e/mock/dispatch.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
-import { buildState, type LiveState } from "../../../test/e2e/mock/state.js";
 import { ENVIRONMENT_PARSE_FIXTURES } from "../../../test/fixtures/environment-parse-rules.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake, registryFake } from "../../../test/sections/fragment-fake.js";
@@ -21,11 +19,10 @@ import { executePlan } from "../../engine/execute.js";
 import type { GitHubClient } from "../../github/api.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
-import { allGraphqlOps, type SectionEndpointKey, type SectionGraphqlKey } from "../registry.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
-import { environmentsMockGraphqlHandlers, environmentsMockHandlers } from "./mock.js";
-import { GRAPHQL_OPS } from "./pins.js";
+import { environmentsMockHandlers } from "./mock.js";
+import type { GRAPHQL_OPS } from "./pins.js";
 import {
   type DeploymentBranchPolicyConfig,
   EnvironmentConfig,
@@ -1268,68 +1265,6 @@ describe("environments deployment protection rules validation and shape", () => 
 
 // --- Convergence over the e2e mock's own handlers ------------------------------
 
-/**
- * A stateful GitHubClient over the section's e2e mock fragment and seeded MockState, so the idempotence proof runs against the scenarios' own model.
- */
-function liveRepo(liveState: LiveState): GitHubClient & { writes: string[] } {
-  const state = buildState(liveState, "org", REPO.slug);
-  const graphqlRoles = Object.entries(GRAPHQL_OPS);
-  return {
-    writes: [],
-    async tryRequest(method, path, payload) {
-      const [pathname = "", search = ""] = path.split("?");
-      const matched = matchEndpoint(method, pathname);
-      if (matched === null || !matched.key.startsWith("environments.")) {
-        throw new Error(`liveRepo: the environments section issued ${method} ${path}`);
-      }
-      const response = environmentsMockHandlers[matched.key as SectionEndpointKey<"environments">]({
-        state,
-        endpoint: matched.endpoint,
-        param: paramAccessor(matched.key, matched.endpoint, matched.params),
-        query: Object.fromEntries(new URLSearchParams(search)),
-        body: payload,
-        headers: {},
-        grants: () => true,
-      });
-      if (response.status >= 400) {
-        const message = (response.body as { message?: unknown } | null)?.message;
-        return { error: { status: response.status, message: String(message ?? ""), body: "" } };
-      }
-      if (method !== "GET") {
-        this.writes.push(`${method} ${pathname}`);
-      }
-      return { data: response.body };
-    },
-    async tryGraphql(op, variables) {
-      const role = graphqlRoles.find(([, declaration]) => declaration.name === op.name)?.[0];
-      if (role === undefined) {
-        throw new Error(`liveRepo: the environments section issued GRAPHQL ${op.name}`);
-      }
-      const key = `environments.${role}` as SectionGraphqlKey<"environments">;
-      const reply = environmentsMockGraphqlHandlers[key]({
-        state,
-        op: allGraphqlOps()[key],
-        variables: { ...variables },
-      });
-      if (reply.errors !== undefined) {
-        const [first] = reply.errors;
-        return {
-          error: {
-            status: first?.type === "NOT_FOUND" ? 404 : 422,
-            message: first?.message ?? "",
-            body: "",
-            graphqlTypes: reply.errors.map((error) => error.type),
-          },
-        };
-      }
-      if (op.kind === "write") {
-        this.writes.push(`GRAPHQL ${op.name}`);
-      }
-      return { data: reply.data };
-    },
-  };
-}
-
 describe("environments convergence", () => {
   const secretEnv = { $PRD: "prod-plaintext", $NEW: "new-plaintext" };
 
@@ -1337,7 +1272,7 @@ describe("environments convergence", () => {
     // Every family at once: an existing environment with settings drift and every nested knob diverging, plus a missing pinned environment whose node
     // id must come from its PUT.
     await mockSodiumReady();
-    const api = liveRepo({
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {
       environments: {
         prod: {
           name: "prod",
@@ -1462,7 +1397,7 @@ describe("environments convergence", () => {
   test("patterns hidden behind a flag that is off reconcile on the run after the one that sets it", async () => {
     // The mock keeps patterns behind an off flag (the list route 404s): the first apply sets the flag and creates the declared ones (the hidden
     // same-name answers 303), the next converges on what was revealed.
-    const api = liveRepo({
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {
       environments: {
         prod: {
           name: "prod",
@@ -1504,7 +1439,7 @@ describe("environments convergence", () => {
 
   test("a secret created alongside its environment is rewritten as an update by the next plan", async () => {
     await mockSodiumReady();
-    const api = liveRepo({});
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {});
     const desired = [{ name: "staging", secrets: [{ name: "NEW", value: "$NEW" }] }];
     const first = await plan(api, desired);
     expect(planDrift(first)).toEqual([
