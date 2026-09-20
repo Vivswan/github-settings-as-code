@@ -40,10 +40,10 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | The snapshot file is canonical and undated | The second header line read `# Snapshot of owner/name taken <instant>`; list entries sat in the order GitHub listed them | No dated line: the run's notice and the step summary say `snapshot taken <instant>`; the document renders in the canonical order the rendered file shares | No error: a committed snapshot reorders once and loses its dated second line; a script reading the instant from the file reads the run's notice instead; [section 26](#26-the-snapshot-file-is-canonical-and-undated) |
 | Library: one problem code for a malformed document | `settings-unknown-directives` and `settings-unknown-sections`, one standalone stop each | Both are lines of `settings-malformed-sections`, beside the section issues | A `switch` on `Problem.code` naming a deleted code fails to compile; [section 27](#27-library-one-problem-code-for-a-malformed-document) |
 | `_layering` takes `replace`, `shallow`, or `deep`, and every list section layers by key | No layering; the pre-release v3 builds took `merge` or `replace`, and only `labels` and `rulesets` unioned | `deep` (default) unions by the section's key and merges a same-key pair field by field; `shallow` unions and swaps the pair; `replace` lets the higher list win; all sixteen knobbed sections union | `_layering: merge` and `layering: merge` fail as unknown values, naming the three; a fourteen-section overlay that relied on silent replacement now unions; [section 28](#28-_layering-takes-replace-shallow-or-deep) |
-| `mode: merge` is `mode: render` | No render mode; the pre-release v3 builds spelled it `mode: merge`, `merged-file`, CLI `merge`, result `merged` | `mode: render`, `rendered-file`, CLI `render`, result `rendered`; five problem codes carry the render spelling | `mode: merge` fails as an unsupported mode value; a `merged-file` input draws the runner's unknown-input warning; [section 29](#29-mode-merge-is-mode-render) |
+| `mode: merge` is `mode: render` | No render mode; the pre-release v3 builds spelled it `mode: merge`, `merged-file`, CLI `merge`, result `merged` | `mode: render`, `rendered-file`, CLI `render`, result `rendered`; five problem codes and four library flow exports carry the render spelling | `mode: merge` fails as an unsupported mode value; a `merged-file` input draws the runner's unknown-input warning; [section 29](#29-mode-merge-is-mode-render) |
 | `environments`, `branches`, and `workflows` layer by key | A higher list replaced the lower one whole | Union by key under `deep`: environment names case-insensitively, branch names verbatim, workflow paths as GitHub lists them; each accepts a `{_layering, entries}` wrapper; an environment's nested lists union by their own keys | No error: a higher layer that meant to replace now unions; write `_layering: replace` on the wrapper; [section 30](#30-environments-branches-and-workflows-layer-by-key) |
 | A higher layer's `null` wins and means empty on GitHub; `_remove: true` drops a keyed entry | In v2's defaults merge a target's `null` survived as a value; the pre-release fold read it as "delete the lower key" | `null` is written as the value, the empty or off state; a key with no empty state refuses it; a whole-section `null` only on `pages` and `interaction_limits`; `_remove: true` drops one lower entry and is consumed | Validation fails naming the legal values; a `null` written to mean "stop managing this" empties the setting on GitHub instead; [section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry) |
-| File-wide `_undeclared` and the run input `undeclared` | The policy lived on each section's wrapper only | A top-level `_undeclared: keep` or `delete` sets every knobbed section of the file; the `undeclared` input sets the run; a wrapper beats the file, the file beats the input, the input beats the section default | No error: a file that set every wrapper by hand keeps working; a file-wide `delete` also deletes undeclared deployment protection rules; [section 32](#32-file-wide-_undeclared-and-the-undeclared-input) |
+| File-wide `_undeclared` and the run input `undeclared` | The policy lived on each section's wrapper only | A top-level `_undeclared: keep` or `delete` sets every knobbed section of the file; the `undeclared` input sets the run; a wrapper beats the file, the file beats the input, the input beats the section default | No error: a top-level `_undeclared: delete` that v2 dropped as a note now deletes undeclared entries on the first apply; a file that set every wrapper by hand keeps working; a file-wide `delete` also deletes undeclared deployment protection rules; [section 32](#32-file-wide-_undeclared-and-the-undeclared-input) |
 | Apply refuses to write over a live value the file omits | Check compared declared keys only; the ruleset and environment PUTs wrote the whole object, so an omitted live value was deleted while check said clean | Check reports the omitted value as drift; apply refuses that entry's PUT and fails the section | The section fails with `not applied - the update would remove a live value the settings file omits`; declare the key, or declare it empty; [section 33](#33-apply-refuses-over-omitted-live-values) |
 | Every file-only check runs before the first write | A duplicate in a section the `sections` input excluded never ran; one in a selected section threw mid-run after earlier sections wrote | Every section's file-only checks run at validation, selected or not, before any request | A file that applied with `sections: repository` beside a broken `labels` fails with exit 1 and zero requests; a custom list module built with the library implements `validate`; [section 34](#34-file-only-checks-run-before-the-first-write) |
 | Library: `plan()` takes only validator-minted input | `labels.plan(ctx, [{name: "bug"}, {name: "Bug"}])` compiled, so a caller could skip the file-only checks | The parameter is `ValidatedInput<K>`, minted by `validateSettings`, `mergeSettings`, or `snapshotRepository` | A raw list fails to compile, naming `ValidatedBrand`; [section 35](#35-library-plan-takes-only-validator-minted-input) |
@@ -468,9 +468,9 @@ For `@vivswan/github-settings-as-code` consumers.
 | v2 | v3 |
 |---|---|
 | `settings-unknown-directives`: an unknown underscore key stopped the run alone | A line of `settings-malformed-sections`: `unknown underscore key: _owner. ...` |
-| `settings-unknown-sections`: a misspelled section stopped the run alone | A line of the same problem: `unknown top-level section: lables (known: ...)` |
+| `settings-unknown-sections`: an unknown section stopped the run alone | A line of the same problem: `unknown top-level section: stickers (known: ...)` |
 
-A `switch` on `Problem.code` that names either deleted code fails to compile. Drop the case; the lines are in the `issues` of `settings-malformed-sections`, in document order before the section issues.
+A `switch` on `Problem.code` that names either deleted code fails to compile. Drop the case; the lines are in the `issues` of `settings-malformed-sections`, before the section issues: the underscore line first, then the unknown-section line.
 
 ## 28. _layering takes replace, shallow, or deep
 
@@ -542,6 +542,7 @@ v3            with:
 | The CLI subcommand | `gsac merge` | `gsac render` |
 | The result word (`result` output, `--json`, `RUN_RESULTS`) | `merged` | `rendered` |
 | Problem codes | `input-merge-only`, `input-rejected-in-merge`, `input-merged-file-missing`, `merged-file-is-layer`, `merged-file-unwritable` | `input-render-only`, `input-rejected-in-render`, `input-rendered-file-missing`, `rendered-file-is-layer`, `rendered-file-unwritable` |
+| The library flow | `runMerge`, `MergeConfig`, `FinishedMerge`, `concludeMerge` | `runRender`, `RenderConfig`, `FinishedRender`, `concludeRender` |
 
 `mode: merge` fails as an unsupported mode value, naming the four modes. There is no alias: rename the mode, the input, and the subcommand together, and a step that branches on `result == 'merged'` tests `rendered`. The library keeps `mergeSettings`, `MergeOptions`, and `MergeReport`, which name the fold, not the mode.
 
@@ -680,7 +681,9 @@ local.yml   repository:
                   required_status_checks: null     # apply removes the required checks
 ```
 
-Both layers validate, since GitHub accepts `null` on those keys. To stop managing a key, omit it from every layer; to drop a keyed entry, write `_remove: true`; to clear a list, write `_layering: replace` with an empty list. Never write `null` for "leave it alone".
+Both layers validate, since GitHub accepts `null` on those keys. Never write `null` for "leave it alone".
+
+To stop managing a key, omit it from every layer; a live ruleset or environment key then needs a declared or empty value instead ([section 33](#33-apply-refuses-over-omitted-live-values)). To drop a keyed entry, write `_remove: true`. To clear a list, write `_layering: replace` with an empty list.
 
 ## 32. File-wide _undeclared and the undeclared input
 
@@ -715,7 +718,9 @@ settings.yml: _undeclared must be one of "keep", "delete"; got a string that is 
 
 A file-wide `delete` reaches the nested `environments[].deployment_protection_rules` list too: an undeclared deployment gate is disabled, where the nested default is `keep`. Set the nested wrapper to `keep` on the environment that must keep its gates.
 
-No v2 file breaks: a file that set every wrapper by hand behaves as before, and a wrapper still beats every default. The render consumes the top-level key and writes the resolved policy onto every knobbed wrapper, an environment's nested lists included, so a rendered document always carries those nested lists in wrapper form.
+One v2 file breaks: a top-level `_undeclared` that v2 dropped as a private note ([section 16](#16-underscore-keys-are-directives-never-notes)) is now the file-wide policy, so a `delete` note deletes the undeclared entries of every knobbed section on the first apply. Run `mode: check` first; the deletions appear there as drift. A file that set every wrapper by hand behaves as before, and a wrapper still beats every default.
+
+The render consumes the top-level key and writes the resolved policy onto every knobbed wrapper, an environment's nested lists included, so a rendered document always carries those nested lists in wrapper form.
 
 ## 33. Apply refuses over omitted live values
 
@@ -765,8 +770,10 @@ v2   const labels = sectionModule("labels");
      // compiled: a caller could hand the planner a pair the validator refuses
 
 v3   const { settings } = validateSettings(doc)._unsafeUnwrap();
-     await labels.plan(planContext(labels, client, repo), settings.labels);
-     // settings.labels is the ValidatedInput<"labels"> the planner takes
+     if (settings.labels !== undefined) {
+       await labels.plan(planContext(labels, client, repo), settings.labels);
+     }
+     // settings.labels is the ValidatedInput<"labels"> the planner takes, or undefined when the file has no labels section
 ```
 
 The old call fails to compile with `Property '[validatedInput]' is missing in type '{ name: string; }[]' but required in type 'ValidatedBrand<"labels">'`. Pass the section off a validated document: `validateSettings(doc)`, `mergeSettings(layers)`, or `snapshotRepository(...)` returns `settings`, and each section of it carries the brand. `SectionInput<K>`, the unbranded shape, stays exported for a custom module's `validate` hook.
@@ -866,7 +873,7 @@ v2   code_scanning_default_setup:
        runner_label: gpu            # drift runner_label: "gpu" != null, forever
 
 v3   code_scanning_default_setup.schedule: "schedule" is reported by GitHub but the PATCH does not accept it, so declaring it could only drift; remove it from the settings file
-     code_scanning_default_setup.languages.0: "javascript" is the spelling GitHub reports, not one the PATCH accepts; write "javascript-typescript"
+     code_scanning_default_setup.languages[0]: "javascript" is the spelling GitHub reports, not one the PATCH accepts; write "javascript-typescript"
      code_quality_setup.runner_label: runner_label "gpu" is declared under runner_type: "standard", where GitHub ignores it; set runner_type: "labeled", or remove runner_label
 ```
 
@@ -1146,7 +1153,7 @@ An entry cast past the type gets two omitted-key drift lines, since nothing fill
 1. Rename any settings file whose path contains a comma, rename `undeclared` to `_undeclared` in every settings file, and move every other underscore key into a YAML comment; the v2 line accepts the old spellings only, so do all three together with the pin move.
 2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
 3. Where a snapshot wrote a `$WEBHOOK_SECRET_<id>` reference, change the reference and its exported variable to `SECRET_WEBHOOK_<id>` together, or re-snapshot.
-4. Move the pin to `@v3` with `mode: check`. The parse-time refusals (sections 36 to 52) surface here, before any request, collected per run (a section prints at most five of its own issues); fix each by the message and run check again.
+4. Move the pin to `@v3` with `mode: check`; a layered setup renames `mode: merge` to `mode: render` and `merged-file` to `rendered-file` in the same edit, since v3 refuses the old mode before check can run. The parse-time refusals (sections 36 to 52) surface here, before any request, collected per run (a section prints at most five of its own issues); fix each by the message and run check again.
 5. Read the fallback notices and the drift; add render steps where a target needs the old overlay behavior; delete duplicated live items the sections now refuse; declare or empty the live values apply now refuses to write over (section 33).
-6. In a layered setup, rename `mode: merge` to `mode: render` and `merged-file` to `rendered-file`, write `_layering: replace` where a higher list must still win, and replace every `null` that meant "stop managing this" with an omission or `_remove: true` (sections 28 to 31).
+6. In a layered setup, write `_layering: replace` where a higher list must still win, and replace every `null` that meant "stop managing this" with an omission or `_remove: true` (sections 28 to 31).
 7. Switch back to apply.
