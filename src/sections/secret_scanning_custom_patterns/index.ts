@@ -308,9 +308,8 @@ export const secretScanningPatternsSection = {
       }
       entries.push(entry);
     }
-    if (entries.length === 0) {
-      return { value: undefined, notes };
-    }
+    // Every entry left out still declares the section, empty: something exists on the repository,
+    // and the keep policy the empty declaration spells is what holds it.
     return { value: knobbedSnapshot(this, entries), notes };
   },
 } satisfies SectionModule<"secret_scanning_custom_patterns", typeof ENDPOINTS>;

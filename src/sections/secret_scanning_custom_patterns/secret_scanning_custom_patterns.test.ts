@@ -446,12 +446,19 @@ describe("secret_scanning_custom_patterns snapshot", () => {
     expect(result.outcomes[0]?.detail).toEqual([expect.stringMatching(/^BUG: /)]);
   });
 
-  test("a live set whose every pattern is left out snapshots as nothing to declare, with the notes", async () => {
+  test("a live set whose every pattern is left out snapshots as an empty declaration under keep, with only the notes", async () => {
+    // Something exists on the repository, so the outcome must not also say nothing does: the left-out
+    // pattern stays live under the keep policy the empty declaration spells.
     const result = await snapshot([livePattern({ id: 8, name: "odd-one", pattern: "(key" })]);
     expect(result.result).toBe("snapshot");
-    expect(result.settings?.secret_scanning_custom_patterns).toBeUndefined();
-    expect(result.outcomes[0]?.detail[0]).toStartWith(
-      "secret_scanning_custom_patterns[odd-one]: left out of the snapshot - its pattern (",
-    );
+    expect(result.settings?.secret_scanning_custom_patterns).toEqual({
+      _undeclared: "keep",
+      entries: [],
+    });
+    expect(result.outcomes[0]?.detail).toEqual([
+      expect.stringMatching(
+        /^secret_scanning_custom_patterns\[odd-one\]: left out of the snapshot - its pattern \(/,
+      ),
+    ]);
   });
 });
