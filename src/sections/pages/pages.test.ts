@@ -99,6 +99,22 @@ describe("pages", () => {
     expect(await plan(api, { public: true })).toEqual({ ops: [], notes: [], drift: [] });
   });
 
+  test("a live non-public site proves the host sets visibility, so making it public is ordinary drift", async () => {
+    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: false } } });
+    expect(await plan(api, { public: true })).toEqual({
+      ops: [
+        {
+          role: "update",
+          payload: { public: true },
+          drift: ["pages.public: true != false"],
+          change: "updated GitHub Pages configuration",
+        },
+      ],
+      notes: [],
+      drift: [],
+    });
+  });
+
   test("no live site: create carries build_type and source, then the update the rest", async () => {
     const api = new MockApi({}); // GET /pages 404s
     const result = await plan(api, {

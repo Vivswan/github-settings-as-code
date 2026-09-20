@@ -29,7 +29,8 @@ coverage:
     notes: >-
       The boolean `public` rides the PUT passthrough. Only an organization on Enterprise Cloud can
       set it; everywhere else GitHub reports public: true and ignores the field, so a public: false
-      declaration drifts on every run and the check run's note says why.
+      declaration drifts on every run and the check run's note says why. A live public: false proves
+      the host sets visibility, so declaring true there is ordinary drift with no note.
 schema:
   SettingsFile.pages: GitHub Pages configuration; null disables Pages on the repository.
   PagesConfig: "GitHub Pages site configuration; use `pages: null` to disable the site."

@@ -53,7 +53,9 @@ const LiveSite = z.looseObject({});
 
 /**
  * A note, not a parse error: nothing in the file tells an Enterprise Cloud organization from github.com,
- * where GitHub reports `public: true` and drops the field from the update.
+ * where GitHub reports `public: true` and drops the field from the update. Only that signature (live
+ * true, declared false) earns it: a live non-public site proves the host supports visibility, so the
+ * PUT can make it public and the drift is ordinary.
  */
 const PUBLIC_VISIBILITY_NOTE =
   "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
@@ -111,7 +113,7 @@ export const pagesSection = {
           drift,
           change: "updated GitHub Pages configuration",
         });
-        if (payload.public !== undefined && probe.data.public !== payload.public) {
+        if (payload.public === false && probe.data.public === true) {
           plan.notes.push(PUBLIC_VISIBILITY_NOTE);
         }
       }
