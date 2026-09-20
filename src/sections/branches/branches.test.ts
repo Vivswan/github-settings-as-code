@@ -436,6 +436,126 @@ describe("branches", () => {
     ).toEqual({ ops: [], notes: [], drift: [] });
   });
 
+  test(
+    "actor lists compare case-insensitively in both directions: GitHub matches a login or slug in any case and " +
+      "reads back its own spelling (a user's login can be mixed-case), so a declaration differing only in case " +
+      "is clean and a real actor change is the whole drift",
+    async () => {
+      const api = new MockApi({
+        [PROTECTION]: {
+          data: {
+            enforce_admins: { enabled: true },
+            required_pull_request_reviews: {
+              required_approving_review_count: 1,
+              dismissal_restrictions: { users: [{ login: "OctoCat" }], teams: [], apps: [] },
+              bypass_pull_request_allowances: {
+                users: [],
+                teams: [{ slug: "platform" }],
+                apps: [],
+              },
+            },
+            restrictions: {
+              users: [{ login: "OctoCat" }],
+              teams: [{ slug: "platform" }],
+              apps: [{ slug: "deploy-gate" }],
+            },
+          },
+        },
+      });
+      const spelled = {
+        enforce_admins: true,
+        required_pull_request_reviews: {
+          required_approving_review_count: 1,
+          dismissal_restrictions: { users: ["octocat"], teams: [], apps: [] },
+          bypass_pull_request_allowances: { users: [], teams: ["Platform"], apps: [] },
+        },
+        restrictions: { users: ["Octocat"], teams: ["PLATFORM"], apps: ["Deploy-Gate"] },
+      };
+      expect(await plan(api, [{ name: "main", protection: spelled }])).toEqual({
+        ops: [],
+        notes: [],
+        drift: [],
+      });
+      const changed = {
+        ...spelled,
+        restrictions: { ...spelled.restrictions, users: ["Release-Bot"] },
+      };
+      // The PUT carries the file's spelling; only the compare folds.
+      expect(await plan(api, [{ name: "main", protection: changed }])).toEqual({
+        ops: [
+          {
+            role: "putProtection",
+            params: MAIN,
+            payload: { ...changed, required_status_checks: null },
+            describe: 'replacing protection for branch "main"',
+            drift: [
+              'branches[main].protection.restrictions.users: missing "release-bot"',
+              'branches[main].protection.restrictions.users: unexpected "octocat"',
+            ],
+            change: 'applied protection to "main"',
+          },
+        ],
+        notes: [],
+        drift: [],
+      });
+    },
+  );
+
+  test.each(["dismissal_restrictions", "bypass_pull_request_allowances"])(
+    "a live review block without %s reads as the empty holder GitHub omits: an empty declaration is clean, a declared actor diffs against the empty list",
+    async (holder) => {
+      const api = new MockApi({
+        [PROTECTION]: {
+          data: {
+            enforce_admins: { enabled: true },
+            required_pull_request_reviews: { required_approving_review_count: 1 },
+          },
+        },
+      });
+      const empty: Record<"users" | "teams" | "apps", string[]> = {
+        users: [],
+        teams: [],
+        apps: [],
+      };
+      const reviews = (actors: typeof empty) => ({
+        enforce_admins: true,
+        required_pull_request_reviews: { required_approving_review_count: 1, [holder]: actors },
+      });
+      expect(await plan(api, [{ name: "main", protection: reviews(empty) }])).toEqual({
+        ops: [],
+        notes: [],
+        drift: [],
+      });
+      const naming = await plan(api, [
+        { name: "main", protection: reviews({ ...empty, users: ["octocat"] }) },
+      ]);
+      expect(naming.ops.map((op) => [op.role, op.drift])).toEqual([
+        [
+          "putProtection",
+          [
+            `branches[main].protection.required_pull_request_reviews.${holder}.users: missing "octocat"`,
+          ],
+        ],
+      ]);
+    },
+  );
+
+  test("an all-empty restrictions holder is a control ON by presence (nobody may push), so declared against an unrestricted branch it plans the PUT", async () => {
+    const api = new MockApi({ [PROTECTION]: { data: { enforce_admins: { enabled: true } } } });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: { enforce_admins: true, restrictions: { users: [], teams: [], apps: [] } },
+      },
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "putProtection",
+        ["branches[main].protection.restrictions: expected object, live has undefined"],
+      ],
+    ]);
+  });
+
   test("protection null removes live protection and plans nothing for an unprotected branch", async () => {
     const protectedApi = new MockApi({
       [PROTECTION]: {
@@ -1475,6 +1595,18 @@ describe("branches snapshot", () => {
     });
   });
 
+  test("the snapshot writes GitHub's own actor spelling and no review holder GitHub omitted: the compare's folding never reaches the file", () => {
+    expect(
+      protectionSnapshot({
+        required_pull_request_reviews: { required_approving_review_count: 1 },
+        restrictions: { users: [{ login: "OctoCat" }], teams: [], apps: [] },
+      }),
+    ).toEqual({
+      required_pull_request_reviews: { required_approving_review_count: 1 },
+      restrictions: { users: ["OctoCat"], teams: [], apps: [] },
+    });
+  });
+
   test("the live side gets the same PUT spelling: -1 for a null app_id, contexts derived from checks", () => {
     expect(
       flattenProtection({ required_status_checks: { checks: [{ context: "ci", app_id: null }] } }),
@@ -1699,6 +1831,34 @@ describe("branches snapshot", () => {
     ["a\\", "a", true],
   ])("the mock's fnmatch: %s against %s -> %p", (pattern, branch, matches) => {
     expect(wildcardMatches(pattern, branch)).toBe(matches);
+  });
+
+  test("the mock reads a PUT back the way GitHub does: actors in their canonical lowercase, all-empty review holders omitted", async () => {
+    const api = registryFake({ branches: ["main"] });
+    const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
+      enforce_admins: true,
+      required_status_checks: null,
+      required_pull_request_reviews: {
+        required_approving_review_count: 1,
+        dismissal_restrictions: { users: [], teams: [], apps: [] },
+        bypass_pull_request_allowances: { users: ["Release-Bot"], teams: [], apps: [] },
+      },
+      restrictions: { users: ["Octocat"], teams: ["Platform-Team"], apps: ["Deploy-Gate"] },
+    });
+    expect("data" in put).toBe(true);
+    const served = await api.tryRequest("GET", "/repos/o/r/branches/main/protection");
+    expect("data" in served ? served.data : served).toEqual({
+      enforce_admins: { enabled: true },
+      required_pull_request_reviews: {
+        required_approving_review_count: 1,
+        bypass_pull_request_allowances: { users: [{ login: "release-bot" }], teams: [], apps: [] },
+      },
+      restrictions: {
+        users: [{ login: "octocat" }],
+        teams: [{ slug: "platform-team" }],
+        apps: [{ slug: "deploy-gate" }],
+      },
+    });
   });
 
   test("the mock serves a wildcard rule's protection only under an EXISTING matching branch, signatures included", async () => {

@@ -1,0 +1,38 @@
+# GitHub serves actor logins and slugs in its own canonical spelling, so a
+# settings file spelling a login in another case (Octocat, live octocat)
+# describes the same restriction. Check mode must read that as clean: the
+# actor lists compare case-insensitively, and nothing is written.
+name: branches-mixed-case-restrictions-check-clean
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        restrictions:
+          users: [Octocat]
+          teams: [Platform-Team]
+          apps: []
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+      restrictions:
+        users:
+          - login: octocat
+        teams:
+          - slug: platform-team
+        apps: []
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 0
+  result: clean
+  outcomes:
+    branches: clean
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"
