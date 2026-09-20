@@ -154,6 +154,78 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
       validateSectionShapes({ repository: { first: shared, second: shared } }, "f.yml").isOk(),
     ).toBe(true);
   });
+
+  // YAML spells none of these, but a library caller's document can; each would reach plan()'s payload proof through a
+  // passthrough field and throw there, after the repository section beside it had written.
+  test.each<[what: string, value: unknown, reason: string]>([
+    ["a bigint", 10n, "a bigint"],
+    ["a function", () => true, "a function"],
+    ["a symbol", Symbol("s"), "a symbol"],
+    [
+      "a symbol-keyed mapping",
+      { ok: true, [Symbol("hidden")]: 1 },
+      "a mapping with a symbol-keyed property, which JSON drops",
+    ],
+    [
+      "a list of a subclass",
+      new (class Tagged extends Array {})(),
+      "a list of a subclass, which JSON serializes as a plain list",
+    ],
+    [
+      "a list carrying named properties",
+      Object.assign([1], { extra: 2 }),
+      "a list carrying named properties, which JSON drops",
+    ],
+    [
+      // The walk must not call the list's own keys(): here it is a number.
+      "a list whose named property shadows a method",
+      Object.assign([1], { keys: 0 }),
+      "a list carrying named properties, which JSON drops",
+    ],
+    [
+      "a list with a hole",
+      Object.assign(new Array(3), { 0: 1, 2: 3 }),
+      "a list with a hole (which JSON renders as null) or a non-enumerable item",
+    ],
+    ["a class instance", new Date(0), "a Date, e.g. from a YAML !!timestamp tag"],
+  ])(
+    "%s in a passthrough field is refused at the boundary with its path",
+    (_what, value, reason) => {
+      expect(
+        issuesOf({
+          repository: { description: "changed" },
+          actions_variables: [{ name: "REGION", value: "eu", extra: value }],
+        }),
+      ).toEqual([
+        `actions_variables[0].extra is not plain YAML data (${reason}); replace it with a plain value`,
+      ]);
+    },
+  );
+
+  // zod reads a schema field by name whatever its enumerability, so its output carries what Object.entries skipped.
+  test("a non-plain value under a NON-ENUMERABLE schema field is refused on zod's output", () => {
+    const branch = Object.defineProperty({ name: "main" }, "protection", {
+      value: { extra: 10n },
+      enumerable: false,
+    });
+    expect(issuesOf({ repository: { description: "changed" }, branches: [branch] })).toEqual([
+      "branches[0].protection.extra is not plain YAML data (a bigint); replace it with a plain value",
+    ]);
+  });
+
+  test("an undefined LIST ITEM is refused at its path; an undefined FIELD is what JSON drops, so it passes", () => {
+    expect(
+      issuesOf({ actions_variables: [{ name: "REGION", value: "eu", extra: [undefined] }] }),
+    ).toEqual([
+      "actions_variables[0].extra[0] is not plain YAML data (an undefined list item, which JSON would turn into null); replace it with a plain value",
+    ]);
+    expect(
+      validateSectionShapes(
+        { actions_variables: [{ name: "REGION", value: "eu", extra: undefined }] },
+        "f.yml",
+      ).isOk(),
+    ).toBe(true);
+  });
 });
 
 describe("closed-surface sections reject unrecognized entry keys upfront", () => {

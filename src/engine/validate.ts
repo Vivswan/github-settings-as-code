@@ -10,20 +10,20 @@ import { agree, countNoun } from "../text.js";
 
 /**
  * One walk over a section's value for what no shape can judge, so a new mapping or passthrough field needs no guard
- * of its own; `offence` names the problem at a node, and a shared alias between siblings is plain data, walked once.
- * A YAML alias to an ancestor is a cycle JSON cannot carry: refused with its path under "refuse" (on zod's output,
- * so a typed field keeps the shape's own message), passed over under "pass" (on the raw value, where the shape
- * parse still runs).
+ * of its own; `offence` names the problem at a node. A YAML alias to an ancestor is a cycle JSON cannot carry:
+ * refused with its path under "refuse" (on zod's output, so a typed field keeps the shape's own message), passed over
+ * under "pass" (on the raw value, where the shape parse still runs). A shared alias between siblings is walked once.
  */
 function findOffending(
   value: unknown,
   path: string,
-  offence: (value: unknown) => string | null,
+  offence: (value: unknown, at: "item" | "field") => string | null,
   cycles: "refuse" | "pass",
+  at: "item" | "field" = "field",
   ancestors: Set<object> = new Set(),
   walked: WeakSet<object> = new WeakSet(),
 ): string | null {
-  const own = offence(value);
+  const own = offence(value, at);
   if (own !== null) {
     return `${path} ${own}`;
   }
@@ -38,11 +38,12 @@ function findOffending(
   }
   walked.add(value);
   ancestors.add(value);
-  const children: [string, unknown][] = Array.isArray(value)
-    ? value.map((entry, index) => [`${path}[${index}]`, entry])
-    : Object.entries(value).map(([key, entry]) => [`${path}.${key}`, entry]);
-  for (const [childPath, child] of children) {
-    const hit = findOffending(child, childPath, offence, cycles, ancestors, walked);
+  // Array.from, not map: map skips a hole.
+  const children: [string, unknown, "item" | "field"][] = Array.isArray(value)
+    ? Array.from(value, (entry, index) => [`${path}[${index}]`, entry, "item"])
+    : Object.entries(value).map(([key, entry]) => [`${path}.${key}`, entry, "field"]);
+  for (const [childPath, child, childAt] of children) {
+    const hit = findOffending(child, childPath, offence, cycles, childAt, ancestors, walked);
     if (hit !== null) {
       return hit;
     }
@@ -52,29 +53,64 @@ function findOffending(
 }
 
 /**
- * zod's object schemas accept a Date, Set, or Uint8Array (YAML !!timestamp, !!set, !!binary) as an empty mapping, so a
- * tagged value where a mapping is expected (actions.cache, a pages mapping) would validate and then silently configure
- * nothing. Judged on the raw value, before the shape parse.
+ * What the payload proof (contract/plan.ts plainData) would throw on mid-run, judged at one node: a YAML-tagged value
+ * (a Date, Set, or Uint8Array from !!timestamp, !!set, !!binary, which a zod object schema accepts as an empty
+ * mapping), and what only a library caller's document can hold. An undefined list item becomes null in JSON; an
+ * undefined field is dropped, so it passes.
  */
-function nonPlainOffence(value: unknown): string | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+function nonPlainOffence(value: unknown, at: "item" | "field"): string | null {
+  const refuse = (what: string): string =>
+    `is not plain YAML data (${what}); replace it with a plain value`;
+  if (value === undefined) {
+    return at === "item" ? refuse("an undefined list item, which JSON would turn into null") : null;
+  }
+  if (value === null) {
+    return null;
+  }
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return null;
+    case "object":
+      break;
+    default:
+      return refuse(nonPlainKind(value));
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return refuse("a mapping with a symbol-keyed property, which JSON drops");
+  }
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+      return refuse("a list of a subclass, which JSON serializes as a plain list");
+    }
+    // Indices from the length, not value.keys(): a named property may shadow the method.
+    const indices = new Set(Array.from({ length: value.length }, (_, index) => String(index)));
+    if (Object.getOwnPropertyNames(value).some((n) => n !== "length" && !indices.has(n))) {
+      return refuse("a list carrying named properties, which JSON drops");
+    }
+    if (Object.keys(value).length !== value.length) {
+      return refuse("a list with a hole (which JSON renders as null) or a non-enumerable item");
+    }
     return null;
   }
   const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null
-    ? null
-    : `is not plain YAML data (${nonPlainKind(value)}); replace it with a plain value`;
+  return proto === Object.prototype || proto === null ? null : refuse(nonPlainKind(value));
 }
 
 /**
- * A typed number field refuses .nan and .inf in its shape; a PASSTHROUGH field carries them (and an alias cycle) into a
- * request body, where the payload proof (contract/plan.ts plainData) would throw mid-run, after earlier sections
- * wrote. Judged on zod's output, so the typed fields keep zod's own message.
+ * A typed number field refuses .nan and .inf in its shape; a PASSTHROUGH field carries them into a request body.
+ * Judged on zod's output only, so the typed fields keep zod's own message.
  */
 function nonFiniteOffence(value: unknown): string | null {
   return typeof value === "number" && !Number.isFinite(value)
     ? `is ${String(value)}, which JSON cannot carry (it would become null); declare a finite number or remove the key`
     : null;
+}
+
+/** On zod's output: plainness again, since zod reads a non-enumerable field the raw walk skipped, plus finiteness. */
+function parsedOffence(value: unknown, at: "item" | "field"): string | null {
+  return nonPlainOffence(value, at) ?? nonFiniteOffence(value);
 }
 
 /**
@@ -116,9 +152,9 @@ export function validateSectionShapes(
       }
       continue;
     }
-    const nonFinite = findOffending(parsed.data, key, nonFiniteOffence, "refuse");
-    if (nonFinite !== null) {
-      problems.push(nonFinite);
+    const unplain = findOffending(parsed.data, key, parsedOffence, "refuse");
+    if (unplain !== null) {
+      problems.push(unplain);
       continue;
     }
     problems.push(

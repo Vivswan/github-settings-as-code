@@ -668,7 +668,7 @@ export function secretValuesOf(
  *
  *   scalars, arrays, null    -> pass through, so the piped shape reports its own error
  *   applied by               -> the sections whose whole value is one mapping (repository, the setups, interaction_limits)
- *   document-wide backstop   -> findNonPlain in engine/validate.ts
+ *   document-wide backstop   -> the raw non-plain walk in engine/validate.ts (validateSectionShapes)
  */
 export function requirePlainMapping(shape: z.ZodType): z.ZodType {
   return z
