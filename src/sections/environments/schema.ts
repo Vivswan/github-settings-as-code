@@ -11,10 +11,10 @@ import { z } from "zod";
 import { nestedKnobbed } from "../shared/schema-helpers.js";
 
 /** GitHub's cap on wait_timer, in minutes (30 days). */
-export const MAX_WAIT_TIMER_MINUTES = 43_200;
+const MAX_WAIT_TIMER_MINUTES = 43_200;
 
 /** GitHub's cap on required reviewers per environment. */
-export const MAX_REVIEWERS = 6;
+const MAX_REVIEWERS = 6;
 
 /** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;

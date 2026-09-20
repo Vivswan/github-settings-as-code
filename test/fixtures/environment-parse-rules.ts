@@ -24,8 +24,8 @@ export type EnvironmentParseFixture =
       refusal: string;
     };
 
-/** Exported so tests asserting on the refinement's error wording (which embeds the name) derive it instead of restating "prod". */
-export const FIXTURE_ENV_NAME = "prod";
+/** The one environment name every fixture carries; the refinement wording embeds it. */
+const FIXTURE_ENV_NAME = "prod";
 
 const customPolicies = { protected_branches: false, custom_branch_policies: true };
 
