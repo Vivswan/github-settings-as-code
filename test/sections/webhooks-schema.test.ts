@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 import { GAP as WEBHOOK_EVENTS } from "../../src/upstream-gaps/webhook-events.js";
 
@@ -99,11 +100,12 @@ describe("every spelling GitHub accepts parses", () => {
       { config: { url: HOOK_URL, insecure_ssl: 1 } },
     ],
     ["a plain http url with a port", { config: { url: "http://hooks.example.com:8080/ci" } }],
-    [
-      "an unknown config key, which passes through",
-      { config: { url: HOOK_URL, future_flag: "x" } },
-    ],
   ])("%s", (_label, hook) => {
     expect(problems([hook])).toBeNull();
+  });
+
+  test("an unknown config key survives the parse (a stripping shape would also parse, so success alone proves nothing)", () => {
+    const webhooks = [{ config: { url: HOOK_URL, future_flag: "x" } }];
+    expect(validateSectionShapes({ webhooks }, "settings.yml")).toEqual(ok({ webhooks }));
   });
 });
