@@ -4,6 +4,9 @@
  *
  * desired null, live absent         -> no delta
  * desired "", live null or absent   -> no delta
+ *
+ * A replace-style write (a ruleset's PUT) is the exception: `replace` turns every non-empty live value the declaration
+ * omits into an `omitted` delta, because that write would remove it.
  */
 
 import { agree } from "../text.js";
@@ -32,21 +35,72 @@ export type Delta =
       readonly path: readonly PathStep[];
       readonly live: unknown;
       readonly match: ListMatch;
+    }
+  | {
+      readonly kind: "omitted";
+      readonly path: readonly PathStep[];
+      readonly live: unknown;
+      /** The slice accepts `null` at this path, so `<key>: null` is the clearing spelling (an object has no other). */
+      readonly nullable: boolean;
     };
+
+/** One field, or the fields whose values together identify an item (a bypass actor's type and id). */
+export type MatchKey = string | readonly string[];
 
 export interface DeltaOptions {
   /**
-   * Per nested list (by dotted object path below the root), the item key to pair by; a missing or repeated key is a
-   * declaration bug.
+   * Per nested list (by dotted object path below the root, a list item spelled `[]`: `rules`, `rules[].checks`), the
+   * item key to pair by; a missing or repeated key is a declaration bug.
    *
    * a list not named here  -> object items pair by shape, others by value
    * matchBy omitted        -> lists fall back to the legacy `type` sniffing subsetDiff callers rely on
    */
-  readonly matchBy?: Readonly<Record<string, string>>;
+  readonly matchBy?: Readonly<Record<string, MatchKey>>;
+  /**
+   * The write replaces the live object whole, so a non-empty live value at a path the declaration omits is an
+   * `omitted` delta. Callers project the live object onto the write's keys first, or server-assigned fields count.
+   */
+  readonly replace?: ReplaceSweep;
+}
+
+/**
+ * Where the write's slice stops knowing the keys. The sweep skips `passthrough` (the dotted paths the slice leaves
+ * untyped, `rules[].parameters`, `bypass_actors[]`) because it cannot tell a default GitHub filled from a value the
+ * file left out: a live `require_code_owner_review: true` beside a declared pull_request rule reads clean, and the
+ * PUT resets it. `nullable` names the paths whose clearing spelling is `null`.
+ */
+export interface ReplaceSweep {
+  readonly passthrough: readonly string[];
+  readonly nullable: readonly string[];
+}
+
+function isPassthrough(keyPath: string, passthrough: readonly string[]): boolean {
+  return passthrough.some((path) => keyPath === path || keyPath.startsWith(`${path}.`));
 }
 
 function isScalar(value: unknown): boolean {
   return typeof value !== "object" || value === null;
+}
+
+function isPlainMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Nothing a replacing write would need to preserve: GitHub's zero values, an empty list, or a mapping
+ * whose every value is empty by the same rule (an actor holder with empty lists).
+ */
+function isEmptySetting(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === "" || value === 0) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (isPlainMapping(value)) {
+    return Object.values(value).every(isEmptySetting);
+  }
+  return false;
 }
 
 /** Marks a live field the object has no own key for, as opposed to one holding undefined. */
@@ -88,7 +142,7 @@ function walk(
     return;
   }
   if (typeof desired === "object") {
-    if (typeof liveValue !== "object" || liveValue === null || Array.isArray(liveValue)) {
+    if (!isPlainMapping(liveValue)) {
       out.push(
         absent
           ? { kind: "phantom", path, desired }
@@ -96,11 +150,28 @@ function walk(
       );
       return;
     }
-    const liveRecord = liveValue as Record<string, unknown>;
-    for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
+    const declared = desired as Record<string, unknown>;
+    for (const [key, value] of Object.entries(declared)) {
       // hasOwn, not indexing: a key named like a prototype member (toString) must read as absent, not as the inherited function.
-      const child = Object.hasOwn(liveRecord, key) ? liveRecord[key] : ABSENT;
+      const child = Object.hasOwn(liveValue, key) ? liveValue[key] : ABSENT;
       walk(value, child, [...path, key], keyPath === "" ? key : `${keyPath}.${key}`, opts, out);
+    }
+    if (opts.replace !== undefined && !isPassthrough(keyPath, opts.replace.passthrough)) {
+      for (const [key, value] of Object.entries(liveValue)) {
+        const childPath = keyPath === "" ? key : `${keyPath}.${key}`;
+        if (
+          !Object.hasOwn(declared, key) &&
+          !isEmptySetting(value) &&
+          !isPassthrough(childPath, opts.replace.passthrough)
+        ) {
+          out.push({
+            kind: "omitted",
+            path: [...path, key],
+            live: value,
+            nullable: opts.replace.nullable.includes(childPath),
+          });
+        }
+      }
     }
     return;
   }
@@ -122,13 +193,29 @@ function typeOf(item: unknown): string | null {
     : null;
 }
 
-function itemKey(item: unknown, key: string, keyPath: string, side: "desired" | "live"): string {
-  if (typeof item !== "object" || item === null || !Object.hasOwn(item, key)) {
+function fieldsOf(key: MatchKey): readonly string[] {
+  return typeof key === "string" ? [key] : key;
+}
+
+function describeKey(key: MatchKey): string {
+  return fieldsOf(key)
+    .map((field) => `"${field}"`)
+    .join(", ");
+}
+
+/**
+ * The identity of one item: its key fields' values, space-joined. A null or absent part is left out (a DeployKey
+ * actor carries no id), so both spellings of the same actor read as one; an item carrying none of the fields is a
+ * declaration bug.
+ */
+function itemKey(item: unknown, key: MatchKey, keyPath: string, side: "desired" | "live"): string {
+  const parts = isPlainMapping(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
+  if (!isPlainMapping(item) || parts.length === 0) {
     throw new Error(
-      `BUG: matchBy pairs the list "${keyPath}" by "${key}", but a ${side} item carries no such key: ${JSON.stringify(item)}`,
+      `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but a ${side} item carries no such key: ${JSON.stringify(item)}`,
     );
   }
-  return String((item as Record<string, unknown>)[key]);
+  return parts.map((field) => String(item[field])).join(" ");
 }
 
 function walkList(
@@ -146,7 +233,7 @@ function walkList(
       const key = itemKey(item, declaredKey, keyPath, "live");
       if (liveByKey.has(key)) {
         throw new Error(
-          `BUG: matchBy pairs the list "${keyPath}" by "${declaredKey}", but the live list repeats ${JSON.stringify(key)}`,
+          `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(declaredKey)}, but the live list repeats ${JSON.stringify(key)}`,
         );
       }
       liveByKey.set(key, item);
@@ -179,14 +266,19 @@ function walkList(
     desired.every((item) => typeof item === "object" && item !== null && !Array.isArray(item));
   if (objectList) {
     // Order-insensitive; a live item nothing pairs with is undeclared because a full-payload write would remove it.
+    // Items pair on the declared fields alone, so under `replace` a paired item's extra live fields read as omitted.
+    const { replace: _replace, ...subset } = opts;
     const liveItems = [...live];
     for (const [index, item] of desired.entries()) {
       const matchIndex = liveItems.findIndex(
-        (candidate) => deltas(item, candidate, opts).length === 0,
+        (candidate) => deltas(item, candidate, subset).length === 0,
       );
       if (matchIndex === -1) {
         out.push({ kind: "missing", path: [...path, index], desired: item, match: "shape" });
       } else {
+        if (opts.replace !== undefined) {
+          walk(item, liveItems[matchIndex], [...path, index], `${keyPath}[]`, opts, out);
+        }
         liveItems.splice(matchIndex, 1);
       }
     }
@@ -214,7 +306,7 @@ function walkList(
 function walkKeyed(
   desired: unknown[],
   liveByKey: ReadonlyMap<string, unknown>,
-  key: string,
+  key: MatchKey,
   path: readonly PathStep[],
   keyPath: string,
   opts: DeltaOptions,
@@ -225,7 +317,7 @@ function walkKeyed(
     const itemId = itemKey(item, key, keyPath, "desired");
     if (declared.has(itemId)) {
       throw new Error(
-        `BUG: matchBy pairs the list "${keyPath}" by "${key}", but the declared list repeats ${JSON.stringify(itemId)}`,
+        `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but the declared list repeats ${JSON.stringify(itemId)}`,
       );
     }
     declared.add(itemId);
@@ -234,7 +326,7 @@ function walkKeyed(
     if (match === undefined) {
       out.push({ kind: "missing", path: at, desired: item, match: "key" });
     } else {
-      walk(item, match, at, keyPath, opts, out);
+      walk(item, match, at, `${keyPath}[]`, opts, out);
     }
   }
   for (const [itemId, item] of liveByKey) {
@@ -244,15 +336,20 @@ function walkKeyed(
   }
 }
 
+/**
+ * `rulesets[main].bypass_actors[Team 1]` under a root, or `rules[deletion].parameters.x` under an empty one:
+ * the path as a settings-file reader would spell it.
+ */
 function renderPath(root: string, path: readonly PathStep[]): string {
-  const steps = path.map((step) =>
-    typeof step === "string"
-      ? `.${step}`
-      : typeof step === "number"
-        ? `[${step}]`
-        : `[${step.key}]`,
+  return path.reduce<string>(
+    (at, step) =>
+      typeof step === "string"
+        ? at === ""
+          ? step
+          : `${at}.${step}`
+        : `${at}[${typeof step === "number" ? step : step.key}]`,
+    root,
   );
-  return `${root}${steps.join("")}`;
 }
 
 function mismatchLine(at: string, desired: unknown, live: unknown): string {
@@ -269,6 +366,24 @@ function mismatchLine(at: string, desired: unknown, live: unknown): string {
     return `${at}: declared ${JSON.stringify(desired)} but the API response has no such field (new or write-only field?)`;
   }
   return `${at}: ${JSON.stringify(desired)} != ${JSON.stringify(live)}`;
+}
+
+/**
+ * The declaration that removes a live value on purpose, or null when the kind has no one empty spelling: a slice
+ * may refuse `null` for an object, and an empty string is outside every enum.
+ */
+function emptyFor(live: unknown): string | null {
+  if (Array.isArray(live)) {
+    return "[]";
+  }
+  switch (typeof live) {
+    case "boolean":
+      return "false";
+    case "number":
+      return "0";
+    default:
+      return null;
+  }
 }
 
 export function renderDelta(root: string, delta: Delta): string {
@@ -290,20 +405,65 @@ export function renderDelta(root: string, delta: Delta): string {
         : delta.match === "shape"
           ? `${at}: live entry not declared: ${JSON.stringify(delta.live)}`
           : `${at}: unexpected ${JSON.stringify(delta.live)}`;
+    case "omitted": {
+      const key = renderPath("", delta.path);
+      const empty = delta.nullable ? "null" : emptyFor(delta.live);
+      const remove = empty === null ? "" : `, or ${key}: ${empty} to remove it on purpose`;
+      return `${at}: live has ${JSON.stringify(delta.live)} but the settings file omits it, so apply would REMOVE it; declare ${key} to keep it${remove}`;
+    }
   }
 }
 
-export function subsetDiff(desired: unknown, live: unknown, path: string): string[] {
-  return deltas(desired, live).map((delta) => renderDelta(path, delta));
+export function subsetDiff(
+  desired: unknown,
+  live: unknown,
+  path: string,
+  opts: DeltaOptions = {},
+): string[] {
+  return deltas(desired, live, opts).map((delta) => renderDelta(path, delta));
+}
+
+/**
+ * What a replacing write would remove: the `omitted` deltas of a comparison against the live object projected onto
+ * the write's own keys. The projection and the passthrough paths are the caller's, since only it knows the write's
+ * schema; the declared-key comparison itself runs against the unprojected live object, so passthrough keys compare.
+ */
+export function omittedDeltas(
+  desired: unknown,
+  projectedLive: unknown,
+  opts: { readonly matchBy?: DeltaOptions["matchBy"]; readonly sweep: ReplaceSweep },
+): Delta[] {
+  return deltas(desired, projectedLive, { matchBy: opts.matchBy, replace: opts.sweep }).filter(
+    (delta) => delta.kind === "omitted",
+  );
+}
+
+/**
+ * Apply never issues a replacing write that would remove what the settings file omits: the operation's `before`
+ * hook throws the omitted lines instead, so the run fails for that entry with its request never sent, while check
+ * keeps reporting the same lines as drift. Undefined when nothing is omitted.
+ */
+export function refuseOmitted(
+  label: string,
+  omitted: readonly string[],
+): (() => never) | undefined {
+  if (omitted.length === 0) {
+    return undefined;
+  }
+  const message = `${label}: not applied - the update would remove ${agree(omitted.length, "a live value", "live values")} the settings file omits. ${omitted.join(" ")}`;
+  return () => {
+    throw new Error(message);
+  };
+}
+
+/** The phantom deltas as dotted paths (`security_and_analysis.foo`, `rules[deletion].x`), for the never-converges note. */
+export function phantomPaths(found: readonly Delta[]): string[] {
+  return found.flatMap((delta) => (delta.kind === "phantom" ? [renderPath("", delta.path)] : []));
 }
 
 /** Sections whose write is gated by a comparison note these, so the gating keys do not silently rewrite on every run. */
 export function phantomKeys(desired: Record<string, unknown>, live: unknown): string[] {
-  return deltas(desired, live).flatMap((delta) =>
-    delta.kind === "phantom" && delta.path.length === 1 && typeof delta.path[0] === "string"
-      ? [delta.path[0]]
-      : [],
-  );
+  return phantomPaths(deltas(desired, live));
 }
 
 export function phantomNote(prefix: string, keys: string[], noun: string, rewrite: string): string {
