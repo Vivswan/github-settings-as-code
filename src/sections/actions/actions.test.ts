@@ -186,7 +186,8 @@ describe("actions", () => {
   });
 
   test("sha_pinning_required is a base-permissions key the PUT takes: it plans without the unrecognized-key note", async () => {
-    // The PUT body documents it beside enabled and allowed_actions; unknown to this action it would converge under a note telling the operator to remove it.
+    // The PUT body documents it beside enabled and allowed_actions; unknown to this action it would converge
+    // under a note telling the operator to remove it.
     const api = new MockApi({
       [PERMISSIONS]: {
         data: { enabled: true, allowed_actions: "all", sha_pinning_required: false },
@@ -391,7 +392,8 @@ describe("actions", () => {
           },
         },
         [
-          'actions.oidc_customization_sub.include_claim_keys[1]: a claim key holds only letters, digits, and underscores (such as "repo" or "job_workflow_ref")',
+          "actions.oidc_customization_sub.include_claim_keys[1]: a claim key holds only letters, digits, and underscores " +
+            '(such as "repo" or "job_workflow_ref")',
         ],
       ],
       [
@@ -410,7 +412,8 @@ describe("actions", () => {
         "a claim-key list under the default template is ignored by GitHub, so it would never take",
         { oidc_customization_sub: { use_default: true, include_claim_keys: ["repo"] } },
         [
-          "actions.oidc_customization_sub.include_claim_keys: GitHub ignores include_claim_keys under use_default: true, so the declared list could never take; set use_default: false for a custom template, or remove the list",
+          "actions.oidc_customization_sub.include_claim_keys: GitHub ignores include_claim_keys under use_default: true, " +
+            "so the declared list could never take; set use_default: false for a custom template, or remove the list",
         ],
       ],
       [
@@ -822,7 +825,7 @@ describe("actions snapshot", () => {
     expect(api.writes).toEqual([]);
   });
 
-  test("the OIDC template reads back as a document the shape accepts: an inactive or null claim-key list and the reported prefix fall away", async () => {
+  test("the OIDC template reads back as a document the shape accepts: an inactive or null claim-key list and the prefix fall away", async () => {
     // GitHub keeps reporting the last custom list (and sub_claim_prefix) after a switch back to the default template, and answers null for a list
     // never set; either read back verbatim would be a snapshot the shape itself refuses.
     const cases: [

@@ -20,7 +20,9 @@ function refuseReportedOnly(
     ctx.addIssue({
       code: "custom",
       path: [...path, field],
-      message: `${field} is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), so a declared value could never be applied; remove it from the settings file`,
+      message:
+        `${field} is a value GitHub reports, not a setting it accepts (the GET returns it, the PUT does not take it), ` +
+        "so a declared value could never be applied; remove it from the settings file",
     });
   }
 }
@@ -68,7 +70,8 @@ const OidcTemplate = z
         code: "custom",
         path: ["include_claim_keys"],
         message:
-          "GitHub ignores include_claim_keys under use_default: true, so the declared list could never take; set use_default: false for a custom template, or remove the list",
+          "GitHub ignores include_claim_keys under use_default: true, so the declared list could never take; " +
+          "set use_default: false for a custom template, or remove the list",
       });
     }
   });
