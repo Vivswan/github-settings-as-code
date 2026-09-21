@@ -5,7 +5,7 @@ import { loosen, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
-import { PagesConfig } from "./schema.js";
+import { PAGES_SITE_SHAPE, PagesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["pages"] };
 
@@ -106,8 +106,12 @@ export const pagesSection = {
 
     if (!("missing" in probe)) {
       // The site mapping passes unknown keys through, so a key the GET never echoes would re-PUT on
-      // every apply without converging; the note names it beside the drift it causes.
-      const phantom = phantomKeys(payload, probe.data);
+      // every apply without converging; the note names it beside the drift it causes. A site key the
+      // GET omits (https_enforced on a site created without it) is drift the PUT resolves, so only a
+      // key outside the site shape is noted.
+      const phantom = phantomKeys(payload, probe.data).filter(
+        (name) => !Object.hasOwn(PAGES_SITE_SHAPE, name),
+      );
       if (phantom.length > 0) {
         plan.notes.push(phantomNote("pages", phantom, "Pages site", "this PUT will re-run"));
       }

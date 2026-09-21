@@ -239,8 +239,9 @@ export const environmentsSection = {
  * The PUT replaces the environment's settings whole (an omitted `reviewers` clears the reviewers rule), so a
  * non-empty live setting the entry omits is drift too, and the lines it makes (`omitted`) are what apply refuses
  * the write over. The live body is split the way the entry was, so only the PUT's own keys take part in that sweep.
- * The entry passes unknown keys through, so a key the GET never echoes is drift the PUT can never resolve; `notes`
- * names it.
+ * The entry passes unknown keys through, so a key the GET never echoes would re-PUT on every apply without
+ * converging; `notes` names it. An entry key the GET omits (deployment_branch_policy on an environment that never
+ * set one) is drift the PUT resolves, so only a key outside the entry shape is noted.
  */
 function environmentDrift(
   label: string,
@@ -251,7 +252,9 @@ function environmentDrift(
   const omitted = omittedDeltas(settings, liveSettings, {
     sweep: replaceSweep(EnvironmentConfig),
   }).map((delta) => renderDelta(label, delta));
-  const phantom = phantomKeys(settings, live);
+  const phantom = phantomKeys(settings, live).filter(
+    (key) => !Object.hasOwn(EnvironmentConfig.shape, key),
+  );
   const notes =
     phantom.length > 0 ? [phantomNote(label, phantom, "environment", "this PUT will re-run")] : [];
   return { drift: [...subsetDiff(settings, live, label), ...omitted], omitted, notes };

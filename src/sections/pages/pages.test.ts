@@ -194,6 +194,26 @@ describe("pages", () => {
     expect(mismatch.notes).toEqual([]);
   });
 
+  test("a site key the GET omits is plain drift the PUT resolves: no note, one PUT, converged", async () => {
+    // GitHub marks https_enforced optional on the site: a site enabled through the create call alone
+    // reports without it until the update sets it. The key is in the site shape, so it is not a phantom.
+    const api = liveRepo({ build_type: "workflow", source: { branch: "main", path: "/" } });
+    const { first, second } = await provePlanIdempotent(pagesSection, api, {
+      https_enforced: true,
+    });
+    expect(first.notes).toEqual([]);
+    expect(first.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "update",
+        [
+          "pages.https_enforced: declared true but the API response has no such field (new or write-only field?)",
+        ],
+      ],
+    ]);
+    expect(api.writes).toEqual(["PUT /repos/o/r/pages"]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
   test("a source without a path gets the default path everywhere", async () => {
     const api = new MockApi({ [GET]: { data: {} } });
     const result = await plan(api, { source: { branch: "main" } });

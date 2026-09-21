@@ -132,6 +132,24 @@ describe("environments plan", () => {
     expect(mismatch.notes).toEqual([]);
   });
 
+  test("an entry key the GET omits is plain drift the PUT resolves: no note, one PUT, converged", async () => {
+    // GitHub marks deployment_branch_policy optional on the environment: one that never set a policy
+    // reports without the key. The key is in the entry shape, so it is not a phantom.
+    const api = fragmentFake(environmentsSection, environmentsMockHandlers, {
+      environments: { prod: { name: "prod", protection_rules: [] } },
+    });
+    const policy = { protected_branches: true, custom_branch_policies: false };
+    const { first, second } = await provePlanIdempotent(environmentsSection, api, [
+      { name: "prod", deployment_branch_policy: policy },
+    ]);
+    expect(first.notes).toEqual([]);
+    expect(planDrift(first)).toEqual([
+      "environments[prod].deployment_branch_policy: expected object, live has undefined",
+    ]);
+    expect(api.writes).toEqual(["PUT /repos/o/r/environments/prod"]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
+  });
+
   test("the disabled protection values are never omitted drift: a bare entry plans clean against no rules and against rules holding them", async () => {
     // flattenEnvironment starts from wait_timer 0 / prevent_self_review false / reviewers [], and the
     // full-payload sweep treats those as nothing to preserve, whether the values come from the absence
