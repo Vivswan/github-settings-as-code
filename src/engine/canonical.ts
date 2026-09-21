@@ -26,7 +26,7 @@ import { defOf, detectKnobUnion } from "../sections/contract/module.js";
 /**
  * The identity field of every mapping list the walk sorts, by list path: the section key, `[]` per entry level,
  * `.field` per nested mapping; a knob wrapper's `entries` is transparent (`labels`, not `labels.entries`). A list
- * section's entry is what its declaration keys the planner by (test/engine/canonical.test.ts pins the six); a bespoke
+ * section's entry is what its declaration keys the planner by (test/engine/canonical.test.ts pins them); a bespoke
  * section's is the field its planner pairs live items on. A dotted value is a path into the entry (`config.url`).
  */
 export const LIST_IDENTITY: Readonly<Record<string, string>> = {

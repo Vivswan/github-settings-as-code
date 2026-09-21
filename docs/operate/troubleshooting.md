@@ -40,7 +40,7 @@ Two other things arrive as 403. First, rate limiting: both the primary limit and
 
 What you see: a failure ending "The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit".
 
-What it means: the retries already happened, or were deliberately skipped because the wait was too long. Rate limits (429 and secondary limits) are retried automatically, honoring Retry-After and the rate-limit reset; transient 5xx and network failures are retried on their own backoff. Both paths allow up to two retries, and a reset more than 60 seconds away fails loudly instead of stalling the workflow (see [Semantics](../reference/semantics.md)). By the time this error surfaces, the run has waited as long as it reasonably could.
+What it means: the retries already happened, or were deliberately skipped because the wait was too long. Which failures are retried, how many times, and the longest wait are in [Semantics](../reference/semantics.md). By the time this error surfaces, the run has waited as long as it reasonably could.
 
 What to do: re-run after the reset. If a multi-repo run keeps hitting the limit, reduce its scope: fewer targets per run, or a `sections` allowlist so each target makes fewer calls.
 

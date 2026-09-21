@@ -1,7 +1,5 @@
 /**
- * The custom_properties fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports
- * only the test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never
- * reaches lib/index.js.
+ * The custom_properties fuzz generator fragment, aggregated by test/e2e/generators.ts.
  */
 
 import { type EntriesForm, type Json, maybeWrapUndeclared } from "../../../test/e2e/gen-support.js";

@@ -1,7 +1,7 @@
 /**
  * The mapped and section-prefixed key types make a missing, misplaced, or colliding fragment a compile error, so the
  * runtime asserts in handlers.ts are only backstops. A section's mock.ts imports the test-tree seams beside this file
- * (support.ts, state.ts, and their siblings), never routes.ts; the bundle entry is src/main.ts, so fragments never reach lib/index.js.
+ * (support.ts, state.ts, and their siblings), never routes.ts.
  */
 
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";

@@ -31,12 +31,11 @@ schema:
     uppercased). Values are plain text BY DESIGN - variables are readable configuration, which is
     what makes check-mode diffing possible; secrets are write-only material and deliberately not
     this section.
-  ActionsVariableConfig: One GitHub Actions repository variable, matched by case-insensitive name.
+  ActionsVariableConfig: >-
+    One GitHub Actions repository variable, matched by case-insensitive name; workflows read it
+    through the `vars` context.
   ActionsVariableConfig.name: >-
     The variable name, the natural key; case-insensitive (stored uppercased by GitHub). GitHub's
     naming rule is checked when the file is parsed, before any API call: ASCII letters, digits, and
     underscores only, not starting with a digit, and not starting with the reserved `GITHUB_` prefix
     in any case.
-  ActionsVariableConfig.value: >-
-    The plain-text value workflows read through the vars context. GitHub caps one variable at 48 KB;
-    a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.

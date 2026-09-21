@@ -1,7 +1,6 @@
 /**
- * This fragment imports test-tree seams on purpose: the bundle entry is src/main.ts, so it never
- * reaches lib/index.js. The stored hook keeps its REAL config.secret so state comparisons see what
- * was written; GitHub never reveals a webhook secret, so every echo masks it.
+ * The stored hook keeps its REAL config.secret so state comparisons see what was written; GitHub
+ * never reveals a webhook secret, so every echo masks it.
  *   config.secret on any read or write echo -> "********"
  */
 

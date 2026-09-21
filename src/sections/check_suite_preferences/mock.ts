@@ -1,7 +1,5 @@
 /**
- * The check_suite_preferences e2e mock fragment (aggregated in test/e2e/mock/sections.ts). It
- * imports the test-tree seams on purpose: the bundle entry is src/main.ts, so this file never
- * reaches lib/index.js.
+ * The check_suite_preferences e2e mock fragment (aggregated in test/e2e/mock/sections.ts).
  */
 
 import { restRepoSurface } from "../../../test/e2e/mock/state.js";

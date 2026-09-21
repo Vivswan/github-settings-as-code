@@ -1,7 +1,5 @@
 /**
- * The environments fuzz generator fragment, aggregated by test/e2e/generators.ts. It imports only
- * the test-tree leaf seams on purpose: the bundle entry is src/main.ts, so this file never reaches
- * lib/index.js.
+ * The environments fuzz generator fragment, aggregated by test/e2e/generators.ts.
  */
 
 import { E2E_SECRET_ENV, type Json } from "../../../test/e2e/gen-support.js";

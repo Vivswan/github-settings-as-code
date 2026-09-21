@@ -24,6 +24,8 @@ layers:
   private: [src/private.ts, src/private-open.ts]
   upstream-gaps: [src/upstream-gaps/]
 
+# The e2e mock and fuzz-generator fragments import test-tree seams on purpose: the bundle entry is src/main.ts, so
+# they never reach lib/index.js, and they sit outside the layering.
 exclude:
   - src/sections/*/mock.ts
   - src/sections/*/generators.ts
