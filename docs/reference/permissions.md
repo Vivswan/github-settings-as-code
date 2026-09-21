@@ -42,7 +42,7 @@ Not every 403 is a missing grant. Rate limits can arrive as 403, and the action 
 
 Permission failures are the only errors the run can be told to tolerate; everything else always fails with the API message verbatim (see [Semantics](semantics.md)). Two inputs set the policy.
 
-Under the default `on-missing-permission: fail`, any denied section fails the run. In apply mode the [preflight barrier](semantics.md#the-preflight-barrier) probes every declared section read-only before anything is written, so a read denial under `fail` stops the run before the first write. The probe cannot see the write half of a grant, though: a token that reads a section but cannot write it still fails mid-apply. The engine is idempotent, so fixing the token and re-running converges.
+Under the default `on-missing-permission: fail`, any denied section fails the run. In apply mode the [preflight barrier](semantics.md#the-preflight-barrier) probes every active section (each declared section the `sections` input selects; all of them when that input is unset) read-only before anything is written, so a read denial under `fail` stops the run before the first write. The probe cannot see the write half of a grant, though: a token that reads a section but cannot write it still fails mid-apply. The engine is idempotent, so fixing the token and re-running converges.
 
 `on-missing-permission: warn` turns a denial into a skip: the section is skipped with a warning annotation, the run continues, and when nothing else drifts or fails the result is `partial` and the run stays green. That is partial success as a policy, useful when one token manages a fleet whose repositories do not all grant the same permissions.
 
