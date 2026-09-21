@@ -1,0 +1,31 @@
+# One environment entry carries two independent file mistakes: a reviewer
+# type outside the User/Team enum (a property-level shape failure) and
+# deployment_branch_policies without the custom_branch_policies flag (the
+# entry's own pair rule). zod would skip the pair rule once the enum failed,
+# so the flag would surface only on the next run; document validation reports
+# both in this one run, and still before any section writes.
+name: environment-every-parse-error-one-run
+settings:
+  repository:
+    description: should never be written
+  environments:
+    - name: production
+      reviewers:
+        - type: Bot
+          id: 1
+      deployment_branch_policies:
+        - name: release/*
+token_permissions:
+  environments: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/environments"
+    - "POST /repos/{repo}/environments"
+  stdout_contains:
+    - "environments[0].reviewers[0].type"
+    - "environments[0].deployment_branch_policies"
+    - 'the "production" entry declares deployment_branch_policies'
+    - "custom_branch_policies: true"

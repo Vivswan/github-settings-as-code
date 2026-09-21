@@ -188,7 +188,12 @@ export const branchesSection = {
       ...rest,
     ];
     entries.forEach((entry: BranchConfig, index) => {
-      if (!isWildcardPattern(entry.name) || entry.protection === null) {
+      // The name may be a raw non-string beside its own shape issue; a regex would coerce it (`[object Object]` wildcards).
+      if (
+        typeof entry.name !== "string" ||
+        !isWildcardPattern(entry.name) ||
+        entry.protection === null
+      ) {
         return;
       }
       const protection = entry.protection as Record<string, unknown>;

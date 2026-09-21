@@ -44,9 +44,9 @@ What it means: the retries already happened, or were deliberately skipped becaus
 
 What to do: re-run after the reset. If a multi-repo run keeps hitting the limit, reduce its scope: fewer targets per run, or a `sections` allowlist so each target makes fewer calls.
 
-## "unknown top-level section in ..." (or "sections")
+## "... has malformed section entries: unknown top-level section: ..."
 
-What you see: the run fails during validation, naming the unknown keys and listing every known section name.
+What you see: the run fails during validation with one collected list: the unknown keys beside every known section name, then whatever else the file got wrong.
 
 What it means: a misspelled section that silently did nothing would break the loud-failure promise, so unknown top-level keys are hard errors (see [Forward compatibility](../reference/forward-compatibility.md)).
 

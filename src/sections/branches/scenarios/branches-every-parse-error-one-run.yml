@@ -1,0 +1,31 @@
+# The first entry's name is a number (a shape failure inside the list) and
+# the second, a wildcard rule, declares protection.restrictions, which the
+# wildcard key sweep the section composes onto its loosened list refuses.
+# Document validation runs that sweep despite the failed sibling entry, so
+# both fixes are named in this one run.
+name: branches-every-parse-error-one-run
+settings:
+  repository:
+    description: should never be written
+  branches:
+    - name: 1
+      protection: null
+    - name: release/*
+      protection:
+        restrictions:
+          users: []
+          teams: []
+          apps: []
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/branches"
+    - "GRAPHQL"
+  stdout_contains:
+    - "branches[0].name"
+    - 'branches[1].protection.restrictions: the wildcard entry "release/*" declares protection.restrictions'
+    - "which this section does not manage on wildcard rules"

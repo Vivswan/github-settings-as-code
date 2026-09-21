@@ -149,17 +149,6 @@ export type Problem =
     }
   | { readonly code: "settings-not-plain-mapping"; readonly source: string }
   | {
-      readonly code: "settings-unknown-sections";
-      readonly source: string;
-      readonly unknown: readonly string[];
-      readonly known: readonly string[];
-    }
-  | {
-      readonly code: "settings-unknown-directives";
-      readonly source: string;
-      readonly unknown: readonly string[];
-    }
-  | {
       readonly code: "settings-malformed-sections";
       readonly source: string;
       readonly issues: readonly string[];
@@ -266,11 +255,7 @@ export type LayerProblem = Extract<Problem, { readonly code: `layer-${string}` }
 
 /** The settings document's members: what validateSettingsDoc refuses (a file's read failure is not one). */
 export type SettingsProblem = ProblemOf<
-  | "settings-not-mapping"
-  | "settings-not-plain-mapping"
-  | "settings-unknown-sections"
-  | "settings-unknown-directives"
-  | "settings-malformed-sections"
+  "settings-not-mapping" | "settings-not-plain-mapping" | "settings-malformed-sections"
 >;
 
 const PAT_ADVICE =
@@ -285,6 +270,16 @@ const DIRECTIVES_ADVICE =
   "The underscore marks this action's directives, \"_layering\" (a file's top level or a list section's {entries} " +
   'wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or ' +
   "keep the note as a YAML comment";
+
+/** One line of the collected document problems: the strange underscore keys, with the rule they break. */
+export function unknownDirectivesIssue(unknown: readonly string[]): string {
+  return `unknown underscore ${agree(unknown.length, "key", "keys")}: ${unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
+}
+
+/** One line of the collected document problems: the misspelled section names beside every name the action knows. */
+export function unknownSectionsIssue(unknown: readonly string[], known: readonly string[]): string {
+  return `unknown top-level ${agree(unknown.length, "section", "sections")}: ${unknown.join(", ")} (known: ${known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
+}
 
 const PASSTHROUGH_ADVICE =
   "Fix these values in the settings file (only the named keys are validated; extra fields pass " +
@@ -517,10 +512,6 @@ export function describeProblem(problem: Problem): string {
       return `${problem.source} must be a YAML mapping of section names to settings, but its top level parsed as a ${problem.shape}. Rewrite the top level as "section: ..." keys`;
     case "settings-not-plain-mapping":
       return `${problem.source} must be a plain YAML mapping of section names to settings, but its top level parsed as another type (a YAML-tagged value like !!timestamp parses to a Date). Rewrite the top level as "section: ..." keys`;
-    case "settings-unknown-sections":
-      return `unknown top-level ${agree(problem.unknown.length, "section", "sections")} in ${problem.source}: ${problem.unknown.join(", ")} (known: ${problem.known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
-    case "settings-unknown-directives":
-      return `unknown underscore ${agree(problem.unknown.length, "key", "keys")} in ${problem.source}: ${problem.unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
     case "settings-malformed-sections":
       return `${problem.source} has malformed section entries: ${problem.issues.join("; ")}. ${PASSTHROUGH_ADVICE}`;
     case "yaml-invalid":

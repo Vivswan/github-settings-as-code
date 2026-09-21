@@ -11,7 +11,12 @@ import {
 } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
-import { describeProblem, type TopLevelShape } from "../../src/problem.js";
+import {
+  describeProblem,
+  type TopLevelShape,
+  unknownDirectivesIssue,
+  unknownSectionsIssue,
+} from "../../src/problem.js";
 import { SECTION_KEYS, type SettingsFile } from "../../src/schema.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
 import type { SectionPlan } from "../../src/sections/contract/plan.js";
@@ -329,27 +334,28 @@ describe("runForRepo secret references", () => {
 });
 
 describe("validateSettingsDoc", () => {
-  test("unknown top-level keys are a problem naming the source and the known sections", () => {
+  test("unknown top-level keys are one collected line naming the known sections", () => {
     const { io } = captureIo();
     expect(validateSettingsDoc({ labls: [] }, "repos/x.yml", SectionSelection.ALL, io)).toEqual(
       err({
-        code: "settings-unknown-sections",
+        code: "settings-malformed-sections",
         source: "repos/x.yml",
-        unknown: ["labls"],
-        known: SECTION_KEYS,
+        issues: [unknownSectionsIssue(["labls"], SECTION_KEYS)],
       }),
     );
   });
 
-  test("an unknown underscore key is a problem under every allowlist, and it outranks the unknown sections; the document directive passes", () => {
+  test("an unknown underscore key is a problem under every allowlist, listed before the unknown sections; the document directive passes", () => {
     const { io, annotations } = captureIo();
     const doc = { _notes: "private", _layerin: "replace", labls: [], repository: {} };
-    const refused = err({
-      code: "settings-unknown-directives" as const,
-      source: "f.yml",
-      unknown: ["_notes", "_layerin"],
-    });
-    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io)).toEqual(refused);
+    const directives = unknownDirectivesIssue(["_notes", "_layerin"]);
+    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io)).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "f.yml",
+        issues: [directives, unknownSectionsIssue(["labls"], SECTION_KEYS)],
+      }),
+    );
     // Outside a `sections` allowlist an unknown SECTION only warns; the underscore rule has no such downgrade.
     expect(
       validateSettingsDoc(
@@ -358,8 +364,10 @@ describe("validateSettingsDoc", () => {
         SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
         io,
       ),
-    ).toEqual(refused);
-    expect(annotations).toEqual([]);
+    ).toEqual(err({ code: "settings-malformed-sections", source: "f.yml", issues: [directives] }));
+    expect(annotations).toEqual([
+      expect.stringMatching(/^warning: ignoring unknown top-level section outside/),
+    ]);
     expect(
       validateSettingsDoc(
         { _layering: "replace", repository: {} },
@@ -368,6 +376,29 @@ describe("validateSettingsDoc", () => {
         io,
       ).isOk(),
     ).toBe(true);
+  });
+
+  // Each of these once stopped the run alone, so a file with all three took three runs to fix.
+  test("an unknown directive, an unknown section, and a bad enum are reported in one run, in that order", () => {
+    const { io } = captureIo();
+    expect(
+      validateSettingsDoc(
+        { _owner: "notes", labls: [], workflows: [{ path: "ci.yml", state: "paused" }] },
+        "f.yml",
+        SectionSelection.ALL,
+        io,
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "f.yml",
+        issues: [
+          unknownDirectivesIssue(["_owner"]),
+          unknownSectionsIssue(["labls"], SECTION_KEYS),
+          expect.stringMatching(/^workflows\[0\]\.state: Invalid option/),
+        ],
+      }),
+    );
   });
 
   test.each<[what: string, doc: unknown, shape: TopLevelShape]>([

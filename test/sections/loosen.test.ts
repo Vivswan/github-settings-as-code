@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { loosen } from "../../src/sections/contract/module.js";
+import { checksReportingBesideFailures, loosen } from "../../src/sections/contract/module.js";
 
 describe("loosen", () => {
   test("strip objects become passthrough, and their superRefines see unknown keys", () => {
@@ -85,5 +85,100 @@ describe("loosen", () => {
         'BUG: loosen(): unhandled schema type "tuple" - teach loosen() its runtime derivation before authoring it in src/schema.ts',
       ),
     );
+  });
+});
+
+describe("every check reports beside a failed nested value", () => {
+  const pair = z
+    .object({ mode: z.enum(["a", "b"]).optional(), list: z.array(z.string()).optional() })
+    .superRefine((value, ctx) => {
+      if (value.list !== undefined && value.mode !== "a") {
+        ctx.addIssue({ code: "custom", path: ["list"], message: "list needs mode a" });
+      }
+    });
+
+  test("an object's own rule runs when a sibling property failed, and its finding keeps its path", () => {
+    const issues = loosen(pair).safeParse({ mode: "c", list: ["x"] }).error?.issues;
+    expect(issues?.map((issue) => [issue.path, issue.message])).toEqual([
+      [["mode"], expect.stringMatching(/^Invalid option/)],
+      [["list"], "list needs mode a"],
+    ]);
+  });
+
+  test("a rule's finding under the failed path is dropped: the shape's issue there is the report", () => {
+    const sweep = z.object({ list: z.array(z.string()) }).superRefine((value, ctx) => {
+      for (const key of Object.keys(value.list)) {
+        ctx.addIssue({ code: "custom", path: ["list", key], message: "swept" });
+      }
+    });
+    const issues = loosen(sweep).safeParse({ list: "yes" }).error?.issues;
+    expect(issues?.map((issue) => [issue.path, issue.message])).toEqual([
+      [["list"], expect.stringMatching(/expected array/)],
+    ]);
+  });
+
+  test("a rule that throws on the raw value beside a failure keeps what it found first; without a failure the throw propagates", () => {
+    const throwing = z
+      .object({ flag: z.boolean().optional(), list: z.array(z.string()) })
+      .superRefine((value, ctx) => {
+        if (value.flag === true) {
+          ctx.addIssue({ code: "custom", path: ["flag"], message: "flag found first" });
+        }
+        value.list.map((item) => item.toLowerCase());
+        throw new Error("rule bug");
+      });
+    const issues = loosen(throwing).safeParse({ flag: true, list: [1] }).error?.issues;
+    expect(issues?.map((issue) => [issue.path, issue.message])).toEqual([
+      [["list", 0], expect.stringMatching(/expected string/)],
+      [["flag"], "flag found first"],
+    ]);
+    expect(() => loosen(throwing).safeParse({ list: ["ok"] })).toThrow(new Error("rule bug"));
+  });
+
+  test("a node refused as a whole does not run its own rules on the foreign value", () => {
+    let ran = false;
+    const watched = z.object({ name: z.string() }).superRefine(() => {
+      ran = true;
+    });
+    const issues = loosen(watched).safeParse("not a mapping").error?.issues;
+    expect(issues?.map((issue) => issue.path)).toEqual([[]]);
+    expect(ran).toBe(false);
+  });
+
+  test("a check's own when predicate still decides: one answering false keeps its body uncalled", () => {
+    let ran = false;
+    const gated = z.check(() => {
+      ran = true;
+    });
+    gated._zod.def.when = () => false;
+    const shape = z.object({ name: z.string() }).check(gated);
+    expect(loosen(shape).safeParse({ name: "a" }).success).toBe(true);
+    expect(loosen(shape).safeParse({ name: 1 }).success).toBe(false);
+    expect(ran).toBe(false);
+  });
+
+  test("a check composed onto the loosened shape reports beside a failure through checksReportingBesideFailures", () => {
+    const composed = loosen(z.array(z.object({ name: z.string() }))).superRefine((value, ctx) => {
+      if (Array.isArray(value) && value.length > 1) {
+        ctx.addIssue({ code: "custom", path: [1], message: "second entry" });
+      }
+    });
+    expect(composed.safeParse([{ name: 1 }, { name: "b" }]).error?.issues).toHaveLength(1);
+    const issues = checksReportingBesideFailures(composed).safeParse([{ name: 1 }, { name: "b" }])
+      .error?.issues;
+    expect(issues?.map((issue) => issue.path)).toEqual([[0, "name"], [1]]);
+  });
+
+  test("a rule's own finding is not a failure: the list-level rule still runs over an entry with one", () => {
+    const list = z.array(pair).superRefine((entries, ctx) => {
+      if (entries.length > 1) {
+        ctx.addIssue({ code: "custom", message: "at most one entry" });
+      }
+    });
+    const issues = loosen(list).safeParse([{ list: ["x"] }, { mode: "a" }]).error?.issues;
+    expect(issues?.map((issue) => issue.message)).toEqual([
+      "list needs mode a",
+      "at most one entry",
+    ]);
   });
 });

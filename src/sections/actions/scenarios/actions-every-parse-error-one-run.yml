@@ -1,0 +1,24 @@
+# allowed_actions carries a value outside its enum (a property-level shape
+# failure) beside selected_actions, which the mapping's own rule refuses under
+# any allowed_actions other than "selected". Both issues land in this one run,
+# where zod alone would have reported the enum first and the pair next time.
+name: actions-every-parse-error-one-run
+settings:
+  repository:
+    description: should never be written
+  actions:
+    allowed_actions: sometimes
+    selected_actions:
+      github_owned_allowed: true
+token_permissions:
+  actions: write
+expect:
+  exit_code: 1
+  result: failed
+  never:
+    - "PATCH /repos/{repo}"
+    - "PUT /repos/{repo}/actions/permissions"
+  stdout_contains:
+    - "actions.allowed_actions"
+    - 'actions.selected_actions: selected_actions is declared together with allowed_actions: "sometimes"'
+    - 'Set allowed_actions to "selected", or remove selected_actions'
