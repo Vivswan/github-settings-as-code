@@ -221,7 +221,7 @@ export function buildProgram(options: ProgramOptions): {
       const read = argvReader("snapshot", values);
       const rendered = await parseInitConfig(read, values.force === true, host.env).match(
         (cfg) => executeInit(cfg, io),
-        async (problem) => failInit(io, problem, snapshotFileDestination(read, "settings-file")),
+        async (problem) => failInit(io, problem, snapshotFileDestination(read)),
       );
       present(rendered, values);
       exitCode = rendered.code;
