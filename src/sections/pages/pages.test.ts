@@ -82,44 +82,40 @@ describe("pages", () => {
       ),
     );
 
-  test("public drift carries the Enterprise Cloud note: github.com reports true and ignores the PUT, so it never converges", async () => {
-    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: true } } });
-    const result = await plan(api, { public: false });
-    expect(result).toEqual({
-      ops: [
-        {
-          role: "update",
-          payload: { public: false },
-          drift: ["pages.public: false != true"],
-          change: "updated GitHub Pages configuration",
-        },
-      ],
-      notes: [
+  test.each([
+    [
+      "github.com reports true and ignores the PUT, so the drift never converges and carries the Enterprise Cloud note",
+      true,
+      false,
+      [
         "pages.public: site visibility is settable only for organizations on GitHub Enterprise Cloud; " +
           "elsewhere GitHub reports public: true and ignores the field on the update, so this drift " +
           "never converges. Remove pages.public unless the repository belongs to an Enterprise Cloud " +
           "organization",
       ],
-      drift: [],
-    });
-    // An Enterprise Cloud site that already matches gets no note: the drift, not the key, earns it.
-    expect(await plan(api, { public: true })).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("a live non-public site proves the host sets visibility, so making it public is ordinary drift", async () => {
-    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: false } } });
-    expect(await plan(api, { public: true })).toEqual({
+    ],
+    [
+      "a live non-public site proves the host sets visibility, so making it public is ordinary drift",
+      false,
+      true,
+      [],
+    ],
+  ])("public drift: %s", async (_title, live, declared, notes) => {
+    const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: live } } });
+    expect(await plan(api, { public: declared })).toEqual({
       ops: [
         {
           role: "update",
-          payload: { public: true },
-          drift: ["pages.public: true != false"],
+          payload: { public: declared },
+          drift: [`pages.public: ${declared} != ${live}`],
           change: "updated GitHub Pages configuration",
         },
       ],
-      notes: [],
+      notes,
       drift: [],
     });
+    // A site that already matches gets no note: the drift, not the key, earns it.
+    expect(await plan(api, { public: live })).toEqual({ ops: [], notes: [], drift: [] });
   });
 
   test("no live site: create carries build_type and source, then the update the rest", async () => {
