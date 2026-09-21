@@ -126,7 +126,7 @@ describe("milestones", () => {
     expect(result).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("a due_on differing by a day, or missing live, is drift, and the update sends the day as noon UTC so GitHub keeps that day", async () => {
+  test("a due_on differing by a day, or missing live, is drift on the day, and the update sends the day as noon UTC so GitHub keeps that day", async () => {
     const api = new MockApi({
       [LIST]: {
         data: [
@@ -153,7 +153,7 @@ describe("milestones", () => {
           payload: { title: "v1", due_on: "2026-01-16T12:00:00Z" },
           describe: 'updating milestone "v1"',
           drift: [
-            'milestones[v1].due_on: declared "2026-01-16T12:00:00Z" != live "2026-01-15T12:00:00Z"; apply will set the declared value',
+            'milestones[v1].due_on: declared "2026-01-16" != live "2026-01-15"; apply will set the declared value',
           ],
           change: 'updated milestone "v1"',
         },
@@ -163,7 +163,7 @@ describe("milestones", () => {
           payload: { title: "v2", due_on: "2026-12-31T12:00:00Z" },
           describe: 'updating milestone "v2"',
           drift: [
-            'milestones[v2].due_on: declared "2026-12-31T12:00:00Z" != live null; apply will set the declared value',
+            'milestones[v2].due_on: declared "2026-12-31" != live null; apply will set the declared value',
           ],
           change: 'updated milestone "v2"',
         },

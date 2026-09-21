@@ -232,6 +232,80 @@ describe("listSection", () => {
     ]);
   });
 
+  test("the wire hook shapes every body the planner sends (create, update, recreate, the updateConfig slice) and nothing the comparison reads", async () => {
+    const wired = listSection({
+      ...base,
+      lens: { ...base.lens, wire: (write) => ({ ...write, via: "wire" }) },
+    });
+    const live = [{ name: "bug", color: "000000", description: null }];
+    const { first, second } = await provePlanIdempotent(wired, fakeFor(wired, live), [
+      { name: "bug", color: "d73a4a" },
+      { name: "new", color: "ffffff" },
+    ]);
+    expect(first.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
+      [
+        "update",
+        { new_name: "bug", color: "d73a4a", via: "wire" },
+        [
+          'labels[bug].color: declared "d73a4a" != live "000000"; apply will set the declared value',
+        ],
+      ],
+      [
+        "create",
+        { name: "new", color: "ffffff", via: "wire" },
+        [
+          "labels[new]: missing - declared in the settings file but not on the repo; apply will create it",
+        ],
+      ],
+    ]);
+    expect(second.ops).toEqual([]);
+
+    const recreating = listSection({
+      ...base,
+      endpoints: IMMUTABLE_ENDPOINTS,
+      lens: { ...base.lens, wire: (write) => ({ ...write, via: "wire" }) },
+    });
+    const replaced = await provePlanIdempotent(recreating, fakeFor(recreating, live), [
+      { name: "bug", color: "d73a4a" },
+    ]);
+    expect(replaced.first.ops.map((op) => [op.role, op.payload])).toEqual([
+      ["remove", undefined],
+      ["create", { name: "bug", color: "d73a4a", via: "wire" }],
+    ]);
+
+    const hooks = listSection({
+      ...webhooksSection.decl,
+      lens: {
+        ...webhooksSection.decl.lens,
+        wire: (write) => ({ ...write, config: { ...write.config, via: "wire" } }),
+      },
+    });
+    const api = new MockApi({
+      "GET /repos/o/r/hooks?per_page=100&page=1": {
+        data: [
+          {
+            id: 8,
+            name: "web",
+            active: true,
+            events: ["push"],
+            config: { url: "https://h.test/hook", content_type: "json" },
+          },
+        ],
+      },
+    });
+    const planned = unwrap(
+      await hooks.plan(
+        planContext(hooks, api, REPO),
+        validatedInput("webhooks", [
+          { config: { url: "https://h.test/hook", content_type: "form" } },
+        ]),
+      ),
+    );
+    expect(planned.ops.map((op) => [op.role, op.payload])).toEqual([
+      ["updateConfig", { url: "https://h.test/hook", content_type: "form", via: "wire" }],
+    ]);
+  });
+
   test("the prose hooks reword the keep-note and the delete drift; nothing else is customizable", async () => {
     const worded = listSection({
       ...base,
