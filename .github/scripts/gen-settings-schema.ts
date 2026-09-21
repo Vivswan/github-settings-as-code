@@ -21,13 +21,9 @@ import { z } from "zod";
 import { SettingsFile } from "../../src/schema.js";
 import { SCHEMA_DESCRIPTIONS } from "../../src/sections/docs-registry.js";
 import { attachDescriptions, type JsonSchemaNode } from "./lib/schema-descriptions.js";
+import { SCHEMA_ID } from "./lib/schema-id.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-
-/** The raw copy at HEAD, naming no release: editors pin a version through the same URL at a release ref (see the
- * README), and a versioned $id would need the schema regenerated on every major bump's release PR. */
-const SCHEMA_ID =
-  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json";
 
 interface ZodDefView {
   type?: string;

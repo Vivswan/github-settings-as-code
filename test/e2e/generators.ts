@@ -344,28 +344,6 @@ export interface InvalidSettingsCase {
   offendingToken: string;
 }
 
-const ARRAY_SECTIONS = [
-  "labels",
-  "rulesets",
-  "branches",
-  "environments",
-  "autolinks",
-  "actions_secrets",
-  "dependabot_secrets",
-  "codespaces_secrets",
-  "agents_secrets",
-  "workflows",
-  "collaborators",
-  "teams",
-  "milestones",
-  "actions_variables",
-  "agents_variables",
-  "webhooks",
-  "custom_properties",
-  "deploy_keys",
-  "secret_scanning_custom_patterns",
-] as const satisfies readonly SectionKey[];
-
 const RECORD_SECTIONS = [
   "repository",
   "actions",
@@ -376,14 +354,14 @@ const RECORD_SECTIONS = [
 
 /** pages and interaction_limits are nullable objects with their own catalog cases; a section unclassified here fails typecheck. */
 type CoveredSection =
-  | (typeof ARRAY_SECTIONS)[number]
+  | ListSection
   | (typeof RECORD_SECTIONS)[number]
   | "pages"
   | "interaction_limits";
 type _UnclassifiedSection = MustBeNever<Exclude<SectionKey, CoveredSection>>;
 
 /** The required field each array section's item shape enforces: a string, except webhooks' `config` object. */
-const NATURAL_KEYS: Record<(typeof ARRAY_SECTIONS)[number], string> = {
+const NATURAL_KEYS: Record<ListSection, string> = {
   labels: "name",
   rulesets: "name",
   branches: "name",
@@ -412,7 +390,7 @@ const GITHUB_NAMED_SECTIONS = [
   ...SECRET_LIST_SECTIONS,
   "actions_variables",
   "agents_variables",
-] as const satisfies readonly (typeof ARRAY_SECTIONS)[number][];
+] as const satisfies readonly ListSection[];
 
 /** A hyphen, a leading digit, and the reserved prefix in both cases; `github_token` folds to GITHUB_TOKEN once uppercased. */
 const REFUSED_GITHUB_NAMES = ["my-secret", "2_TOKEN", "GITHUB_TOKEN", "github_token"] as const;
@@ -420,7 +398,7 @@ const REFUSED_GITHUB_NAMES = ["my-secret", "2_TOKEN", "GITHUB_TOKEN", "github_to
 /** Entries come back by reference, so a case's mutation lands inside whichever form was drawn; itemToken spells that form's validator path. */
 function validItems(
   rng: Rng,
-  key: (typeof ARRAY_SECTIONS)[number],
+  key: ListSection,
 ): { value: EntriesForm; entries: Json[]; index: number; itemToken: string } {
   const value = genSettings(rng.fork("valid"), key) as EntriesForm;
   const entries = entriesOf(value);
@@ -457,7 +435,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "array-section-wrong-type",
     build: (rng) => {
-      const key = rng.pick(ARRAY_SECTIONS);
+      const key = rng.pick(LIST_SECTIONS);
       return { doc: { [key]: rng.pick([{ not: "an array" }, "oops", 7]) }, offendingToken: key };
     },
   },
@@ -545,7 +523,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "scalar-item",
     build: (rng) => {
-      const key = rng.pick(ARRAY_SECTIONS);
+      const key = rng.pick(LIST_SECTIONS);
       const { value, entries, index, itemToken } = validItems(rng, key);
       (entries as unknown[])[index] = "oops";
       return { doc: { [key]: value }, offendingToken: itemToken };
@@ -554,7 +532,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "missing-natural-key",
     build: (rng) => {
-      const key = rng.pick(ARRAY_SECTIONS);
+      const key = rng.pick(LIST_SECTIONS);
       const { value, entries, index, itemToken } = validItems(rng, key);
       delete (entries[index] as Json)[NATURAL_KEYS[key]];
       return { doc: { [key]: value }, offendingToken: `${itemToken}.${NATURAL_KEYS[key]}` };
@@ -563,7 +541,7 @@ export const INVALID_SETTINGS_CASES: ReadonlyArray<{
   {
     name: "non-string-natural-key",
     build: (rng) => {
-      const key = rng.pick(ARRAY_SECTIONS);
+      const key = rng.pick(LIST_SECTIONS);
       const { value, entries, index, itemToken } = validItems(rng, key);
       (entries[index] as Json)[NATURAL_KEYS[key]] = 42;
       return { doc: { [key]: value }, offendingToken: `${itemToken}.${NATURAL_KEYS[key]}` };

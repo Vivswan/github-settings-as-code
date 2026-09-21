@@ -85,6 +85,9 @@ import type { Scenario } from "./schema.js";
 
 const FAILURE_CAP = 5;
 
+/** A stack frame line: the runtime crashed instead of reporting a problem. */
+const UNHANDLED_STACK = /\n\s+at\s+\S+ \(/;
+
 function iterationSeed(master: number, i: number): number {
   let h = (master ^ (i + 0x9e3779b9)) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
@@ -551,7 +554,7 @@ async function singleShotChaosIteration(
   });
   // The mock marks a corrupt body offSpec, so the OpenAPI validator skips it and no failure needs filtering here.
   const problems = [...report.failures];
-  if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
+  if (UNHANDLED_STACK.test(report.stderr)) {
     problems.push(`unhandled stack in stderr under ${mode}`);
   }
   const observed = parseSummaryOutcomes(report.summary);
@@ -588,7 +591,7 @@ async function persistentChaosIteration(
     serverOptions: { corrupt: { key: "labels.list", mode, times: "always" } },
   });
   const problems = [...report.failures];
-  if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
+  if (UNHANDLED_STACK.test(report.stderr)) {
     problems.push(`unhandled stack in stderr under persistent ${mode}`);
   }
   const errorNamesSection = /::error::[^\n]*labels/.test(report.stdout);
@@ -1040,7 +1043,7 @@ async function runMergePredicted(
         };
   const report = await runScenario(scenario);
   const problems = [...report.failures];
-  if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
+  if (UNHANDLED_STACK.test(report.stderr)) {
     problems.push("unhandled stack in stderr from a merge run");
   }
   // Matched on ::error:: lines only: a removal ::notice:: line also starts with the layer name (describeRemoval).
@@ -1296,7 +1299,7 @@ async function exhaustedSectionRun(
   if (!new RegExp(`::error::[^\\n]*${section}`).test(report.stdout)) {
     problems.push(`no actionable error naming the ${section} section`);
   }
-  if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
+  if (UNHANDLED_STACK.test(report.stderr)) {
     problems.push("unhandled stack in stderr under an exhausted fault");
   }
   return iterationResult(

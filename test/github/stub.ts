@@ -1,4 +1,4 @@
-import { GitHubApi, type TraceIo } from "../../src/github/api.js";
+import { DEFAULT_API_VERSION, GitHubApi, type TraceIo } from "../../src/github/api.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 
 const realFetch = globalThis.fetch;
@@ -41,6 +41,6 @@ export const api = (io: TraceIo = traceIo().io) =>
     token: "t",
     io,
     baseUrl: "https://api.test",
-    apiVersion: "2022-11-28",
+    apiVersion: DEFAULT_API_VERSION,
     retryBaseMs: 1,
   });

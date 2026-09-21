@@ -22,6 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { failRun } from "../../src/flows/deliver.js";
@@ -39,11 +40,6 @@ import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
 
 const repo = parseRepoSlug("o/r")._unsafeUnwrap();
-
-/** `text` as a regex source matching itself literally. */
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** Run a snapshot the way the action does: the finished run concludes, a problem fails the run. */
 async function run(api: MockApi, cfg: SnapshotConfig, io: Io): Promise<number> {
@@ -374,13 +370,13 @@ describe("runSnapshot writes through a staging file", () => {
       );
       // The staging name carries the pid and random bytes, so the line is matched with that piece wild.
       const [head = "", tail = ""] = line.split("<staging>");
-      const stagingRe = `${escapeRegExp(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
+      const stagingRe = `${escapeRe(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
       expect(collected.lines).toEqual([
         TAKEN,
         {
           level,
           line: expect.stringMatching(
-            new RegExp(`^o/a: ${escapeRegExp(head)}${stagingRe}${escapeRegExp(tail)}$`),
+            new RegExp(`^o/a: ${escapeRe(head)}${stagingRe}${escapeRe(tail)}$`),
           ),
         },
         { line: `o/b: snapshot written to ${fileB}` },
@@ -911,7 +907,7 @@ describe("runSnapshot, dir form", () => {
             level: "error",
             line: expect.stringMatching(
               new RegExp(
-                `^${escapeRegExp(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${escapeRegExp(first)}\\. `,
+                `^${escapeRe(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${escapeRe(first)}\\. `,
               ),
             ),
           });

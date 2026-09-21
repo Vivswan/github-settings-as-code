@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { ROOT } from "../root.js";
@@ -361,9 +362,7 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
         // the read silently succeeding.
         writeFileSync(join(root, "one.yml"), "name: one\n");
         chmodSync(root, 0o000);
-        const named = new RegExp(
-          `^cannot read the scenario directory ${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .*EACCES`,
-        );
+        const named = new RegExp(`^cannot read the scenario directory ${escapeRe(root)}: .*EACCES`);
         expect(() => collectYmlFiles(root)).toThrow(named);
         // loadScenarios is what run.ts and the coverage tripwire call, so the
         // failure must reach them through it.
@@ -389,9 +388,7 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
           expect(roots[0]).toBe(join(import.meta.dir, "scenarios"));
           expect(roots).toContain(unreadable);
           expect(() => loadScenarios(roots.slice(1))).toThrow(
-            new RegExp(
-              `^cannot read the scenario directory ${unreadable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .*EACCES`,
-            ),
+            new RegExp(`^cannot read the scenario directory ${escapeRe(unreadable)}: .*EACCES`),
           );
         } finally {
           // withTempRoot restores only the top of the tree; this nested

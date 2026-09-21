@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import {
   anchorCheck,
   anchorReleasePr,
@@ -144,8 +145,6 @@ const TAG = "refs/tags/v2.1.0";
 const V2 = "refs/tags/v2";
 const FROZEN =
   "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
-/** `text` as a regex source matching it literally. */
-const literally = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("packageRelease", () => {
   test("a fresh release mints the merge commit's package under its build tag, tags it, and creates latest; a rerun verifies it and pushes nothing", () => {
@@ -347,7 +346,7 @@ describe("packageRelease", () => {
     drift(rerun);
     expect(() => packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
       new RegExp(
-        `^${TAG} \\(${before}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build packages, .*Diff the two trees by hand; ${literally(FROZEN)}$`,
+        `^${TAG} \\(${before}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build packages, .*Diff the two trees by hand; ${escapeRe(FROZEN)}$`,
       ),
     );
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(before);
@@ -359,7 +358,7 @@ describe("packageRelease", () => {
       const fx = seedFixture();
       const { from, sha, error } = plant(fx);
       git(from, "push", "--quiet", "origin", `${sha}:${TAG}`);
-      const frozen = new RegExp(`${literally(FROZEN)}$`);
+      const frozen = new RegExp(`${escapeRe(FROZEN)}$`);
       const pushes = withPushPlans(fx, [], () => {
         for (const path of [
           () => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha }),

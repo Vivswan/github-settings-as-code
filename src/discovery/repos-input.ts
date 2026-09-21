@@ -2,6 +2,9 @@ import { err, ok, type Result } from "neverthrow";
 import type { ProblemOf } from "../problem.js";
 import { SLUG_RE } from "./targets.js";
 
+/** What separates the entries of a list input; a single path can never contain one. */
+export const LIST_SEPARATOR = /[\n,]/;
+
 export function parseReposInput(
   raw: string,
 ): Result<
@@ -9,7 +12,7 @@ export function parseReposInput(
   ProblemOf<"repos-input-wildcard-mixed" | "repos-input-invalid-entries">
 > {
   const items = raw
-    .split(/[\n,]/)
+    .split(LIST_SEPARATOR)
     .map((s) => s.trim())
     .filter(Boolean);
   if (items.includes("*")) {
