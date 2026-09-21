@@ -23,6 +23,7 @@ import {
   loadScenarios,
   markerLabelFixtureMismatches,
   parseScenario,
+  type Scenario,
   scenarioRoots,
 } from "./schema.js";
 
@@ -50,12 +51,11 @@ describe("prng", () => {
     }
   });
 
-  test("Rng.int rejects a non-positive bound", () => {
-    expect(() => new Rng(1).int(0)).toThrow();
-  });
-
-  test("Rng.pick throws on an empty array", () => {
-    expect(() => new Rng(1).pick([])).toThrow();
+  test.each<[label: string, draw: () => unknown]>([
+    ["Rng.int rejects a non-positive bound", () => new Rng(1).int(0)],
+    ["Rng.pick throws on an empty array", () => new Rng(1).pick([])],
+  ])("%s", (_label, draw) => {
+    expect(draw).toThrow();
   });
 
   test("Rng.bool honors its probability at the extremes", () => {
@@ -81,98 +81,107 @@ describe("scenario schema", () => {
     expect(s.owner_kind).toBe("org");
   });
 
-  test("passes live_state through (including the labels.generate sugar)", () => {
-    const s = parseScenario(
-      {
-        name: "g",
-        settings: {},
-        live_state: { labels: { generate: { count: 150, prefix: "gen", color: "ededed" } } },
-        expect: { exit_code: 0 },
-      },
-      "g.yml",
-    );
-    expect(s.live_state?.labels).toEqual({
-      generate: { count: 150, prefix: "gen", color: "ededed" },
-    });
-  });
-
-  test("token_permissions is a partial mask", () => {
-    const s = parseScenario(
-      { name: "m", settings: {}, token_permissions: { issues: "read" }, expect: { exit_code: 0 } },
-      "m.yml",
-    );
-    expect(s.token_permissions).toEqual({ issues: "read" });
-  });
-
-  test("inputs.required_sections is a comma-separated string", () => {
-    const s = parseScenario(
-      {
-        name: "r",
-        settings: {},
-        inputs: { mode: "apply", required_sections: "labels,rulesets" },
-        expect: { exit_code: 0 },
-      },
-      "r.yml",
-    );
-    expect(s.inputs?.required_sections).toBe("labels,rulesets");
-  });
-
-  test("rejects an unknown top-level key and names the file", () => {
-    expect(() =>
-      parseScenario({ name: "x", settings: {}, expect: { exit_code: 0 }, bogus: 1 }, "bad.yml"),
-    ).toThrow(/bad\.yml/);
-  });
-
-  test("rejects an unsupported denial_style, naming the field", () => {
-    expect(() =>
-      parseScenario(
-        { name: "x", settings: {}, denial_style: 500, expect: { exit_code: 0 } },
-        "d.yml",
-      ),
-    ).toThrow(/denial_style/);
-  });
-
-  test("accepts an allowed-set exit_code, rejects an empty one", () => {
-    // The array form carries the fuzz oracle's allowed exit set; an empty set
-    // would fail every exit code, so the schema refuses it at load time.
-    const s = parseScenario({ name: "e", settings: {}, expect: { exit_code: [0, 1] } }, "e.yml");
-    expect(s.expect.exit_code).toEqual([0, 1]);
-    expect(() =>
-      parseScenario({ name: "e", settings: {}, expect: { exit_code: [] } }, "e.yml"),
-    ).toThrow(/exit_code/);
-  });
-
-  test("a scenario declaring neither settings nor settings_raw is rejected", () => {
-    expect(() => parseScenario({ name: "x", expect: { exit_code: 0 } }, "d.yml")).toThrow(
+  // Load-time refusals, none a silent preference: both spellings define settings.yml, a multi-repo run never reads
+  // the single-repo file, and an empty allowed exit set would fail every exit code.
+  test.each<[label: string, raw: Record<string, unknown>, refusal: RegExp]>([
+    [
+      "an unknown top-level key, naming the file",
+      { name: "x", settings: {}, expect: { exit_code: 0 }, bogus: 1 },
+      /refused\.yml/,
+    ],
+    [
+      "an unsupported denial_style, naming the field",
+      { name: "x", settings: {}, denial_style: 500, expect: { exit_code: 0 } },
+      /denial_style/,
+    ],
+    [
+      "an empty allowed-set exit_code",
+      { name: "e", settings: {}, expect: { exit_code: [] } },
+      /exit_code/,
+    ],
+    [
+      "neither settings nor settings_raw",
+      { name: "x", expect: { exit_code: 0 } },
       /one of `settings` or `settings_raw` is required/,
-    );
+    ],
+    [
+      "a repo that sets both settings and settings_raw",
+      {
+        name: "x",
+        settings: {},
+        expect: { exit_code: 0 },
+        repos: { "e2e-owner/svc-a": { settings: { labels: [] }, settings_raw: "labels: [oops" } },
+      },
+      /only one of `settings` or `settings_raw`/,
+    ],
+    [
+      "a top-level scenario that sets both settings and settings_raw",
+      { name: "x", settings: {}, settings_raw: "labels: [oops", expect: { exit_code: 0 } },
+      /only one of `settings` or `settings_raw`/,
+    ],
+    [
+      "a top-level settings_raw on a multi-repo scenario",
+      {
+        name: "x",
+        settings_raw: "labels: [oops",
+        repos: { "e2e-owner/svc-a": { settings: {} } },
+        expect: { exit_code: 0 },
+      },
+      /single-repo only/,
+    ],
+    [
+      "snapshot_converges outside mode: snapshot",
+      { name: "x", settings: {}, expect: { exit_code: 0, snapshot_converges: true } },
+      /snapshot_converges only applies with inputs.mode: snapshot/,
+    ],
+    [
+      "an expect.fixpoint outside the two proofs",
+      { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: "idempotent" } },
+      /expect\.fixpoint/,
+    ],
+    [
+      "an unknown expect key, as a bare unrecognized-key issue",
+      { name: "x", settings: {}, expect: { exit_code: 0, bogus: true } },
+      /expect: Unrecognized key: "bogus"$/m,
+    ],
+  ])("rejects %s", (_label, raw, refusal) => {
+    expect(() => parseScenario(raw, "refused.yml")).toThrow(refusal);
   });
 
-  test("rejects a repo that sets both `settings` and `settings_raw`", () => {
-    // The two are mutually exclusive (both define settings.yml); setting both is
-    // a loud failure, not a silent preference.
-    expect(() =>
-      parseScenario(
-        {
-          name: "x",
-          settings: {},
-          expect: { exit_code: 0 },
-          repos: {
-            "e2e-owner/svc-a": { settings: { labels: [] }, settings_raw: "labels: [oops" },
-          },
-        },
-        "both.yml",
-      ),
-    ).toThrow(/only one of `settings` or `settings_raw`/);
-  });
-
-  test("rejects a top-level scenario that sets both `settings` and `settings_raw`", () => {
-    expect(() =>
-      parseScenario(
-        { name: "x", settings: {}, settings_raw: "labels: [oops", expect: { exit_code: 0 } },
-        "both.yml",
-      ),
-    ).toThrow(/only one of `settings` or `settings_raw`/);
+  test.each<[label: string, raw: Record<string, unknown>, parsed: Partial<Scenario>]>([
+    [
+      "an allowed-set exit_code (the fuzz oracle's allowed exit set)",
+      { name: "e", settings: {}, expect: { exit_code: [0, 1] } },
+      { expect: { exit_code: [0, 1] } },
+    ],
+    [
+      "the numeric denial styles",
+      { name: "x", settings: {}, denial_style: 403, expect: { exit_code: 0 } },
+      { denial_style: 403 },
+    ],
+    [
+      "a nested snapshot destination and the dir form's snapshot_converges",
+      {
+        name: "x",
+        settings: {},
+        inputs: { mode: "snapshot", snapshot_dir: "out/snapshots" },
+        repos: { "e2e-owner/svc-a": {} },
+        expect: { exit_code: 0, snapshot_converges: true },
+      },
+      {
+        inputs: { snapshot_dir: "out/snapshots" },
+        expect: { exit_code: 0, snapshot_converges: true },
+      },
+    ],
+    ...(["converges", "apply_idempotent"] as const).map(
+      (proof): [string, Record<string, unknown>, Partial<Scenario>] => [
+        `expect.fixpoint: ${proof}`,
+        { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: proof } },
+        { expect: { exit_code: 0, fixpoint: proof } },
+      ],
+    ),
+  ])("accepts %s", (_label, raw, parsed) => {
+    expect(parseScenario(raw, "accepted.yml")).toMatchObject(parsed);
   });
 
   test("accepts a single-repo scenario with only settings_raw, kept verbatim", () => {
@@ -182,30 +191,6 @@ describe("scenario schema", () => {
     );
     expect(s.settings_raw).toBe("labels: [oops, unclosed");
     expect(s.settings).toBeUndefined();
-  });
-
-  test("rejects a top-level settings_raw on a multi-repo scenario", () => {
-    // The single-repo settings file is never read in multi mode, so a top-level
-    // settings_raw there would be silently dead configuration.
-    expect(() =>
-      parseScenario(
-        {
-          name: "x",
-          settings_raw: "labels: [oops",
-          repos: { "e2e-owner/svc-a": { settings: {} } },
-          expect: { exit_code: 0 },
-        },
-        "multi-raw.yml",
-      ),
-    ).toThrow(/single-repo only/);
-  });
-
-  test("accepts the numeric denial styles", () => {
-    const s = parseScenario(
-      { name: "x", settings: {}, denial_style: 403, expect: { exit_code: 0 } },
-      "d.yml",
-    );
-    expect(s.denial_style).toBe(403);
   });
 
   // The runner keeps its own files at the root of the child's working directory, so a destination
@@ -260,53 +245,6 @@ describe("scenario schema", () => {
       ).toThrow(/may not start with a file the runner keeps/);
     },
   );
-
-  test("accepts a nested snapshot destination and the dir form's snapshot_converges", () => {
-    const s = parseScenario(
-      {
-        name: "x",
-        settings: {},
-        inputs: { mode: "snapshot", snapshot_dir: "out/snapshots" },
-        repos: { "e2e-owner/svc-a": {} },
-        expect: { exit_code: 0, snapshot_converges: true },
-      },
-      "dir.yml",
-    );
-    expect(s.inputs?.snapshot_dir).toBe("out/snapshots");
-    expect(s.expect.snapshot_converges).toBe(true);
-  });
-
-  test("snapshot_converges outside mode: snapshot is dead configuration, so it is rejected", () => {
-    expect(() =>
-      parseScenario(
-        { name: "x", settings: {}, expect: { exit_code: 0, snapshot_converges: true } },
-        "apply.yml",
-      ),
-    ).toThrow(/snapshot_converges only applies with inputs.mode: snapshot/);
-  });
-
-  test.each(["converges", "apply_idempotent"] as const)("expect.fixpoint: %s parses", (proof) => {
-    const s = parseScenario(
-      { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: proof } },
-      "fixpoint.yml",
-    );
-    expect(s.expect.fixpoint).toBe(proof);
-  });
-
-  test("expect.fixpoint rejects a value outside the two proofs", () => {
-    expect(() =>
-      parseScenario(
-        { name: "x", settings: {}, expect: { exit_code: 0, fixpoint: "idempotent" } },
-        "fixpoint.yml",
-      ),
-    ).toThrow(/expect\.fixpoint/);
-  });
-
-  test("an unknown expect key stays a bare unrecognized-key issue", () => {
-    expect(() =>
-      parseScenario({ name: "x", settings: {}, expect: { exit_code: 0, bogus: true } }, "b.yml"),
-    ).toThrow(/expect: Unrecognized key: "bogus"$/m);
-  });
 });
 
 describe("scenario corpus loader (collectYmlFiles)", () => {
@@ -337,15 +275,17 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
     });
   }
 
-  test("a root that does not exist yields [] (a section may have no scenarios/ yet)", () =>
+  test.each<[label: string, at: (root: string) => string]>([
+    [
+      "a root that does not exist (a section may have no scenarios/ yet)",
+      (root) => join(root, "absent"),
+    ],
+    ["a readable empty root", (root) => root],
+  ])("%s yields []", (_label, at) =>
     withTempRoot((root) => {
-      expect(collectYmlFiles(join(root, "absent"))).toEqual([]);
-    }));
-
-  test("a readable empty root yields []", () =>
-    withTempRoot((root) => {
-      expect(collectYmlFiles(root)).toEqual([]);
-    }));
+      expect(collectYmlFiles(at(root))).toEqual([]);
+    }),
+  );
 
   // chmod 000 does not bar root from reading a directory, so as root there is
   // no unreadable root to test against; the skip names that rather than
@@ -403,58 +343,51 @@ describe("marker-label fixture pin (markerLabelFixtureMismatches)", () => {
     description: MARKER_LABEL_CONFIG.description,
   };
   const canonicalMarker = { ...MARKER_LABEL_CONFIG };
-
-  test("a drifted marker in DECLARED settings fails scenario load, naming the field", () => {
-    expect(() =>
-      parseScenario(
-        { name: "m", settings: { labels: [driftedMarker] }, expect: { exit_code: 0 } },
-        "m.yml",
-      ),
-    ).toThrow(/settings\.labels\[0\]\.color/);
+  const multiRepoWith = (marker: Record<string, unknown>): Record<string, unknown> => ({
+    name: "m",
+    settings: {},
+    repos: { "e2e-owner/svc-a": { settings: { labels: [marker] } } },
+    expect: { exit_code: 0 },
   });
 
-  test("a drifted marker in a multi-repo target's settings is flagged with its slug path", () => {
-    const scenarioFor = (marker: Record<string, unknown>) =>
-      parseScenario(
-        {
-          name: "m",
-          settings: {},
-          repos: { "e2e-owner/svc-a": { settings: { labels: [marker] } } },
-          expect: { exit_code: 0 },
-        },
-        "m.yml",
-      );
-    expect(markerLabelFixtureMismatches(scenarioFor(canonicalMarker))).toEqual([]);
-    expect(() => scenarioFor(driftedMarker)).toThrow(
+  test.each<[label: string, raw: Record<string, unknown>, field: RegExp]>([
+    [
+      "in DECLARED settings",
+      { name: "m", settings: { labels: [driftedMarker] }, expect: { exit_code: 0 } },
+      /settings\.labels\[0\]\.color/,
+    ],
+    [
+      "in a multi-repo target's settings, with its slug path",
+      multiRepoWith(driftedMarker),
       /repos\.e2e-owner\/svc-a\.settings\.labels\[0\]\.color/,
-    );
+    ],
+  ])("a drifted marker %s fails scenario load, naming the field", (_label, raw, field) => {
+    expect(() => parseScenario(raw, "m.yml")).toThrow(field);
   });
 
-  test("a drifted marker in live_state LOADS - seeding stale marker state is legitimate", () => {
-    // The pin covers declared fixtures only: a future scenario testing that
-    // the report path repairs a mangled live marker must stay expressible.
-    const s = parseScenario(
+  // The pin covers declared fixtures only: a future scenario testing that the report path repairs a mangled live
+  // marker must stay expressible.
+  test.each<[label: string, raw: Record<string, unknown>]>([
+    ["the canonical marker in a multi-repo target's settings", multiRepoWith(canonicalMarker)],
+    [
+      "a drifted marker in live_state (seeding stale marker state is legitimate)",
       {
         name: "m",
         settings: {},
         live_state: { labels: [driftedMarker] },
         expect: { exit_code: 0 },
       },
-      "m.yml",
-    );
-    expect(markerLabelFixtureMismatches(s)).toEqual([]);
-  });
-
-  test("non-marker labels and field-less marker references are never compared", () => {
-    const s = parseScenario(
+    ],
+    [
+      "non-marker labels and field-less marker references",
       {
         name: "m",
         settings: { labels: [{ name: "bug", color: "ffffff" }, { name: MARKER_LABEL }] },
         expect: { exit_code: 0 },
       },
-      "m.yml",
-    );
-    expect(markerLabelFixtureMismatches(s)).toEqual([]);
+    ],
+  ])("%s LOADS with no mismatch", (_label, raw) => {
+    expect(markerLabelFixtureMismatches(parseScenario(raw, "m.yml"))).toEqual([]);
   });
 });
 

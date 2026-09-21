@@ -3,7 +3,7 @@ import { describeRemoval, mergeLayers, type RemovalNotice } from "../../src/engi
 import { foldLayers } from "../../src/flows/layers.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
-import { LIST_SECTIONS } from "../../src/schema.js";
+import { LIST_SECTIONS, type SectionKey } from "../../src/schema.js";
 import { listLayering } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
@@ -33,7 +33,9 @@ import {
   predictSection,
   predictSectionAt,
   preflightDeniable,
+  type RunPrediction,
   refusedMergeLayer,
+  type SectionPrediction,
   sectionGrade,
 } from "./oracle.js";
 import type { MaskGrade, MaskKey } from "./schema.js";
@@ -61,37 +63,25 @@ function meta(overrides: Partial<ScenarioMeta>): ScenarioMeta {
 }
 
 describe("sectionGrade", () => {
-  const cases: Array<[string, MaskKey, MaskGrade | undefined, MaskGrade]> = [
-    ["unspecified resource defaults to write", "issues", undefined, "write"],
-    ["explicit none", "issues", "none", "none"],
-    ["explicit read", "issues", "read", "read"],
-  ];
-  for (const [name, key, grade, want] of cases) {
-    test(`labels: ${name}`, () => {
-      const mask = grade === undefined ? {} : { [key]: grade };
-      expect(sectionGrade("labels", mask)).toBe(want);
-    });
-  }
-
-  test("repository takes the max over its (single) repo resource", () => {
-    expect(sectionGrade("repository", { administration: "read" })).toBe("read");
-    expect(sectionGrade("repository", { administration: "none" })).toBe("none");
-  });
-
-  test("code_scanning is granted when EITHER admin or code_scanning_alerts is", () => {
-    expect(sectionGrade("code_scanning_default_setup", { administration: "none" })).toBe("write");
-    expect(
-      sectionGrade("code_scanning_default_setup", {
-        administration: "none",
-        code_scanning_alerts: "none",
-      }),
-    ).toBe("none");
-    expect(
-      sectionGrade("code_scanning_default_setup", {
-        administration: "none",
-        code_scanning_alerts: "read",
-      }),
-    ).toBe("read");
+  test.each<[key: SectionKey, mask: Partial<Record<MaskKey, MaskGrade>>, grade: MaskGrade]>([
+    ["labels", {}, "write"],
+    ["labels", { issues: "none" }, "none"],
+    ["labels", { issues: "read" }, "read"],
+    ["repository", { administration: "read" }, "read"],
+    ["repository", { administration: "none" }, "none"],
+    ["code_scanning_default_setup", { administration: "none" }, "write"],
+    [
+      "code_scanning_default_setup",
+      { administration: "none", code_scanning_alerts: "none" },
+      "none",
+    ],
+    [
+      "code_scanning_default_setup",
+      { administration: "none", code_scanning_alerts: "read" },
+      "read",
+    ],
+  ])("%s under %o grades %s", (key, mask, grade) => {
+    expect(sectionGrade(key, mask)).toBe(grade);
   });
 
   test("teams: org_members shuts the org gate, never the repository grade", () => {
@@ -289,80 +279,172 @@ describe("judgePreflightAbort", () => {
   });
 });
 
+type Outcome = SectionPrediction["allowed"] extends Set<infer O> ? O : never;
+
 describe("predictSection rules", () => {
-  test("write granted: check => {clean, drift}", () => {
-    const p = predictSection("labels", meta({ mode: "check", mask: { issues: "write" } }));
-    expect([...p.allowed].sort()).toEqual(["clean", "drift"]);
-  });
+  type AllowedRow = [
+    label: string,
+    key: SectionKey,
+    overrides: Partial<ScenarioMeta>,
+    want: { allowed: Outcome[]; mayWrite?: boolean },
+  ];
+  const expectAllowed = (
+    _label: string,
+    key: SectionKey,
+    overrides: Partial<ScenarioMeta>,
+    want: AllowedRow[3],
+  ) => {
+    const p = predictSection(key, meta(overrides));
+    expect([...p.allowed].sort()).toEqual(want.allowed);
+    if (want.mayWrite !== undefined) {
+      expect(p.mayWrite).toBe(want.mayWrite);
+    }
+  };
 
-  test("write granted: apply => {applied}", () => {
-    const p = predictSection("labels", meta({ mode: "apply", mask: { issues: "write" } }));
-    expect([...p.allowed]).toEqual(["applied"]);
-    expect(p.mayWrite).toBe(true);
-  });
-
-  test("none + 403 style: skipped under warn, failed under fail", () => {
-    const denied = { mask: { issues: "none" as MaskGrade }, denialStyle: 403 as const };
-    expect([
-      ...predictSection("labels", meta({ ...denied, mode: "apply", policy: "warn" })).allowed,
-    ]).toEqual(["skipped"]);
-    expect([
-      ...predictSection("labels", meta({ ...denied, mode: "apply", policy: "fail" })).allowed,
-    ]).toEqual(["failed"]);
-  });
-
-  test("none + fine_grained on a denied-semantics section behaves like 403", () => {
-    const p = predictSection(
+  // labels is a denied-semantics section, pages an absent-semantics one: under fine_grained a none grade on pages
+  // reads as the resource missing, so its reads pass and only an apply-mode write can fail.
+  const pages: Partial<ScenarioMeta> = {
+    sections: ["pages"],
+    mask: { pages: "none" },
+    denialStyle: "fine_grained",
+  };
+  test.each<AllowedRow>([
+    [
+      "write granted: check => {clean, drift}",
       "labels",
-      meta({
+      { mode: "check", mask: { issues: "write" } },
+      { allowed: ["clean", "drift"] },
+    ],
+    [
+      "write granted: apply => {applied}, and may write",
+      "labels",
+      { mode: "apply", mask: { issues: "write" } },
+      { allowed: ["applied"], mayWrite: true },
+    ],
+    [
+      "none + 403 style: skipped under warn",
+      "labels",
+      { mask: { issues: "none" }, denialStyle: 403, mode: "apply", policy: "warn" },
+      { allowed: ["skipped"] },
+    ],
+    [
+      "none + 403 style: failed under fail",
+      "labels",
+      { mask: { issues: "none" }, denialStyle: 403, mode: "apply", policy: "fail" },
+      { allowed: ["failed"] },
+    ],
+    [
+      "none + fine_grained on a denied-semantics section behaves like 403",
+      "labels",
+      { mask: { issues: "none" }, denialStyle: "fine_grained", mode: "apply", policy: "warn" },
+      { allowed: ["skipped"] },
+    ],
+    [
+      "none + fine_grained on an absent-semantics section: check => {clean, drift}",
+      "pages",
+      { ...pages, mode: "check" },
+      { allowed: ["clean", "drift"] },
+    ],
+    [
+      "none + fine_grained absent-semantics apply under fail: {applied, failed}",
+      "pages",
+      { ...pages, mode: "apply", policy: "fail" },
+      { allowed: ["applied", "failed"] },
+    ],
+    [
+      "none + fine_grained absent-semantics apply under warn: {applied, skipped}",
+      "pages",
+      { ...pages, mode: "apply", policy: "warn" },
+      { allowed: ["applied", "skipped"] },
+    ],
+    [
+      "read grade apply under fail: {applied, failed}",
+      "labels",
+      { mask: { issues: "read" }, mode: "apply", policy: "fail" },
+      { allowed: ["applied", "failed"] },
+    ],
+    [
+      "read grade apply under warn: {applied, skipped}",
+      "labels",
+      { mask: { issues: "read" }, mode: "apply", policy: "warn" },
+      { allowed: ["applied", "skipped"] },
+    ],
+    [
+      "a required denied section fails even under warn (apply)",
+      "labels",
+      { mask: { issues: "read" }, mode: "apply", policy: "warn", requiredSections: ["labels"] },
+      { allowed: ["applied", "failed"] },
+    ],
+  ])("%s", expectAllowed);
+
+  // A seeded live-state witness tightens {clean, drift} to one outcome, but only after the permission and policy
+  // fold: a matching witness needs no write, a drift witness forces one (a check-mode clean would be a false negative).
+  test.each<AllowedRow>([
+    [
+      "a matching witness pins check to exactly clean",
+      "labels",
+      { mode: "check", liveKinds: { labels: "matching" } },
+      { allowed: ["clean"] },
+    ],
+    [
+      "a matching witness pins apply to exactly applied, with no write",
+      "labels",
+      { mode: "apply", liveKinds: { labels: "matching" } },
+      { allowed: ["applied"], mayWrite: false },
+    ],
+    [
+      "a drift-update witness pins check to exactly drift",
+      "labels",
+      { mode: "check", liveKinds: { labels: "drift-update" } },
+      { allowed: ["drift"] },
+    ],
+    [
+      "an extra-undeclared witness pins check to exactly drift",
+      "labels",
+      { mode: "check", liveKinds: { labels: "extra-undeclared" } },
+      { allowed: ["drift"] },
+    ],
+    [
+      "permission folding beats the witness: a denied section stays skipped",
+      "labels",
+      {
         mask: { issues: "none" },
-        denialStyle: "fine_grained",
+        denialStyle: 403,
+        mode: "check",
+        policy: "warn",
+        liveKinds: { labels: "matching" },
+      },
+      { allowed: ["skipped"] },
+    ],
+    [
+      "read grade + drift witness in apply under warn: the forced write is denied",
+      "labels",
+      {
+        mask: { issues: "read" },
         mode: "apply",
         policy: "warn",
-      }),
-    );
-    expect([...p.allowed]).toEqual(["skipped"]);
-  });
-
-  test("none + fine_grained on an absent-semantics section: check => {clean, drift}", () => {
-    const p = predictSection(
-      "pages",
-      meta({
-        sections: ["pages"],
-        mask: { pages: "none" },
-        denialStyle: "fine_grained",
-        mode: "check",
-      }),
-    );
-    expect([...p.allowed].sort()).toEqual(["clean", "drift"]);
-  });
-
-  test("none + fine_grained absent-semantics apply: {applied, failed} fail, {applied, skipped} warn", () => {
-    const base = {
-      sections: ["pages"] as ScenarioMeta["sections"],
-      mask: { pages: "none" as MaskGrade },
-      denialStyle: "fine_grained" as const,
-      mode: "apply" as const,
-    };
-    expect([...predictSection("pages", meta({ ...base, policy: "fail" })).allowed].sort()).toEqual([
-      "applied",
-      "failed",
-    ]);
-    expect([...predictSection("pages", meta({ ...base, policy: "warn" })).allowed].sort()).toEqual([
-      "applied",
-      "skipped",
-    ]);
-  });
-
-  test("read grade apply: {applied, failed} fail, {applied, skipped} warn", () => {
-    const base = { mask: { issues: "read" as MaskGrade }, mode: "apply" as const };
-    expect([...predictSection("labels", meta({ ...base, policy: "fail" })).allowed].sort()).toEqual(
-      ["applied", "failed"],
-    );
-    expect([...predictSection("labels", meta({ ...base, policy: "warn" })).allowed].sort()).toEqual(
-      ["applied", "skipped"],
-    );
-  });
+        liveKinds: { labels: "drift-update" },
+      },
+      { allowed: ["skipped"] },
+    ],
+    [
+      "read grade + drift witness in apply under fail: the forced write is denied",
+      "labels",
+      {
+        mask: { issues: "read" },
+        mode: "apply",
+        policy: "fail",
+        liveKinds: { labels: "drift-update" },
+      },
+      { allowed: ["failed"] },
+    ],
+    [
+      "read grade + matching witness in apply: applied despite the missing write grant",
+      "labels",
+      { mask: { issues: "read" }, mode: "apply", liveKinds: { labels: "matching" } },
+      { allowed: ["applied"], mayWrite: false },
+    ],
+  ])("%s", expectAllowed);
 
   test("a no-read section is exactly clean in check mode, whatever the mask", () => {
     // check_suite_preferences makes ZERO check-mode requests, so even a full 403-style denial has nothing to deny.
@@ -413,130 +495,85 @@ describe("predictSection rules", () => {
     }
   });
 
-  test("a required denied section fails even under warn (apply)", () => {
-    const p = predictSection(
+  // The engine reports an excluded section before any read, so neither the denied grade nor the seeded witness may
+  // tighten the prediction, and the empty grades leave preflight and the write-granted fold vacuous over it without
+  // recognizing "excluded". The unrestricted control is the same denied section with no allowlist.
+  test.each<
+    [
+      label: string,
+      key: SectionKey,
+      overrides: Partial<ScenarioMeta>,
+      prediction: SectionPrediction,
+    ]
+  >([
+    [
+      "exclusion folds before grades and witnesses: the section predicts at NO grade",
       "labels",
-      meta({
-        mask: { issues: "read" },
-        mode: "apply",
-        policy: "warn",
-        requiredSections: ["labels"],
-      }),
-    );
-    expect([...p.allowed].sort()).toEqual(["applied", "failed"]);
-  });
-
-  test("a matching witness pins check to exactly clean and apply to exactly applied", () => {
-    const check = predictSection(
-      "labels",
-      meta({ mode: "check", liveKinds: { labels: "matching" } }),
-    );
-    expect([...check.allowed]).toEqual(["clean"]);
-    const apply = predictSection(
-      "labels",
-      meta({ mode: "apply", liveKinds: { labels: "matching" } }),
-    );
-    expect([...apply.allowed]).toEqual(["applied"]);
-    expect(apply.mayWrite).toBe(false);
-  });
-
-  test("a drift witness pins check to exactly drift (a clean is a false negative)", () => {
-    for (const kind of ["drift-update", "extra-undeclared"] as const) {
-      const p = predictSection("labels", meta({ mode: "check", liveKinds: { labels: kind } }));
-      expect([...p.allowed]).toEqual(["drift"]);
-    }
-  });
-
-  test("permission folding beats the witness: a denied section stays skipped", () => {
-    const p = predictSection(
-      "labels",
-      meta({
-        mask: { issues: "none" },
-        denialStyle: 403,
-        mode: "check",
-        policy: "warn",
-        liveKinds: { labels: "matching" },
-      }),
-    );
-    expect([...p.allowed]).toEqual(["skipped"]);
-  });
-
-  test("read grade + drift witness in apply: the forced write is denied", () => {
-    // The witness guarantees a write is needed, so the section can never be a no-op applied.
-    const base = {
-      mask: { issues: "read" as MaskGrade },
-      mode: "apply" as const,
-      liveKinds: { labels: "drift-update" as const },
-    };
-    expect([...predictSection("labels", meta({ ...base, policy: "warn" })).allowed]).toEqual([
-      "skipped",
-    ]);
-    expect([...predictSection("labels", meta({ ...base, policy: "fail" })).allowed]).toEqual([
-      "failed",
-    ]);
-  });
-
-  test("read grade + matching witness in apply: applied despite the missing write grant", () => {
-    const p = predictSection(
-      "labels",
-      meta({ mask: { issues: "read" }, mode: "apply", liveKinds: { labels: "matching" } }),
-    );
-    expect([...p.allowed]).toEqual(["applied"]);
-    expect(p.mayWrite).toBe(false);
-  });
-
-  test("exclusion folds before grades and witnesses: the section predicts at NO grade", () => {
-    // The engine reports an excluded section before any read, so neither the denied grade nor the
-    // seeded witness may tighten the prediction, and the empty grades leave preflight and the
-    // write-granted fold vacuous over it without recognizing "excluded".
-    const p = predictSection(
-      "labels",
-      meta({
+      {
         sections: ["labels", "pages"],
         onlySections: ["pages"],
         mask: { issues: "none" },
         denialStyle: 403,
         mode: "check",
         liveKinds: { labels: "drift-update" },
-      }),
-    );
-    expect(p).toEqual({
-      key: "labels",
-      grades: [],
-      allowed: new Set(["excluded"]),
-      posture: "denied",
-      mayWrite: false,
-    });
-    const unrestricted = predictSection(
+      },
+      {
+        key: "labels",
+        grades: [],
+        allowed: new Set(["excluded"]),
+        posture: "denied",
+        mayWrite: false,
+      },
+    ],
+    [
+      "control: the unrestricted denied section predicts failed at grade none",
       "labels",
-      meta({ mask: { issues: "none" }, denialStyle: 403, mode: "check" }),
-    );
-    expect(unrestricted).toEqual({
-      key: "labels",
-      grades: ["none"],
-      allowed: new Set(["failed"]),
-      posture: "denied",
-      mayWrite: false,
-    });
-  });
-
-  test("an excluded NO_READ section in check mode is excluded, not the read-free clean", () => {
-    const p = predictSection(
+      { mask: { issues: "none" }, denialStyle: 403, mode: "check" },
+      {
+        key: "labels",
+        grades: ["none"],
+        allowed: new Set(["failed"]),
+        posture: "denied",
+        mayWrite: false,
+      },
+    ],
+    [
+      "an excluded NO_READ section in check mode is excluded, not the read-free clean",
       "check_suite_preferences",
-      meta({
+      {
         sections: ["check_suite_preferences", "labels"],
         onlySections: ["labels"],
         mask: { checks: "none" },
         mode: "check",
-      }),
-    );
-    expect(p).toEqual({
-      key: "check_suite_preferences",
-      grades: [],
-      allowed: new Set(["excluded"]),
-      posture: "absent",
-      mayWrite: false,
-    });
+      },
+      {
+        key: "check_suite_preferences",
+        grades: [],
+        allowed: new Set(["excluded"]),
+        posture: "absent",
+        mayWrite: false,
+      },
+    ],
+    [
+      "exclusion folds before the personal-account no-op",
+      "teams",
+      {
+        sections: ["teams", "labels"],
+        onlySections: ["labels"],
+        ownerKind: "user",
+        mask: { org_members: "none" },
+        mode: "apply",
+      },
+      {
+        key: "teams",
+        grades: [],
+        allowed: new Set(["excluded"]),
+        posture: "denied",
+        mayWrite: false,
+      },
+    ],
+  ])("%s", (_label, key, overrides, prediction) => {
+    expect(predictSection(key, meta(overrides))).toEqual(prediction);
   });
 
   test("an excluded denied section beside an active one: the run follows the active one alone", () => {
@@ -651,26 +688,6 @@ describe("predictSection rules", () => {
       mayWrite: false,
     });
   });
-
-  test("exclusion folds before the personal-account no-op", () => {
-    const p = predictSection(
-      "teams",
-      meta({
-        sections: ["teams", "labels"],
-        onlySections: ["labels"],
-        ownerKind: "user",
-        mask: { org_members: "none" },
-        mode: "apply",
-      }),
-    );
-    expect(p).toEqual({
-      key: "teams",
-      grades: [],
-      allowed: new Set(["excluded"]),
-      posture: "denied",
-      mayWrite: false,
-    });
-  });
 });
 
 describe("predictOutcomes run level", () => {
@@ -735,80 +752,82 @@ describe("predictOutcomes run level", () => {
       preflightAborts: "yes",
     });
   });
-  test("fully granted apply predicts exit 0 and flags convergence", () => {
-    const p = predictOutcomes(meta({ sections: ["labels", "pages"], mode: "apply", mask: {} }));
-    expect(p.allowedExitCodes.has(0)).toBe(true);
-    expect(p.fullyGranted).toBe(true);
-    expect(p.noWritesInCheck).toBe(false);
-  });
-
-  test("check mode never writes", () => {
-    const p = predictOutcomes(meta({ mode: "check", mask: {} }));
-    expect(p.noWritesInCheck).toBe(true);
-  });
-
-  test("a denied required section under apply+fail forces exit 1", () => {
-    const p = predictOutcomes(
-      meta({
-        sections: ["labels"],
-        mask: { issues: "none" },
-        denialStyle: 403,
-        mode: "apply",
-        policy: "fail",
-        requiredSections: ["labels"],
-      }),
-    );
-    expect([...p.allowedExitCodes]).toEqual([1]);
-  });
-
-  test("check mode with a write-granted section may exit 0 or 1 (clean vs drift)", () => {
-    const p = predictOutcomes(meta({ mode: "check", mask: { issues: "write" } }));
-    expect([...p.allowedExitCodes].sort()).toEqual([0, 1]);
-  });
-
-  test("apply + fail + a permission-denied section aborts at preflight", () => {
-    const p = predictOutcomes(
-      meta({ sections: ["labels"], mask: { issues: "none" }, mode: "apply", policy: "fail" }),
-    );
-    expect(p.preflightAborts).toBe("yes");
-  });
-
-  test("preflightAborts is no under warn, under check, and when fully granted", () => {
-    const warn = predictOutcomes(
-      meta({ sections: ["labels"], mask: { issues: "none" }, mode: "apply", policy: "warn" }),
-    );
-    expect(warn.preflightAborts).toBe("no");
-    const check = predictOutcomes(
-      meta({ sections: ["labels"], mask: { issues: "none" }, mode: "check", policy: "fail" }),
-    );
-    expect(check.preflightAborts).toBe("no");
-    const granted = predictOutcomes(
-      meta({ sections: ["labels"], mask: {}, mode: "apply", policy: "fail" }),
-    );
-    expect(granted.preflightAborts).toBe("no");
-  });
-
-  test("a read grant on plain reads never aborts preflight: preflight is reads-only", () => {
-    // Preflight plans every section over its read-only port, so a read-graded section passes it;
-    // the write denial surfaces during apply, after the summary rows exist.
-    const p = predictOutcomes(
-      meta({ sections: ["labels"], mask: { issues: "read" }, mode: "apply", policy: "fail" }),
-    );
-    expect(p.preflightAborts).toBe("no");
-  });
-
-  test("a fine_grained absent-tolerant denial does not abort preflight", () => {
-    // branches is "absent" semantics: a fine_grained 404 reads as resource absent, not a denial.
-    const p = predictOutcomes(
-      meta({
+  // Preflight plans every section over its read-only port, so a read-graded section passes it and the write denial
+  // surfaces during apply, after the summary rows exist; branches is "absent" semantics, so a fine_grained 404 reads
+  // as the resource missing, not a denial. Check mode never writes and may exit 0 or 1 (clean vs drift).
+  type Flags = {
+    exits: number[];
+    noWritesInCheck: boolean;
+    fullyGranted: boolean;
+    preflightAborts: PreflightAbort;
+  };
+  const denied: Partial<ScenarioMeta> = { sections: ["labels"], mask: { issues: "none" } };
+  const noAbort = { noWritesInCheck: false, fullyGranted: false, preflightAborts: "no" } as const;
+  test.each<[label: string, overrides: Partial<ScenarioMeta>, flags: Flags]>([
+    [
+      "fully granted apply predicts exit 0 and flags convergence",
+      { sections: ["labels", "pages"], mode: "apply", mask: {} },
+      { exits: [0], noWritesInCheck: false, fullyGranted: true, preflightAborts: "no" },
+    ],
+    [
+      "check mode never writes",
+      { mode: "check", mask: {} },
+      { exits: [0, 1], noWritesInCheck: true, fullyGranted: true, preflightAborts: "no" },
+    ],
+    [
+      "a denied required section under apply+fail forces exit 1",
+      { ...denied, denialStyle: 403, mode: "apply", policy: "fail", requiredSections: ["labels"] },
+      { exits: [1], noWritesInCheck: false, fullyGranted: false, preflightAborts: "yes" },
+    ],
+    [
+      "check mode with a write-granted section may exit 0 or 1",
+      { mode: "check", mask: { issues: "write" } },
+      { exits: [0, 1], noWritesInCheck: true, fullyGranted: true, preflightAborts: "no" },
+    ],
+    [
+      "apply + fail + a permission-denied section aborts at preflight",
+      { ...denied, mode: "apply", policy: "fail" },
+      { exits: [1], noWritesInCheck: false, fullyGranted: false, preflightAborts: "yes" },
+    ],
+    [
+      "preflightAborts is no under warn: the denied section is skipped",
+      { ...denied, mode: "apply", policy: "warn" },
+      { exits: [0], ...noAbort },
+    ],
+    [
+      "preflightAborts is no under check: the denied section fails without a barrier",
+      { ...denied, mode: "check", policy: "fail" },
+      { exits: [1], ...noAbort, noWritesInCheck: true },
+    ],
+    [
+      "preflightAborts is no when fully granted",
+      { sections: ["labels"], mask: {}, mode: "apply", policy: "fail" },
+      { exits: [0], noWritesInCheck: false, fullyGranted: true, preflightAborts: "no" },
+    ],
+    [
+      "a read grant on plain reads never aborts preflight: preflight is reads-only",
+      { sections: ["labels"], mask: { issues: "read" }, mode: "apply", policy: "fail" },
+      { exits: [0, 1], ...noAbort },
+    ],
+    [
+      "a fine_grained absent-tolerant denial does not abort preflight",
+      {
         sections: ["branches"],
         mask: { administration: "none", contents: "none" },
         denialStyle: "fine_grained",
         mode: "apply",
         policy: "fail",
-      }),
-    );
-    expect(p.preflightAborts).toBe("no");
+      },
+      { exits: [0, 1], ...noAbort },
+    ],
+  ])("%s", (_label, overrides, flags) => {
+    const p = predictOutcomes(meta(overrides));
+    expect({
+      exits: [...p.allowedExitCodes].sort(),
+      noWritesInCheck: p.noWritesInCheck,
+      fullyGranted: p.fullyGranted,
+      preflightAborts: p.preflightAborts,
+    }).toEqual(flags);
   });
 });
 
@@ -833,27 +852,115 @@ describe("predictMulti rollup", () => {
     };
   }
 
-  test("a missing-settings target is skipped (null run)", () => {
-    const p = predictMulti(multiMeta([missing()]));
-    expect(p.repos[0]?.run).toBeNull();
-    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["skipped"]);
-  });
+  const granted = meta({ mode: "apply", mask: {} });
+  const readable = meta({ sections: ["labels"], mask: { contents: "read" } });
 
-  test("a raw-settings target predicts exactly failed and raises exit 1", () => {
-    // Both raw kinds fail before any section runs, never skipped: unparseable at the parse gate,
-    // non-mapping at the top-level validator.
-    for (const raw of ["unparseable", "non-mapping"] as const) {
-      const base = multiMeta([missing(), normal(meta({ mode: "apply", mask: {} }))]);
-      const rawRepo = base.repos[0];
-      if (rawRepo === undefined) {
-        throw new Error("multiMeta built no repos");
-      }
-      rawRepo.target = { kind: "raw-invalid", raw };
-      const p = predictMulti(base);
-      expect(p.repos[0]?.run).toBeNull();
-      expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["failed"]);
-      expect(p.allowedExitCodes.has(1)).toBe(true);
+  // Both raw kinds fail before any section runs, never skipped: unparseable at the parse gate, non-mapping at the
+  // top-level validator. contents:none fails the target even with administration granted: the repo probe succeeds,
+  // but the default branch's ref read (the Contents-gated proof of a missing file, repo-file.ts) is denied too, so
+  // the target FAILS instead of reading as fileless; with administration:none as well the repo probe ALSO 404s, so
+  // the read is "visible but unreadable" and the target fails before any ref read.
+  test.each<
+    [
+      label: string,
+      targets: MultiRepoTarget[],
+      firstRun: RunPrediction | null | undefined,
+      results: string[][],
+      exits: number[],
+    ]
+  >([
+    ["a missing-settings target is skipped (null run)", [missing()], null, [["skipped"]], [0]],
+    [
+      "an unparseable raw-settings target predicts exactly failed and raises exit 1",
+      [{ kind: "raw-invalid", raw: "unparseable" }, normal(granted)],
+      null,
+      [["failed"], ["applied"]],
+      [1],
+    ],
+    [
+      "a non-mapping raw-settings target predicts exactly failed and raises exit 1",
+      [{ kind: "raw-invalid", raw: "non-mapping" }, normal(granted)],
+      null,
+      [["failed"], ["applied"]],
+      [1],
+    ],
+    [
+      "contents:none under fine_grained fails the target even with administration granted",
+      [
+        normal(
+          meta({
+            sections: ["labels", "collaborators"],
+            mask: { contents: "none" },
+            denialStyle: "fine_grained",
+          }),
+        ),
+      ],
+      null,
+      [["failed"]],
+      [1],
+    ],
+    [
+      "contents:none AND administration:none under fine_grained fails the target",
+      [
+        normal(
+          meta({
+            sections: ["labels"],
+            mask: { contents: "none", administration: "none" },
+            denialStyle: "fine_grained",
+          }),
+        ),
+      ],
+      null,
+      [["failed"]],
+      [1],
+    ],
+    [
+      "contents:none under the 403 style fails the target and raises exit 1",
+      [normal(meta({ sections: ["labels"], mask: { contents: "none" }, denialStyle: 403 }))],
+      null,
+      [["failed"]],
+      [1],
+    ],
+    [
+      "contents:read lets the settings read through to per-section prediction",
+      [normal(readable)],
+      predictOutcomes(readable),
+      [["applied"]],
+      [...predictOutcomes(readable).allowedExitCodes],
+    ],
+    [
+      "all granted targets => exit 0 only",
+      [normal(granted), normal(granted)],
+      undefined,
+      [["applied"], ["applied"]],
+      [0],
+    ],
+    [
+      "one target that can fail raises the multi exit to 1",
+      [
+        normal(granted),
+        normal(
+          meta({
+            sections: ["labels"],
+            mask: { issues: "none" },
+            denialStyle: 403,
+            mode: "apply",
+            policy: "fail",
+            requiredSections: ["labels"],
+          }),
+        ),
+      ],
+      undefined,
+      [["applied"], ["failed"]],
+      [1],
+    ],
+  ])("%s", (_label, targets, firstRun, results, exits) => {
+    const p = predictMulti(multiMeta(targets));
+    if (firstRun !== undefined) {
+      expect(p.repos[0]?.run).toEqual(firstRun);
     }
+    expect(p.repos.map((repo) => [...repo.allowedResults].sort())).toEqual(results);
+    expect([...p.allowedExitCodes].sort()).toEqual(exits);
   });
 
   test("a fatal contentsGet fault fails the FIRST target whatever its kind", () => {
@@ -922,106 +1029,46 @@ describe("predictMulti rollup", () => {
     expect(p.repos[0]?.allowedResults.has("skipped")).toBe(false);
   });
 
-  test("contents:none under fine_grained fails the target even with administration granted", () => {
-    // The repo probe succeeds, but the default branch's ref read (the Contents-gated proof of a missing
-    // file, repo-file.ts) is denied too, so the target FAILS instead of reading as fileless.
-    const gated = meta({
-      sections: ["labels", "collaborators"],
-      mask: { contents: "none" },
-      denialStyle: "fine_grained",
-    });
-    const p = predictMulti(multiMeta([normal(gated)]));
-    expect(p.repos[0]?.run).toBeNull();
-    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["failed"]);
-    expect([...p.allowedExitCodes]).toEqual([1]);
-  });
-
-  test("contents:none AND administration:none under fine_grained fails the target", () => {
-    // The repo probe ALSO 404s, so the read is "visible but unreadable" and the target fails before any ref read.
-    const gated = meta({
-      sections: ["labels"],
-      mask: { contents: "none", administration: "none" },
-      denialStyle: "fine_grained",
-    });
-    const p = predictMulti(multiMeta([normal(gated)]));
-    expect(p.repos[0]?.run).toBeNull();
-    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["failed"]);
-    expect(p.allowedExitCodes.has(1)).toBe(true);
-  });
-
-  test("contents:none under the 403 style fails the target and raises exit 1", () => {
-    const gated = meta({
-      sections: ["labels"],
-      mask: { contents: "none" },
-      denialStyle: 403,
-    });
-    const p = predictMulti(multiMeta([normal(gated)]));
-    expect(p.repos[0]?.run).toBeNull();
-    expect([...(p.repos[0]?.allowedResults ?? [])]).toEqual(["failed"]);
-    expect(p.allowedExitCodes.has(1)).toBe(true);
-  });
-
-  test("contents:read lets the settings read through to per-section prediction", () => {
-    const readable = meta({ sections: ["labels"], mask: { contents: "read" } });
-    const p = predictMulti(multiMeta([normal(readable)]));
-    expect(p.repos[0]?.run).toEqual(predictOutcomes(readable));
-    expect(p.allowedExitCodes).toEqual(predictOutcomes(readable).allowedExitCodes);
-  });
-
-  test("all granted targets => exit 0 only", () => {
-    const granted = meta({ mode: "apply", mask: {} });
-    const p = predictMulti(multiMeta([normal(granted), normal(granted)]));
-    expect([...p.allowedExitCodes]).toEqual([0]);
-  });
-
-  test("one target that can fail raises the multi exit to include 1", () => {
-    const granted = meta({ mode: "apply", mask: {} });
-    const denied = meta({
-      sections: ["labels"],
-      mask: { issues: "none" },
-      denialStyle: 403,
-      mode: "apply",
-      policy: "fail",
-      requiredSections: ["labels"],
-    });
-    const p = predictMulti(multiMeta([normal(granted), normal(denied)]));
-    expect(p.allowedExitCodes.has(1)).toBe(true);
-  });
-
-  test("a redacted target keys its result by the placeholder, not the slug", () => {
-    const granted = meta({ sections: ["labels"], mode: "apply", mask: {} });
+  test.each<
+    [
+      label: string,
+      redaction: MultiScenarioMeta["repos"][number]["redaction"],
+      displayKey: string,
+      forbidden: string[],
+    ]
+  >([
+    [
+      "a redacted target keys its result by the placeholder, not the slug, and forbids the slug and its canaries",
+      { kind: "redacted", placeholder: "private repository #1", canaries: ["CANARY-1-0-name"] },
+      "private repository #1",
+      ["e2e-owner/repo-0", "CANARY-1-0-name"],
+    ],
+    [
+      "under show nothing is redacted, so the forbidden set is empty",
+      { kind: "shown" },
+      "e2e-owner/repo-0",
+      [],
+    ],
+  ])("%s", (_label, redaction, displayKey, forbidden) => {
+    const redact = redaction.kind === "redacted";
     const p = predictMulti({
+      ...multiMeta([]),
+      privateRepos: redact ? "redact" : "show",
       repos: [
         {
           slug: "e2e-owner/repo-0",
-          target: { kind: "normal", meta: granted },
-          visibility: "private",
+          target: normal(granted),
+          visibility: redact ? "private" : "public",
           probeDenied: false,
-          redaction: {
-            kind: "redacted",
-            placeholder: "private repository #1",
-            canaries: ["CANARY-1-0-name"],
-          },
+          redaction,
         },
       ],
-      mode: "apply",
-      policy: "fail",
-      privateRepos: "redact",
-      privateReport: "none",
-      selfSlug: ADMIN_SLUG,
-      globalMask: {},
     });
-    expect(p.repos[0]?.displayKey).toBe("private repository #1");
-    expect(p.repos[0]?.redacted).toBe(true);
-    expect(p.forbidden).toContain("e2e-owner/repo-0");
-    expect(p.forbidden).toContain("CANARY-1-0-name");
-  });
-
-  test("under show nothing is redacted, so the forbidden set is empty", () => {
-    const granted = meta({ sections: ["labels"], mode: "apply", mask: {} });
-    const p = predictMulti(multiMeta([normal(granted)]));
-    expect(p.forbidden).toEqual([]);
-    expect(p.repos[0]?.displayKey).toBe("e2e-owner/repo-0");
+    expect([p.repos[0]?.displayKey, p.repos[0]?.redacted, p.forbidden]).toEqual([
+      displayKey,
+      redact,
+      forbidden,
+    ]);
   });
 });
 
@@ -1034,61 +1081,86 @@ describe("predictDiscovery filter rules", () => {
     { slug: "e2e-owner/fork", visibility: "public", fork: true },
     { slug: "e2e-owner/tagged", visibility: "public", topics: ["infra"] },
   ];
+  const globPool = [
+    { slug: "e2e-owner/svc-a" },
+    { slug: "e2e-owner/svc-b" },
+    { slug: "e2e-owner/legacy-x" },
+    { slug: "e2e-owner/UPPER" },
+  ];
+  const include = { archived: "include" } as const;
 
-  test("no filters keeps everything except archived (default skip)", () => {
-    const kept = predictDiscovery(pool, {});
-    expect(kept).not.toContain("e2e-owner/arch");
-    expect(kept).toContain("e2e-owner/pub");
-    expect(kept).toContain("e2e-owner/fork");
-  });
-
-  test("visibility public keeps only public", () => {
-    const kept = predictDiscovery(pool, { visibility: "public", archived: "include" });
-    expect(kept).not.toContain("e2e-owner/priv");
-    expect(kept).not.toContain("e2e-owner/intern");
-  });
-
-  test("visibility private keeps only private (drops internal and public)", () => {
-    const kept = predictDiscovery(pool, { visibility: "private", archived: "include" });
-    expect(kept).toEqual(["e2e-owner/priv"]);
-  });
-
-  test("forks exclude drops forks; only keeps only forks", () => {
-    expect(predictDiscovery(pool, { forks: "exclude", archived: "include" })).not.toContain(
-      "e2e-owner/fork",
-    );
-    expect(predictDiscovery(pool, { forks: "only", archived: "include" })).toEqual([
-      "e2e-owner/fork",
-    ]);
-  });
-
-  test("topics keeps only repos with a matching topic", () => {
-    expect(predictDiscovery(pool, { topics: "infra", archived: "include" })).toEqual([
-      "e2e-owner/tagged",
-    ]);
-  });
-
-  test("exclude patterns drop matching slugs", () => {
-    const kept = predictDiscovery(pool, { exclude: "pub", archived: "include" });
-    expect(kept).not.toContain("e2e-owner/pub");
-  });
-
-  test("exclude globs: wildcards, name-vs-slug, backtracking, case-insensitivity", () => {
-    const globPool = [
-      { slug: "e2e-owner/svc-a" },
-      { slug: "e2e-owner/svc-b" },
-      { slug: "e2e-owner/legacy-x" },
-      { slug: "e2e-owner/UPPER" },
-    ];
-    expect(predictDiscovery(globPool, { exclude: "svc-*" })).toEqual([
-      "e2e-owner/legacy-x",
-      "e2e-owner/UPPER",
-    ]);
-    expect(predictDiscovery(globPool, { exclude: "e2e-owner/legacy-*" })).not.toContain(
-      "e2e-owner/legacy-x",
-    );
-    expect(predictDiscovery(globPool, { exclude: "*-*" })).toEqual(["e2e-owner/UPPER"]);
-    expect(predictDiscovery(globPool, { exclude: "uPPer" })).not.toContain("e2e-owner/UPPER");
+  test.each<
+    [
+      label: string,
+      pool: Parameters<typeof predictDiscovery>[0],
+      filters: Parameters<typeof predictDiscovery>[1],
+      kept: string[],
+    ]
+  >([
+    [
+      "no filters keeps everything except archived (default skip)",
+      pool,
+      {},
+      ["e2e-owner/pub", "e2e-owner/priv", "e2e-owner/intern", "e2e-owner/fork", "e2e-owner/tagged"],
+    ],
+    [
+      "visibility public keeps only public",
+      pool,
+      { visibility: "public", ...include },
+      ["e2e-owner/pub", "e2e-owner/arch", "e2e-owner/fork", "e2e-owner/tagged"],
+    ],
+    [
+      "visibility private keeps only private (drops internal and public)",
+      pool,
+      { visibility: "private", ...include },
+      ["e2e-owner/priv"],
+    ],
+    [
+      "forks exclude drops forks",
+      pool,
+      { forks: "exclude", ...include },
+      ["e2e-owner/pub", "e2e-owner/priv", "e2e-owner/intern", "e2e-owner/arch", "e2e-owner/tagged"],
+    ],
+    ["forks only keeps only forks", pool, { forks: "only", ...include }, ["e2e-owner/fork"]],
+    [
+      "topics keeps only repos with a matching topic",
+      pool,
+      { topics: "infra", ...include },
+      ["e2e-owner/tagged"],
+    ],
+    [
+      "exclude patterns drop matching slugs",
+      pool,
+      { exclude: "pub", ...include },
+      [
+        "e2e-owner/priv",
+        "e2e-owner/intern",
+        "e2e-owner/arch",
+        "e2e-owner/fork",
+        "e2e-owner/tagged",
+      ],
+    ],
+    [
+      "exclude globs: a wildcard over the name",
+      globPool,
+      { exclude: "svc-*" },
+      ["e2e-owner/legacy-x", "e2e-owner/UPPER"],
+    ],
+    [
+      "exclude globs: a wildcard over the slug",
+      globPool,
+      { exclude: "e2e-owner/legacy-*" },
+      ["e2e-owner/svc-a", "e2e-owner/svc-b", "e2e-owner/UPPER"],
+    ],
+    ["exclude globs: backtracking", globPool, { exclude: "*-*" }, ["e2e-owner/UPPER"]],
+    [
+      "exclude globs: case-insensitivity",
+      globPool,
+      { exclude: "uPPer" },
+      ["e2e-owner/svc-a", "e2e-owner/svc-b", "e2e-owner/legacy-x"],
+    ],
+  ])("%s", (_label, repos, filters, kept) => {
+    expect(predictDiscovery(repos, filters)).toEqual(kept);
   });
 });
 
