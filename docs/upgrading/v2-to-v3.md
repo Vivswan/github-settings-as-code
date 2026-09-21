@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-four breaks. Seven are for library consumers (sections 9, 23, 24, 27, 34, 35, and 54), one is for anyone pinning a sha (section 21), and seventeen are parse-time refusals (sections 36 to 52): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve.
+Fifty-five breaks. Seven are for library consumers (sections 9, 23, 24, 27, 34, 35, and 54), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve.
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
@@ -66,6 +66,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | Autolinks: charset, the `<num>` placeholder, overlapping prefixes, the live flag | An empty or bad-charset `key_prefix` or a template without `<num>` 422ed; a recreate sent `is_alphanumeric: true` over a live `false` | Refused at parse: an empty `key_prefix`, a character outside GitHub's set, a template without `<num>`, two prefixes where one begins the other; a recreate keeps the live flag | Validation fails naming the key and an example value; [section 52](#52-autolinks-charset-placeholder-and-overlapping-prefixes) |
 | YAML merge keys resolve | `<<: *base` survived as a literal `<<` field and rode into the create payload | `<<` merges the aliased mapping, as the Probot Settings app's parser did | No error: an entry that carried a literal `<<` key now gets the merged fields instead; [section 53](#53-yaml-merge-keys-resolve) |
 | Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2322`, naming the missing key); parse the document through `validateSettings`, or declare both keys; [section 54](#54-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
+| Branches: a `restrictions` block carries `users` and `teams` | `restrictions: {}`, or a block naming only `apps` or only `users`, parsed clean and the protection PUT 422ed at apply | Both lists are required on the block (`[]` when none) and `apps` stays optional; `restrictions: null` lifts the push restriction; `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal | Validation fails naming the two lists and the `null` form, with zero requests; [section 55](#55-branches-a-restrictions-block-carries-users-and-teams) |
 
 ## 1. The defaults-file fallback
 
@@ -1134,28 +1135,52 @@ Every reader (single file, layers, central file, defaults file, the CLI) parses 
 
 ## 54. Library: a parsed ruleset entry carries `target` and `enforcement`
 
-For `@vivswan/github-settings-as-code` consumers. The settings file is unchanged: both keys stay optional there, and the parse fills `target: branch` and `enforcement: active`.
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in sections 24 and 29. The settings file is unchanged: both keys stay optional there, and the parse fills `target: branch` and `enforcement: active`.
 
 The parsed entry always carries both, so the full-payload PUT sends them and the comparison never reads a live value under either key as omitted. The parsed type says so, and a typed literal that omits them stops compiling.
 
 ```text
-v2   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // compiles
+pre-release   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // compiles
 
-v3   const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // TS2322: target and enforcement are missing
-     const { settings } = validateSettings({ rulesets: [{ name: "main" }] })._unsafeUnwrap();  // parsed: both keys filled
-     const doc: SettingsFile = { rulesets: [{ name: "main", target: "branch", enforcement: "active" }] };
+v3            const doc: SettingsFile = { rulesets: [{ name: "main" }] };            // TS2322: target and enforcement are missing
+              const { settings } = validateSettings({ rulesets: [{ name: "main" }] })._unsafeUnwrap();  // parsed: both keys filled
+              const doc: SettingsFile = { rulesets: [{ name: "main", target: "branch", enforcement: "active" }] };
 ```
 
 `sectionModule("rulesets").plan` takes the parsed entry, so a hand-built entry handed to it needs both keys too.
 
 An entry cast past the type gets two omitted-key drift lines, since nothing fills them after the parse.
 
+## 55. Branches: a restrictions block carries users and teams
+
+```text
+v2   branches:
+       - name: main
+         protection:
+           restrictions: {}                    # parsed clean
+       - name: develop
+         protection:
+           restrictions:
+             users: [octocat]
+             apps: [deploy-gate]               # parsed clean
+     -> PUT .../branches/main/protection -> 422, with v2's hint: "restrictions" needs "users" and "teams" lists (or declare the whole key as null)
+
+v3   branches[0].protection.restrictions.users: protection.restrictions must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; restrictions: null lifts the push restriction
+     branches[0].protection.restrictions.teams: protection.restrictions must carry both users and teams ...
+     branches[1].protection.restrictions.teams: protection.restrictions must carry both users and teams ...
+     (exit 1, zero requests)
+```
+
+GitHub's protection PUT requires `users` and `teams` under `restrictions` and takes `apps` as optional, so each missing list is refused before any request. The two review-side holders are unchanged: `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal, since GitHub documents the empty mapping there as "disabled".
+
+Fix: declare both lists (`users: []` and `teams: []` when none), or write `restrictions: null` to lift the push restriction.
+
 ## Order of operations
 
 1. Rename any settings file whose path contains a comma, rename `undeclared` to `_undeclared` in every settings file, and move every other underscore key into a YAML comment; the v2 line accepts the old spellings only, so do all three together with the pin move.
 2. Rename `skippedSections` to `skipped-sections` in every step expression that reads `repos-result`, and repoint `jq` filters at the `--json` envelope.
 3. Where a snapshot wrote a `$WEBHOOK_SECRET_<id>` reference, change the reference and its exported variable to `SECRET_WEBHOOK_<id>` together, or re-snapshot.
-4. Move the pin to `@v3` with `mode: check`. A layered setup also renames `mode: merge` to `mode: render` and `merged-file` to `rendered-file`, and writes `deep` where a layer or the `layering` input said `merge`; v3 refuses the old mode and value before check runs. The parse-time refusals (sections 36 to 52) surface here, before any request, at most five schema issues per section; fix each and run check again.
+4. Move the pin to `@v3` with `mode: check`. A layered setup also renames `mode: merge` to `mode: render` and `merged-file` to `rendered-file`, and writes `deep` where a layer or the `layering` input said `merge`; v3 refuses both before check runs. The parse-time refusals (sections 36 to 52 and 55) surface here, before any request, at most five schema issues per section; fix each and run check again.
 5. Read the fallback notices and the drift; add render steps where a target needs the old overlay behavior; delete duplicated live items the sections now refuse; declare or empty the live values apply now refuses to write over (section 33).
 6. In a layered setup, write `_layering: replace` where a higher list must still win, omit from every layer any key whose `null` meant "stop managing this", and drop a lower entry with `_remove: true` (sections 28 to 31).
 7. Switch back to apply.
