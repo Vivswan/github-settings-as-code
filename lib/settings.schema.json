@@ -481,7 +481,7 @@
           ]
         },
         "restrictions": {
-          "description": "Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings. GitHub's protection PUT requires `users` and `teams` (`[]` when none) and takes `apps` as optional, so a mapping without either is refused upfront; an all-empty mapping lets nobody push, and `null` turns the push restriction off. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write. Literal branches only; wildcard rules point at the rulesets section.",
+          "description": "Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings; the PUT requires `users` and `teams` (`[]` when none) and takes `apps` as optional, so a mapping missing either is refused upfront. An all-empty mapping lets nobody push, `null` lifts the restriction, and a copied GET actor object is refused naming the string to write. Literal branches only; wildcard rules point at the rulesets section.",
           "anyOf": [
             {
               "type": "object",
