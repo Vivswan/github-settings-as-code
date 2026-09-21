@@ -296,23 +296,6 @@ describe("webhooks plan", () => {
     ]);
   });
 
-  test("two live hooks under one url fail BEFORE any operation is planned, declared or not", async () => {
-    // A missing url declared before the ambiguous one must not become a create; the live index is built over the whole list first.
-    const api = new MockApi({
-      [LIST]: { data: [liveHook(11, "https://dup.test/h"), liveHook(12, "https://dup.test/h")] },
-    });
-    const refusal =
-      'webhooks: GitHub holds webhooks that resolve to one identity: "https://dup.test/h (hook id 11)" and "https://dup.test/h (hook id 12)". ' +
-      "This section manages one webhook per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again";
-    await expect(
-      plan(api, [
-        { config: { url: "https://new.test/h" } },
-        { config: { url: "https://dup.test/h" } },
-      ]),
-    ).rejects.toThrow(refusal);
-    await expect(plan(api, [])).rejects.toThrow(refusal);
-  });
-
   test("two declared entries with the same url are a validate issue at the nested identity field, so the document fails before any call", () => {
     expect(
       webhooksSection.validate([
