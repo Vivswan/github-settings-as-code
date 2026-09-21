@@ -149,7 +149,7 @@ describe("deltas", () => {
         { type: "User", id: 1, extra: true },
       ],
     };
-    // Repeated types defeat the legacy sniffing (shape pairing still matches here)...
+    // Repeated types defeat the default `type` pairing (shape pairing still matches here)...
     expect(deltas(desired, live)).toEqual([]);
     // ...and a declared key pairs by id, so a divergent field under a paired id is a mismatch.
     const drifted = {

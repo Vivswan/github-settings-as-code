@@ -213,28 +213,6 @@ describe("section docs completeness", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
-  test("a docs file still keyed by the table's former name fails naming the file and the rename", () => {
-    const dir = mkdtempSync(join(tmpdir(), "docs-yml-"));
-    try {
-      const stale = join(dir, "labels.docs.yml");
-      writeFileSync(
-        stale,
-        WELL_FORMED_DOCS.map((line) => line.replace(/^sections_table:/, "readme:")).join("\n"),
-      );
-      // The whole message is compared outright, not a substring of it.
-      expect(readDocsYaml(stale, SectionDocs)._unsafeUnwrapErr()).toBe(
-        [
-          `${stale} is not a valid docs document:`,
-          '\u2716 Unrecognized key: "readme"; the Sections table cells key "readme" was renamed to "sections_table" (the table renders into docs/reference/sections.md)',
-          "\u2716 Invalid input: expected object, received undefined",
-          "  \u2192 at sections_table",
-        ].join("\n"),
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe("Notes cells vs undeclaredDefault", () => {

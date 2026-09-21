@@ -1,7 +1,7 @@
 /**
  * The zod error map for a strict object whose key was renamed: a document still using the old key
  * fails with the rename in hand, not a bare unknown-key issue. Imports only zod and the
- * text leaf, like its schema-helpers.ts sibling, so both the settings slices and the docs shapes can use it.
+ * text leaf, like its schema-helpers.ts sibling, so the settings slices can use it.
  */
 
 import type { z } from "zod";
