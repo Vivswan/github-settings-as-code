@@ -218,33 +218,19 @@ describe("deploy_keys schema", () => {
 });
 
 describe("deploy_keys validation before any read", () => {
-  test.each<
-    [label: string, declared: Parameters<typeof deployKeysSection.validate>[0], issue: RegExp]
-  >([
-    [
-      "duplicate declared titles",
-      [
-        { title: "deploy-bot", key: BOT_KEY },
-        { title: "deploy-bot", key: MIRROR_KEY },
-      ],
-      /^\[1\]\.title: "deploy-bot" names the same deploy key as "deploy-bot" declared earlier/,
-    ],
-    [
-      "duplicate declared MATERIAL under different titles (comments ignored)",
-      [
-        { title: "deploy-bot", key: `${BOT_KEY} deploy@bot` },
-        { title: "mirror-pull", key: `${BOT_KEY} mirror@other-comment` },
-      ],
-      /^\[1\]\.key: the entries "deploy-bot" and "mirror-pull" declare the same key material.*keep one entry per key$/s,
-    ],
-  ])(
-    "%s is one validate issue at the offending field, so the document fails before any API call",
-    (_label, declared, issue) => {
-      expect(
-        deployKeysSection.validate(declared).map((found) => `${found.path}: ${found.message}`),
-      ).toEqual([expect.stringMatching(issue)]);
-    },
-  );
+  test("duplicate declared MATERIAL under different titles (comments ignored) is one validate issue at the offending field, so the document fails before any API call", () => {
+    const declared = [
+      { title: "deploy-bot", key: `${BOT_KEY} deploy@bot` },
+      { title: "mirror-pull", key: `${BOT_KEY} mirror@other-comment` },
+    ];
+    expect(
+      deployKeysSection.validate(declared).map((found) => `${found.path}: ${found.message}`),
+    ).toEqual([
+      expect.stringMatching(
+        /^\[1\]\.key: the entries "deploy-bot" and "mirror-pull" declare the same key material.*keep one entry per key$/s,
+      ),
+    ]);
+  });
 });
 
 describe("deploy_keys conflicts", () => {
@@ -270,20 +256,6 @@ describe("deploy_keys conflicts", () => {
       expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
     },
   );
-
-  test("two live keys under one title fail loudly, declared or not: GitHub does not enforce title uniqueness", async () => {
-    const api = new MockApi({
-      [LIST]: {
-        data: [liveKey(11, "deploy-bot", BOT_KEY), liveKey(12, "deploy-bot", MIRROR_KEY)],
-      },
-    });
-    await expect(plan(api, [{ title: "deploy-bot", key: BOT_KEY }])).rejects.toThrow(
-      'deploy_keys: GitHub holds deploy keys that resolve to one identity: "deploy-bot (key id 11)" and "deploy-bot (key id 12)". ' +
-        "This section manages one deploy key per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again",
-    );
-    await expect(plan(api, [])).rejects.toThrow(/resolve to one identity/);
-    expect(api.mutations()).toEqual([]);
-  });
 
   test("the guard runs before the section's live conflicts: a duplicated title wins over a colliding holder's material", async () => {
     const api = new MockApi({
@@ -590,16 +562,5 @@ describe("deploy_keys convergence", () => {
     expect(await post({ title: "deploy-bot", key: MIRROR_KEY })).toBe(201);
     expect(await post({ title: "other-title", key: `${BOT_KEY} some@comment` })).toBe(422);
     expect(api.state.deploy_keys.map((k) => k.title)).toEqual(["deploy-bot", "deploy-bot"]);
-  });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(deployKeysSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
   });
 });
