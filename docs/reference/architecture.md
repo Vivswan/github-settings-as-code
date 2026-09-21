@@ -10,9 +10,9 @@ The check is existence only: a caption-only box (`mode`, `rendered-file`) names 
 
 The [module map](#the-module-map) at the end is generated from [architecture.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/architecture.yml). The `lint:arch` script keeps that declaration equal to the import graph, so the map cannot show an edge the code does not draw.
 
-The same lint enforces the never-throw rule: a function that can fail returns a `Result` carrying a typed `Problem`, so an error is a value the caller handles. A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or in a file the `throws` block of `architecture.yml` names.
+The same lint enforces the never-throw rule: a function that can fail returns a neverthrow `Result` carrying a typed `Problem`, so an error is a value the caller handles. A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or in a file the `throws` block of `architecture.yml` names.
 
-That block counts the remaining throws per file. The lint fails when the count and the tree disagree in either direction, and a converted throw retires its entry; that a count only goes down is the review rule in AGENTS.md.
+That block counts the remaining throws per file. The lint fails when the count and the tree disagree in either direction, so a converted throw lowers its file's count and the entry leaves the list once no throw remains; that a count only goes down is the review rule in AGENTS.md.
 
 ## The journey of one settings file
 
@@ -122,13 +122,15 @@ flowchart TD
 
 One rule decides what belongs here: what the settings file alone shows wrong is refused when the file is parsed, naming the key and the fix, never discovered at apply time. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
 
-The phase runs in every mode before the first request to that repository's sections, and in render mode on every layer and on the fold. In a multi-repo run each target is validated in turn, once its file is fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
+The phase runs in check and apply before the first request to that repository's sections, and in render mode on every layer and on the fold. A layer of the fold is judged as its standalone view, the document minus the two directives the fold consumes; the fold itself is judged whole.
+
+ In a multi-repo run the `defaults-file` document is validated before target resolution, so an invalid default stops the run before any write; a target's file is validated once fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
 
 - The zod shape of each section, with its cross-field rules. A rule still runs beside a sibling that failed, so one run reports the bad enum and the contradictory pair together.
 - The section's `validate` hook, required on every list section: duplicates by the section's key, a rename that collides, a nested list's own duplicates. Its issues carry paths under the section key, like the shape's.
 - Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite.
 
-Every issue the phase finds lands in one list: unknown directives, then unknown sections, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
+Every issue the phase finds lands in one list: unknown directives, unknown sections, a single document's `_remove` markers, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
 
 Two limits. A shape's own issues are capped at five per section, with a count of the rest; and a section's hook runs once its shape parsed, so a shape error in an entry can hide a duplicate until it is fixed.
 
@@ -149,6 +151,7 @@ flowchart TD
   replace["replace<br>the higher list wins whole"]
   shallow["shallow<br>union by key, a same-key entry swapped whole"]
   deep["deep, the default<br>union by key, a same-key pair merged field by field"]
+  consumed["directives consumed, the plain-list wrapper unwrapped, _undeclared resolved"]
   whole["the fold validated once more<br>src/engine/orchestrate.ts validateSettingsDoc()"]
   out["rendered-file, in canonical order<br>src/engine/canonical.ts renderCanonicalYaml()"]
   layers --> each
@@ -157,10 +160,11 @@ flowchart TD
   directive --> replace
   directive --> shallow
   directive --> deep
-  replace --> whole
-  shallow --> whole
-  deep --> whole
-  whole -->|directives consumed, the plain-list wrapper unwrapped, _undeclared resolved| out
+  replace --> consumed
+  shallow --> consumed
+  deep --> consumed
+  consumed --> whole
+  whole --> out
 ```
 
 The fold is a cascade: the higher layer's value wins at every depth, and `null` is a value. Every list section is keyed by what its planner matches entries by, so a fleet `Bug` and a repository `bug` are one label. Three directives say how a keyed list meets the list below it; here the highest layer, in a run with `layering: replace`:
