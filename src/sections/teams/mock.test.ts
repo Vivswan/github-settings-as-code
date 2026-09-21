@@ -59,34 +59,20 @@ describe("teams.probe answers by Accept media type, like GitHub", () => {
   });
 });
 
-describe("teams.grant refuses a permission GitHub would not grant", () => {
+describe("teams.grant answers a permission like GitHub", () => {
   const params = { org: "acme", team_slug: "platform", owner: "acme", repo: "widgets" };
 
-  test.each(["write", "read", "Push"])(
-    "%j is a 422, and the team's access is unchanged",
-    (permission) => {
-      const state = buildStateForSlug(
-        "acme/widgets",
-        { settingsYaml: null, liveState: LIVE },
-        "org",
-      );
-      const response = teamsMockHandlers["teams.grant"](
-        handlerTestContext("teams.grant", state, { params, body: { permission } }),
-      );
-      expect(response.status).toBe(422);
-      expect(state.teams.platform).toEqual({ role_name: "write" });
-    },
-  );
-
-  test("a defined custom role is granted", () => {
+  test.each<[permission: string, status: number, stored: { role_name: string }]>([
+    ["write", 422, { role_name: "write" }],
+    ["read", 422, { role_name: "write" }],
+    ["Push", 422, { role_name: "write" }],
+    ["security-auditor", 204, { role_name: "security-auditor" }],
+  ])("%j is a %i, and the team's role is then %j", (permission, status, stored) => {
     const state = buildStateForSlug("acme/widgets", { settingsYaml: null, liveState: LIVE }, "org");
     const response = teamsMockHandlers["teams.grant"](
-      handlerTestContext("teams.grant", state, {
-        params,
-        body: { permission: "security-auditor" },
-      }),
+      handlerTestContext("teams.grant", state, { params, body: { permission } }),
     );
-    expect(response.status).toBe(204);
-    expect(state.teams.platform).toEqual({ role_name: "security-auditor" });
+    expect(response.status).toBe(status);
+    expect(state.teams.platform).toEqual(stored);
   });
 });
