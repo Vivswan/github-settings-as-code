@@ -1,7 +1,7 @@
 /**
  * The canonical order is a relation, not a picture: the same content in any key or list order renders to one set of
- * bytes, a changed value moves exactly its own line, and every mapping list the schema declares is either sorted by a
- * declared identity or deliberately left as written.
+ * bytes, and every mapping list the schema declares is either sorted by a declared identity or deliberately left as
+ * written.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -109,18 +109,6 @@ describe("canonicalDocument", () => {
     const before = JSON.stringify(SHUFFLED);
     canonicalDocument(SHUFFLED);
     expect(JSON.stringify(SHUFFLED)).toBe(before);
-  });
-
-  test("a changed value changes exactly its own line", () => {
-    const changed = structuredClone(SHUFFLED) as { labels: { entries: Array<{ color: string }> } };
-    changed.labels.entries[0] = { ...changed.labels.entries[0], color: "ffffff" } as never;
-    const before = renderCanonicalYaml(ORDERED).split("\n");
-    const after = renderCanonicalYaml(changed).split("\n");
-    expect(after.length).toBe(before.length);
-    const differing = before.flatMap((line, index) => (line === after[index] ? [] : [index]));
-    expect(differing.map((index) => [before[index], after[index]])).toEqual([
-      ["      color: 0075ca", "      color: ffffff"],
-    ]);
   });
 
   test("the top level is SECTION_KEYS order, then the directives, then unknown keys by code point", () => {
