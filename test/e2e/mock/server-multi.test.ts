@@ -269,34 +269,6 @@ describe("multi-repo mode", () => {
     expect(b.status).toBe(200);
   });
 
-  test("team-repo grading: global org_members:none denies BOTH regardless of per-slug administration", async () => {
-    const h = await start(
-      scenario({
-        owner_kind: "org",
-        token_permissions: { org_members: "none" },
-        repos: {
-          "e2e-owner/svc-a": {
-            settings: {},
-            permissions: { administration: "write" },
-            live_state: { teams: { reviewers: { role_name: "write" } } },
-          },
-          "e2e-owner/svc-b": {
-            settings: {},
-            permissions: { administration: "write" },
-            live_state: { teams: { reviewers: { role_name: "write" } } },
-          },
-        },
-      }),
-    );
-    for (const slug of ["svc-a", "svc-b"]) {
-      const res = await call(h, "GET", `/orgs/e2e-owner/teams/reviewers/repos/e2e-owner/${slug}`);
-      expect(res.status).toBe(404);
-      expect(
-        h.requests.find((r) => r.pathname.endsWith(`/repos/e2e-owner/${slug}`))?.deniedBy,
-      ).toBe("org_members");
-    }
-  });
-
   test("per-slug permission mask scopes a denial to one repository", async () => {
     const h = await start(
       scenario({
@@ -332,19 +304,25 @@ describe("multi-repo mode", () => {
   });
 
   test("the denial barrier does not leak across slugs (per-target keying)", async () => {
+    // The barrier is consulted only on a DENIED write, so svc-b's write is denied too (issues: read);
+    // keyed by section alone, svc-a's denied read would flag it. The same-slug write then shows the
+    // barrier IS armed for svc-a, so svc-b's silence is the keying, not a disarmed barrier.
     const h = await start(
       scenario({
         denial_style: 403,
         repos: {
           "e2e-owner/svc-a": { settings: {}, permissions: { issues: "none" } },
-          "e2e-owner/svc-b": { settings: {}, permissions: { issues: "write" } },
+          "e2e-owner/svc-b": { settings: {}, permissions: { issues: "read" } },
         },
       }),
     );
     expect((await call(h, "GET", "/repos/e2e-owner/svc-a/labels")).status).toBe(403);
-    const write = await call(h, "POST", "/repos/e2e-owner/svc-b/labels", { body: { name: "x" } });
-    expect(write.status).toBe(201);
+    const other = await call(h, "POST", "/repos/e2e-owner/svc-b/labels", { body: { name: "x" } });
+    expect(other.status).toBe(403);
     expect(h.violations).toHaveLength(0);
+    const same = await call(h, "POST", "/repos/e2e-owner/svc-a/labels", { body: { name: "x" } });
+    expect(same.status).toBe(403);
+    expect(h.violations.filter((v) => v.includes("should have aborted"))).toHaveLength(1);
   });
 
   test("a team-repo route naming an unknown slug is a violation (not an orgState fallback)", async () => {

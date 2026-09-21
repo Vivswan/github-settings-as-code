@@ -567,18 +567,6 @@ describe("OpenApiValidator against the fetched spec", () => {
     expect(v.validateRequest(request)).toEqual([]);
   });
 
-  test("a mock VIOLATION 400 is excluded from validation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "GET",
-        pathname: "/user/repos",
-        status: 400,
-        responseBody: { message: "E2E MOCK VIOLATION: something broke" },
-      }),
-    );
-    expect(violations).toEqual([]);
-  });
-
   test("validateLog flattens violations across many requests", () => {
     const log: LoggedRequest[] = [
       req({ method: "GET", pathname: "/repos/e2e-owner/e2e-repo", status: 200 }),

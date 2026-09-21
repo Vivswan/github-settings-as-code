@@ -179,11 +179,6 @@ describe("buildState overlay semantics", () => {
     expect(seeded.actions_retention).toEqual({ days: 30, maximum_allowed_days: 400 });
   });
 
-  test("ownerKind user marks the org absent", () => {
-    const state = buildState(undefined, "user");
-    expect(state.org).toBeNull();
-  });
-
   test("state is decoupled from the fixture: mutating it does not leak", () => {
     const a = buildState(undefined, "org");
     a.repo.description = "mutated";

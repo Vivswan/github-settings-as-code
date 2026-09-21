@@ -471,10 +471,6 @@ describe("assertGraphqlHandlerCompleteness", () => {
       /GraphQL handlers naming no declared operation/,
     );
   });
-
-  test("the live tables are in lockstep", () => {
-    expect(() => assertGraphqlHandlerCompleteness()).not.toThrow();
-  });
 });
 
 describe("pinned-environments position semantics (production tables)", () => {

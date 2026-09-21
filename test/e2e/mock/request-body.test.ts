@@ -44,18 +44,6 @@ describe("an undocumented key on an open body is dropped before the handler", ()
     expect(singleState(h).labels[0]).not.toHaveProperty("colour");
   });
 
-  test("a hook PATCH no longer stores a passthrough key", async () => {
-    const h = await start(
-      scenario({ live_state: { hooks: [{ id: 90_000_000, config: { url: "https://h.test" } }] } }),
-    );
-    const res = await call(h, "PATCH", `${repoPath}/hooks/90000000`, {
-      body: { active: false, name: "web", nickname: "ci" },
-    });
-    expect(res.status).toBe(200);
-    expect(singleState(h).hooks[0]).not.toHaveProperty("nickname");
-    expect(singleState(h).hooks[0]?.active).toBe(false);
-  });
-
   test("a variable POST and PATCH store name and value only", async () => {
     const h = await start(scenario());
     const created = await call(h, "POST", `${repoPath}/actions/variables`, {

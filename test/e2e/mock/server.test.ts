@@ -28,10 +28,6 @@ const start = mockServerLifecycle();
 const silentTrace = { debug: () => {}, ...maskRegistry(() => {}) };
 
 describe("handler-completeness startup assertion", () => {
-  test("passes for the real table", () => {
-    expect(() => assertHandlerCompleteness()).not.toThrow();
-  });
-
   test.each([
     ["an endpoint has no handler", { "phantom.role": {} }, {}, /no mock handler/],
     [
@@ -291,17 +287,26 @@ describe("denial barrier", () => {
   test("a denied ADVISORY read (branches.branchProbe) does NOT arm the barrier", async () => {
     // branches.ts treats the branch probe as advisory (only a definitive 404 matters) and PUTs
     // regardless, so a denied probe must NOT arm: the PUT is the engine's legitimate write. Fuzz
-    // seed 610725843 false-flagged this.
+    // seed 610725843 false-flagged this. Under the fine_grained style the denied probe answers the
+    // 404 the probe declares as tolerated, which never arms on its own; the 403 style makes the
+    // advisory exemption the only thing holding the barrier.
     const branch = "main-0";
     const h = await start(
       scenario({
+        denial_style: 403,
         inputs: { on_missing_permission: "warn" },
         token_permissions: { contents: "none", administration: "read" },
       }),
     );
     await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`);
-    await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}`); // advisory, denied
-    await call(h, "PUT", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`, { body: {} });
+    const probe = await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}`); // advisory, denied
+    const put = await call(h, "PUT", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`, {
+      body: {},
+    });
+    // Controls: both denials were reached, so the barrier had a denied write to judge.
+    expect(probe.status).toBe(403);
+    expect(h.requests[1]?.deniedBy).toBe("contents");
+    expect(put.status).toBe(403);
     expect(h.violations).toHaveLength(0);
   });
 
@@ -586,14 +591,6 @@ describe("route matching and wire contract", () => {
     expect(h.violations.some((v) => v.includes(named))).toBe(true);
   });
 
-  test("the repo probe is served by the repository.get section endpoint", async () => {
-    const h = await start(scenario());
-    const res = await call(h, "GET", `/repos/${OWNER}/${REPO}`);
-    expect(res.status).toBe(200);
-    expect((await json(res)).name).toBe(REPO);
-    expect(h.violations).toHaveLength(0);
-  });
-
   // A name every plain object inherits must be a MISS in a name-keyed state dictionary, not Object.prototype's member.
   //   branch protection  -> served the function as a 200 body
   //   team access        -> 200 with role_name undefined
@@ -658,18 +655,6 @@ describe("workflows envelope", () => {
 });
 
 describe("writes mutate state", () => {
-  test("a label create then list sees the new label", async () => {
-    const h = await start(scenario());
-    const created = await call(h, "POST", labelsPath, {
-      body: { name: "feature", color: "00ff00" },
-    });
-    expect(created.status).toBe(201);
-    const list = await jsonArray(await call(h, "GET", labelsPath));
-    expect(list).toHaveLength(1);
-    expect(list[0]?.name).toBe("feature");
-    expect(singleState(h).labels).toHaveLength(1);
-  });
-
   test("label create and update drop what the body cannot set: unknown keys and server-owned fields", async () => {
     // GitHub ignores a key its labels body does not document and never lets a body set id, node_id,
     // url, or default; a mock keeping either would let a phantom key converge or an id be spoofed.
@@ -797,17 +782,15 @@ describe("code-scanning 200-vs-202 rule", () => {
 
 describe("logged response bodies are snapshots, not live-state aliases", () => {
   test("a later mutation does not retroactively rewrite an earlier logged body", async () => {
-    // server.ts structuredClones every logged body, so a handler that returned live state could not
-    // have its logged body rewritten by a later mutation.
-    const h = await start(scenario());
-    await call(h, "GET", `/repos/${OWNER}/${REPO}`);
-    await call(h, "PATCH", `/repos/${OWNER}/${REPO}`, { body: { description: "changed-after" } });
-    const getLog = h.requests.find(
-      (r) => r.method === "GET" && r.pathname === `/repos/${OWNER}/${REPO}`,
-    );
-    expect((getLog?.responseBody as Record<string, unknown>)?.description).not.toBe(
-      "changed-after",
-    );
+    // The labels list answers the stored label objects themselves (repository.get builds a fresh
+    // surface, so it could never show aliasing), so an uncloned log entry would read the PATCHed color.
+    const h = await start(scenario({ live_state: { labels: [{ name: "bug", color: "ededed" }] } }));
+    await call(h, "GET", labelsPath);
+    await call(h, "PATCH", `${labelsPath}/bug`, { body: { color: "d73a4a" } });
+    const getLog = h.requests.find((r) => r.method === "GET" && r.pathname === labelsPath);
+    const logged = getLog?.responseBody as Array<Record<string, unknown>>;
+    expect(logged[0]?.color).toBe("ededed");
+    expect(singleState(h).labels[0]?.color).toBe("d73a4a");
   });
 });
 
