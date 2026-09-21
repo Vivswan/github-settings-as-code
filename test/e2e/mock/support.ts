@@ -491,7 +491,7 @@ export function secretScanningPatternFromCreate(state: MockState, payload: Json)
     pattern: payload.pattern ?? "",
     // ASSUMPTION, not spec: the enum documents no creation default. If real
     // GitHub lands bulk-created patterns unpublished, the created-then-clean
-    // story overstates enforcement (COVERAGE documents the caveat).
+    // story overstates enforcement (the coverage page documents the caveat).
     state: "published",
     push_protection_enabled: false,
     custom_pattern_version: mintSecretScanningVersion(state),

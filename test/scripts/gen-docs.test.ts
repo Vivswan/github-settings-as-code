@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CoverageData } from "../../.github/scripts/coverage-data.js";
+import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
+  type CoverageSection,
   PAGE_REGIONS,
   patFormParameters,
   renderCoverage,
@@ -13,6 +15,7 @@ import {
   renderPatFormUrl,
   renderSectionsTable,
 } from "../../.github/scripts/gen-docs.js";
+import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
 import { relocatedRegion } from "./relocated-region.js";
 
@@ -74,36 +77,111 @@ describe("renderSectionsTable", () => {
 });
 
 describe("renderCoverage", () => {
-  const sections = [{ key: "repository" }, { key: "labels" }] as const;
+  const sections: CoverageSection[] = [
+    {
+      key: "repository",
+      endpoints: {
+        get: { route: "GET /repos/{owner}/{repo}" },
+        update: { route: "PATCH /repos/{owner}/{repo}" },
+        topics: { route: "PUT /repos/{owner}/{repo}/topics" },
+      },
+      graphql: { features: { name: "RepositoryFeatures" } },
+    },
+    { key: "labels", endpoints: { list: { route: "GET /repos/{owner}/{repo}/labels" } } },
+  ];
   const docs = {
     repository: {
       coverage: [
-        { area: "[Core](https://x/repos)", notes: "PATCH passthrough." },
-        { area: "Topics", keys: "topics key", notes: "PUT topics." },
+        {
+          area: "[Core](https://x/repos)",
+          endpoints: ["get", "update", "features"],
+          notes: ["PATCH passthrough.", "GET-only fields are refused."],
+        },
+        { area: "Forking", keys: "allow_forking", endpoints: [], notes: ["Rides the PATCH."] },
+        {
+          area: "[Topics](https://x/topics)",
+          keys: "topics",
+          endpoints: ["topics"],
+          notes: ["PUT topics."],
+        },
       ],
     },
-    labels: { coverage: [{ area: "Labels", notes: "CRUD; deleted by default." }] },
+    labels: {
+      coverage: [{ area: "Labels", endpoints: ["list"], notes: ["CRUD; deleted by default."] }],
+    },
   } as const;
+  const anchors: EndpointAnchors = {
+    rest: {
+      "GET /repos/{owner}/{repo}": "https://docs.github.com/en/rest/repos/repos#get",
+      "PATCH /repos/{owner}/{repo}": "https://docs.github.com/en/rest/repos/repos#update",
+      "PUT /repos/{owner}/{repo}/topics": "https://docs.github.com/en/rest/repos/repos#topics",
+      "GET /repos/{owner}/{repo}/labels": "https://docs.github.com/en/rest/issues/labels#list",
+    },
+    graphql: {
+      RepositoryFeatures: "https://docs.github.com/en/graphql/reference/repos#object-repository",
+    },
+  };
   const data: CoverageData = {
-    intro: "The tenet.",
+    intro: ["The tenet.", "The inventory."],
     supportedOrder: ["labels", "repository"],
     gaps: { emptyNote: "No gaps." },
     noPublicApi: { intro: "UI-only:", items: ["Social preview.", "Wiki editing."] },
     outOfScope: { items: ["User surface."] },
   };
+  const render = (
+    overrides: {
+      sections?: CoverageSection[];
+      docs?: Readonly<Record<string, Pick<SectionDocs, "coverage">>>;
+      data?: Partial<CoverageData>;
+      anchors?: EndpointAnchors;
+    } = {},
+  ) =>
+    renderCoverage(
+      overrides.sections ?? sections,
+      overrides.docs ?? docs,
+      { ...data, ...overrides.data },
+      overrides.anchors ?? anchors,
+    );
 
-  test("renders the Supported rows in the data's display order, then the authored sections", () => {
-    expect(renderCoverage(sections, docs, data)).toBe(
+  test("renders the intro, one row per area with one link per call, the notes by row, then the authored sections", () => {
+    expect(render()).toBe(
       [
         "The tenet.",
         "",
+        "The inventory.",
+        "",
         "## Supported",
         "",
-        "| Area | Section | Notes |",
+        "| Area | Key in settings.yml | Endpoints |",
         "|---|---|---|",
-        "| Labels | `labels` | CRUD; deleted by default. |",
-        "| [Core](https://x/repos) | `repository` | PATCH passthrough. |",
-        "| Topics | `repository (topics key)` | PUT topics. |",
+        "| Labels | [`labels`](sections.md) | [GET /repos/{owner}/{repo}/labels](https://docs.github.com/en/rest/issues/labels#list) |",
+        [
+          "| [Core](https://x/repos) | [`repository`](sections.md) | ",
+          "[GET /repos/{owner}/{repo}](https://docs.github.com/en/rest/repos/repos#get)<br>",
+          "[PATCH /repos/{owner}/{repo}](https://docs.github.com/en/rest/repos/repos#update)<br>",
+          "[GraphQL RepositoryFeatures](https://docs.github.com/en/graphql/reference/repos#object-repository) |",
+        ].join(""),
+        "| Forking | [`repository`](sections.md) (`allow_forking`) | shares the calls of the Core row |",
+        "| [Topics](https://x/topics) | [`repository`](sections.md) (`topics`) | [PUT /repos/{owner}/{repo}/topics](https://docs.github.com/en/rest/repos/repos#topics) |",
+        "",
+        "### Notes",
+        "",
+        "**Labels** (`labels`)",
+        "",
+        "- CRUD; deleted by default.",
+        "",
+        "**Core** (`repository`)",
+        "",
+        "- PATCH passthrough.",
+        "- GET-only fields are refused.",
+        "",
+        "**Forking** (`repository`)",
+        "",
+        "- Rides the PATCH.",
+        "",
+        "**Topics** (`repository`)",
+        "",
+        "- PUT topics.",
         "",
         "## Repo-scoped gaps (not built yet)",
         "",
@@ -127,19 +205,19 @@ describe("renderCoverage", () => {
   });
 
   test("a known gap renders as a table row and drops the empty-state note", () => {
-    const withGap: CoverageData = {
-      ...data,
-      gaps: {
-        rows: [
-          {
-            area: "Widgets",
-            endpoints: ["GET /repos/{owner}/{repo}/widgets", "PUT /repos/{owner}/{repo}/widgets"],
-            why: "Widgets matter.",
-          },
-        ],
+    const rendered = render({
+      data: {
+        gaps: {
+          rows: [
+            {
+              area: "Widgets",
+              endpoints: ["GET /repos/{owner}/{repo}/widgets", "PUT /repos/{owner}/{repo}/widgets"],
+              why: "Widgets matter.",
+            },
+          ],
+        },
       },
-    };
-    const rendered = renderCoverage(sections, docs, withGap);
+    });
     expect(rendered).toContain(
       [
         "## Repo-scoped gaps (not built yet)",
@@ -156,7 +234,7 @@ describe("renderCoverage", () => {
 
   test("refuses a display order that skips, repeats, or invents a section", () => {
     const order = (supportedOrder: CoverageData["supportedOrder"]) => () =>
-      renderCoverage(sections, docs, { ...data, supportedOrder });
+      render({ data: { supportedOrder } });
     expect(order(["labels"])).toThrow("missing [repository], unknown or repeated []");
     expect(order(["labels", "repository", "labels"])).toThrow(
       "missing [], unknown or repeated [labels]",
@@ -168,58 +246,137 @@ describe("renderCoverage", () => {
 
   test("refuses a section without docs", () => {
     expect(() =>
-      renderCoverage([{ key: "labels" }], {}, { ...data, supportedOrder: ["labels"] }),
+      render({
+        sections: [sections[1] as CoverageSection],
+        docs: {},
+        data: { supportedOrder: ["labels"] },
+      }),
     ).toThrow('section "labels" has no docs entry');
+  });
+
+  /** The labels fixture with its one row replaced. */
+  const labelsRows = (...rows: SectionDocs["coverage"][number][]) => ({
+    sections: [sections[1] as CoverageSection],
+    docs: { labels: { coverage: rows as unknown as SectionDocs["coverage"] } },
+    data: { supportedOrder: ["labels"] as CoverageData["supportedOrder"] },
+  });
+  const row = (
+    overrides: Partial<SectionDocs["coverage"][number]>,
+  ): SectionDocs["coverage"][number] => ({
+    area: "Labels",
+    endpoints: ["list"],
+    notes: ["CRUD."],
+    ...overrides,
+  });
+
+  test("every declared call is listed at least once, a shared call on each row, and a row lists only declared roles", () => {
+    // Control: the fixture's own rows render.
+    expect(() => render(labelsRows(row({})))).not.toThrow();
+    expect(() => render(labelsRows(row({ endpoints: [] })))).toThrow(
+      'the "Labels" row of labels lists no calls, and no row above it in the section does either',
+    );
+    expect(() => render(labelsRows(row({ endpoints: ["list", "list"] })))).toThrow(
+      'the "Labels" row of labels lists the role "list" twice',
+    );
+    // A call that serves two areas renders on both rows.
+    const shared = render(labelsRows(row({}), row({ area: "Again", endpoints: ["list"] })));
+    expect(shared.match(/\[GET \/repos\/\{owner\}\/\{repo\}\/labels\]/g)).toHaveLength(2);
+    expect(() => render(labelsRows(row({ endpoints: ["remove"] })))).toThrow(
+      'the "Labels" row of labels lists the role "remove", which the section declares neither as an endpoint nor as a GraphQL operation',
+    );
+    const wider: CoverageSection = {
+      key: "labels",
+      endpoints: {
+        ...sections[1]?.endpoints,
+        remove: { route: "DELETE /repos/{owner}/{repo}/labels/{name}" },
+      },
+    };
+    expect(() => render({ ...labelsRows(row({})), sections: [wider] })).toThrow(
+      "the coverage rows of labels list none of its roles [remove]; every declared call is listed on at least one row",
+    );
+  });
+
+  test("anchors built over other sections fail on the first call they lack", () => {
+    expect(() => render({ anchors: { rest: {}, graphql: anchors.graphql } })).toThrow(
+      'no page was resolved for "GET /repos/{owner}/{repo}/labels"; the anchors handed to the renderer must come from resolveAnchors()',
+    );
+    expect(() => render({ anchors: { rest: anchors.rest, graphql: {} } })).toThrow(
+      'no page was resolved for "RepositoryFeatures"',
+    );
   });
 
   test.each([
     [
-      "a pipe in a table cell",
-      { area: "A | B", notes: "n" },
-      'Area cell is blank or contains "|" or a line break',
+      "a pipe in the Area cell",
+      { area: "A | B" },
+      'a labels coverage row\'s Area cell is blank or contains "|" or a line break',
     ],
-    ["a blank table cell", { area: " ", notes: "n" }, "Area cell is blank"],
-    ["blank keys", { area: "A", keys: "", notes: "n" }, "keys is blank"],
+    ["a blank Area cell", { area: " " }, "a labels coverage row's Area cell is blank"],
+    ["blank keys", { keys: "" }, "a labels coverage row's keys is blank"],
     [
       "a line break in the keys",
-      { area: "A", keys: "x\ny", notes: "n" },
-      "keys is blank or contains",
+      { keys: "x\ny" },
+      "a labels coverage row's keys is blank or contains",
     ],
-    ["a backtick in the keys", { area: "A", keys: "x`y", notes: "n" }, "keys contains a backtick"],
-  ])("refuses a coverage row with %s", (_, row, message) => {
-    expect(() =>
-      renderCoverage(
-        [{ key: "labels" }],
-        { labels: { coverage: [row] } },
-        { ...data, supportedOrder: ["labels"] },
-      ),
-    ).toThrow(`a labels coverage row's ${message}`);
+    ["a backtick in the keys", { keys: "x`y" }, "a labels coverage row's keys contains a backtick"],
+    [
+      "an Area cell that cannot label the notes",
+      { area: "**Bold**" },
+      'the "**Bold**" row of labels has an Area cell that cannot label its notes',
+    ],
+    [
+      "a note with a line break",
+      { notes: ["one\ntwo"] },
+      'a note under the "Labels" row of labels is blank or spans several lines',
+    ],
+    ["a blank note", { notes: [" "] }, 'a note under the "Labels" row of labels is blank'],
+    [
+      "a note over the word cap",
+      { notes: [Array.from({ length: 71 }, (_, i) => `w${i}`).join(" ")] },
+      'a note under the "Labels" row of labels runs to 71 words, over the cap of 70; split it into two',
+    ],
+  ] as const)("refuses a coverage row with %s", (_, overrides, message) => {
+    expect(() => render(labelsRows(row(overrides)))).toThrow(message);
+  });
+
+  test("a note of exactly the word cap renders", () => {
+    const seventy = Array.from({ length: 70 }, (_, i) => `w${i}`).join(" ");
+    expect(render(labelsRows(row({ notes: [seventy] })))).toContain(`- ${seventy}`);
   });
 
   test.each([
     [
       "a bullet with a line break",
       { outOfScope: { items: ["one\ntwo"] } },
-      "an out-of-scope item is blank or contains a line break",
+      "an out-of-scope item is blank or spans several lines",
     ],
     [
       "a blank bullet",
       { noPublicApi: { intro: "UI-only:", items: [" "] } },
-      "a no-public-API item is blank or contains a line break",
+      "a no-public-API item is blank or spans several lines",
     ],
     [
       "a blank gaps empty-state note",
       { gaps: { emptyNote: "  " } },
       "the gaps section's empty-state note is blank",
     ],
-    ["a multi-line intro", { intro: "one\ntwo" }, "the page intro is blank or spans several lines"],
+    [
+      "a multi-line intro paragraph",
+      { intro: ["one\ntwo"] },
+      "intro paragraph 1 is blank or spans several lines",
+    ],
     [
       "a blank no-public-API intro",
       { noPublicApi: { intro: "", items: ["x"] } },
       "the no-public-API intro is blank",
     ],
+    [
+      "an out-of-scope item over the word cap",
+      { outOfScope: { items: [Array.from({ length: 71 }, () => "w").join(" ")] } },
+      "an out-of-scope item runs to 71 words, over the cap of 70",
+    ],
   ] as const)("refuses %s", (_, override, message) => {
-    expect(() => renderCoverage(sections, docs, { ...data, ...override })).toThrow(message);
+    expect(() => render({ data: override })).toThrow(message);
   });
 });
 
@@ -453,8 +610,8 @@ describe("the committed pages", () => {
   });
 });
 
-describe("the committed COVERAGE.md", () => {
-  const coverage = readFileSync(join(ROOT, "COVERAGE.md"), "utf8");
+describe("the committed coverage page", () => {
+  const coverage = readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8");
 
   test("is exactly what the generator renders from the declarations and the authored data", () => {
     expect(renderCoverageFile(coverage)).toBe(coverage);
@@ -465,7 +622,7 @@ describe("the committed COVERAGE.md", () => {
     const begin = coverage.match(/<!-- BEGIN GENERATED: coverage[^\n]*\n/)?.[0] ?? "";
     expect(begin).not.toBe("");
     const exact =
-      'COVERAGE.md must be the "# Coverage" title, the coverage region, and one final newline';
+      'docs/reference/coverage.md must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline';
     expect(() => renderCoverageFile(coverage.replace(begin, `Intro prose.\n\n${begin}`))).toThrow(
       exact,
     );
@@ -478,28 +635,38 @@ describe("the committed COVERAGE.md", () => {
     expect(() => renderCoverageFile(`${coverage}\nTrailing prose.\n`)).toThrow(exact);
     // A pipe-wrapped line that is not a three-cell row of the table it sits in is authored prose.
     const shape =
-      "the coverage region in COVERAGE.md encloses content the generator would not write";
+      "the coverage region in docs/reference/coverage.md encloses content the generator would not write";
     expect(() =>
-      renderCoverageFile(
-        coverage.replace("\n\n## Repo-scoped gaps", "\n| Authored prose |\n\n## Repo-scoped gaps"),
-      ),
+      renderCoverageFile(coverage.replace("\n\n### Notes", "\n| Authored prose |\n\n### Notes")),
+    ).toThrow(shape);
+    const topics = "[`repository`](sections.md) (`topics`)";
+    expect(coverage).toContain(topics);
+    expect(() =>
+      renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top | ics`)")),
     ).toThrow(shape);
     expect(() =>
-      renderCoverageFile(
-        coverage.replace("`repository (topics key)`", "`repository (topics | key)`"),
-      ),
+      renderCoverageFile(coverage.replace(topics, "[`repository`](sections.md) (`top `ics`)")),
     ).toThrow(shape);
+    // A key cell that links anywhere but the Sections page is not the generator's.
     expect(() =>
-      renderCoverageFile(
-        coverage.replace("`repository (topics key)`", "`repository (topics `key`)`"),
-      ),
+      renderCoverageFile(coverage.replace(topics, "[`repository`](semantics.md) (`topics`)")),
     ).toThrow(shape);
     // A parenthesized qualifier is what codeSpan() lets through, so the shape accepts it.
     expect(() =>
       renderCoverageFile(
-        coverage.replace("`repository (topics key)`", "`repository (topics (legacy) key)`"),
+        coverage.replace(topics, "[`repository`](sections.md) (`topics (legacy)`)"),
       ),
     ).not.toThrow();
+    // A notes group is a bold label naming its section, a blank, and bullets; anything else between groups is authored.
+    const label = "**Topics** (`repository`)\n\n";
+    expect(coverage).toContain(label);
+    expect(() =>
+      renderCoverageFile(coverage.replace(label, `Authored aside.\n\n${label}`)),
+    ).toThrow(shape);
+    expect(() => renderCoverageFile(coverage.replace(label, "**Topics**\n\n"))).toThrow(shape);
+    expect(() => renderCoverageFile(coverage.replace(label, `${label}- extra bullet\n\n`))).toThrow(
+      shape,
+    );
     const gapsHeader = "| Area | Endpoints | Why it matters |\n|---|---|---|\n";
     expect(coverage).toContain(gapsHeader);
     expect(() =>
@@ -533,6 +700,6 @@ describe("the committed COVERAGE.md", () => {
           "\nAuthored afterword.\n\n<!-- END GENERATED: coverage -->",
         ),
       ),
-    ).toThrow("the coverage region in COVERAGE.md encloses content the generator would not write");
+    ).toThrow(shape);
   });
 });

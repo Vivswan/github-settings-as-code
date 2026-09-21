@@ -11,96 +11,166 @@ sections_table:
     the environment on the home page's deployments sidebar over GraphQL (declaration order sets the
     pin order, max 10 pins; environments without the key are never unpinned)
 coverage:
+  - area: "[Environments](https://docs.github.com/en/rest/deployments/environments)"
+    endpoints: [list, probe, update]
+    notes:
+      - >-
+        Covers wait_timer, reviewers, prevent_self_review, and the deployment_branch_policy
+        protected_branches/custom_branch_policies flags; the nested lists have their own rows below.
+      - >-
+        PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's
+        protection_rules[] back into the PUT shape.
+      - >-
+        A live wait timer or reviewers list the entry omits is drift, and apply refuses the PUT (the
+        [replace-write rule](semantics.md)).
+      - Undeclared environments are left untouched.
+      - >-
+        In check mode against a missing environment the declared variables, secrets, patterns, and
+        protection rules cannot be listed, so notes say they are unverifiable until it exists; against
+        a live environment whose custom_branch_policies flag is off, the patterns earn the same note
+        while the flag drift comes from the environment diff.
+      - >-
+        Snapshot lists the environments (GET /repos/{owner}/{repo}/environments) and reads each one
+        back as an entry: the PUT-shape settings off its GET body, and every nested list that has live
+        items in its wrapped form under that list's default policy.
+      - >-
+        The snapshot writes variables with their values, branch-policy patterns while the
+        custom_branch_policies flag is on, and the enabled protection rules by App slug; those two
+        lists sit behind the Actions grant: under on-missing-permission: warn a denial leaves the key
+        out with a note and the rest of the environment reads back, under fail it fails the section.
+      - >-
+        The snapshot writes secrets as `$SECRET_ENVIRONMENT_<NAME>_<SECRET>` references with a note
+        each: the per-store minting the secret sections use, the environment folded into the store so
+        same-named secrets in two environments get two variables; two names the fold collapses are
+        noted once.
+  - area: "[Environment variables](https://docs.github.com/en/rest/actions/variables)"
+    keys: variables
+    endpoints: [listVariables, createVariable, updateVariable, removeVariable]
+    notes:
+      - >-
+        A declared per-environment `variables` key reconciles that environment's Actions variables
+        AFTER the PUT, through GET/POST /repos/{owner}/{repo}/environments/{name}/variables and
+        PATCH/DELETE .../variables/{name}: create missing, update divergent values, and delete
+        undeclared ones by default (the wrapped `_undeclared: keep` form keeps them as notes).
+      - Names match case-insensitively, values are plain text by design.
+  - area: "[Environment secrets](https://docs.github.com/en/rest/actions/secrets)"
+    keys: secrets
+    endpoints: [listSecrets, secretsPublicKey, putSecret, removeSecret]
+    notes:
+      - >-
+        A declared per-environment `secrets` key reconciles that environment's Actions secrets the
+        same way the shipped secret sections do: GET .../environments/{name}/secrets (names +
+        timestamps), GET .../secrets/public-key, and sealed PUT/DELETE .../secrets/{secret_name}.
+      - >-
+        The public key is issued at apply, inside the secret PUT, since that PUT may follow the
+        environment's own creation; check mode never reads it.
+      - >-
+        One sealing scope per environment, so same-named secrets in sibling environments resolve
+        independently.
+      - >-
+        Undeclared secrets within a declared key are KEPT by default (values unrecoverable;
+        `_undeclared: delete` opts in).
+  - area: "[Deployment branch policies](https://docs.github.com/en/rest/deployments/branch-policies)"
+    keys: deployment_branch_policies
+    endpoints: [listPolicies, createPolicy, removePolicy]
+    notes:
+      - >-
+        A declared per-environment `deployment_branch_policies` key reconciles that environment's
+        custom branch-policy patterns through GET/POST .../environments/{name}/deployment-branch-policies
+        and DELETE .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete
+        undeclared ones by default (`_undeclared: keep` softens to notes), and replace a matching
+        pattern whose type differs.
+      - >-
+        Type is immutable upstream, so the change is delete + recreate; the upstream PUT is
+        deliberately unused - its body is the name alone, and the name is the pattern's identity, so
+        it can never help reconciliation.
+      - >-
+        Declaring the key requires the singular `deployment_branch_policy` sibling with
+        custom_branch_policies: true (rejected upfront otherwise, since the pattern writes would 404
+        only after the environment PUT landed).
+      - >-
+        These endpoints sit outside the Environments PAT permission: the list read needs Actions read,
+        the writes need Administration write.
   - area: >-
-      [Environments](https://docs.github.com/en/rest/deployments/environments) (wait_timer,
-      reviewers, prevent_self_review, deployment_branch_policy
-      protected_branches/custom_branch_policies flags), their [Actions
-      variables](https://docs.github.com/en/rest/actions/variables), their [Actions
-      secrets](https://docs.github.com/en/rest/actions/secrets), their [deployment branch
-      policies](https://docs.github.com/en/rest/deployments/branch-policies) (custom patterns), and
-      their [custom deployment protection
-      rules](https://docs.github.com/en/rest/deployments/protection-rules) (GitHub App gates)
-    notes: >-
-      PUT /repos/{owner}/{repo}/environments/{name} passthrough; check mode flattens GET's
-      protection_rules[] back into the PUT shape. A live wait timer or reviewers list the entry
-      omits is drift, and apply refuses the PUT (the [replace-write
-      rule](docs/reference/semantics.md)). A declared per-environment `variables` key
-      reconciles that environment's Actions variables AFTER the PUT, through GET/POST
-      /repos/{owner}/{repo}/environments/{name}/variables and PATCH/DELETE .../variables/{name}:
-      create missing, update divergent values, and delete undeclared ones by default (the wrapped
-      `_undeclared: keep` form keeps them as notes); names match case-insensitively, values are plain
-      text by design. A declared per-environment `secrets` key reconciles that environment's Actions
-      secrets the same way the shipped secret sections do - GET .../environments/{name}/secrets
-      (names + timestamps), GET .../secrets/public-key (issued at apply, inside the secret PUT,
-      since that PUT may follow the environment's own creation; check mode never reads it), sealed
-      PUT/DELETE .../secrets/{secret_name}
-      - one sealing scope per environment, so same-named secrets in sibling environments resolve
-      independently; undeclared secrets within a declared key are KEPT by default (values
-      unrecoverable; `_undeclared: delete` opts in). A declared per-environment
-      `deployment_branch_policies` key reconciles that environment's custom branch-policy patterns
-      through GET/POST .../environments/{name}/deployment-branch-policies and DELETE
-      .../deployment-branch-policies/{branch_policy_id}: create missing patterns, delete undeclared
-      ones by default (`_undeclared: keep` softens to notes), and replace a matching pattern whose
-      type differs (type is immutable upstream, so the change is delete + recreate; the upstream PUT
-      is deliberately unused - its body is the name alone, and the name is the pattern's identity,
-      so it can never help reconciliation). Declaring the key requires the singular
-      `deployment_branch_policy` sibling with custom_branch_policies: true (rejected upfront
-      otherwise, since the pattern writes would 404 only after the environment PUT landed), and its
-      endpoints sit outside the Environments PAT permission: the list read needs Actions read, the
-      writes need Administration write. A declared per-environment `deployment_protection_rules` key
-      reconciles that environment's custom deployment protection rules (GitHub App gates) through
-      GET/POST .../environments/{name}/deployment_protection_rules (the list documents NO
-      pagination, so it is fetched in one call; the POST body is {integration_id}) and DELETE
-      .../deployment_protection_rules/{protection_rule_id}: enable/disable ONLY, since GitHub offers
-      no update call. Rules are declared by App slug and resolved to the integration id via ONE
-      GET .../deployment_protection_rules/apps fetch per environment with a missing rule: at plan
-      time for an environment that exists (so a slug the listing does not carry, or two Apps under
-      one slug, fails before any write, naming the available slugs), inside the enabling POST for
-      an environment the run creates (the listing 404s until the environment's PUT lands).
-      Undeclared rules within a declared key are KEPT by default - Apps can enable themselves as
-      gates, and silently disabling a deployment gate is security-relevant - with `_undeclared:
-      delete` opting into disabling; these endpoints also sit outside the Environments PAT
-      permission (the enabled-rules list under Actions read, the Apps read and both writes under
-      Administration). In check mode against a missing environment the declared variables, secrets,
-      patterns, and protection rules cannot be listed, so notes say they are unverifiable until it
-      exists; against a live environment whose custom_branch_policies flag is off, the patterns earn
-      the same note while the flag drift comes from the environment diff. A declared per-environment
-      `pinned` key reconciles the repository's pinned deployments sidebar over POST /graphql, AFTER
-      every environment PUT - each mutation addresses the node_id the environment PUT/GET bodies
-      already carry, so no extra lookup is made. The live pins read back through the repository's
-      pinnedEnvironments connection (the EnvironmentPins query), where the ordering is the 1-based
-      `position` field ON THE PinnedEnvironment NODE (it does not live on the Environment object) -
-      and, verified against live GitHub, those numbers may be NON-CONTIGUOUS: unpinning leaves a
-      hole, a new pin appends at the tail via a monotonic counter, and only a reorder renormalizes
-      the list. Positions are therefore consumed as a sort key only, and reconciliation compares
-      RANK ORDER: the entries declaring pinned: true must LEAD the pinned list in settings-file
-      declaration order. pinEnvironment ({environmentId, pinned}) pins a missing pin (tail append)
-      and unpins a pinned: false entry, reorderEnvironment ({environmentId, position}) pulls a
-      divergent pin left into its declared rank; unpins are issued before pins, so a swap can never
-      transiently exceed GitHub's cap of 10 pins (more than 10 declared pinned: true entries are
-      rejected upfront, and a final count that would overflow the cap - live pins nobody declared
-      count toward it - fails BEFORE the first pin mutation, naming the cap and the way to make
-      room; check mode surfaces the same overflow as a note). Pins with no pinned declaration -
-      undeclared environments, or entries without the key - are never unpinned; one sitting among
-      the leading ranks is moved after the declared block, surfaced as a note in BOTH modes so check
-      and apply agree exactly. Everything reads back, so check mode reports exact pin membership and
-      order drift (the order line names both sequences). Undeclared environments are left untouched.
-      Snapshot lists the environments (GET /repos/{owner}/{repo}/environments) and reads each one
-      back as an entry: the PUT-shape settings off its GET body, and every nested list that has
-      live items in its wrapped form under that list's default policy - variables with their
-      values, secrets as `$SECRET_ENVIRONMENT_<NAME>_<SECRET>` references with a note each (the
-      per-store minting the secret sections use, the environment folded into the store so
-      same-named secrets in two environments get two variables; two names the fold collapses are
-      noted once), branch-policy patterns while the custom_branch_policies flag is on, and the
-      enabled protection rules by App slug (those two lists sit behind the Actions grant, so a
-      denial there leaves the key out with a note and the rest of the environment reads back). The
-      pin state reads back through the snapshot's own pins read (EnvironmentPinsSnapshot, the
-      planner's selection under a declaration that tolerates no denial, so a concealed 404 is a
-      PermissionDenied naming the grant, which the engine turns into a skipped section under
-      on-missing-permission: warn and a failed run under fail, instead of reading as no pins): the pinned environments
-      LEAD the file in rank order with `pinned: true`, since the planner reads declaration order as
-      pin order, and the unpinned ones follow without the key (an absent key leaves a pin
-      untouched); a pin naming no listed environment is a note.
+      [Custom deployment protection
+      rules](https://docs.github.com/en/rest/deployments/protection-rules)
+    keys: deployment_protection_rules
+    endpoints:
+      - listProtectionRules
+      - listProtectionRuleApps
+      - createProtectionRule
+      - removeProtectionRule
+    notes:
+      - >-
+        A declared per-environment `deployment_protection_rules` key reconciles that environment's
+        custom deployment protection rules (GitHub App gates) through GET/POST
+        .../environments/{name}/deployment_protection_rules and DELETE
+        .../deployment_protection_rules/{protection_rule_id}: enable/disable ONLY, since GitHub offers
+        no update call.
+      - >-
+        The list documents NO pagination, so it is fetched in one call; the POST body is
+        {integration_id}.
+      - >-
+        Rules are declared by App slug and resolved to the integration id via ONE GET
+        .../deployment_protection_rules/apps fetch per environment with a missing rule.
+      - >-
+        The fetch happens at plan time for an environment that exists (so a slug the listing does not
+        carry, or two Apps under one slug, fails before any write, naming the available slugs), and
+        inside the enabling POST for an environment the run creates (the listing 404s until the
+        environment's PUT lands).
+      - >-
+        Undeclared rules within a declared key are KEPT by default - Apps can enable themselves as
+        gates, and silently disabling a deployment gate is security-relevant - with `_undeclared:
+        delete` opting into disabling.
+      - >-
+        These endpoints also sit outside the Environments PAT permission (the enabled-rules list under
+        Actions read, the Apps read and both writes under Administration).
+  - area: "[Pinned environments](https://docs.github.com/en/graphql/reference/deployments#mutation-pinenvironment)"
+    keys: pinned
+    endpoints: [pins, pinsSnapshot, pin, reorder]
+    notes:
+      - >-
+        A declared per-environment `pinned` key reconciles the repository's pinned deployments sidebar
+        over POST /graphql, AFTER every environment PUT; each mutation addresses the node_id the
+        environment PUT/GET bodies already carry, so no extra lookup is made.
+      - >-
+        The live pins read back through the repository's pinnedEnvironments connection (the
+        EnvironmentPins query), where the ordering is the 1-based `position` field ON THE
+        PinnedEnvironment NODE (it does not live on the Environment object).
+      - >-
+        Verified against live GitHub, those numbers may be NON-CONTIGUOUS: unpinning leaves a hole, a
+        new pin appends at the tail via a monotonic counter, and only a reorder renormalizes the list.
+      - >-
+        Positions are therefore consumed as a sort key only, and reconciliation compares RANK ORDER:
+        the entries declaring pinned: true must LEAD the pinned list in settings-file declaration
+        order.
+      - >-
+        pinEnvironment ({environmentId, pinned}) pins a missing pin (tail append) and unpins a pinned:
+        false entry; reorderEnvironment ({environmentId, position}) pulls a divergent pin left into
+        its declared rank.
+      - >-
+        Unpins are issued before pins, so a swap can never transiently exceed GitHub's cap of 10 pins;
+        more than 10 declared pinned: true entries are rejected upfront.
+      - >-
+        A final count that would overflow the cap - live pins nobody declared count toward it - fails
+        BEFORE the first pin mutation, naming the cap and the way to make room; check mode surfaces the
+        same overflow as a note.
+      - >-
+        Pins with no pinned declaration - undeclared environments, or entries without the key - are
+        never unpinned; one sitting among the leading ranks is moved after the declared block,
+        surfaced as a note in BOTH modes so check and apply agree exactly.
+      - >-
+        Everything reads back, so check mode reports exact pin membership and order drift (the order
+        line names both sequences).
+      - >-
+        The pin state reads back through the snapshot's own pins read, EnvironmentPinsSnapshot, the
+        planner's selection under a declaration that tolerates no denial: a concealed 404 is a
+        PermissionDenied naming the grant, which the engine turns into a skipped section under
+        on-missing-permission: warn and a failed run under fail, instead of reading as no pins.
+      - >-
+        In the snapshot the pinned environments LEAD the file in rank order with `pinned: true`, since
+        the planner reads declaration order as pin order, and the unpinned ones follow without the key
+        (an absent key leaves a pin untouched); a pin naming no listed environment is a note.
 schema:
   SettingsFile.environments: Deployment environments, upserted by name.
   DeploymentBranchPolicyConfig: >-

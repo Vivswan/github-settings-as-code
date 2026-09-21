@@ -4,33 +4,52 @@ sections_table:
     `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`, `public` (GHEC site
     visibility); `pages: null` disables the site
 coverage:
+  - area: "[GitHub Pages](https://docs.github.com/en/rest/pages/pages)"
+    endpoints: [get, create, update, remove]
+    notes:
+      - >-
+        Covers build_type, source, cname, https_enforced, and any PUT field GitHub adds; pages: null
+        disables the site.
+      - >-
+        POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the
+        rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring
+        branches' protection: null.
+      - >-
+        In a mode: render fold, pages: null is written as the section's value even over a lower
+        layer's pages declaration, so the rendered file turns the site off (the layering guide owns
+        that rule); a multi-repo defaults-file never merges into a target's file.
+      - >-
+        Snapshot reads the live site back on the declared keys; a repository without Pages is omitted
+        rather than declared null.
   - area: >-
-      [GitHub Pages](https://docs.github.com/en/rest/pages/pages) (build_type, source, cname,
-      https_enforced and any PUT field GitHub adds; pages: null disables the site)
-    notes: >-
-      POST /repos/{owner}/{repo}/pages (create accepts only build_type/source) then PUT for the
-      rest; existing sites get straight PUT passthrough; pages: null issues DELETE, mirroring
-      branches' protection: null. In a mode: render fold, pages: null is written as the section's
-      value even over a lower layer's pages declaration, so the rendered file turns the site off (the
-      layering guide owns that rule); a multi-repo defaults-file never merges into a target's file.
-      Snapshot reads the live site back on the declared keys; a repository without Pages is omitted
-      rather than declared null.
+      [Fields the Pages update
+      ignores](https://docs.github.com/en/rest/pages/pages#update-information-about-a-github-pages-site)
+    endpoints: []
+    notes:
+      - >-
+        Parsing the file refuses the fields only the site GET reports (url, html_url, status,
+        custom_404, protected_domain_state, pending_domain_unverified_at, https_certificate) and a
+        source.path other than / or /docs, the only directories Pages publishes from.
+      - >-
+        Sent, GitHub would drop the fields and report them as drift on every run, and the path would
+        422 at apply.
+      - >-
+        A workflow-built site still reports its source, so build_type: workflow beside a source
+        converges.
   - area: >-
-      [Fields the Pages update ignores](https://docs.github.com/en/rest/pages/pages#update-information-about-a-github-pages-site)
-    notes: >-
-      Parsing the file refuses the fields only the site GET reports (url, html_url, status,
-      custom_404, protected_domain_state, pending_domain_unverified_at, https_certificate) and a
-      source.path other than / or /docs, the only directories Pages publishes from. Sent, GitHub
-      would drop the fields and report them as drift on every run, and the path would 422 at apply.
-      A workflow-built site still reports its source, so build_type: workflow beside a source
-      converges.
-  - area: >-
-      [Pages site visibility](https://docs.github.com/en/enterprise-cloud@latest/rest/pages/pages#update-information-about-a-github-pages-site)
-    notes: >-
-      The boolean `public` rides the PUT passthrough. Only an organization on Enterprise Cloud can
-      set it; everywhere else GitHub reports public: true and ignores the field, so a public: false
-      declaration drifts on every run and the check run's note says why. A live public: false proves
-      the host sets visibility, so declaring true there is ordinary drift with no note.
+      [Pages site
+      visibility](https://docs.github.com/en/enterprise-cloud@latest/rest/pages/pages#update-information-about-a-github-enterprise-cloud-pages-site)
+    keys: public
+    endpoints: []
+    notes:
+      - The boolean `public` rides the PUT passthrough.
+      - >-
+        Only an organization on Enterprise Cloud can set it; everywhere else GitHub reports public:
+        true and ignores the field, so a public: false declaration drifts on every run and the check
+        run's note says why.
+      - >-
+        A live public: false proves the host sets visibility, so declaring true there is ordinary
+        drift with no note.
 schema:
   SettingsFile.pages: GitHub Pages configuration; null disables Pages on the repository.
   PagesConfig: "GitHub Pages site configuration; use `pages: null` to disable the site."

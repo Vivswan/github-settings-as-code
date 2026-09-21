@@ -3,11 +3,15 @@ sections_table:
   notes: immutable upstream, so changed entries are replaced
 coverage:
   - area: "[Autolinks](https://docs.github.com/en/rest/repos/autolinks)"
-    notes: >-
-      GET/POST/DELETE /repos/{owner}/{repo}/autolinks; immutable upstream so changed entries are
-      delete+recreate; undeclared autolinks DELETED by default, kept as notes under the wrapped
-      `_undeclared: keep` form.
-      Snapshot reads the live autolinks back as entries under the delete default.
+    endpoints: [list, create, remove]
+    notes:
+      - >-
+        GET/POST/DELETE /repos/{owner}/{repo}/autolinks; immutable upstream so changed entries are
+        delete+recreate.
+      - >-
+        Undeclared autolinks are DELETED by default, kept as notes under the wrapped `_undeclared:
+        keep` form.
+      - Snapshot reads the live autolinks back as entries under the delete default.
 schema:
   SettingsFile.autolinks: >-
     Autolink references; undeclared ones are DELETED by default (the wrapped form can set

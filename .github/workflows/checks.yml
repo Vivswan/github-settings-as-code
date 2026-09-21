@@ -70,6 +70,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
+      # The docs generator reads the fetched OpenAPI spec for the coverage page's endpoint links.
+      - uses: ./.github/actions/fetch-test-artifacts
       - name: Regenerate the schema and compare
         run: bun run build:check
 

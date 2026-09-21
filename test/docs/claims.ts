@@ -1,5 +1,5 @@
 /**
- * One definition of the claim-word families, the negator rule, and the window logic, so the three kept/deleted-by-default matchers (COVERAGE rows,
+ * One definition of the claim-word families, the negator rule, and the window logic, so the three kept/deleted-by-default matchers (coverage notes,
  * the SettingsFile schema descriptions, the Sections table's Notes cells) cannot drift apart.
  */
 

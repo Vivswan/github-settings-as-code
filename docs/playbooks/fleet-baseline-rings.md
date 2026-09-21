@@ -50,7 +50,7 @@ rulesets:
 
 Two details in that file earn a sentence each:
 
-- Rule parameters pass through verbatim, so every rule type GitHub accepts works here, `required_signatures` included (see [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md)).
+- Rule parameters pass through verbatim, so every rule type GitHub accepts works here, `required_signatures` included (see the [coverage page](../reference/coverage.md)).
 - The `bypass_actors` entry is the break-glass path: `bypass_mode: pull_request` lets repository admins bypass through a pull request while direct pushes stay blocked.
 
 Capability boundaries decide what belongs in a shared baseline for a mixed fleet:

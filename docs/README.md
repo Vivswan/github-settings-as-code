@@ -14,6 +14,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 | Replace the Probot Settings app | [start/migrating-from-probot.md](start/migrating-from-probot.md) |
 | Copy a settings.yml shape | [start/examples.md](start/examples.md) |
 | Look up what a section manages and deletes | [reference/sections.md](reference/sections.md) |
+| Look up every call a section makes, and what has no API | [reference/coverage.md](reference/coverage.md) |
 | Look up an input or output | [reference/inputs.md](reference/inputs.md) |
 | Scope the token | [reference/permissions.md](reference/permissions.md) |
 | Predict what an apply or a check will do | [reference/semantics.md](reference/semantics.md) |
@@ -39,6 +40,7 @@ The documentation for GitHub Settings as Code, in five groups. Start here if the
 ## reference: the normative model
 
 - [Sections](reference/sections.md): every section with its endpoints, PAT permission, undeclared default, and notes.
+- [Coverage](reference/coverage.md): every supported area with one link per call it makes, the facts behind each, the repo-scoped gaps, and what has no public API or is out of scope.
 - [Inputs and outputs](reference/inputs.md): every `with:` input with its default, and the `result`, `skipped-sections`, and `repos-result` outputs.
 - [Semantics](reference/semantics.md): stateless, declared-keys-only, convergent applies, softenable errors, retries, and the preflight barrier.
 - [Architecture](reference/architecture.md): how the action works in diagrams, from one settings file's journey to the module map, each pinned to the code.
@@ -70,7 +72,7 @@ The [playbooks](playbooks/README.md) compose the pieces above into end-to-end se
 Generated regions carry the load-bearing facts. Each is rendered from its declarations or generator data by `bun run build:docs` and `bun run build:action-docs`, and `build:check` fails when a committed page drifts:
 
 - the [Sections](reference/sections.md) and [Inputs](reference/inputs.md) tables, and the `result` values on the inputs page;
-- [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md), the per-section detail behind the Sections table;
+- the [Coverage](reference/coverage.md) tables and notes, the per-section detail behind the Sections table;
 - the defaults table and count in [undeclared policy](reference/undeclared-policy.md);
 - the grant sentence and gated-read bullets in [permissions](reference/permissions.md) and [check mode](operate/check-mode.md);
 - the module map in [architecture](reference/architecture.md), rendered from `architecture.yml`, which `bun run lint:arch` keeps equal to the import graph.

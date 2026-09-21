@@ -20,9 +20,9 @@ body:
   - type: dropdown
     id: coverage
     attributes:
-      label: Is it already listed in COVERAGE.md?
+      label: Is it already listed on the coverage page?
       description: >-
-        COVERAGE.md tracks everything supported, every known repo-scoped gap, and what has
+        docs/reference/coverage.md tracks everything supported, every known repo-scoped gap, and what has
         no public API. If it is a listed gap, this request helps prioritize it.
       options:
         - Yes, under "Repo-scoped gaps"

@@ -84,6 +84,9 @@ describe("the build:check runner", () => {
         // generators are copied from the working tree, so the code under test is the code being edited.
         git(ROOT, "clone", "--quiet", "--shared", ROOT, dir);
         symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+        // The docs generator reads the fetched, gitignored OpenAPI spec, which the clone lacks; it borrows the tree's.
+        const spec = join("test", "e2e", "openapi", "github-openapi.trimmed.json");
+        symlinkSync(join(ROOT, spec), join(dir, spec));
         cpSync(join(ROOT, ".github", "scripts"), join(dir, ".github", "scripts"), {
           recursive: true,
         });

@@ -53,4 +53,4 @@ What happens to a live resource the settings file does not declare:
 
 - [Semantics](semantics.md): the model every section shares (stateless, declared-keys-only, convergent applies, loud failures).
 - [Forward compatibility](forward-compatibility.md): which sections pass payloads through verbatim and which are closed.
-- [COVERAGE.md](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md): every row above expanded with its exact endpoints, semantics, and caveats, plus the gaps.
+- [Coverage](coverage.md): every row above expanded into its areas, one link per call, with the facts and caveats as notes, plus the gaps.

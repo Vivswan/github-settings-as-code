@@ -5,13 +5,17 @@ sections_table:
     keep is the default
 coverage:
   - area: "[Milestones](https://docs.github.com/en/rest/issues/milestones)"
-    notes: >-
-      POST/PATCH/DELETE /repos/{owner}/{repo}/milestones, matched by title, declared-keys-only
-      (description/state/due_on untouched unless declared; a due_on is a calendar day, compared and
-      converged as the day GitHub keeps); undeclared milestones kept by default and
-      surfaced as notes, because deleting a milestone DETACHES it from every issue carrying it - the
-      wrapped `_undeclared: delete` form opts into exactly that.
-      Snapshot reads every milestone, open and closed, back as entries under the keep default.
+    endpoints: [list, create, update, remove]
+    notes:
+      - >-
+        POST/PATCH/DELETE /repos/{owner}/{repo}/milestones, matched by title, declared-keys-only
+        (description/state/due_on untouched unless declared; a due_on is a calendar day, compared and
+        converged as the day GitHub keeps).
+      - >-
+        Undeclared milestones are kept by default and surfaced as notes, because deleting a milestone
+        DETACHES it from every issue carrying it - the wrapped `_undeclared: delete` form opts into
+        exactly that.
+      - Snapshot reads every milestone, open and closed, back as entries under the keep default.
 schema:
   SettingsFile.milestones: >-
     Milestones, upserted by title; undeclared ones are kept by default (the wrapped form can set

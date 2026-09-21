@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RUN_RESULTS, type RunOutcome } from "../../src/engine/outcome.js";
-import type { SectionDocs } from "../../src/sections/contract/docs.js";
+import type { CoverageRow, SectionDocs } from "../../src/sections/contract/docs.js";
 import {
   type SectionMeta,
   type SectionOperation,
@@ -14,6 +14,7 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
 import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
+import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import {
   escapeRe,
   type GeneratedRegion,
@@ -22,7 +23,7 @@ import {
 } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-export const COVERAGE_PATH = "COVERAGE.md";
+export const COVERAGE_PATH = "docs/reference/coverage.md";
 
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
@@ -132,61 +133,184 @@ function codeSpan(text: string, where: string): string {
   return cell(text, where);
 }
 
-/** A paragraph of authored prose: a blank one would leave its heading unexplained, so it is refused. */
+/** The longest paragraph or bullet the page carries; a fact past it is two facts. */
+const FACT_WORD_CAP = 70;
+
+/**
+ * A paragraph of authored prose: one line, at most FACT_WORD_CAP words. A blank one would leave its heading
+ * unexplained, and a long one is a blob the page exists to avoid, so both are refused.
+ */
 function paragraph(text: string, where: string): string {
   if (text.trim() === "" || /[\r\n]/.test(text)) {
     throw new Error(`gen-docs: ${where} is blank or spans several lines: "${text}"`);
   }
+  const words = text.trim().split(/\s+/).length;
+  if (words > FACT_WORD_CAP) {
+    throw new Error(
+      `gen-docs: ${where} runs to ${words} words, over the cap of ${FACT_WORD_CAP}; split it into two: "${text}"`,
+    );
+  }
   return text;
 }
 
-/** A markdown list item's text; a line break would end the bullet early, so it is refused. */
-function bullet(text: string, where: string): string {
-  if (text.trim() === "" || /[\r\n]/.test(text)) {
-    throw new Error(`gen-docs: ${where} is blank or contains a line break: "${text}"`);
-  }
-  return `- ${text}`;
+/** One fact as a markdown bullet, under paragraph()'s line and word rules. */
+function fact(text: string, where: string): string {
+  return `- ${paragraph(text, where)}`;
 }
 
 const SUPPORTED_HEADING = "## Supported";
+const NOTES_HEADING = "### Notes";
 const GAPS_HEADING = "## Repo-scoped gaps (not built yet)";
 const NO_API_HEADING = "## No public API (cannot be built)";
 const OUT_OF_SCOPE_HEADING = "## Out of scope (user or org account surface)";
 
-const SUPPORTED_HEADER = "| Area | Section | Notes |\n|---|---|---|";
+const SUPPORTED_HEADER = "| Area | Key in settings.yml | Endpoints |\n|---|---|---|";
 const GAPS_HEADER = "| Area | Endpoints | Why it matters |\n|---|---|---|";
 
+/** The Sections table's page, the one reference page a settings key has; the coverage page sits beside it. */
+const SECTIONS_PAGE = "sections.md";
+/** The Endpoints cell of a row that lists no calls of its own, naming the row whose calls it rides. */
+function sharedCalls(label: string): string {
+  return `shares the calls of the ${label} row`;
+}
+/** The calls in a cell, one per rendered line. */
+const CALL_SEPARATOR = "<br>";
+
+/** What the coverage page reads off a section module: its key and the routes and operations it declares. */
+export interface CoverageSection {
+  readonly key: string;
+  readonly endpoints: Readonly<Record<string, { readonly route: string }>>;
+  readonly graphql?: Readonly<Record<string, { readonly name: string }>>;
+}
+
+/** The label of a row's notes group: the Area cell with its link unwrapped, so the text stands alone. */
+function areaLabel(area: string): string {
+  return area.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+}
+
+/** The resolved page of one call; resolveAnchors() admits every declared call, so a miss is anchors built over other sections. */
+function anchor(pages: Readonly<Record<string, string>>, call: string): string {
+  const url = pages[call];
+  if (url === undefined) {
+    throw new Error(
+      `gen-docs: no page was resolved for "${call}"; the anchors handed to the renderer must come from resolveAnchors() over the same sections`,
+    );
+  }
+  return url;
+}
+
+// Each role is looked up in the section's own declarations, so the cell can only name a call the code makes, and
+// the claimed set is compared with the declared set afterwards, so a call the rows forget fails the build. A call
+// that serves several areas is listed on each of their rows; within one row a role is listed once.
+function renderCalls(
+  section: CoverageSection,
+  row: CoverageRow,
+  claimed: Set<string>,
+  carrier: { label?: string },
+  anchors: EndpointAnchors,
+): string {
+  const label = areaLabel(row.area);
+  const where = `the "${label}" row of ${section.key}`;
+  const seen = new Set<string>();
+  const links = row.endpoints.map((role) => {
+    if (seen.has(role)) {
+      throw new Error(`gen-docs: ${where} lists the role "${role}" twice`);
+    }
+    seen.add(role);
+    claimed.add(role);
+    const endpoint = section.endpoints[role];
+    if (endpoint !== undefined) {
+      return `[${endpoint.route}](${anchor(anchors.rest, endpoint.route)})`;
+    }
+    const op = section.graphql?.[role];
+    if (op !== undefined) {
+      return `[GraphQL ${op.name}](${anchor(anchors.graphql, op.name)})`;
+    }
+    throw new Error(
+      `gen-docs: ${where} lists the role "${role}", which the section declares neither as an endpoint nor as a GraphQL operation`,
+    );
+  });
+  if (links.length > 0) {
+    carrier.label = label;
+    return links.join(CALL_SEPARATOR);
+  }
+  if (carrier.label === undefined) {
+    throw new Error(
+      `gen-docs: ${where} lists no calls, and no row above it in the section does either; a section's first row carries its calls`,
+    );
+  }
+  return sharedCalls(carrier.label);
+}
+
+function renderSection(
+  section: CoverageSection,
+  rows: readonly CoverageRow[],
+  anchors: EndpointAnchors,
+): { rows: string[]; notes: string[] } {
+  const claimed = new Set<string>();
+  /** The nearest row above that listed calls, whose calls a call-less row rides. */
+  const carrier: { label?: string } = {};
+  const tableRows = rows.map((row) => {
+    const where = `a ${section.key} coverage row`;
+    const keys = row.keys === undefined ? "" : ` (\`${codeSpan(row.keys, `${where}'s keys`)}\`)`;
+    const cells = [
+      cell(row.area, `${where}'s Area cell`),
+      `[\`${section.key}\`](${SECTIONS_PAGE})${keys}`,
+      cell(renderCalls(section, row, claimed, carrier, anchors), `${where}'s Endpoints cell`),
+    ];
+    return `| ${cells.join(" | ")} |`;
+  });
+  const declared = [...Object.keys(section.endpoints), ...Object.keys(section.graphql ?? {})];
+  const unclaimed = declared.filter((role) => !claimed.has(role));
+  if (unclaimed.length > 0) {
+    throw new Error(
+      `gen-docs: the coverage rows of ${section.key} list none of its roles [${unclaimed.join(", ")}]; every declared call is listed on at least one row`,
+    );
+  }
+  const notes = rows.flatMap((row) => {
+    const label = areaLabel(row.area);
+    if (/[*\r\n]/.test(label) || label.trim() === "") {
+      throw new Error(
+        `gen-docs: the "${label}" row of ${section.key} has an Area cell that cannot label its notes (blank, or holding "*" or a line break)`,
+      );
+    }
+    return [
+      `**${label}** (\`${section.key}\`)`,
+      "",
+      ...row.notes.map((note) => fact(note, `a note under the "${label}" row of ${section.key}`)),
+      "",
+    ];
+  });
+  return { rows: tableRows, notes };
+}
+
 export function renderCoverage(
-  sections: ReadonlyArray<Pick<SectionMeta, "key">>,
+  sections: readonly CoverageSection[],
   docs: Readonly<Record<string, Pick<SectionDocs, "coverage">>>,
   data: CoverageData,
+  anchors: EndpointAnchors,
 ): string {
-  const registered = new Set(sections.map((section) => section.key));
-  const ordered = new Set(data.supportedOrder);
-  const missing = [...registered].filter((key) => !ordered.has(key));
+  const byKey = new Map(sections.map((section) => [section.key, section]));
+  const ordered = new Set<string>(data.supportedOrder);
+  const missing = [...byKey.keys()].filter((key) => !ordered.has(key));
   const stray = data.supportedOrder.filter(
-    (key, i) => !registered.has(key) || data.supportedOrder.indexOf(key) !== i,
+    (key, i) => !byKey.has(key) || data.supportedOrder.indexOf(key) !== i,
   );
   if (missing.length > 0 || stray.length > 0) {
     throw new Error(
       `gen-docs: supportedOrder must list every section exactly once; missing [${missing.join(", ")}], unknown or repeated [${stray.join(", ")}]`,
     );
   }
-  const supported = data.supportedOrder.flatMap((key) => {
+  const supported = data.supportedOrder.map((key) => {
     const doc = docs[key];
     if (doc === undefined) {
       throw new Error(`gen-docs: section "${key}" has no docs entry`);
     }
-    return doc.coverage.map((row) => {
-      const where = `a ${key} coverage row`;
-      const keys = row.keys === undefined ? "" : ` (${codeSpan(row.keys, `${where}'s keys`)})`;
-      const cells = [
-        cell(row.area, `${where}'s Area cell`),
-        `\`${key}${keys}\``,
-        cell(row.notes, `${where}'s Notes cell`),
-      ];
-      return `| ${cells.join(" | ")} |`;
-    });
+    const section = byKey.get(key);
+    if (section === undefined) {
+      throw new Error(`gen-docs: section "${key}" is not registered`);
+    }
+    return renderSection(section, doc.coverage, anchors);
   });
   const gaps =
     data.gaps.rows === undefined
@@ -204,13 +328,15 @@ export function renderCoverage(
           }),
         ];
   return [
-    paragraph(data.intro, "the page intro"),
-    "",
+    ...data.intro.flatMap((line, i) => [paragraph(line, `intro paragraph ${i + 1}`), ""]),
     SUPPORTED_HEADING,
     "",
     SUPPORTED_HEADER,
-    ...supported,
+    ...supported.flatMap((section) => section.rows),
     "",
+    NOTES_HEADING,
+    "",
+    ...supported.flatMap((section) => section.notes),
     GAPS_HEADING,
     "",
     ...gaps,
@@ -219,11 +345,11 @@ export function renderCoverage(
     "",
     paragraph(data.noPublicApi.intro, "the no-public-API intro"),
     "",
-    ...data.noPublicApi.items.map((item) => bullet(item, "a no-public-API item")),
+    ...data.noPublicApi.items.map((item) => fact(item, "a no-public-API item")),
     "",
     OUT_OF_SCOPE_HEADING,
     "",
-    ...data.outOfScope.items.map((item) => bullet(item, "an out-of-scope item")),
+    ...data.outOfScope.items.map((item) => fact(item, "an out-of-scope item")),
   ].join("\n");
 }
 
@@ -374,15 +500,17 @@ export function renderPage(path: string, text: string): string {
   return out;
 }
 
-// nonBlank is unambiguous on purpose: overlapping parts would backtrack exponentially over a 38-row table.
+// nonBlank is unambiguous on purpose: overlapping parts would backtrack exponentially over a 60-row table.
 const nonBlank = (excluded: string): string =>
   String.raw`[ \t]*[^${excluded}\s][^${excluded}\r\n]*`;
 const PROSE_LINE = `${nonBlank("")}\n`;
 const CELL = nonBlank("|");
-const SUPPORTED_ROWS = String.raw`(?:\| ${CELL} \| \x60[a-z_]+(?: \(${nonBlank("|\x60")}\))?\x60 \| ${CELL} \|\n)+`;
+const KEY_CELL = String.raw`\[\x60[a-z_]+\x60\]\(${escapeRe(SECTIONS_PAGE)}\)(?: \(\x60${nonBlank("|\x60")}\x60\))?`;
+const SUPPORTED_ROWS = String.raw`(?:\| ${CELL} \| ${KEY_CELL} \| ${CELL} \|\n)+`;
 const GAP_ROWS = String.raw`(?:\| ${CELL} \| ${CELL} \| ${CELL} \|\n)+`;
 const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${escapeRe(GAPS_HEADER)}\n|${escapeRe(GAPS_HEADER)}\n${GAP_ROWS})`;
 const BULLETS = `(?:- ${PROSE_LINE})+`;
+const NOTE_GROUPS = String.raw`(?:\*\*${nonBlank("*")}\*\* \(\x60[a-z_]+\x60\)\n\n${BULLETS}\n)+`;
 
 // The one region closes the file and holds everything below the title (or an empty body between fresh markers), so
 // a marker moved over authored prose fails instead of erasing it.
@@ -391,15 +519,17 @@ const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
     name: "coverage",
     placement: { kind: "tail" },
     body: new RegExp(
-      String.raw`^\n(?:${PROSE_LINE}\n${escapeRe(SUPPORTED_HEADING)}\n\n${escapeRe(SUPPORTED_HEADER)}\n` +
-        String.raw`${SUPPORTED_ROWS}\n${escapeRe(GAPS_HEADING)}\n\n${GAPS_BODY}\n${escapeRe(NO_API_HEADING)}\n\n` +
+      String.raw`^\n(?:(?:${PROSE_LINE}\n)+${escapeRe(SUPPORTED_HEADING)}\n\n${escapeRe(SUPPORTED_HEADER)}\n` +
+        String.raw`${SUPPORTED_ROWS}\n${escapeRe(NOTES_HEADING)}\n\n${NOTE_GROUPS}` +
+        String.raw`${escapeRe(GAPS_HEADING)}\n\n${GAPS_BODY}\n${escapeRe(NO_API_HEADING)}\n\n` +
         String.raw`${PROSE_LINE}\n${BULLETS}\n${escapeRe(OUT_OF_SCOPE_HEADING)}\n\n${BULLETS})?$`,
     ),
-    render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA)}\n`,
+    render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS)}\n`,
   },
 ];
 
-const COVERAGE_TITLE = "# Coverage\n\n";
+/** The page's frontmatter and title; the sidebar reads `order`, and 115 sits the page right after the Sections table (110). */
+const COVERAGE_TITLE = "---\norder: 115\n---\n\n# Coverage\n\n";
 
 // Beyond the shared placement checks, the page must be exactly the title, the region, and one final newline, or
 // prose left outside could drift from the generator's.
@@ -407,7 +537,7 @@ export function renderCoverageFile(coverage: string): string {
   const { begin, end } = regionBounds(coverage, "coverage", "html");
   if (coverage.slice(0, begin[0]) !== COVERAGE_TITLE || coverage.slice(end[1]) !== "\n") {
     throw new Error(
-      `gen-docs: ${COVERAGE_PATH} must be the "# Coverage" title, the coverage region, and one final newline`,
+      `gen-docs: ${COVERAGE_PATH} must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline`,
     );
   }
   return regenerateRegions(coverage, COVERAGE_REGIONS, COVERAGE_PATH);

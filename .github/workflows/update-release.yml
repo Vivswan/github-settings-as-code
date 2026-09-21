@@ -68,6 +68,8 @@ jobs:
           # new version tag names the build tag by the commit's position; a shallow checkout can do none of that.
           fetch-depth: 0
       - uses: ./.github/actions/setup
+      # build:docs reads the fetched OpenAPI spec for the coverage page's endpoint links.
+      - uses: ./.github/actions/fetch-test-artifacts
       - name: Build the bundle and the schema
         run: |
           bun run build

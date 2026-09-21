@@ -35,7 +35,9 @@ export function readSpecText(specPath = SPEC_PATH): string {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(
-        `the trimmed OpenAPI spec is missing at ${specPath}. It is a fetched, gitignored artifact: bun run test:artifacts fetches it (bun .github/scripts/trim-openapi.ts --when-stale), and the test, test:e2e, and fuzz scripts run it first.`,
+        `the trimmed OpenAPI spec is missing at ${specPath}. It is a fetched, gitignored artifact: ` +
+          "bun run test:artifacts fetches it (bun .github/scripts/trim-openapi.ts --when-stale), and the test, " +
+          "test:e2e, and fuzz scripts run it first; the docs generator (bun run build:docs) reads it too.",
       );
     }
     throw error;

@@ -1,0 +1,23 @@
+# The docs.github.com page for every call the trimmed OpenAPI descriptor cannot supply: the routes GitHub does not
+# document (src/upstream-gaps/) and every GraphQL operation, keyed as the declaration spells them. Every other REST
+# route takes its page from the descriptor's own externalDocs link (endpoint-docs.ts). The lockstep test in
+# test/scripts/endpoint-docs.test.ts fails on a declared call without a page, an entry the descriptor already
+# covers, and an entry no section declares.
+rest:
+  "PUT /repos/{owner}/{repo}/lfs": https://docs.github.com/en/rest/repos/lfs#enable-git-lfs-for-a-repository
+  "DELETE /repos/{owner}/{repo}/lfs": https://docs.github.com/en/rest/repos/lfs#disable-git-lfs-for-a-repository
+graphql:
+  RepositoryFeatures: https://docs.github.com/en/graphql/reference/repos#object-repository
+  UpdateRepositoryFeatures: https://docs.github.com/en/graphql/reference/repos#mutation-updaterepository
+  EnvironmentPins: https://docs.github.com/en/graphql/reference/deployments#object-pinnedenvironment
+  EnvironmentPinsSnapshot: https://docs.github.com/en/graphql/reference/deployments#object-pinnedenvironment
+  PinEnvironment: https://docs.github.com/en/graphql/reference/deployments#mutation-pinenvironment
+  ReorderEnvironment: https://docs.github.com/en/graphql/reference/deployments#mutation-reorderenvironment
+  BranchProtectionRules: https://docs.github.com/en/graphql/reference/branches#object-branchprotectionrule
+  BranchProtectionRulesSnapshot: https://docs.github.com/en/graphql/reference/branches#object-branchprotectionrule
+  BranchProtectionRepository: https://docs.github.com/en/graphql/reference/repos#object-repository
+  BranchProtectionActorUser: https://docs.github.com/en/graphql/reference/users#query-user
+  BranchProtectionActorTeam: https://docs.github.com/en/graphql/reference/teams#object-team
+  CreateBranchProtectionRule: https://docs.github.com/en/graphql/reference/branches#mutation-createbranchprotectionrule
+  UpdateBranchProtectionRule: https://docs.github.com/en/graphql/reference/branches#mutation-updatebranchprotectionrule
+  DeleteBranchProtectionRule: https://docs.github.com/en/graphql/reference/branches#mutation-deletebranchprotectionrule

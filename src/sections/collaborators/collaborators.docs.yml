@@ -4,25 +4,42 @@ sections_table:
     invitations for new users, pending ones reconciled (stale permission updated, expired re-sent,
     undeclared cancelled); the repository owner is never touched
 coverage:
-  - area: >-
-      [Collaborators](https://docs.github.com/en/rest/collaborators/collaborators) (direct)
-    notes: >-
-      PUT/DELETE /repos/{owner}/{repo}/collaborators/{username} (affiliation=direct); pending
-      invitations reconciled alongside via GET /repos/{owner}/{repo}/invitations and PATCH/DELETE
-      /repos/{owner}/{repo}/invitations/{invitation_id}: a declared user's matching pending
-      invitation converges, a stale permission is PATCHed in place (a declared custom role cannot be
-      verified against an invitation - the standard-roles enum - so the invitation is kept with a
-      note), an expired invitation is cancelled and re-sent, and undeclared pending invitations
-      follow the section's one undeclared policy (email invitations, which no username can declare,
-      are noted and left untouched); vocabulary mapping push<->write, pull<->read for check mode;
-      custom org role names pass through; undeclared direct collaborators REMOVED by default (kept
-      as notes under the wrapped `_undeclared: keep` form), owner never touched; new users get
-      invitations.
-      Snapshot reads the direct collaborators and the pending username invitations back as entries
-      under the delete default, each role through the inverse mapping (write -> push, read -> pull,
-      custom role names verbatim); the repository owner, email invitations, and expired invitations
-      are left out with a note, and a live role no declaration plans as (a custom role named "push"
-      or "pull") fails the collaborators section; the snapshot is written as partial without it.
+  - area: "[Collaborators](https://docs.github.com/en/rest/collaborators/collaborators)"
+    endpoints: [list, update, remove]
+    notes:
+      - >-
+        Direct collaborators only. PUT/DELETE /repos/{owner}/{repo}/collaborators/{username}
+        (affiliation=direct); new users get invitations.
+      - >-
+        Vocabulary mapping push<->write, pull<->read for check mode; custom org role names pass
+        through.
+      - >-
+        Undeclared direct collaborators are REMOVED by default (kept as notes under the wrapped
+        `_undeclared: keep` form); the owner is never touched.
+      - >-
+        Snapshot reads the direct collaborators and the pending username invitations back as entries
+        under the delete default, each role through the inverse mapping (write -> push, read -> pull,
+        custom role names verbatim).
+      - >-
+        The snapshot leaves out the repository owner, email invitations, and expired invitations with
+        a note; a live role no declaration plans as (a custom role named "push" or "pull") fails the
+        collaborators section, and the snapshot is written as partial without it.
+  - area: "[Repository invitations](https://docs.github.com/en/rest/collaborators/invitations)"
+    endpoints: [listInvitations, updateInvitation, cancelInvitation]
+    notes:
+      - >-
+        Pending invitations are reconciled alongside the collaborators via GET
+        /repos/{owner}/{repo}/invitations and PATCH/DELETE
+        /repos/{owner}/{repo}/invitations/{invitation_id}.
+      - >-
+        A declared user's matching pending invitation converges, a stale permission is PATCHed in
+        place, and an expired invitation is cancelled and re-sent.
+      - >-
+        A declared custom role cannot be verified against an invitation (the standard-roles enum), so
+        the invitation is kept with a note.
+      - >-
+        Undeclared pending invitations follow the section's one undeclared policy; email invitations,
+        which no username can declare, are noted and left untouched.
 schema:
   SettingsFile.collaborators: >-
     Direct collaborators, with pending invitations reconciled alongside; undeclared ones are REMOVED

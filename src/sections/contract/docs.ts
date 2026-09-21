@@ -9,17 +9,32 @@ import { parse } from "yaml";
 import { z } from "zod";
 import { renamedKeyError } from "../shared/renamed-key.js";
 
-/** One COVERAGE.md Supported row: the GitHub surface it covers and how the section handles it. */
+/** A role name as the section's ENDPOINTS or graphql dictionary spells it. */
+const Role = z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/, "a role is the declaration's own key");
+
+/** One fact, rendered as one bullet on the coverage page; a line break would end the bullet early. */
+const Fact = z.string().regex(/^\S(?:[^\r\n]*\S)?$/, "a fact is one non-blank line");
+
+/**
+ * One row of the coverage page's Supported table: the GitHub surface it covers, the calls that serve it, and
+ * the facts a reader needs about how the section handles it.
+ */
 const CoverageRow = z
   .strictObject({
-    /** The Area cell: the GitHub feature, usually a docs link with the fields it spans. */
+    /** The Area cell: the GitHub feature as a docs link, and nothing else (the fields it spans are facts). */
     area: z.string().min(1),
-    /** Settings keys this row covers, rendered as "section (keys)"; omitted for a whole-section row. */
+    /** The settings key or keys this row covers, rendered beside the section key; omitted for a whole-section row. */
     keys: z.string().min(1).optional(),
-    /** The Notes cell: endpoints, semantics, and caveats. */
-    notes: z.string().min(1),
+    /**
+     * The roles of the calls this row lists, each declared by the section. Every declared role is listed on at least
+     * one row of its section, a shared call on each row it serves; an empty list means the row rides a row above it.
+     */
+    endpoints: z.array(Role).readonly(),
+    /** One fact per bullet, under the table; the renderer caps each at 70 words. */
+    notes: z.tuple([Fact], Fact).readonly(),
   })
   .readonly();
+export type CoverageRow = z.infer<typeof CoverageRow>;
 
 /**
  * Keyed as .github/scripts/lib/schema-descriptions.ts spells a site (`LabelConfig.color`,
