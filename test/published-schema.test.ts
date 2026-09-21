@@ -110,6 +110,62 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
       },
       false,
     ],
+    // GitHub's protection PUT requires users and teams under restrictions (apps optional) and takes every list of the two review-side
+    // holders as optional, so the two validators refuse the bare restrictions mapping and accept the bare review-side one.
+    [
+      "a restrictions holder without its users and teams lists",
+      { branches: [{ name: "main", protection: { restrictions: {} } }] },
+      false,
+    ],
+    [
+      "a restrictions holder naming only apps",
+      { branches: [{ name: "main", protection: { restrictions: { apps: ["deploy-gate"] } } }] },
+      false,
+    ],
+    [
+      "an all-empty restrictions holder (nobody may push)",
+      { branches: [{ name: "main", protection: { restrictions: { users: [], teams: [] } } }] },
+      true,
+    ],
+    [
+      "an empty dismissal_restrictions holder (anyone with push access may dismiss)",
+      {
+        branches: [
+          {
+            name: "main",
+            protection: { required_pull_request_reviews: { dismissal_restrictions: {} } },
+          },
+        ],
+      },
+      true,
+    ],
+    // The status-check requirement needs a check list beside strict (the runtime's refinement has a JSON Schema twin).
+    [
+      "a status-check requirement without a check list",
+      { branches: [{ name: "main", protection: { required_status_checks: { strict: true } } }] },
+      false,
+    ],
+    [
+      "a status-check requirement with an empty contexts list",
+      {
+        branches: [
+          { name: "main", protection: { required_status_checks: { strict: true, contexts: [] } } },
+        ],
+      },
+      true,
+    ],
+    [
+      "a status-check requirement spelled as checks only",
+      {
+        branches: [
+          {
+            name: "main",
+            protection: { required_status_checks: { strict: false, checks: [{ context: "ci" }] } },
+          },
+        ],
+      },
+      true,
+    ],
     // Typed boolean so a YAML-quoted "yes" fails upfront instead of riding the protection PUT (which drops the key) and never reaching the
     // signatures sub-endpoint.
     [

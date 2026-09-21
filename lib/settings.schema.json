@@ -385,7 +385,19 @@
               "required": [
                 "strict"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {},
+              "anyOf": [
+                {
+                  "required": [
+                    "contexts"
+                  ]
+                },
+                {
+                  "required": [
+                    "checks"
+                  ]
+                }
+              ]
             },
             {
               "type": "null"
@@ -405,7 +417,7 @@
                   "maximum": 6
                 },
                 "dismissal_restrictions": {
-                  "description": "Who may dismiss pull request reviews, as `users`, `teams`, and `apps` lists of login/slug strings; an empty mapping lets anyone with push access dismiss. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
+                  "description": "Who may dismiss pull request reviews, as `users`, `teams`, and `apps` lists of login/slug strings, each list optional; an empty mapping lets anyone with push access dismiss. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
                   "type": "object",
                   "properties": {
                     "users": {
@@ -433,7 +445,7 @@
                   "additionalProperties": {}
                 },
                 "bypass_pull_request_allowances": {
-                  "description": "Who may push without a pull request review, as `users`, `teams`, and `apps` lists of login/slug strings. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
+                  "description": "Who may push without a pull request review, as `users`, `teams`, and `apps` lists of login/slug strings, each list optional. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write.",
                   "type": "object",
                   "properties": {
                     "users": {
@@ -469,33 +481,37 @@
           ]
         },
         "restrictions": {
-          "description": "Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings; an all-empty mapping lets nobody push, and `null` turns the push restriction off. GitHub's GET expands each actor into an object, which the PUT rejects, so a copied one is refused naming the string to write. Literal branches only; wildcard rules point at the rulesets section.",
+          "description": "Who may push to the branch, as `users`, `teams`, and `apps` lists of login/slug strings; the PUT requires `users` and `teams` (`[]` when none) and takes `apps` as optional, so a mapping missing either is refused upfront. An all-empty mapping lets nobody push, `null` lifts the restriction, and a copied GET actor object is refused naming the string to write. Literal branches only; wildcard rules point at the rulesets section.",
           "anyOf": [
             {
               "type": "object",
               "properties": {
                 "users": {
-                  "description": "User logins (\"octocat\").",
+                  "description": "User logins (\"octocat\"); required, `[]` when none.",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "teams": {
-                  "description": "Team slugs (\"platform-team\").",
+                  "description": "Team slugs (\"platform-team\"); required, `[]` when none.",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "apps": {
-                  "description": "GitHub App slugs (\"deploy-gate\").",
+                  "description": "GitHub App slugs (\"deploy-gate\"); optional.",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 }
               },
+              "required": [
+                "users",
+                "teams"
+              ],
               "additionalProperties": {}
             },
             {

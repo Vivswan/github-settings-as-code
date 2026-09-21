@@ -72,39 +72,63 @@ function copiedActorName(item: unknown): string | null {
 /**
  * The GET expands each actor into an object ({login, id, ...} for a user, {slug, ...} for a team
  * or App); the PUT takes the login/slug string, so a copied item is refused naming the string to
- * write, and any other non-string item the type rule.
+ * write, and any other non-string item the type rule. A list the holder requires is refused when
+ * absent, naming the required lists; an optional one is wrapped in .optional() by its holder, so
+ * the absent case never reaches this error.
  */
 function actorList(holder: string, list: ActorList) {
   const site = `protection.${holder}.${list}`;
   const { nameKey, example } = ACTOR_LIST_EXAMPLE[list];
   const typeRule = `${site} lists each actor as its ${nameKey} string ("${example}")`;
-  return z
-    .array(
-      z.string({
-        error: (issue) => {
-          const copied = copiedActorName(issue.input);
-          return copied === null
-            ? typeRule
-            : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
-        },
-      }),
-      { error: typeRule },
-    )
-    .optional();
-}
-
-function actorHolder(holder: string) {
-  return z.looseObject(
+  return z.array(
+    z.string({
+      error: (issue) => {
+        const copied = copiedActorName(issue.input);
+        return copied === null
+          ? typeRule
+          : `${site} carries an actor object copied from GitHub's GET response, which the protection PUT takes as the ${nameKey} string; write "${copied}" instead`;
+      },
+    }),
     {
-      users: actorList(holder, "users"),
-      teams: actorList(holder, "teams"),
-      apps: actorList(holder, "apps"),
-    },
-    {
-      error: `protection.${holder} must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")`,
+      error: (issue) =>
+        issue.input === undefined
+          ? `protection.${holder} must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; ${holder}: null lifts the push restriction`
+          : typeRule,
     },
   );
 }
+
+function holderError(holder: string): string {
+  return `protection.${holder} must be a mapping of users, teams, and apps lists, each actor its login or slug string ("octocat")`;
+}
+
+/**
+ * GitHub's protection PUT takes every list of dismissal_restrictions and
+ * bypass_pull_request_allowances as optional and reads an empty holder as "disabled".
+ */
+function reviewActorHolder(holder: string) {
+  return z.looseObject(
+    {
+      users: actorList(holder, "users").optional(),
+      teams: actorList(holder, "teams").optional(),
+      apps: actorList(holder, "apps").optional(),
+    },
+    { error: holderError(holder) },
+  );
+}
+
+/**
+ * The PUT requires users and teams under restrictions (apps stays optional), so a mapping missing
+ * either would 422 at apply and is refused at parse instead.
+ */
+const Restrictions = z.looseObject(
+  {
+    users: actorList("restrictions", "users"),
+    teams: actorList("restrictions", "teams"),
+    apps: actorList("restrictions", "apps").optional(),
+  },
+  { error: holderError("restrictions") },
+);
 
 // --- Controls whose wrong shapes the settings file alone reveals ---------------
 
@@ -163,7 +187,10 @@ const RequiredStatusChecks = z
     if (status.contexts === undefined && status.checks === undefined) {
       refineCtx.addIssue({ code: "custom", message: CHECK_LIST_ERROR });
     }
-  });
+  })
+  // The refinement's published-schema twin: zod refinements do not reach z.toJSONSchema, and
+  // test/published-schema.test.ts holds the two sides to the same verdicts.
+  .meta({ anyOf: [{ required: ["contexts"] }, { required: ["checks"] }] });
 
 const RequiredPullRequestReviews = z.looseObject(
   {
@@ -172,10 +199,10 @@ const RequiredPullRequestReviews = z.looseObject(
       .min(0, { error: REVIEW_COUNT_ERROR })
       .max(6, { error: REVIEW_COUNT_ERROR })
       .optional(),
-    dismissal_restrictions: actorHolder(
+    dismissal_restrictions: reviewActorHolder(
       "required_pull_request_reviews.dismissal_restrictions",
     ).optional(),
-    bypass_pull_request_allowances: actorHolder(
+    bypass_pull_request_allowances: reviewActorHolder(
       "required_pull_request_reviews.bypass_pull_request_allowances",
     ).optional(),
   },
@@ -256,7 +283,7 @@ export const BranchProtectionConfig = z
   .looseObject({
     required_status_checks: RequiredStatusChecks.nullable().optional(),
     required_pull_request_reviews: RequiredPullRequestReviews.nullable().optional(),
-    restrictions: actorHolder("restrictions").nullable().optional(),
+    restrictions: Restrictions.nullable().optional(),
     required_signatures: z
       .boolean({
         error:

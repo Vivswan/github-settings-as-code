@@ -29,6 +29,24 @@ const cases: Array<{
     fix: "contexts: [] requires none",
   },
   {
+    refused: "a restrictions holder without its users and teams lists (the PUT 422s on it)",
+    protection: { restrictions: {} },
+    paths: ["0.protection.restrictions.users", "0.protection.restrictions.teams"],
+    fix: "restrictions: null lifts the push restriction",
+  },
+  {
+    refused: "a restrictions holder naming only apps (the PUT 422s without users and teams)",
+    protection: { restrictions: { apps: ["deploy-gate"] } },
+    paths: ["0.protection.restrictions.users", "0.protection.restrictions.teams"],
+    fix: "must carry both users and teams",
+  },
+  {
+    refused: "a restrictions holder naming users but no teams",
+    protection: { restrictions: { users: ["octocat"] } },
+    paths: ["0.protection.restrictions.teams"],
+    fix: "[] when none",
+  },
+  {
     refused: "a check item carrying a key the PUT has no word for",
     protection: {
       required_status_checks: { strict: true, checks: [{ context: "ci", app: "ci-bot" }] },
@@ -114,7 +132,11 @@ describe("branches protection parse rules", () => {
   // The GET expands each actor into an object; the PUT takes the login/slug string, so a copied
   // list reached the PUT as objects and 422d there.
   const holders = [
-    { holder: "restrictions", at: (holder: object) => ({ restrictions: holder }) },
+    {
+      holder: "restrictions",
+      // The PUT requires users and teams here, so the two ride along and the copied list stands alone.
+      at: (holder: object) => ({ restrictions: { users: [], teams: [], ...holder } }),
+    },
     {
       holder: "required_pull_request_reviews.dismissal_restrictions",
       at: (holder: object) => ({
@@ -211,7 +233,8 @@ describe("branches protection parse rules", () => {
   });
 
   test("a protection aliased to itself is left to the engine's document-cycle diagnostic instead of overflowing the key walk, and a shared alias is reported at both sites", () => {
-    const self: Record<string, unknown> = { enforce_admins: true };
+    // The mapping doubles as its own restrictions holder, so it carries the two lists the PUT requires.
+    const self: Record<string, unknown> = { users: [], teams: [] };
     self.restrictions = self;
     expect(issues([{ name: "main", protection: self }])).toEqual([]);
     const wrapper = { enabled: true };
@@ -241,7 +264,13 @@ describe("branches protection parse rules", () => {
             required_pull_request_reviews: {
               required_approving_review_count: 6,
               dismiss_stale_reviews: true,
+              // GitHub's PUT takes every list of the two review-side holders as optional and reads
+              // an empty holder as "disabled", so the bare mapping is the documented off spelling.
+              dismissal_restrictions: {},
+              bypass_pull_request_allowances: {},
             },
+            // The PUT requires users and teams under restrictions and only apps may be omitted.
+            restrictions: { users: [], teams: [] },
           },
         },
         {

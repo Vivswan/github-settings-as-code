@@ -1865,31 +1865,42 @@ describe("branches snapshot", () => {
 
   test.each([
     [
-      "the GET wrapper",
-      "enforce_admins",
-      { url: "https://api.github.com/x/enforce_admins", enabled: true },
-      "is not a boolean or null",
+      "the GET wrapper under a boolean control",
+      { enforce_admins: { url: "https://api.github.com/x/enforce_admins", enabled: true } },
+      `For 'properties/enforce_admins', {"url":"https://api.github.com/x/enforce_admins","enabled":true} is not a boolean or null.`,
     ],
-    ["a quoted boolean", "enforce_admins", "true", "is not a boolean or null"],
+    [
+      "a quoted boolean under a boolean control",
+      { enforce_admins: "true" },
+      `For 'properties/enforce_admins', "true" is not a boolean or null.`,
+    ],
     // Only enforce_admins and allow_force_pushes are nullable in the PUT schema; null elsewhere is a 422.
-    ["null under a non-nullable control", "allow_deletions", null, "is not a boolean"],
+    [
+      "null under a non-nullable control",
+      { allow_deletions: null },
+      `For 'properties/allow_deletions', null is not a boolean.`,
+    ],
+    // The PUT schema requires users and teams under restrictions; GitHub names the first list not supplied.
+    [
+      "restrictions without its teams list",
+      { restrictions: { users: [] } },
+      `"teams" wasn't supplied.`,
+    ],
   ])(
-    "the mock answers GitHub's 422 to a PUT whose boolean control carries %s, and stores nothing",
-    async (_what, control, value, verdict) => {
+    "the mock answers GitHub's 422 to a PUT carrying %s, and stores nothing",
+    async (_what, fragment, error) => {
       const api = registryFake({ branches: ["main"] });
       const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
-        [control]: value,
         required_status_checks: null,
         required_pull_request_reviews: null,
         restrictions: null,
+        ...fragment,
       });
       expect("error" in put ? [put.error.status, JSON.parse(put.error.body)] : put).toEqual([
         422,
         {
           message: "Validation Failed",
-          errors: [
-            `Invalid request.\n\nFor 'properties/${control}', ${JSON.stringify(value)} ${verdict}.`,
-          ],
+          errors: [`Invalid request.\n\n${error}`],
           documentation_url:
             "https://docs.github.com/rest/branches/branch-protection#update-branch-protection",
         },
