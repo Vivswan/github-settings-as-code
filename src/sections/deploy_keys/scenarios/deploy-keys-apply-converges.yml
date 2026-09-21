@@ -41,10 +41,10 @@ expect:
   outcomes:
     deploy_keys: applied
   mutations:
+    - "DELETE /repos/{repo}/keys/20"
     - "POST /repos/{repo}/keys"
     - "DELETE /repos/{repo}/keys/10"
     - "POST /repos/{repo}/keys"
-    - "DELETE /repos/{repo}/keys/20"
   # apply_idempotent's final check-mode run IS the convergence proof, so
   # converges is not set alongside (the schema rejects the pair).
   fixpoint: apply_idempotent

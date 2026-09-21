@@ -30,6 +30,11 @@ export interface ListMockSpec {
    * the folded identity field, or another key (deploy keys repeat titles but never material).
    */
   readonly unique: "identity" | ((item: Json) => string);
+  /**
+   * A create GitHub refuses against the items already stored (an autolink prefix that begins, or is begun by, a
+   * live one): the 422 message, or undefined when the server accepts it. Runs after the uniqueness rule.
+   */
+  readonly rejects?: (item: Json, siblings: readonly Json[]) => string | undefined;
 }
 
 /** The roles a dictionary declares, which the derived fragment serves - no update handler without an update role. */
@@ -96,6 +101,10 @@ export function mockFragmentFor<
         // deploy_keys rejects reused material upfront), so this answers only other callers,
         // such as the private report's marker-label ensure.
         return { status: 422, body: { message: "Validation Failed" } };
+      }
+      const refused = spec.rejects?.(payload, spec.collection(state));
+      if (refused !== undefined) {
+        return { status: 422, body: { message: refused } };
       }
       const id = state.nextId++;
       const item: Json = { ...spec.defaults, ...payload };

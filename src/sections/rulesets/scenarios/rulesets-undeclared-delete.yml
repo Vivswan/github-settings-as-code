@@ -30,8 +30,8 @@ expect:
   outcomes:
     rulesets: applied
   mutations:
-    - "POST /repos/{repo}/rulesets"
     - "DELETE /repos/{repo}/rulesets/501"
+    - "POST /repos/{repo}/rulesets"
   stdout_contains:
     - "DELETED undeclared ruleset \"legacy-guard\""
   fixpoint: converges

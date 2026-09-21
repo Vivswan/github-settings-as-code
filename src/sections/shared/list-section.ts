@@ -3,6 +3,11 @@
  * (slice, roles, identity, address, lens, prose) from which plan(), snapshot(), the loose shape, the
  * mock's transformers, and the fuzz witness derive. Prose enters through the two undeclared hooks and
  * the reasons `concealed` and `foreign` return; a section needing more stays bespoke.
+ *
+ * The plan's operations are ordered: the undeclared deletes first, in live order, then one group per
+ * declared entry in file order (a recreate is its delete then its create; a mapping's updateConfig
+ * precedes the general update). Execution follows the plan, so a delete has freed a name or prefix
+ * before the create that needs it is sent.
  */
 
 import { err, ok, type Result, safeTry } from "neverthrow";
@@ -852,8 +857,28 @@ async function planList<Key extends string>(
       );
     }
     const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
+    const undeclared = liveItems.filter((live) => !claimed.has(live.key));
 
     const plan: SectionPlan = { ops: [], notes: [], drift: [] };
+    // The undeclared deletes come first, in live order: a delete frees what a create below would collide
+    // with (an autolink prefix that begins a declared one); the declared entries follow in file order.
+    if (policy === "delete") {
+      for (const { item, name } of undeclared) {
+        plan.ops.push({
+          role: "remove",
+          params: decl.address(item),
+          describe: `deleting undeclared ${noun} "${name}"`,
+          drift: [
+            undeclaredDrift(defaultPolicy, {
+              label: `${key}[${name}]`,
+              action: prose.undeclaredAction,
+              ...prose.undeclaredDrift,
+            }),
+          ],
+          change: `DELETED undeclared ${noun} "${name}"`,
+        });
+      }
+    }
     for (const { write, name, claims } of writes) {
       const matches = claims.flatMap((claim) => {
         const match = liveByKey.get(claim);
@@ -992,11 +1017,8 @@ async function planList<Key extends string>(
       });
     }
 
-    for (const { item, name, key: liveKey } of liveItems) {
-      if (claimed.has(liveKey)) {
-        continue;
-      }
-      if (policy === "keep") {
+    if (policy === "keep") {
+      for (const { name } of undeclared) {
         plan.notes.push(
           undeclaredNote({
             subject: `${noun} "${name}"`,
@@ -1004,21 +1026,7 @@ async function planList<Key extends string>(
             ...prose.undeclaredNote,
           }),
         );
-        continue;
       }
-      plan.ops.push({
-        role: "remove",
-        params: decl.address(item),
-        describe: `deleting undeclared ${noun} "${name}"`,
-        drift: [
-          undeclaredDrift(defaultPolicy, {
-            label: `${key}[${name}]`,
-            action: prose.undeclaredAction,
-            ...prose.undeclaredDrift,
-          }),
-        ],
-        change: `DELETED undeclared ${noun} "${name}"`,
-      });
     }
     return ok(plan);
   });

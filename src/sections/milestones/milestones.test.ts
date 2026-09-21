@@ -267,15 +267,15 @@ describe("milestones", () => {
       ],
     });
     expect(changes).toEqual([
+      'DELETED undeclared milestone "v0.9"',
       'updated milestone "v1.0"',
       'created milestone "v2.0"',
-      'DELETED undeclared milestone "v0.9"',
     ]);
     expect(notes).toEqual([]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/milestones/1",
       "PATCH /repos/o/r/milestones/7",
       "POST /repos/o/r/milestones",
-      "DELETE /repos/o/r/milestones/1",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
     // The mock stored the day as GitHub does: Pacific midnight, in PDT for June.

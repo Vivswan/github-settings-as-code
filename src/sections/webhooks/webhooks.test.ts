@@ -278,20 +278,20 @@ describe("webhooks plan", () => {
     expect(deleted.notes).toEqual([]);
     expect(deleted.ops.map((op) => [op.role, op.params, driftOf(op), op.change])).toEqual([
       [
-        "create",
-        undefined,
-        [
-          "webhooks[https://new.test/h]: missing - declared in the settings file but not on the repo; apply will create it",
-        ],
-        'created webhook "https://new.test/h"',
-      ],
-      [
         "remove",
         { hook_id: "8" },
         [
           'webhooks[https://old.test/h]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
         ],
         'DELETED undeclared webhook "https://old.test/h"',
+      ],
+      [
+        "create",
+        undefined,
+        [
+          "webhooks[https://new.test/h]: missing - declared in the settings file but not on the repo; apply will create it",
+        ],
+        'created webhook "https://new.test/h"',
       ],
     ]);
   });
@@ -366,23 +366,23 @@ describe("webhooks plan", () => {
       tools({ $WEBHOOK_SECRET: "hook-secret-1" }),
     );
     expect(changes).toEqual([
+      'DELETED undeclared webhook "https://stray.test/hook"',
       'updated webhook "https://ci.test/hook" config (the declared secret is re-sent every run)',
       'updated webhook "https://ci.test/hook"',
       'created webhook "https://deploy.test/hook"',
-      'DELETED undeclared webhook "https://stray.test/hook"',
     ]);
     expect(notes).toEqual([]);
     // provePlanIdempotent executes the converged second plan too, so the two secret-bearing config PATCHes land once more.
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/hooks/602",
       "PATCH /repos/o/r/hooks/601/config",
       "PATCH /repos/o/r/hooks/601",
       "POST /repos/o/r/hooks",
-      "DELETE /repos/o/r/hooks/602",
       "PATCH /repos/o/r/hooks/601/config",
       expect.stringMatching(/^PATCH \/repos\/o\/r\/hooks\/\d+\/config$/),
     ]);
     // The created hook now exists, so its secret recurs as a config PATCH: the facet with no lines, which check mode reads as clean plus the note.
-    expect(first.ops.map((op) => op.role)).toEqual(["updateConfig", "update", "create", "remove"]);
+    expect(first.ops.map((op) => op.role)).toEqual(["remove", "updateConfig", "update", "create"]);
     expect(second.ops.map((op) => [op.role, op.params, op.drift])).toEqual([
       [
         "updateConfig",

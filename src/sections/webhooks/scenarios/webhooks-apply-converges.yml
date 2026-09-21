@@ -42,10 +42,10 @@ expect:
   outcomes:
     webhooks: applied
   mutations:
+    - DELETE /repos/{repo}/hooks/602
     - PATCH /repos/{repo}/hooks/601/config
     - PATCH /repos/{repo}/hooks/601
     - POST /repos/{repo}/hooks
-    - DELETE /repos/{repo}/hooks/602
   requests_contain:
     - GET /repos/e2e-owner/e2e-repo/hooks
   stdout_contains:

@@ -55,6 +55,8 @@ Three sections illustrate the range of default policies:
 
 Every section's own default is stated in the [Sections table](sections.md)'s Undeclared default column, and the [undeclared policy](undeclared-policy.md) page covers the knob that overrides it.
 
+Within the six sections built on the list-section factory (`labels`, `milestones`, `autolinks`, `deploy_keys`, `webhooks`, `rulesets`), apply deletes the undeclared resources first and then walks the declared entries in file order (a changed resource GitHub cannot edit is deleted and recreated in place), so a delete has freed a name or prefix before the create that needs it is sent.
+
 ## Null is the empty state
 
 A `null` in the settings file is a declared value: the EMPTY or OFF state on GitHub (`pages: null` turns Pages off, `cname: null` removes the custom domain, `protection: null` strips a branch's protection). A key with no empty state refuses it at validation, naming the values that exist: `repository.enable_git_lfs has no empty state; write true or false`.

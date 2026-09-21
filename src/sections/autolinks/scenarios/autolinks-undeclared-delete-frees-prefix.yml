@@ -1,0 +1,29 @@
+# A declared prefix begins a live undeclared one. GitHub refuses a create whose
+# prefix overlaps a stored autolink, so under the delete default the undeclared
+# one is DELETED first and the declared one created after, in that order; the
+# mock refuses the create while the overlapping autolink is still stored.
+name: autolinks-undeclared-delete-frees-prefix
+settings:
+  autolinks:
+    - key_prefix: "TICKET-"
+      url_template: "https://example.com/TICKET/<num>"
+live_state:
+  autolinks:
+    - id: 20
+      key_prefix: "TICKET-A"
+      url_template: "https://example.com/TICKET-A/<num>"
+      is_alphanumeric: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    autolinks: applied
+  mutations:
+    - "DELETE /repos/{repo}/autolinks/20"
+    - "POST /repos/{repo}/autolinks"
+  stdout_contains:
+    - 'DELETED undeclared autolink "TICKET-A"'
+    - 'created autolink "TICKET-"'
+  fixpoint: converges
