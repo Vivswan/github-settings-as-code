@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../../src/sections/teams/mock.js";
+import { RAW_CONTENTS_ACCEPT } from "./core-paths.js";
 import type { MockHandle } from "./server.js";
 import { call, json, jsonArray, mockServerLifecycle, scenario } from "./server-test-support.js";
 
 const start = mockServerLifecycle();
 
 describe("multi-repo mode", () => {
-  const RAW_ACCEPT = "application/vnd.github.raw+json";
   const settingsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
   const contentsGet = (h: MockHandle, slug: string) =>
-    call(h, "GET", settingsPath(slug), { headers: { accept: RAW_ACCEPT } });
+    call(h, "GET", settingsPath(slug), { headers: { accept: RAW_CONTENTS_ACCEPT } });
   /** The team probe as the section sends it: the repository media type is what earns the role_name body. */
   const probeTeam = (h: MockHandle, slug: string) =>
     call(h, "GET", `/orgs/e2e-owner/teams/reviewers/repos/${slug}`, {
@@ -31,24 +31,6 @@ describe("multi-repo mode", () => {
     expect(await configured.text()).toContain("labels");
     const missing = await contentsGet(h, "e2e-owner/svc-b");
     expect(missing.status).toBe(404);
-  });
-
-  test("contents rejects a non-GET method with a violation", async () => {
-    const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
-    const res = await call(h, "PUT", settingsPath("e2e-owner/svc-a"), {
-      headers: { accept: RAW_ACCEPT },
-      body: {},
-    });
-    expect(res.status).toBe(400);
-    expect(h.violations.some((v) => v.includes("must be GET"))).toBe(true);
-  });
-
-  test("contents rejects a missing raw Accept header with a violation", async () => {
-    const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
-    // call() sends no Accept header at all (server-test-support.ts AUTH), so the raw type is missing.
-    const res = await call(h, "GET", settingsPath("e2e-owner/svc-a"));
-    expect(res.status).toBe(400);
-    expect(h.violations.some((v) => v.includes("Accept"))).toBe(true);
   });
 
   test("contents is permission-gated: a Contents-denied slug answers a denial", async () => {
@@ -90,11 +72,32 @@ describe("multi-repo mode", () => {
     expect(log?.deniedBy).toBe("contents");
   });
 
-  test("git ref read rejects a non-GET method with a violation", async () => {
+  test.each<{ name: string; request: (h: MockHandle) => Promise<Response>; violation: string }>([
+    {
+      name: "contents rejects a non-GET method",
+      request: (h) =>
+        call(h, "PUT", settingsPath("e2e-owner/svc-a"), {
+          headers: { accept: RAW_CONTENTS_ACCEPT },
+          body: {},
+        }),
+      violation: "contents fetch must be GET, got PUT",
+    },
+    {
+      // call() sets no Accept header (server-test-support.ts AUTH), so fetch sends its */* default and the raw type is missing.
+      name: "contents rejects a missing raw Accept header",
+      request: (h) => call(h, "GET", settingsPath("e2e-owner/svc-a")),
+      violation: `contents fetch must send Accept: ${RAW_CONTENTS_ACCEPT}, got "*/*"`,
+    },
+    {
+      name: "git ref read rejects a non-GET method",
+      request: (h) => call(h, "POST", refPath("e2e-owner/svc-a", "heads/main"), { body: {} }),
+      violation: "git ref read must be GET, got POST",
+    },
+  ])("$name with a violation", async ({ request, violation }) => {
     const h = await start(scenario({ repos: { "e2e-owner/svc-a": { settings: {} } } }));
-    const res = await call(h, "POST", refPath("e2e-owner/svc-a", "heads/main"), { body: {} });
+    const res = await request(h);
     expect(res.status).toBe(400);
-    expect(h.violations).toEqual(["git ref read must be GET, got POST"]);
+    expect(h.violations).toEqual([violation]);
   });
 
   test("/user/repos enumerates the discovery pool, paginated", async () => {

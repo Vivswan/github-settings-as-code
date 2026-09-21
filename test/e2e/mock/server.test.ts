@@ -6,6 +6,7 @@ import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../../src/sections/teams/mock.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
 import { assertFaultKeys } from "./chaos.js";
+import { RAW_CONTENTS_ACCEPT } from "./core-paths.js";
 import { declaredStatuses, statusAllowed } from "./dispatch.js";
 import { assertHandlerCompleteness } from "./handlers.js";
 import { startMockServer } from "./server.js";
@@ -31,40 +32,37 @@ describe("handler-completeness startup assertion", () => {
     expect(() => assertHandlerCompleteness()).not.toThrow();
   });
 
-  test("fires when an endpoint has no handler", () => {
-    const endpoints = { "phantom.role": {} } as unknown as Parameters<
-      typeof assertHandlerCompleteness
-    >[0];
-    expect(() => assertHandlerCompleteness(endpoints, {})).toThrow(/no mock handler/);
-  });
-
-  test("fires when a handler names no known endpoint", () => {
-    const handlers = { "ghost.role": () => ({ status: 200, body: null }) } as unknown as Parameters<
-      typeof assertHandlerCompleteness
-    >[1];
-    expect(() => assertHandlerCompleteness({}, handlers)).toThrow(/no known endpoint/);
+  test.each([
+    ["an endpoint has no handler", { "phantom.role": {} }, {}, /no mock handler/],
+    [
+      "a handler names no known endpoint",
+      {},
+      { "ghost.role": () => ({ status: 200, body: null }) },
+      /no known endpoint/,
+    ],
+  ])("fires when %s", (_name, endpoints, handlers, fires) => {
+    expect(() =>
+      assertHandlerCompleteness(
+        endpoints as unknown as Parameters<typeof assertHandlerCompleteness>[0],
+        handlers as unknown as Parameters<typeof assertHandlerCompleteness>[1],
+      ),
+    ).toThrow(fires);
   });
 });
 
 describe("pagination slicing", () => {
-  test("the 100-boundary: exactly 100 items yields a full page then an empty one", () => {
-    const items = Array.from({ length: 100 }, (_, i) => i);
-    expect(slicePage(items, { per_page: "100", page: "1" })).toHaveLength(100);
-    expect(slicePage(items, { per_page: "100", page: "2" })).toHaveLength(0);
-  });
-
-  test("defaults per_page to 100 and page to 1 when absent or invalid", () => {
-    const items = Array.from({ length: 150 }, (_, i) => i);
-    expect(slicePage(items, {})).toHaveLength(100);
-    expect(slicePage(items, { per_page: "0", page: "-1" })).toHaveLength(100);
-  });
-
-  test("an endpoint cap clamps an oversized request, exactly as GitHub does", () => {
-    // The variables list is capped at 30 and GitHub clamps, so the mock must not be more generous.
-    const items = Array.from({ length: 40 }, (_, i) => i);
-    expect(slicePage(items, { per_page: "100", page: "1" }, 30)).toHaveLength(30);
-    expect(slicePage(items, { per_page: "100", page: "2" }, 30)).toHaveLength(10);
-    expect(slicePage(items, { per_page: "10", page: "1" }, 30)).toHaveLength(10);
+  // The variables list is capped at 30 and GitHub clamps, so the mock must not be more generous.
+  test.each<[number, Record<string, string>, number | undefined, number]>([
+    [100, { per_page: "100", page: "1" }, undefined, 100], // the 100-boundary: a full page
+    [100, { per_page: "100", page: "2" }, undefined, 0], // then an empty one
+    [150, {}, undefined, 100], // an absent query defaults per_page to 100 and page to 1
+    [150, { per_page: "0", page: "-1" }, undefined, 100], // an invalid query takes the same defaults
+    [40, { per_page: "100", page: "1" }, 30, 30], // the cap clamps an oversized per_page
+    [40, { per_page: "100", page: "2" }, 30, 10], // and paginates by the clamped size
+    [40, { per_page: "10", page: "1" }, 30, 10], // a per_page under the cap stands
+  ])("%d items, query %o, cap %p -> %d", (items, query, cap, length) => {
+    const list = Array.from({ length: items }, (_, i) => i);
+    expect(slicePage(list, query, cap)).toHaveLength(length);
   });
 
   test("labels.list paginates over the wire", async () => {
@@ -203,38 +201,34 @@ describe("permission mask semantics", () => {
 });
 
 describe("denial style bodies", () => {
-  test("fine_grained: a denied read answers 404 Not Found", async () => {
-    const h = await start(scenario({ token_permissions: { issues: "none" } }));
-    const read = await json(await call(h, "GET", labelsPath));
-    expect(read.message).toBe("Not Found");
-  });
-
-  test("fine_grained: a denied write answers 403 not accessible", async () => {
-    const h = await start(scenario({ token_permissions: { environments: "none" } }));
-    const put = await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
-    expect(put.status).toBe(403);
-    expect((await json(put)).message).toBe("Resource not accessible by personal access token");
-  });
-
+  // The wire bodies GitHub sends: a fine_grained token conceals a denied read as a plain 404.
+  const NOT_FOUND = "Not Found";
+  const NOT_ACCESSIBLE = "Resource not accessible by personal access token";
+  const DENIED = {
+    read: { token_permissions: { issues: "none" }, method: "GET", path: labelsPath },
+    write: {
+      token_permissions: { environments: "none" },
+      method: "PUT",
+      path: `/repos/${OWNER}/${REPO}/environments/prod`,
+      body: {},
+    },
+  } as const;
   test.each([
-    { style: 403, op: "read" },
-    { style: 403, op: "write" },
-    { style: 404, op: "read" },
-    { style: 404, op: "write" },
-  ] as const)("style $style: a denied $op answers $style", async ({ style, op }) => {
-    if (op === "read") {
-      const h = await start(
-        scenario({ denial_style: style, token_permissions: { issues: "none" } }),
-      );
-      expect((await call(h, "GET", labelsPath)).status).toBe(style);
-      return;
-    }
-    const h = await start(
-      scenario({ denial_style: style, token_permissions: { environments: "none" } }),
-    );
-    const write = await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
-    expect(write.status).toBe(style);
-  });
+    { style: "fine_grained", op: "read", status: 404, message: NOT_FOUND },
+    { style: "fine_grained", op: "write", status: 403, message: NOT_ACCESSIBLE },
+    { style: 403, op: "read", status: 403, message: NOT_ACCESSIBLE },
+    { style: 403, op: "write", status: 403, message: NOT_ACCESSIBLE },
+    { style: 404, op: "read", status: 404, message: NOT_FOUND },
+    { style: 404, op: "write", status: 404, message: NOT_FOUND },
+  ] as const)(
+    "style $style: a denied $op answers $status $message",
+    async ({ style, op, status, message }) => {
+      const { token_permissions, method, path, ...body } = DENIED[op];
+      const h = await start(scenario({ denial_style: style, token_permissions }));
+      const res = await call(h, method, path, body);
+      expect([res.status, (await json(res)).message]).toEqual([status, message]);
+    },
+  );
 
   test("no denial body ever mentions rate limit", async () => {
     for (const style of [403, 404, "fine_grained"] as const) {
@@ -580,25 +574,16 @@ describe("route matching and wire contract", () => {
     expect(h.violations).toHaveLength(1);
   });
 
-  test("a missing Authorization header is a violation", async () => {
+  test.each([
+    { header: "authorization", named: "Authorization header" },
+    { header: "x-github-api-version", named: "x-github-api-version" },
+  ] as const)("a request missing the $header header is a violation", async ({ header, named }) => {
     const h = await start(scenario());
-    const res = await fetch(`${h.url}${labelsPath}`, {
-      method: "GET",
-      headers: { "x-github-api-version": "2022-11-28" },
-    });
+    const headers = Object.fromEntries(Object.entries(AUTH).filter(([name]) => name !== header));
+    const res = await fetch(`${h.url}${labelsPath}`, { method: "GET", headers });
     expect(res.status).toBe(400);
-    expect((await json(res)).message).toContain("Authorization header");
-    expect(h.violations.some((v) => v.includes("Authorization"))).toBe(true);
-  });
-
-  test("a missing api-version header is a violation", async () => {
-    const h = await start(scenario());
-    const res = await fetch(`${h.url}${labelsPath}`, {
-      method: "GET",
-      headers: { authorization: "Bearer t" },
-    });
-    expect(res.status).toBe(400);
-    expect((await json(res)).message).toContain("x-github-api-version");
+    expect((await json(res)).message).toContain(named);
+    expect(h.violations.some((v) => v.includes(named))).toBe(true);
   });
 
   test("the repo probe is served by the repository.get section endpoint", async () => {
@@ -745,54 +730,68 @@ describe("writes mutate state", () => {
 });
 
 describe("actions selected-actions 409", () => {
-  test("GET selected-actions answers 409 when the policy is not 'selected'", async () => {
-    const h = await start(
-      scenario({ live_state: { actions_permissions: { allowed_actions: "all" } } }),
-    );
+  test.each([
+    [
+      "409 when the policy is not 'selected'",
+      { actions_permissions: { allowed_actions: "all" } },
+      409,
+    ],
+    [
+      "200 when the policy is 'selected'",
+      {
+        actions_permissions: { allowed_actions: "selected" },
+        selected_actions: { github_owned_allowed: true },
+      },
+      200,
+    ],
+  ] as const)("GET selected-actions answers %s", async (_name, live_state, status) => {
+    const h = await start(scenario({ live_state }));
     const res = await call(
       h,
       "GET",
       `/repos/${OWNER}/${REPO}/actions/permissions/selected-actions`,
     );
-    expect(res.status).toBe(409);
-  });
-
-  test("GET selected-actions answers 200 when the policy is 'selected'", async () => {
-    const h = await start(
-      scenario({
-        live_state: {
-          actions_permissions: { allowed_actions: "selected" },
-          selected_actions: { github_owned_allowed: true },
-        },
-      }),
-    );
-    const res = await call(
-      h,
-      "GET",
-      `/repos/${OWNER}/${REPO}/actions/permissions/selected-actions`,
-    );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(status);
   });
 });
 
 describe("code-scanning 200-vs-202 rule", () => {
-  test("a payload changing languages answers 202 with run_id; else 200 with an empty body", async () => {
-    const h = await start(
-      scenario({ live_state: { code_scanning: { state: "configured", languages: ["python"] } } }),
+  const path = `/repos/${OWNER}/${REPO}/code-scanning/default-setup`;
+  const configured = { state: "configured", languages: ["python"] };
+  // A 202 carries the configuration run; the spec's 200 body is an empty object
+  // (additionalProperties: false), NOT the stored config.
+  test.each([
+    [
+      "a payload changing languages answers 202 with run_id",
+      configured,
+      { languages: ["javascript"] },
+      202,
+    ],
+    [
+      "a payload leaving languages alone answers 200 with an empty body",
+      configured,
+      { state: "configured" },
+      200,
+    ],
+    [
+      "languages added over a live seed that declares none answer 202",
+      { state: "configured" },
+      { languages: ["javascript"] },
+      202,
+    ],
+  ] as const)("%s", async (_name, seed, body, status) => {
+    const h = await start(scenario({ live_state: { code_scanning: seed } }));
+    const res = await call(h, "PATCH", path, { body });
+    expect(res.status).toBe(status);
+    const answered = await json(res);
+    expect(answered).toEqual(
+      status === 202
+        ? {
+            run_id: expect.any(Number),
+            run_url: `https://api.github.com${path}/runs/${String(answered.run_id)}`,
+          }
+        : {},
     );
-    const path = `/repos/${OWNER}/${REPO}/code-scanning/default-setup`;
-    const changed = await call(h, "PATCH", path, { body: { languages: ["javascript"] } });
-    expect(changed.status).toBe(202);
-    const body = (await json(changed)) as { run_id: number; run_url: string };
-    expect(body).toEqual({
-      run_id: expect.any(Number),
-      run_url: `https://api.github.com${path}/runs/${body.run_id}`,
-    });
-
-    const same = await call(h, "PATCH", path, { body: { state: "configured" } });
-    expect(same.status).toBe(200);
-    // The spec's 200 body is an empty object (additionalProperties: false), NOT the stored config.
-    expect(await json(same)).toEqual({});
   });
 });
 
@@ -813,12 +812,30 @@ describe("logged response bodies are snapshots, not live-state aliases", () => {
 });
 
 describe("chaos hook", () => {
-  test("invalid_json corrupts the first response only (times defaults to 1)", async () => {
-    const h = await start(scenario(), { corrupt: { key: "labels.list", mode: "invalid_json" } });
-    const first = await call(h, "GET", labelsPath);
-    await expect(first.json()).rejects.toThrow();
-    const second = await call(h, "GET", labelsPath);
-    expect(await second.json()).toEqual([]);
+  test.each<[string, number | "always" | undefined, Array<"corrupt" | "real">]>([
+    ["times defaults to 1", undefined, ["corrupt", "real"]],
+    [
+      'times: "always" corrupts every response',
+      "always",
+      ["corrupt", "corrupt", "corrupt", "corrupt"],
+    ],
+    ["times: N corrupts the first N responses", 3, ["corrupt", "corrupt", "corrupt", "real"]],
+  ])("invalid_json, %s", async (_name, times, responses) => {
+    const h = await start(scenario(), {
+      corrupt: {
+        key: "labels.list",
+        mode: "invalid_json",
+        ...(times === undefined ? {} : { times }),
+      },
+    });
+    for (const expected of responses) {
+      const res = await call(h, "GET", labelsPath);
+      if (expected === "corrupt") {
+        await expect(res.json()).rejects.toThrow();
+      } else {
+        expect(await res.json()).toEqual([]);
+      }
+    }
   });
 
   test("missing_envelope strips the workflows list wrapper", async () => {
@@ -834,29 +851,9 @@ describe("chaos hook", () => {
     expect(body.workflows).toBeUndefined();
     expect(body.total_count).toBe(1);
   });
-
-  test('times: "always" corrupts every response', async () => {
-    const h = await start(scenario(), {
-      corrupt: { key: "labels.list", mode: "invalid_json", times: "always" },
-    });
-    for (let i = 0; i < 4; i++) {
-      await expect((await call(h, "GET", labelsPath)).json()).rejects.toThrow();
-    }
-  });
-
-  test("times: N corrupts the first N responses then serves real ones", async () => {
-    const h = await start(scenario(), {
-      corrupt: { key: "labels.list", mode: "invalid_json", times: 3 },
-    });
-    for (let i = 0; i < 3; i++) {
-      await expect((await call(h, "GET", labelsPath)).json()).rejects.toThrow();
-    }
-    expect(await jsonArray(await call(h, "GET", labelsPath))).toEqual([]);
-  });
 });
 
 describe("core-route faults and server_error", () => {
-  const RAW_ACCEPT = "application/vnd.github.raw+json";
   const contentsPath = (slug: string) => `/repos/${slug}/contents/.github/settings.yml`;
 
   // Key validation through both channels over section and core keys; the unknown-key and duplicate-fault
@@ -911,10 +908,12 @@ describe("core-route faults and server_error", () => {
       { faults: [{ key: "core.contentsGet", kind: "server_error" }] },
     );
     const faulted = await call(h, "GET", contentsPath(target), {
-      headers: { accept: RAW_ACCEPT },
+      headers: { accept: RAW_CONTENTS_ACCEPT },
     });
     expect(faulted.status).toBe(500);
-    const real = await call(h, "GET", contentsPath(target), { headers: { accept: RAW_ACCEPT } });
+    const real = await call(h, "GET", contentsPath(target), {
+      headers: { accept: RAW_CONTENTS_ACCEPT },
+    });
     expect(real.status).toBe(200);
     expect(await real.text()).toContain("labels");
     expect(h.faultCounts.get("core.contentsGet")).toBe(1);
@@ -941,12 +940,12 @@ describe("core-route faults and server_error", () => {
       { faults: [{ key: "core.contentsGet", kind: "server_error" }] },
     );
     const ghost = await call(h, "GET", contentsPath("e2e-owner/ghost"), {
-      headers: { accept: RAW_ACCEPT },
+      headers: { accept: RAW_CONTENTS_ACCEPT },
     });
     expect(ghost.status).toBe(404);
     expect(h.faultCounts.get("core.contentsGet")).toBeUndefined();
     const faulted = await call(h, "GET", contentsPath(target), {
-      headers: { accept: RAW_ACCEPT },
+      headers: { accept: RAW_CONTENTS_ACCEPT },
     });
     expect(faulted.status).toBe(500);
     expect(h.faultCounts.get("core.contentsGet")).toBe(1);
@@ -1708,30 +1707,18 @@ describe("state-flag gaps", () => {
     expect(res.status).toBe(409);
   });
 
-  test("code-scanning update answers 202 for languages added over a live seed that declares none", async () => {
-    const h = await start(scenario({ live_state: { code_scanning: { state: "configured" } } }));
-    const applied = await call(h, "PATCH", `/repos/${OWNER}/${REPO}/code-scanning/default-setup`, {
-      body: { languages: ["javascript"] },
-    });
-    expect(applied.status).toBe(202);
-  });
-
-  test("private-vulnerability-reporting GET/DELETE answer 404 when not applicable", async () => {
-    const h = await start(
-      scenario({
-        live_state: { repo: { private_vulnerability_reporting_not_applicable: true } },
-      }),
-    );
-    const get = await call(h, "GET", `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`);
-    expect(get.status).toBe(404);
-    const del = await call(h, "DELETE", `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`);
-    expect(del.status).toBe(404);
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("PVR GET answers 200 when applicable (flag absent)", async () => {
-    const h = await start(scenario());
-    const get = await call(h, "GET", `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`);
-    expect(get.status).toBe(200);
-  });
+  const notApplicable = { private_vulnerability_reporting_not_applicable: true };
+  test.each([
+    ["GET", notApplicable, 404],
+    ["DELETE", notApplicable, 404],
+    ["GET", {}, 200], // applicable: the flag is absent
+  ] as const)(
+    "private-vulnerability-reporting %s over repo %o answers %d",
+    async (method, repo, status) => {
+      const h = await start(scenario({ live_state: { repo } }));
+      const res = await call(h, method, `/repos/${OWNER}/${REPO}/private-vulnerability-reporting`);
+      expect(res.status).toBe(status);
+      expect(h.violations).toHaveLength(0);
+    },
+  );
 });
