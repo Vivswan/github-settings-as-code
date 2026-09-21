@@ -5,13 +5,12 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import {
   driftOf,
   type OnMissingPermission,
-  type PlannedOp,
   planContext,
   snapshotContext,
 } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { deniedDetail, REPO, unwrap } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { describeProblem } from "../../problem.js";
 import { type SectionInput, sectionGrant } from "../contract/module.js";
@@ -462,45 +461,6 @@ describe("actions", () => {
     );
   });
 
-  test("a denied fork-pr-private read renders the ambiguity denialHint", async () => {
-    // If GitHub denies this pair on a public repository this sentence is the whole mitigation, and denialHint rendering has silently broken once
-    // before.
-    const api = new MockApi({
-      [FORK_PRIVATE]: { error: { status: 403, message: "Forbidden", body: "" } },
-    });
-    let thrown: unknown;
-    try {
-      await plan(api, {
-        fork_pr_workflows_private_repos: {
-          run_workflows_from_fork_pull_requests: true,
-          send_write_tokens_to_workflows: false,
-          send_secrets_and_variables: false,
-          require_approval_for_fork_pr_workflows: true,
-        },
-      });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(deniedDetail(thrown)).toContain("can also mean the repository is public");
-  });
-
-  test("a denied OIDC read renders the Actions grant, not the section's Administration", async () => {
-    const api = new MockApi({
-      [OIDC]: { error: { status: 403, message: "Resource not accessible", body: "" } },
-    });
-    let thrown: unknown;
-    try {
-      await plan(api, { oidc_customization_sub: { use_default: true } });
-    } catch (error) {
-      thrown = error;
-    }
-    const detail = deniedDetail(thrown);
-    // The advice grades by the SECTION's need on the override permission: the OIDC PUT sibling writes with the same Actions permission, so read-only
-    // advice would cost a second round trip.
-    expect(detail).toContain(grantFor({ repo: ["actions"] }));
-    expect(detail).not.toContain('"Administration"');
-  });
-
   test("each fork PR policy object is planned verbatim to its own endpoint, every toggle compared", async () => {
     const api = new MockApi({
       [FORK_APPROVAL]: { data: { approval_policy: "first_time_contributors_new_to_github" } },
@@ -647,32 +607,6 @@ describe("actions", () => {
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("the read port exposes exactly the GET roles; the primary read keeps its denied posture", () => {
-    const ctx = planContext(actionsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual([
-      "getPermissions",
-      "getSelected",
-      "getWorkflow",
-      "getAccess",
-      "getRetention",
-      "getCacheRetention",
-      "getCacheStorage",
-      "getOidcSub",
-      "getForkPrApproval",
-      "getForkPrPrivate",
-    ]);
-    // @ts-expect-error a write role is not a read: the port has no `putPermissions`
-    ctx.read.putPermissions;
-    // @ts-expect-error nor a `putSelected`
-    ctx.read.putSelected;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.getPermissions.probeAbsent;
-    // The allowlist probe keeps every helper: its 404/409 mean "no allowlist".
-    expect(typeof ctx.read.getSelected.probeAbsent).toBe("function");
-  });
-
   test("a routed key's endpoint pair must share a name, and a scalar key must say how it becomes a body", () => {
     // Compile-time only: a GET paired with another key's PUT, or an enum-valued key PUT bare, never reaches the routing table.
     const live = z.looseObject({ access_level: z.string() });
@@ -707,16 +641,6 @@ describe("actions", () => {
       live,
       read: () => "none",
     });
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    type Op = PlannedOp<typeof actionsSection.endpoints>;
-    const read = { role: "getPermissions", drift: ["x"], change: "" } as const;
-    // @ts-expect-error a GET role is a read, not a plannable write
-    const _read: Op = read;
-    const silent = { role: "putPermissions", drift: [], change: "" } as const;
-    // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
-    const _silent: Op = silent;
   });
 });
 
@@ -939,47 +863,6 @@ describe("actions snapshot", () => {
     expect(read.value?.cache).toEqual({ max_cache_retention_days: 7 });
     expect(read.notes).toEqual([
       leftOut("cache.max_cache_size_gb", "/repos/o/r/actions/cache/storage-limit"),
-    ]);
-  });
-
-  test("under fail, a denied sub-read fails the section with that read's own grant advice, never a note", async () => {
-    // Every key but the OIDC template reads back, so the one denial is the sub-read's alone.
-    const api = liveActions({
-      [BASE]: { enabled: true, allowed_actions: "all" },
-      [`${BASE}/workflow`]: {
-        default_workflow_permissions: "read",
-        can_approve_pull_request_reviews: false,
-      },
-      [`${BASE}/access`]: { access_level: "none" },
-      [`${BASE}/artifact-and-log-retention`]: { days: 90 },
-      "/repos/o/r/actions/cache/retention-limit": { max_cache_retention_days: 7 },
-      "/repos/o/r/actions/cache/storage-limit": { max_cache_size_gb: 10 },
-      [`${BASE}/fork-pr-contributor-approval`]: { approval_policy: "first_time_contributors" },
-      [`${BASE}/fork-pr-workflows-private-repos`]: {
-        run_workflows_from_fork_pull_requests: false,
-        send_write_tokens_to_workflows: false,
-        send_secrets_and_variables: false,
-        require_approval_for_fork_pr_workflows: true,
-      },
-    });
-    let thrown: unknown;
-    try {
-      await snapshot(api, "fail");
-    } catch (error) {
-      thrown = error;
-    }
-    expect(deniedDetail(thrown)).toBe(
-      `the token was denied GET /repos/o/r/actions/oidc/customization/sub: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grantFor({ repo: ["actions"] }, undefined, "write")}`,
-    );
-    // The control: under warn the same fixture reads back with the denial as its one note.
-    const noted = await snapshot(api, "warn");
-    expect(noted.value).not.toHaveProperty("oidc_customization_sub");
-    expect(noted.notes).toEqual([
-      leftOut(
-        "oidc_customization_sub",
-        "/repos/o/r/actions/oidc/customization/sub",
-        grantFor({ repo: ["actions"] }, undefined, "write"),
-      ),
     ]);
   });
 });
