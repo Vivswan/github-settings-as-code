@@ -42,6 +42,7 @@ import {
   type VariableEntry,
   type VariablesPlanScope,
   variableKey,
+  variableOps,
 } from "./variables-engine.js";
 
 export type RepoVariablesKey = "actions_variables" | "agents_variables";
@@ -216,28 +217,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
       label: key,
       noun,
       list: () => ctx.read.list.listAllEnveloped("variables", LiveVariable),
-      create: (write) => ({
-        role: "create",
-        payload: write.payload,
-        drift: write.drift,
-        change: write.change,
-        describe: write.describe,
-      }),
-      update: (write) => ({
-        role: "update",
-        params: { name: write.liveName },
-        payload: write.payload,
-        drift: write.drift,
-        change: write.change,
-        describe: write.describe,
-      }),
-      remove: (deletion) => ({
-        role: "remove",
-        params: { name: deletion.name },
-        drift: deletion.drift,
-        change: deletion.change,
-        describe: deletion.describe,
-      }),
+      ...variableOps({ create: "create", update: "update", remove: "remove" }, undefined),
     };
     return planVariables(section, scope, { entries, policy, defaultPolicy });
   };

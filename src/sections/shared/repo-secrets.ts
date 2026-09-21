@@ -46,6 +46,7 @@ import {
   type SecretEntry,
   type SecretsPlanScope,
   secretKey,
+  secretOps,
 } from "./secrets-engine.js";
 import { knobbedSnapshot, unreadableSecretNote } from "./snapshot-helpers.js";
 
@@ -257,21 +258,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       list: () => ctx.read.list.listAllEnveloped("secrets", LiveSecretName),
       publicKey: (exec, describe) => ctx.read.publicKey.call(exec, z.unknown(), { describe }),
       publicKeyEndpoint: wide.publicKey,
-      put: (write) => ({
-        role: "put",
-        params: { secret_name: write.name },
-        payload: write.payload,
-        drift: write.drift,
-        change: write.change,
-        describe: write.describe,
-      }),
-      remove: (deletion) => ({
-        role: "remove",
-        params: { secret_name: deletion.name },
-        drift: deletion.drift,
-        change: deletion.change,
-        describe: deletion.describe,
-      }),
+      ...secretOps({ put: "put", remove: "remove" }, undefined),
     };
     return planSecrets(section, scope, { entries, policy, defaultPolicy });
   };
