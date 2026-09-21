@@ -6,43 +6,41 @@
 
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../src/engine/validate.js";
-import { SECTION_KEYS, type SectionKey, type SettingsFile } from "../../src/schema.js";
+import {
+  LIST_SECTIONS,
+  type ListSection,
+  type SectionKey,
+  type SettingsFile,
+} from "../../src/schema.js";
 import type { EntryOf, SectionModule } from "../../src/sections/contract/module.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { repositorySection } from "../../src/sections/repository/index.js";
 
-/**
- * One well-formed entry per list section, null for a mapping section (nothing to duplicate). The type permits null
- * only where the section value has no entries, so a list section cannot opt out of the census below, and a new
- * section must say which it is.
- */
-type OneEntryPerSection = {
-  [K in SectionKey]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
-    ? null
+/** The sections whose value has entries; the census runs over LIST_SECTIONS, so the two must agree. */
+type EntryBearing = {
+  [K in SectionKey]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never] ? never : K;
+}[SectionKey];
+// Each direction fails naming the section: an entry-bearing section outside the list has nowhere to go in
+// `Record<never, never>`, and a listed section without entries leaves its table slot `never`.
+const _everyEntryBearingSectionIsListed: Record<Exclude<EntryBearing, ListSection>, never> = {};
+const ONE_ENTRY: {
+  readonly [K in ListSection]: [EntryOf<NonNullable<SettingsFile[K]>>] extends [never]
+    ? never
     : Record<string, unknown>;
-};
-
-const ONE_ENTRY: OneEntryPerSection = {
-  repository: null,
+} = {
   labels: { name: "bug" },
   rulesets: { name: "protect-main" },
   environments: { name: "prod" },
   branches: { name: "main", protection: null },
   autolinks: { key_prefix: "JIRA-", url_template: "https://example.com/<num>" },
-  actions: null,
   actions_secrets: { name: "TOKEN", value: "$TOKEN" },
   dependabot_secrets: { name: "TOKEN", value: "$TOKEN" },
   codespaces_secrets: { name: "TOKEN", value: "$TOKEN" },
   agents_secrets: { name: "TOKEN", value: "$TOKEN" },
   workflows: { path: "ci.yml", state: "active" },
-  check_suite_preferences: null,
-  pages: null,
-  code_scanning_default_setup: null,
-  code_quality_setup: null,
   collaborators: { username: "octocat" },
   teams: { name: "devs" },
   milestones: { title: "v1" },
-  interaction_limits: null,
   actions_variables: { name: "REGION", value: "eu" },
   agents_variables: { name: "REGION", value: "eu" },
   webhooks: { config: { url: "https://example.com/hook" }, events: ["push"] },
@@ -55,9 +53,7 @@ const ONE_ENTRY: OneEntryPerSection = {
 };
 
 describe("every list section's validate hook reaches the engine", () => {
-  const listSections = SECTION_KEYS.filter((key) => ONE_ENTRY[key] !== null);
-
-  test.each(listSections)(
+  test.each([...LIST_SECTIONS])(
     "%s: a duplicated entry is refused at the later entry's path, and the same entry alone passes",
     (key) => {
       const entry = ONE_ENTRY[key];

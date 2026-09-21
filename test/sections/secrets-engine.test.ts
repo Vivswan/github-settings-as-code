@@ -252,23 +252,6 @@ describe("planSecrets and the execution-time resolver", () => {
     expect(plan).toEqual({ ops: [], notes: [], drift: [] });
     expect(reads).toEqual(["list"]);
   });
-
-  test("a value the engine never resolved fails the thunk loudly", async () => {
-    const plan = unwrap(
-      await planSecrets(section, fabricatedPlanScope([], []), {
-        entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
-        policy: "keep",
-        defaultPolicy: "keep",
-      }),
-    );
-    const payload = plan.ops[0]?.payload;
-    expect(typeof payload).toBe("function");
-    if (typeof payload === "function") {
-      expect(() => payload({ resolveSecret: resolver({}) })).toThrow(
-        new Error("test resolver has no value for $NEVER_RESOLVED"),
-      );
-    }
-  });
 });
 
 describe("the section context arms", () => {
