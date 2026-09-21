@@ -30,18 +30,22 @@ describe("pages mock handlers", () => {
     expect(state.pages).toBeNull();
   });
 
-  test("PUT on an existing site merges the body, mints the url, and answers 204", () => {
-    const state = slugged({ build_type: "workflow" });
-    const response = handler("pages.update")(
-      handlerTestContext("pages.update", state, { body: { build_type: "legacy" } }),
-    );
-    expect(response.status).toBe(204);
-    expect(state.pages).toMatchObject({
-      build_type: "legacy",
-      // The seeded site carried no url, so the update completed it from the state slug (an existing stored url would win, matching create).
-      url: "https://api.github.com/repos/acme/private/pages",
-    });
-  });
+  test.each([
+    ["pages.create", 201, null, { build_type: "workflow" }],
+    ["pages.update", 204, { build_type: "workflow" }, { build_type: "legacy" }],
+  ] as const)(
+    "%s stores the body over the site, mints the url, and answers %d",
+    (key, status, seeded, body) => {
+      const state = slugged(seeded);
+      const response = handler(key)(handlerTestContext(key, state, { body }));
+      expect(response.status).toBe(status);
+      expect(state.pages).toMatchObject({
+        ...body,
+        // The seeded site carried no url, so the handler completed it from the state slug (an existing stored url would win).
+        url: "https://api.github.com/repos/acme/private/pages",
+      });
+    },
+  );
 
   test("PUT stores only the update body's fields, so a key github.com ignores cannot fake convergence here", () => {
     // github.com drops `public` (Enterprise Cloud only) and every GET-only field from the update; an echoing mock hid that.
@@ -59,16 +63,5 @@ describe("pages mock handlers", () => {
       custom_404: false,
       cname: "docs.example.com",
     });
-  });
-
-  test("create mints the Pages url from the state slug", () => {
-    const state = slugged(null);
-    const response = handler("pages.create")(
-      handlerTestContext("pages.create", state, { body: { build_type: "workflow" } }),
-    );
-    expect(response.status).toBe(201);
-    expect(String((state.pages as Record<string, unknown>).url)).toBe(
-      "https://api.github.com/repos/acme/private/pages",
-    );
   });
 });
