@@ -4,7 +4,7 @@
  * in traces) must hold independent of any transport.
  */
 
-import { nonPlainKind } from "../plain-data.js";
+import { isPlainObject, nonPlainKind } from "../plain-data.js";
 
 const SECRET_FIELD_PLACEHOLDER = "***";
 
@@ -13,14 +13,9 @@ const SECRET_FIELD_PLACEHOLDER = "***";
  * iteration, which is foreign code the normalizer must never invoke.
  */
 function isPlainJsonContainer(value: unknown): boolean {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value);
-  if (Array.isArray(value)) {
-    return proto === Array.prototype;
-  }
-  return proto === Object.prototype || proto === null;
+  return Array.isArray(value)
+    ? Object.getPrototypeOf(value) === Array.prototype
+    : isPlainObject(value);
 }
 
 /**

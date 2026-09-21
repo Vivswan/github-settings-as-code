@@ -10,24 +10,9 @@ import type { ReplaceSweep } from "../../engine/diff.js";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
-import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
+import { defaultUndeclaredPolicy, defOf, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
 import { isMapping } from "./raw-values.js";
-
-/** The zod internals the projection walks: the def discriminator and its children. */
-interface ProjectionDef {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  catchall?: z.ZodType;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  valueType?: z.ZodType;
-}
-
-function defOf(schema: z.ZodType): ProjectionDef {
-  return (schema as unknown as { _zod: { def: ProjectionDef } })._zod.def;
-}
 
 /** The schema types the projection treats as leaves: the live value passes through verbatim. */
 const LEAF_TYPES: ReadonlySet<string> = new Set([
