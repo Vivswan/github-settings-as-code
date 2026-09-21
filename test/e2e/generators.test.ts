@@ -1123,6 +1123,7 @@ describe("genMergeScenario", () => {
     expect(MERGE_REFUSAL_KINDS.filter((kind) => !refusals.has(kind))).toEqual([]);
   });
 
+  // 720 forced generator runs, each probing the validator per layer: ~1.4 s alone, near bun's 5 s default on a loaded runner.
   test("forces construct their eligibility: a pinned run layering, or the named refusal", () => {
     for (let seed = 0; seed < 60; seed++) {
       for (const layering of LAYERING_DIRECTIVES) {
@@ -1143,7 +1144,7 @@ describe("genMergeScenario", () => {
         expect(predictMerge(meta)).toEqual({ kind: "refused", layer: meta.refusal.layer });
       }
     }
-  });
+  }, 20_000);
 
   test("honors the sections option", () => {
     const pool: SectionKey[] = ["labels", "rulesets", "milestones", "pages"];
