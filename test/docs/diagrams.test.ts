@@ -196,14 +196,16 @@ describe("diagram guard (mutation checks)", () => {
   const page = (label: string, tail = demo): string =>
     `# T\n\n\`\`\`mermaid\nflowchart LR\n  a["${label}"]\n\`\`\`\n\n${tail}\n\n## Next\n`;
 
-  test("accepts a real path with its exported symbols", () => {
-    expect(
-      diagramProblems(page("src/engine/layers.ts<br>standaloneView() mergeLayers()"), ROOT),
-    ).toEqual([]);
-  });
-
-  test("accepts a caption before the path, and symbols split across segments and commas", () => {
-    const label = "the fold<br>src/engine/layers.ts mergeLayers()<br>standaloneView(), Layer";
+  test.each<[string, string]>([
+    [
+      "a real path with its exported symbols",
+      "src/engine/layers.ts<br>standaloneView() mergeLayers()",
+    ],
+    [
+      "a caption before the path, and symbols split across segments and commas",
+      "the fold<br>src/engine/layers.ts mergeLayers()<br>standaloneView(), Layer",
+    ],
+  ])("accepts %s", (_case, label) => {
     expect(diagramProblems(page(label), ROOT)).toEqual([]);
   });
 
@@ -306,28 +308,29 @@ ${demo}
     ]);
   });
 
-  test("rejects a concept diagram without a demonstration line", () => {
-    expect(diagramProblems(page("src/engine/layers.ts", "Some prose."), ROOT)).toEqual([
-      'line 3: the diagram has no "Demonstrated by:" line before the next heading',
-    ]);
-  });
-
   test.each<[string, string, string]>([
     [
-      "a relative link",
-      "Demonstrated by: [x](../test/engine/layers.test.ts).",
-      `is not a ${REPO_FILE_URL} link`,
+      "no demonstration line",
+      "Some prose.",
+      'line 3: the diagram has no "Demonstrated by:" line before the next heading',
     ],
     [
-      "a missing file",
-      `Demonstrated by: [x](${REPO_FILE_URL}test/engine/nowhere.test.ts).`,
-      "names a file that does not exist",
+      "a relative demonstration link",
+      "Demonstrated by: [x](../test/engine/layers.test.ts).",
+      `line 3: "../test/engine/layers.test.ts" is not a ${REPO_FILE_URL} link`,
     ],
-    ["no link at all", "Demonstrated by: the layers test.", "links nothing"],
-  ])("rejects a demonstration with %s", (_case, tail, error) => {
-    const problems = diagramProblems(page("src/engine/layers.ts", tail), ROOT);
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain(error);
+    [
+      "a demonstration link to a missing file",
+      `Demonstrated by: [x](${REPO_FILE_URL}test/engine/nowhere.test.ts).`,
+      `line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`,
+    ],
+    [
+      "a demonstration line linking nothing",
+      "Demonstrated by: the layers test.",
+      'line 3: the "Demonstrated by:" line links nothing',
+    ],
+  ])("rejects a concept diagram with %s", (_case, tail, error) => {
+    expect(diagramProblems(page("src/engine/layers.ts", tail), ROOT)).toEqual([error]);
   });
 
   test("a diagram inside a generated region needs no demonstration line", () => {

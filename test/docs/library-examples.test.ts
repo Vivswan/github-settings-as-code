@@ -158,8 +158,9 @@ describe(`${PAGE} examples`, () => {
     expect(await compileExamples(markdown, PAGE)).toEqual([]);
   });
 
-  // Each fence is one slip the page could ship; the pinned list is what tsc must say about it,
-  // by page line. A syntax slip stops tsc before its semantic pass, so it is its own case.
+  // Each fence is one slip the page could ship; the pinned list is what tsc must say about it, by page line, and the
+  // messages are the diagnostics whose text must be carried through. A syntax slip stops tsc before its semantic pass,
+  // so it is its own case.
   const semanticSlips = [
     "# Page",
     "",
@@ -204,7 +205,7 @@ describe(`${PAGE} examples`, () => {
     "```",
     "",
   ];
-  test.each<[string, string[], string[]]>([
+  test.each<[string, string[], string[], RegExp[]]>([
     [
       "a .value read off a Result, an undeclared name, a missing export aliased onto an imported name, a multi-line import",
       semanticSlips,
@@ -216,20 +217,20 @@ describe(`${PAGE} examples`, () => {
         "page.md:18: TS2305",
         "page.md:28: TS2322",
       ],
+      [/^page\.md:14: TS2339: Property 'value' does not exist on type 'Result</],
     ],
-    ["a doubled comma in an import", syntaxSlip, ["page.md:2: TS1003"]],
-    ["a name imported twice", doubledName, ["page.md:2: TS2300", "page.md:2: TS2300"]],
-  ])("%s fails with the page line and the TypeScript code", async (_slips, lines, expected) => {
-    const problems = await compileExamples(lines.join("\n"), "page.md");
-    expect(problems.map((problem) => problem.split(": ").slice(0, 2).join(": ")).sort()).toEqual(
-      expected.sort(),
-    );
-  });
-
-  test("the .value read is reported as the property TypeScript cannot find on the Result", async () => {
-    const problems = await compileExamples(semanticSlips.join("\n"), "page.md");
-    expect(problems.find((problem) => problem.startsWith("page.md:14: TS2339"))).toMatch(
-      /TS2339: Property 'value' does not exist on type 'Result</,
-    );
-  });
+    ["a doubled comma in an import", syntaxSlip, ["page.md:2: TS1003"], []],
+    ["a name imported twice", doubledName, ["page.md:2: TS2300", "page.md:2: TS2300"], []],
+  ])(
+    "%s fails with the page line and the TypeScript code",
+    async (_slips, lines, expected, messages) => {
+      const problems = await compileExamples(lines.join("\n"), "page.md");
+      expect(problems.map((problem) => problem.split(": ").slice(0, 2).join(": ")).sort()).toEqual(
+        expected.sort(),
+      );
+      for (const message of messages) {
+        expect(problems).toContainEqual(expect.stringMatching(message));
+      }
+    },
+  );
 });

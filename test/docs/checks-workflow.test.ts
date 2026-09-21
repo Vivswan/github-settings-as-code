@@ -220,17 +220,24 @@ describe("checks.yml release PR branch spelling", () => {
     expectReleasePrefixes(parseYaml(text) as Workflow);
   });
 
-  test("a drifted spelling fails the guard (negative control)", () => {
-    const drifted = text.replaceAll(`'${RELEASE_PR_BRANCH_PREFIX}'`, "'release-pls--'");
-    expect(() => expectReleasePrefixes(parseYaml(drifted) as Workflow)).toThrow();
-  });
-
-  test("a missing anchor-check step fails the guard (negative control)", () => {
-    const wf = parseYaml(text) as Workflow;
-    for (const job of Object.values(wf.jobs)) {
-      job.steps = job.steps?.filter((step) => !(step.run ?? "").includes("anchor-check"));
-    }
-    expect(() => expectReleasePrefixes(wf)).toThrow();
+  test.each<[string, (text: string) => Workflow]>([
+    [
+      "a drifted spelling",
+      (text) =>
+        parseYaml(text.replaceAll(`'${RELEASE_PR_BRANCH_PREFIX}'`, "'release-pls--'")) as Workflow,
+    ],
+    [
+      "a missing anchor-check step",
+      (text) => {
+        const wf = parseYaml(text) as Workflow;
+        for (const job of Object.values(wf.jobs)) {
+          job.steps = job.steps?.filter((step) => !(step.run ?? "").includes("anchor-check"));
+        }
+        return wf;
+      },
+    ],
+  ])("%s fails the guard (negative control)", (_case, mutate) => {
+    expect(() => expectReleasePrefixes(mutate(text))).toThrow();
   });
 });
 
