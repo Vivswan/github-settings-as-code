@@ -46,10 +46,6 @@ function duplicateIn(list: unknown): string | null {
   return null;
 }
 
-function isPlainMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // --- Actor holders: restrictions, dismissal_restrictions, bypass_pull_request_allowances --------
 
 const ACTOR_LIST_EXAMPLE = {
@@ -60,7 +56,7 @@ const ACTOR_LIST_EXAMPLE = {
 type ActorList = keyof typeof ACTOR_LIST_EXAMPLE;
 
 function copiedActorName(item: unknown): string | null {
-  if (!isPlainMapping(item)) {
+  if (!isMapping(item)) {
     return null;
   }
   for (const nameKey of ["login", "slug"] as const) {
@@ -254,7 +250,7 @@ function refuseGetOnlyKeys(
   refineCtx: z.RefinementCtx,
   ancestors: Set<object> = new Set(),
 ): void {
-  if (!Array.isArray(value) && !isPlainMapping(value)) {
+  if (!Array.isArray(value) && !isMapping(value)) {
     return;
   }
   if (ancestors.has(value)) {

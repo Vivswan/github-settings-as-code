@@ -84,7 +84,7 @@ function isEmptySetting(key: string, value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (isPlainMapping(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
+  if (isMapping(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
     const keys = Object.keys(value);
     return (
       keys.length > 0 &&
@@ -109,7 +109,7 @@ function omittedLiveDrift(
     const keyPath = path === "" ? key : `${path}.${key}`;
     if (Object.hasOwn(declared, key)) {
       const inner = declared[key];
-      if (isPlainMapping(inner) && isPlainMapping(value)) {
+      if (isMapping(inner) && isMapping(value)) {
         drift.push(...omittedLiveDrift(inner, value, prefix, keyPath));
       }
       continue;
@@ -126,10 +126,6 @@ function omittedLiveDrift(
     );
   }
   return drift;
-}
-
-function isPlainMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const permission: SectionPermission = { repo: ["administration"] };
@@ -216,7 +212,7 @@ export const branchesSection = {
       ];
       for (const [key, twins] of nested) {
         const value = protection[key];
-        if (!isPlainMapping(value)) {
+        if (!isMapping(value)) {
           continue;
         }
         for (const subKey of Object.keys(value)) {
@@ -419,7 +415,7 @@ async function planLiteralEntry(
         payload[key] = null;
       }
     }
-    if (isPlainMapping(payload.required_status_checks)) {
+    if (isMapping(payload.required_status_checks)) {
       payload.required_status_checks = putStatusChecks(payload.required_status_checks);
     }
     let live: Record<string, unknown> | null = null;
@@ -541,7 +537,7 @@ async function planLiteralEntry(
 export function flattenProtection(live: Record<string, unknown>): Record<string, unknown> {
   const out = flattenValue(live) as Record<string, unknown>;
   const checks = out.required_status_checks;
-  if (isPlainMapping(checks)) {
+  if (isMapping(checks)) {
     out.required_status_checks = putStatusChecks(checks);
   }
   return out;
@@ -559,12 +555,12 @@ function putStatusChecks<T extends Record<string, unknown>>(status: T): T {
     return status;
   }
   const checks = status.checks.map((check) =>
-    isPlainMapping(check) && check.app_id === null ? { ...check, app_id: -1 } : check,
+    isMapping(check) && check.app_id === null ? { ...check, app_id: -1 } : check,
   );
   const contexts = Array.isArray(status.contexts)
     ? status.contexts
     : checks.flatMap((check) =>
-        isPlainMapping(check) && typeof check.context === "string" ? [check.context] : [],
+        isMapping(check) && typeof check.context === "string" ? [check.context] : [],
       );
   return { ...status, checks, contexts };
 }
@@ -583,7 +579,7 @@ function foldActorNames(protection: Record<string, unknown>): Record<string, unk
     if (ACTOR_LIST_KEYS.has(key) && Array.isArray(value)) {
       out[key] = value.map((name) => (typeof name === "string" ? name.toLowerCase() : name));
     } else {
-      out[key] = isPlainMapping(value) ? foldActorNames(value) : value;
+      out[key] = isMapping(value) ? foldActorNames(value) : value;
     }
   }
   return out;
@@ -602,7 +598,7 @@ const REVIEW_ACTOR_HOLDER_SET: ReadonlySet<string> = new Set(REVIEW_ACTOR_HOLDER
  */
 function withEmptyReviewHolders(live: Record<string, unknown>): Record<string, unknown> {
   const reviews = live.required_pull_request_reviews;
-  if (!isPlainMapping(reviews)) {
+  if (!isMapping(reviews)) {
     return live;
   }
   const filled = { ...reviews };
