@@ -17,13 +17,12 @@ import { assertGraphqlHandlerCompleteness } from "./handlers.js";
 import { mintNodeId } from "./node-id.js";
 import { handleGraphqlRequest, runPipeline } from "./routes.js";
 import { type MockHandle, startMockServer } from "./server.js";
+import { AUTH } from "./server-test-support.js";
 import { buildMultiState, buildState } from "./state.js";
 import type { GraphqlHandlerContext, GraphqlHandlerResult } from "./support.js";
 
 type Json = Record<string, unknown>;
 type GraphqlHandler = (ctx: GraphqlHandlerContext) => GraphqlHandlerResult;
-
-const AUTH = { authorization: "Bearer test-token", "x-github-api-version": "2022-11-28" };
 
 function scenario(overrides: Partial<Scenario> = {}): Scenario {
   return parseScenario(
@@ -178,25 +177,24 @@ describe("GraphQL dispatch and logging", () => {
     expect(isWriteRequest(result.log)).toBe(true);
   });
 
-  test("a single-mode mutation without a decodable node id is a violation", () => {
-    // The node-id contract binds in EVERY mode, or a section could look
-    // green against the single-repo harness and only fail under multi.
-    const result = dispatch(
-      G_WRITE,
-      { repositoryId: "R_kgDOnotOurs", hasWiki: true },
-      options(scenario()),
-    );
-    expect(result.violation).toContain("carries no decodable mock node id");
-  });
-
-  test("a single-mode mutation naming a foreign slug is a violation", () => {
-    const result = dispatch(
-      G_WRITE,
-      { repositoryId: mintNodeId("repo", "acme/other", ""), hasWiki: true },
-      options(scenario()),
-    );
-    expect(result.violation).toContain('node ids of "acme/other"');
-    expect(result.violation).toContain(`serves only "${ADMIN_SLUG}"`);
+  // The node-id contract binds in EVERY mode, or a section could look
+  // green against the single-repo harness and only fail under multi.
+  test.each([
+    {
+      name: "without a decodable node id",
+      repositoryId: "R_kgDOnotOurs",
+      violation: ["carries no decodable mock node id"],
+    },
+    {
+      name: "naming a foreign slug",
+      repositoryId: mintNodeId("repo", "acme/other", ""),
+      violation: ['node ids of "acme/other"', `serves only "${ADMIN_SLUG}"`],
+    },
+  ])("a single-mode mutation $name is a violation", ({ repositoryId, violation }) => {
+    const result = dispatch(G_WRITE, { repositoryId, hasWiki: true }, options(scenario()));
+    for (const fragment of violation) {
+      expect(result.violation).toContain(fragment);
+    }
   });
 
   test("sectionForRequest attributes a /graphql request through its body", () => {

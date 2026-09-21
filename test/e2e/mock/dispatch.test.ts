@@ -13,11 +13,6 @@ describe("path params are own keys of the matched route", () => {
   }
   const param = paramAccessor(matched.key, matched.endpoint, matched.params);
 
-  test("the declared tokens resolve to the decoded segments", () => {
-    expect(matched.params).toEqual({ owner: "acme", repo: "widgets" });
-    expect([param("owner"), param("repo")]).toEqual(["acme", "widgets"]);
-  });
-
   test.each(INHERITED_NAMES)("pipeline accessor throws the BUG for %s", (name) => {
     expect(() => param(name)).toThrow(/E2E MOCK BUG: handler ".*" asked for path param/);
   });

@@ -84,27 +84,32 @@ describe("an undocumented key on an open body is dropped before the handler", ()
 });
 
 describe("an undocumented key on a closed body is GitHub's 422", () => {
-  test("the code scanning setup PATCH names the key and stores nothing", async () => {
-    const h = await start(scenario({ live_state: { code_scanning: { state: "not-configured" } } }));
-    const res = await call(h, "PATCH", `${repoPath}/code-scanning/default-setup`, {
+  const seeded = { state: "not-configured" };
+  test.each([
+    {
+      name: "the code scanning setup PATCH names the key",
+      stateKey: "code_scanning",
+      path: `${repoPath}/code-scanning/default-setup`,
       body: { state: "configured", query_suit: "extended" },
-    });
-    expect(res.status).toBe(422);
-    expect((await json(res)).message).toBe(
-      'Invalid request.\n\n"query_suit" is not a permitted key.',
+      message: 'Invalid request.\n\n"query_suit" is not a permitted key.',
+    },
+    {
+      name: "the code quality setup PATCH lists several unknown keys together",
+      stateKey: "code_quality",
+      path: `${repoPath}/code-quality/setup`,
+      body: { state: "configured", a: 1, b: 2 },
+      message: 'Invalid request.\n\n"a", "b" are not permitted keys.',
+    },
+  ] as const)("$name and stores nothing", async ({ stateKey, path, body, message }) => {
+    const h = await start(
+      scenario({ live_state: { code_scanning: seeded, code_quality: seeded } }),
     );
-    expect(singleState(h).code_scanning).toEqual({ state: "not-configured" });
+    const res = await call(h, "PATCH", path, { body });
+    expect(res.status).toBe(422);
+    expect((await json(res)).message).toBe(message);
+    expect(singleState(h)[stateKey]).toEqual(seeded);
     // The body is deliberately off the request schema, so the validator skips only that check.
     expect(h.requests.find((r) => r.method === "PATCH")?.requestOffSpec).toBe(true);
-  });
-
-  test("several unknown keys are listed together", async () => {
-    const h = await start(scenario());
-    const res = await call(h, "PATCH", `${repoPath}/code-quality/setup`, {
-      body: { state: "configured", a: 1, b: 2 },
-    });
-    expect(res.status).toBe(422);
-    expect((await json(res)).message).toBe('Invalid request.\n\n"a", "b" are not permitted keys.');
   });
 
   test("an environment PUT with a GET-shape key is refused instead of stored", async () => {

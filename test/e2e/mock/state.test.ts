@@ -13,7 +13,7 @@ import {
 import { flattenProtection } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
-import { roleForPermission } from "../../../src/sections/shared/roles.js";
+import { DEFAULT_ROLE, roleForPermission } from "../../../src/sections/shared/roles.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "../../../src/sections/teams/mock.js";
 import { genScenario } from "../generators.js";
 import { Rng } from "../prng.js";
@@ -427,25 +427,17 @@ describe("environmentFromPut round trip", () => {
 });
 
 describe("collaborator and team transformers map permission to role_name", () => {
-  test("collaboratorFromPut uses roleForPermission", () => {
-    const get = collaboratorFromPut("alice", { permission: "push" });
-    expect(get.login).toBe("alice");
-    expect(get.role_name).toBe(roleForPermission("push"));
-    expect(get.role_name).toBe("write");
-  });
-
-  test("collaboratorFromPut defaults to push when permission is absent", () => {
-    expect(collaboratorFromPut("bob", {}).role_name).toBe("write");
-  });
-
-  test("custom org role names pass through untouched", () => {
-    expect(collaboratorFromPut("carol", { permission: "security-team" }).role_name).toBe(
-      "security-team",
-    );
-  });
-
-  test("teamRepoFromPut maps pull to read", () => {
-    expect(teamRepoFromPut({ permission: "pull" })).toEqual({ role_name: "read" });
+  // Both route through roleForPermission with the sections' shared push default; a custom org role
+  // name passes through untouched.
+  test.each<[{ permission?: string }, string]>([
+    [{ permission: "push" }, "write"],
+    [{}, "write"],
+    [{ permission: "security-team" }, "security-team"],
+    [{ permission: "pull" }, "read"],
+  ])("%o -> %s", (payload, role_name) => {
+    expect(roleForPermission(payload.permission ?? DEFAULT_ROLE)).toBe(role_name);
+    expect(collaboratorFromPut("alice", payload)).toMatchObject({ login: "alice", role_name });
+    expect(teamRepoFromPut(payload)).toEqual({ role_name });
   });
 });
 
@@ -546,29 +538,31 @@ describe("completeInvitation", () => {
 });
 
 describe("bypassUser", () => {
-  test("a sparse seed keeps its login and takes the caller's id", () => {
-    expect(bypassUser({ login: "dave" }, 42)).toMatchObject({
-      id: 42,
-      login: "dave",
-      html_url: "https://github.com/dave",
-    });
-  });
-
-  test("a seeded id wins over the caller's and drives the derived fields", () => {
-    const completed = bypassUser({ login: "x", id: 5 }, 99) as Record<string, unknown>;
-    expect(completed.id).toBe(5);
-    expect(completed.node_id).toBe("MDQ6VXNlcj5");
-    expect(completed.avatar_url).toBe("https://avatars.githubusercontent.com/u/5?v=4");
-  });
-
-  test("a seed's own scaffold fields win over the defaults", () => {
-    const completed = bypassUser(
+  test.each<[string, Record<string, unknown>, number, Record<string, unknown>]>([
+    [
+      "a sparse seed keeps its login and takes the caller's id",
+      { login: "dave" },
+      42,
+      { id: 42, login: "dave", html_url: "https://github.com/dave" },
+    ],
+    [
+      "a seeded id wins over the caller's and drives the derived fields",
+      { login: "x", id: 5 },
+      99,
+      {
+        id: 5,
+        node_id: "MDQ6VXNlcj5",
+        avatar_url: "https://avatars.githubusercontent.com/u/5?v=4",
+      },
+    ],
+    [
+      "a seed's own scaffold fields win over the defaults",
       { login: "bot", type: "Bot", site_admin: true, url: "https://example.test/bot" },
       7,
-    ) as Record<string, unknown>;
-    expect(completed.type).toBe("Bot");
-    expect(completed.site_admin).toBe(true);
-    expect(completed.url).toBe("https://example.test/bot");
+      { type: "Bot", site_admin: true, url: "https://example.test/bot" },
+    ],
+  ])("%s", (_name, seed, id, expected) => {
+    expect(bypassUser(seed, id)).toMatchObject(expected);
   });
 
   test("buildState completes pull_bypass_list seeds to the served shape", () => {
@@ -582,18 +576,11 @@ describe("bypassUser", () => {
 });
 
 describe("mock node ids", () => {
-  test("mint/decode round-trips family, slug, and key", () => {
-    const id = mintNodeId("environment", "acme/api.service-1", "prod");
-    expect(decodeNodeId(id)).toEqual({
-      family: "environment",
-      slug: "acme/api.service-1",
-      key: "prod",
-    });
-  });
-
-  test("a key containing colons survives the round trip", () => {
-    const id = mintNodeId("rule", "o/r", "branch:main:pattern");
-    expect(decodeNodeId(id)?.key).toBe("branch:main:pattern");
+  test.each([
+    ["environment", "acme/api.service-1", "prod"],
+    ["rule", "o/r", "branch:main:pattern"],
+  ] as const)("mint/decode round-trips a %s id for %s with key %s", (family, slug, key) => {
+    expect(decodeNodeId(mintNodeId(family, slug, key))).toEqual({ family, slug, key });
   });
 
   test("foreign ids do not decode", () => {
