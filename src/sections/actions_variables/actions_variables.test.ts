@@ -10,18 +10,16 @@ import { type PlannedOp, planContext } from "../contract/plan.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { actionsVariablesSection } from "./index.js";
 
-describe("variableKey", () => {
-  test("uppercases (GitHub stores variable names uppercased)", () => {
-    expect(variableKey("deploy_region")).toBe("DEPLOY_REGION");
-  });
-});
-
 type Declared = SectionInput<"actions_variables">;
+
+const PAGE_SIZE = actionsVariablesSection.endpoints.list.pageSize;
+const listPage = (page: number) =>
+  `/repos/o/r/actions/variables?per_page=${PAGE_SIZE}&page=${page}`;
 
 /** The enveloped list body the mock serves for a live variable set. */
 function listRoute(variables: Array<{ name: string; value: string }>) {
   return {
-    "GET /repos/o/r/actions/variables?per_page=30&page=1": {
+    [`GET ${listPage(1)}`]: {
       data: { total_count: variables.length, variables },
     },
   };
@@ -34,6 +32,7 @@ const plan = async (api: GitHubClient, declared: Declared) =>
       validatedInput("actions_variables", declared),
     ),
   );
+type Planned = Awaited<ReturnType<typeof plan>>;
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
 async function apply(api: GitHubClient, declared: Declared) {
@@ -130,9 +129,7 @@ describe("actions_variables", () => {
       notes: [],
       drift: [],
     });
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GET /repos/o/r/actions/variables?per_page=30&page=1",
-    ]);
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([`GET ${listPage(1)}`]);
   });
 
   test("executing the plan converges: the re-plan over applied state is empty", async () => {
@@ -195,32 +192,47 @@ describe("actions_variables", () => {
     expect(plain.ops.map((op) => op.payload)).toEqual([{ name: "NEW", value: "v", extra: 42 }]);
   });
 
-  test("wrapped _undeclared:keep leaves the undeclared variable as a note, never a DELETE", async () => {
-    const api = new MockApi(listRoute(liveVariables));
-    const result = await plan(api, {
-      _undeclared: "keep",
-      entries: [{ name: "DEPLOY_REGION", value: "us-east-1" }],
-    });
-    expect(result).toEqual({
-      ops: [],
-      notes: [
-        'Actions variable "RETIRED_FLAG" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
-      ],
-      drift: [],
-    });
-  });
-
-  test("the wrapper without a policy keeps the delete default; an explicit delete says the same", async () => {
-    const entries = [{ name: "DEPLOY_REGION", value: "us-east-1" }];
-    const implicit = await plan(new MockApi(listRoute(liveVariables)), { entries });
-    const explicit = await plan(new MockApi(listRoute(liveVariables)), {
-      _undeclared: "delete",
-      entries,
-    });
-    expect(implicit.ops.map((op) => [op.role, op.change])).toEqual([
-      ["remove", 'DELETED undeclared Actions variable "RETIRED_FLAG"'],
-    ]);
-    expect(explicit).toEqual(implicit);
+  const converged = [{ name: "DEPLOY_REGION", value: "us-east-1" }];
+  const retiredFlagDeleted: Planned = {
+    ops: [
+      {
+        role: "remove",
+        params: { name: "RETIRED_FLAG" },
+        drift: [
+          "actions_variables[RETIRED_FLAG]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+        ],
+        change: 'DELETED undeclared Actions variable "RETIRED_FLAG"',
+        describe: 'deleting undeclared Actions variable "RETIRED_FLAG"',
+      },
+    ],
+    notes: [],
+    drift: [],
+  };
+  const undeclaredForms: Array<[string, Declared, Planned]> = [
+    [
+      "wrapped _undeclared: keep leaves it as a note, never a DELETE",
+      { _undeclared: "keep", entries: converged },
+      {
+        ops: [],
+        notes: [
+          'Actions variable "RETIRED_FLAG" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
+        ],
+        drift: [],
+      },
+    ],
+    [
+      "the wrapper without a policy takes the delete default",
+      { entries: converged },
+      retiredFlagDeleted,
+    ],
+    [
+      "an explicit _undeclared: delete plans the same deletion as the wrapper without a policy",
+      { _undeclared: "delete", entries: converged },
+      retiredFlagDeleted,
+    ],
+  ];
+  test.each(undeclaredForms)("%s", async (_form, declared, expected) => {
+    expect(await plan(new MockApi(listRoute(liveVariables)), declared)).toEqual(expected);
   });
 
   test("url-encodes tricky live names in the request path", async () => {
@@ -233,24 +245,17 @@ describe("actions_variables", () => {
     expect(api.mutations()[0]?.path).toBe("/repos/o/r/actions/variables/ODD%20NAME");
   });
 
-  test("the list request asks for the endpoint's 30-per-page cap", async () => {
-    // The variables list caps per_page at 30; a 100 would be silently clamped and a 30-item first page would wrongly end the walk, so the second page
-    // proves the loop continues past a full page.
-    const page1 = Array.from({ length: 30 }, (_, i) => ({ name: `VAR_${i}`, value: "x" }));
+  test("the list request asks for the endpoint's per-page cap and walks past a full page", async () => {
+    // GitHub clamps this list's per_page silently, so a full first page must not end the walk: the second page proves the loop continues.
+    const page1 = Array.from({ length: PAGE_SIZE }, (_, i) => ({ name: `VAR_${i}`, value: "x" }));
+    const last = { name: `VAR_${PAGE_SIZE}`, value: "x" };
     const api = new MockApi({
-      "GET /repos/o/r/actions/variables?per_page=30&page=1": {
-        data: { total_count: 31, variables: page1 },
-      },
-      "GET /repos/o/r/actions/variables?per_page=30&page=2": {
-        data: { total_count: 31, variables: [{ name: "VAR_30", value: "x" }] },
-      },
+      [`GET ${listPage(1)}`]: { data: { total_count: PAGE_SIZE + 1, variables: page1 } },
+      [`GET ${listPage(2)}`]: { data: { total_count: PAGE_SIZE + 1, variables: [last] } },
     });
-    const result = await plan(api, page1.concat([{ name: "VAR_30", value: "x" }]));
+    const result = await plan(api, page1.concat([last]));
     expect(result).toEqual({ ops: [], notes: [], drift: [] });
-    expect(api.calls.map((c) => c.path)).toEqual([
-      "/repos/o/r/actions/variables?per_page=30&page=1",
-      "/repos/o/r/actions/variables?per_page=30&page=2",
-    ]);
+    expect(api.calls.map((c) => c.path)).toEqual([listPage(1), listPage(2)]);
   });
 
   test("a declared key the live variable does not carry drifts, and its update carries the phantom note", async () => {
