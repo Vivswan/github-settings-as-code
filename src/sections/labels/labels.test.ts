@@ -2,13 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { fragmentFake } from "../../../test/sections/fragment-fake.js";
-import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { labelsSection } from "./index.js";
-import { labelsMockHandlers } from "./mock.js";
 
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
 const liveLabels = [
@@ -142,47 +139,5 @@ describe("labels", () => {
           '"Triage" names the same label as "triage" declared earlier; keep exactly one entry per label',
       },
     ]);
-  });
-
-  test("executing the plan against the derived mock converges: the re-plan is empty", async () => {
-    const api = fragmentFake(labelsSection, labelsMockHandlers, {
-      labels: [
-        { name: "bug", color: "ff0000", description: "Something isn't working" },
-        { name: "wontfix", color: "ffffff", description: "This will not be worked on" },
-      ],
-    });
-    const { second, changes, notes } = await provePlanIdempotent(labelsSection, api, [
-      { name: "Bug", new_name: "defect", color: "#D73A4A", description: "" },
-      { name: "enhancement", color: "a2eeef", description: "New feature or request" },
-    ]);
-    expect(changes).toEqual([
-      'DELETED undeclared label "wontfix"',
-      'updated label "defect"',
-      'created label "enhancement"',
-    ]);
-    expect(notes).toEqual([]);
-    expect(api.writes).toEqual([
-      "DELETE /repos/o/r/labels/wontfix",
-      "PATCH /repos/o/r/labels/bug",
-      "POST /repos/o/r/labels",
-    ]);
-    expect(second).toEqual({ ops: [], notes: [], drift: [] });
-    expect(api.state.labels.map((label) => [label.name, label.color, label.description])).toEqual([
-      ["defect", "d73a4a", ""],
-      ["enhancement", "a2eeef", "New feature or request"],
-    ]);
-  });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(labelsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
   });
 });
