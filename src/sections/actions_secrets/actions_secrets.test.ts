@@ -276,33 +276,40 @@ describe("actions_secrets execution", () => {
     }
   });
 
-  test("the sealed PUT recurs on every plan by declaration; deletions and creates converge", async () => {
+  test("the sealed PUT recurs on every plan by declaration; the deletion converges, and a created secret is an update on the next plan with its missing drift gone", async () => {
     // No compare is possible (values cannot be read back), and the rewrite is what propagates a rotated source value, so the PUT fires on every pass.
     const api = liveRepo(["ROTATED", "STALE"]);
     const { first, second, changes } = await provePlanIdempotent(
       actionsSecretsSection,
       api,
-      { _undeclared: "delete", entries: [{ name: "rotated", value: "$R" }] },
-      tools({ $R: "new-plaintext" }),
+      {
+        _undeclared: "delete",
+        entries: [
+          { name: "rotated", value: "$R" },
+          { name: "NEW", value: "$N" },
+        ],
+      },
+      tools({ $R: "new-plaintext", $N: "n" }),
     );
-    expect(changes).toEqual(['updated secret "ROTATED"', 'DELETED undeclared secret "STALE"']);
-    expect(first.ops.map((op) => op.role)).toEqual(["put", "remove"]);
-    expect(second.ops.map((op) => op.role)).toEqual(["put"]);
-    // provePlanIdempotent executes the converged plan too, hence the second PUT.
+    expect(changes).toEqual([
+      'updated secret "ROTATED"',
+      'created secret "NEW"',
+      'DELETED undeclared secret "STALE"',
+    ]);
+    expect(first.ops.map((op) => op.role)).toEqual(["put", "put", "remove"]);
+    expect(first.ops[1]?.drift).toEqual([expect.stringContaining("missing")]);
+    expect(second.ops.map((op) => [op.role, op.drift, op.change])).toEqual([
+      ["put", [], 'updated secret "ROTATED"'],
+      ["put", [], 'updated secret "NEW"'],
+    ]);
+    // provePlanIdempotent executes the converged plan too, hence the second round of PUTs.
     expect(api.writes).toEqual([
       "PUT /repos/o/r/actions/secrets/ROTATED",
+      "PUT /repos/o/r/actions/secrets/NEW",
       "DELETE /repos/o/r/actions/secrets/STALE",
       "PUT /repos/o/r/actions/secrets/ROTATED",
+      "PUT /repos/o/r/actions/secrets/NEW",
     ]);
-  });
-
-  test("a created secret is an update on the next plan, its missing drift gone", async () => {
-    const api = liveRepo([]);
-    const created = await apply(api, [{ name: "NEW", value: "$N" }], tools({ $N: "n" }));
-    expect(created.plan.ops.map((op) => op.drift)).toEqual([[expect.stringContaining("missing")]]);
-    expect(created.changes).toEqual(['created secret "NEW"']);
-    const again = await plan(api, [{ name: "NEW", value: "$N" }]);
-    expect(again.ops.map((op) => [op.drift, op.change])).toEqual([[[], 'updated secret "NEW"']]);
   });
 
   test("undeclared secrets: kept with a note by default, DELETED under the knob without a resolver", async () => {
