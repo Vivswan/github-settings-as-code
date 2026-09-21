@@ -108,6 +108,67 @@ describe("foldLayers", () => {
       ]),
     );
   });
+  test.each<[string, Record<string, unknown>, string]>([
+    [
+      "a plain list",
+      {
+        labels: [
+          { name: "bug", _remove: true },
+          { name: "new", color: null },
+        ],
+      },
+      "labels[1].color",
+    ],
+    [
+      "an {_layering, entries} wrapper",
+      {
+        labels: {
+          _layering: "deep",
+          entries: [
+            { name: "bug", _remove: true },
+            { name: "new", color: null },
+          ],
+        },
+      },
+      "labels.entries[1].color",
+    ],
+    [
+      "a nested list",
+      {
+        environments: [
+          {
+            name: "prod",
+            variables: [
+              { name: "REGION", _remove: true },
+              { name: "ZONE", value: null },
+            ],
+          },
+        ],
+      },
+      "environments[0].variables[1].value",
+    ],
+  ])(
+    "a layer's own issue names the entry by its index in the file as written, removal entries counted, in %s",
+    (_case, doc, path) => {
+      const fleet = {
+        name: "fleet.yml",
+        doc: {
+          labels: [{ name: "bug", color: "111111" }],
+          environments: [{ name: "prod", variables: [{ name: "REGION", value: "eu" }] }],
+        },
+      };
+      expect(
+        foldLayers(
+          [fleet, { name: "repo.yml", doc }],
+          "merged",
+          { layering: "deep" },
+          silentIo(),
+        ).match(() => null, describeProblem),
+      ).toStartWith(
+        `repo.yml has malformed section entries: ${path} has no empty state; write a string.`,
+      );
+    },
+  );
 
   test("a malformed marker inside a closed entry schema is the fold's refusal, not the layer's own unknown-key problem", () => {
     // Per-layer validation runs before the fold, and an environment secret's schema is closed: were the marker left in

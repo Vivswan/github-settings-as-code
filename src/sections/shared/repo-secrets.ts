@@ -173,7 +173,6 @@ type _SharedPlanIsEveryFamilyPlan = MustBeNever<
  */
 const CLOSED_SURFACE = {
   known: { name: true, value: true },
-  describe: (entry: SecretEntry) => entry.name,
   consequence: "the API body carries only the sealed value, so the key would silently do nothing",
 } satisfies ClosedSurfaceOf<"actions_secrets"> &
   ClosedSurfaceOf<"dependabot_secrets"> &

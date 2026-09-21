@@ -179,7 +179,7 @@ export function validateSettingsDoc(
     sourceLabel,
   );
   if (shapes.isErr()) {
-    issues.push(...shapes.error.issues);
+    issues.push(...shapes.error.issues.map(removals.asWritten));
   }
   if (issues.length > 0) {
     return err({ code: "settings-malformed-sections", source: sourceLabel, issues });

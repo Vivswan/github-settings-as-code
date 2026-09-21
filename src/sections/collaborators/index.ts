@@ -144,7 +144,6 @@ export const collaboratorsSection = {
   // The PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { username: true, permission: true },
-    describe: (c) => c.username,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
   // Logins are case-insensitive on GitHub, the fold every lookup below uses.

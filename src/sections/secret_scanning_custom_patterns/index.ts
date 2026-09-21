@@ -178,7 +178,6 @@ export const secretScanningPatternsSection = {
       must_match: true,
       must_not_match: true,
     },
-    describe: (p) => p.name,
     consequence:
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },

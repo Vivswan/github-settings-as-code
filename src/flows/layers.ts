@@ -42,6 +42,19 @@ export interface FoldedLayers {
 }
 
 /**
+ * One layer judged on its own, over its standalone view; an issue's list indices are the layer's own, so the path
+ * names the entry the reader finds in the file, removal entries counted, as the fold's notices count them.
+ */
+function validateLayer(layer: Layer, io: Io): Result<ValidatedSettings, SettingsProblem> {
+  const view = standaloneView(layer.doc);
+  return validateSettingsDoc(view.doc, layer.name, EVERY_SECTION, io).mapErr((problem) =>
+    problem.code === "settings-malformed-sections"
+      ? { ...problem, issues: problem.issues.map(view.asWritten) }
+      : problem,
+  );
+}
+
+/**
  * A layer must be a valid document before it may contribute, so the merge can never complete a broken declaration into
  * a valid one. The fold, not the validated parse, is what is written: the file holds what the layers declared, and
  * validation only judges it.
@@ -52,11 +65,7 @@ export function foldLayers(
   options: FoldOptions,
   io: Io,
 ): Result<FoldedLayers, SettingsProblem | LayerProblem> {
-  return Result.combine(
-    layers.map((layer) =>
-      validateSettingsDoc(standaloneView(layer.doc), layer.name, EVERY_SECTION, io),
-    ),
-  )
+  return Result.combine(layers.map((layer) => validateLayer(layer, io)))
     .andThen(() => mergeLayers(layers, options))
     .andThen((merged) =>
       // The fold resolved every policy already, so the run input changes nothing here; passed so the two paths read alike.

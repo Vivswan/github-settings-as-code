@@ -3,12 +3,16 @@
 import { err, ok, type Result } from "neverthrow";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
-import { LIST_SECTIONS, SECTION_KEYS, type SettingsFile } from "../schema.js";
+import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import { checksReportingBesideFailures, type DeclaredIssue } from "../sections/contract/module.js";
-import { sectionModule, sectionShape } from "../sections/registry.js";
+import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
 
 const LIST_KEYS: ReadonlySet<string> = new Set(LIST_SECTIONS);
+
+function isListSection(key: string): key is ListSection {
+  return LIST_KEYS.has(key);
+}
 
 /** The value at an issue's path, so a null the author wrote can be told from a type the author got wrong. */
 function valueAt(root: unknown, path: readonly PropertyKey[]): unknown {
@@ -266,45 +270,52 @@ function fileOnlyProblems(key: (typeof SECTION_KEYS)[number], parsed: unknown): 
   return (module.validate?.(parsed) ?? []).map((issue) => `${key}${issue.path}: ${issue.message}`);
 }
 
-/** Only the entries are checked here, in either form; the wrapper's own keys are the section shape's strictObject to judge. */
+/**
+ * Only the entries are checked here, in either form; the wrapper's own keys are the section shape's strictObject to
+ * judge. An entry is named by its path as every other issue spells one (`collaborators[2]`, `.entries[2]` under a
+ * wrapper), a bracket always holding an index; its identity rides in the text (`(username "octocat")`), so an
+ * all-digit identity is never read as an index.
+ */
 function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unknown): string[] {
   // The registry's generic view erases the per-section entry typing, so the declaration is re-widened here.
   const closed = sectionModule(key).closedSurface as
-    | {
-        known: Readonly<Record<string, true>>;
-        describe: (entry: Record<string, unknown>) => string;
-        consequence: string;
-      }
+    | { known: Readonly<Record<string, true>>; consequence: string }
     | undefined;
-  if (closed === undefined) {
+  if (closed === undefined || !isListSection(key)) {
     return [];
   }
+  const wrapped =
+    typeof declared === "object" &&
+    declared !== null &&
+    Array.isArray((declared as Record<string, unknown>).entries);
   const entries = Array.isArray(declared)
     ? declared
-    : typeof declared === "object" &&
-        declared !== null &&
-        Array.isArray((declared as Record<string, unknown>).entries)
+    : wrapped
       ? ((declared as Record<string, unknown>).entries as unknown[])
       : null;
   if (entries === null) {
     return [];
   }
+  const { keyField } = listLayering(key);
   const knownKeys = Object.keys(closed.known);
   const known = new Set<string>(knownKeys);
   const problems: string[] = [];
-  for (const entry of entries) {
+  entries.forEach((entry, index) => {
     if (typeof entry !== "object" || entry === null) {
-      continue;
+      return;
     }
     const record = entry as Record<string, unknown>;
     const unknown = Object.keys(record).filter((k) => !known.has(k));
-    if (unknown.length > 0) {
-      const list = unknown.map((k) => `"${k}"`).join(", ");
-      problems.push(
-        `${key}[${closed.describe(record)}]: declares ${list}, which this section does not recognize (known keys: ${knownKeys.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
-      );
+    if (unknown.length === 0) {
+      return;
     }
-  }
+    const list = unknown.map((k) => `"${k}"`).join(", ");
+    // The shape parse passed, so the entry carries its key field in the form the schema admits.
+    const named = `(${keyField} ${JSON.stringify(record[keyField])})`;
+    problems.push(
+      `${key}${wrapped ? ".entries" : ""}[${index}] ${named}: declares ${list}, which this section does not recognize (known keys: ${knownKeys.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
+    );
+  });
   if (problems.length > 5) {
     return [
       ...problems.slice(0, 5),

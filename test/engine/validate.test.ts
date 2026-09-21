@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { validateSectionShapes } from "../../src/engine/validate.js";
-import type { SectionKey } from "../../src/schema.js";
-import { SECTIONS } from "../../src/sections/registry.js";
+import type { ListSection, SectionKey } from "../../src/schema.js";
+import { listLayering, SECTIONS } from "../../src/sections/registry.js";
 
 function issuesOf(doc: Record<string, unknown>, sourceLabel = "f.yml"): readonly string[] | null {
   return validateSectionShapes(doc, sourceLabel).match(
@@ -304,32 +304,36 @@ describe("closed-surface sections reject unrecognized entry keys upfront", () =>
             key: section.key,
             surface: section.closedSurface as {
               known: Readonly<Record<string, true>>;
-              describe: (entry: Record<string, unknown>) => string;
               consequence: string;
             },
+            keyField: listLayering(section.key as ListSection).keyField,
           },
         ],
   );
 
-  test("every closed section refuses a misspelled key, naming the key, its known keys, and its consequence; a correct entry passes", () => {
+  test("every closed section refuses a misspelled key by the entry's index and identity, naming the key, its known keys, and its consequence; a correct entry passes", () => {
     expect(Object.keys(ENTRIES).sort()).toEqual(closed.map((section) => section.key).sort());
-    for (const { key, surface } of closed) {
+    for (const { key, surface, keyField } of closed) {
       const entry = ENTRIES[key] as Record<string, unknown>;
       expect(validateSectionShapes({ [key]: [entry] }, "f.yml").isOk(), key).toBe(true);
       const misspelled = { ...entry, permision: "admin" };
       expect(issuesOf({ [key]: [misspelled] }), key).toEqual([
-        `${key}[${surface.describe(misspelled)}]: declares "permision", which this section does not recognize ` +
+        `${key}[0] (${keyField} ${JSON.stringify(entry[keyField])}): declares "permision", which this section does not recognize ` +
           `(known keys: ${Object.keys(surface.known).join(", ")}) - ${surface.consequence}. Fix the key name, or remove it`,
       ]);
     }
   });
 
-  test("closed-surface entry checks see through the wrapper (collaborators)", () => {
+  test("closed-surface entry checks see through the wrapper, spelled as every wrapper issue is (collaborators)", () => {
     expect(
       issuesOf({
         collaborators: { _undeclared: "keep", entries: [{ username: "alice", permision: "x" }] },
       }),
-    ).toEqual([expect.stringMatching(/^collaborators\[alice\]: declares "permision", /)]);
+    ).toEqual([
+      expect.stringMatching(
+        /^collaborators\.entries\[0\] \(username "alice"\): declares "permision", /,
+      ),
+    ]);
   });
 });
 

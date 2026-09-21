@@ -134,7 +134,6 @@ export const teamsSection = {
   // The grant PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { name: true, permission: true },
-    describe: (t) => t.name,
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
   // A team's slug is its lowercased name, the identity every lookup below uses.
