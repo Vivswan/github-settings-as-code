@@ -44,9 +44,9 @@ export function decodeBase64(text: string): Result<Uint8Array, "not canonical ba
  * libsodium's crypto_box_beforenm: the X25519 shared point through hsalsa20.
  * getSharedSecret throws on a low-order public key (an all-zero shared point),
  * like crypto_scalarmult's -1 that makes libsodium refuse the seal.
- * test/sections/sealed-box.test.ts pins the result against crypto_box_beforenm.
+ * test/sections/sealed-box.test.ts opens every seal with libsodium, which pins the derivation.
  */
-export function boxSharedKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
+function boxSharedKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
   const shared = x25519.getSharedSecret(secretKey, publicKey);
   const key = new Uint32Array(8);
   hsalsa(HSALSA_SIGMA, new Uint32Array(shared.slice().buffer), ZERO_INPUT, key);

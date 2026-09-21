@@ -11,7 +11,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ok } from "neverthrow";
 import type { GitHubClient } from "../../src/github/api.js";
-import type { SectionKey } from "../../src/schema.js";
+import { LIST_SECTIONS, type SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
 import { snapshotContext } from "../../src/sections/contract/plan.js";
 import { environmentsSection } from "../../src/sections/environments/index.js";
@@ -217,28 +217,24 @@ describe("snapshot round trip", () => {
     });
   });
 
-  test("sections without live state read back as nothing to declare", async () => {
-    // The mock's defaults: no Pages site, no limit with the cap disabled and nobody bypassing it,
-    // no custom property values, every list empty.
+  test("a section without live state reads back as nothing to declare, and only such a section does", async () => {
+    // The mock's defaults: every list empty, no Pages site, no limit with the cap disabled and nobody bypassing it. The
+    // other singletons (the repository, its Actions permissions, the two setup states) always exist, so they read back a value.
+    const absent = new Set<SectionKey>([...LIST_SECTIONS, "pages", "interaction_limits"]);
     const api = registryFake({});
-    for (const key of [
-      "labels",
-      "autolinks",
-      "actions_secrets",
-      "workflows",
-      "pages",
-      "milestones",
-      "interaction_limits",
-      "actions_variables",
-      "webhooks",
-      "custom_properties",
-      "deploy_keys",
-      "secret_scanning_custom_patterns",
-    ] as const) {
+    const read: unknown[] = [];
+    for (const key of declaring) {
       const { section } = (await loadRow(key)).row;
       const snapshot = unwrap(await section.snapshot(snapshotContext(section, api, REPO, "fail")));
-      expect({ key, ...snapshot }).toEqual({ key, value: undefined, notes: [] });
+      read.push(
+        absent.has(key) ? { key, ...snapshot } : { key, present: snapshot.value !== undefined },
+      );
     }
+    expect(read).toEqual(
+      declaring.map((key) =>
+        absent.has(key) ? { key, value: undefined, notes: [] } : { key, present: true },
+      ),
+    );
     expect(api.writes).toEqual([]);
   });
 });

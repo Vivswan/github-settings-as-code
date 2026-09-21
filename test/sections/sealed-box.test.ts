@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
 import { err, ok, Result } from "neverthrow";
 import {
-  boxSharedKey,
   decodeBase64,
   openSealedBox,
   SEALED_BOX_PUBLIC_KEY_BYTES,
@@ -70,13 +69,6 @@ describe("sealBox against libsodium", () => {
     const zero = new Uint8Array(SEALED_BOX_PUBLIC_KEY_BYTES);
     expect(() => sealBox(encode(""), zero)).toThrow();
     expect(() => sodium.crypto_box_seal(new Uint8Array(0), zero)).toThrow();
-  });
-
-  test("boxSharedKey derives libsodium's crypto_box_beforenm key from either side", () => {
-    const sender = sodium.crypto_box_keypair();
-    const expected = hex(sodium.crypto_box_beforenm(recipient.publicKey, sender.privateKey));
-    expect(hex(boxSharedKey(sender.privateKey, recipient.publicKey))).toBe(expected);
-    expect(hex(boxSharedKey(recipient.privateKey, sender.publicKey))).toBe(expected);
   });
 });
 

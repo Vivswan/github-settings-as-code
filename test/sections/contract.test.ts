@@ -10,6 +10,7 @@ import { actionsSection } from "../../src/sections/actions/index.js";
 import {
   type EndpointDecl,
   endpointKind,
+  endpointMethod,
   toleratedStatuses,
 } from "../../src/sections/contract/endpoints.js";
 import { failureFor, type SectionFailure } from "../../src/sections/contract/errors.js";
@@ -43,6 +44,8 @@ import {
   tryCallDeclared,
 } from "../../src/sections/contract/requests.js";
 import { customPropertiesSection } from "../../src/sections/custom_properties/index.js";
+import { environmentsSection } from "../../src/sections/environments/index.js";
+import { SECTIONS } from "../../src/sections/registry.js";
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
 import { MockApi } from "../mock-api.js";
@@ -560,44 +563,32 @@ describe("failureFor context enrichment", () => {
     );
   });
 
-  test('a public endpoint ("none") cannot be a missing-grant failure', () => {
+  test.each<[label: string, meta: SectionMeta, path: string, op: EndpointDecl]>([
     // A denied PUBLIC endpoint is not about the token's grants, so grant advice cannot help.
-    let thrown: unknown;
-    try {
-      raiseFor(
-        section,
-        "GET",
-        "/repos/o/r/rulesets",
-        { status: 403, message: "Forbidden", body: "" },
-        { op: endpoint({ permission: "none" }) },
+    ["a synthetic override", section, "/repos/o/r/rulesets", endpoint({ permission: "none" })],
+    // The shipped one: the section is gated ("Custom properties"), and only the endpoint's own "none" keeps that grant out of the advice.
+    [
+      "the custom property values GET",
+      customPropertiesSection,
+      "/repos/o/r/properties/values",
+      customPropertiesSection.endpoints.list,
+    ],
+  ])(
+    'a public endpoint ("none") cannot be a missing-grant failure: %s',
+    (_label, meta, path, op) => {
+      expect(sectionGrant(meta)).toMatch(/^grant /);
+      let thrown: unknown;
+      try {
+        raiseFor(meta, "GET", path, { status: 403, message: "Forbidden", body: "" }, { op });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(failureKind(thrown)).not.toBe("permission-denied");
+      expect((thrown as Error).message).toBe(
+        `${meta.key}: GET ${path}: 403 Forbidden. The API rejected the request; fix the "${meta.key}" values in the settings file to satisfy the message above`,
       );
-    } catch (error) {
-      thrown = error;
-    }
-    expect(failureKind(thrown)).not.toBe("permission-denied");
-    expect((thrown as Error).message).toBe(
-      'rulesets: GET /repos/o/r/rulesets: 403 Forbidden. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
-    );
-  });
-
-  test("the custom property values GET is public, so its denial asks for no grant the section itself needs", () => {
-    // The section is gated ("Custom properties"); only the endpoint's own "none" keeps that grant out of the advice.
-    expect(sectionGrant(customPropertiesSection)).toMatch(/^grant /);
-    let thrown: unknown;
-    try {
-      raiseFor(
-        customPropertiesSection,
-        "GET",
-        "/repos/o/r/properties/values",
-        { status: 403, message: "Forbidden", body: "" },
-        { op: customPropertiesSection.endpoints.list },
-      );
-    } catch (error) {
-      thrown = error;
-    }
-    expect(failureKind(thrown)).not.toBe("permission-denied");
-    expect((thrown as Error).message).not.toMatch(/grant/);
-  });
+    },
+  );
 
   test.each<[label: string, op: EndpointDecl]>([
     // sectionGrant(section) and grantFor(effective) coincide for a caveat-free section, so only a caveat-bearing one catches a refactor that
@@ -830,6 +821,69 @@ describe("planContext read port", () => {
     ]);
     expect(api.mutations()).toEqual([]);
     expect(Object.isFrozen(ctx.read)).toBe(true);
+  });
+
+  test("the port exposes exactly the declared reads of every section, each narrowed to its posture, and neither a write role nor the raw client", () => {
+    // A GET route or a `kind: "read"` GraphQL op is a read, everything else a write: derived from the declarations, not listed by hand.
+    const rolesOf = (module: SectionModule, kind: "read" | "write") =>
+      [
+        ...Object.entries(module.endpoints).map(
+          ([role, decl]) =>
+            [role, endpointMethod(decl.route) === "GET" ? "read" : "write"] as const,
+        ),
+        ...Object.entries(module.graphql ?? {}).map(([role, op]) => [role, op.kind] as const),
+      ]
+        .filter(([, roleKind]) => roleKind === kind)
+        .map(([role]) => role)
+        .sort();
+    const ports = Object.fromEntries(
+      SECTIONS.map((module) => {
+        const port = planContext(module, new MockApi({}), REPO);
+        return [
+          module.key,
+          {
+            reads: Object.keys(port.read).sort(),
+            writesReachable: rolesOf(module, "write").filter((role) => role in port.read),
+            rawClient: "api" in port,
+          },
+        ];
+      }),
+    );
+    expect(ports).toEqual(
+      Object.fromEntries(
+        SECTIONS.map((module) => [
+          module.key,
+          { reads: rolesOf(module, "read"), writesReachable: [], rawClient: false },
+        ]),
+      ),
+    );
+    // The same at the type level, on the section declaring every kind of role.
+    const ctx = planContext(environmentsSection, new MockApi({}), REPO);
+    // @ts-expect-error a REST write role is not on the port
+    ctx.read.update;
+    // @ts-expect-error nor a GraphQL mutation
+    ctx.read.pin;
+    // @ts-expect-error nor a role the section never declared
+    ctx.read.typo;
+    // @ts-expect-error nor the raw client: every request goes through a bound read
+    ctx.api;
+    // A posture narrows the helpers: an "absent" primary read offers no must-succeed call and neither list,
+    // @ts-expect-error
+    ctx.read.probe.call;
+    // @ts-expect-error
+    ctx.read.probe.listAll;
+    // @ts-expect-error
+    ctx.read.probe.listAllEnveloped;
+    // a "denied" one no 404-tolerant helper.
+    const denied = planContext(rulesetsSection, new MockApi({}), REPO);
+    // @ts-expect-error
+    denied.read.list.probeAbsent;
+    // @ts-expect-error
+    denied.read.list.tryCall;
+    expect([typeof ctx.read.probe.probeAbsent, typeof denied.read.list.listAll]).toEqual([
+      "function",
+      "function",
+    ]);
   });
 
   test("an advisory read exposes only tryCall, which tolerates every error status", async () => {

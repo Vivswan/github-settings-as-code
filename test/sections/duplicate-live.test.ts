@@ -1,14 +1,14 @@
 /**
  * The duplicate-live spine, over every section: two live items resolving to one identity fail plan()
  * and snapshot() with the one liveByIdentity refusal naming both, and nothing is written. The table
- * is keyed by SectionKey, so a new section compiles only once it is seeded here or listed among the
- * sections that read no live list, with the reason.
+ * is keyed by SectionKey and split by LIST_SECTIONS: a list section compiles only once it is seeded
+ * here, any other only once it names why it reads no live list.
  */
 
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import type { GitHubClient } from "../../src/github/api.js";
-import type { SectionKey } from "../../src/schema.js";
+import type { ListSection, SectionKey } from "../../src/schema.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
@@ -76,7 +76,7 @@ function ruleNode(id: string, pattern: string): Record<string, unknown> {
   return ruleWireNode(completeRule({ id, pattern }));
 }
 
-function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Seed[] {
+function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Seeds {
   return [
     {
       list: key,
@@ -92,7 +92,7 @@ function secretsSeed(key: SectionKey, family: keyof LiveState, noun: string): Se
   ];
 }
 
-function variablesSeed(key: SectionKey, family: keyof LiveState, noun: string): Seed[] {
+function variablesSeed(key: SectionKey, family: keyof LiveState, noun: string): Seeds {
   return [
     {
       list: key,
@@ -108,7 +108,12 @@ function variablesSeed(key: SectionKey, family: keyof LiveState, noun: string): 
   ];
 }
 
-const SEEDS: { readonly [K in SectionKey]: readonly Seed[] | NoLiveList } = {
+/** At least one seed, so a list section cannot opt out of the table with an empty list. */
+type Seeds = readonly [Seed, ...Seed[]];
+
+const SEEDS: { readonly [K in ListSection]: Seeds } & {
+  readonly [K in Exclude<SectionKey, ListSection>]: NoLiveList;
+} = {
   repository: { noLiveList: "one repository object and one probe per toggle", declared: {} },
   labels: [
     {
@@ -507,7 +512,7 @@ function clientFor(fake: FragmentFake, seed: Seed): GitHubClient {
   };
 }
 
-function isSeeded(entry: readonly Seed[] | NoLiveList): entry is readonly Seed[] {
+function isSeeded(entry: Seeds | NoLiveList): entry is Seeds {
   return Array.isArray(entry);
 }
 
@@ -544,22 +549,6 @@ async function proveNoLiveList(section: SectionModule, declared: unknown): Promi
 }
 
 describe("duplicate live identities", () => {
-  test("every section is seeded with a pair or names why it reads no live list", () => {
-    expect(Object.keys(SEEDS).sort()).toEqual(SECTIONS.map((section) => section.key).sort());
-    for (const section of SECTIONS) {
-      const entry = SEEDS[section.key];
-      if (!isSeeded(entry)) {
-        expect(entry.noLiveList.length, section.key).toBeGreaterThan(0);
-        continue;
-      }
-      expect(entry.length, section.key).toBeGreaterThan(0);
-      // A seed proves at least one of the two handlers, and the snapshot arm exists exactly where snapshot() does.
-      for (const seed of entry) {
-        expect(seed.declared !== undefined || section.snapshot !== undefined, seed.list).toBe(true);
-      }
-    }
-  });
-
   const exempt = SECTIONS.flatMap((section) => {
     const entry = SEEDS[section.key];
     return isSeeded(entry) ? [] : [{ section, entry }];
@@ -581,23 +570,27 @@ describe("duplicate live identities", () => {
 
   test.each(seeded.map(({ section, seed }) => [seed.list, section, seed] as const))(
     "%s: plan() and snapshot() refuse the pair, naming both, and write nothing",
-    (_list, section: SectionModule, seed: Seed) => proveRefused(section, seed),
+    (_list, section: SectionModule, seed: Seed) => {
+      // A seed proves at least one of the two handlers, or the proof below passes vacuously.
+      expect(seed.declared !== undefined || section.snapshot !== undefined, seed.list).toBe(true);
+      return proveRefused(section, seed);
+    },
   );
 
   test("the negative control: a snapshot that skips the guard fails the proof, and so does a refusal with extra text", async () => {
-    const [seed] = SEEDS.labels as readonly Seed[];
+    const [seed] = SEEDS.labels;
     const unguarded = {
       ...labelsSection,
       snapshot: async () => ok({ value: undefined, notes: [] }),
     } as SectionModule;
-    await expect(proveRefused(unguarded, seed as Seed)).rejects.toThrow();
+    await expect(proveRefused(unguarded, seed)).rejects.toThrow();
     const padded = {
       ...labelsSection,
       snapshot: async () => {
-        throw new Error(`${(seed as Seed).refusal} (and more)`);
+        throw new Error(`${seed.refusal} (and more)`);
       },
     } as SectionModule;
-    await expect(proveRefused(padded, seed as Seed)).rejects.toThrow();
+    await expect(proveRefused(padded, seed)).rejects.toThrow();
   });
 });
 

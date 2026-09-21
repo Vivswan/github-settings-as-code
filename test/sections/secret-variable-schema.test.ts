@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../src/engine/validate.js";
+import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
 
 type Noun = "secret" | "variable";
 
@@ -86,8 +87,10 @@ describe("secret and variable names", () => {
 });
 
 describe("variable values", () => {
-  // GitHub's documented cap, spelled here independently of the source so a moved constant fails this test.
-  const cap = 49152;
+  const cap = MAX_VARIABLE_VALUE_BYTES;
+
+  test("GitHub caps a variable value at 48 KB", () => expect(cap).toBe(49152));
+
   // A CJK character is three UTF-8 bytes, so a row lands exactly on the cap or one character over it while its
   // character count stays far below the cap.
   const threeByte = "\u4e2d";
