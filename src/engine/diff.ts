@@ -342,7 +342,7 @@ function walkKeyed(
  * `rulesets[main].bypass_actors[Team 1]` under a root, or `rules[deletion].parameters.x` under an empty one:
  * the path as a settings-file reader would spell it.
  */
-function renderPath(root: string, path: readonly PathStep[]): string {
+export function renderPath(root: string, path: readonly PathStep[]): string {
   return path.reduce<string>(
     (at, step) =>
       typeof step === "string"

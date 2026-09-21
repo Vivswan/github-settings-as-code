@@ -1,0 +1,35 @@
+# A misspelled protection key passes through (the protection mapping is open
+# so a control GitHub ships tomorrow is declarable), but the protection GET
+# never echoes it, so the PUT would re-run on every apply without converging.
+# Check mode notes exactly that, naming the key, alongside the drift it causes,
+# and writes nothing.
+name: branches-protection-unknown-key-noted
+settings:
+  branches:
+    - name: main
+      protection:
+        enforce_admins: true
+        require_linear_history: true
+inputs:
+  mode: check
+live_state:
+  branches: ["main"]
+  branch_protection:
+    main:
+      enforce_admins:
+        enabled: true
+token_permissions:
+  administration: read
+  contents: read
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    branches: drift
+  stdout_contains:
+    - >-
+      branches[main].protection: declared key "require_linear_history" does not exist on the live
+      branch protection, so if GitHub ignores it this PUT will re-run on every apply without
+      converging. Fix the key name, or remove it from the settings file
+  never:
+    - "PUT /repos/{repo}/branches/main/protection"

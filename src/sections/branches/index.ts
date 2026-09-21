@@ -10,7 +10,7 @@
 
 import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { type Delta, deltas, phantomNote, renderPath, subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -49,8 +49,13 @@ import {
   WILDCARD_KEYS,
   wildcardSnapshot,
 } from "./graphql-rules.js";
-import { isGetOnlyKey } from "./keys.js";
-import { type BranchConfig, BranchesConfig, type BranchProtectionConfig } from "./schema.js";
+import { BOOLEAN_CONTROL_SET, isGetOnlyKey } from "./keys.js";
+import {
+  type BranchConfig,
+  BranchesConfig,
+  BranchProtectionConfig,
+  PROTECTION_MAPPING_KEYS,
+} from "./schema.js";
 
 const REQUIRED_PROTECTION_KEYS = [
   "required_status_checks",
@@ -58,6 +63,86 @@ const REQUIRED_PROTECTION_KEYS = [
   "required_pull_request_reviews",
   "restrictions",
 ] as const;
+
+/**
+ * The protection PUT's vocabulary by holder path: the schema's keys and the boolean controls at
+ * the top, the declared keys and the review booleans under each open mapping. A declared key
+ * outside it that the GET does not echo is noted as never converging; a documented key the GET
+ * omits (an off control, an optional review setting) is drift the PUT resolves.
+ */
+const PROTECTION_VOCABULARY: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  Object.entries({
+    ...PROTECTION_MAPPING_KEYS,
+    "": [...Object.keys(BranchProtectionConfig.shape), ...BOOLEAN_CONTROL_SET],
+    required_pull_request_reviews: [
+      ...PROTECTION_MAPPING_KEYS.required_pull_request_reviews,
+      ...Object.keys(GRAPHQL_REVIEW_TWINS),
+    ],
+  }).map(([holder, keys]) => [holder, new Set(keys)]),
+);
+
+/**
+ * Whether every step of a phantom's path names a key the PUT documents under its holder. The steps
+ * are checked one at a time, so a literal key holding a dot never reads as documented nesting.
+ */
+function isProtectionVocabulary(path: Delta["path"]): boolean {
+  let holder = "";
+  for (const step of path) {
+    if (typeof step !== "string" || !(PROTECTION_VOCABULARY.get(holder)?.has(step) ?? false)) {
+      return false;
+    }
+    holder = holder === "" ? step : `${holder}.${step}`;
+  }
+  return true;
+}
+
+/**
+ * The declared keys outside the vocabulary under a documented holder the GET omits entirely: the
+ * phantom stops at the absent holder, so its declared mapping is walked here, holder by holder.
+ * An empty declared value (null, "") is skipped, as the diff skips it.
+ */
+function undocumentedKeysUnder(value: unknown, holder: string): string[] {
+  const documented = PROTECTION_VOCABULARY.get(holder);
+  if (!isPlainMapping(value) || documented === undefined) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, inner]) => {
+    const path = `${holder}.${key}`;
+    if (documented.has(key)) {
+      return undocumentedKeysUnder(inner, path);
+    }
+    return inner === null || inner === undefined || inner === "" ? [] : [path];
+  });
+}
+
+/**
+ * The protection passes unknown keys through, so a key GitHub never echoes would re-PUT on every
+ * apply without converging; the note names it beside the drift it causes. An unprotected branch
+ * scans against an empty live object, so the note lands on the run that plans the first PUT.
+ */
+function noteUndocumentedKeys(
+  plan: BranchesPlan,
+  prefix: string,
+  declared: Record<string, unknown>,
+  live: unknown,
+): void {
+  const phantom = undocumentedPhantoms(declared, live);
+  if (phantom.length > 0) {
+    plan.notes.push(phantomNote(prefix, phantom, "branch protection", "this PUT will re-run"));
+  }
+}
+
+/** The declared keys the GET does not echo and the PUT does not document, as dotted paths for the note. */
+function undocumentedPhantoms(declared: Record<string, unknown>, live: unknown): string[] {
+  return deltas(declared, live).flatMap((delta) => {
+    if (delta.kind !== "phantom") {
+      return [];
+    }
+    return isProtectionVocabulary(delta.path)
+      ? undocumentedKeysUnder(delta.desired, delta.path.join("."))
+      : [renderPath("", delta.path)];
+  });
+}
 
 /** Git refnames forbid `*`, `?`, and `[`, so a wildcard entry can never collide with a literal branch. */
 export function isWildcardPattern(name: string): boolean {
@@ -440,6 +525,7 @@ async function planLiteralEntry(
           ),
         );
       }
+      noteUndocumentedKeys(plan, prefix, payload, {});
       plan.ops.push({
         role: "putProtection",
         params,
@@ -467,6 +553,7 @@ async function planLiteralEntry(
       // Both sides compare in GitHub's spelling; the PUT payload keeps the file's.
       const declaredView = foldActorNames(declaredRest);
       const liveView = withEmptyReviewHolders(foldActorNames(live));
+      noteUndocumentedKeys(plan, prefix, declaredView, liveView);
       // The PUT replaces the whole protection, so live settings the declaration omits are REMOVED by
       // it: drift, not silence. The signature toggle is the one live field the PUT never touches.
       const { required_signatures: _liveSignatures, ...liveRest } = liveView;

@@ -281,6 +281,19 @@ function refuseGetOnlyKeys(
   ancestors.delete(value);
 }
 
+/**
+ * The keys the schema declares under each open protection mapping, by the mapping's dotted path.
+ * index.ts completes the PUT vocabulary with the controls that pass through (the boolean controls,
+ * the review booleans) and notes a declared key outside it that the GET never echoes.
+ */
+export const PROTECTION_MAPPING_KEYS = {
+  required_status_checks: Object.keys(RequiredStatusChecks.shape),
+  required_pull_request_reviews: Object.keys(RequiredPullRequestReviews.shape),
+  "required_pull_request_reviews.dismissal_restrictions": Object.keys(ACTOR_LIST_EXAMPLE),
+  "required_pull_request_reviews.bypass_pull_request_allowances": Object.keys(ACTOR_LIST_EXAMPLE),
+  restrictions: Object.keys(Restrictions.shape),
+} as const satisfies Readonly<Record<string, readonly string[]>>;
+
 export const BranchProtectionConfig = z
   .looseObject({
     required_status_checks: RequiredStatusChecks.nullable().optional(),

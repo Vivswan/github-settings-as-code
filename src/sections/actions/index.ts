@@ -1,6 +1,6 @@
 import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
-import { subsetDiff } from "../../engine/diff.js";
+import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { agree } from "../../text.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
@@ -215,6 +215,13 @@ const LiveWorkflowPermissions = z.looseObject({
 /** The selected-actions allowlist: a mapping the file's own passthrough record compares against. */
 const LiveSelectedActions = z.looseObject({});
 
+/** The template's declared keys across both variants; the compare notes a passthrough key outside them that the GET never echoes. */
+const OIDC_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
+  ActionsConfig.shape.oidc_customization_sub
+    .unwrap()
+    .options.flatMap((variant) => Object.keys(variant.shape)),
+);
+
 /** The base-permissions keys as the primary read reports them; the allowlist read hangs off the policy. */
 type BasePermissions = Pick<ActionsConfig, "enabled" | "allowed_actions">;
 
@@ -261,8 +268,19 @@ export function endpointRouted<
     /** The GET body as the settings file declares the key (the inverse of `body`). */
     read: (live: Live) => ActionsConfig[K];
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
-    ? { body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }
-    : { body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown> }),
+    ? {
+        body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown>;
+        /**
+         * The declared mapping's shape and what the note calls the live object: a passthrough key
+         * outside the shape that the GET never echoes is noted as never converging, while a key
+         * inside it the GET omits is drift the PUT resolves.
+         */
+        mapping: { shape: z.ZodObject; noun: string };
+      }
+    : {
+        body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown>;
+        mapping?: undefined;
+      }),
 ): RoutedDestination<K> {
   const body =
     wiring.body ??
@@ -271,6 +289,17 @@ export function endpointRouted<
     plan: async (ctx, _section, declared, plan) =>
       ctx.read[wiring.get].call(wiring.live).andThen((live) => {
         const payload = body(declared);
+        const mapping = wiring.mapping;
+        if (mapping !== undefined) {
+          const phantom = phantomKeys(payload, live).filter(
+            (key) => !Object.hasOwn(mapping.shape.shape, key),
+          );
+          if (phantom.length > 0) {
+            plan.notes.push(
+              phantomNote(wiring.label, phantom, mapping.noun, "this PUT will re-run"),
+            );
+          }
+        }
         const drift = subsetDiff(payload, live, wiring.label);
         if (hasDrift(drift)) {
           plan.ops.push({
@@ -350,6 +379,10 @@ const KEY_DESTINATION = {
     describe: "setting the artifact and log retention window",
     live: z.looseObject({ days: z.number() }),
     read: sliceOf("artifact_and_log_retention"),
+    mapping: {
+      shape: ActionsConfig.shape.artifact_and_log_retention.unwrap(),
+      noun: "retention window",
+    },
   }),
   cache: {
     plan: async (ctx, _section, declared, plan) =>
@@ -400,6 +433,19 @@ const KEY_DESTINATION = {
           string,
           unknown
         >;
+        // The template passes unknown keys through, so a key GitHub never echoes would re-PUT on
+        // every apply without converging; use_immutable_subject, which the GET may omit, is drift.
+        const phantom = phantomKeys(comparable, live).filter((key) => !OIDC_TEMPLATE_KEYS.has(key));
+        if (phantom.length > 0) {
+          plan.notes.push(
+            phantomNote(
+              "actions.oidc_customization_sub",
+              phantom,
+              "OIDC subject claim template",
+              "this PUT will re-run",
+            ),
+          );
+        }
         const drift = subsetDiff(comparable, live, "actions.oidc_customization_sub");
         const claimKeys = declared.use_default ? undefined : declared.include_claim_keys;
         if (claimKeys !== undefined) {
@@ -437,6 +483,10 @@ const KEY_DESTINATION = {
     describe: "setting the fork PR contributor approval policy",
     live: z.looseObject({ approval_policy: z.string() }),
     read: sliceOf("fork_pr_contributor_approval"),
+    mapping: {
+      shape: ActionsConfig.shape.fork_pr_contributor_approval.unwrap(),
+      noun: "approval policy",
+    },
   }),
   fork_pr_workflows_private_repos: endpointRouted({
     get: "getForkPrPrivate",
@@ -451,6 +501,10 @@ const KEY_DESTINATION = {
       require_approval_for_fork_pr_workflows: z.boolean(),
     }),
     read: sliceOf("fork_pr_workflows_private_repos"),
+    mapping: {
+      shape: ActionsConfig.shape.fork_pr_workflows_private_repos.unwrap(),
+      noun: "fork PR workflow settings",
+    },
   }),
 } satisfies { [K in keyof ActionsConfig]-?: "base" | "workflow" | RoutedDestination<K> };
 

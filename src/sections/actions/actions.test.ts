@@ -617,7 +617,8 @@ describe("actions", () => {
       ["putForkPrApproval", approval, "applied the fork PR contributor approval policy"],
       ["putForkPrPrivate", privateRepos, "applied the private-repo fork PR workflow settings"],
     ]);
-    // Every live value is flipped, so an omitted comparison cannot pass here; the passthrough field drifts as unknown to GitHub.
+    // Every live value is flipped, so an omitted comparison cannot pass here; the passthrough field
+    // drifts as unknown to GitHub, and the note says the PUT would never converge on it.
     expect(result.ops[1]?.drift).toEqual([
       "actions.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests: true != false",
       "actions.fork_pr_workflows_private_repos.send_write_tokens_to_workflows: false != true",
@@ -627,7 +628,69 @@ describe("actions", () => {
     ]);
     // No base-permissions read: these keys alone must not imply enabled: true.
     expect(roles(api)).toEqual([FORK_APPROVAL, FORK_PRIVATE]);
-    expect(result.notes).toEqual([]);
+    expect(result.notes).toEqual([
+      'actions.fork_pr_workflows_private_repos: declared key "extra_field" does not exist on the live fork PR workflow settings, ' +
+        "so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file",
+    ]);
+  });
+
+  test("a key outside a routed mapping's shape that the GET never echoes is noted as never converging, per mapping", async () => {
+    const privateRepos = {
+      run_workflows_from_fork_pull_requests: true,
+      send_write_tokens_to_workflows: false,
+      send_secrets_and_variables: false,
+      require_approval_for_fork_pr_workflows: true,
+    };
+    const api = new MockApi({
+      [RETENTION]: { data: { days: 30, maximum_allowed_days: 400 } },
+      [OIDC]: { data: { use_default: false, include_claim_keys: ["repo"] } },
+      [FORK_APPROVAL]: { data: { approval_policy: "first_time_contributors" } },
+      [FORK_PRIVATE]: { data: privateRepos },
+    });
+    const result = await plan(api, {
+      artifact_and_log_retention: { days: 30, retention_days: 30 },
+      oidc_customization_sub: {
+        use_default: false,
+        include_claim_keys: ["repo"],
+        claim_prefix: "repo",
+      },
+      fork_pr_contributor_approval: { approval_policy: "first_time_contributors", policy: "all" },
+      fork_pr_workflows_private_repos: { ...privateRepos, send_secret_and_variables: false },
+    } as ActionsConfig);
+    const tail =
+      "so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file";
+    expect(result.notes).toEqual([
+      `actions.artifact_and_log_retention: declared key "retention_days" does not exist on the live retention window, ${tail}`,
+      `actions.oidc_customization_sub: declared key "claim_prefix" does not exist on the live OIDC subject claim template, ${tail}`,
+      `actions.fork_pr_contributor_approval: declared key "policy" does not exist on the live approval policy, ${tail}`,
+      `actions.fork_pr_workflows_private_repos: declared key "send_secret_and_variables" does not exist on the live fork PR workflow settings, ${tail}`,
+    ]);
+    // The unknown key is the whole drift of each mapping: every declared value matches live.
+    expect(result.ops.map((op) => [op.role, op.drift.length])).toEqual([
+      ["putRetention", 1],
+      ["putOidcSub", 1],
+      ["putForkPrApproval", 1],
+      ["putForkPrPrivate", 1],
+    ]);
+  });
+
+  test("a documented template key the GET omits is drift the PUT resolves, never a note: one PUT, then the re-plan is empty", async () => {
+    // use_immutable_subject is optional on GitHub's GET; the three routed mapping GETs mark every
+    // field required, so only the template has such a key.
+    const api = liveActions({
+      "/repos/o/r/actions/oidc/customization/sub": { use_default: true },
+    });
+    const { first, second, changes } = await provePlanIdempotent(actionsSection, api, {
+      oidc_customization_sub: { use_default: true, use_immutable_subject: true },
+    });
+    expect(first.notes).toEqual([]);
+    expect(first.ops.map((op) => op.drift)).toEqual([
+      [
+        "actions.oidc_customization_sub.use_immutable_subject: declared true but the API response has no such field (new or write-only field?)",
+      ],
+    ]);
+    expect(changes).toEqual(["applied the OIDC subject claim template"]);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
   });
 
   test("executing the plan converges: every routed PUT lands once, then nothing", async () => {
