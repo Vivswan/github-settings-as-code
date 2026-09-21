@@ -3,7 +3,7 @@
 #   src/sections/webhooks/events.ts              -> build:events (a Dependabot @octokit/openapi-webhooks bump changes the event list on a
 #                                                   branch nobody builds)
 #   lib/settings.schema.json                     -> build:schema (a Dependabot generator bump changes its bytes on a branch nobody builds)
-#   README, COVERAGE, action.yml, docs/ regions  -> build:docs, build:action-docs
+#   README, action.yml, docs/ regions           -> build:docs, build:action-docs
 #   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with;
 #                                                   gen-gaps-index.ts re-renders index.ts
 #   lib/index.js                                 -> never: main carries no bundle
@@ -38,7 +38,7 @@ on:
       - "docs/operate/check-mode.md"
       - "docs/start/getting-started.md"
       - ".github/scripts/gen-action-docs.ts"
-      - "COVERAGE.md"
+      - "docs/reference/coverage.md"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -51,6 +51,10 @@ on:
       - ".github/scripts/arch-lint.ts"
       - ".github/scripts/lib/**"
       - ".github/scripts/coverage-data.ts"
+      - ".github/scripts/coverage-data.yml"
+      - ".github/scripts/endpoint-docs.ts"
+      - ".github/scripts/endpoint-docs.yml"
+      - "test/e2e/openapi/validate.ts"
 
 permissions:
   contents: read
@@ -76,6 +80,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # build:docs reads the fetched OpenAPI spec for the coverage page's endpoint links.
+      - uses: ./.github/actions/fetch-test-artifacts
       - name: Graduate upstream gaps octokit now ships
         shell: bash
         run: bun .github/scripts/graduate-upstream-gaps.ts
@@ -93,10 +99,10 @@ jobs:
           # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
           # patch holds exactly the allowed paths.
           git reset -q
-          git add -A -- src/sections/webhooks/events.ts lib/settings.schema.json README.md COVERAGE.md action.yml \
-            docs/reference/undeclared-policy.md docs/reference/permissions.md docs/operate/check-mode.md \
-            docs/reference/sections.md docs/reference/inputs.md docs/reference/architecture.md \
-            docs/start/getting-started.md src/upstream-gaps/
+          git add -A -- src/sections/webhooks/events.ts lib/settings.schema.json README.md action.yml \
+            docs/reference/coverage.md docs/reference/undeclared-policy.md docs/reference/permissions.md \
+            docs/operate/check-mode.md docs/reference/sections.md docs/reference/inputs.md \
+            docs/reference/architecture.md docs/start/getting-started.md src/upstream-gaps/
           git diff --cached --binary > "$RUNNER_TEMP/autofix.patch"
           if [ ! -s "$RUNNER_TEMP/autofix.patch" ]; then
             echo "webhook events, schema, docs, and upstream gaps already fresh"
@@ -166,14 +172,14 @@ jobs:
           # of a protected path cannot hide behind an allowed destination.
           while IFS= read -r -d '' path; do
             case "$path" in
-              src/sections/webhooks/events.ts | lib/settings.schema.json | README.md | COVERAGE.md | action.yml | \
-              docs/reference/undeclared-policy.md | docs/reference/permissions.md | \
+              src/sections/webhooks/events.ts | lib/settings.schema.json | README.md | action.yml | \
+              docs/reference/coverage.md | docs/reference/undeclared-policy.md | docs/reference/permissions.md | \
               docs/operate/check-mode.md | docs/reference/sections.md | docs/reference/inputs.md | \
               docs/reference/architecture.md | docs/start/getting-started.md | src/upstream-gaps/*) ;;
               *)
                 echo "::error::the fix patch staged '$path', outside src/sections/webhooks/events.ts," \
                   "lib/settings.schema.json, the generated docs" \
-                  "(README.md, COVERAGE.md, action.yml, docs/reference/undeclared-policy.md," \
+                  "(README.md, action.yml, docs/reference/coverage.md, docs/reference/undeclared-policy.md," \
                   "docs/reference/permissions.md, docs/operate/check-mode.md, docs/reference/sections.md," \
                   "docs/reference/inputs.md, docs/reference/architecture.md, docs/start/getting-started.md)," \
                   "and src/upstream-gaps/; refusing to push"

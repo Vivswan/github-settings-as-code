@@ -6,43 +6,106 @@ sections_table:
     keys with their own sub-endpoint route there; everything else rides the base permissions PUT
     verbatim
 coverage:
+  - area: "[Actions permissions](https://docs.github.com/en/rest/actions/permissions)"
+    endpoints: [getPermissions, putPermissions]
+    notes:
+      - >-
+        Covers enabled, allowed_actions, sha_pinning_required, and any base-permission field GitHub
+        adds; the keys with a sub-endpoint of their own have rows below.
+      - >-
+        Key routing (src/sections/actions/index.ts): a key with its own sub-endpoint routes there,
+        EVERYTHING else rides the base PUT .../actions/permissions verbatim.
+      - >-
+        Whenever any base-permissions key is present in that PUT body, an undeclared `enabled` is
+        defaulted to `true` (declaring a permissions field implies Actions are on).
+      - >-
+        RISK: a key GitHub adds that belongs on a NEW sub-endpoint gets routed to the base PUT where
+        GitHub ignores it; audit the routing whenever GitHub adds a permissions sub-endpoint.
+      - >-
+        Fields a GET reports that its PUT does not take (selected_actions_url,
+        artifact_and_log_retention.maximum_allowed_days, oidc_customization_sub.sub_claim_prefix) are
+        refused when the file is parsed, since a declared value could only diff against live and
+        re-PUT on every run.
+      - >-
+        Snapshot reads every endpoint back onto its key (the allowlist only under the selected policy;
+        the reported-only fields fall away); a sub-endpoint the token cannot read, such as the OIDC
+        template under a token without the Actions permission, is noted and left out under
+        on-missing-permission: warn and fails the section under fail.
   - area: >-
-      [Actions permissions](https://docs.github.com/en/rest/actions/permissions) (enabled,
-      allowed_actions, sha_pinning_required + any base-permission field GitHub adds; selected_actions
-      policy; workflow
-      token default permissions + can_approve_pull_request_reviews; workflows access_level;
-      artifact/log retention; cache limits; OIDC subject claim customization; fork PR contributor
-      approval and private-repo fork PR workflow policies)
-    notes: >-
-      Key routing (src/sections/actions/index.ts): the two known workflow-token keys -> PUT
-      .../actions/permissions/workflow, selected_actions -> PUT .../permissions/selected-actions
-      (the allowlist body is closed to its three documented keys, since that PUT has no
-      unrecognized-key note to catch a typo), access_level -> PUT .../permissions/access (private
-      repositories only), artifact_and_log_retention -> PUT .../permissions/artifact-and-log-retention
-      (body {days}, verbatim), cache.max_cache_retention_days -> PUT .../actions/cache/retention-limit,
-      cache.max_cache_size_gb -> PUT .../actions/cache/storage-limit (each limit is its own
-      single-field endpoint, so unrecognized cache keys are rejected; a 403 on the cache endpoints
-      can mean an org- or enterprise-managed policy rather than a missing grant),
-      oidc_customization_sub -> GET/PUT .../actions/oidc/customization/sub (201 on write; needs the
-      "Actions" PAT permission instead of Administration, and include_claim_keys is compared
-      positionally because claim-key order defines the subject format), fork_pr_contributor_approval
-      -> GET/PUT .../permissions/fork-pr-contributor-approval (the approval_policy object,
-      verbatim), fork_pr_workflows_private_repos -> GET/PUT
-      .../permissions/fork-pr-workflows-private-repos (only run_workflows_from_fork_pull_requests is
-      required, as in the request body; the pair is documented for private repositories, so a denial
-      on it can also mean the repository is public), EVERYTHING else -> base PUT
-      .../actions/permissions verbatim. Whenever any base-permissions key is present in that PUT
-      body, an undeclared `enabled` is defaulted to `true` (declaring a permissions field implies
-      Actions are on), and selected_actions with no allowed_actions infers allowed_actions:
-      selected. RISK: a key GitHub adds that belongs on a NEW sub-endpoint gets routed to the base
-      PUT where GitHub ignores it; audit the routing whenever GitHub adds a permissions
-      sub-endpoint. Fields a GET reports that its PUT does not take (selected_actions_url,
-      artifact_and_log_retention.maximum_allowed_days, oidc_customization_sub.sub_claim_prefix) are
-      refused when the file is parsed, since a declared value could only diff against live and
-      re-PUT on every run. Snapshot reads every endpoint back onto its key (the allowlist only under
-      the selected policy; the reported-only fields fall away); a sub-endpoint the token cannot read,
-      such as the OIDC template under a token without the Actions permission, is noted and left out
-      rather than failing the section.
+      [Allowed actions and reusable
+      workflows](https://docs.github.com/en/rest/actions/permissions#set-allowed-actions-and-reusable-workflows-for-a-repository)
+    keys: selected_actions
+    endpoints: [getSelected, putSelected]
+    notes:
+      - >-
+        selected_actions -> PUT .../permissions/selected-actions; the allowlist body is closed to its
+        three documented keys, since that PUT has no unrecognized-key note to catch a typo.
+      - "selected_actions with no allowed_actions infers allowed_actions: selected."
+  - area: >-
+      [Workflow token
+      permissions](https://docs.github.com/en/rest/actions/permissions#set-default-workflow-permissions-for-a-repository)
+    keys: default_workflow_permissions, can_approve_pull_request_reviews
+    endpoints: [getWorkflow, putWorkflow]
+    notes:
+      - >-
+        The two known workflow-token keys, the default permissions and can_approve_pull_request_reviews,
+        route to PUT .../actions/permissions/workflow.
+  - area: >-
+      [Workflow access
+      level](https://docs.github.com/en/rest/actions/permissions#set-the-level-of-access-for-workflows-outside-of-the-repository)
+    keys: access_level
+    endpoints: [getAccess, putAccess]
+    notes:
+      - access_level -> PUT .../permissions/access (private repositories only).
+  - area: >-
+      [Artifact and log
+      retention](https://docs.github.com/en/rest/actions/permissions#set-artifact-and-log-retention-settings-for-a-repository)
+    keys: artifact_and_log_retention
+    endpoints: [getRetention, putRetention]
+    notes:
+      - >-
+        artifact_and_log_retention -> PUT .../permissions/artifact-and-log-retention (body {days},
+        verbatim).
+  - area: "[Cache limits](https://docs.github.com/en/rest/actions/cache)"
+    keys: cache
+    endpoints: [getCacheRetention, putCacheRetention, getCacheStorage, putCacheStorage]
+    notes:
+      - >-
+        cache.max_cache_retention_days -> PUT .../actions/cache/retention-limit and
+        cache.max_cache_size_gb -> PUT .../actions/cache/storage-limit; each limit is its own
+        single-field endpoint, so unrecognized cache keys are rejected.
+      - >-
+        A 403 on the cache endpoints can mean an org- or enterprise-managed policy rather than a
+        missing grant.
+  - area: "[OIDC subject claim customization](https://docs.github.com/en/rest/actions/oidc)"
+    keys: oidc_customization_sub
+    endpoints: [getOidcSub, putOidcSub]
+    notes:
+      - >-
+        oidc_customization_sub -> GET/PUT .../actions/oidc/customization/sub (201 on write); it needs
+        the "Actions" PAT permission instead of Administration, and include_claim_keys is compared
+        positionally because claim-key order defines the subject format.
+  - area: >-
+      [Fork PR contributor
+      approval](https://docs.github.com/en/rest/actions/permissions#set-fork-pr-contributor-approval-permissions-for-a-repository)
+    keys: fork_pr_contributor_approval
+    endpoints: [getForkPrApproval, putForkPrApproval]
+    notes:
+      - >-
+        fork_pr_contributor_approval -> GET/PUT .../permissions/fork-pr-contributor-approval (the
+        approval_policy object, verbatim).
+  - area: >-
+      [Private-repo fork PR
+      workflows](https://docs.github.com/en/rest/actions/permissions#set-private-repo-fork-pr-workflow-settings-for-a-repository)
+    keys: fork_pr_workflows_private_repos
+    endpoints: [getForkPrPrivate, putForkPrPrivate]
+    notes:
+      - >-
+        fork_pr_workflows_private_repos -> GET/PUT .../permissions/fork-pr-workflows-private-repos;
+        only run_workflows_from_fork_pull_requests is required, as in the request body.
+      - >-
+        The pair is documented for private repositories, so a denial on it can also mean the
+        repository is public.
 schema:
   SettingsFile.actions: GitHub Actions permissions for the repository.
   ActionsConfig: GitHub Actions settings, routed to the right endpoint by key.

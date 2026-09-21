@@ -29,14 +29,9 @@ function namesOperation(prose: string, name: string): boolean {
   return new RegExp(`(?<![A-Za-z0-9_])${escapeRe(name)}(?![A-Za-z0-9_])`, "i").test(prose);
 }
 
-// A route in prose bounds a segment with "/" or "{", so "monkeys" never satisfies "keys" and "labels/{name}" does.
-function mentionsSegment(prose: string, segment: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_-])${escapeRe(segment)}(?![A-Za-z0-9_-])`).test(prose);
-}
-
-/** A section's coverage Notes cells joined, since a section may span several rows. */
+/** A section's coverage notes joined, since a section may span several rows and each row several bullets. */
 function coverageNotes(key: SectionKey): string {
-  return DOCS[key].coverage.map((row) => row.notes).join(" ");
+  return DOCS[key].coverage.flatMap((row) => row.notes).join(" ");
 }
 
 /** The distinctive leading segment of an endpoint's path below the repo, or "" for the bare repo endpoint. */
@@ -146,7 +141,8 @@ describe("section docs completeness", () => {
     "  notes: upsert by name",
     "coverage:",
     "  - area: Labels",
-    "    notes: CRUD",
+    "    endpoints: [list]",
+    "    notes: [CRUD]",
     "schema:",
     "  LabelConfig: One label.",
   ];
@@ -209,7 +205,7 @@ describe("section docs completeness", () => {
       expect(readDocsYaml(malformed, SectionDocs)).toEqual(
         ok({
           sections_table: { endpoints: "labels CRUD", notes: "upsert by name" },
-          coverage: [{ area: "Labels", notes: "CRUD" }],
+          coverage: [{ area: "Labels", endpoints: ["list"], notes: ["CRUD"] }],
           schema: { LabelConfig: "One label." },
         }),
       );
@@ -317,6 +313,13 @@ describe("Endpoints cells vs declared operations", () => {
       ).toBe(true);
     }
     // GraphQL operations have no path to derive a segment from, so the cell must name each by its wire operationName.
+    // Control for the matcher: a whole identifier counts in any case, a longer identifier does not.
+    expect(namesOperation("the pinEnvironment ({environmentId}) mutation", "PinEnvironment")).toBe(
+      true,
+    );
+    expect(namesOperation("the DocumentPinEnvironmentAudit query", "PinEnvironment")).toBe(false);
+    expect(namesOperation("see a.b here", "a.b")).toBe(true);
+    expect(namesOperation("see axb here", "a.b")).toBe(false);
     for (const op of Object.values(allGraphqlOps())) {
       expect(
         namesOperation(DOCS[op.section].sections_table.endpoints, op.name),
@@ -327,36 +330,19 @@ describe("Endpoints cells vs declared operations", () => {
 });
 
 describe("coverage rows vs declarations", () => {
-  test("each section's coverage rows name the leading path segment of every endpoint it calls", () => {
-    // Control for the matcher: a whole token counts, a longer word does not.
-    expect(mentionsSegment("DELETE /repos/{owner}/{repo}/keys/{key_id}", "keys")).toBe(true);
-    expect(mentionsSegment("the monkeys endpoint", "keys")).toBe(false);
-    // The COVERAGE rows spell endpoints out, so the inventory cannot omit an endpoint the code calls.
-    for (const endpoint of Object.values(allEndpoints())) {
-      const segment = leadingSegment(endpoint.route);
-      if (segment === "") {
-        continue; // the bare repo endpoint has no distinctive resource
-      }
-      expect(
-        mentionsSegment(coverageNotes(endpoint.section), segment),
-        `the ${endpoint.section} coverage rows never mention "${segment}" from endpoint ${endpoint.route}`,
-      ).toBe(true);
-    }
-  });
-
-  test("each section's coverage rows name every GraphQL operation it issues", () => {
-    // Control for the matcher both GraphQL sweeps share.
-    expect(namesOperation("the pinEnvironment ({environmentId}) mutation", "PinEnvironment")).toBe(
-      true,
-    );
-    expect(namesOperation("the DocumentPinEnvironmentAudit query", "PinEnvironment")).toBe(false);
-    expect(namesOperation("see a.b here", "a.b")).toBe(true);
-    expect(namesOperation("see axb here", "a.b")).toBe(false);
-    for (const op of Object.values(allGraphqlOps())) {
-      expect(
-        namesOperation(coverageNotes(op.section), op.name),
-        `the ${op.section} coverage rows never mention the GraphQL operation "${op.name}"`,
-      ).toBe(true);
+  test("each section's coverage rows list every role it declares, and no role it does not", () => {
+    // The rows name roles, not routes, so the coverage page cannot list a call the code does not make or drop one it
+    // does; a call serving several areas sits on each of their rows, so the comparison is between sets. The renderer
+    // resolves each role to its route (test/scripts/gen-docs.test.ts pins the failures).
+    for (const section of SECTIONS) {
+      const declared = [
+        ...Object.keys(section.endpoints),
+        ...Object.keys(section.graphql ?? {}),
+      ].sort();
+      const listed = [
+        ...new Set(DOCS[section.key].coverage.flatMap((row) => row.endpoints)),
+      ].sort();
+      expect(listed, `the ${section.key} coverage rows`).toEqual(declared);
     }
   });
 

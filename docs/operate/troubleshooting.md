@@ -34,7 +34,7 @@ What to do: re-run the workflow. The fresh run reads the current versions and co
 
 ## A 403 that is not about a grant
 
-Two other things arrive as 403. First, rate limiting: both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions. Second, feature policies: on a few endpoints a 403 means something other than the token. An org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's row of the [COVERAGE.md Supported table](https://github.com/Vivswan/github-settings-as-code/blob/main/COVERAGE.md#supported).
+Two other things arrive as 403. First, rate limiting: both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions. Second, feature policies: on a few endpoints a 403 means something other than the token. An org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's notes on the [coverage page](../reference/coverage.md#supported).
 
 ## Rate limited
 

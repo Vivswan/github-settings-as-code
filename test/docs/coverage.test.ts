@@ -1,10 +1,11 @@
-// Supported rows are pinned in test/sections/docs-registry.test.ts and the rendered page in test/scripts/gen-docs.test.ts.
+// The Supported rows are pinned against the declarations in test/sections/docs-registry.test.ts, the rendered page in test/scripts/gen-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Kind, parse, type SelectionSetNode } from "graphql";
 import { COVERAGE_DATA, type GapRow } from "../../.github/scripts/coverage-data.js";
+import { ENDPOINT_ANCHORS } from "../../.github/scripts/endpoint-docs.js";
 import { renderCoverage } from "../../.github/scripts/gen-docs.js";
 import {
   endpointMethod,
@@ -16,25 +17,25 @@ import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
 
-const coverage = renderCoverage(SECTIONS, DOCS, COVERAGE_DATA);
+const coverage = renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS);
 
-describe("COVERAGE path citations", () => {
+describe("coverage page path citations", () => {
   test("every src/ or test/ path citation resolves on disk", () => {
     // A citation must carry a file extension so prose slash-pairs ("test/lint jobs") do not read as paths; a directory citation is invisible here, so
     // cite files.
     const cited =
       coverage.match(/\b(?:src|test)\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.[a-z]+\b/g) ?? [];
-    expect(cited.length, "COVERAGE.md cites no src/ or test/ path at all").toBeGreaterThan(0);
+    expect(cited.length, "the coverage page cites no src/ or test/ path at all").toBeGreaterThan(0);
     for (const path of new Set(cited)) {
       expect(
         existsSync(join(ROOT, path)),
-        `COVERAGE.md cites "${path}" but nothing exists there; update the citation to the file's current location`,
+        `the coverage page cites "${path}" but nothing exists there; update the citation to the file's current location`,
       ).toBe(true);
     }
   });
 });
 
-describe("COVERAGE gaps anti-test", () => {
+describe("coverage gaps anti-test", () => {
   type GraphqlDocument = { readonly query: string };
 
   // Root-level fragment spreads and inline fragments are expanded so a refactor into fragments cannot hide a field.

@@ -5,26 +5,39 @@ sections_table:
     are replaced
 coverage:
   - area: "[Deploy keys](https://docs.github.com/en/rest/deploy-keys/deploy-keys)"
-    notes: >-
-      GET/POST /repos/{owner}/{repo}/keys and DELETE /repos/{owner}/{repo}/keys/{key_id}, matched by
-      exact title (two live keys under one title fail loudly, since GitHub does not enforce title
-      uniqueness). The declared material is a PUBLIC key, so it is
-      safe to keep in settings.yml (unlike secrets). Keys are immutable upstream (no update endpoint
-      exists), so a changed key or declared read_only is applied as delete + recreate, the autolinks
-      pattern (an UNDECLARED read_only survives the recreate: the live value is re-sent, so a
-      rotation never widens access). Renaming a key while keeping its material cannot be applied -
-      the one-repository-per-key rule makes the create collide with the live key - so the section
-      fails loudly naming the live holder; delete or rename the live key on GitHub first. Material
-      is compared as algorithm + base64 blob with the trailing comment ignored, because GitHub may
-      strip or rewrite comments on storage - a raw-string compare would replace the key on every
-      apply. A live key under an algorithm the settings file cannot declare is outside the section:
-      GitHub accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it
-      out with a note. A 422 on create can mean the public key is already attached to another repository (one
-      repository per key, account-wide); the error says so. Undeclared keys are KEPT by default
-      (deleting a live deploy key breaks whatever service authenticates with it, and deployment
-      tooling installs its own keys); the wrapped `_undeclared: delete` form opts into deletion.
-      Snapshot reads the live keys back (title, comparable material, read_only) under the keep
-      default.
+    endpoints: [list, create, remove]
+    notes:
+      - >-
+        GET/POST /repos/{owner}/{repo}/keys and DELETE /repos/{owner}/{repo}/keys/{key_id}, matched
+        by exact title (two live keys under one title fail loudly, since GitHub does not enforce title
+        uniqueness).
+      - The declared material is a PUBLIC key, so it is safe to keep in settings.yml (unlike secrets).
+      - >-
+        Keys are immutable upstream (no update endpoint exists), so a changed key or declared
+        read_only is applied as delete + recreate, the autolinks pattern; an UNDECLARED read_only
+        survives the recreate, since the live value is re-sent, so a rotation never widens access.
+      - >-
+        Renaming a key while keeping its material cannot be applied - the one-repository-per-key rule
+        makes the create collide with the live key - so the section fails loudly naming the live
+        holder; delete or rename the live key on GitHub first.
+      - >-
+        Material is compared as algorithm + base64 blob with the trailing comment ignored, because
+        GitHub may strip or rewrite comments on storage - a raw-string compare would replace the key
+        on every apply.
+      - >-
+        A live key under an algorithm the settings file cannot declare is outside the section: GitHub
+        accepted it, so it is never matched, deleted, or aborted on, and a snapshot leaves it out with
+        a note.
+      - >-
+        A 422 on create can mean the public key is already attached to another repository (one
+        repository per key, account-wide); the error says so.
+      - >-
+        Undeclared keys are KEPT by default (deleting a live deploy key breaks whatever service
+        authenticates with it, and deployment tooling installs its own keys); the wrapped
+        `_undeclared: delete` form opts into deletion.
+      - >-
+        Snapshot reads the live keys back (title, comparable material, read_only) under the keep
+        default.
 schema:
   SettingsFile.deploy_keys: >-
     Deploy keys, matched by title. The declared material is a PUBLIC key, safe in a committed

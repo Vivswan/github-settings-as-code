@@ -169,9 +169,12 @@ describe("auto-fix.yml tracks the generated-output table", () => {
 
   test("the rebuild step runs exactly the generators, in table order", () => {
     // The graduation step regenerates the gaps index only when a gap graduates, so the index generator runs here
-    // too. `bun run build:x` resolves through package.json to the script it runs.
+    // too. `bun run build:x` resolves through package.json to the one generator it runs, after at most the
+    // artifact fetch build:docs opens with; any other shape resolves to nothing and fails the comparison.
     const run = [...rebuildRun.matchAll(/^\s*bun (run )?(\S+)$/gm)].map(([, viaScript, name]) =>
-      viaScript === undefined ? name : /^bun (\S+)$/.exec(scripts[name ?? ""] ?? "")?.[1],
+      viaScript === undefined
+        ? name
+        : /^(?:bun run test:artifacts && )?bun (\S+)$/.exec(scripts[name ?? ""] ?? "")?.[1],
     );
     expect(run).toEqual(generators);
   });

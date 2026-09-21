@@ -87,7 +87,7 @@ export interface SectionMeta<
   readonly graphql?: G;
   /**
    * The generated Sections table's Undeclared-default column derives from it, and test/sections/docs-registry.test.ts
-   * fails a COVERAGE Notes cell that contradicts it; the wrapped `{_undeclared, entries}` form overrides it per run.
+   * fails a coverage note that contradicts it; the wrapped `{_undeclared, entries}` form overrides it per run.
    *
    *   "delete"     -> lists live resources and DELETES undeclared ones; `_undeclared: keep` softens to notes
    *   "keep"       -> lists live resources and KEEPS undeclared ones as notes; `_undeclared: delete` hardens

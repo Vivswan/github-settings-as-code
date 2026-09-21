@@ -4,25 +4,35 @@ sections_table:
     org repos only, skipped with a notice on personal accounts; undeclared teams kept by default
     (`_undeclared: delete` revokes their direct access)
 coverage:
-  - area: >-
-      [Team repository permissions](https://docs.github.com/en/rest/teams/teams) (org repos)
-    notes: >-
-      PUT/DELETE /orgs/{org}/teams/{slug}/repos/{owner}/{repo}; probes GET /orgs/{owner} and no-ops
-      with a note on personal accounts (404 only; 403/5xx still fail). Both modes probe each
-      declared team's access with the v3.repository media type to read role_name, and the grant is
-      issued only when the team lacks access or its live role diverges. The repository's team list
-      (GET /repos/{owner}/{repo}/teams) names the undeclared teams: kept by default and noted (a
-      team is often granted by the org for reasons outside one repository's file); under the
-      wrapped `_undeclared: delete` form a team's DIRECT grant is revoked, while access granted at
-      the organization or enterprise level is noted as beyond the repository's reach. A declared
-      child team whose access comes through an undeclared parent's grant loses it with that
-      revocation (the probe reads the inherited role as converged): declare the parent too, or keep.
-      Snapshot lists the same teams and reads each team's role through the same probe, so a custom
-      role reads back by name, and writes the wrapped form with the keep default spelled out;
-      left out with a note: access granted at the organization or enterprise level, a probe 404 (no
-      access, or a fine-grained token missing the grant; the note names both), a role the probe
-      does not report, and a role no declaration plans as (a custom role named "push" or "pull").
-      A personal account snapshots nothing.
+  - area: "[Team repository permissions](https://docs.github.com/en/rest/teams/teams)"
+    endpoints: [org, list, probe, grant, revoke]
+    notes:
+      - >-
+        Org repos only. PUT/DELETE /orgs/{org}/teams/{slug}/repos/{owner}/{repo}; the section probes
+        GET /orgs/{owner} and no-ops with a note on personal accounts (404 only; 403/5xx still fail).
+      - >-
+        Both modes probe each declared team's access with the v3.repository media type to read
+        role_name, and the grant is issued only when the team lacks access or its live role diverges.
+      - >-
+        The repository's team list (GET /repos/{owner}/{repo}/teams) names the undeclared teams: kept
+        by default and noted (a team is often granted by the org for reasons outside one repository's
+        file).
+      - >-
+        Under the wrapped `_undeclared: delete` form a team's DIRECT grant is revoked, while access
+        granted at the organization or enterprise level is noted as beyond the repository's reach.
+      - >-
+        A declared child team whose access comes through an undeclared parent's grant loses it with
+        that revocation (the probe reads the inherited role as converged): declare the parent too, or
+        keep.
+      - >-
+        Snapshot lists the same teams and reads each team's role through the same probe, so a custom
+        role reads back by name, and writes the wrapped form with the keep default spelled out.
+      - >-
+        Left out of the snapshot with a note: access granted at the organization or enterprise level,
+        a probe 404 (no access, or a fine-grained token missing the grant; the note names both), a
+        role the probe does not report, and a role no declaration plans as (a custom role named
+        "push" or "pull").
+      - A personal account snapshots nothing.
 schema:
   SettingsFile.teams: >-
     Org team access to the repo; skipped on personal accounts. Undeclared teams are kept by default

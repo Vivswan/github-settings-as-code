@@ -1,7 +1,7 @@
 /**
- * The authored half of COVERAGE.md (rendered by gen-docs.ts): the prose no declaration can derive, because it
- * enumerates what does NOT exist. The data is coverage-data.yml beside this file; the Supported table renders from
- * each section's <key>.docs.yml.
+ * The authored half of the coverage page, docs/reference/coverage.md (rendered by gen-docs.ts): the prose no
+ * declaration can derive, because it enumerates what does NOT exist. The data is coverage-data.yml beside this
+ * file; the Supported table and its notes render from each section's <key>.docs.yml.
  */
 
 import { join } from "node:path";
@@ -44,8 +44,8 @@ const Items = z.tuple([z.string().min(1)], z.string().min(1)).readonly();
 
 export const CoverageData = z
   .strictObject({
-    /** The paragraph under the page title. */
-    intro: z.string().min(1),
+    /** The paragraphs under the page title, one line each. */
+    intro: Items,
     /** The Supported table's section order, a display decision; the renderer requires every section once. */
     supportedOrder: z.array(z.enum(SECTION_KEYS)).readonly(),
     gaps: CoverageGaps,

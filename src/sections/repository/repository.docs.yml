@@ -8,105 +8,146 @@ sections_table:
     `enable_sponsorships` and `issue_creation_policy` (`all`/`collaborators_only`) route through
     GraphQL - REST has no surface for them; declared fields only, undeclared siblings untouched
 coverage:
-  - area: >-
-      [Repository core settings](https://docs.github.com/en/rest/repos/repos) (name, description,
-      homepage, visibility/private, has_issues, has_wiki, has_projects, has_discussions,
-      merge-strategy toggles, squash/merge commit title+message, delete_branch_on_merge,
-      allow_update_branch, allow_auto_merge, web_commit_signoff_required, is_template, archived,
-      default_branch)
-    notes: >-
-      PATCH /repos/{owner}/{repo} passthrough: documented fields are typed (toggles true or false;
-      description and homepage also null, the API's clear); a field GitHub adds later works day one.
-      GET-only fields, a commit message without its title, and illegal squash pairs are refused at
-      parse: each would drift or 422 every run. Check diffs the declared keys against GET /repos;
-      snapshot reads back the PATCH fields, topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
-  - area: >-
-      [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
-      Security, secret scanning, push protection, delegated bypass, validity checks)
-    notes: >-
-      Nested in the same PATCH, closed to the sub-keys the PATCH accepts (GitHub 422s any other):
-      each feature is {status: enabled/disabled}, delegated-bypass reviewers are {reviewer_id,
-      reviewer_type: TEAM/ROLE, mode: ALWAYS/EXEMPT}, and the GET-only dependabot_security_updates
-      points at enable_automated_security_fixes. secret_scanning_validity_checks nests here too
-      (documented in the GHEC flavor of the spec). The GET echoes all of it, so check verifies it.
+  - area: "[Repository core settings](https://docs.github.com/en/rest/repos/repos)"
+    endpoints: [get, update]
+    notes:
+      - >-
+        Covers name, description, homepage, visibility/private, has_issues, has_wiki, has_projects,
+        has_discussions, the merge-strategy toggles, squash/merge commit title and message,
+        delete_branch_on_merge, allow_update_branch, allow_auto_merge, web_commit_signoff_required,
+        is_template, archived, and default_branch.
+      - >-
+        PATCH /repos/{owner}/{repo} passthrough: documented fields are typed (toggles true or false;
+        description and homepage also null, the API's clear); a field GitHub adds later works day one.
+      - >-
+        GET-only fields, a commit message without its title, and illegal squash pairs are refused at
+        parse: each would drift or 422 every run.
+      - >-
+        Check diffs the declared keys against GET /repos; snapshot reads back the PATCH fields, topics,
+        toggles, and GraphQL keys (docs/operate/snapshot.md).
+  - area: "[security_and_analysis](https://docs.github.com/en/rest/repos/repos)"
+    keys: security_and_analysis
+    endpoints: []
+    notes:
+      - >-
+        Covers GitHub Advanced Security, secret scanning, push protection, delegated bypass, and
+        validity checks.
+      - >-
+        Nested in the same PATCH, closed to the sub-keys the PATCH accepts (GitHub 422s any other):
+        each feature is {status: enabled/disabled}, delegated-bypass reviewers are {reviewer_id,
+        reviewer_type: TEAM/ROLE, mode: ALWAYS/EXEMPT}, and the GET-only dependabot_security_updates
+        points at enable_automated_security_fixes.
+      - >-
+        secret_scanning_validity_checks nests here too (documented in the GHEC flavor of the spec).
+      - The GET echoes all of it, so check verifies it.
+  - area: "[Forking policy](https://docs.github.com/en/rest/repos/repos)"
+    keys: allow_forking
+    endpoints: []
+    notes:
+      - >-
+        allow_forking and any other fork-policy fields on the repo object ride the PATCH passthrough.
+      - The org-side 'members can fork' policy is org-scoped, out of scope.
   - area: "[Topics](https://docs.github.com/en/rest/repos/repos)"
-    keys: topics key
-    notes: >-
-      PUT /repos/{owner}/{repo}/topics, with string-to-list splitting (normalizeTopics), lowercasing,
-      and order-insensitive compare in check mode. GitHub's topic rule (1 to 50 letters, digits, and
-      hyphens, starting with a letter or digit; at most 20 distinct topics) is checked at parse on
-      every entry, empty ones included, and the grammar is published in the settings schema while the
-      cap is the runtime's alone. `topics: []` is the one spelling of the wholesale clear.
-  - area: >-
-      [Dependabot alerts](https://docs.github.com/en/rest/repos/repos) (vulnerability alerts)
+    keys: topics
+    endpoints: [topics]
+    notes:
+      - >-
+        PUT /repos/{owner}/{repo}/topics, with string-to-list splitting (normalizeTopics), lowercasing,
+        and order-insensitive compare in check mode.
+      - >-
+        GitHub's topic rule (1 to 50 letters, digits, and hyphens, starting with a letter or digit; at
+        most 20 distinct topics) is checked at parse on every entry, empty ones included; the grammar
+        is published in the settings schema while the cap is the runtime's alone.
+      - "`topics: []` is the one spelling of the wholesale clear."
+  - area: "[Dependabot alerts](https://docs.github.com/en/rest/repos/repos)"
     keys: enable_vulnerability_alerts
-    notes: >-
-      PUT/DELETE /repos/{owner}/{repo}/vulnerability-alerts; check mode probes GET and treats 404 as
-      disabled. GitHub couples the dependency graph to this endpoint: the PUT/DELETE also
-      enable/disable the graph as a side effect (the graph toggle itself has no API of its own; see
-      No public API).
-  - area: >-
-      [Dependabot security updates](https://docs.github.com/en/rest/repos/repos) (automated security
-      fixes)
+    endpoints: [vulnerabilityAlertsGet, vulnerabilityAlertsPut, vulnerabilityAlertsRemove]
+    notes:
+      - >-
+        Also called vulnerability alerts. PUT/DELETE /repos/{owner}/{repo}/vulnerability-alerts; check
+        mode probes GET and treats 404 as disabled.
+      - >-
+        GitHub couples the dependency graph to this endpoint: the PUT/DELETE also enable/disable the
+        graph as a side effect (the graph toggle itself has no API of its own; see No public API).
+  - area: "[Dependabot security updates](https://docs.github.com/en/rest/repos/repos)"
     keys: enable_automated_security_fixes
-    notes: >-
-      PUT/DELETE /repos/{owner}/{repo}/automated-security-fixes; check handles both 204-empty and
-      {enabled} body shapes.
+    endpoints: [automatedSecurityFixesGet, automatedSecurityFixesPut, automatedSecurityFixesRemove]
+    notes:
+      - >-
+        Also called automated security fixes. PUT/DELETE /repos/{owner}/{repo}/automated-security-fixes;
+        check reads the {enabled} body from GET, and a 404 reads as disabled.
   - area: "[Private vulnerability reporting](https://docs.github.com/en/rest/repos/repos)"
     keys: enable_private_vulnerability_reporting
-    notes: >-
-      PUT/DELETE /repos/{owner}/{repo}/private-vulnerability-reporting; check reads the {enabled}
-      body from GET. Repositories where the feature does not apply (observed: private repos) answer
-      404 or 422, which check treats as "not enabled" and disable treats as already done.
+    endpoints:
+      - privateVulnerabilityReportingGet
+      - privateVulnerabilityReportingPut
+      - privateVulnerabilityReportingRemove
+    notes:
+      - >-
+        PUT/DELETE /repos/{owner}/{repo}/private-vulnerability-reporting; check reads the {enabled}
+        body from GET.
+      - >-
+        Repositories where the feature does not apply (observed: private repos) answer 404 or 422,
+        which check treats as "not enabled" and disable treats as already done.
   - area: "[Git LFS enable/disable](https://docs.github.com/en/rest/repos/lfs)"
     keys: enable_git_lfs
-    notes: >-
-      PUT /repos/{owner}/{repo}/lfs (202) or DELETE (204). GitHub exposes NO endpoint to read the
-      state back, so check mode emits a cannot-verify note instead of drift, apply re-asserts the
-      declared state on every run, and the apply-mode preflight cannot probe it (a denied LFS write
-      surfaces only after the section's other writes landed). A 403 can mean LFS is disabled
-      account-wide or for the root of the repository network, or a credential without billing
-      access, rather than a missing token grant; the error says so. GitHub's OpenAPI descriptor does
-      not document this endpoint (real per the REST docs), so the e2e validator carries it in
-      UNDOCUMENTED_ROUTES.
+    endpoints: [lfsPut, lfsRemove]
+    notes:
+      - PUT /repos/{owner}/{repo}/lfs (202) or DELETE (204).
+      - >-
+        GitHub exposes NO endpoint to read the state back, so check mode emits a cannot-verify note
+        instead of drift, apply re-asserts the declared state on every run, and the apply-mode
+        preflight cannot probe it (a denied LFS write surfaces only after the section's other writes
+        landed).
+      - >-
+        A 403 can mean LFS is disabled account-wide or for the root of the repository network, or a
+        credential without billing access, rather than a missing token grant; the error says so.
+      - >-
+        GitHub's OpenAPI descriptor does not document this endpoint (real per the REST docs), so the
+        e2e validator carries it in UNDOCUMENTED_ROUTES.
   - area: "[Immutable releases](https://docs.github.com/en/rest/repos/repos)"
     keys: enable_immutable_releases
-    notes: >-
-      GET/PUT/DELETE /repos/{owner}/{repo}/immutable-releases; check mode probes GET and treats 404
-      as disabled. CAVEAT: enforced_by_owner in the GET body is read-only owner-level enforcement -
-      both writes then answer 409, which apply surfaces as a note rather than a failure or a false
-      change line, and check mode still reports a mismatched declaration as drift while saying apply
-      cannot change it from the repository.
-  - area: >-
-      [Sponsor button](https://docs.github.com/en/graphql/reference/mutations#updaterepository) (the
-      "Display a Sponsor button" checkbox under Settings > General > Features)
+    endpoints: [immutableReleasesGet, immutableReleasesPut, immutableReleasesRemove]
+    notes:
+      - >-
+        GET/PUT/DELETE /repos/{owner}/{repo}/immutable-releases; check mode probes GET and treats 404
+        as disabled.
+      - >-
+        CAVEAT: enforced_by_owner in the GET body is read-only owner-level enforcement - both writes
+        then answer 409, which apply surfaces as a note rather than a failure or a false change line,
+        and check mode still reports a mismatched declaration as drift while saying apply cannot
+        change it from the repository.
+  - area: "[Sponsor button](https://docs.github.com/en/graphql/reference/repos#mutation-updaterepository)"
     keys: enable_sponsorships
-    notes: >-
-      GraphQL only: read via Repository.hasSponsorshipsEnabled, written via the updateRepository
-      mutation's hasSponsorshipsEnabled input field - the PATCH /repos body carries no such field
-      and no REST GET returns one. One RepositoryFeatures query serves this key,
-      issue_creation_policy, and the node id the UpdateRepositoryFeatures mutation addresses; apply
-      compares first, mutates only on divergence, and verifies the mutation's echoed state. A stored
-      repository boolean independent of FUNDING.yml (repo content, out of scope).
+    endpoints: [featuresQuery, updateFeatures]
+    notes:
+      - The "Display a Sponsor button" checkbox under Settings > General > Features.
+      - >-
+        GraphQL only: read via Repository.hasSponsorshipsEnabled, written via the updateRepository
+        mutation's hasSponsorshipsEnabled input field - the PATCH /repos body carries no such field
+        and no REST GET returns one.
+      - >-
+        One RepositoryFeatures query serves this key, issue_creation_policy, and the node id the
+        UpdateRepositoryFeatures mutation addresses; apply compares first, mutates only on divergence,
+        and verifies the mutation's echoed state.
+      - A stored repository boolean independent of FUNDING.yml (repo content, out of scope).
   - area: >-
       [Issue creation
-      policy](https://docs.github.com/en/graphql/reference/input-objects#updaterepositoryinput) (the
-      Issues "Creation allowed by" control: everyone vs collaborators only)
+      policy](https://docs.github.com/en/graphql/reference/repos#input-object-updaterepositoryinput)
     keys: issue_creation_policy
-    notes: >-
-      GraphQL only, sharing the Sponsor button's RepositoryFeatures query and updateRepository
-      mutation: declared lowercase ("all"/"collaborators_only") and mapped to GitHub's
-      ALL/COLLABORATORS_ONLY IssueCreationPolicy enum at the boundary. Live-probed before building:
-      the REST PATCH ACCEPTS an issue_creation_policy field and silently ignores it (HTTP 200, no
-      echo, no effect), and no REST GET carries it (the GET has pull_request_creation_policy but not
-      the issue twin) - so GraphQL is the only read and write surface and the passthrough cannot
-      absorb the key. A persistent two-value enum with full read-back, so check mode diffs it
-      exactly.
-  - area: "[Forking policy](https://docs.github.com/en/rest/repos/repos)"
-    keys: allow_forking, fork-related PATCH fields
-    notes: >-
-      allow_forking and any other fork-policy fields on the repo object ride the PATCH passthrough.
-      (Org-side 'members can fork' policy is org-scoped, out of scope.)
+    endpoints: []
+    notes:
+      - 'The Issues "Creation allowed by" control: everyone vs collaborators only.'
+      - >-
+        GraphQL only, sharing the Sponsor button's RepositoryFeatures query and updateRepository
+        mutation: declared lowercase ("all"/"collaborators_only") and mapped to GitHub's
+        ALL/COLLABORATORS_ONLY IssueCreationPolicy enum at the boundary.
+      - >-
+        Live-probed before building: the REST PATCH ACCEPTS an issue_creation_policy field and silently
+        ignores it (HTTP 200, no echo, no effect), and no REST GET carries it (the GET has
+        pull_request_creation_policy but not the issue twin) - so GraphQL is the only read and write
+        surface and the passthrough cannot absorb the key.
+      - A persistent two-value enum with full read-back, so check mode diffs it exactly.
 schema:
   SettingsFile.repository: >-
     Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents.

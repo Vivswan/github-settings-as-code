@@ -5,20 +5,31 @@ sections_table:
     a configuration run; needs code quality available on the repository
 coverage:
   - area: "[Code quality setup](https://docs.github.com/en/rest/code-quality/code-quality)"
-    notes: >-
-      GET/PATCH /repos/{owner}/{repo}/code-quality/setup, PATCH body verbatim (state, languages,
-      runner_type, runner_label, ai_findings_option), the near field-for-field mirror of
-      code_scanning_default_setup. A 202 answer means GitHub rolls the change out in a configuration
-      run, which the log names; a 409 means a configuration run is already in progress (re-run the
-      workflow after it finishes); a 403 can mean code quality is unavailable on the repository or
-      the repository is archived, rather than a missing permission, and a 422 (the change cannot be
-      applied) carries GitHub's message verbatim. Check compares declared keys only, languages as a
-      set in the PATCH's vocabulary, and notes a key the GET never echoes as never converging; parse
-      refuses the GET-only schedule and updated_at. ASSUMPTION: the GET is graded as a plain read under the Administration permission,
-      mirroring code scanning - the fine-grained grading of these endpoints is not verified against
-      production. The sibling /code-quality/findings endpoints are read-only and stay out of scope.
-      Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
-      not-configured setup's runner_type) is omitted.
+    endpoints: [get, update]
+    notes:
+      - >-
+        GET/PATCH /repos/{owner}/{repo}/code-quality/setup, PATCH body verbatim (state, languages,
+        runner_type, runner_label, ai_findings_option), the near field-for-field mirror of
+        code_scanning_default_setup.
+      - >-
+        A 202 answer means GitHub rolls the change out in a configuration run, which the log names; a
+        409 means a configuration run is already in progress (re-run the workflow after it finishes).
+      - >-
+        A 403 can mean code quality is unavailable on the repository or the repository is archived,
+        rather than a missing permission, and a 422 (the change cannot be applied) carries GitHub's
+        message verbatim.
+      - >-
+        Check compares declared keys only, languages as a set in the PATCH's vocabulary, and notes a
+        key the GET never echoes as never converging; parse refuses the GET-only schedule and
+        updated_at.
+      - >-
+        GitHub gates the GET at write (the Codespaces secrets precedent), so a read-only Administration
+        grant cannot run this section in check mode either; the declaration grades the read as write
+        (src/sections/shared/setup-section.ts).
+      - The sibling /code-quality/findings endpoints are read-only and stay out of scope.
+      - >-
+        Snapshot reads the GET body back on the declared keys; a null the slice does not take (a
+        not-configured setup's runner_type) is omitted.
 schema:
   SettingsFile.code_quality_setup: Code quality analysis setup.
   CodeQualitySetupConfig: PATCH /repos/{r}/code-quality/setup, sent verbatim.

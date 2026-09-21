@@ -4,41 +4,56 @@ sections_table:
     branch, tag, and push targets; short ref names auto-prefixed (`staging` ->
     `refs/heads/staging`); deletion stays an explicit opt-in
 coverage:
-  - area: >-
-      [Rulesets](https://docs.github.com/en/rest/repos/rules) (branch, tag, and push targets; all
-      rule types, conditions, bypass_actors)
-    notes: >-
-      GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT,
-      passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
-      through) and the actor fill GitHub applies (bypass_mode always, an OrganizationAdmin's
-      actor_id 1). What the file alone shows wrong is refused at parse, before any request: the
-      enforcement level, a bypass actor's type, mode, and id rules, a "~" ref-name value other than
-      ~ALL or ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows
-      (types, enums in GitHub's casing, integer bounds, required fields). A rule type the spec does
-      not know passes through verbatim, as does a new field on a known rule or a bypass actor, so
-      what GitHub ships tomorrow works today. The list carries summaries, so each matched ruleset is
-      read whole before the comparison. A live value the entry omits is drift, and apply refuses the
-      PUT (the [replace-write rule](docs/reference/semantics.md)). Undeclared rulesets are kept by
-      default (notes only); the wrapped `_undeclared: delete` form deletes them. Org-sourced rulesets
-      are outside the section (source_type other than Repository). GitHub returns bypass_actors only
-      to a token with write
-      access to the ruleset, so under a token without Administration write a declared bypass_actors
-      is left out of the comparison and noted as not visible instead of reported as drift. Snapshot
-      reads repository rulesets back as entries under the keep default (id, source, links,
-      timestamps, and the caller's bypass state fall away); an inherited organization ruleset is
-      left out with a note, and so is a ruleset whose bypass_actors the token cannot see (kept
-      undeclared), since an entry without the key would clear the bypass list on the next
-      full-payload update.
+  - area: "[Rulesets](https://docs.github.com/en/rest/repos/rules)"
+    endpoints: [list, create, get, update, remove]
+    notes:
+      - Covers branch, tag, and push targets; all rule types, conditions, and bypass_actors.
+      - >-
+        GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT,
+        passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
+        through) and the actor fill GitHub applies (bypass_mode always, an OrganizationAdmin's
+        actor_id 1).
+      - >-
+        What the file alone shows wrong is refused at parse, before any request: the enforcement
+        level, a bypass actor's type, mode, and id rules, a "~" ref-name value other than ~ALL or
+        ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows (types,
+        enums in GitHub's casing, integer bounds, required fields).
+      - >-
+        A rule type the spec does not know passes through verbatim, as does a new field on a known
+        rule or a bypass actor, so what GitHub ships tomorrow works today.
+      - The list carries summaries, so each matched ruleset is read whole before the comparison.
+      - >-
+        A live value the entry omits is drift, and apply refuses the PUT (the [replace-write
+        rule](semantics.md)).
+      - >-
+        Undeclared rulesets are kept by default (notes only); the wrapped `_undeclared: delete` form
+        deletes them.
+      - Org-sourced rulesets are outside the section (source_type other than Repository).
+      - >-
+        GitHub returns bypass_actors only to a token with write access to the ruleset, so under a
+        token without Administration write a declared bypass_actors is left out of the comparison and
+        noted as not visible instead of reported as drift.
+      - >-
+        Snapshot reads repository rulesets back as entries under the keep default (id, source, links,
+        timestamps, and the caller's bypass state fall away).
+      - >-
+        Snapshot leaves out an inherited organization ruleset with a note, and so a ruleset whose
+        bypass_actors the token cannot see (kept undeclared), since an entry without the key would
+        clear the bypass list on the next full-payload update.
   - area: "[Merge queue](https://docs.github.com/en/rest/repos/rules)"
-    notes: >-
-      Configured as the merge_queue rule type inside a branch ruleset, its parameters typed from the
-      spec (merge_method MERGE, SQUASH, or REBASE; grouping_strategy ALLGREEN or HEADGREEN; the
-      minute and entry bounds), so a mis-cased value is refused at parse instead of as a 422. No dedicated
-      endpoint exists; rulesets ARE the API for merge queue.
+    endpoints: []
+    notes:
+      - >-
+        Configured as the merge_queue rule type inside a branch ruleset, its parameters typed from the
+        spec (merge_method MERGE, SQUASH, or REBASE; grouping_strategy ALLGREEN or HEADGREEN; the
+        minute and entry bounds), so a mis-cased value is refused at parse instead of as a 422.
+      - No dedicated endpoint exists; rulesets ARE the API for merge queue.
   - area: "[Tag protection (modern)](https://docs.github.com/en/rest/repos/rules)"
-    notes: >-
-      target: tag rulesets cover everything the retired legacy tag-protection API did (legacy API
-      itself is out of scope, removed by GitHub).
+    endpoints: []
+    notes:
+      - >-
+        target: tag rulesets cover everything the retired legacy tag-protection API did (the legacy
+        API itself is out of scope, removed by GitHub).
 schema:
   SettingsFile.rulesets: >-
     Repository rulesets, upserted by name; undeclared ones are kept by default (the wrapped form can

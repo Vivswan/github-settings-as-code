@@ -56,9 +56,9 @@
     "build:lib": "bun x tsdown",
     "build:events": "bun .github/scripts/gen-webhook-events.ts",
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
-    "build:docs": "bun .github/scripts/gen-docs.ts",
+    "build:docs": "bun run test:artifacts && bun .github/scripts/gen-docs.ts",
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
-    "build:check": "bun .github/scripts/generated.ts",
+    "build:check": "bun run test:artifacts && bun .github/scripts/generated.ts",
     "prepare": "lefthook install || true"
   },
   "dependencies": {

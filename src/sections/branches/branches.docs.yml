@@ -12,90 +12,167 @@ sections_table:
     (`release/*`) reconcile entirely through GraphQL with a fixed key set; add Contents: read so
     check mode can tell a missing branch from an unprotected one
 coverage:
+  - area: "[Classic branch protection](https://docs.github.com/en/rest/branches/branch-protection)"
+    endpoints: [getProtection, putProtection, removeProtection, branchProbe, listProtected]
+    notes:
+      - >-
+        Covers literal branches, wildcard patterns, force-push bypass actors, and required
+        deployments; the last three have their own rows below.
+      - >-
+        PUT /repos/{owner}/{repo}/branches/{branch}/protection passthrough; the four required keys
+        are null-filled; protection: null issues DELETE (deleteBranchProtectionRule for a wildcard
+        entry).
+      - >-
+        GET /repos/{owner}/{repo}/branches/{branch} probes whether a literal branch exists, so check
+        mode can tell a missing branch from an unprotected one; the probe needs Contents: read.
+      - >-
+        What the settings file alone shows wrong is refused before any request, naming the key and
+        the fix: required_status_checks without strict or without a check list (contexts or checks),
+        required_approving_review_count outside 0-6, and the GET-only vocabulary a copied GET
+        response carries (name, enabled, enforcement_level, url and *_url keys, at any depth).
+      - >-
+        Also refused at parse: an actor object copied from the GET into restrictions,
+        dismissal_restrictions, or bypass_pull_request_allowances, where the PUT takes login/slug
+        strings (the refusal names the string to write).
+      - >-
+        Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings,
+        *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection).
+      - >-
+        Check mode notes a declared key outside the PUT vocabulary that the GET never echoes as never
+        converging; a documented key the GET omits, such as an off control, is drift the PUT resolves.
+      - >-
+        Actor logins and slugs compare case-insensitively (GitHub matches them in any case and reads
+        back its own spelling), and a live review block without dismissal_restrictions or
+        bypass_pull_request_allowances compares as the all-empty holder, which is how GitHub reads an
+        empty one back.
+      - >-
+        Every write is drift-gated: the PUT is planned when a declared key diverges or when the
+        replacing PUT would remove a live setting the file omits, and a converged branch plans
+        nothing.
+      - >-
+        A live restrictions holder with empty users, teams, and apps is such a setting (it lets nobody
+        push, and GitHub omits the key only when the branch is unrestricted), so a file that omits
+        restrictions is told the PUT would lift it; declaring the all-empty holder keeps it.
+      - >-
+        Snapshot lists the protected branches (GET /repos/{owner}/{repo}/branches?protected=true) and
+        reads each one's classic protection back in the PUT vocabulary, controls that are off
+        omitted.
+      - >-
+        The snapshot writes the required checks in both spellings the PUT takes, `contexts` and
+        `checks` (an any-App check as app_id -1, the PUT's spelling of GitHub's null read-back, which
+        the diff normalizes the same way); a listed branch whose protection read answers 404 (a
+        ruleset protects it) is left out.
   - area: >-
-      [Classic branch protection](https://docs.github.com/en/rest/branches/branch-protection)
-      (literal branches, wildcard patterns, force-push bypass actors, required deployments)
-    notes: >-
-      PUT /repos/{owner}/{repo}/branches/{branch}/protection passthrough; the four required keys are
-      null-filled; protection: null issues DELETE (deleteBranchProtectionRule for a wildcard entry).
-      What the settings file alone shows wrong is refused before any request, naming the key and the
-      fix: required_status_checks without strict or without a check list (contexts or checks),
-      required_approving_review_count outside 0-6, the GET-only vocabulary a copied GET response
-      carries (name, enabled, enforcement_level, url and *_url keys, at any depth), and an actor
-      object copied from the GET into restrictions, dismissal_restrictions, or
-      bypass_pull_request_allowances, where the PUT takes login/slug strings (the refusal names the
-      string to write).
-      Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings,
-      *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection),
-      and notes a declared key outside the PUT vocabulary that the GET never echoes as never
-      converging (a documented key the GET omits, such as an off control, is drift the PUT resolves);
-      actor logins and slugs compare case-insensitively (GitHub matches them in any case and reads
-      back its own spelling), and a live review block without dismissal_restrictions or
-      bypass_pull_request_allowances compares as the all-empty holder, which is how GitHub reads an
-      empty one back.
-      Every write is drift-gated: the PUT is planned when a declared key diverges or when the
-      replacing PUT would remove a live setting the file omits, and a converged branch plans
-      nothing. A live restrictions holder with empty users, teams, and apps is such a setting (it
-      lets nobody push, and GitHub omits the key only when the branch is unrestricted), so a file
-      that omits restrictions is told the PUT would lift it; declaring the all-empty holder keeps it. Three routed keys never ride the PUT: required_signatures (the PUT silently drops it)
-      goes through its own POST/DELETE .../protection/required_signatures sub-endpoint when it
-      drifts and again after any planned PUT (declared true POSTs, false DELETEs, undeclared
-      untouched; a GET that omits the field reads as false; GitHub does not document whether the PUT
-      preserves an existing requirement, so declare the toggle on any branch that carries one),
-      while force_push_bypassers and required_deployments are REST-invisible entirely and ride ONE
-      updateBranchProtectionRule GraphQL mutation on the same terms. force_push_bypassers is a list
-      of actor strings - a bare login is a user, "org/team-slug" a team, "app/slug" a GitHub App -
-      resolved to node ids when apply executes, ahead of the section's first write, so a misspelled
-      actor fails before any write lands (check mode issues no lookup and reports the drift): users
-      and teams through GraphQL (the BranchProtectionActorUser and BranchProtectionActorTeam
-      lookups, new-format ids), Apps through the public GET /apps/{app_slug} REST lookup, whose
-      node_id can still be the legacy format for old Apps (GitHub accepts it with a deprecation
-      warning). required_deployments takes {environments: [...]}; declaring null turns the
-      requirement off, an absent key leaves the live state untouched. CAVEAT (verified live): GitHub
-      SILENTLY drops required-deployment environment names that do not exist while the mutation
-      succeeds, so apply verifies the mutation's read-back and fails loudly naming any dropped name
-      - the environments section runs before branches, so environments declared in the same file
-      exist by then. WILDCARD entries (a name containing `*`, `?`, or `[`, e.g. release/*) are
-      invisible to the REST endpoints (their docs point wildcard use at the GraphQL API), so they
-      reconcile entirely through the
-      createBranchProtectionRule/updateBranchProtectionRule/deleteBranchProtectionRule mutations (a
-      create addresses the repository node id the BranchProtectionRepository query fetches) against
-      the Repository.branchProtectionRules read; a wildcard protection accepts exactly the keys this
-      section can round-trip through the GraphQL rule surface - enforce_admins (its isAdminEnforced
-      twin live-verified bidirectionally against the REST view of the same rule),
-      required_linear_history, allow_force_pushes, allow_deletions, block_creations,
-      required_conversation_resolution, lock_branch, allow_fork_syncing, required_signatures,
-      required_status_checks (strict, contexts), required_pull_request_reviews
-      (required_approving_review_count, require_code_owner_reviews, dismiss_stale_reviews,
-      require_last_push_approval), force_push_bypassers, required_deployments - and rejects anything
-      else upfront (the actor-list controls have GraphQL fields but their REST vocabulary of
-      database ids does not round-trip through node-id-based reads, so this section does not manage
-      them on wildcard rules), pointing at rulesets as the recommended path for new configuration.
-      The rules query fires only when an entry has a wildcard name or declares a GraphQL-routed key
-      (a pure-REST declaration issues no GraphQL request), which also scopes the undeclared-rule
-      NOTE: only a run whose declaration fires the query reports a live wildcard rule the file does
-      not declare, as a note and never a deletion; wildcard updates have PATCH semantics (an omitted
-      key keeps its live value, unlike the literal PUT's replace). Actor and environment names
-      compare case-insensitively (GitHub canonicalizes them), and the routed lists reject duplicate
-      names upfront.
-      Snapshot lists the protected branches (GET /repos/{owner}/{repo}/branches?protected=true)
-      and reads each one's classic protection back in the PUT vocabulary, controls that are off
-      omitted and the required checks in both spellings the PUT takes, `contexts` and `checks` (an
-      any-App check as app_id -1, the PUT's spelling of GitHub's null read-back, which the diff
-      normalizes the same way); a listed branch
-      whose protection read answers 404 (a ruleset protects it) is left out. The snapshot's own
-      rules read (BranchProtectionRulesSnapshot, the planner's selection under a declaration that
-      tolerates no denial, so a concealed 404 is a PermissionDenied naming the grant, which the
-      engine turns into a skipped section under on-missing-permission: warn and a failed run under
-      fail, instead of reading as no rules) supplies the GraphQL-only surface: a literal entry carries its
-      force_push_bypassers (actor strings in the file's spelling, sorted) and required_deployments
-      when set, an empty allowance list and an off requirement omitted since an absent routed key
-      leaves the live value untouched; every wildcard rule is written as its own entry with the
-      off controls dropped; a branch only a wildcard rule protects is NOT written as a literal
-      entry (the REST read serves that rule's protection under the branch's name, and a literal
-      entry would create a second rule on apply); a literal-pattern rule whose branch the REST
-      read did not surface (no such branch, or a denied probe) is a note, since a literal entry
-      applies through the PUT that needs the branch.
+      [Required
+      signatures](https://docs.github.com/en/rest/branches/branch-protection#create-commit-signature-protection)
+    keys: required_signatures
+    endpoints: [sigPost, sigDelete]
+    notes:
+      - >-
+        One of three routed keys that never ride the PUT: the PUT silently drops required_signatures,
+        so it goes through its own POST/DELETE .../protection/required_signatures sub-endpoint when it
+        drifts and again after any planned PUT.
+      - >-
+        Declared true POSTs, false DELETEs, undeclared is untouched; a GET that omits the field reads
+        as false.
+      - >-
+        GitHub does not document whether the PUT preserves an existing requirement, so declare the
+        toggle on any branch that carries one.
+  - area: >-
+      [Force-push bypassers and required
+      deployments](https://docs.github.com/en/graphql/reference/branches#mutation-updatebranchprotectionrule)
+    keys: force_push_bypassers, required_deployments
+    endpoints: [rulesQuery, rulesSnapshot, actorUser, actorTeam, appLookup, updateRule]
+    notes:
+      - >-
+        The other two routed keys: both are REST-invisible entirely and ride ONE
+        updateBranchProtectionRule GraphQL mutation on the same terms as required_signatures, when
+        they drift and again after any planned protection PUT.
+      - >-
+        force_push_bypassers is a list of actor strings - a bare login is a user, "org/team-slug" a
+        team, "app/slug" a GitHub App - resolved to node ids when apply executes, ahead of the
+        section's first write, so a misspelled actor fails before any write lands (check mode issues
+        no lookup and reports the drift).
+      - >-
+        Users and teams resolve through GraphQL (the BranchProtectionActorUser and
+        BranchProtectionActorTeam lookups, new-format ids), Apps through the public GET
+        /apps/{app_slug} REST lookup, whose node_id can still be the legacy format for old Apps
+        (GitHub accepts it with a deprecation warning).
+      - >-
+        required_deployments takes {environments: [...]}; declaring null turns the requirement off,
+        an absent key leaves the live state untouched.
+      - >-
+        CAVEAT (verified live): GitHub SILENTLY drops required-deployment environment names that do
+        not exist while the mutation succeeds, so apply verifies the mutation's read-back and fails
+        loudly naming any dropped name - the environments section runs before branches, so
+        environments declared in the same file exist by then.
+      - >-
+        Actor and environment names compare case-insensitively (GitHub canonicalizes them), and the
+        routed lists reject duplicate names upfront.
+  - area: >-
+      [Wildcard branch protection
+      rules](https://docs.github.com/en/graphql/reference/branches#object-branchprotectionrule)
+    endpoints:
+      - rulesQuery
+      - repoLookup
+      - createRule
+      - updateRule
+      - deleteRule
+      - actorUser
+      - actorTeam
+      - appLookup
+      - rulesSnapshot
+    notes:
+      - >-
+        WILDCARD entries (a name containing `*`, `?`, or `[`, e.g. release/*) are invisible to the
+        REST endpoints (their docs point wildcard use at the GraphQL API), so they reconcile entirely
+        through the createBranchProtectionRule/updateBranchProtectionRule/deleteBranchProtectionRule
+        mutations against the Repository.branchProtectionRules read.
+      - A create addresses the repository node id the BranchProtectionRepository query fetches.
+      - >-
+        A wildcard protection accepts exactly the keys this section can round-trip through the
+        GraphQL rule surface: enforce_admins (its isAdminEnforced twin live-verified bidirectionally
+        against the REST view of the same rule), required_linear_history, allow_force_pushes,
+        allow_deletions, block_creations, required_conversation_resolution, lock_branch,
+        allow_fork_syncing, and required_signatures.
+      - >-
+        Also accepted on a wildcard rule: required_status_checks (strict, contexts),
+        required_pull_request_reviews (required_approving_review_count, require_code_owner_reviews,
+        dismiss_stale_reviews, require_last_push_approval), force_push_bypassers, and
+        required_deployments.
+      - >-
+        Anything else is rejected upfront, pointing at rulesets as the recommended path for new
+        configuration: this section neither reads nor writes the rule's push, dismissal, or review-bypass
+        actor lists over GraphQL, so restrictions, dismissal_restrictions, and
+        bypass_pull_request_allowances (login and slug strings in the file) are not managed on a
+        wildcard rule; force_push_bypassers is, through its own key.
+      - >-
+        The rules query fires only when an entry has a wildcard name or declares a GraphQL-routed key
+        (a pure-REST declaration issues no GraphQL request).
+      - >-
+        That also scopes the undeclared-rule NOTE: only a run whose declaration fires the query
+        reports a live wildcard rule the file does not declare, as a note and never a deletion.
+      - >-
+        Wildcard updates have PATCH semantics (an omitted key keeps its live value, unlike the literal
+        PUT's replace).
+      - >-
+        The snapshot's own rules read is BranchProtectionRulesSnapshot, the planner's selection under
+        a declaration that tolerates no denial: a concealed 404 is a PermissionDenied naming the
+        grant, which the engine turns into a skipped section under on-missing-permission: warn and a
+        failed run under fail, instead of reading as no rules.
+      - >-
+        That read supplies the GraphQL-only surface: a literal entry carries its force_push_bypassers
+        (actor strings in the file's spelling, sorted) and required_deployments when set, an empty
+        allowance list and an off requirement omitted since an absent routed key leaves the live
+        value untouched.
+      - Every wildcard rule is written as its own snapshot entry with the off controls dropped.
+      - >-
+        A branch only a wildcard rule protects is NOT written as a literal entry (the REST read serves
+        that rule's protection under the branch's name, and a literal entry would create a second
+        rule on apply).
+      - >-
+        A literal-pattern rule whose branch the REST read did not surface (no such branch, or a denied
+        probe) is a note, since a literal entry applies through the PUT that needs the branch.
 schema:
   SettingsFile.branches: Classic branch protection per branch.
   BranchConfig: Classic protection for one branch name or wildcard pattern.
