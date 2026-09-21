@@ -1,0 +1,29 @@
+# deployment_branch_policy is optional on the environment GET: an environment
+# that never set a policy reports without the key. A declared policy against
+# that environment is ordinary drift the PUT resolves, not a phantom key: apply
+# PUTs once with no never-converges note, and a check rerun over the mutated
+# state converges.
+name: environments-branch-policy-absent-converges
+settings:
+  environments:
+    - name: production
+      deployment_branch_policy:
+        protected_branches: true
+        custom_branch_policies: false
+live_state:
+  environments:
+    production:
+      name: production
+      protection_rules: []
+token_permissions:
+  environments: write
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    environments: applied
+  mutations:
+    - "PUT /repos/{repo}/environments/production"
+  stdout_lacks:
+    - 'declared key "deployment_branch_policy" does not exist on the live environment'
+  fixpoint: converges

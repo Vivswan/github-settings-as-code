@@ -1,0 +1,26 @@
+# https_enforced is optional on the Pages site GET: a site enabled through the
+# create call alone reports without it until the update sets it. A declared
+# https_enforced against that site is ordinary drift the PUT resolves, not a
+# phantom key: apply PUTs once with no never-converges note, and a check rerun
+# over the mutated state converges.
+name: pages-site-key-absent-converges
+settings:
+  pages:
+    https_enforced: true
+live_state:
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    build_type: workflow
+    source:
+      branch: main
+      path: /
+expect:
+  exit_code: 0
+  result: applied
+  outcomes:
+    pages: applied
+  mutations:
+    - "PUT /repos/{repo}/pages"
+  stdout_lacks:
+    - 'declared key "https_enforced" does not exist on the live Pages site'
+  fixpoint: converges

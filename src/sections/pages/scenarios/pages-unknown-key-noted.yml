@@ -1,0 +1,31 @@
+# A misspelled key passes through (the site mapping is open so a field GitHub
+# ships tomorrow is declarable), but the site GET never echoes it, so the PUT
+# would re-run on every apply without converging. Check mode notes exactly
+# that, naming the key, alongside the drift it causes, and writes nothing.
+name: pages-unknown-key-noted
+settings:
+  pages:
+    cname: docs.example.com
+    https_enforce: true
+inputs:
+  mode: check
+live_state:
+  pages:
+    url: https://api.github.com/repos/e2e-owner/e2e-repo/pages
+    build_type: workflow
+    cname: docs.example.com
+    https_enforced: false
+    source:
+      branch: main
+      path: /
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    pages: drift
+  stdout_contains:
+    - 'declared key "https_enforce" does not exist on the live Pages site, so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file'
+  never:
+    - "PUT /repos/{repo}/pages"
+    - "POST /repos/{repo}/pages"
+    - "DELETE /repos/{repo}/pages"

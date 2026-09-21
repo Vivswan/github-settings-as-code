@@ -2683,7 +2683,7 @@
           "type": "string"
         },
         "pattern": {
-          "description": "The regular expression the secret format must match. Like every regex field here it passes a syntax check at parse, or the file is refused naming the field: the PCRE-only forms Hyperscan accepts (`(?P<name>`, `(?#comment)`, `\\x{HH}`, `(?i)`, atomic and possessive forms, `\\Q...\\E`) are translated, then the result must compile as a flagless JavaScript RegExp. GitHub can still refuse at apply what Hyperscan alone refuses (lookbehind, backreferences, option modifiers).",
+          "description": "The regular expression the secret format must match. Like every regex field here it passes a syntax check at parse, or the file is refused naming the field: the PCRE-only forms Hyperscan accepts (`(?P<name>`, `(?#comment)`, `\\x{HH}`, `(?i)`, atomic and possessive forms, `\\Q...\\E`, a leading `(*UTF8)`, `(*UTF)` or `(*UCP)`) are translated, then the result must compile as a flagless JavaScript RegExp. GitHub can still refuse at apply what Hyperscan alone refuses (lookbehind, backreferences, option modifiers).",
           "type": "string"
         },
         "start_delimiter": {

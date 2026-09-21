@@ -63,3 +63,6 @@ const PagesSite = z
 
 export const PagesConfig = PagesSite.nullable();
 export type PagesConfig = z.infer<typeof PagesConfig>;
+
+/** The site's own keys: a declared one the GET omits is drift the PUT resolves, so only a key outside this shape is a phantom. */
+export const PAGES_SITE_SHAPE = PagesSite.shape;

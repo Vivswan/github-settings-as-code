@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { omittedDeltas, refuseOmitted, renderDelta, subsetDiff } from "../../engine/diff.js";
+import {
+  omittedDeltas,
+  phantomKeys,
+  phantomNote,
+  refuseOmitted,
+  renderDelta,
+  subsetDiff,
+} from "../../engine/diff.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
@@ -157,10 +164,11 @@ export const environmentsSection = {
       });
       const live = "missing" in probe ? undefined : probe.data;
       const label = `environments[${name}]`;
-      const { drift, omitted } =
+      const { drift, omitted, notes } =
         live === undefined
-          ? { drift: [missingDrift(label)], omitted: [] }
+          ? { drift: [missingDrift(label)], omitted: [], notes: [] }
           : environmentDrift(label, settings, flattenEnvironment(live));
+      plan.notes.push(...notes);
       // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
       // body is validated only when a mutation needs it.
       const probedNodeId = live === undefined ? undefined : { node_id: live.node_id };
@@ -244,17 +252,25 @@ export const environmentsSection = {
  * The PUT replaces the environment's settings whole (an omitted `reviewers` clears the reviewers rule), so a
  * non-empty live setting the entry omits is drift too, and the lines it makes (`omitted`) are what apply refuses
  * the write over. The live body is split the way the entry was, so only the PUT's own keys take part in that sweep.
+ * The entry passes unknown keys through, so a key the GET never echoes would re-PUT on every apply without
+ * converging; `notes` names it. An entry key the GET omits (deployment_branch_policy on an environment that never
+ * set one) is drift the PUT resolves, so only a key outside the entry shape is noted.
  */
 function environmentDrift(
   label: string,
   settings: Record<string, unknown>,
   live: Record<string, unknown>,
-): { drift: string[]; omitted: string[] } {
+): { drift: string[]; omitted: string[]; notes: string[] } {
   const liveSettings = splitEntry(projectOntoSchema(EnvironmentConfig, live)).settings;
   const omitted = omittedDeltas(settings, liveSettings, {
     sweep: replaceSweep(EnvironmentConfig),
   }).map((delta) => renderDelta(label, delta));
-  return { drift: [...subsetDiff(settings, live, label), ...omitted], omitted };
+  const phantom = phantomKeys(settings, live).filter(
+    (key) => !Object.hasOwn(EnvironmentConfig.shape, key),
+  );
+  const notes =
+    phantom.length > 0 ? [phantomNote(label, phantom, "environment", "this PUT will re-run")] : [];
+  return { drift: [...subsetDiff(settings, live, label), ...omitted], omitted, notes };
 }
 
 /**
