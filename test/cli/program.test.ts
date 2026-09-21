@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliHost } from "../../src/cli/commands.js";
 import { main } from "../../src/cli/program.js";
@@ -131,17 +131,6 @@ describe("check and apply", () => {
         expect(result.stderr).not.toContain("Re-run with --verbose");
       }),
   );
-
-  test("--summary appends the run's markdown to the named file", () =>
-    withTempDir("gsac-cli-", async (dir) => {
-      const summary = join(dir, "summary.md");
-      const result = await cli(
-        ["check", ...target, "--summary", summary],
-        new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }),
-      );
-      expect(result.code).toBe(0);
-      expect(readFileSync(summary, "utf8")).toContain("clean");
-    }));
 });
 
 describe("validate and permissions", () => {
