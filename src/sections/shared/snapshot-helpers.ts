@@ -12,6 +12,7 @@ import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
+import { isMapping } from "./raw-values.js";
 
 /** The zod internals the projection walks: the def discriminator and its children. */
 interface ProjectionDef {
@@ -39,10 +40,6 @@ const LEAF_TYPES: ReadonlySet<string> = new Set([
   "unknown",
   "null",
 ]);
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * A live value projected onto a schema slice, so server-assigned fields fall away without a hand
@@ -73,7 +70,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
     case "default":
       return project(def.innerType as z.ZodType, live);
     case "object": {
-      if (!isPlainObject(live)) {
+      if (!isMapping(live)) {
         return live;
       }
       const shape = def.shape ?? {};
@@ -99,7 +96,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
         ? live.map((item) => project(def.element as z.ZodType, item))
         : live;
     case "record":
-      return isPlainObject(live)
+      return isMapping(live)
         ? Object.fromEntries(
             Object.entries(live).map(([key, value]) => [
               key,
