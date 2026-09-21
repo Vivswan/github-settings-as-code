@@ -21,7 +21,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
 } from "../contract/module.js";
-import type { ExecTools, SectionPlan } from "../contract/plan.js";
+import { type ExecTools, paramsWith, type SectionPlan } from "../contract/plan.js";
 import { decodeBase64, SEALED_BOX_PUBLIC_KEY_BYTES, sealForGithub } from "./sealed-box.js";
 
 export interface SecretEntry {
@@ -93,6 +93,26 @@ export interface SecretsPlanScope<Put extends AnyPlannedOp, Remove extends AnyPl
   /** The planned sealed PUT; function-valued so a builder demanding an unsupplied facet fails. */
   readonly put: (write: SealedSecretWrite) => Put;
   readonly remove: (deletion: UndeclaredSecretDeletion) => Remove;
+}
+
+/** The scope's two mappers under its role names; `params` is what its routes take beyond the `{secret_name}` token. */
+export function secretOps<
+  Put extends string,
+  Remove extends string,
+  Params extends Readonly<Record<string, string>> | undefined,
+>(roles: { put: Put; remove: Remove }, params: Params) {
+  return {
+    put: ({ name, ...write }: SealedSecretWrite) => ({
+      role: roles.put,
+      params: paramsWith(params, "secret_name", name),
+      ...write,
+    }),
+    remove: ({ name, ...deletion }: UndeclaredSecretDeletion) => ({
+      role: roles.remove,
+      params: paramsWith(params, "secret_name", name),
+      ...deletion,
+    }),
+  };
 }
 
 /** The matching key for a secret name: GitHub stores and compares uppercase. */

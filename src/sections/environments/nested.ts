@@ -15,12 +15,14 @@ import {
   LiveSecretName,
   planSecrets,
   type SecretsPlanScope,
+  secretOps,
 } from "../shared/secrets-engine.js";
 import {
   duplicateVariableNameIssues,
   LiveVariable,
   planVariables,
   type VariablesPlanScope,
+  variableOps,
 } from "../shared/variables-engine.js";
 import {
   BRANCH_POLICIES_DEFAULT_POLICY,
@@ -288,29 +290,10 @@ async function planEnvironmentVariables(
   > = {
     ...nestedProse(envName, "variables", "variable"),
     list: () => (liveEnv === undefined ? okAsync([]) : listEnvironmentVariables(ctx, envName)),
-    create: (write) => ({
-      role: "createVariable",
+    ...variableOps(
+      { create: "createVariable", update: "updateVariable", remove: "removeVariable" },
       params,
-      payload: write.payload,
-      drift: write.drift,
-      change: write.change,
-      describe: write.describe,
-    }),
-    update: (write) => ({
-      role: "updateVariable",
-      params: { ...params, name: write.liveName },
-      payload: write.payload,
-      drift: write.drift,
-      change: write.change,
-      describe: write.describe,
-    }),
-    remove: (deletion) => ({
-      role: "removeVariable",
-      params: { ...params, name: deletion.name },
-      drift: deletion.drift,
-      change: deletion.change,
-      describe: deletion.describe,
-    }),
+    ),
   };
   return (
     await planVariables(section, scope, {
@@ -352,21 +335,7 @@ async function planEnvironmentSecrets(
     publicKey: (exec, describe) =>
       ctx.read.secretsPublicKey.call(exec, z.unknown(), { params, describe }),
     publicKeyEndpoint: ENDPOINTS.secretsPublicKey,
-    put: (write) => ({
-      role: "putSecret",
-      params: { ...params, secret_name: write.name },
-      payload: write.payload,
-      drift: write.drift,
-      change: write.change,
-      describe: write.describe,
-    }),
-    remove: (deletion) => ({
-      role: "removeSecret",
-      params: { ...params, secret_name: deletion.name },
-      drift: deletion.drift,
-      change: deletion.change,
-      describe: deletion.describe,
-    }),
+    ...secretOps({ put: "putSecret", remove: "removeSecret" }, params),
   };
   return (
     await planSecrets(section, scope, {

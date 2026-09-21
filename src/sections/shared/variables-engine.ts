@@ -19,7 +19,7 @@ import {
   undeclaredNote,
   valueDrift,
 } from "../contract/module.js";
-import { type PlainData, plainData, type SectionPlan } from "../contract/plan.js";
+import { type PlainData, paramsWith, plainData, type SectionPlan } from "../contract/plan.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {
@@ -89,6 +89,28 @@ export interface VariablesPlanScope<
   readonly create: (write: VariableCreate) => Create;
   readonly update: (write: VariableUpdate) => Update;
   readonly remove: (deletion: VariableDeletion) => Remove;
+}
+
+/** The scope's three mappers under its role names; `params` is what its routes take beyond the `{name}` token. */
+export function variableOps<
+  Create extends string,
+  Update extends string,
+  Remove extends string,
+  Params extends Readonly<Record<string, string>> | undefined,
+>(roles: { create: Create; update: Update; remove: Remove }, params: Params) {
+  return {
+    create: (write: VariableCreate) => ({ role: roles.create, params, ...write }),
+    update: ({ liveName, ...write }: VariableUpdate) => ({
+      role: roles.update,
+      params: paramsWith(params, "name", liveName),
+      ...write,
+    }),
+    remove: ({ name, ...deletion }: VariableDeletion) => ({
+      role: roles.remove,
+      params: paramsWith(params, "name", name),
+      ...deletion,
+    }),
+  };
 }
 
 /**

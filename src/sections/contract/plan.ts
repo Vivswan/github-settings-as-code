@@ -482,6 +482,25 @@ type RestParams<R extends string> = [PathParams<R>] extends [never]
   ? { readonly params?: undefined }
   : { readonly params: Readonly<Record<PathParams<R>, string>> };
 
+type BaseParams = Readonly<Record<string, string>> | undefined;
+
+type ParamsWith<Base extends BaseParams, Token extends string> = (Base extends undefined
+  ? unknown
+  : Base) &
+  Record<Token, string>;
+
+/**
+ * The stated return type keeps an absent base (`undefined`) from collapsing the params to `never`, which
+ * every route would accept; the cast is that one boundary.
+ */
+export function paramsWith<Base extends BaseParams, Token extends string>(
+  base: Base,
+  token: Token,
+  value: string,
+): ParamsWith<Base, Token> {
+  return { ...base, [token]: value } as ParamsWith<Base, Token>;
+}
+
 type PlannedRestOp<E extends EndpointDict, R extends WriteRole<E>> = PlannedOpBase<DriftFor<E[R]>> &
   RestParams<E[R]["route"]> & {
     readonly role: R;
