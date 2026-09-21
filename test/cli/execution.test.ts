@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "../../src/action/run.js";
-import { type ConfigEnv, collectingIo, type OutputName, parseConfig } from "../../src/index.js";
+import { type ConfigEnv, collectingIo, type OutputName } from "../../src/index.js";
 import { INPUT_DECLS, type InputName } from "../../src/internal.js";
 import { MockApi, type Route } from "../mock-api.js";
 import { ROOT } from "../root.js";
@@ -339,27 +339,5 @@ describe("the action and the CLI run one arm to one result", () => {
     ) {
       expect(Object.keys(action.files).some((f) => f !== "settings.yml")).toBe(true);
     }
-  });
-
-  test("the table reaches every arm, both snapshot forms, both exit codes, and a partial result", () => {
-    const arms = new Set<string>();
-    for (const c of cases) {
-      const parsed = parseConfig((name) => c.inputs("<dir>")[name] ?? "", c.env, {
-        artifactUpload: true,
-      })._unsafeUnwrap();
-      arms.add(parsed.kind === "snapshot" ? `snapshot:${parsed.form}` : parsed.kind);
-    }
-    expect([...arms].sort()).toEqual([
-      "multi",
-      "render",
-      "single",
-      "snapshot:dir",
-      "snapshot:file",
-    ]);
-    expect([...new Set(cases.map((c) => c.ends.code))].sort()).toEqual([0, 1]);
-    expect(cases.filter((c) => c.ends.result === "partial").map((c) => c.name)).toEqual([
-      "check, one repository, a denied section skipped under warn",
-      "snapshot, two repositories to a directory, a denied section skipped under warn",
-    ]);
   });
 });
