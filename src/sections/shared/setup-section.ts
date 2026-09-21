@@ -270,7 +270,7 @@ export function setupSection<K extends SetupKey>(setup: {
           undeclarable.length > 0
             ? [leftOutOfSnapshot(`${key}.languages`, undeclarableLanguages(undeclarable))]
             : [];
-        return { value: projectOntoSchema(slice, live) as SetupDeclared<K>, notes };
+        return { value: projectOntoSchema<unknown>(slice, live) as SetupDeclared<K>, notes };
       });
 
   const section: SetupSectionModule<K> = {

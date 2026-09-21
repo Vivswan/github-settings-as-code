@@ -30,9 +30,17 @@ async function probe(api: GitHubClient, slug: string): Promise<RepoVisibility> {
   if ("failed" in result || "error" in result) {
     return "unknown";
   }
-  const repo = result.data as { visibility?: unknown; private?: unknown } | null;
-  // Fail closed, mirroring discover.ts normalizeVisibility: the always-present `private` flag is the authority, so
-  // private === true wins over any `visibility` value.
+  return classifyVisibility(result.data as { visibility?: unknown; private?: unknown } | null);
+}
+
+/**
+ * Fails closed for the REDACTION decision. `visibility` is a plain string in the API schema and optional on GHES, so
+ * the always-present `private` flag is the authority: private === true wins over any `visibility` (even a stale
+ * "public"), and a body that proves neither public nor private is "unknown", which every caller hides.
+ */
+export function classifyVisibility(
+  repo: { visibility?: unknown; private?: unknown } | null,
+): RepoVisibility {
   if (repo?.private === true) {
     return repo.visibility === "internal" ? "internal" : "private";
   }
@@ -40,8 +48,5 @@ async function probe(api: GitHubClient, slug: string): Promise<RepoVisibility> {
   if (visibility === "public" || visibility === "private" || visibility === "internal") {
     return visibility;
   }
-  if (repo?.private === false) {
-    return "public";
-  }
-  return "unknown";
+  return repo?.private === false ? "public" : "unknown";
 }

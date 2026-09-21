@@ -8,6 +8,7 @@ import type { components } from "@octokit/openapi-types";
 import { err, ok, ResultAsync } from "neverthrow";
 import { type GitHubClient, isPermissionError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
+import { classifyVisibility } from "../github/repo-visibility.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
 import type { ProblemOf } from "../problem.js";
@@ -37,20 +38,10 @@ function sealFiltered(ref: DiscoveredRepoRef): FilteredRepoRef {
     : { slug: markPrivate(ref.slug), visibility: ref.visibility };
 }
 
-/**
- * Fails closed for the REDACTION decision. `visibility` is a plain string in the API schema and optional on GHES, so
- * the always-present `private` flag is the authority: private === true wins over any `visibility` (even a stale
- * "public"), and with BOTH fields missing the repo is hidden, never exposed.
- */
+/** Discovery never re-probes, so a repository the listing proves neither public nor private is hidden, never exposed. */
 function normalizeVisibility(repo: DiscoveredRepo): DiscoveredRepoRef["visibility"] {
-  if (repo.private === true) {
-    return "internal" === repo.visibility ? "internal" : "private";
-  }
-  const visibility = repo.visibility;
-  if (visibility === "public" || visibility === "private" || visibility === "internal") {
-    return visibility;
-  }
-  return repo.private === false ? "public" : "private";
+  const visibility = classifyVisibility(repo);
+  return visibility === "unknown" ? "private" : visibility;
 }
 
 /** Allowed values per discovery-filter input; the single source the input validation and types derive from. */
