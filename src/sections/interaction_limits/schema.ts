@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { agree } from "../../text.js";
+import { stringItems } from "../shared/raw-values.js";
 
 const INTERACTION_GROUPS = ["existing_users", "contributors_only", "collaborators_only"] as const;
 const INTERACTION_EXPIRIES = [
@@ -80,8 +81,9 @@ const InteractionLimits = z
           "expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry",
       });
     }
-    const bypass = declared.pull_request_creation_bypass;
-    if (bypass === undefined) {
+    // The list may be raw beside its own shape issue (see ../shared/raw-values.ts); a non-list holds no logins.
+    const bypass: unknown = declared.pull_request_creation_bypass;
+    if (!Array.isArray(bypass)) {
       return;
     }
     if (bypass.length > 100) {
@@ -94,7 +96,8 @@ const InteractionLimits = z
       });
     }
     const seen = new Map<string, string>();
-    for (const login of bypass) {
+    // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts); the string items are judged.
+    for (const login of stringItems(bypass)) {
       const key = login.toLowerCase();
       const first = seen.get(key);
       if (first === undefined) {

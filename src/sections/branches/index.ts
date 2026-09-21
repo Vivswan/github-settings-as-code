@@ -23,6 +23,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData } from "../contract/plan.js";
+import { isMapping } from "../shared/raw-values.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
@@ -188,15 +189,15 @@ export const branchesSection = {
       ...rest,
     ];
     entries.forEach((entry: BranchConfig, index) => {
-      // The name may be a raw non-string beside its own shape issue; a regex would coerce it (`[object Object]` wildcards).
-      if (
-        typeof entry.name !== "string" ||
-        !isWildcardPattern(entry.name) ||
-        entry.protection === null
-      ) {
+      // The entry, its name, or its protection may be raw or missing beside its own shape issue; a regex would
+      // coerce the name (`[object Object]` wildcards), and a non-mapping protection holds no keys to sweep.
+      if (!isMapping(entry) || typeof entry.name !== "string" || !isWildcardPattern(entry.name)) {
         return;
       }
-      const protection = entry.protection as Record<string, unknown>;
+      const protection = entry.protection;
+      if (!isMapping(protection)) {
+        return;
+      }
       for (const key of Object.keys(protection)) {
         if (!WILDCARD_KEY_SET.has(key)) {
           refineCtx.addIssue({

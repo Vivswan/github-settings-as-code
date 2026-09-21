@@ -492,6 +492,46 @@ describe("every parse error in a document is reported in one run", () => {
       ],
     ],
     [
+      // The rule reads the list's length; a string has one too, and an empty string's is zero.
+      "a raw reviewers value beside prevent_self_review: true, which the pair rule does not count as no reviewers",
+      { environments: [{ name: "production", prevent_self_review: true, reviewers: "" }] },
+      [/^environments\[0\]\.reviewers: Invalid input: expected array, received string/],
+    ],
+    [
+      // zod runs a length check on any value with a length; a raw list's zero is not an empty delimiter.
+      "a raw start_delimiter, which the empty-delimiter check does not read as an empty string",
+      {
+        secret_scanning_custom_patterns: [
+          { name: "synthetic-token", pattern: "x", start_delimiter: [] },
+        ],
+      },
+      [
+        /^secret_scanning_custom_patterns\[0\]\.start_delimiter: Invalid input: expected string, received array/,
+      ],
+    ],
+    [
+      // The rule compares the two flags; two equal raw values are not two false ones.
+      "two raw deployment_branch_policy flags, which the exclusive-flag rule does not read as both false",
+      {
+        environments: [
+          {
+            name: "production",
+            deployment_branch_policy: { protected_branches: 0, custom_branch_policies: 0 },
+          },
+        ],
+      },
+      [
+        /^environments\[0\]\.deployment_branch_policy\.protected_branches: Invalid input: expected boolean/,
+        /^environments\[0\]\.deployment_branch_policy\.custom_branch_policies: Invalid input: expected boolean/,
+      ],
+    ],
+    [
+      // The rule branches on the flag; a raw number is truthy without being true.
+      "a raw use_default beside include_claim_keys, which the template rule does not read as the default template",
+      { actions: { oidc_customization_sub: { use_default: 1, include_claim_keys: ["repo"] } } },
+      [/^actions\.oidc_customization_sub\.use_default: Invalid discriminator value/],
+    ],
+    [
       "a property-level type failure and the object-level misplaced-key rule in one webhook entry",
       {
         webhooks: [{ config: { url: "https://hooks.example/x" }, active: "yes", secret: "$HOOK" }],

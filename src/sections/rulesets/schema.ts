@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { isMapping } from "../shared/raw-values.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -327,13 +328,16 @@ export const RulesetConfig = z
     bypass_actors: z.array(BypassActorConfig).optional(),
   })
   .superRefine((ruleset, refineCtx) => {
-    // The spec: `pull_request` bypass applies to branch rulesets only; the target defaults to branch upstream.
-    const target = ruleset.target ?? "branch";
-    if (target === "branch") {
+    // The spec: `pull_request` bypass applies to branch rulesets only; the target defaults to branch upstream. The
+    // target, the actor list, or an actor may be raw beside its own shape issue (see ../shared/raw-values.ts): only
+    // the two other targets carry the restriction, a non-list holds no actors, and a non-mapping declares no mode.
+    const target: unknown = ruleset.target;
+    if (target !== "tag" && target !== "push") {
       return;
     }
-    for (const [index, actor] of (ruleset.bypass_actors ?? []).entries()) {
-      if (actor.bypass_mode === "pull_request") {
+    const actors: unknown = ruleset.bypass_actors;
+    for (const [index, actor] of (Array.isArray(actors) ? actors : []).entries()) {
+      if (isMapping(actor) && actor.bypass_mode === "pull_request") {
         refineCtx.addIssue({
           code: "custom",
           path: ["bypass_actors", index, "bypass_mode"],
