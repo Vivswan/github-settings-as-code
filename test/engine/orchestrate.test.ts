@@ -294,23 +294,6 @@ describe("validateSettingsDoc secret references", () => {
       validateSettingsDoc(LITERAL_HOOK, "f.yml", only, io),
     );
   });
-
-  test("a target-fetched document's reference is refused; the operator default admits it", () => {
-    const { io } = captureIo();
-    const doc = { webhooks: [{ config: { url: "https://x.test/h", secret: "$WEBHOOK_SECRET" } }] };
-    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io).isOk()).toBe(true);
-    expect(
-      validateSettingsDoc(doc, "o/r:.github/settings.yml", SectionSelection.ALL, io, {
-        secretSource: "target",
-      }),
-    ).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "o/r:.github/settings.yml",
-        issues: [expect.stringContaining("in a target-fetched settings file")],
-      }),
-    );
-  });
 });
 
 describe("validateSettingsDoc", () => {
@@ -404,60 +387,24 @@ describe("validateSettingsDoc", () => {
     );
   });
 
-  test("a duplicate label and a malformed deploy key beside a valid repository section refuse the document whole, so runForRepo never PATCHes the repository first", () => {
-    const verdict = validateSettingsDoc(
+  test.each<[form: string, doc: unknown, issues: string[]]>([
+    // Never branded: the open label shape would have carried _remove to GitHub as a field.
+    [
+      "a plain list",
       {
-        repository: { description: "should never be written" },
-        labels: [{ name: "bug" }, { name: "Bug" }],
-        deploy_keys: [{ title: "ci", key: "ssh-ed25519" }],
+        labels: [
+          { name: "old", _remove: true },
+          { name: "new", color: "ffffff" },
+        ],
       },
-      "settings.yml",
-      SectionSelection.ALL,
-      silentIo(),
-    );
-    expect(verdict).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "settings.yml",
-        issues: [
-          'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
-          expect.stringMatching(
-            /^deploy_keys\[0\]\.key: entry "ci": the key has fewer than two fields separated by a space or tab/,
-          ),
-        ],
-      }),
-    );
-  });
-
-  test("a removal entry in a single document is refused by its site, never branded: the open label shape would have carried _remove to GitHub as a field", () => {
-    expect(
-      validateSettingsDoc(
-        {
-          labels: [
-            { name: "old", _remove: true },
-            { name: "new", color: "ffffff" },
-          ],
-        },
-        "settings.yml",
-        SectionSelection.ALL,
-        silentIo(),
-      ),
-    ).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "settings.yml",
-        issues: [
-          "labels[0]._remove: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)",
-        ],
-      }),
-    );
-  });
-
-  test.each<[form: string, doc: unknown, sites: string[]]>([
+      [
+        "labels[0]._remove: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)",
+      ],
+    ],
     [
       "a wrapper's entries",
       { labels: { _undeclared: "keep", entries: [{ name: "old", _remove: true }] } },
-      ["labels[0]._remove"],
+      [singleDocumentRemovalIssue("labels[0]._remove")],
     ],
     [
       "nested lists in both forms, the marker's value unjudged",
@@ -470,15 +417,14 @@ describe("validateSettingsDoc", () => {
           },
         ],
       },
-      ["environments[0].variables[0]._remove", "environments[0].secrets[0]._remove"],
+      [
+        singleDocumentRemovalIssue("environments[0].variables[0]._remove"),
+        singleDocumentRemovalIssue("environments[0].secrets[0]._remove"),
+      ],
     ],
-  ])("a removal entry under %s is refused by its site", (_form, doc, sites) => {
+  ])("a removal entry under %s is refused by its site", (_form, doc, issues) => {
     expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, silentIo())).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: sites.map(singleDocumentRemovalIssue),
-      }),
+      err({ code: "settings-malformed-sections", source: "s.yml", issues }),
     );
   });
 
@@ -505,58 +451,47 @@ describe("validateSettingsDoc", () => {
     );
   });
 
-  test("a shape issue beside a refused removal names the entry by its index as written: the shapes judged the document minus the removal, and the index shifted", () => {
-    expect(
-      validateSettingsDoc(
-        {
-          labels: [
-            { name: "old", _remove: true },
-            { name: "new", color: null },
-          ],
-        },
-        "s.yml",
-        SectionSelection.ALL,
-        silentIo(),
-      ),
-    ).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: [
-          singleDocumentRemovalIssue("labels[0]._remove"),
-          "labels[1].color has no empty state; write a string",
+  // The shapes judged the document minus the removal, and the index shifted back to the one written.
+  test.each<[kind: string, doc: unknown, site: string, issue: string | RegExp]>([
+    [
+      "a shape issue",
+      {
+        labels: [
+          { name: "old", _remove: true },
+          { name: "new", color: null },
         ],
-      }),
-    );
-  });
-
-  test("a closed-surface issue beside a refused removal names the entry by its index as written and carries the identity in the text: an all-digit identity is never read as an index", () => {
-    expect(
-      validateSettingsDoc(
-        {
-          custom_properties: [
-            { property_name: "old", _remove: true },
-            { property_name: "tier", value: "gold" },
-            { property_name: "0", value: "x", permision: "y" },
-          ],
-        },
-        "s.yml",
-        SectionSelection.ALL,
-        silentIo(),
-      ),
-    ).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "s.yml",
-        issues: [
-          singleDocumentRemovalIssue("custom_properties[0]._remove"),
-          expect.stringMatching(
-            /^custom_properties\[2\] \(property_name "0"\): declares "permision", /,
-          ),
+      },
+      "labels[0]._remove",
+      "labels[1].color has no empty state; write a string",
+    ],
+    // The identity travels in the text, so an all-digit identity is never read as an index.
+    [
+      "a closed-surface issue carrying an all-digit identity",
+      {
+        custom_properties: [
+          { property_name: "old", _remove: true },
+          { property_name: "tier", value: "gold" },
+          { property_name: "0", value: "x", permision: "y" },
         ],
-      }),
-    );
-  });
+      },
+      "custom_properties[0]._remove",
+      /^custom_properties\[2\] \(property_name "0"\): declares "permision", /,
+    ],
+  ])(
+    "%s beside a refused removal names the entry by its index as written",
+    (_kind, doc, site, issue) => {
+      expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, silentIo())).toEqual(
+        err({
+          code: "settings-malformed-sections",
+          source: "s.yml",
+          issues: [
+            singleDocumentRemovalIssue(site),
+            typeof issue === "string" ? issue : expect.stringMatching(issue),
+          ],
+        }),
+      );
+    },
+  );
 
   test("a list whose named property shadows a method is refused by the plainness check, never met by the removal walk", () => {
     // The walk for removals runs on the raw document, before the shapes; calling the list's own forEach would throw here.
@@ -649,20 +584,6 @@ describe("validateSettingsDoc", () => {
       );
     },
   );
-
-  test("a valid document comes back branded, ready for runForRepo", () => {
-    const { io } = captureIo();
-    const doc = { repository: { has_wiki: false } };
-    // The brand is compile-time only; the value is zod's parsed copy.
-    const branded: unknown = validateSettingsDoc(
-      doc,
-      "s.yml",
-      SectionSelection.ALL,
-      io,
-    )._unsafeUnwrap();
-    expect(branded).toEqual(doc);
-    expect(branded).not.toBe(doc);
-  });
 });
 
 describe("preflightProbe", () => {

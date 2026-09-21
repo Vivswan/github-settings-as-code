@@ -936,61 +936,52 @@ describe("executePlan", () => {
   });
 
   // Each refusal names a role the erased plan type admits but the executor must never issue, run against a client that would otherwise answer.
-  const refused: ReadonlyArray<{ what: string; role: string; message: string }> = [
-    {
-      what: "a REST read role",
-      role: "list",
-      message:
-        'BUG: labels planned an operation under role "list", which is a read endpoint (GET /repos/{owner}/{repo}/labels); only write roles are plannable',
-    },
-    {
-      what: "a GraphQL read role",
-      role: "read",
-      message:
-        'BUG: labels planned an operation under role "read", which is a GraphQL read operation; only write roles are plannable',
-    },
-    {
-      what: "an undeclared role",
-      role: "typo",
-      message:
-        'BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
-    },
+  test.each<[what: string, role: string, message: string]>([
+    [
+      "a REST read role",
+      "list",
+      'BUG: labels planned an operation under role "list", which is a read endpoint (GET /repos/{owner}/{repo}/labels); only write roles are plannable',
+    ],
+    [
+      "a GraphQL read role",
+      "read",
+      'BUG: labels planned an operation under role "read", which is a GraphQL read operation; only write roles are plannable',
+    ],
+    [
+      "an undeclared role",
+      "typo",
+      'BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
+    ],
     // Inherited names resolve through a plain `dict[role]` lookup; the executor must read own properties only.
-    {
-      what: "an inherited role (constructor)",
-      role: "constructor",
-      message:
-        'BUG: labels planned an operation under role "constructor", which names no declared endpoint or GraphQL operation',
-    },
+    [
+      "an inherited role (constructor)",
+      "constructor",
+      'BUG: labels planned an operation under role "constructor", which names no declared endpoint or GraphQL operation',
+    ],
     // A number would coerce onto a matching key and a symbol would enter the property-key path; both are refused before any lookup.
-    {
-      what: "a numeric role",
-      role: 0 as unknown as string,
-      message:
-        "BUG: labels planned an operation whose role is a number, not the name of a declared write",
-    },
-    {
-      what: "a symbol role",
-      role: Symbol("create") as unknown as string,
-      message:
-        "BUG: labels planned an operation whose role is a symbol, not the name of a declared write",
-    },
-  ];
-  for (const { what, role, message } of refused) {
-    test(`refuses ${what} before any request leaves`, async () => {
-      const api = new MockApi(
-        {
-          "GET /repos/o/r/labels": { data: [] },
-          "GRAPHQL ExecutorRead": { data: { repository: {} } },
-        },
-        { unroutedMutations: "succeed" },
-      );
-      const execution = await executePlan(planOf({ role }), SECTION, api, REPO, TOOLS);
-      expect(execution.status).toBe("failed");
-      expect(execution.changes).toEqual([]);
-      expect(execution.landed).toBe(0);
-      expect(errorOf(execution)).toBe(message);
-      expect(api.calls).toEqual([]);
-    });
-  }
+    [
+      "a numeric role",
+      0 as unknown as string,
+      "BUG: labels planned an operation whose role is a number, not the name of a declared write",
+    ],
+    [
+      "a symbol role",
+      Symbol("create") as unknown as string,
+      "BUG: labels planned an operation whose role is a symbol, not the name of a declared write",
+    ],
+  ])("refuses %s before any request leaves", async (_what, role, message) => {
+    const api = new MockApi(
+      {
+        "GET /repos/o/r/labels": { data: [] },
+        "GRAPHQL ExecutorRead": { data: { repository: {} } },
+      },
+      { unroutedMutations: "succeed" },
+    );
+    const execution = await executePlan(planOf({ role }), SECTION, api, REPO, TOOLS);
+    expect(execution.status).toBe("failed");
+    expect(execution.changes).toEqual([]);
+    expect(execution.landed).toBe(0);
+    expect(errorOf(execution)).toBe(message);
+    expect(api.calls).toEqual([]);
+  });
 });

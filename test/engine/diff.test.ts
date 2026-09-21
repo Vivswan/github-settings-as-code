@@ -422,31 +422,38 @@ describe("phantomNote", () => {
 });
 
 describe("phantomKeys", () => {
-  test("names declared keys the live object does not carry", () => {
-    expect(phantomKeys({ colr: "ff0000", description: "x" }, { description: "x" })).toEqual([
-      "colr",
-    ]);
-  });
-  test("excludes null and empty-string values (deltas tolerates them)", () => {
-    expect(phantomKeys({ a: null, b: "", c: undefined }, {})).toEqual([]);
-  });
-  test("a live key holding any value is not phantom, even when it differs", () => {
-    expect(phantomKeys({ state: "open" }, { state: "closed" })).toEqual([]);
-    expect(phantomKeys({ state: "open" }, { state: null })).toEqual([]);
-  });
-  test("a non-object live value yields nothing", () => {
-    expect(phantomKeys({ a: 1 }, null)).toEqual([]);
-    expect(phantomKeys({ a: 1 }, [])).toEqual([]);
-  });
-  test("a phantom nested under a declared object, or inside a keyed item, is named by its dotted path, so the never-converges note covers it", () => {
-    const desired = {
-      security_and_analysis: { secret_scanning_ai_detection: { status: "enabled" } },
-      rules: [{ type: "deletion", extra: 1 }],
-    };
-    const live = { security_and_analysis: {}, rules: [{ type: "deletion" }] };
-    expect(phantomKeys(desired, live)).toEqual([
-      "security_and_analysis.secret_scanning_ai_detection",
-      "rules[deletion].extra",
-    ]);
+  test.each<[what: string, desired: Record<string, unknown>, live: unknown, keys: string[]]>([
+    [
+      "names declared keys the live object does not carry",
+      { colr: "ff0000", description: "x" },
+      { description: "x" },
+      ["colr"],
+    ],
+    [
+      "excludes null and empty-string values (deltas tolerates them)",
+      { a: null, b: "", c: undefined },
+      {},
+      [],
+    ],
+    [
+      "a live key holding a differing value is not phantom",
+      { state: "open" },
+      { state: "closed" },
+      [],
+    ],
+    ["a live key holding null is not phantom", { state: "open" }, { state: null }, []],
+    ["a null live value yields nothing", { a: 1 }, null, []],
+    ["a list live value yields nothing", { a: 1 }, [], []],
+    [
+      "a phantom nested under a declared object, or inside a keyed item, is named by its dotted path, so the never-converges note covers it",
+      {
+        security_and_analysis: { secret_scanning_ai_detection: { status: "enabled" } },
+        rules: [{ type: "deletion", extra: 1 }],
+      },
+      { security_and_analysis: {}, rules: [{ type: "deletion" }] },
+      ["security_and_analysis.secret_scanning_ai_detection", "rules[deletion].extra"],
+    ],
+  ])("%s", (_what, desired, live, keys) => {
+    expect(phantomKeys(desired, live)).toEqual(keys);
   });
 });

@@ -12,10 +12,6 @@ function issuesOf(doc: Record<string, unknown>, sourceLabel = "f.yml"): readonly
 }
 
 describe("section shape validation", () => {
-  test("pages: null passes", () => {
-    expect(validateSectionShapes({ pages: null }, "f.yml")).toEqual(ok({ pages: null }));
-  });
-
   test("a shape failure is one problem naming the source, with every issue listed", () => {
     expect(
       validateSectionShapes({ workflows: [{ path: "ci.yml", state: "paused" }] }, "settings.yml"),
@@ -47,13 +43,20 @@ describe("section shape validation", () => {
       { pages: { source: null } },
       /^pages\.source has no empty state; write a mapping of its fields$/,
     ],
+    // Entry paths keep their precision inside the wrapper.
+    [
+      "a string where the handler maps a list, inside the wrapper",
+      { rulesets: { entries: [{ name: "r", conditions: { ref_name: { include: "main" } } }] } },
+      /^rulesets\.entries\[0\]\.conditions\.ref_name\.include: .*expected array/,
+    ],
   ])("the fields handlers dereference are shape-checked: %s", (_what, doc, issue) => {
     expect(issuesOf(doc)).toEqual([expect.stringMatching(issue)]);
   });
 
   // The cascade's null is the EMPTY value on GitHub, so a key with no empty state refuses it naming the values that exist;
   // a whole section takes null only where null is its off state. The messages are the fix, not zod's type prose.
-  test.each<[string, Record<string, unknown>, string]>([
+  test.each<[string, Record<string, unknown>, string | null]>([
+    ["on pages, whose off state it is", { pages: null }, null],
     [
       "a boolean",
       { repository: { enable_git_lfs: null } },
@@ -94,9 +97,17 @@ describe("section shape validation", () => {
       { labels: null },
       "labels: null has no meaning; remove the section or declare its entries",
     ],
-  ])("a null a key does not admit names the legal values: %s", (_what, doc, issue) => {
-    expect(issuesOf(doc)).toEqual([issue]);
-  });
+  ])(
+    "a null is a value only where the section has an off state, elsewhere it names the legal values: %s",
+    (_what, doc, issue) => {
+      // The expected verdict is fixed before the call, so a validator that wrote into its input could not pass by it.
+      const expected =
+        issue === null
+          ? ok(structuredClone(doc))
+          : err({ code: "settings-malformed-sections" as const, source: "f.yml", issues: [issue] });
+      expect(validateSectionShapes(doc, "f.yml")).toEqual(expected);
+    },
+  );
 
   test("a shape's own diagnostic for a null keeps its words: no value would make the key legal", () => {
     // The environments slice refuses a singular `secret` key by name; the null rewrite has nothing truer to say.
@@ -175,19 +186,24 @@ describe("file-only checks run inside document validation", () => {
 
 describe("YAML-tagged values are rejected anywhere in a section", () => {
   // zod object schemas accept a Date or Set as an empty mapping, so without the plain-data gate these would validate and silently configure nothing.
-  test("a tagged section VALUE is rejected for a mapping section that has no required key", () => {
-    expect(issuesOf({ actions: new Date(0) }, "settings.yml")).toEqual([
+  test.each<[where: string, doc: Record<string, unknown>, issue: string]>([
+    [
+      "a section VALUE, for a mapping section that has no required key",
+      { actions: new Date(0) },
       "actions is not plain YAML data (a Date, e.g. from a YAML !!timestamp tag); replace it with a plain value",
-    ]);
-  });
-
-  test("a tagged NESTED value is rejected with its key path", () => {
-    expect(issuesOf({ actions: { cache: new Date(0) } })).toEqual([
+    ],
+    [
+      "a NESTED mapping value",
+      { actions: { cache: new Date(0) } },
       "actions.cache is not plain YAML data (a Date, e.g. from a YAML !!timestamp tag); replace it with a plain value",
-    ]);
-    expect(issuesOf({ labels: [{ name: "bug", color: new Set(["d73a4a"]) }] })).toEqual([
+    ],
+    [
+      "a NESTED field of a list entry",
+      { labels: [{ name: "bug", color: new Set(["d73a4a"]) }] },
       "labels[0].color is not plain YAML data (a set, e.g. from a YAML !!set tag); replace it with a plain value",
-    ]);
+    ],
+  ])("a tagged value at %s is rejected with its key path", (_where, doc, issue) => {
+    expect(issuesOf(doc)).toEqual([issue]);
   });
 
   // Without this gate, plan()'s payload proof would throw on the cycle only after earlier sections wrote.
@@ -424,7 +440,7 @@ describe("the wrapped undeclared-policy form", () => {
     ).toEqual([expect.stringMatching(/^rulesets: Unrecognized key: "__proto__"/)]);
   });
 
-  test("an unknown underscore key on a wrapper names the two directives, on a top-level and a nested wrapper alike", () => {
+  test("an unknown underscore key on a wrapper names the two directives, on a top-level and a nested wrapper alike; the pre-v3 policy key names its rename", () => {
     expect(issuesOf({ labels: { _notes: "private", entries: [{ name: "bug" }] } })).toEqual([
       expect.stringMatching(/^labels: Unrecognized key: "_notes"; .*"_undeclared".*"_layering"/),
     ]);
@@ -445,21 +461,7 @@ describe("the wrapped undeclared-policy form", () => {
         /^labels: Unrecognized keys: "undeclared", "_owner"; .*"undeclared" was renamed to "_undeclared".*; "_owner": /,
       ),
     ]);
-  });
-
-  test("entry paths keep their precision inside the wrapper", () => {
-    expect(
-      issuesOf({
-        rulesets: { entries: [{ name: "r", conditions: { ref_name: { include: "main" } } }] },
-      }),
-    ).toEqual([
-      expect.stringMatching(
-        /^rulesets\.entries\[0\]\.conditions\.ref_name\.include: .*expected array/,
-      ),
-    ]);
-  });
-
-  test("the pre-v3 policy key fails naming the rename on a nested environments list", () => {
+    // The rename clause alone, on a nested list.
     expect(
       issuesOf({
         environments: [
