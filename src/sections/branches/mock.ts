@@ -149,8 +149,9 @@ const isMapping = (value: unknown): value is Json =>
  * lowercase, a list the review-side holders omit served empty (the PUT takes each of theirs as
  * optional), and a review-side holder naming nobody dropped, since GitHub serves
  * dismissal_restrictions and bypass_pull_request_allowances only when they name someone.
- * `restrictions` stays whole: an all-empty one restricts pushes to nobody, and a list it omits
- * never reaches here (missingRestrictionListResponse answers the 422 first).
+ * `restrictions` stays whole: an all-empty one restricts pushes to nobody, a users or teams list it
+ * omits never reaches here (missingRestrictionListResponse answers the 422 first), and an omitted
+ * apps is served empty.
  */
 function actorsAsGitHubReadsBack(payload: Json): Json {
   const canonical = (holder: Json): ActorHolder => {
