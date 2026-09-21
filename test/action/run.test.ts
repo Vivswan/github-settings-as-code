@@ -328,6 +328,7 @@ describe("run in multi-repo mode (env glue)", () => {
       const uploader: ArtifactUploader = {
         async upload(_name, file) {
           uploads.push(file.data);
+          return { uploaded: true as const };
         },
       };
       setDiscoveryEnv();

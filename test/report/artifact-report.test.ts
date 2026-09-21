@@ -24,6 +24,7 @@ function captureUploader(): {
     uploader: {
       async upload(name, file) {
         uploads.push({ name, file });
+        return { uploaded: true as const };
       },
     },
     uploads,
@@ -76,19 +77,34 @@ describe("deliverArtifactReport", () => {
     expect(await decrypter.decrypt(data, "text")).toBe("secret document");
   });
 
-  test("an upload failure is a warning, never a throw", async () => {
-    const { recipient } = await testKeypair();
-    const uploader: ArtifactUploader = {
-      async upload() {
-        throw new Error("Unable to get the ACTIONS_RUNTIME_TOKEN env variable");
+  test.each<[string, ArtifactUploader]>([
+    [
+      "answers failed",
+      {
+        async upload() {
+          return { failed: "Unable to get the ACTIONS_RUNTIME_TOKEN env variable" };
+        },
       },
-    };
-    expect(await deliverArtifactReport(uploader, "doc", recipient)).toEqual({
-      warning:
-        "could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN " +
-        "env variable. Re-run, or set private-report: none if it persists",
-    });
-  });
+    ],
+    [
+      "throws instead of answering",
+      {
+        async upload() {
+          throw new Error("Unable to get the ACTIONS_RUNTIME_TOKEN env variable");
+        },
+      },
+    ],
+  ])(
+    "an uploader that %s is one warning carrying its reason, never a throw",
+    async (_how, uploader) => {
+      const { recipient } = await testKeypair();
+      expect(await deliverArtifactReport(uploader, "doc", recipient)).toEqual({
+        warning:
+          "could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN " +
+          "env variable. Re-run, or set private-report: none if it persists",
+      });
+    },
+  );
 
   test("a malformed recipient is a warning and the uploader is never called", async () => {
     const { uploader, uploads } = captureUploader();

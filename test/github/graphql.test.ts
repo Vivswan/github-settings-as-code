@@ -60,11 +60,13 @@ describe("tryGraphql success and envelope", () => {
     });
   });
 
-  test("a 200 with neither data nor errors throws the wire-contract error", async () => {
+  test("a 200 with neither data nor errors fails with the wire-contract line", async () => {
     stubFetch([() => graphql({ ok: true })]);
-    await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-      /GRAPHQL RepoToggles returned a response carrying neither errors nor a data object/,
-    );
+    expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
+      failed: expect.stringMatching(
+        /GRAPHQL RepoToggles returned a response carrying neither errors nor a data object/,
+      ),
+    });
   });
 });
 
@@ -154,16 +156,16 @@ describe("tryGraphql errors[] mapping", () => {
     // {data, errors: null} must never read as "no errors": the contract makes errors, when present, a non-empty list. (An errors OBJECT trips the
     // throttling plugin's own inspection first and never reaches this guard.)
     stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors: null })]);
-    await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-      /GRAPHQL RepoToggles returned a malformed errors value/,
-    );
+    expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
+      failed: expect.stringMatching(/GRAPHQL RepoToggles returned a malformed errors value/),
+    });
   });
 
   test("an empty errors array fails closed (present means non-empty)", async () => {
     stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors: [] })]);
-    await expect(api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-      /GRAPHQL RepoToggles returned a malformed errors value/,
-    );
+    expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
+      failed: expect.stringMatching(/GRAPHQL RepoToggles returned a malformed errors value/),
+    });
   });
 
   // The ladder reads the rate limit first: beside FORBIDDEN it must not read as a permission failure (the user would be told to fix their PAT),
@@ -365,17 +367,12 @@ describe("tryGraphql tracing and redaction", () => {
       t.io.mask("o/secretrepo");
       throw new Error(rawReason);
     }) as unknown as typeof fetch;
-    const thrown = await api(t.io)
-      .tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo")
-      .then(
-        () => {
-          throw new Error("expected tryGraphql to throw");
-        },
-        (error: unknown) => String(error),
-      );
-    expect(thrown).toBe(
-      "Error: GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run",
-    );
+    expect(
+      await api(t.io).tryGraphql(READ_OP, { owner: "o", repo: "secretrepo" }, "o/secretrepo"),
+    ).toEqual({
+      failed:
+        "GRAPHQL RepoToggles failed: the transport failed before an HTTP response arrived (details withheld: the repository is redacted). Check network connectivity from the runner to https://api.test, then re-run",
+    });
   });
 
   test("a secret-named variable is masked in the trace and its error body withheld", async () => {
@@ -438,7 +435,7 @@ describe("tryGraphql tracing and redaction", () => {
     ["timers", TIMERS_SCHEDULER],
     ["immediate", IMMEDIATE_SCHEDULER],
   ])(
-    "a network-level failure throws with the GRAPHQL label and rerun advice (%s scheduler)",
+    "a network-level failure fails with the GRAPHQL label and rerun advice (%s scheduler)",
     async (_label, scheduler) => {
       // The throttling plugin inspects every failed /graphql request and reads `error.response.headers`, which a transport error lacks; the
       // original error must survive that handler under both schedulers.
@@ -453,9 +450,11 @@ describe("tryGraphql tracing and redaction", () => {
         retryBaseMs: 1,
         scheduler,
       });
-      await expect(client.tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).rejects.toThrow(
-        /GRAPHQL RepoToggles failed: socket hang up\. Check network connectivity/,
-      );
+      expect(await client.tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
+        failed: expect.stringMatching(
+          /GRAPHQL RepoToggles failed: socket hang up\. Check network connectivity/,
+        ),
+      });
     },
   );
 });

@@ -119,6 +119,7 @@ describe("executeRun", () => {
     const uploader: ArtifactUploader = {
       async upload(name) {
         uploads.push(name);
+        return { uploaded: true as const };
       },
     };
     const reached = new MockApi(routes);

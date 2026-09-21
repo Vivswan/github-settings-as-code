@@ -15,17 +15,27 @@ export const actionsArtifactUploader: ArtifactUploader = {
     // DefaultArtifactClient emits its own core.warning before it throws on a missing runtime token; failing before
     // constructing it keeps the single warning deliverArtifactReport turns this into.
     if (!process.env.ACTIONS_RUNTIME_TOKEN) {
-      throw new Error(
-        "the artifact service is unavailable: no ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside Actions)",
-      );
+      return {
+        failed:
+          "the artifact service is unavailable: no ACTIONS_RUNTIME_TOKEN in the environment. Artifact upload needs a GitHub-hosted or self-hosted Actions runner (it is not available on GitHub Enterprise Server or outside Actions)",
+      };
     }
-    const dir = await mkdtemp(join(tmpdir(), "settings-as-code-report-"));
+    // The artifact client and the filesystem report their failures by throwing; the port answers them as `failed`.
+    let dir: string | undefined;
+    let outcome: { uploaded: true } | { failed: string };
     try {
+      dir = await mkdtemp(join(tmpdir(), "settings-as-code-report-"));
       const path = join(dir, file.name);
       await writeFile(path, file.data);
       await new DefaultArtifactClient().uploadArtifact(name, [path], dir);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
+      outcome = { uploaded: true };
+    } catch (error) {
+      outcome = { failed: error instanceof Error ? error.message : String(error) };
     }
+    if (dir !== undefined) {
+      // A cleanup that fails changes nothing about the upload, so the outcome stands.
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+    return outcome;
   },
 };

@@ -104,7 +104,7 @@ describe("lintThrows", () => {
   }
 
   const OUTSIDE =
-    "throws outside the rule: not a BUG: invariant, not a bare rethrow inside its catch clause, and the file is not in throws.requestLayer; return a Result, or add the file to throws.ratchet";
+    "throws outside the rule: not a BUG: invariant, not a bare rethrow inside its catch clause, and the file is not in throws.contracts; return a Result, or add the file to throws.ratchet";
 
   test("each class lands in the census; a throw outside the rule, a rethrow from another scope, and a file that does not parse are reported, and a type alias does not shadow the binding", () =>
     withTempDir("arch-lint-throws-", (dir) => {
@@ -166,7 +166,7 @@ describe("lintThrows", () => {
         "src/broken.ts": 'export function broken(): never {\n  throw "x";',
         "src/plain.test.ts": 'throw new Error("x");',
       };
-      expect(lint(dir, files, { requestLayer: ["src/spared.ts"], ratchet: {} })).toEqual({
+      expect(lint(dir, files, { contracts: ["src/spared.ts"], ratchet: {} })).toEqual({
         problems: [
           expect.stringMatching(/^src\/broken\.ts does not parse, so its throws are uncounted: /),
           `src/plain.ts:2 ${OUTSIDE}`,
@@ -177,7 +177,7 @@ describe("lintThrows", () => {
           `src/shadow.ts:16 ${OUTSIDE}`,
           `src/shadow.ts:20 ${OUTSIDE}`,
         ],
-        census: { bug: 2, rethrow: 2, requestLayer: 1, outside: 7 },
+        census: { bug: 2, rethrow: 2, contract: 1, outside: 7 },
       });
     }));
 
@@ -203,9 +203,9 @@ describe("lintThrows", () => {
           "src/two.ts":
             'export function two(a: boolean): never {\n  if (a) throw new Error("x");\n  throw new Error("y");\n}',
         };
-        expect(lint(dir, files, { requestLayer: [], ratchet: { "src/two.ts": listed } })).toEqual({
+        expect(lint(dir, files, { contracts: [], ratchet: { "src/two.ts": listed } })).toEqual({
           problems,
-          census: { bug: 0, rethrow: 0, requestLayer: 0, outside: 2 },
+          census: { bug: 0, rethrow: 0, contract: 0, outside: 2 },
         });
       }),
   );
@@ -217,16 +217,16 @@ describe("lintThrows", () => {
           'export function clean(): never {\n  throw new Error("BUG: clean() ran");\n}',
       };
       const throws = {
-        requestLayer: ["src/clean.ts", "src/gone.ts"],
+        contracts: ["src/clean.ts", "src/gone.ts"],
         ratchet: { "src/clean.ts": 1 },
       };
       expect(lint(dir, files, throws)).toEqual({
         problems: [
           "stale ratchet src/clean.ts: no throw outside the rule remains; remove it from throws.ratchet",
-          "stale allowance throws.requestLayer src/clean.ts: no throw remains there; remove it",
-          "stale allowance throws.requestLayer src/gone.ts: no throw remains there; remove it",
+          "stale allowance throws.contracts src/clean.ts: no throw remains there; remove it",
+          "stale allowance throws.contracts src/gone.ts: no throw remains there; remove it",
         ],
-        census: { bug: 1, rethrow: 0, requestLayer: 0, outside: 0 },
+        census: { bug: 1, rethrow: 0, contract: 0, outside: 0 },
       });
     }));
 });
@@ -255,7 +255,7 @@ describe("parseArchitecture", () => {
     ["a negative", "-1", "-1"],
   ])("a ratchet count that is %s fails naming the key and the value", (_case, value, shown) =>
     withTempDir("arch-lint-parse-", (dir) => {
-      const throws = `throws:|  requestLayer: []|  ratchet:|    src/x.ts: ${value}`;
+      const throws = `throws:|  contracts: []|  ratchet:|    src/x.ts: ${value}`;
       expect(parse(dir, throws)).toEqual(
         err([
           `${ARCHITECTURE_PATH}: throws.ratchet["src/x.ts"] is ${shown}; expected a whole number of throws`,
@@ -265,36 +265,36 @@ describe("parseArchitecture", () => {
   );
 
   test.each<[string, string, string[]]>([
-    ["a missing ratchet", "throws:|  requestLayer: []", ["throws.ratchet is missing"]],
+    ["a missing ratchet", "throws:|  contracts: []", ["throws.ratchet is missing"]],
     [
       "a misspelled ratchet",
-      "throws:|  requestLayer: []|  ratchets: {}",
+      "throws:|  contracts: []|  ratchets: {}",
       ["throws.ratchet is missing", "unknown key throws.ratchets"],
     ],
     ["a misspelled throws", "throw: {}", ["throws is missing", "unknown key throw"]],
     [
       "a ratchet path that is no file",
-      "throws:|  requestLayer: []|  ratchet:|    src/gone.ts: 1",
+      "throws:|  contracts: []|  ratchet:|    src/gone.ts: 1",
       [`throws.ratchet["src/gone.ts"] names no file under src/: 'src/gone.ts'`],
     ],
     [
       "a spared path outside src/",
-      "throws:|  requestLayer: [test/x.ts]|  ratchet: {}",
-      ["throws.requestLayer[0] names no file under src/: 'test/x.ts'"],
+      "throws:|  contracts: [test/x.ts]|  ratchet: {}",
+      ["throws.contracts[0] names no file under src/: 'test/x.ts'"],
     ],
     [
       "a spared path through a file",
-      "throws:|  requestLayer: [src/x.ts/y.ts]|  ratchet: {}",
-      ["throws.requestLayer[0] names no file under src/: 'src/x.ts/y.ts'"],
+      "throws:|  contracts: [src/x.ts/y.ts]|  ratchet: {}",
+      ["throws.contracts[0] names no file under src/: 'src/x.ts/y.ts'"],
     ],
     [
       "a spared path that leaves src/ through a parent segment",
-      "throws:|  requestLayer: [src/../test/x.ts]|  ratchet: {}",
-      ["throws.requestLayer[0] names no file under src/: 'src/../test/x.ts'"],
+      "throws:|  contracts: [src/../test/x.ts]|  ratchet: {}",
+      ["throws.contracts[0] names no file under src/: 'src/../test/x.ts'"],
     ],
     [
       "an unresolved yaml alias",
-      "throws: {requestLayer: [], ratchet: *missing}",
+      "throws: {contracts: [], ratchet: *missing}",
       ["Unresolved alias (the anchor must be set before the alias): missing"],
     ],
     [

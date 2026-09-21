@@ -3,6 +3,7 @@
  * Immutable upstream (no update role), so a changed key or read_only flag is delete plus recreate.
  */
 
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { exactName, listSection } from "../shared/list-section.js";
@@ -88,7 +89,7 @@ export const deployKeysSection = listSection({
       ...passthrough,
     }),
     // The algorithm is the section's own reading of the material, not a field GitHub echoes, so it stays out of the compare.
-    fromLive: ({ algorithm: _algorithm, ...live }) => live,
+    fromLive: ({ algorithm: _algorithm, ...live }) => ok(live),
     matchBy: {},
   },
   replaces: false,

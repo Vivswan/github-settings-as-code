@@ -702,38 +702,27 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     globalThis.fetch = (async () => {
       throw new Error(`request to https://x failed, body was: {"secret":"${hostileSecret}"}`);
     }) as unknown as typeof fetch;
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-        url: "https://example.test/hook",
-        secret: hostileSecret,
-      });
-    } catch (error) {
-      thrown = error as Error;
-    }
-    if (thrown === undefined) {
-      throw new Error("expected a thrown transport error");
-    }
-    expect(thrown.message).toBe(
-      "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
+    const answer = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
+      url: "https://example.test/hook",
+      secret: hostileSecret,
+    });
+    expect(answer).toEqual({
+      failed:
+        "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
         "response arrived (details withheld: the request carried a secret field). Check network " +
         "connectivity from the runner to https://api.test, then re-run",
-    );
+    });
   });
 
   test("a transport failure on a non-secret request keeps its diagnostic message", async () => {
     globalThis.fetch = (async () => {
       throw new Error("socket hang up");
     }) as unknown as typeof fetch;
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("GET", "/repos/hookco/hookrepo", undefined);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
-    );
+    const answer = await api().tryRequest("GET", "/repos/hookco/hookrepo", undefined);
+    expect(answer).toEqual({
+      failed:
+        "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
+    });
   });
 
   test("the caller's mark withholds a payload the field-name scan cannot name; unmarked, the same request reads", async () => {
@@ -772,17 +761,11 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     globalThis.fetch = (async () => {
       throw new Error(`request failed, body was: {"token":"${hostileSecret}"}`);
     }) as unknown as typeof fetch;
-    const thrown = await api()
-      .tryRequest("POST", path, { token: hostileSecret }, { carriesSecret: true })
-      .then(
-        () => {
-          throw new Error("expected a thrown transport error");
-        },
-        (error: unknown) => String(error),
-      );
-    expect(thrown).toBe(
-      `Error: POST ${path} failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run`,
-    );
+    expect(
+      await api().tryRequest("POST", path, { token: hostileSecret }, { carriesSecret: true }),
+    ).toEqual({
+      failed: `POST ${path} failed: the transport failed before an HTTP response arrived (details withheld: the request carried a secret field). Check network connectivity from the runner to https://api.test, then re-run`,
+    });
   });
 
   test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
@@ -913,15 +896,14 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     };
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
     const dbg = traceIo();
-    let thrown: Error | undefined;
-    try {
-      await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", payload);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "toJSON" is not plain JSON data (a function)${NOT_SENT_TAIL}`,
+    const answer = await api(dbg.io).tryRequest(
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      payload,
     );
+    expect(answer).toEqual({
+      failed: `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "toJSON" is not plain JSON data (a function)${NOT_SENT_TAIL}`,
+    });
     expect(calls).toBe(0);
     expect(sent.bodies).toHaveLength(0);
     expect(dbg.lines.join("")).not.toContain("he said");
@@ -938,16 +920,15 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       },
     );
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", hostileProxy);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    // The trap's throw is swallowed: no field name, so the fallback reason.
-    expect(thrown?.message).toBe(
-      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    const answer = await api().tryRequest(
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      hostileProxy,
     );
+    // The trap's throw is swallowed: no field name, so the fallback reason.
+    expect(answer).toEqual({
+      failed: `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    });
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -962,15 +943,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       },
     };
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", trapped);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `POST /repos/hookco/hookrepo/anything was not sent: the value at "note" is not plain JSON data (an accessor property)${NOT_SENT_TAIL}`,
-    );
+    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", trapped);
+    expect(answer).toEqual({
+      failed: `POST /repos/hookco/hookrepo/anything was not sent: the value at "note" is not plain JSON data (an accessor property)${NOT_SENT_TAIL}`,
+    });
     expect(getterRan).toBe(false);
     expect(sent.bodies).toHaveLength(0);
   });
@@ -987,15 +963,10 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     }
     const sneaky = SneakyArray.from([{ name: "web" }]);
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", sneaky);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
-    );
+    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", sneaky);
+    expect(answer).toEqual({
+      failed: `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
+    });
     expect(overrideRan).toBe(false);
     expect(sent.bodies).toHaveLength(0);
   });
@@ -1006,29 +977,19 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const parsed = parseYaml("stamp: !!timestamp 2024-01-01") as Record<string, unknown>;
     expect(parsed.stamp instanceof Date).toBe(true);
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", parsed);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `POST /repos/hookco/hookrepo/anything was not sent: the value at "stamp" is not plain JSON data (a Date, e.g. from a YAML !!timestamp tag)${NOT_SENT_TAIL}`,
-    );
+    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", parsed);
+    expect(answer).toEqual({
+      failed: `POST /repos/hookco/hookrepo/anything was not sent: the value at "stamp" is not plain JSON data (a Date, e.g. from a YAML !!timestamp tag)${NOT_SENT_TAIL}`,
+    });
     expect(sent.bodies).toHaveLength(0);
   });
 
   test("a top-level bigint payload aborts instead of reaching octokit", async () => {
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", 42n);
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `POST /repos/hookco/hookrepo/anything was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
-    );
+    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", 42n);
+    expect(answer).toEqual({
+      failed: `POST /repos/hookco/hookrepo/anything was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
+    });
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -1036,19 +997,14 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     // Octokit passes non-plain objects to fetch verbatim; normalizing one would change the wire and sending it unscanned would be a blind spot, so it
     // aborts. Nothing sends such a payload today; this pins the boundary.
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    let thrown: Error | undefined;
-    try {
-      await api().tryRequest(
-        "POST",
-        "/repos/hookco/hookrepo/anything",
-        Buffer.from("raw-bytes-here"),
-      );
-    } catch (error) {
-      thrown = error as Error;
-    }
-    expect(thrown?.message).toBe(
-      `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
+    const answer = await api().tryRequest(
+      "POST",
+      "/repos/hookco/hookrepo/anything",
+      Buffer.from("raw-bytes-here"),
     );
+    expect(answer).toEqual({
+      failed: `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
+    });
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -1079,19 +1035,21 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     const dbg = traceIo();
     // One descriptor read per container visited: the root, then the cycle is refused before its descriptors are read.
     const visits = spyOn(Object, "getOwnPropertyDescriptors");
-    let thrown: Error | undefined;
     let visited: number;
+    let answer: Awaited<ReturnType<GitHubApi["tryRequest"]>>;
     try {
-      await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", cyclic);
-    } catch (error) {
-      thrown = error as Error;
+      answer = await api(dbg.io).tryRequest(
+        "PATCH",
+        "/repos/hookco/hookrepo/hooks/1/config",
+        cyclic,
+      );
     } finally {
       visited = visits.mock.calls.length; // mockRestore clears the record
       visits.mockRestore();
     }
-    expect(thrown?.message).toBe(
-      `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "self" is not plain JSON data (a reference back to one of its own containers)${NOT_SENT_TAIL}`,
-    );
+    expect(answer).toEqual({
+      failed: `PATCH /repos/hookco/hookrepo/hooks/1/config was not sent: the value at "self" is not plain JSON data (a reference back to one of its own containers)${NOT_SENT_TAIL}`,
+    });
     expect(visited).toBe(1);
     expect(sent.bodies).toHaveLength(0);
     expect(dbg.lines.join("")).not.toContain("he said");

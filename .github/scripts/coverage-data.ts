@@ -61,4 +61,12 @@ export const CoverageData = z
   .readonly();
 export type CoverageData = z.infer<typeof CoverageData>;
 
-export const COVERAGE_DATA = readDocsYaml(join(import.meta.dir, "coverage-data.yml"), CoverageData);
+export const COVERAGE_DATA = readDocsYaml(
+  join(import.meta.dir, "coverage-data.yml"),
+  CoverageData,
+).match(
+  (data) => data,
+  (problem) => {
+    throw new Error(problem);
+  },
+);

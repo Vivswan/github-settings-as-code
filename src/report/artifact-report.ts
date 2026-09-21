@@ -35,30 +35,41 @@ export async function encryptReport(recipient: string, content: string): Promise
   return encrypter.encrypt(content);
 }
 
-/** The upload port: the action implements it over @actions/artifact, tests capture. */
+/**
+ * The upload port: the action implements it over @actions/artifact, tests capture. `failed` is the reason the upload
+ * did not happen, as prose about the artifact service, never the report content.
+ */
 export interface ArtifactUploader {
-  upload(name: string, file: { name: string; data: Uint8Array }): Promise<void>;
+  upload(
+    name: string,
+    file: { name: string; data: Uint8Array },
+  ): Promise<{ uploaded: true } | { failed: string }>;
 }
 
 export type ArtifactDelivery = { uploaded: true } | { warning: string };
 
 /**
  * Never throws: report delivery is auxiliary, so every failure is a warning and the run's result stays untouched. The
- * messages describe the artifact service or the recipient, never the report content, which leaves this module only as ciphertext.
+ * messages describe the artifact service or the recipient, never the report content, which leaves this module only as
+ * ciphertext. An uploader that throws instead of answering is read the same way as one that answers `failed`.
  */
 export async function deliverArtifactReport(
   uploader: ArtifactUploader,
   document: string,
   recipient: string,
 ): Promise<ArtifactDelivery> {
+  let reason: string;
   try {
     const ciphertext = await encryptReport(recipient, document);
-    await uploader.upload(ARTIFACT_NAME, { name: ARTIFACT_FILE, data: ciphertext });
-    return { uploaded: true };
+    const upload = await uploader.upload(ARTIFACT_NAME, { name: ARTIFACT_FILE, data: ciphertext });
+    if ("uploaded" in upload) {
+      return upload;
+    }
+    reason = upload.failed;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return {
-      warning: `could not upload the private report artifact: ${reason}. Re-run, or set private-report: none if it persists`,
-    };
+    reason = error instanceof Error ? error.message : String(error);
   }
+  return {
+    warning: `could not upload the private report artifact: ${reason}. Re-run, or set private-report: none if it persists`,
+  };
 }

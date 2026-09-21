@@ -1163,6 +1163,10 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       error: { status, message, body: message, graphqlTypes: ["UNPROCESSABLE"] },
     }),
   });
+  const failing: GitHubClient = {
+    tryRequest: async () => ({ failed: `PATCH failed: ${echo}` }),
+    tryGraphql: async () => ({ failed: `GRAPHQL failed: ${echo}` }),
+  };
   const throwing: GitHubClient = {
     tryRequest: async () => {
       throw new Error(echo);
@@ -1196,6 +1200,11 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
     },
     {
+      wire: "REST, the client answers failed",
+      run: () => rest(failing, true),
+      thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
+    },
+    {
       wire: "REST, the client throws",
       run: () => rest(throwing, true),
       thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
@@ -1204,6 +1213,11 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       wire: "GraphQL, the client answers with errors",
       run: () => graphql(answering(422), true),
       thrown: `actions: arming the setup failed - GRAPHQL MarkedWrite: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
+    },
+    {
+      wire: "GraphQL, the client answers failed",
+      run: () => graphql(failing, true),
+      thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "GraphQL, the client throws",
@@ -1227,6 +1241,17 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       wire: "REST unmarked, the client answers 422",
       run: () => rest(answering(422), false),
       thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${echo}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
+    },
+    // Unmarked, the client's own failed line is the failure, kind "transport".
+    {
+      wire: "REST unmarked, the client answers failed",
+      run: () => rest(failing, false),
+      thrown: `PATCH failed: ${echo}`,
+    },
+    {
+      wire: "GraphQL unmarked, the client answers failed",
+      run: () => graphql(failing, false),
+      thrown: `GRAPHQL failed: ${echo}`,
     },
     {
       wire: "GraphQL unmarked, the client throws",

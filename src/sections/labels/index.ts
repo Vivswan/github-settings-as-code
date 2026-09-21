@@ -1,3 +1,4 @@
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { type ListComparable, type ListWrite, listSection } from "../shared/list-section.js";
@@ -76,11 +77,12 @@ export const labelsSection = listSection({
       ...passthrough,
     }),
     // GitHub returns null for an empty description, which the file spells "".
-    fromLive: (live): LabelComparable => ({
-      ...live,
-      color: normalizeColor(live.color),
-      description: live.description ?? "",
-    }),
+    fromLive: (live) =>
+      ok<LabelComparable>({
+        ...live,
+        color: normalizeColor(live.color),
+        description: live.description ?? "",
+      }),
     matchBy: {},
   },
   replaces: false,

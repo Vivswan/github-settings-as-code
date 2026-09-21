@@ -126,7 +126,8 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 |---|---|---|
 | `GitHubApi` | class | The REST and GraphQL client the action uses: retries, throttling, the pinned API version, trace redaction |
 | `GitHubApiOptions` | type | Its constructor's options: `token` required; `io` (the trace sink), `baseUrl`, `apiVersion`, `retryBaseMs` (real milliseconds per plugin second), `scheduler` (the throttling limiter), `userAgent` optional |
-| `GitHubClient` | type | The port every verb reads and writes through, and the interface a test double implements |
+| `GitHubClient` | type | The port every verb reads and writes through, and the interface a test double implements; it answers, never rejects |
+| `ClientAnswer` | type | What one request ends in: `data`, an `error` (GitHub's answer, an `ApiError`), or `failed` (the whole line for a request with no HTTP answer: not sent, the transport failed, a GraphQL body off the wire contract) |
 | `DEFAULT_API_VERSION` | const | The `X-GitHub-Api-Version` the action pins |
 | `ApiError` | type | A failed request as the port returns it: `status`, `message`, `body` |
 | `GraphqlOp` | type | A GraphQL operation as the port takes it |
@@ -267,7 +268,7 @@ console.log(found.value.repos.map((r) => r.slug));
 | `openReportChannel` | function | The issue or artifact channel the action delivers through |
 | `PrivateReportChannel` | type | `none`, `issue`, `issue-on-failure`, or `artifact` |
 | `deliverArtifactReport` | function | The artifact half, behind an uploader you supply; never throws |
-| `ArtifactUploader` | type | `upload(name, file)`: the port the Actions runner implements |
+| `ArtifactUploader` | type | `upload(name, file)`: the port the Actions runner implements; it resolves to `{ uploaded: true }` or `{ failed }` with the reason |
 
 ```ts
 import { encryptReport, parseRecipient } from "@vivswan/github-settings-as-code";
@@ -319,7 +320,7 @@ A module's `plan()` and `snapshot()` are callable directly, each over a context 
 - `snapshotContext(module, client, repo, onMissingPermission)` for `snapshot()`; the fourth argument is the `OnMissingPermission`, `"fail"` or `"warn"`. The context carries it as a `DenialPolicy` only this factory mints, so a literal object cannot stand in for one.
 - A context belongs to the module it was built from: `labels.plan(planContext(branches, ...))` does not compile, and a module handed another section's context at runtime rejects with an error naming both sections before it reads anything.
 - `plan()` takes the section's value off a validated document (`settings.labels`, a `ValidatedInput<"labels">`), never a list you built by hand. Only `validateSettings()`, `mergeSettings()`, and a `snapshotRepository()` that did not fail mint that type.
-- `plan()` and `snapshot()` resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err` (a denied read, a live state the section cannot reconcile, a duplicated live pair). Neither rejects for anything a settings file can cause; a rejection is the wrong-context refusal above, the client's own throw, or a `BUG:` invariant.
+- `plan()` and `snapshot()` resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err` (a denied read, a live state the section cannot reconcile, a duplicated live pair). Neither rejects for anything a settings file or the network can cause; a rejection is the wrong-context refusal above, a `GitHubClient` that throws instead of answering (breaking its contract), or a `BUG:` invariant.
 - A module's own `snapshot()` value is unbranded and goes through `validateSettings()` first. So the file-only checks (two entries naming one label) have run before any planner reads.
 - The brand names the section: on a module named by its key, a validated `branches` list is not a `labels` input. The erased `SectionModule` view is one key on both sides, as it is for contexts, so only the key-named module carries that check.
 - A `null` section value (`pages`, `interaction_limits`) carries no brand, since it holds nothing to check.

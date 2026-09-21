@@ -107,6 +107,20 @@ describe("getRepoFile", () => {
     });
   });
 
+  test("a transport failure on any of the three reads comes back as the client's failed line, never a throw", async () => {
+    // The socket dies on the ref read, once per retry; the line names the request and the remedy, and the caller renders it.
+    const drop = () => {
+      throw new Error("socket hang up");
+    };
+    const state = stubFetch([notFound, repo(), drop, drop, drop]);
+    const result = await getRepoFile(api(), "o/r", FILE);
+    expect(state.paths).toEqual([CONTENTS, REPO, ...Array<string>(1 + MAX_RETRIES).fill(REF)]);
+    expect(result).toEqual({
+      failed:
+        "GET /repos/o/r/git/ref/heads/main failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
+    });
+  });
+
   test("a repo object without a default branch cannot prove anything and is an error", async () => {
     const state = stubFetch([notFound, repoWithoutDefaultBranch]);
     const result = await getRepoFile(api(), "o/r", FILE);

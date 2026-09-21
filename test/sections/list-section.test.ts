@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { SectionInput } from "../../src/sections/contract/module.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -47,10 +48,11 @@ describe("listSection", () => {
       ...base,
       lens: {
         ...base.lens,
-        fromLive: ({ description: _dropped, ...rest }) => ({
-          ...rest,
-          color: rest.color.toLowerCase(),
-        }),
+        fromLive: ({ description: _dropped, ...rest }) =>
+          ok({
+            ...rest,
+            color: rest.color.toLowerCase(),
+          }),
       },
     });
     const live = [{ name: "bug", color: "d73a4a", description: "x" }];

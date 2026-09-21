@@ -244,6 +244,7 @@ describe("the artifact channel", () => {
     const uploader: ArtifactUploader = {
       async upload(name, file) {
         uploads.push({ name, file });
+        return { uploaded: true as const };
       },
     };
     const decrypt = async (data: Uint8Array): Promise<string> => {

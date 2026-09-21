@@ -114,7 +114,7 @@ export function discoverRepos(
     params.push(`visibility=${filters.visibility}`);
   }
   const path = `/user/repos?${params.join("&")}`;
-  // Network-level failure: tryRequest throws once the retries are spent.
+  // A client that throws breaks the GitHubClient contract; its message is folded like the `failed` line it owed.
   return ResultAsync.fromPromise(
     paginate(api, path),
     (error): DiscoveryProblem => ({
@@ -122,6 +122,12 @@ export function discoverRepos(
       reason: error instanceof Error ? error.message : String(error),
     }),
   ).andThen((page) => {
+    if ("failed" in page) {
+      return err<DiscoveryResult, DiscoveryProblem>({
+        code: "discovery-transport-failed",
+        reason: page.failed,
+      });
+    }
     if ("error" in page) {
       // A rate-limit 403 is NOT a permission problem (isPermissionError excludes it), so it never reads as denied and
       // never tells the operator to swap tokens; 401 (an invalid or expired token) does.

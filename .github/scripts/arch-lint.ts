@@ -22,8 +22,8 @@ import { resolveImport, scanImports } from "./changed-sections.js";
 export const ARCHITECTURE_PATH = "architecture.yml";
 
 export interface Throws {
-  /** Files whose throws are spared until the request layer returns Results. */
-  readonly requestLayer: readonly string[];
+  /** Files whose throw is a third party's contract (commander's argParser), each with its reason in the yaml. */
+  readonly contracts: readonly string[];
   /** file -> its exact count of throws outside the rule. */
   readonly ratchet: Readonly<Record<string, number>>;
 }
@@ -44,12 +44,12 @@ const ARCHITECTURE = z.strictObject({
   exclude: PATHS,
   edges: z.record(z.string(), PATHS),
   throws: z.strictObject({
-    requestLayer: PATHS,
+    contracts: PATHS,
     ratchet: z.record(z.string(), z.int(COUNT).nonnegative(COUNT)),
   }),
 }) satisfies z.ZodType<Architecture>;
 
-/** `throws.ratchet["src/x.ts"]`, `throws.requestLayer[0]`: the yaml key as a reader would write it in code. */
+/** `throws.ratchet["src/x.ts"]`, `throws.contracts[0]`: the yaml key as a reader would write it in code. */
 function keyPath(path: readonly PropertyKey[]): string {
   return path
     .map((segment, index) =>
@@ -103,9 +103,9 @@ export function parseArchitecture(root: string): Result<Architecture, string[]> 
   if (!parsed.success) {
     return err(located(parsed.error.issues.flatMap((issue) => describeIssue(doc.value, issue))));
   }
-  const { requestLayer, ratchet } = parsed.data.throws;
+  const { contracts, ratchet } = parsed.data.throws;
   const unknownFiles = [
-    ...requestLayer.map((file, index) => [["requestLayer", index], file] as const),
+    ...contracts.map((file, index) => [["contracts", index], file] as const),
     ...Object.keys(ratchet).map((file) => [["ratchet", file], file] as const),
   ]
     .filter(([, file]) => !(normalize(file).startsWith("src/") && isFile(join(root, file))))
@@ -315,20 +315,20 @@ function isBugInvariant(argument: ThrowStatement["argument"]): boolean {
 export interface ThrowCensus {
   bug: number;
   rethrow: number;
-  requestLayer: number;
+  contract: number;
   /** Throws outside the rule, whether or not the ratchet lists them. */
   outside: number;
 }
 
 const OUTSIDE_RULE =
-  "not a BUG: invariant, not a bare rethrow inside its catch clause, and the file is not in throws.requestLayer";
+  "not a BUG: invariant, not a bare rethrow inside its catch clause, and the file is not in throws.contracts";
 
 export function lintThrows(
   root: string,
   arch = readArchitecture(root),
 ): { problems: string[]; census: ThrowCensus } {
-  const census: ThrowCensus = { bug: 0, rethrow: 0, requestLayer: 0, outside: 0 };
-  const spared = new Set(arch.throws.requestLayer);
+  const census: ThrowCensus = { bug: 0, rethrow: 0, contract: 0, outside: 0 };
+  const spared = new Set(arch.throws.contracts);
   const sparedInUse = new Set<string>();
   const outside = new Map<string, number[]>();
   const problems: string[] = [];
@@ -348,7 +348,7 @@ export function lintThrows(
       } else if (node.argument.type === "Identifier" && node.argument.name === rethrowable) {
         census.rethrow += 1;
       } else if (spared.has(file)) {
-        census.requestLayer += 1;
+        census.contract += 1;
         sparedInUse.add(file);
       } else {
         census.outside += 1;
@@ -386,16 +386,14 @@ export function lintThrows(
   }
   for (const file of [...spared].sort()) {
     if (!sparedInUse.has(file)) {
-      problems.push(
-        `stale allowance throws.requestLayer ${file}: no throw remains there; remove it`,
-      );
+      problems.push(`stale allowance throws.contracts ${file}: no throw remains there; remove it`);
     }
   }
   return { problems, census };
 }
 
-export function describeThrowCensus({ bug, rethrow, requestLayer, outside }: ThrowCensus): string {
-  return `throws: ${bug} BUG: invariants, ${rethrow} rethrows, ${requestLayer} in the request layer, ${outside} outside the rule`;
+export function describeThrowCensus({ bug, rethrow, contract, outside }: ThrowCensus): string {
+  return `throws: ${bug} BUG: invariants, ${rethrow} rethrows, ${contract} under a third-party contract, ${outside} outside the rule`;
 }
 
 /** A hyphen in a layer name is edge syntax to mermaid, so ids swap it for an underscore. */

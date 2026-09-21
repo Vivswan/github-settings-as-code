@@ -1,6 +1,13 @@
-import type { ApiError, GitHubClient, GraphqlOp, RequestMark } from "../src/github/api.js";
+import type {
+  ApiError,
+  ClientAnswer,
+  GitHubClient,
+  GraphqlOp,
+  RequestMark,
+} from "../src/github/api.js";
 
-export type Route = { data?: unknown; error?: ApiError };
+/** `failed` is the client's own line for a request with no HTTP answer (not sent, the transport failed). */
+export type Route = { data?: unknown; error?: ApiError; failed?: string };
 
 export type MockApiOptions = { unroutedMutations?: "throw" | "succeed" };
 
@@ -60,7 +67,7 @@ export class MockApi implements GitHubClient {
     path: string,
     payload?: unknown,
     options?: RequestMark & { accept?: string; raw?: boolean },
-  ): Promise<{ data: unknown } | { error: ApiError }> {
+  ): Promise<ClientAnswer<unknown>> {
     this.calls.push({ method, path, payload, ...markOf(options) });
     const route = this.lookup(method, path);
     if (!route) {
@@ -74,6 +81,9 @@ export class MockApi implements GitHubClient {
       }
       return { data: null };
     }
+    if (route.failed !== undefined) {
+      return { failed: route.failed };
+    }
     if (route.error) {
       return { error: route.error };
     }
@@ -85,7 +95,7 @@ export class MockApi implements GitHubClient {
     variables: Readonly<Record<string, unknown>>,
     _slug: string,
     options?: RequestMark,
-  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+  ): Promise<ClientAnswer<Record<string, unknown>>> {
     this.calls.push({
       method: "GRAPHQL",
       path: op.name,
@@ -105,6 +115,9 @@ export class MockApi implements GitHubClient {
         );
       }
       return { data: {} };
+    }
+    if (route.failed !== undefined) {
+      return { failed: route.failed };
     }
     if (route.error) {
       return { error: route.error };

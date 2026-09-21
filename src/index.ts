@@ -75,6 +75,7 @@ export {
 } from "./flows/snapshot.js";
 export {
   type ApiError,
+  type ClientAnswer,
   DEFAULT_API_VERSION,
   GitHubApi,
   type GitHubApiOptions,

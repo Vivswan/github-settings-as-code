@@ -12,7 +12,7 @@ The [module map](#the-module-map) at the end is generated from [architecture.yml
 
 The same lint enforces the never-throw rule: a function that can fail returns a neverthrow `Result` carrying a typed `Problem`, so an error is a value the caller handles. A section's `plan()`, `snapshot()`, and operation hooks carry a `SectionFailure` instead, which the engine loops match on by kind.
 
-A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or in a file the `throws` block of `architecture.yml` names.
+A `throw` is allowed as a `BUG:` invariant, as a bare rethrow inside its own `catch`, or where a third party's contract demands it, in a file the `throws` block of `architecture.yml` names with its reason.
 
 That block counts the remaining throws per file. The lint fails when the count and the tree disagree in either direction, so a converted throw lowers its file's count and the entry leaves the list once no throw remains; that a count only goes down is the review rule in AGENTS.md.
 

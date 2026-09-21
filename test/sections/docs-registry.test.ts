@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { ok } from "neverthrow";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { readDocsYaml, SectionDocs } from "../../src/sections/contract/docs.js";
 import { endpointPath, type Route } from "../../src/sections/contract/endpoints.js";
@@ -189,25 +190,29 @@ describe("section docs completeness", () => {
         "at sections_table.notes",
         "at coverage[0]",
       ]) {
-        expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(new RegExp(escapeRe(issue)));
+        expect(readDocsYaml(malformed, SectionDocs)._unsafeUnwrapErr()).toMatch(
+          new RegExp(escapeRe(issue)),
+        );
       }
       // The tail of a missing-file error is the runtime's ENOENT prose, so only our prefix is pinned.
       const absent = join(dir, "absent.yml");
-      expect(() => readDocsYaml(absent, SectionDocs)).toThrow(
+      expect(readDocsYaml(absent, SectionDocs)._unsafeUnwrapErr()).toMatch(
         new RegExp(`^${escapeRe(`${absent} is not valid YAML: `)}`),
       );
       // YAML that does not even parse (a duplicated key, which the loader refuses) names the file too.
       writeFileSync(malformed, ["sections_table:", "  endpoints: a", "  endpoints: b"].join("\n"));
-      expect(() => readDocsYaml(malformed, SectionDocs)).toThrow(
+      expect(readDocsYaml(malformed, SectionDocs)._unsafeUnwrapErr()).toMatch(
         new RegExp(`${escapeRe(malformed)} is not valid YAML: .*unique`),
       );
       // Control: the same reader accepts a well-formed document.
       writeFileSync(malformed, WELL_FORMED_DOCS.join("\n"));
-      expect(readDocsYaml(malformed, SectionDocs)).toEqual({
-        sections_table: { endpoints: "labels CRUD", notes: "upsert by name" },
-        coverage: [{ area: "Labels", notes: "CRUD" }],
-        schema: { LabelConfig: "One label." },
-      });
+      expect(readDocsYaml(malformed, SectionDocs)).toEqual(
+        ok({
+          sections_table: { endpoints: "labels CRUD", notes: "upsert by name" },
+          coverage: [{ area: "Labels", notes: "CRUD" }],
+          schema: { LabelConfig: "One label." },
+        }),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -221,14 +226,8 @@ describe("section docs completeness", () => {
         stale,
         WELL_FORMED_DOCS.map((line) => line.replace(/^sections_table:/, "readme:")).join("\n"),
       );
-      // toThrow(string) matches a substring, so the whole message is compared outright.
-      let message = "did not throw";
-      try {
-        readDocsYaml(stale, SectionDocs);
-      } catch (error) {
-        message = (error as Error).message;
-      }
-      expect(message).toBe(
+      // The whole message is compared outright, not a substring of it.
+      expect(readDocsYaml(stale, SectionDocs)._unsafeUnwrapErr()).toBe(
         [
           `${stale} is not a valid docs document:`,
           '\u2716 Unrecognized key: "readme"; the Sections table cells key "readme" was renamed to "sections_table" (the table renders into docs/reference/sections.md)',

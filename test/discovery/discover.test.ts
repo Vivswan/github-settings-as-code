@@ -60,6 +60,15 @@ describe("discoverRepos", () => {
   const hidden = markPrivate;
   const OWNED = "GET /user/repos?affiliation=owner&per_page=100&page=1";
 
+  test("a listing with no HTTP answer is the transport problem carrying the client's line", async () => {
+    const failed =
+      "GET /user/repos?affiliation=owner&per_page=100&page=1 failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run";
+    const api = new MockApi({ [OWNED]: { failed } });
+    expect(await discoverRepos(api, filters({}))).toEqual(
+      err({ code: "discovery-transport-failed", reason: failed }),
+    );
+  });
+
   test("default filters list owned repos, skipping archived ones", async () => {
     const discovered = await discover({
       [OWNED]: { data: [{ full_name: "o/x" }, { full_name: "o/y", archived: true }] },

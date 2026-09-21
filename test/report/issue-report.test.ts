@@ -352,8 +352,32 @@ describe("deliverIssueReport", () => {
     });
   });
 
-  test("a throwing transport never escapes; the warning stays slug-free", async () => {
-    // MockApi throws on unrouted mutations, standing in for a network-level failure (GitHubApi throws those with the path in the message).
+  test("a request with no HTTP answer is the same slug-free warning, on the label create and on the lookup", async () => {
+    // The client's line embeds the request path (the private slug), so the warning names neither.
+    const failed = `POST /repos/o/private-repo/labels failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run`;
+    const warning =
+      "could not deliver the private report: the request failed before an HTTP response " +
+      "arrived. Re-run, or set private-report: none if it persists";
+    expect(
+      await deliverIssueReport(
+        new MockApi({ [LABEL_CREATE]: { failed } }),
+        SLUG,
+        "body",
+        true,
+        "always",
+      ),
+    ).toEqual({ landed: NOTHING_LANDED, warning });
+    const onLookup = new MockApi({
+      [LABEL_CREATE]: { error: { status: 422, message: "already_exists", body: "" } },
+      [LABEL_LOOKUP]: { failed },
+    });
+    const result = await deliverIssueReport(onLookup, SLUG, "body", true, "always");
+    expect(result).toEqual({ landed: NOTHING_LANDED, warning });
+    expect(JSON.stringify(result)).not.toContain("o/private-repo");
+  });
+
+  test("a client that throws instead of answering never escapes; the warning stays slug-free", async () => {
+    // MockApi throws on unrouted mutations, standing in for a client that breaks the GitHubClient contract.
     const api = new MockApi({});
     const result = await deliverIssueReport(api, SLUG, "body", true, "always");
     expect(result).toEqual({

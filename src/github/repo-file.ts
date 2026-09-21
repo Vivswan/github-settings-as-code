@@ -15,11 +15,20 @@ export async function getRepoFile(
   api: GitHubClient,
   slug: string,
   filePath: string,
-): Promise<{ content: string } | { missing: true } | { unproven: string } | { error: ApiError }> {
+): Promise<
+  | { content: string }
+  | { missing: true }
+  | { unproven: string }
+  | { error: ApiError }
+  | { failed: string }
+> {
   const result = await api.tryRequest("GET", `/repos/${slug}/contents/${filePath}`, undefined, {
     accept: "application/vnd.github.raw+json",
     raw: true,
   });
+  if ("failed" in result) {
+    return result;
+  }
   if (!("error" in result)) {
     return { content: String(result.data ?? "") };
   }
@@ -27,6 +36,9 @@ export async function getRepoFile(
     return { error: result.error };
   }
   const repoProbe = await api.tryRequest("GET", `/repos/${slug}`);
+  if ("failed" in repoProbe) {
+    return repoProbe;
+  }
   if ("error" in repoProbe) {
     return { error: repoProbe.error };
   }
@@ -45,6 +57,9 @@ export async function getRepoFile(
   // must stay unencoded, while any other URL-significant character must be encoded.
   const refPath = defaultBranch.split("/").map(encodeURIComponent).join("/");
   const refProbe = await api.tryRequest("GET", `/repos/${slug}/git/ref/heads/${refPath}`);
+  if ("failed" in refProbe) {
+    return refProbe;
+  }
   if (!("error" in refProbe)) {
     return { missing: true };
   }
