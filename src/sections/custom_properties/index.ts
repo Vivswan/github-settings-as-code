@@ -14,8 +14,7 @@ import {
   type DeclaredIssue,
   declaredEntries,
   defaultUndeclaredPolicy,
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   loosen,
   ORG_PROBE,
   type SectionMeta,
@@ -141,12 +140,13 @@ interface PendingUpdate {
   readonly change: string;
 }
 
+// Verbatim: GitHub documents no case folding for property names, so entries are duplicates only when they match exactly.
+// `value: null` unsets the property, so a higher layer's null is the value, never a marker for the lower one.
+const IDENTITY = identifiedBy("custom_properties", "property_name", "custom property");
+
 export const customPropertiesSection = {
-  key: "custom_properties",
+  ...IDENTITY,
   undeclaredDefault: "keep",
-  // Verbatim, the key validate() rejects duplicates by: GitHub documents no case folding for property names.
-  // `value: null` unsets the property, so a higher layer's null is the value, never a marker for the lower one.
-  layering: keyedBy("property_name"),
   permission,
   // Custom properties exist only under an organization owner; the registry's owner gate (contract/owner.ts)
   // probes the `org` role and no-ops with a note on a personal account.
@@ -160,11 +160,10 @@ export const customPropertiesSection = {
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },
-  // GitHub documents no case folding for property names, so entries are duplicates only when they match verbatim.
   validate(declared) {
     const { entries, path } = declaredEntries(declared);
     return [
-      ...duplicateFieldIssues(declared, { field: "property_name" }, "custom property"),
+      ...IDENTITY.validate(declared),
       ...entries.flatMap((property, index) =>
         malformedListIssues(property, `${path}[${index}].value`),
       ),

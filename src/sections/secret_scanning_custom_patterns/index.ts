@@ -16,8 +16,7 @@ import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   loosen,
   missingDrift,
   type SectionMeta,
@@ -161,10 +160,9 @@ function patternsByName<T extends { id: number; name: string }>(
 const key = "secret_scanning_custom_patterns";
 
 export const secretScanningPatternsSection = {
-  key,
+  // Verbatim: GitHub matches pattern names exactly.
+  ...identifiedBy(key, "name", "custom pattern"),
   undeclaredDefault: "keep",
-  // Verbatim, the key validate() rejects duplicates by: GitHub matches pattern names exactly.
-  layering: keyedBy("name"),
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(SecretScanningPatternConfig)),
@@ -180,9 +178,6 @@ export const secretScanningPatternsSection = {
     },
     consequence:
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
-  },
-  validate(declared) {
-    return duplicateFieldIssues(declared, { field: "name" }, "custom pattern");
   },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

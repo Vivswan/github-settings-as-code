@@ -160,6 +160,46 @@ export function keyedBy(
   };
 }
 
+/** The string-valued fields of a list section's entry, the ones it can be identified by. */
+type StringField<K extends ListSection> = {
+  [F in keyof EntryOf<SectionInput<K>> & string]: EntryOf<SectionInput<K>>[F] extends string
+    ? F
+    : never;
+}[keyof EntryOf<SectionInput<K>> & string];
+
+/**
+ * A bespoke list module's key, layering, and duplicate check from one declaration of its identity field and fold,
+ * as listSection derives them from `identity`. Spread it into the module in place of `key`; a module with further
+ * file-only checks declares a validate() after the spread that reads this one first.
+ */
+export function identifiedBy<K extends ListSection, F extends StringField<K>>(
+  key: K,
+  keyField: F,
+  noun: string,
+  options: {
+    readonly fold?: (name: string) => string;
+    readonly nested?: Readonly<Record<string, KeyedListLayering>>;
+  } = {},
+): {
+  readonly key: K;
+  readonly layering: KeyedListLayering;
+  validate(declared: SectionInput<K>): DeclaredIssue[];
+} {
+  return {
+    key,
+    layering: keyedBy(keyField, options),
+    validate: (declared) =>
+      duplicateFieldIssues(
+        // A list section's input is its entries in either declared form; the generic key cannot show the compiler.
+        declared as unknown as
+          | readonly Record<F, string>[]
+          | UndeclaredPolicyList<Record<F, string>>,
+        { field: keyField, fold: options.fold },
+        noun,
+      ),
+  };
+}
+
 /**
  * The entries of a list section's value in either form, by reference: the bare list, or the `{entries}` wrapper (the
  * knobbed `{_undeclared, entries}` and the plain-list `{_layering, entries}` alike). The one unwrap a planner over a

@@ -14,7 +14,7 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
   declaredEntries,
-  duplicateFieldIssues,
+  identifiedBy,
   type KeyedListLayering,
   keyedBy,
   listEntries,
@@ -45,7 +45,7 @@ import {
   planPinned,
   snapshotPins,
 } from "./pins.js";
-import { EnvironmentConfig, EnvironmentsConfig } from "./schema.js";
+import { EnvironmentConfig, EnvironmentsConfig, environmentKey } from "./schema.js";
 import { sharedSecretNotes, snapshotNested, withPins } from "./snapshot.js";
 
 /**
@@ -104,39 +104,40 @@ const REVIEWER_LAYERING: KeyedListLayering = {
   removalPaths: ["type", "id"],
 };
 
+/**
+ * Environment names fold as plan() probes them (case-insensitive). The nested lists union by the key each
+ * planner reconciles by: variable and secret names uppercased as GitHub stores them, branch policies by their
+ * pattern, protection rules by App slug, reviewers by type and id.
+ */
+const IDENTITY = identifiedBy("environments", "name", "environment", {
+  fold: environmentKey,
+  nested: {
+    variables: keyedBy("name", {
+      fold: variableKey,
+      undeclaredDefault: nestedDefaultPolicy("variables"),
+    }),
+    secrets: keyedBy("name", {
+      fold: secretKey,
+      undeclaredDefault: nestedDefaultPolicy("secrets"),
+    }),
+    deployment_branch_policies: keyedBy("name", {
+      undeclaredDefault: nestedDefaultPolicy("deployment_branch_policies"),
+    }),
+    deployment_protection_rules: keyedBy("app", {
+      undeclaredDefault: nestedDefaultPolicy("deployment_protection_rules"),
+    }),
+    reviewers: REVIEWER_LAYERING,
+  },
+});
+
 export const environmentsSection = {
-  key: "environments",
+  ...IDENTITY,
   undeclaredDefault: "untouched",
   permission,
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
   shape: loosen(layeredList(EnvironmentsConfig)),
-  /**
-   * Environment names fold as plan() probes them (case-insensitive). The nested lists union by the key each
-   * planner reconciles by: variable and secret names uppercased as GitHub stores them, branch policies by their
-   * pattern, protection rules by App slug, reviewers by type and id.
-   */
-  layering: keyedBy("name", {
-    fold: (name) => name.toLowerCase(),
-    nested: {
-      variables: keyedBy("name", {
-        fold: variableKey,
-        undeclaredDefault: nestedDefaultPolicy("variables"),
-      }),
-      secrets: keyedBy("name", {
-        fold: secretKey,
-        undeclaredDefault: nestedDefaultPolicy("secrets"),
-      }),
-      deployment_branch_policies: keyedBy("name", {
-        undeclaredDefault: nestedDefaultPolicy("deployment_branch_policies"),
-      }),
-      deployment_protection_rules: keyedBy("app", {
-        undeclaredDefault: nestedDefaultPolicy("deployment_protection_rules"),
-      }),
-      reviewers: REVIEWER_LAYERING,
-    },
-  }),
   /**
    * Labels carry the environment: sibling environments can declare same-named secrets.
    * A malformed container contributes nothing rather than throwing, so the actionable error
@@ -153,13 +154,8 @@ export const environmentsSection = {
       }));
     });
   },
-  // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
   validate(desired) {
-    const issues = duplicateFieldIssues(
-      desired,
-      { field: "name", fold: (name) => name.toLowerCase() },
-      "environment",
-    );
+    const issues = IDENTITY.validate(desired);
     const { entries: environments, path: at } = declaredEntries(desired);
     environments.forEach((env, index) => {
       issues.push(
@@ -250,12 +246,11 @@ export const environmentsSection = {
       if (listed.length === 0) {
         return ok({ value: undefined, notes: [] });
       }
-      // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
       yield* liveByIdentity(
         section,
         "environment",
         listed,
-        (live) => live.name.toLowerCase(),
+        (live) => environmentKey(live.name),
         (live) => liveIdentity(live.name, { environment_id: live.id }),
       );
       const notes: string[] = [];

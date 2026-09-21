@@ -11,8 +11,7 @@ import { sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   loosen,
   type SectionMeta,
   type SectionModule,
@@ -56,6 +55,14 @@ function isNamedInvitation(invitation: LiveInvitation): invitation is NamedInvit
   return typeof invitation.invitee?.login === "string" && invitation.invitee.login !== "";
 }
 
+/** GitHub matches logins case-insensitively; the brand marks a login already folded to the key every lookup reads. */
+declare const collaboratorLoginKey: unique symbol;
+type LoginKey = string & { readonly [collaboratorLoginKey]: true };
+
+function loginKey(login: string): LoginKey {
+  return login.toLowerCase() as LoginKey;
+}
+
 const permission: SectionPermission = { repo: ["administration"] };
 
 const ENDPOINTS = {
@@ -94,9 +101,9 @@ function readLiveAccess(
   section: SectionMeta,
 ): Read<{
   collaborators: LiveCollaborator[];
-  liveByLogin: Map<string, LiveCollaborator>;
+  liveByLogin: Map<LoginKey, LiveCollaborator>;
   invitations: NamedInvitation[];
-  inviteByLogin: Map<string, NamedInvitation>;
+  inviteByLogin: Map<LoginKey, NamedInvitation>;
   emailInvitations: LiveInvitation[];
 }> {
   return safeTry(async function* () {
@@ -109,14 +116,14 @@ function readLiveAccess(
       section,
       "collaborator",
       collaborators,
-      (c) => c.login.toLowerCase(),
+      (c) => loginKey(c.login),
       (c) => liveIdentity(c.login),
     );
     const inviteByLogin = yield* liveByIdentity(
       section,
       "pending invitation",
       invitations,
-      (invitation) => invitation.invitee.login.toLowerCase(),
+      (invitation) => loginKey(invitation.invitee.login),
       (invitation) => liveIdentity(invitation.invitee.login, { invitation_id: invitation.id }),
     );
     return ok({
@@ -129,15 +136,13 @@ function readLiveAccess(
   });
 }
 
-function isOwner(ctx: CollaboratorsContext, login: string): boolean {
-  return login.toLowerCase() === ctx.repo.owner.toLowerCase();
+function isOwner(ctx: CollaboratorsContext, login: LoginKey): boolean {
+  return login === loginKey(ctx.repo.owner);
 }
 
 export const collaboratorsSection = {
-  key: "collaborators",
+  ...identifiedBy("collaborators", "username", "collaborator", { fold: loginKey }),
   undeclaredDefault: "delete",
-  // The fold validate() rejects duplicates by: GitHub matches logins case-insensitively.
-  layering: keyedBy("username", { fold: (username) => username.toLowerCase() }),
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(knobbed(CollaboratorConfig)),
@@ -146,14 +151,6 @@ export const collaboratorsSection = {
     known: { username: true, permission: true },
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
   },
-  // Logins are case-insensitive on GitHub, the fold every lookup below uses.
-  validate(declared) {
-    return duplicateFieldIssues(
-      declared,
-      { field: "username", fold: (username) => username.toLowerCase() },
-      "collaborator",
-    );
-  },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     // Both pools are resolved BEFORE the declared walk, so a declared user is never mistaken for
@@ -161,12 +158,12 @@ export const collaboratorsSection = {
     // split into their own pool.
     return readLiveAccess(ctx, this).map(
       ({ collaborators: live, liveByLogin, invitations, inviteByLogin, emailInvitations }) => {
-        const declaredKeys = new Set<string>();
+        const declaredKeys = new Set<LoginKey>();
         const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
 
         for (const collaborator of desired) {
           const { username } = collaborator;
-          const login = username.toLowerCase();
+          const login = loginKey(username);
           declaredKeys.add(login);
           const wantPermission = collaborator.permission ?? DEFAULT_ROLE;
           const wantRole = roleForPermission(wantPermission);
@@ -247,7 +244,7 @@ export const collaboratorsSection = {
         }
 
         for (const collaborator of live) {
-          const login = collaborator.login.toLowerCase();
+          const login = loginKey(collaborator.login);
           if (isOwner(ctx, login) || declaredKeys.has(login)) {
             continue;
           }
@@ -280,7 +277,7 @@ export const collaboratorsSection = {
 
         for (const invitation of invitations) {
           const invitee = invitation.invitee.login;
-          if (declaredKeys.has(invitee.toLowerCase())) {
+          if (declaredKeys.has(loginKey(invitee))) {
             continue;
           }
           if (policy === "keep") {
@@ -336,7 +333,7 @@ export const collaboratorsSection = {
           const expired: string[] = [];
           for (const collaborator of collaborators) {
             const label = `collaborators[${collaborator.login}]`;
-            if (isOwner(ctx, collaborator.login)) {
+            if (isOwner(ctx, loginKey(collaborator.login))) {
               notes.push(
                 leftOutOfSnapshot(
                   label,

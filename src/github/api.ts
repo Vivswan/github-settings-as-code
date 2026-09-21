@@ -20,6 +20,7 @@ import {
   throttleGroups,
 } from "./scheduler.js";
 import { redactSecretPayloadSafe } from "./secret-scan.js";
+import { type SlugKey, slugKey } from "./slug.js";
 
 export interface ApiError {
   status: number;
@@ -118,7 +119,7 @@ function repoSlugOf(path: string): string | undefined {
  */
 export class TraceRedaction {
   // One token per hold, so concurrent holds on the same slug release independently and a double release is inert.
-  private readonly holds = new Set<{ readonly slug: string }>();
+  private readonly holds = new Set<{ readonly slug: SlugKey }>();
 
   constructor(private readonly io: TraceIo) {}
 
@@ -127,7 +128,7 @@ export class TraceRedaction {
   }
 
   hold(slug: string): () => void {
-    const token = { slug: slug.toLowerCase() };
+    const token = { slug: slugKey(slug) };
     this.holds.add(token);
     return () => {
       this.holds.delete(token);
@@ -135,7 +136,7 @@ export class TraceRedaction {
   }
 
   isRedacted(slug: string): boolean {
-    const key = slug.toLowerCase();
+    const key = slugKey(slug);
     for (const needle of this.needles()) {
       if (needle === key) {
         return true;

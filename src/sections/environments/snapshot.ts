@@ -29,6 +29,7 @@ import {
   DeploymentBranchPolicyConfig,
   type EnvironmentConfig,
   EnvironmentVariableConfig,
+  environmentKey,
 } from "./schema.js";
 
 /** The nested keys of one snapshot entry: only the lists with at least one live item appear. */
@@ -46,14 +47,15 @@ export function withPins(
   entries: readonly EnvironmentConfig[],
   pins: PinnedNames,
 ): { entries: EnvironmentConfig[]; notes: string[] } {
-  const byKey = new Map(entries.map((entry) => [entry.name.toLowerCase(), entry]));
+  const byKey = new Map(entries.map((entry) => [environmentKey(entry.name), entry]));
   const leading: EnvironmentConfig[] = [];
   const notes: string[] = [];
-  const unlistedAt = pins.findIndex((name) => !byKey.has(name.toLowerCase()));
+  const unlistedAt = pins.findIndex((name) => !byKey.has(environmentKey(name)));
   const declared = unlistedAt < 0 ? pins : pins.slice(0, unlistedAt);
   for (const name of declared) {
-    const entry = byKey.get(name.toLowerCase()) as EnvironmentConfig;
-    byKey.delete(name.toLowerCase());
+    const key = environmentKey(name);
+    const entry = byKey.get(key) as EnvironmentConfig;
+    byKey.delete(key);
     // The key sits beside the name in the written file, ahead of the nested lists.
     const { name: entryName, ...rest } = entry;
     leading.push({ name: entryName, pinned: true, ...rest });

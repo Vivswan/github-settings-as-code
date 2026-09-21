@@ -9,8 +9,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   listEntries,
   loosen,
   type SectionMeta,
@@ -71,21 +70,16 @@ const ENDPOINTS = {
 } as const satisfies Record<string, EndpointDecl>;
 
 export const workflowsSection = {
-  key: "workflows",
+  // Folded as plan() folds a path: a bare file name and its .github/workflows/ spelling are one workflow.
+  ...identifiedBy("workflows", "path", "workflow", { fold: workflowPath }),
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
   shape: loosen(layeredList(WorkflowsConfig)),
-  // Folded as plan() folds a path: a bare file name and its .github/workflows/ spelling are one workflow.
-  layering: keyedBy("path", { fold: workflowPath }),
   // The enable/disable PUTs carry no body at all, so an extra key can only be a typo that would silently do nothing.
   closedSurface: {
     known: { path: true, state: true },
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
-  },
-  // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
-  validate(desired) {
-    return duplicateFieldIssues(desired, { field: "path", fold: workflowPath }, "workflow");
   },
   async plan(ctx, desired) {
     const workflows = listEntries(desired);

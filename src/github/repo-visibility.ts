@@ -4,6 +4,7 @@
  */
 
 import type { GitHubClient } from "./api.js";
+import { slugKey } from "./slug.js";
 
 /** A repository's visibility as the probe established it; "unknown" means it could not. */
 export type RepoVisibility = "public" | "private" | "internal" | "unknown";
@@ -13,7 +14,7 @@ export function createVisibilityResolver(
 ): (slug: string) => Promise<RepoVisibility> {
   const cache = new Map<string, Promise<RepoVisibility>>();
   return (slug) => {
-    const key = slug.toLowerCase();
+    const key = slugKey(slug);
     let pending = cache.get(key);
     if (!pending) {
       pending = probe(api, slug);
