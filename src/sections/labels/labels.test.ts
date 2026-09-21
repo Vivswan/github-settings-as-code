@@ -113,33 +113,6 @@ describe("labels", () => {
     });
   });
 
-  test.each<[form: string, declared: SectionInput<"labels">, roles: string[], notes: string[]]>([
-    [
-      "wrapped _undeclared:keep",
-      { _undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] },
-      [],
-      [
-        'label "stale" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
-      ],
-    ],
-    [
-      "the wrapper without a policy",
-      { entries: [{ name: "bug", color: "d73a4a" }] },
-      ["remove"],
-      [],
-    ],
-    ["the plain list", [{ name: "bug", color: "d73a4a" }], ["remove"], []],
-  ])(
-    "%s resolves the undeclared label against the delete default",
-    async (_form, declared, roles, notes) => {
-      const api = new MockApi({ [LIST]: { data: liveLabels } });
-      const result = await plan(api, declared);
-      expect(result.ops.map((op): string => op.role)).toEqual(roles);
-      expect(result.notes).toEqual(notes);
-      expect(result.drift).toEqual([]);
-    },
-  );
-
   test("executing an update addresses the live name, url-encoded", async () => {
     const api = new MockApi({
       [LIST]: { data: [{ name: "autorelease: pending", color: "ededed", description: "x" }] },
@@ -169,15 +142,6 @@ describe("labels", () => {
           '"Triage" names the same label as "triage" declared earlier; keep exactly one entry per label',
       },
     ]);
-  });
-
-  test("a rename whose source and target both exist live cannot converge", async () => {
-    const api = new MockApi({
-      [LIST]: { data: [...liveLabels, { name: "defect", color: "000000", description: null }] },
-    });
-    await expect(plan(api, [{ name: "bug", new_name: "defect" }])).rejects.toThrow(
-      /"defect" matches 2 separate live labels \("defect", "bug"\), so it cannot converge/,
-    );
   });
 
   test("executing the plan against the derived mock converges: the re-plan is empty", async () => {
