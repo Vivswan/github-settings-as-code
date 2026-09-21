@@ -114,21 +114,12 @@ export async function callDeclared(
     describe?: string;
   },
 ): Promise<Result<unknown, SectionFailure>> {
-  const method = endpointMethod(endpoint.route);
-  const path = expand(endpoint, ctx, opts.params, opts.query);
-  const issued = await issue(`${method} ${path}`, opts.carriesSecret, (mark) =>
-    ctx.api.tryRequest(method, path, opts.payload, mark),
-  );
-  return issued.andThen((result) =>
-    "error" in result
-      ? err(
-          failureFor(section, method, path, result.error, {
-            operation: opts.describe,
-            op: endpoint,
-          }),
-        )
-      : ok(result.data),
-  );
+  const answered = await tryCallDeclared(ctx, section, endpoint, {
+    ...opts,
+    tolerated: () => false,
+  });
+  // Nothing is tolerated, so no { error } reaches this map; the arm only narrows the type.
+  return answered.map((result) => ("data" in result ? result.data : undefined));
 }
 
 /** Tolerated statuses come back as { error }; an explicit `tolerate` only ever tolerates FEWER than declared. */
