@@ -6,8 +6,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { run } from "../../src/action/run.js";
 import type { Layering } from "../../src/engine/layers.js";
 import { type Io, maskRegistry } from "../../src/io.js";
+import { describeProblem, type Problem } from "../../src/problem.js";
 import type { ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
+import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
 import { MockApi } from "../mock-api.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
@@ -33,6 +35,9 @@ beforeEach(() => {
   outputs = {};
 });
 
+// A well-formed age recipient for the rows where the key's shape is not the rule under test.
+const VALID_KEY = await identityToRecipient(await generateX25519Identity());
+
 describe("run in multi-repo mode (env glue)", () => {
   const ENV_KEYS = [
     "INPUT_TOKEN",
@@ -49,6 +54,8 @@ describe("run in multi-repo mode (env glue)", () => {
     "INPUT_PRIVATE-REPOS",
     "INPUT_PRIVATE-REPORT",
     "INPUT_REPORT-PUBLIC-KEY",
+    "INPUT_SETTINGS-FILE",
+    "INPUT_DEFAULTS-FILE",
   ];
   const saved = new Map(ENV_KEYS.map((k) => [k, process.env[k]]));
 
@@ -62,65 +69,14 @@ describe("run in multi-repo mode (env glue)", () => {
     }
   });
 
-  test("repository input combined with repos is a hard error", async () => {
-    process.env.INPUT_TOKEN = "t";
-    process.env.INPUT_MODE = "check";
-    process.env.INPUT_REPOS = "o/a";
-    process.env.INPUT_REPOSITORY = "o/r";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-    expect(captured).toContain(
-      'error: the "repository" input cannot be combined with "repos" or "repos-dir"; multi-repo targets come from those inputs. Remove "repository", or remove the multi-repo inputs to stay in single-repo mode',
-    );
-  });
-
+  // A discovery run starts from a token and a mode alone: every other input of this describe is unset until the test sets it.
   function setDiscoveryEnv() {
-    process.env.INPUT_TOKEN = "t";
-    process.env.INPUT_MODE = "check";
-    delete process.env.INPUT_REPOS;
-    delete process.env.INPUT_REPOSITORY;
-    delete process.env.GITHUB_REPOSITORY;
-  }
-
-  test("invalid filter values are hard errors before any API call", async () => {
-    const bad: Array<[string, string]> = [
-      ["INPUT_VISIBILITY", "sometimes"],
-      ["INPUT_ARCHIVED", "maybe"],
-      ["INPUT_FORKS", "never"],
-      ["INPUT_AFFILIATION", "member"],
-      ["INPUT_EXCLUDE", "a/b/c"],
-      ["INPUT_EXCLUDE", "octo/"],
-      ["INPUT_EXCLUDE", "/repo"],
-    ];
-    for (const [key, value] of bad) {
-      setDiscoveryEnv();
-      process.env.INPUT_REPOS = "*";
-      process.env[key] = value;
-      const api = new MockApi({});
-      expect(await run({ api: api, io: testIo })).toBe(1);
-      expect(api.calls).toHaveLength(0);
+    for (const key of ENV_KEYS) {
       delete process.env[key];
     }
-  });
-
-  test("filters with an explicit repos list are a hard error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOS = "o/a";
-    process.env.INPUT_FORKS = "exclude";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
-
-  test("filters in single-repo mode are a hard error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env.INPUT_TOPICS = "team-a";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-  });
+    process.env.INPUT_TOKEN = "t";
+    process.env.INPUT_MODE = "check";
+  }
 
   test("discovery with forks: exclude processes only the non-fork", async () => {
     setDiscoveryEnv();
@@ -140,16 +96,6 @@ describe("run in multi-repo mode (env glue)", () => {
     });
     expect(await run({ api: api, io: testIo })).toBe(0);
     expect(api.calls.some((c) => c.path.startsWith("/repos/o/y"))).toBe(false);
-  });
-
-  test("defaults-file in single-repo mode is a hard error", async () => {
-    setDiscoveryEnv();
-    process.env.INPUT_REPOSITORY = "o/r";
-    process.env["INPUT_DEFAULTS-FILE"] = "test/fixtures/defaults.yml";
-    const api = new MockApi({});
-    expect(await run({ api: api, io: testIo })).toBe(1);
-    expect(api.calls).toHaveLength(0);
-    delete process.env["INPUT_DEFAULTS-FILE"];
   });
 
   test("the step summary escapes pipes and marks drift rows", async () => {
@@ -186,91 +132,117 @@ describe("run in multi-repo mode (env glue)", () => {
   });
 
   // The error annotation must name ITS OWN rule: exit code and call count alone would pass on a wrong-rule rejection.
-  test.each([
+  const SINGLE = { INPUT_REPOSITORY: "o/r", "INPUT_SETTINGS-FILE": "test/fixtures/single.yml" };
+  const REDACT = { ...SINGLE, "INPUT_PRIVATE-REPOS": "redact" };
+  const SHOW = { ...SINGLE, "INPUT_PRIVATE-REPOS": "show" };
+  const NEVER_SENT = "nothing is redacted and no report would ever be sent";
+  const ARTIFACT_ONLY = "only applies to private-report: artifact";
+  const MALFORMED_KEY = "age1notavalidkey"; // gitleaks:allow
+  const FILTER = (input: string, value: string) =>
+    `the "${input}" input is "${value}", which is not a supported`;
+  const EXCLUDE = (pattern: string): Problem => ({
+    code: "input-exclude-pattern-invalid",
+    pattern,
+  });
+  // A row names the whole Problem where that is the rule, and a message fragment where the whole message would restate
+  // the input's option list or a library's own wording.
+  test.each<[string, Record<string, string>, Problem | string]>([
+    [
+      "repository with repos",
+      { INPUT_REPOS: "o/a", INPUT_REPOSITORY: "o/r" },
+      { code: "input-repository-with-multi" },
+    ],
+    [
+      "visibility: sometimes",
+      { INPUT_REPOS: "*", INPUT_VISIBILITY: "sometimes" },
+      FILTER("visibility", "sometimes"),
+    ],
+    ["archived: maybe", { INPUT_REPOS: "*", INPUT_ARCHIVED: "maybe" }, FILTER("archived", "maybe")],
+    ["forks: never", { INPUT_REPOS: "*", INPUT_FORKS: "never" }, FILTER("forks", "never")],
+    [
+      "affiliation: member",
+      { INPUT_REPOS: "*", INPUT_AFFILIATION: "member" },
+      'the "affiliation" input entry "member" is not a supported affiliation',
+    ],
+    ["exclude: a/b/c", { INPUT_REPOS: "*", INPUT_EXCLUDE: "a/b/c" }, EXCLUDE("a/b/c")],
+    ["exclude: octo/", { INPUT_REPOS: "*", INPUT_EXCLUDE: "octo/" }, EXCLUDE("octo/")],
+    ["exclude: /repo", { INPUT_REPOS: "*", INPUT_EXCLUDE: "/repo" }, EXCLUDE("/repo")],
+    [
+      "a filter with an explicit repos list",
+      { INPUT_REPOS: "o/a", INPUT_FORKS: "exclude" },
+      { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "explicit-repos" },
+    ],
+    [
+      "a filter in single-repo mode",
+      { INPUT_REPOSITORY: "o/r", INPUT_TOPICS: "team-a" },
+      { code: "discovery-filters-without-wildcard", filters: ["topics"], targets: "single-repo" },
+    ],
+    [
+      "defaults-file in single-repo mode",
+      { INPUT_REPOSITORY: "o/r", "INPUT_DEFAULTS-FILE": "test/fixtures/defaults.yml" },
+      { code: "input-defaults-file-without-multi" },
+    ],
     [
       "private-report: issue with private-repos: show",
-      "show",
-      "issue",
-      "absent",
-      "nothing is redacted and no report would ever be sent",
+      { ...SHOW, "INPUT_PRIVATE-REPORT": "issue" },
+      NEVER_SENT,
     ],
     [
       "private-report: issue-on-failure with private-repos: show",
-      "show",
-      "issue-on-failure",
-      "absent",
-      "nothing is redacted and no report would ever be sent",
+      { ...SHOW, "INPUT_PRIVATE-REPORT": "issue-on-failure" },
+      NEVER_SENT,
     ],
     [
       "private-report: artifact with private-repos: show",
-      "show",
-      "artifact",
-      "valid",
-      "nothing is redacted and no report would ever be sent",
+      { ...SHOW, "INPUT_PRIVATE-REPORT": "artifact", "INPUT_REPORT-PUBLIC-KEY": VALID_KEY },
+      NEVER_SENT,
     ],
     [
       "private-report: artifact without report-public-key",
-      "redact",
-      "artifact",
-      "absent",
+      { ...REDACT, "INPUT_PRIVATE-REPORT": "artifact" },
       'private-report: artifact needs a "report-public-key" input',
     ],
     [
       "private-report: artifact with a malformed report-public-key",
-      "redact",
-      "artifact",
-      "malformed",
+      { ...REDACT, "INPUT_PRIVATE-REPORT": "artifact", "INPUT_REPORT-PUBLIC-KEY": MALFORMED_KEY },
       "not a valid age recipient",
     ],
     [
       "report-public-key with the issue channel",
-      "redact",
-      "issue",
-      "valid",
-      "only applies to private-report: artifact",
+      { ...REDACT, "INPUT_PRIVATE-REPORT": "issue", "INPUT_REPORT-PUBLIC-KEY": VALID_KEY },
+      ARTIFACT_ONLY,
     ],
     [
       "report-public-key with the issue-on-failure channel",
-      "redact",
-      "issue-on-failure",
-      "valid",
-      "only applies to private-report: artifact",
+      {
+        ...REDACT,
+        "INPUT_PRIVATE-REPORT": "issue-on-failure",
+        "INPUT_REPORT-PUBLIC-KEY": VALID_KEY,
+      },
+      ARTIFACT_ONLY,
     ],
     [
       "report-public-key with the default none channel",
-      "redact",
-      "none",
-      "valid",
-      "only applies to private-report: artifact",
+      { ...REDACT, "INPUT_PRIVATE-REPORT": "none", "INPUT_REPORT-PUBLIC-KEY": VALID_KEY },
+      ARTIFACT_ONLY,
     ],
-  ] as const)(
-    "%s is a hard config error naming its rule",
-    async (_name, privateRepos, privateReport, key, fragment) => {
-      setDiscoveryEnv();
-      process.env.INPUT_REPOSITORY = "o/r";
-      process.env["INPUT_SETTINGS-FILE"] = "test/fixtures/single.yml";
-      process.env["INPUT_PRIVATE-REPOS"] = privateRepos;
-      process.env["INPUT_PRIVATE-REPORT"] = privateReport;
-      if (key === "absent") {
-        delete process.env["INPUT_REPORT-PUBLIC-KEY"];
-      } else if (key === "malformed") {
-        process.env["INPUT_REPORT-PUBLIC-KEY"] = "age1notavalidkey"; // gitleaks:allow
-      } else {
-        process.env["INPUT_REPORT-PUBLIC-KEY"] = await identityToRecipient(
-          await generateX25519Identity(),
-        );
-      }
-      const api = new MockApi({});
-      expect(await run({ api: api, io: testIo })).toBe(1);
-      expect(api.calls).toHaveLength(0);
-      expect(captured.filter((line) => line.startsWith("error: ")).join("\n")).toContain(fragment);
-    },
-  );
+  ])("%s is a hard config error naming its rule", async (_name, env, expected) => {
+    setDiscoveryEnv();
+    Object.assign(process.env, env);
+    const api = new MockApi({});
+    expect(await run({ api: api, io: testIo })).toBe(1);
+    expect(api.calls).toHaveLength(0);
+    const errors = captured.filter((line) => line.startsWith("error: "));
+    if (typeof expected === "string") {
+      expect(errors.join("\n")).toContain(expected);
+    } else {
+      expect(errors).toContain(`error: ${describeProblem(expected)}`);
+    }
+  });
 
   // Check mode; a drifting row has has_wiki: true against single.yml's false.
-  const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const listPath = (state: string) =>
-    `GET /repos/o/priv/issues?state=${state}&labels=settings-as-code-report&per_page=100&page=1`;
+    `GET /repos/o/priv/issues?state=${state}&labels=${MARKER_LABEL}&per_page=100&page=1`;
   const issue3 = {
     number: 3,
     title: ISSUE_TITLE,
