@@ -69,7 +69,7 @@ A section's shape reports every mistake it finds in that one run, like a compile
 
 The shape's own issues are capped at 5 per section; the line after them counts the rest ("...and N more issues in this section"). The checks that need the parsed section (two entries naming one resource) wait for its shape to pass and report every finding; only the unrecognized-key check of a closed section keeps a cap of its own, 5 entries.
 
-Under `on-missing-permission: fail`, every declared section is then probed read-only before ANY write; if a section is inaccessible, nothing is applied at all (per repository in multi-repo mode; earlier targets in the same run are already done).
+Under `on-missing-permission: fail`, every active section (each declared section the `sections` input selects; all of them when that input is unset) is then probed read-only before ANY write; if a section is inaccessible, nothing is applied at all (per repository in multi-repo mode; earlier targets in the same run are already done).
 
 The API has no transactions. A read-but-not-write token can still fail mid-apply, and a section whose reads need no grant at all (`custom_properties` - its values read is Metadata-gated) surfaces a missing write grant only at its first write. Re-running after fixing it converges because applies are idempotent.
 
