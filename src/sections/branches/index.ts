@@ -103,7 +103,7 @@ function isProtectionVocabulary(path: Delta["path"]): boolean {
  */
 function undocumentedKeysUnder(value: unknown, holder: string): string[] {
   const documented = PROTECTION_VOCABULARY.get(holder);
-  if (!isPlainMapping(value) || documented === undefined) {
+  if (!isMapping(value) || documented === undefined) {
     return [];
   }
   return Object.entries(value).flatMap(([key, inner]) => {

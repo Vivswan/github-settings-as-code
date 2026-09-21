@@ -11,6 +11,7 @@
 
 import { err, type Result } from "neverthrow";
 import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
+import { isMapping } from "../sections/shared/raw-values.js";
 import { agree } from "../text.js";
 
 type PathStep = string | number | { readonly key: string };
@@ -84,10 +85,6 @@ function isScalar(value: unknown): boolean {
   return typeof value !== "object" || value === null;
 }
 
-function isPlainMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /**
  * Nothing a replacing write would need to preserve: GitHub's zero values, an empty list, or a mapping
  * whose every value is empty by the same rule (an actor holder with empty lists).
@@ -99,7 +96,7 @@ function isEmptySetting(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (isPlainMapping(value)) {
+  if (isMapping(value)) {
     return Object.values(value).every(isEmptySetting);
   }
   return false;
@@ -144,7 +141,7 @@ function walk(
     return;
   }
   if (typeof desired === "object") {
-    if (!isPlainMapping(liveValue)) {
+    if (!isMapping(liveValue)) {
       out.push(
         absent
           ? { kind: "phantom", path, desired }
@@ -211,8 +208,8 @@ function describeKey(key: MatchKey): string {
  * declaration bug.
  */
 function itemKey(item: unknown, key: MatchKey, keyPath: string, side: "desired" | "live"): string {
-  const parts = isPlainMapping(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
-  if (!isPlainMapping(item) || parts.length === 0) {
+  const parts = isMapping(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
+  if (!isMapping(item) || parts.length === 0) {
     throw new Error(
       `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but a ${side} item carries no such key: ${JSON.stringify(item)}`,
     );
