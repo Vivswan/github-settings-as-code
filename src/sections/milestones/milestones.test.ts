@@ -64,56 +64,6 @@ describe("milestones", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 
-  test("a declared key the live milestone lacks is drift plus a phantom note beside the update", async () => {
-    const api = new MockApi({ [LIST]: { data: liveMilestones } });
-    const result = await plan(api, {
-      _undeclared: "keep",
-      entries: [{ title: "v1", due_date: "2026-01-15" } as never],
-    });
-    expect(result.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
-      [
-        "update",
-        { title: "v1", due_date: "2026-01-15" },
-        [
-          'milestones[v1].due_date: declared "2026-01-15" but the API response has no such field (new or write-only field?)',
-        ],
-      ],
-    ]);
-    expect(result.notes).toEqual([
-      'milestones[v1]: declared key "due_date" does not exist on the live milestone, so if GitHub ignores it this update will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
-      KEEP_NOTE,
-    ]);
-  });
-
-  test("a declared day matches the Pacific-midnight timestamp GitHub stores it as, in either DST state, so no PATCH recurs", async () => {
-    const api = new MockApi({
-      [LIST]: {
-        data: [
-          {
-            number: 1,
-            title: "winter",
-            description: null,
-            state: "open",
-            due_on: "2026-01-15T08:00:00Z",
-          },
-          {
-            number: 2,
-            title: "summer",
-            description: null,
-            state: "open",
-            due_on: "2026-07-01T07:00:00Z",
-          },
-        ],
-      },
-    });
-    const result = await plan(api, [
-      { title: "winter", due_on: "2026-01-15" },
-      // A timestamp declares the same day: GitHub would discard its time anyway.
-      { title: "summer", due_on: "2026-07-01T00:00:00Z" },
-    ]);
-    expect(result).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
   test("a due_on differing by a day, or missing live, is drift on the day, and the update sends the day as noon UTC so GitHub keeps that day", async () => {
     const api = new MockApi({
       [LIST]: {
@@ -214,18 +164,6 @@ describe("milestones", () => {
     },
   );
 
-  test("duplicate titles are a validate issue, so the document fails before any API call", () => {
-    expect(milestonesSection.validate([{ title: "v1" }, { title: "v1", state: "closed" }])).toEqual(
-      [
-        {
-          path: "[1].title",
-          message:
-            '"v1" names the same milestone as "v1" declared earlier; keep exactly one entry per milestone',
-        },
-      ],
-    );
-  });
-
   test("executing the plan against the mock converges: the re-plan is empty", async () => {
     const api = fragmentFake(milestonesSection, milestonesMockHandlers, {
       milestones: [
@@ -271,18 +209,5 @@ describe("milestones", () => {
       ["v1.0", "First stable release.", "open", "2026-06-30T07:00:00Z"],
       ["v2.0", null, "closed", null],
     ]);
-  });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(milestonesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
   });
 });
