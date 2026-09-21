@@ -5,6 +5,7 @@ import type { LoggedRequest } from "../mock/contract.js";
 import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
   OpenApiValidator,
+  type OpenApiViolation,
   pathMatches,
   readSpecText,
   sharedValidator,
@@ -16,123 +17,143 @@ function req(overrides: Partial<LoggedRequest>): LoggedRequest {
   return { method: "GET", pathname: "/", query: "", status: 200, ...overrides };
 }
 
+const line = (violation: OpenApiViolation): string => `${violation.kind}: ${violation.detail}`;
+
+/** An empty `expected` pins a clean exchange; otherwise every pattern must match one finding line. */
+function expectFindings(lines: readonly string[], expected: readonly RegExp[]): void {
+  if (expected.length === 0) {
+    expect(lines).toEqual([]);
+    return;
+  }
+  for (const pattern of expected) {
+    expect(
+      lines.some((found) => pattern.test(found)),
+      `no finding matches ${pattern}`,
+    ).toBe(true);
+  }
+}
+
 describe("toJsonSchema", () => {
-  test("folds nullable:true into a type array", () => {
-    expect(toJsonSchema({ type: "string", nullable: true })).toEqual({ type: ["string", "null"] });
-  });
+  // GitHub's custom-property `value` schema is `oneOf [string, string[]]` with nullable: true and
+  // NO sibling type; a null value must validate.
+  const nullableOneOf = {
+    nullable: true,
+    oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+  };
+  const overlappingOneOf = {
+    oneOf: [
+      { type: "object", required: ["a"], properties: { a: { type: "string" } } },
+      { type: "object", required: ["b"], properties: { b: { type: "string" } } },
+    ],
+  };
 
-  test("appends null to an existing type array without duplicating", () => {
-    expect(toJsonSchema({ type: ["string", "number"], nullable: true })).toEqual({
-      type: ["string", "number", "null"],
-    });
-    expect(toJsonSchema({ type: ["string", "null"], nullable: true })).toEqual({
-      type: ["string", "null"],
-    });
-  });
-
-  test("a nullable enum gains null (the code-quality runner_type shape)", () => {
-    expect(toJsonSchema({ type: "string", nullable: true, enum: ["standard", "labeled"] })).toEqual(
+  test.each<[label: string, args: Parameters<typeof toJsonSchema>, expected: unknown]>([
+    [
+      "folds nullable:true into a type array",
+      [{ type: "string", nullable: true }],
+      { type: ["string", "null"] },
+    ],
+    [
+      "appends null to an existing type array",
+      [{ type: ["string", "number"], nullable: true }],
+      { type: ["string", "number", "null"] },
+    ],
+    [
+      "does not duplicate a null already in the type array",
+      [{ type: ["string", "null"], nullable: true }],
+      { type: ["string", "null"] },
+    ],
+    [
+      "a nullable enum gains null (the code-quality runner_type shape)",
+      [{ type: "string", nullable: true, enum: ["standard", "labeled"] }],
       { type: ["string", "null"], enum: ["standard", "labeled", null] },
-    );
-    expect(toJsonSchema({ type: "string", nullable: true, enum: ["weekly", null] })).toEqual({
-      type: ["string", "null"],
-      enum: ["weekly", null],
-    });
-    expect(toJsonSchema({ type: "string", enum: ["standard"] })).toEqual({
-      type: "string",
-      enum: ["standard"],
-    });
-  });
-
-  test("nullable without a type is dropped, not turned into a bare null type", () => {
-    // ajv treats a type-less schema as accept-anything, the safe reading.
-    expect(toJsonSchema({ nullable: true, description: "x" })).toEqual({ description: "x" });
-  });
-
-  test("nullable beside a bare oneOf gains a null branch (the custom property value shape)", () => {
-    // GitHub's custom-property `value` schema is `oneOf [string, string[]]` with nullable: true and
-    // NO sibling type; a null value must validate.
-    const input = {
-      nullable: true,
-      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
-    };
-    expect(toJsonSchema(input, true)).toEqual({
-      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
-    });
-    expect(toJsonSchema(input)).toEqual({
-      anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
-    });
-  });
-
-  test("strips required from a response schema (presence relaxed) by default", () => {
-    expect(
-      toJsonSchema({ type: "object", required: ["id"], properties: { id: { type: "integer" } } }),
-    ).toEqual({
-      type: "object",
-      properties: { id: { type: "integer" } },
-    });
-  });
-
-  test("keeps required when keepRequired is set (request-body variant)", () => {
-    expect(
-      toJsonSchema(
-        { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
-        true,
-      ),
-    ).toEqual({
-      type: "object",
-      required: ["id"],
-      properties: { id: { type: "integer" } },
-    });
-  });
-
-  test("strips annotation-only keywords ajv would choke on", () => {
-    const input = {
-      type: "object",
-      example: { a: 1 },
-      examples: [1, 2],
-      xml: { name: "thing" },
-      discriminator: { propertyName: "kind" },
-      properties: { a: { type: "integer", example: 5 } },
-    };
-    expect(toJsonSchema(input)).toEqual({
-      type: "object",
-      properties: { a: { type: "integer" } },
-    });
-  });
-
-  test("recurses through arrays and nested objects", () => {
-    const input = {
-      allOf: [
-        { type: "string", nullable: true },
-        { type: "object", example: {} },
+    ],
+    [
+      "a nullable enum already carrying null is not doubled",
+      [{ type: "string", nullable: true, enum: ["weekly", null] }],
+      { type: ["string", "null"], enum: ["weekly", null] },
+    ],
+    [
+      "a non-nullable enum is untouched",
+      [{ type: "string", enum: ["standard"] }],
+      { type: "string", enum: ["standard"] },
+    ],
+    [
+      // ajv treats a type-less schema as accept-anything, the safe reading.
+      "nullable without a type is dropped, not turned into a bare null type",
+      [{ nullable: true, description: "x" }],
+      { description: "x" },
+    ],
+    [
+      "nullable beside a bare oneOf gains a null branch (request variant keeps oneOf)",
+      [nullableOneOf, true],
+      {
+        oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
+      },
+    ],
+    [
+      "nullable beside a bare oneOf gains a null branch (response variant widens to anyOf)",
+      [nullableOneOf],
+      {
+        anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
+      },
+    ],
+    [
+      "strips required from a response schema (presence relaxed) by default",
+      [{ type: "object", required: ["id"], properties: { id: { type: "integer" } } }],
+      { type: "object", properties: { id: { type: "integer" } } },
+    ],
+    [
+      "keeps required when keepRequired is set (request-body variant)",
+      [{ type: "object", required: ["id"], properties: { id: { type: "integer" } } }, true],
+      { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+    ],
+    [
+      "strips annotation-only keywords ajv would choke on",
+      [
+        {
+          type: "object",
+          example: { a: 1 },
+          examples: [1, 2],
+          xml: { name: "thing" },
+          discriminator: { propertyName: "kind" },
+          properties: { a: { type: "integer", example: 5 } },
+        },
       ],
-    };
-    expect(toJsonSchema(input)).toEqual({
-      allOf: [{ type: ["string", "null"] }, { type: "object" }],
-    });
-  });
-
-  test("leaves primitives untouched", () => {
-    expect(toJsonSchema("s")).toBe("s");
-    expect(toJsonSchema(3)).toBe(3);
-    expect(toJsonSchema(null)).toBeNull();
-  });
-
-  test("relaxed variant rewrites oneOf to anyOf (widened branches may overlap)", () => {
-    const input = {
-      oneOf: [
-        { type: "object", required: ["a"], properties: { a: { type: "string" } } },
-        { type: "object", required: ["b"], properties: { b: { type: "string" } } },
+      { type: "object", properties: { a: { type: "integer" } } },
+    ],
+    [
+      "recurses through arrays and nested objects",
+      [
+        {
+          allOf: [
+            { type: "string", nullable: true },
+            { type: "object", example: {} },
+          ],
+        },
       ],
-    };
-    expect(toJsonSchema(input)).toEqual({
-      anyOf: [
-        { type: "object", properties: { a: { type: "string" } } },
-        { type: "object", properties: { b: { type: "string" } } },
-      ],
-    });
-    expect(toJsonSchema(input, true)).toEqual(input);
+      { allOf: [{ type: ["string", "null"] }, { type: "object" }] },
+    ],
+    ["leaves a string primitive untouched", ["s"], "s"],
+    ["leaves a number primitive untouched", [3], 3],
+    ["leaves null untouched", [null], null],
+    [
+      "relaxed variant rewrites oneOf to anyOf (widened branches may overlap)",
+      [overlappingOneOf],
+      {
+        anyOf: [
+          { type: "object", properties: { a: { type: "string" } } },
+          { type: "object", properties: { b: { type: "string" } } },
+        ],
+      },
+    ],
+    [
+      "the request variant keeps an overlapping oneOf as is",
+      [overlappingOneOf, true],
+      overlappingOneOf,
+    ],
+  ])("%s", (_label, args, expected) => {
+    expect(toJsonSchema(...args)).toEqual(expected);
   });
 
   test("a widened oneOf that would fail exactly-one passes as anyOf end to end", () => {
@@ -221,25 +242,30 @@ describe("toJsonSchema", () => {
 });
 
 describe("undocumented-route exemption", () => {
-  test("the declared LFS methods are exempt from unknown-route", () => {
-    expect(
-      validateExchange(req({ method: "PUT", pathname: "/repos/o/r/lfs", status: 202 })),
-    ).toEqual([]);
-    expect(
-      validateExchange(req({ method: "DELETE", pathname: "/repos/o/r/lfs", status: 204 })),
-    ).toEqual([]);
-  });
-
-  test("an unlisted method on the same path is still an unknown route", () => {
-    const violations = validateExchange(
+  test.each<[label: string, request: LoggedRequest, kinds: string[]]>([
+    [
+      "the declared LFS PUT is exempt",
+      req({ method: "PUT", pathname: "/repos/o/r/lfs", status: 202 }),
+      [],
+    ],
+    [
+      "the declared LFS DELETE is exempt",
+      req({ method: "DELETE", pathname: "/repos/o/r/lfs", status: 204 }),
+      [],
+    ],
+    [
+      "an unlisted method on the same path is still an unknown route",
       req({ method: "GET", pathname: "/repos/o/r/lfs", status: 200, responseBody: {} }),
-    );
-    expect(violations.some((v) => v.includes("unknown-route"))).toBe(true);
-  });
-
-  test("a near-miss path is still an unknown route", () => {
-    const violations = validateExchange(req({ method: "PUT", pathname: "/repos/o/r/lsf" }));
-    expect(violations.some((v) => v.includes("unknown-route"))).toBe(true);
+      ["unknown-route"],
+    ],
+    [
+      "a near-miss path is still an unknown route",
+      req({ method: "PUT", pathname: "/repos/o/r/lsf" }),
+      ["unknown-route"],
+    ],
+  ])("%s", (_label, request, kinds) => {
+    const violations = validateExchange(request);
+    expect(violations.map((v) => v.match(/\[([a-z-]+)\]/)?.[1])).toEqual(kinds);
   });
 
   test("excludeUndocumented removes declared paths and throws on a stale entry", () => {
@@ -253,27 +279,19 @@ describe("undocumented-route exemption", () => {
 describe("pathMatches greedy trailing params", () => {
   const contents = "/repos/{owner}/{repo}/contents/{path}";
   const gitRef = "/repos/{owner}/{repo}/git/ref/{ref}";
+  const labelName = "/repos/{owner}/{repo}/labels/{name}";
 
-  test("{path} absorbs a multi-segment file path", () => {
-    expect(pathMatches(contents, "/repos/o/r/contents/.github/settings.yml")).toBe(true);
-    expect(pathMatches(contents, "/repos/o/r/contents/README.md")).toBe(true);
-  });
-
-  test("{ref} absorbs a fully qualified ref", () => {
-    expect(pathMatches(gitRef, "/repos/o/r/git/ref/heads/main")).toBe(true);
-    expect(pathMatches(gitRef, "/repos/o/r/git/ref/heads/release/1.x")).toBe(true);
-    expect(pathMatches(gitRef, "/repos/o/r/git/ref")).toBe(false);
-  });
-
-  test("{path} requires at least one trailing segment", () => {
-    expect(pathMatches(contents, "/repos/o/r/contents")).toBe(false);
-  });
-
-  test("a non-contents template still matches one segment per param", () => {
-    expect(pathMatches("/repos/{owner}/{repo}/labels/{name}", "/repos/o/r/labels/bug")).toBe(true);
-    expect(pathMatches("/repos/{owner}/{repo}/labels/{name}", "/repos/o/r/labels/bug/extra")).toBe(
-      false,
-    );
+  test.each<[template: string, pathname: string, matches: boolean]>([
+    [contents, "/repos/o/r/contents/.github/settings.yml", true],
+    [contents, "/repos/o/r/contents/README.md", true],
+    [contents, "/repos/o/r/contents", false],
+    [gitRef, "/repos/o/r/git/ref/heads/main", true],
+    [gitRef, "/repos/o/r/git/ref/heads/release/1.x", true],
+    [gitRef, "/repos/o/r/git/ref", false],
+    [labelName, "/repos/o/r/labels/bug", true],
+    [labelName, "/repos/o/r/labels/bug/extra", false],
+  ])("%s against %s -> %p", (template, pathname, matches) => {
+    expect(pathMatches(template, pathname)).toBe(matches);
   });
 });
 
@@ -347,25 +365,22 @@ describe("OpenApiValidator against the fetched spec", () => {
     expect(cappedEndpoints).toBeGreaterThan(0);
   });
 
-  test("a path the spec does not document is an unknown-route violation", () => {
-    const violations = v.validateRequest(
+  test.each<[label: string, request: LoggedRequest]>([
+    [
+      "a path the spec does not document",
       req({
         method: "GET",
         pathname: "/repos/e2e-owner/e2e-repo/not-a-real-endpoint",
         status: 200,
       }),
-    );
-    expect(violations).toHaveLength(1);
-    expect(violations[0]?.kind).toBe("unknown-route");
-  });
-
-  test("a method the spec does not document on a known path is a violation", () => {
-    // DELETE /repos/{owner}/{repo}/labels is not a documented operation.
-    const violations = v.validateRequest(
+    ],
+    [
+      // DELETE /repos/{owner}/{repo}/labels is not a documented operation.
+      "a method the spec does not document on a known path",
       req({ method: "DELETE", pathname: "/repos/e2e-owner/e2e-repo/labels", status: 204 }),
-    );
-    expect(violations).toHaveLength(1);
-    expect(violations[0]?.kind).toBe("unknown-route");
+    ],
+  ])("%s is one unknown-route violation", (_label, request) => {
+    expect(v.validateRequest(request).map((x) => x.kind)).toEqual(["unknown-route"]);
   });
 
   test("a valid label create body passes request-body validation", () => {
@@ -389,243 +404,167 @@ describe("OpenApiValidator against the fetched spec", () => {
     expect(violations).toEqual([]);
   });
 
-  test("a body with a wrong-typed field is a request-body violation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
-        status: 201,
-        body: { name: "bug", color: 123 },
-      }),
-    );
-    expect(violations.some((x) => x.kind === "request-body")).toBe(true);
-  });
+  const labelCreate = { method: "POST", pathname: "/repos/e2e-owner/e2e-repo/labels" } as const;
+  const labelDelete = {
+    method: "DELETE",
+    pathname: "/repos/e2e-owner/e2e-repo/labels/bug",
+  } as const;
+  const environment = { pathname: "/repos/e2e-owner/e2e-repo/environments/production" } as const;
 
-  test("an off-schema body the mock REJECTED as requestOffSpec skips only the body check", () => {
-    // Settings pass through verbatim, so a user typo the request schema forbids reaching the API
-    // and being 422'd is modeled behavior (the rulesets-invalid-rule-type scenario).
-    const violations = v.validateRequest(
+  // Request bodies keep `required` (presence enforced) and are checked on every status the tag does
+  // not exempt.
+  test.each<[label: string, request: LoggedRequest, expected: RegExp[]]>([
+    [
+      "a body with a wrong-typed field is a request-body violation",
+      req({ ...labelCreate, status: 201, body: { name: "bug", color: 123 } }),
+      [/^request-body:/],
+    ],
+    [
+      // Settings pass through verbatim, so a user typo the request schema forbids reaching the API
+      // and being 422'd is modeled behavior (the rulesets-invalid-rule-type scenario).
+      "an off-schema body the mock REJECTED as requestOffSpec skips only the body check",
       req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        ...labelCreate,
         status: 422,
         body: { name: "bug", color: 123 },
         responseBody: { message: "Validation Failed" },
         requestOffSpec: true,
       }),
-    );
-    expect(violations.some((x) => x.kind === "request-body")).toBe(false);
-  });
-
-  test("an off-schema body on an UNTAGGED 4xx is still a request-body violation", () => {
-    const violations = v.validateRequest(
+      [],
+    ],
+    [
+      "an off-schema body on an UNTAGGED 4xx is still a request-body violation",
       req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        ...labelCreate,
         status: 422,
         body: { name: "bug", color: 123 },
         responseBody: { message: "Validation Failed" },
       }),
-    );
-    expect(violations.some((x) => x.kind === "request-body")).toBe(true);
-  });
-
-  test("the tag exempts only the schema check; a missing required body still violates", () => {
-    // requestOffSpec asserts the BODY is deliberately off-schema, which presumes a body exists.
-    const violations = v.validateRequest(
+      [/^request-body:/],
+    ],
+    [
+      // requestOffSpec asserts the BODY is deliberately off-schema, which presumes a body exists.
+      "the tag exempts only the schema check; a missing required body still violates",
       req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        ...labelCreate,
         status: 422,
         responseBody: { message: "Validation Failed" },
         requestOffSpec: true,
       }),
-    );
-    expect(violations.some((x) => x.kind === "request-body" && x.detail.includes("required"))).toBe(
-      true,
-    );
+      [/^request-body: .*required/],
+    ],
+    [
+      "a request body missing a required field IS a violation (presence enforced)",
+      req({ ...labelCreate, status: 201, body: { color: "d73a4a" } }), // no name
+      [/^request-body:/],
+    ],
+    [
+      "a PRIMITIVE request body where an object is documented IS a violation",
+      req({ ...labelCreate, status: 201, body: "just a string" }),
+      [/^request-body:/],
+    ],
+    [
+      "a required request body sent as none IS a violation",
+      req({ ...labelCreate, status: 201 }),
+      [/^request-body: .*required/],
+    ],
+    [
+      "a JSON body sent to an op that documents NO request body IS a violation",
+      req({ ...labelDelete, status: 204, body: { unexpected: true } }),
+      [/^request-body: .*no request body/],
+    ],
+  ])("%s", (_label, request, expected) => {
+    expectFindings(v.validateRequest(request).map(line), expected);
   });
 
-  test("a request body missing a required field IS a violation (presence enforced)", () => {
-    const violations = v.validateRequest(
+  // Response bodies drop `required` (presence relaxed); the spec documents its success statuses
+  // and omits most error statuses, so only an undocumented 2xx/3xx is drift.
+  test.each<[label: string, request: LoggedRequest, expected: RegExp[]]>([
+    [
+      "a body on a documented no-content (204) success response IS a violation",
+      req({ ...labelDelete, status: 204, responseBody: { message: "deleted" } }),
+      [/^response-body: .*no response content/],
+    ],
+    [
+      "a null body on a 204 is fine (the correct empty response)",
+      req({ ...labelDelete, status: 204, responseBody: null }),
+      [],
+    ],
+    [
+      "a RESPONSE body merely missing a documented field is NOT a violation (presence relaxed)",
       req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
-        status: 201,
-        body: { color: "d73a4a" }, // no name
-      }),
-    );
-    expect(violations.some((x) => x.kind === "request-body")).toBe(true);
-  });
-
-  test("a PRIMITIVE request body where an object is documented IS a violation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
-        status: 201,
-        body: "just a string",
-      }),
-    );
-    expect(violations.some((x) => x.kind === "request-body")).toBe(true);
-  });
-
-  test("a required request body sent as none IS a violation", () => {
-    const violations = v.validateRequest(
-      req({ method: "POST", pathname: "/repos/e2e-owner/e2e-repo/labels", status: 201 }),
-    );
-    expect(violations.some((x) => x.kind === "request-body" && x.detail.includes("required"))).toBe(
-      true,
-    );
-  });
-
-  test("a JSON body sent to an op that documents NO request body IS a violation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "DELETE",
-        pathname: "/repos/e2e-owner/e2e-repo/labels/bug",
-        status: 204,
-        body: { unexpected: true },
-      }),
-    );
-    expect(
-      violations.some((x) => x.kind === "request-body" && x.detail.includes("no request body")),
-    ).toBe(true);
-  });
-
-  test("a body on a documented no-content (204) success response IS a violation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "DELETE",
-        pathname: "/repos/e2e-owner/e2e-repo/labels/bug",
-        status: 204,
-        responseBody: { message: "deleted" },
-      }),
-    );
-    expect(
-      violations.some(
-        (x) => x.kind === "response-body" && x.detail.includes("no response content"),
-      ),
-    ).toBe(true);
-  });
-
-  test("a null body on a 204 is fine (the correct empty response)", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "DELETE",
-        pathname: "/repos/e2e-owner/e2e-repo/labels/bug",
-        status: 204,
-        responseBody: null,
-      }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("a RESPONSE body merely missing a documented field is NOT a violation (presence relaxed)", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        ...labelCreate,
         status: 201,
         body: { name: "bug" },
         responseBody: { name: "bug", color: "d73a4a" },
       }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("an undocumented 2xx status IS a response-body violation", () => {
-    // PUT environments answers 200 even on create (the spec lists 200/422), so a 201 is real drift.
-    const violations = v.validateRequest(
+      [],
+    ],
+    [
+      // PUT environments answers 200 even on create (the spec lists 200/422), so a 201 is real drift.
+      "an undocumented 2xx status IS a response-body violation",
       req({
+        ...environment,
         method: "PUT",
-        pathname: "/repos/e2e-owner/e2e-repo/environments/production",
         status: 201,
         body: { wait_timer: 5 },
         responseBody: { id: 1, name: "production" },
       }),
-    );
-    expect(violations.some((x) => x.kind === "response-body" && x.detail.includes("201"))).toBe(
-      true,
-    );
-  });
-
-  test("an undocumented 2xx status with NO body is still a violation", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "PUT",
-        pathname: "/repos/e2e-owner/e2e-repo/environments/production",
-        status: 201,
-      }),
-    );
-    expect(violations.some((x) => x.kind === "response-body" && x.detail.includes("201"))).toBe(
-      true,
-    );
-  });
-
-  test("an undocumented status >= 400 is accepted silently (spec omits most errors)", () => {
-    // GET environments documents only 200; the mock's absent-probe 404 is realistic GitHub behavior.
-    const violations = v.validateRequest(
-      req({
-        method: "GET",
-        pathname: "/repos/e2e-owner/e2e-repo/environments/production",
-        status: 404,
-        responseBody: { message: "Not Found" },
-      }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("a documented status is still validated: GET environments 200 passes", () => {
-    const violations = v.validateRequest(
-      req({
-        method: "GET",
-        pathname: "/repos/e2e-owner/e2e-repo/environments/production",
-        status: 200,
-        responseBody: { id: 1, name: "production" },
-      }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("a primitive response body where an object is documented IS a violation", () => {
-    const violations = v.validateRequest(
+      [/^response-body: .*201/],
+    ],
+    [
+      "an undocumented 2xx status with NO body is still a violation",
+      req({ ...environment, method: "PUT", status: 201 }),
+      [/^response-body: .*201/],
+    ],
+    [
+      // GET environments documents only 200; the mock's absent-probe 404 is realistic GitHub behavior.
+      "an undocumented status >= 400 is accepted silently (spec omits most errors)",
+      req({ ...environment, status: 404, responseBody: { message: "Not Found" } }),
+      [],
+    ],
+    [
+      "a documented status is still validated: GET environments 200 passes",
+      req({ ...environment, status: 200, responseBody: { id: 1, name: "production" } }),
+      [],
+    ],
+    [
+      "a primitive response body where an object is documented IS a violation",
       req({ method: "GET", pathname: "/repos/e2e-owner/e2e-repo", status: 200, responseBody: 42 }),
-    );
-    expect(violations.some((x) => x.kind === "response-body")).toBe(true);
+      [/^response-body:/],
+    ],
+  ])("%s", (_label, request, expected) => {
+    expectFindings(v.validateRequest(request).map(line), expected);
   });
 
-  test("an offSpec response (raw media / synthetic fault) is excluded entirely", () => {
-    // A rate-limit 403 fault: the status is undocumented AND the body is off-spec; both are skipped.
-    const violations = v.validateRequest(
+  // The harness's own shapes are excluded entirely: the spec never documents them.
+  test.each<[label: string, request: LoggedRequest]>([
+    [
+      // A raw-media fetch: the text body is not the documented JSON array, and the tag skips it.
+      "an offSpec response (raw media / synthetic fault)",
       req({
         method: "GET",
         pathname: "/repos/e2e-owner/e2e-repo/labels",
-        status: 403,
+        status: 200,
+        responseBody: "raw text",
         offSpec: true,
       }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("a non-HTTP status sentinel (0, connection drop) is excluded", () => {
-    const violations = v.validateRequest(
+    ],
+    [
+      "a non-HTTP status sentinel (0, connection drop)",
       req({ method: "GET", pathname: "/repos/e2e-owner/e2e-repo/labels", status: 0 }),
-    );
-    expect(violations).toEqual([]);
-  });
-
-  test("a denied request (deniedBy set) is excluded from validation", () => {
-    const violations = v.validateRequest(
+    ],
+    [
+      "a denied request (deniedBy set)",
       req({
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
+        ...labelCreate,
         status: 403,
         deniedBy: "issues",
         responseBody: { message: "Resource not accessible by personal access token" },
       }),
-    );
-    expect(violations).toEqual([]);
+    ],
+  ])("%s is excluded from validation", (_label, request) => {
+    expect(v.validateRequest(request)).toEqual([]);
   });
 
   test("a mock VIOLATION 400 is excluded from validation", () => {
@@ -666,42 +605,42 @@ describe("the fetched trimmed spec", () => {
 });
 
 describe("validateExchange adapter", () => {
-  test("returns string errors for a wrong-shaped response", () => {
-    const errors = validateExchange(
-      { method: "GET", pathname: "/repos/e2e-owner/e2e-repo", query: "", status: 200 },
-      42, // scalar where the repo object is documented
-    );
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]).toContain("[response-body]");
+  const repoGet = req({ method: "GET", pathname: "/repos/e2e-owner/e2e-repo", status: 200 });
+  const labelCreate = req({
+    method: "POST",
+    pathname: "/repos/e2e-owner/e2e-repo/labels",
+    status: 201,
   });
 
-  test("returns errors for a misspelled request field", () => {
-    // The schema requires `name`, so sending only the misspelled `colour` trips required.
-    const errors = validateExchange(
-      {
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
-        query: "",
-        status: 201,
-        body: { colour: "d73a4a" },
-      },
-      { id: 1 },
-    );
-    expect(errors.some((e) => e.includes("[request-body]"))).toBe(true);
-  });
-
-  test("returns no errors for a valid exchange", () => {
-    const errors = validateExchange(
-      {
-        method: "POST",
-        pathname: "/repos/e2e-owner/e2e-repo/labels",
-        query: "",
-        status: 201,
-        body: { name: "bug", color: "d73a4a" },
-      },
-      { name: "bug", color: "d73a4a" },
-    );
-    expect(errors).toEqual([]);
+  test.each<[label: string, args: Parameters<typeof validateExchange>, errors: string[]]>([
+    [
+      "returns string errors for a wrong-shaped response",
+      [repoGet, 42], // scalar where the repo object is documented
+      ["GET /repos/e2e-owner/e2e-repo [response-body]: (root) must be object"],
+    ],
+    [
+      // The schema requires `name`, so sending only the misspelled `colour` trips required.
+      "returns errors for a misspelled request field",
+      [{ ...labelCreate, body: { colour: "d73a4a" } }, { id: 1 }],
+      [
+        "POST /repos/e2e-owner/e2e-repo/labels [request-body]: (root) must have required property 'name'",
+      ],
+    ],
+    [
+      "returns no errors for a valid exchange",
+      [
+        { ...labelCreate, body: { name: "bug", color: "d73a4a" } },
+        { name: "bug", color: "d73a4a" },
+      ],
+      [],
+    ],
+    [
+      "omitting responseBody falls back to the request's own field",
+      [{ ...repoGet, responseBody: 42 }],
+      ["GET /repos/e2e-owner/e2e-repo [response-body]: (root) must be object"],
+    ],
+  ])("%s", (_label, args, errors) => {
+    expect(validateExchange(...args)).toEqual(errors);
   });
 
   test("an explicit null responseBody OVERRIDES the request's own field, not falls through", () => {
@@ -718,17 +657,6 @@ describe("validateExchange adapter", () => {
       null,
     );
     expect(errors).toEqual([]);
-  });
-
-  test("omitting responseBody falls back to the request's own field", () => {
-    const errors = validateExchange({
-      method: "GET",
-      pathname: "/repos/e2e-owner/e2e-repo",
-      query: "",
-      status: 200,
-      responseBody: 42,
-    });
-    expect(errors.some((e) => e.includes("[response-body]"))).toBe(true);
   });
 });
 
@@ -805,76 +733,62 @@ describe("the hand-written /graphql branch", () => {
       ...overrides,
     });
 
-  test("a well-formed exchange passes", () => {
-    expect(validator.validateRequest(exchange({}))).toEqual([]);
-  });
-
-  test("a data:null + typed errors response passes", () => {
-    expect(
-      validator.validateRequest(
-        exchange({
-          responseBody: { data: null, errors: [{ type: "NOT_FOUND", message: "gone" }] },
-        }),
-      ),
-    ).toEqual([]);
-  });
-
-  test("a non-POST method is an unknown-route finding", () => {
-    const found = validator.validateRequest(exchange({ method: "GET" }));
-    expect(found.map((f) => f.kind)).toContain("unknown-route");
-  });
-
-  test("missing query/operationName/variables are request-body findings", () => {
-    const found = validator.validateRequest(exchange({ body: { operationName: 7 } }));
-    const details = found.map((f) => `${f.kind}: ${f.detail}`).join("\n");
-    expect(details).toContain("request-body: the request body must carry a string `query`");
-    expect(details).toContain("request-body: the request body must carry a string `operationName`");
-    expect(details).toContain("request-body: the request body must carry a `variables` object");
-  });
-
-  test("an undeclared operationName is a request-body finding", () => {
-    const found = validator.validateRequest(
-      exchange({ body: { ...goodBody, operationName: "Rogue" } }),
-    );
-    expect(found.map((f) => f.detail).join("\n")).toContain(
-      'operationName "Rogue" names no declared GraphQL operation',
-    );
-  });
-
-  test("a non-200 status is a response-body finding", () => {
-    const found = validator.validateRequest(exchange({ status: 502, responseBody: null }));
-    expect(found.map((f) => f.detail).join("\n")).toContain("GraphQL responses are HTTP 200");
-  });
-
-  test("a data value that is neither object nor null is a finding", () => {
-    const found = validator.validateRequest(exchange({ responseBody: { data: 42 } }));
-    expect(found.map((f) => f.detail).join("\n")).toContain(
-      "the response `data` must be an object or null",
-    );
-  });
-
-  test("an unknown errors[].type and a missing message are findings", () => {
-    const found = validator.validateRequest(
-      exchange({
-        responseBody: { data: null, errors: [{ type: "SERVICE_UNAVAILABLE" }] },
-      }),
-    );
-    const details = found.map((f) => f.detail).join("\n");
-    expect(details).toContain(
-      'errors[].type "SERVICE_UNAVAILABLE" is not a known GraphQL error type',
-    );
-    expect(details).toContain("every errors[] entry must carry a string message");
-  });
-
-  test("an empty errors array is a finding (present means non-empty)", () => {
-    const found = validator.validateRequest(exchange({ responseBody: { data: null, errors: [] } }));
-    expect(found.map((f) => f.detail).join("\n")).toContain("must be a non-empty array");
-  });
-
-  test("denied and off-spec exchanges are excluded like every other route", () => {
-    expect(
-      validator.validateRequest(exchange({ deniedBy: "administration", responseBody: undefined })),
-    ).toEqual([]);
-    expect(validator.validateRequest(exchange({ offSpec: true }))).toEqual([]);
+  test.each<[label: string, overrides: Partial<LoggedRequest>, expected: RegExp[]]>([
+    ["a well-formed exchange passes", {}, []],
+    [
+      "a data:null + typed errors response passes",
+      { responseBody: { data: null, errors: [{ type: "NOT_FOUND", message: "gone" }] } },
+      [],
+    ],
+    ["a non-POST method is an unknown-route finding", { method: "GET" }, [/^unknown-route:/]],
+    [
+      "missing query/operationName/variables are request-body findings",
+      { body: { operationName: 7 } },
+      [
+        /^request-body: the request body must carry a string `query`/,
+        /^request-body: the request body must carry a string `operationName`/,
+        /^request-body: the request body must carry a `variables` object/,
+      ],
+    ],
+    [
+      "an undeclared operationName is a request-body finding",
+      { body: { ...goodBody, operationName: "Rogue" } },
+      [/operationName "Rogue" names no declared GraphQL operation/],
+    ],
+    [
+      "a non-200 status is a response-body finding",
+      { status: 502, responseBody: null },
+      [/GraphQL responses are HTTP 200/],
+    ],
+    [
+      "a data value that is neither object nor null is a finding",
+      { responseBody: { data: 42 } },
+      [/the response `data` must be an object or null/],
+    ],
+    [
+      "an unknown errors[].type and a missing message are findings",
+      { responseBody: { data: null, errors: [{ type: "SERVICE_UNAVAILABLE" }] } },
+      [
+        /errors\[\]\.type "SERVICE_UNAVAILABLE" is not a known GraphQL error type/,
+        /every errors\[\] entry must carry a string message/,
+      ],
+    ],
+    [
+      "an empty errors array is a finding (present means non-empty)",
+      { responseBody: { data: null, errors: [] } },
+      [/must be a non-empty array/],
+    ],
+    [
+      "a denied exchange is excluded like every other route",
+      { deniedBy: "administration", responseBody: undefined },
+      [],
+    ],
+    [
+      "an off-spec exchange is excluded like every other route",
+      { offSpec: true, responseBody: { data: 42 } },
+      [],
+    ],
+  ])("%s", (_label, overrides, expected) => {
+    expectFindings(validator.validateRequest(exchange(overrides)).map(line), expected);
   });
 });
