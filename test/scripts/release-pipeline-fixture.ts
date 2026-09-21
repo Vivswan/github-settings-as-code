@@ -159,12 +159,13 @@ export function writeBuild(cwd: string, bundle: string): void {
   }
 }
 
-/** The fixture's package.json: one of each script pacote takes as a preparation trigger, beside one that is not. */
+/** The fixture's package.json: the library build as its `files` list (what the tarball ships), and one of each script
+ * pacote takes as a preparation trigger, beside one that is not. */
 export function manifestJson(
   version: string,
   scripts: Record<string, string> = FIXTURE_SCRIPTS,
 ): string {
-  return `${JSON.stringify({ name: "@scope/pkg", version, scripts }, null, 2)}\n`;
+  return `${JSON.stringify({ name: "@scope/pkg", version, files: ["lib/pkg/"], scripts }, null, 2)}\n`;
 }
 /** The six scripts pacote reads before it prepares a git dependency, spelled here so a name dropped from the
  * pipeline's list would stay in a packaged manifest and fail the manifest assertion. */

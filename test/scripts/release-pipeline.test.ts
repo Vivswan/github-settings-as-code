@@ -5,7 +5,7 @@
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import {
@@ -15,6 +15,7 @@ import {
   FROZEN,
   type MainPosition,
   mainPosition,
+  NEXT_BUILD_INPUTS,
   type NextVerdict,
   nextPublishVerdict,
   npmConfirm,
@@ -50,6 +51,7 @@ import {
   LATEST,
   latestTag,
   localIdentity,
+  manifestJson,
   moveOf,
   PERMANENT,
   PLANTED_PACKAGES,
@@ -1205,6 +1207,9 @@ describe("prereleaseVersion", () => {
     ).toThrow(/not a version this pipeline mints/);
   });
 
+  /** The surface a skip names: the manifest, the fixture manifest's files list (lib/pkg/), the build inputs, and npm's always-packed root files. */
+  const SHIPPED = `package.json, lib/pkg/, ${NEXT_BUILD_INPUTS.join(", ")}, or a root README, COPYING, or LICENSE`;
+
   const registry = (versions: string[], tags: Record<string, string>): Packument => ({
     versions: Object.fromEntries(versions.map((v) => [v, {}])),
     "dist-tags": tags,
@@ -1236,7 +1241,7 @@ describe("prereleaseVersion", () => {
     };
   }
 
-  test("next: a published pre-release is placed by its source's ancestry, and only a descendant's holds the run back", () => {
+  test("next: a published pre-release is placed by its source's ancestry, and a descendant's, or next naming this run's own source, holds the run back", () => {
     const fx = seedFixture();
     const main = mainAround(fx);
     const source7 = fx.mergeSha.slice(0, 7);
@@ -1248,21 +1253,60 @@ describe("prereleaseVersion", () => {
       notices: [],
     });
     const unresolved = "2.1.1-main.9.20260901.g0000000";
+    /** Why a run without a base publishes, and what one that names the version next holds says on top of "ignored". */
+    const noNext =
+      "the registry's next names no version, so there is no build to compare the shipped surface against; publishing";
+    const noBase =
+      ", and next names it, so there is no build to compare the shipped surface against: every change counts as shipped";
     const cases: [string, Packument | null, NextVerdict][] = [
       [
         "a package the registry has never seen",
         null,
-        { publish: true, version: main.own, notices: [] },
+        {
+          publish: true,
+          version: main.own,
+          notices: [
+            "the registry holds no record of this package yet, so there is no build to compare the shipped surface against; publishing",
+          ],
+        },
       ],
       [
         "the first pre-release after a release",
         registry(["2.1.0"], { latest: "2.1.0" }),
-        { publish: true, version: main.own, notices: [] },
+        { publish: true, version: main.own, notices: [noNext] },
       ],
       [
-        "an ancestor's pre-release on next",
+        // The release merge rewrote the manifest and package.json beside the changelog: two shipped paths, named in order.
+        "an ancestor's pre-release on next, with shipped changes since",
         registry(["2.1.0", main.ancestor], { latest: "2.1.0", next: main.ancestor }),
-        { publish: true, version: main.own, notices: [] },
+        {
+          publish: true,
+          version: main.own,
+          notices: [
+            `2 shipped files changed since ${main.ancestor} (source ${sha7(main.ancestor)}): .release-please-manifest.json, package.json`,
+          ],
+        },
+      ],
+      [
+        "next naming this run's own version while the record lacks it: nothing changed since itself",
+        registry(["2.1.0"], { latest: "2.1.0", next: main.own }),
+        {
+          publish: false,
+          version: main.own,
+          reason: `no shipped file changed since ${main.own} (source ${source7}): no merge to main in ${source7}..${source7} touches ${SHIPPED}`,
+          notices: [],
+        },
+      ],
+      [
+        "next naming a release, which carries no source",
+        registry(["2.1.0"], { latest: "2.1.0", next: "2.1.0" }),
+        {
+          publish: true,
+          version: main.own,
+          notices: [
+            "the registry's next is 2.1.0, which names no source sha, so there is no build to compare the shipped surface against; publishing",
+          ],
+        },
       ],
       [
         "a descendant's pre-release with other position identifiers (the hand bootstrap's shape): the sha alone places it",
@@ -1298,32 +1342,46 @@ describe("prereleaseVersion", () => {
       [
         "a release that shipped after this commit, with no pre-release of its merge",
         registry(["2.1.0", "2.2.0"], { latest: "2.2.0" }),
-        { publish: true, version: main.own, notices: [] },
+        { publish: true, version: main.own, notices: [noNext] },
       ],
       [
-        "a pre-release naming a commit this checkout lacks",
+        "a pre-release naming a commit this checkout lacks, on next",
         registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved }),
         {
           publish: true,
           version: main.own,
-          notices: [`${unresolved} names 0000000, which is no commit in this checkout; ignored`],
+          notices: [
+            `${unresolved} names 0000000, which is no commit in this checkout; ignored${noBase}`,
+          ],
         },
       ],
       [
-        "a pre-release naming a commit off this source's line of main",
+        "a pre-release naming a commit this checkout lacks, beside an ancestor's on next",
+        registry(["2.1.0", unresolved, main.ancestor], { latest: "2.1.0", next: main.ancestor }),
+        {
+          publish: true,
+          version: main.own,
+          notices: [
+            `${unresolved} names 0000000, which is no commit in this checkout; ignored`,
+            `2 shipped files changed since ${main.ancestor} (source ${sha7(main.ancestor)}): .release-please-manifest.json, package.json`,
+          ],
+        },
+      ],
+      [
+        "a pre-release naming a commit off this source's line of main, on next",
         registry(["2.1.0", main.unrelated], { latest: "2.1.0", next: main.unrelated }),
         {
           publish: true,
           version: main.own,
           notices: [
-            `${main.unrelated} names ${sha7(main.unrelated)}, which is neither an ancestor nor a descendant of ${source7} on main; ignored`,
+            `${main.unrelated} names ${sha7(main.unrelated)}, which is neither an ancestor nor a descendant of ${source7} on main; ignored${noBase}`,
           ],
         },
       ],
       [
         "a hand-published version this pipeline never minted, which no dist-tag names",
         registry(["2.1.0", "2.1.1-beta.1"], { latest: "2.1.0" }),
-        { publish: true, version: main.own, notices: [] },
+        { publish: true, version: main.own, notices: [noNext] },
       ],
     ];
     for (const [name, packument, expected] of cases) {
@@ -1346,6 +1404,165 @@ describe("prereleaseVersion", () => {
     ).toThrow(
       /^git rev-parse --verify --quiet [0-9a-f]{7}\^\{commit\} failed: fatal: not a git repository/,
     );
+  });
+
+  test("next: a source no merge since the build next names touched a shipped path up to publishes nothing; a shipped change, a reverted one, a moved file, or a files list not read as paths publishes", async () => {
+    const fx = seedFixture();
+    const main = mainAround(fx);
+    const further = git(fx.work, "ls-remote", "origin", "refs/heads/main").split("\t")[0] ?? "";
+    const lab = clone(fx.root, fx.origin, "lab");
+    const skipReason = (base: string, baseSha: string, source: string): string =>
+      `no shipped file changed since ${base} (source ${baseSha.slice(0, 7)}): no merge to main in ${baseSha.slice(0, 7)}..${source.slice(0, 7)} touches ${SHIPPED}`;
+    const skipped = (base: string, baseSha: string, source: string): NextVerdict => ({
+      publish: false,
+      version: versionOf(lab, source, 5),
+      reason: skipReason(base, baseSha, source),
+      notices: [],
+    });
+    const published = (source: string, count: number, notice: string): NextVerdict => ({
+      publish: true,
+      version: versionOf(lab, source, count),
+      notices: [notice],
+    });
+    const at = (base: string) => registry(["2.1.0", base], { latest: "2.1.0", next: base });
+    // Docs, the changelog, and a workflow: nothing the tarball ships or the build reads.
+    write(lab, "docs/guide.md", "# Guide\n");
+    write(lab, "CHANGELOG.md", `${CHANGELOG_21}\n## Unreleased\n`);
+    write(lab, ".github/workflows/ci.yml", "name: ci\non: [push]\njobs: {}\n");
+    const docs = commitAll(lab, "docs: a guide");
+    git(lab, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+    expect(nextPublishVerdict(lab, docs, versionOf(lab, docs, 5), at(main.further))).toEqual(
+      skipped(main.further, further, docs),
+    );
+    // The base two merges back: the merge between them changed src/, so the diff to this source carries it.
+    const after = git(lab, "rev-parse", `${further}^`);
+    expect(nextPublishVerdict(lab, docs, versionOf(lab, docs, 5), at(main.descendant))).toEqual(
+      published(
+        docs,
+        5,
+        `1 shipped file changed since ${main.descendant} (source ${after.slice(0, 7)}): src/marker.ts`,
+      ),
+    );
+    const docsVersion = versionOf(lab, docs, 5);
+    // A source change on top of the docs commit.
+    write(lab, "src/marker.ts", 'export const marker = "shipped";\n');
+    const src = commitAll(lab, "feat: shipped");
+    expect(nextPublishVerdict(lab, src, versionOf(lab, src, 6), at(docsVersion))).toEqual(
+      published(
+        src,
+        6,
+        `1 shipped file changed since ${docsVersion} (source ${docs.slice(0, 7)}): src/marker.ts`,
+      ),
+    );
+    // The root README, which npm packs whatever the files list says (the fixture's names lib/pkg/ alone); a backup
+    // copy beside it and a README under a directory are not packed, so they do not count.
+    git(lab, "checkout", "--quiet", docs);
+    write(lab, "README.md", "# Package\n");
+    write(lab, "README.md~", "# Package (backup)\n");
+    write(lab, "docs/README.md", "# Docs\n");
+    const readme = commitAll(lab, "docs: the package readme");
+    expect(nextPublishVerdict(lab, readme, versionOf(lab, readme, 6), at(docsVersion))).toEqual(
+      published(
+        readme,
+        6,
+        `1 shipped file changed since ${docsVersion} (source ${docs.slice(0, 7)}): README.md`,
+      ),
+    );
+    // A change one merge makes and the next reverts: the trees agree, so a tree diff would skip the revert's run, and
+    // the change's run, taking the lane after it, would publish what main no longer holds.
+    git(lab, "checkout", "--quiet", docs);
+    write(lab, "src/marker.ts", 'export const marker = "reverted";\n');
+    commitAll(lab, "feat: soon reverted");
+    // The helper trims git's output; the file ends in the newline the trim took.
+    write(lab, "src/marker.ts", `${git(lab, "show", `${docs}:src/marker.ts`)}\n`);
+    const reverted = commitAll(lab, "revert: the marker");
+    expect(git(lab, "diff", "--name-only", docs, reverted)).toBe("");
+    expect(nextPublishVerdict(lab, reverted, versionOf(lab, reverted, 7), at(docsVersion))).toEqual(
+      published(
+        reverted,
+        7,
+        `1 shipped file changed since ${docsVersion} (source ${docs.slice(0, 7)}): src/marker.ts`,
+      ),
+    );
+    // A file moved out of the surface: with rename detection the diff would list docs/marker.ts alone.
+    git(lab, "checkout", "--quiet", docs);
+    git(lab, "mv", "src/marker.ts", "docs/marker.ts");
+    const moved = commitAll(lab, "refactor: move the marker");
+    expect(git(lab, "diff", "-M", "--name-only", docs, moved)).toBe("docs/marker.ts");
+    expect(nextPublishVerdict(lab, moved, versionOf(lab, moved, 6), at(docsVersion))).toEqual(
+      published(
+        moved,
+        6,
+        `1 shipped file changed since ${docsVersion} (source ${docs.slice(0, 7)}): src/marker.ts`,
+      ),
+    );
+    // A base inside a merged branch: the first-parent walk from the source never visits it, so the merges since it
+    // cannot be read. Here the branch changed the marker and reverted it before the merge; judged by the merge's own
+    // diff the revert would be lost, so the run publishes instead, saying why.
+    git(lab, "checkout", "--quiet", docs);
+    write(lab, "src/marker.ts", 'export const marker = "branch";\n');
+    const inBranch = commitAll(lab, "feat: on a branch");
+    write(lab, "src/marker.ts", `${git(lab, "show", `${docs}:src/marker.ts`)}\n`);
+    const branchTip = commitAll(lab, "revert: on the branch");
+    git(lab, "checkout", "--quiet", docs);
+    git(lab, "merge", "--quiet", "--no-ff", "--no-edit", branchTip);
+    const merge = git(lab, "rev-parse", "HEAD");
+    const inBranchVersion = versionOf(lab, inBranch, 6);
+    expect(nextPublishVerdict(lab, merge, versionOf(lab, merge, 6), at(inBranchVersion))).toEqual(
+      published(
+        merge,
+        6,
+        `the registry's next is ${inBranchVersion}, whose source ${inBranch.slice(0, 7)} is inside a branch merged to main, not a main commit, so the merges since it cannot be walked; publishing`,
+      ),
+    );
+    // A manifest without a files list, then a docs-only commit over it: npm would pack the whole tree, so it publishes.
+    const manifestWith = (files: string[] | undefined): string => {
+      const pkg = JSON.parse(manifestJson("2.1.0")) as { files?: string[] };
+      if (files === undefined) {
+        delete pkg.files;
+      } else {
+        pkg.files = files;
+      }
+      return `${JSON.stringify(pkg, null, 2)}\n`;
+    };
+    for (const [files, why] of [
+      [undefined, "has no files list, so npm packs the whole tree"],
+      [["lib/**"], 'lists "lib/**" in files, a pattern this comparison does not match'],
+    ] as const) {
+      git(lab, "checkout", "--quiet", docs);
+      write(lab, "package.json", manifestWith(files === undefined ? undefined : [...files]));
+      const base = commitAll(lab, "chore: the files list");
+      write(lab, "docs/guide.md", `# Guide (${why})\n`);
+      const source = commitAll(lab, "docs: the guide again");
+      const baseVersion = versionOf(lab, base, 6);
+      expect(nextPublishVerdict(lab, source, versionOf(lab, source, 7), at(baseVersion))).toEqual(
+        published(
+          source,
+          7,
+          `package.json at ${source.slice(0, 7)} ${why}; every change since ${baseVersion} counts as shipped, publishing`,
+        ),
+      );
+    }
+    // The subcommand prints the skip as one stdout line, the notice the workflow raises.
+    const judge = checkoutOf(fx, "docs-judge", docs, "packaged-bundle-bytes-4\n");
+    await withRegistry({ status: 200, body: at(main.further) }, async (url) => {
+      expect(
+        await subcommand(judge, { GITHUB_SHA: docs, NPM_REGISTRY_URL: url }, "npm-verdict", "next"),
+      ).toEqual({
+        stdout: `skip ${skipReason(main.further, further, docs)}\n`,
+        stderr: "",
+        status: 0,
+      });
+    });
+  });
+
+  test("the shipped surface's build inputs are paths in this repository, and package.json's files list is plain paths", () => {
+    for (const input of NEXT_BUILD_INPUTS) {
+      expect(existsSync(join(ROOT, input)), input).toBe(true);
+    }
+    // A pattern would make every verdict fall open to publishing, with the notice naming it.
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { files: string[] };
+    expect(pkg.files.filter((entry) => /[*?[\]{}!]/.test(entry))).toEqual([]);
   });
 
   const stableVerdicts: [string, string, Packument | null, PublishVerdict][] = [
@@ -1466,7 +1683,13 @@ describe("prereleaseVersion", () => {
       "404 is an unpublished package",
       { channel: "next" },
       () => ({ status: 404 }),
-      (own) => ({ publish: true, version: own, notices: [] }),
+      (own) => ({
+        publish: true,
+        version: own,
+        notices: [
+          "the registry holds no record of this package yet, so there is no build to compare the shipped surface against; publishing",
+        ],
+      }),
     ],
     [
       "a stable version the record holds is skipped",
@@ -1563,7 +1786,12 @@ describe("prereleaseVersion", () => {
           "npm-verdict",
           "next",
         ),
-      ).toEqual({ stdout: `publish ${own}\n`, stderr: "", status: 0 });
+      ).toEqual({
+        stdout: `publish ${own}\n`,
+        stderr:
+          "the registry holds no record of this package yet, so there is no build to compare the shipped surface against; publishing\n",
+        status: 0,
+      });
       expect(
         await subcommand(
           fx.work,
@@ -1589,7 +1817,7 @@ describe("prereleaseVersion", () => {
           ),
         ).toEqual({
           stdout: `publish ${own}\n`,
-          stderr: `${unresolved} names 0000000, which is no commit in this checkout; ignored\n`,
+          stderr: `${unresolved} names 0000000, which is no commit in this checkout; ignored, and next names it, so there is no build to compare the shipped surface against: every change counts as shipped\n`,
           status: 0,
         });
       },
@@ -1630,7 +1858,7 @@ describe("prereleaseVersion", () => {
     /** The drift the confirmation reports when next stayed on this run's version while a descendant's is on the record. */
     const behind = (fx: Fixture, ahead: string): string =>
       `the registry's next is ${published(fx)} while it holds ${ahead}, whose source ${ahead.slice(-7)} is a descendant ` +
-      `of ${fx.mergeSha.slice(0, 7)} on main; this stale run moved next back, and the next green push moves it forward ` +
+      `of ${fx.mergeSha.slice(0, 7)} on main; this stale run moved next back, and the next green push that changes the shipped surface moves it forward ` +
       `(npm dist-tag add @scope/pkg@${ahead} next repairs it by hand)`;
 
     test("a record that lags the publish is read again until it shows the version, each read past the CDN cache", async () => {
