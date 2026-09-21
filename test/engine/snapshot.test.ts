@@ -11,6 +11,7 @@ import { SectionSelection } from "../../src/engine/section-selection.js";
 import {
   type RenderableSnapshot,
   renderSnapshotYaml,
+  type SnapshotResult,
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../src/github/api.js";
@@ -28,6 +29,16 @@ import { captureIo } from "../io/capture.js";
 import { registryFake } from "../sections/fragment-fake.js";
 import { REPO } from "../sections/section-run.js";
 import type { Row } from "../sections/snapshot-roundtrip.js";
+
+/** A failed snapshot fails the test here, on the discriminant; a cast would count as a second mint of the brand. */
+function renderable(result: SnapshotResult): RenderableSnapshot {
+  if (result.result === "failed") {
+    throw new Error(
+      `the snapshot failed: ${result.outcomes.map((o) => o.detail.join("; ")).join(" | ")}`,
+    );
+  }
+  return result;
+}
 
 /** A client that answers `status` (the fine-grained denial is 404) to GETs whose path matches `denied`. */
 function denying(api: GitHubClient, denied: RegExp, status: 403 | 404 = 404): GitHubClient {
@@ -454,7 +465,7 @@ describe("renderSnapshotYaml", () => {
       );
       expect(result.result).toBe("snapshot");
       const rendered = renderSnapshotYaml(
-        result as RenderableSnapshot,
+        renderable(result),
         "https://example.test/settings.schema.json",
       );
       expect(rendered).toBe(
@@ -514,11 +525,8 @@ describe("the snapshot is canonical at its boundary", () => {
     );
     expect(result.result).toBe("snapshot");
     return {
-      rendered: renderSnapshotYaml(
-        result as RenderableSnapshot,
-        "https://example.test/schema.json",
-      ),
-      result: result as RenderableSnapshot,
+      rendered: renderSnapshotYaml(renderable(result), "https://example.test/schema.json"),
+      result: renderable(result),
       notices: io.annotations,
     };
   }

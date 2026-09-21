@@ -87,8 +87,7 @@ async function processTarget(ctx: {
   const { api, target, defaults, cfg, injectMarker, channel } = ctx;
   const fail = (richMessage: string): TargetResult => targetFailure(channel.io, richMessage);
 
-  // Marker injection is validity-preserving (it appends the constant marker label config, or strips a rename), so it
-  // happens after validation and keeps the brand.
+  // Injection needs the typed labels, so it follows validation; the injected document is validated again inside.
   const run = async (
     settings: ValidatedSettings,
     secretSource: SettingsSource,

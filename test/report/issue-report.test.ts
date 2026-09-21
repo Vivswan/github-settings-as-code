@@ -571,8 +571,9 @@ describe("injectMarkerLabel", () => {
   });
 
   test("every injection outcome preserves document validity, in both label forms", () => {
-    // applyMarkerInjection (src/report/delivery.ts) carries the injected document across the ValidatedSettings brand on the strength of this
-    // property; the rename-refused arm, which writes an explicit `new_name: undefined`, is the risky one.
+    // applyMarkerInjection (src/report/delivery.ts) sends the injected document back through the validator and treats a
+    // refusal as a defect on the strength of this property; the rename-refused arm, which writes an explicit
+    // `new_name: undefined`, is the risky one.
     const cases: Array<{ doc: SettingsFile; expected: string }> = [
       { doc: { labels: [{ name: "bug", color: "d73a4a" }] }, expected: "injected" },
       {
