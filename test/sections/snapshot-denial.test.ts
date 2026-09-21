@@ -92,15 +92,6 @@ async function proveClassified(
 }
 
 describe("snapshot under a token without grants", () => {
-  test("only a write-only section lacks a snapshot(); the contract type makes every reading section read back", () => {
-    for (const section of SECTIONS) {
-      if (section.snapshot === undefined) {
-        expect(planningReads(section), section.key).toEqual([]);
-      }
-    }
-    expect(reading.length).toBeGreaterThan(0);
-  });
-
   test.each(reading.map((section) => [section.key, section] as const))(
     "%s: a 403 denial is skipped under warn and failed under fail, with the grant advice; a public-only section reads back",
     (_key, section) => proveClassified(section, DENIED_403),

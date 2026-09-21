@@ -37,29 +37,28 @@ describe("secret_scanning_custom_patterns regex fields", () => {
     },
   );
 
-  test("GitHub's documented default delimiters and a Hyperscan-shaped pattern parse clean", () => {
-    expect(
-      issues({
-        ...VALID,
+  test.each<[label: string, fields: Record<string, unknown>]>([
+    [
+      "GitHub's documented default delimiters and a Hyperscan-shaped pattern",
+      {
         pattern: "\\bint_[a-z0-9]{8}\\b",
         start_delimiter: "\\A|[^0-9A-Za-z]",
         end_delimiter: "\\z|[^0-9A-Za-z]",
         must_match: ["[A-Z]", "[0-9]", "[$%@!]"],
         must_not_match: ["[a-z]{2,}"],
-      }),
-    ).toEqual([]);
-  });
-
-  test("the PCRE-only forms Hyperscan accepts parse clean in every field: a user can declare what GitHub already holds", () => {
-    expect(
-      issues({
-        ...VALID,
+      },
+    ],
+    [
+      "the PCRE-only forms Hyperscan accepts, in every field",
+      {
         pattern: "(?P<token>int_[a-z0-9]{8})",
         start_delimiter: "(?#word edge)\\A|[^0-9A-Za-z]",
         end_delimiter: "(?i)\\z|[^0-9A-Za-z]",
         must_match: ["[\\x{41}-\\x{5A}]", "(?>[0-9])++"],
         must_not_match: ["\\Qexample.com\\E"],
-      }),
-    ).toEqual([]);
+      },
+    ],
+  ])("%s parse clean: a user can declare what GitHub already holds", (_label, fields) => {
+    expect(issues({ ...VALID, ...fields })).toEqual([]);
   });
 });

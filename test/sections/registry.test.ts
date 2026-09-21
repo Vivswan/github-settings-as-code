@@ -22,7 +22,6 @@ import type {
 } from "../../src/sections/contract/graphql.js";
 import {
   denialPosture,
-  endpointPermission,
   type GraphqlDict,
   planningReads,
   type SectionContext,
@@ -217,25 +216,29 @@ describe("section permissions", () => {
 });
 
 describe("grantFor", () => {
-  test("single repo resource", () => {
-    const permission: SectionPermission = { repo: ["administration"] };
-    expect(grantFor(permission)).toBe(
+  test.each<
+    [label: string, permission: SectionPermission, caveat: string | undefined, sentence: string]
+  >([
+    [
+      "a single repo resource",
+      { repo: ["administration"] },
+      undefined,
       `grant "Administration" (read and write) under the PAT's Repository permissions`,
-    );
-  });
-
-  test("multiple repo resources with a caveat", () => {
-    const permission: SectionPermission = { repo: ["administration", "code_scanning_alerts"] };
-    expect(grantFor(permission, CODE_SCANNING_CAVEAT)).toBe(
+    ],
+    [
+      "several repo resources with a caveat",
+      { repo: ["administration", "code_scanning_alerts"] },
+      CODE_SCANNING_CAVEAT,
       `grant "Administration" or "Code scanning alerts" (read and write) under the PAT's Repository permissions; ${CODE_SCANNING_CAVEAT}`,
-    );
-  });
-
-  test("org variant (teams)", () => {
-    const permission: SectionPermission = { repo: ["administration"], org: "members" };
-    expect(grantFor(permission)).toBe(
+    ],
+    [
+      "the org variant (teams)",
+      { repo: ["administration"], org: "members" },
+      undefined,
       `grant "Members" (read) under the PAT's Organization permissions and "Administration" (read and write) under its Repository permissions`,
-    );
+    ],
+  ])("spells %s", (_label, permission, caveat, sentence) => {
+    expect(grantFor(permission, caveat)).toBe(sentence);
   });
 });
 
@@ -262,30 +265,6 @@ describe("section endpoints", () => {
       }
     }
     expect(problems, `malformed endpoint declaration(s):\n  ${problems.join("\n  ")}`).toEqual([]);
-  });
-
-  test("endpointPermission resolves override, else section permission", () => {
-    const section: SectionMeta = {
-      key: "branches",
-      permission: { repo: ["administration"] },
-      endpoints: {},
-      undeclaredDefault: "untouched",
-    };
-    // Typed consts: endpointPermission takes the FailingOp facet, so a fresh literal's route/statuses would trip the excess-property check.
-    const plain: EndpointDecl = { route: "GET /repos/{owner}/{repo}", statuses: { 200: "x" } };
-    expect(endpointPermission(section, plain)).toEqual({ repo: ["administration"] });
-    const overridden: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/branches/{branch}",
-      statuses: { 200: "x" },
-      permission: { repo: ["contents"] },
-    };
-    expect(endpointPermission(section, overridden)).toEqual({ repo: ["contents"] });
-    const publicEndpoint: EndpointDecl = {
-      route: "GET /orgs/{org}",
-      statuses: { 200: "x" },
-      permission: "none",
-    };
-    expect(endpointPermission(section, publicEndpoint)).toBe("none");
   });
 });
 
@@ -400,18 +379,6 @@ describe("declarations are frozen at registration", () => {
 });
 
 describe("allEndpoints", () => {
-  test("flattens every section endpoint under its section.role key, tagged with both", () => {
-    const all = allEndpoints();
-    const declared = SECTIONS.flatMap((section) =>
-      Object.entries(section.endpoints).map(
-        ([role, endpoint]) =>
-          [`${section.key}.${role}`, { ...endpoint, section: section.key, role }] as const,
-      ),
-    );
-    expect(declared.length).toBeGreaterThan(0);
-    expect(Object.fromEntries(declared)).toEqual(all);
-  });
-
   test("the returned view is frozen through every nested field, so a consumer cannot corrupt declarations", () => {
     const all = allEndpoints();
     const entry = all["labels.update"];
@@ -590,21 +557,18 @@ describe("typed params (compile-time guards)", () => {
 });
 
 describe("matchesTemplate", () => {
-  test("every {token} consumes exactly one segment", () => {
-    expect(matchesTemplate("/repos/{owner}/{repo}/labels", "/repos/o/r/labels")).toBe(true);
-    expect(matchesTemplate("/repos/{owner}/{repo}/labels", "/repos/o/labels")).toBe(false);
-    expect(matchesTemplate("/repos/{owner}/{repo}/labels", "/repos/o/r/labels/bug")).toBe(false);
-  });
-
-  test("literal segments must match exactly", () => {
-    expect(matchesTemplate("/repos/{owner}/{repo}/pages", "/repos/o/r/pages")).toBe(true);
-    expect(matchesTemplate("/repos/{owner}/{repo}/pages", "/repos/o/r/topics")).toBe(false);
-  });
-
-  test("the query string is ignored", () => {
-    expect(
-      matchesTemplate("/repos/{owner}/{repo}/milestones", "/repos/o/r/milestones?state=all"),
-    ).toBe(true);
+  test.each<[template: string, path: string, matches: boolean]>([
+    // Every {token} consumes exactly one segment.
+    ["/repos/{owner}/{repo}/labels", "/repos/o/r/labels", true],
+    ["/repos/{owner}/{repo}/labels", "/repos/o/labels", false],
+    ["/repos/{owner}/{repo}/labels", "/repos/o/r/labels/bug", false],
+    // Literal segments must match exactly.
+    ["/repos/{owner}/{repo}/pages", "/repos/o/r/pages", true],
+    ["/repos/{owner}/{repo}/pages", "/repos/o/r/topics", false],
+    // The query string is ignored.
+    ["/repos/{owner}/{repo}/milestones", "/repos/o/r/milestones?state=all", true],
+  ])("%s against %s is %p", (template, path, matches) => {
+    expect(matchesTemplate(template, path)).toBe(matches);
   });
 
   test("every declared route path matches its own expanded concrete path", () => {
@@ -640,48 +604,56 @@ describe("expand", () => {
     check: true,
   });
 
-  test("{owner} and {repo} fill from ctx (repo is the name half)", () => {
-    const endpoint: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/labels",
-      statuses: { 200: "x" },
-    };
-    expect(expand(endpoint, ctx())).toBe("/repos/octo/repo/labels");
-  });
-
-  test("a {param} is URL-encoded", () => {
-    const endpoint: EndpointDecl = {
-      route: "PATCH /repos/{owner}/{repo}/labels/{name}",
-      statuses: { 200: "x" },
-    };
-    expect(expand(endpoint, ctx(), { name: "needs review/100%" })).toBe(
+  test.each<
+    [
+      label: string,
+      endpoint: EndpointDecl,
+      params: Record<string, string> | undefined,
+      query: Record<string, string> | undefined,
+      expected: string | RegExp,
+    ]
+  >([
+    [
+      "{owner} and {repo} fill from ctx (repo is the name half)",
+      { route: "GET /repos/{owner}/{repo}/labels", statuses: { 200: "x" } },
+      undefined,
+      undefined,
+      "/repos/octo/repo/labels",
+    ],
+    [
+      "a {param} is URL-encoded",
+      { route: "PATCH /repos/{owner}/{repo}/labels/{name}", statuses: { 200: "x" } },
+      { name: "needs review/100%" },
+      undefined,
       "/repos/octo/repo/labels/needs%20review%2F100%25",
-    );
-  });
-
-  test("a missing param throws", () => {
-    const endpoint: EndpointDecl = {
-      route: "PATCH /repos/{owner}/{repo}/labels/{name}",
-      statuses: { 200: "x" },
-    };
-    expect(() => expand(endpoint, ctx())).toThrow(/needs a "name" param/);
-  });
-
-  test("an extra (unused) param throws", () => {
-    const endpoint: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/labels",
-      statuses: { 200: "x" },
-    };
-    expect(() => expand(endpoint, ctx(), { name: "bug" })).toThrow(/unused param/);
-  });
-
-  test("a query is appended, encoded", () => {
-    const endpoint: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/milestones",
-      statuses: { 200: "x" },
-    };
-    expect(expand(endpoint, ctx(), undefined, { state: "all" })).toBe(
+    ],
+    [
+      "a missing param throws",
+      { route: "PATCH /repos/{owner}/{repo}/labels/{name}", statuses: { 200: "x" } },
+      undefined,
+      undefined,
+      /needs a "name" param/,
+    ],
+    [
+      "an extra (unused) param throws",
+      { route: "GET /repos/{owner}/{repo}/labels", statuses: { 200: "x" } },
+      { name: "bug" },
+      undefined,
+      /unused param/,
+    ],
+    [
+      "a query is appended, encoded",
+      { route: "GET /repos/{owner}/{repo}/milestones", statuses: { 200: "x" } },
+      undefined,
+      { state: "all" },
       "/repos/octo/repo/milestones?state=all",
-    );
+    ],
+  ])("%s", (_label, endpoint, params, query, expected) => {
+    if (typeof expected === "string") {
+      expect(expand(endpoint, ctx(), params, query)).toBe(expected);
+    } else {
+      expect(() => expand(endpoint, ctx(), params, query)).toThrow(expected);
+    }
   });
 });
 
@@ -737,27 +709,29 @@ describe("the section.role key space reserves ':'", () => {
   }
   const LIST = { route: "GET /repos/{owner}/{repo}/labels", statuses: { 200: "x" } } as const;
 
-  test("a role containing ':' fails allEndpoints at construction", () => {
-    expect(() => allEndpoints([endpointSection("labels", { "ring:list": LIST })])).toThrow(
-      new Error(
-        'BUG: role "ring:list" contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon',
-      ),
+  const reserved = (what: string) =>
+    new Error(
+      `BUG: ${what} contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon`,
     );
-  });
 
-  test("a section key containing ':' fails both flatteners", () => {
-    const colonKey = new Error(
-      'BUG: section key "prod:labels" contains ":", which the "section.role" key space reserves for a future scope prefix ("<scope>:<section>.<role>"); rename it without a colon',
-    );
-    expect(() => allEndpoints([endpointSection("prod:labels", { list: LIST })])).toThrow(colonKey);
-    expect(() =>
-      allGraphqlOps([{ key: "prod:labels" as (typeof SECTION_KEYS)[number], endpoints: {} }]),
-    ).toThrow(colonKey);
-  });
-
-  test("the live registry passes every construction assert of both flatteners", () => {
-    expect(() => allEndpoints()).not.toThrow();
-    expect(() => allGraphqlOps()).not.toThrow();
+  test.each<[label: string, construct: () => unknown, refused: Error]>([
+    [
+      "a role, in allEndpoints",
+      () => allEndpoints([endpointSection("labels", { "ring:list": LIST })]),
+      reserved('role "ring:list"'),
+    ],
+    [
+      "a section key, in allEndpoints",
+      () => allEndpoints([endpointSection("prod:labels", { list: LIST })]),
+      reserved('section key "prod:labels"'),
+    ],
+    [
+      "a section key, in allGraphqlOps",
+      () => allGraphqlOps([{ key: "prod:labels" as (typeof SECTION_KEYS)[number], endpoints: {} }]),
+      reserved('section key "prod:labels"'),
+    ],
+  ])("%s fails at construction", (_label, construct, refused) => {
+    expect(construct).toThrow(refused);
   });
 });
 

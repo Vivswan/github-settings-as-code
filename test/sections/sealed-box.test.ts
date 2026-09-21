@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
-import { err, ok } from "neverthrow";
+import { err, ok, Result } from "neverthrow";
 import {
   boxSharedKey,
   decodeBase64,
@@ -29,17 +29,21 @@ const OVERHEAD = SEALED_BOX_PUBLIC_KEY_BYTES + 16;
 describe("sealBox against libsodium", () => {
   const recipient = sodium.crypto_box_keypair();
 
-  test.each(MESSAGES)("libsodium opens what noble sealed: %s", (_what, message) => {
+  test.each(MESSAGES)("each side opens what the other sealed: %s", (_what, message) => {
     const sealed = sealBox(encode(message), recipient.publicKey);
     expect(sealed.length).toBe(OVERHEAD + encode(message).length);
     const opened = sodium.crypto_box_seal_open(sealed, recipient.publicKey, recipient.privateKey);
     expect(sodium.to_string(opened)).toBe(message);
-  });
-
-  test.each(MESSAGES)("noble opens what libsodium sealed: %s", (_what, message) => {
-    const sealed = sodium.crypto_box_seal(sodium.from_string(message), recipient.publicKey);
-    const opened = openSealedBox(sealed, recipient.privateKey, recipient.publicKey);
-    expect(new TextDecoder().decode(opened)).toBe(message);
+    const sealedByLibsodium = sodium.crypto_box_seal(
+      sodium.from_string(message),
+      recipient.publicKey,
+    );
+    const openedByNoble = openSealedBox(
+      sealedByLibsodium,
+      recipient.privateKey,
+      recipient.publicKey,
+    );
+    expect(new TextDecoder().decode(openedByNoble)).toBe(message);
   });
 
   test("sealForGithub emits canonical base64 of the sealed box that libsodium opens", () => {
@@ -105,22 +109,29 @@ describe("fixed vectors (no libsodium in the loop)", () => {
 });
 
 describe("decodeBase64", () => {
-  test.each([
-    ["missing padding", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw"],
-    ["an invalid character", "not base64!"],
-    ["a url-safe alphabet", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw="],
-    ["nonzero padding bits", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHx="],
-    ["a stray quantum", "AAAAA"],
-    ["whitespace", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=\n"],
-  ])("rejects %s, which Buffer would silently accept and libsodium refused", (_what, text) => {
-    expect(() => sodium.from_base64(text, sodium.base64_variants.ORIGINAL)).toThrow();
-    expect(decodeBase64(text)).toEqual(err("not canonical base64"));
-  });
-
-  test("decodes canonical padded base64 to the exact bytes", () => {
-    expect(hex(decodeBase64("B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=")._unsafeUnwrap())).toBe(
-      "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
-    );
-    expect(decodeBase64("")).toEqual(ok(new Uint8Array(0)));
+  const NOT_CANONICAL = err("not canonical base64");
+  // What libsodium decodes (or refuses) is the control: Buffer would silently accept every rejected row.
+  test.each<[what: string, text: string, expected: ReturnType<typeof decodeBase64>]>([
+    ["missing padding", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw", NOT_CANONICAL],
+    ["an invalid character", "not base64!", NOT_CANONICAL],
+    ["a url-safe alphabet", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw=", NOT_CANONICAL],
+    ["nonzero padding bits", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHx=", NOT_CANONICAL],
+    ["a stray quantum", "AAAAA", NOT_CANONICAL],
+    ["whitespace", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=\n", NOT_CANONICAL],
+    [
+      "canonical padded base64",
+      "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=",
+      ok(fromHex("07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c")),
+    ],
+    ["the empty string", "", ok(new Uint8Array(0))],
+  ])("%s decodes as libsodium does", (_what, text, expected) => {
+    const libsodium = Result.fromThrowable(() =>
+      sodium.from_base64(text, sodium.base64_variants.ORIGINAL),
+    )();
+    expect(libsodium.isOk()).toBe(expected.isOk());
+    if (libsodium.isOk()) {
+      expect(hex(libsodium.value)).toBe(hex(expected._unsafeUnwrap()));
+    }
+    expect(decodeBase64(text)).toEqual(expected);
   });
 });

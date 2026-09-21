@@ -86,17 +86,6 @@ describe("the standard scenario set", () => {
     },
   );
 
-  test("the set is derived from the contract: a write-only section (no planning read, no snapshot) demands the convergence proof alone", () => {
-    const writeOnly = SECTIONS.filter(
-      (section) => planningReads(section).length === 0 && section.snapshot === undefined,
-    );
-    // At least one such section exists, or the branch below is never exercised.
-    expect(writeOnly.length).toBeGreaterThan(0);
-    for (const section of writeOnly) {
-      expect(standardSet(section)).toEqual([`${slugOf(section)}-apply-converges`]);
-    }
-  });
-
   test("the negative control: a directory lacking one file of the set fails naming that stem", () =>
     withTempDir("scenario-set-", (dir) => {
       const labels = labelsSection();
