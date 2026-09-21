@@ -758,7 +758,8 @@ export function requirePlainMapping(shape: z.ZodType): z.ZodType {
     .pipe(shape);
 }
 
-interface LoosenDef {
+/** The zod internals a schema walk reads, one view for every walk in the tree. */
+export interface ZodDef {
   type: string;
   shape?: Record<string, z.ZodType>;
   catchall?: z.ZodType;
@@ -769,12 +770,12 @@ interface LoosenDef {
   checks?: readonly unknown[];
 }
 
-function defOf(schema: z.ZodType): LoosenDef {
-  return (schema as unknown as { _zod: { def: LoosenDef } })._zod.def;
+export function defOf(schema: z.ZodType): ZodDef {
+  return (schema as unknown as { _zod: { def: ZodDef } })._zod.def;
 }
 
 /** Every clone's own checks are rewired to report beside a failed nested value (reportingBesideFailures). */
-function cloneWith(schema: z.ZodType, patch: Partial<LoosenDef>): z.ZodType {
+function cloneWith(schema: z.ZodType, patch: Partial<ZodDef>): z.ZodType {
   const def = (schema as unknown as { _zod: { def: Record<string, unknown> } })._zod.def;
   const checks = (def.checks as readonly z.core.$ZodCheck[] | undefined)?.map(
     reportingBesideFailures,

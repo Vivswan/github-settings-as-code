@@ -19,9 +19,9 @@
 
 import { stringify as stringifyYaml } from "yaml";
 import type { z } from "zod";
-import { isPlainObject } from "../plain-data.js";
+import { isPlainObject, own, put } from "../plain-data.js";
 import { SECTION_KEYS, SettingsFile } from "../schema.js";
-import { detectKnobUnion } from "../sections/contract/module.js";
+import { defOf, detectKnobUnion } from "../sections/contract/module.js";
 
 /**
  * The identity field of every mapping list the walk sorts, by list path: the section key, `[]` per entry level,
@@ -95,30 +95,6 @@ export function compareByCodePoint(a: string, b: string): number {
     }
   }
   return left.length - right.length;
-}
-
-/** The zod internals the walk reads; loosen() in src/sections/contract/module.ts reads the same fields. */
-interface Def {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  valueType?: z.ZodType;
-}
-
-function defOf(schema: z.ZodType): Def {
-  return (schema as unknown as { _zod: { def: Def } })._zod.def;
-}
-
-/** Set an own data property whatever the key; assigning `__proto__` would set the prototype. */
-function put(record: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(record, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
 }
 
 /** The keys of `value` in order: the known ones the schema declares, then the rest by code point; an undefined value is no key. */
@@ -228,11 +204,6 @@ function admits(schema: z.ZodType, value: unknown): boolean {
     default:
       return true;
   }
-}
-
-/** A shape's own property: a passthrough key named `constructor` or `toString` is not a schema property. */
-function own(shape: Readonly<Record<string, z.ZodType>>, key: string): z.ZodType | undefined {
-  return Object.hasOwn(shape, key) ? shape[key] : undefined;
 }
 
 function mappingNode(

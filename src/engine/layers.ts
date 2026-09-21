@@ -25,7 +25,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import { isPlainObject } from "../plain-data.js";
+import { isPlainObject, own, put } from "../plain-data.js";
 import type { LayerProblem } from "../problem.js";
 import {
   LIST_SECTIONS,
@@ -564,21 +564,6 @@ function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerP
 
 function childPath(path: string, key: string): string {
   return path === "" ? key : `${path}.${key}`;
-}
-
-/** An own property's value: an inherited name (`constructor`) is not a document key. */
-function own<V>(record: Readonly<Record<string, V>>, key: string): V | undefined {
-  return Object.hasOwn(record, key) ? record[key] : undefined;
-}
-
-/** Set an own data property whatever the key; assigning `__proto__` would set the prototype. */
-function put(record: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(record, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
 }
 
 /**

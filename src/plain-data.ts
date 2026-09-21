@@ -1,6 +1,7 @@
 /**
  * The one plain-mapping test and the rejection prose, shared by the boundaries that refuse tagged values
- * (engine/validate.ts, github/secret-scan.ts), so no two of them describe the same value differently.
+ * (engine/validate.ts, github/secret-scan.ts), so no two of them describe the same value differently; and the two
+ * record accessors that keep a document key from reaching the prototype chain.
  */
 
 /**
@@ -31,4 +32,19 @@ export function nonPlainKind(value: unknown): string {
     return "a set, e.g. from a YAML !!set tag";
   }
   return "a non-plain object";
+}
+
+/** An own property's value: an inherited name (`constructor`) is not a document key. */
+export function own<V>(record: Readonly<Record<string, V>>, key: string): V | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/** Set an own data property whatever the key; assigning `__proto__` would set the prototype. */
+export function put(record: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
