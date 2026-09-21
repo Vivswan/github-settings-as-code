@@ -13,57 +13,36 @@ describe("dedupeTargets", () => {
     { slug: "O/X", source: "remote", origin: 'the "repos" input' },
     { slug: "o/z", source: "remote", origin: 'the "repos" input' },
   ];
+  const IGNORED = 'the entry for the same repository from the "repos" input is ignored';
 
-  test("central wins over remote for the same repo, with a notice", () => {
-    const notices: string[] = [];
-    const merged = dedupeTargets(
-      central,
-      remote,
-      (m) => notices.push(m),
+  test.each<[string, (slug: string) => string, ((slug: string) => boolean) | undefined, string]>([
+    [
+      "central wins over remote for the same repo, with a notice",
       (slug) => slug,
-    );
+      undefined,
+      `O/X: using the central file repos/x.yml; ${IGNORED}`,
+    ],
+    // Wrapping the origin noun phrase must not double its article.
+    [
+      "the notice renders the slug through display; a non-redacted origin stays verbatim",
+      () => "private repository #1",
+      undefined,
+      `private repository #1: using the central file repos/x.yml; ${IGNORED}`,
+    ],
+    // The central file path can embed the real repo name, so it must not appear next to the placeholder.
+    [
+      "a redacted target's central origin is rendered generically, never the file path",
+      () => "private repository #1",
+      () => true,
+      `private repository #1: using the central file a repos-dir file; ${IGNORED}`,
+    ],
+  ])("%s", (_case, display, isRedacted, expected) => {
+    const notices: string[] = [];
+    const merged = dedupeTargets(central, remote, (m) => notices.push(m), display, isRedacted);
     expect(merged).toEqual([
       { slug: "o/x", source: "central", origin: "repos/x.yml", filePath: "repos/x.yml" },
       { slug: "o/z", source: "remote", origin: 'the "repos" input' },
     ]);
-    expect(notices).toEqual([
-      'O/X: using the central file repos/x.yml; the entry for the same repository from the "repos" input is ignored',
-    ]);
-  });
-
-  test("the notice renders the slug through display; a non-redacted origin stays verbatim", () => {
-    const notices: string[] = [];
-    dedupeTargets(
-      central,
-      remote,
-      (m) => notices.push(m),
-      () => "private repository #1",
-    );
-    // Pinned whole: wrapping the origin noun phrase must not double its article.
-    expect(notices).toEqual([
-      'private repository #1: using the central file repos/x.yml; the entry for the same repository from the "repos" input is ignored',
-    ]);
-  });
-
-  test("a redacted target's central origin is rendered generically, never the file path", () => {
-    // The central file path (repos/secret.yml) can embed the real repo name, so it must not appear next to the placeholder.
-    const notices: string[] = [];
-    dedupeTargets(
-      [
-        {
-          slug: "o/secret",
-          source: "central",
-          origin: "repos/secret.yml",
-          filePath: "repos/secret.yml",
-        },
-      ],
-      [{ slug: "o/secret", source: "remote", origin: 'the "repos" input' }],
-      (m) => notices.push(m),
-      () => "private repository #1",
-      () => true,
-    );
-    expect(notices).toEqual([
-      'private repository #1: using the central file a repos-dir file; the entry for the same repository from the "repos" input is ignored',
-    ]);
+    expect(notices).toEqual([expected]);
   });
 });
