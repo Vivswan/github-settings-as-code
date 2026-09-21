@@ -55,12 +55,20 @@ export const autolinksSection = listSection({
   conflicts: {
     declared: (writes) =>
       writes.flatMap((write, index) =>
-        writes.slice(index + 1).flatMap((other) => {
+        writes.slice(index + 1).flatMap((other, offset) => {
           const [shorter, longer] =
             write.key_prefix.length <= other.key_prefix.length ? [write, other] : [other, write];
-          return longer.key_prefix.startsWith(shorter.key_prefix)
+          // Identical prefixes are the duplicate rule's finding, not a pair; this names one prefix that begins ANOTHER.
+          return shorter.key_prefix !== longer.key_prefix &&
+            longer.key_prefix.startsWith(shorter.key_prefix)
             ? [
-                `the key_prefix "${shorter.key_prefix}" begins the key_prefix "${longer.key_prefix}", and GitHub rejects an autolink whose prefix begins or extends another, so the second create would fail - choose prefixes where neither begins the other`,
+                {
+                  path: `[${index + 1 + offset}].key_prefix`,
+                  message:
+                    `the key_prefix "${shorter.key_prefix}" begins the key_prefix "${longer.key_prefix}", ` +
+                    "and GitHub rejects an autolink whose prefix begins or extends another, " +
+                    "so the second create would fail - choose prefixes where neither begins the other",
+                },
               ]
             : [];
         }),

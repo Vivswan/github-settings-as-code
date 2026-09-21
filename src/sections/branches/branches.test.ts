@@ -268,15 +268,19 @@ describe("branches", () => {
     },
   );
 
-  test("duplicate branch names are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("duplicate branch names are a validate issue, so the document fails before any API call", () => {
+    expect(
+      branchesSection.validate([
         { name: "main", protection: { enforce_admins: true } },
         { name: "main", protection: null },
       ]),
-    ).rejects.toThrow(/same branches entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"main" names the same branch as "main" declared earlier; keep exactly one entry per branch',
+      },
+    ]);
   });
 
   test("live protection diffs the declared keys, and whatever the replacing PUT would remove or turn off is its drift too", async () => {

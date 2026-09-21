@@ -156,12 +156,14 @@ describe("teams", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);
   });
 
-  test("two entries naming the same slug are rejected after the owner probe alone", async () => {
-    const api = new MockApi({ [ORG]: { data: { login: "o" } } });
-    await expect(plan(api, [{ name: "ops" }, { name: "Ops", permission: "pull" }])).rejects.toThrow(
-      /same teams entry: "ops" and "Ops"/,
-    );
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG]);
+  test("two entries naming the same slug in different case are a validate issue, so the document fails before the owner probe", () => {
+    expect(teamsSection.validate([{ name: "ops" }, { name: "Ops", permission: "pull" }])).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"Ops" names the same team as "ops" declared earlier; keep exactly one entry per team',
+      },
+    ]);
   });
 
   test("executing the plan against the mock fragment converges: the re-plan is empty", async () => {

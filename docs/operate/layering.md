@@ -304,6 +304,12 @@ The per-layer validation catches what a standalone settings file could not say, 
 | A keyed entry without its key, here a label with no `name` (`labels: [{name: bug}, {color: d73a4a}]`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
 | A non-mapping entry (`milestones: [v2]`) | Validation: `milestones[0]: Invalid input: expected object, received string` |
 | An underscore key that is not a directive on a wrapper (`labels: {_notes: x, entries: [{name: bug}]}`) | Validation: `labels: Unrecognized key: "_notes"; the wrapper's directives are "_undeclared" and, on a top-level section, "_layering", and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment` |
+| Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | Validation: `labels[2].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label` |
+| Two milestones under one title in one list (`milestones: [{title: v1}, {title: v1, state: closed}]`) | Validation: `milestones[1].title: "v1" names the same milestone as "v1" declared earlier; keep exactly one entry per milestone` |
+| Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`) | Validation: `rulesets[0].rules: the ruleset "main" lists the rule type "deletion" more than once, and GitHub keeps one rule per type - declare each type once` |
+| Two variables of one environment under one uppercased name, in either form (`environments: [{name: prod, variables: {entries: [{name: region, value: eu}, {name: REGION, value: us}]}}]`) | Validation: `environments[0].variables.entries[1].name: "REGION" names the same variable of the "prod" environment as "region" declared earlier; keep exactly one entry per variable of the "prod" environment` |
+| A workflow named by its file and its path in one list (`workflows: [{path: ci.yml, state: active}, {path: .github/workflows/ci.yml, state: disabled}]`) | Validation: `workflows[1].path: ".github/workflows/ci.yml" names the same workflow as "ci.yml" declared earlier; keep exactly one entry per workflow` |
+| A YAML anchor aliased inside its own node (`repository: &loop {self: *loop}`) | Validation: `repository.self.self refers back to one of its own containers (a YAML alias cycle), which JSON cannot carry; spell the value out instead` |
 
 The fold itself refuses what only the fold can judge (`layer ".github/settings/repo.yml": ...`). A fold refusal names the key path (entries by index) and the kind of problem, never a value from the document: the render runs without a repository's redaction context, so a label name or rule type echoed here could put a private repository's settings into a public log.
 
@@ -329,15 +335,9 @@ A render-mode log can therefore show your settings file's structure and, through
 
 | The layer has | The fold says |
 |---|---|
-| Two entries under one key in one list (`labels: [{name: bug}, {name: docs}, {name: Bug}]`) | `labels[0] and labels[2] both claim one name; each name belongs to one entry within a layer` |
-| Two rules of one type in one ruleset (`rulesets: [{name: main, rules: [{type: deletion}, {type: deletion}]}]`) | `rulesets[0].rules[0] and rulesets[0].rules[1] both claim one type; each type belongs to one entry within a layer` |
-| Two milestones under one title in one list (`milestones: [{title: v1}, {title: v1, state: closed}]`) | `milestones[0] and milestones[1] both claim one title; each title belongs to one entry within a layer` |
-| Two variables of one environment under one uppercased name, in either form (`environments: [{name: prod, variables: {entries: [{name: region, value: eu}, {name: REGION, value: us}]}}]`) | `environments[0].variables[0] and environments[0].variables[1] both claim one name; each name belongs to one entry within a layer` |
-| A workflow named by its file and its path in one list (`workflows: [{path: ci.yml, state: active}, {path: .github/workflows/ci.yml, state: disabled}]`) | `workflows[0] and workflows[1] both claim one path; each path belongs to one entry within a layer` |
 | An unknown `_layering` value on a wrapper, the retired `merge` included (`labels: {_layering: merge, entries: [{name: bug}]}`) | `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value on a plain-list wrapper (`environments: {_layering: union, entries: []}`) | `environments._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
-| A YAML anchor aliased inside its own node (`repository: &loop {self: *loop}`) | `the document contains a reference cycle (a YAML anchor that includes itself); layers must be trees` |
 
 ## Where to go next
 

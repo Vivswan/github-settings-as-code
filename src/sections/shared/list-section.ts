@@ -24,8 +24,11 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
+  type DeclaredIssue,
   type DeclaredSecretValue,
+  declaredEntries,
   defaultUndeclaredPolicy,
+  duplicateIssues,
   type EntryOf,
   type GraphqlDict,
   type KeyedListLayering,
@@ -51,7 +54,6 @@ import {
   type SnapshotContext,
   type Unverifiable,
 } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "./schema-helpers.js";
 import {
   knobbedSnapshot,
@@ -342,13 +344,20 @@ interface ListSectionDeclFields<
     ? never
     : (live: Live, write: ListWrite<F>) => ListWrite<F>;
   /**
-   * Conflicts the identities cannot show, one line each naming the fix; any line fails the section.
+   * File-only checks over the entries beyond identity uniqueness (a deploy key's material must parse), one
+   * issue per finding with its path (`[2].key`); they join the module's validate hook, which the engine runs
+   * inside document validation, so a write with such an entry is unreachable and toWrite may treat it as a BUG.
+   */
+  readonly validate?: (entries: readonly Entry<K>[]) => readonly DeclaredIssue[];
+  /**
+   * Conflicts the identities cannot show, each naming the fix; any finding fails the section.
    *
-   *   `declared`  -> sees only the entries and runs BEFORE the read (a settings-file mistake costs no request)
+   *   `declared`  -> sees only the writes and runs inside document validation, before ANY section writes
+   *                  (a settings-file mistake costs no request); `[i]` indexes the writes as the entries
    *   `live`      -> runs after the read and before any write (a deploy key's material held by another key)
    */
   readonly conflicts?: {
-    readonly declared?: (writes: readonly ListWrite<F>[]) => readonly string[];
+    readonly declared?: (writes: readonly ListWrite<F>[]) => readonly DeclaredIssue[];
     readonly live?: (
       writes: readonly ListWrite<F>[],
       live: readonly ListComparable<F>[],
@@ -400,6 +409,7 @@ export interface ListSectionModule<
   readonly shape: z.ZodType;
   readonly secretValues?: (declared: Declared<K>) => DeclaredSecretValue[];
   readonly layering: KeyedListLayering;
+  readonly validate: (declared: Declared<K>) => readonly DeclaredIssue[];
   readonly plan: (
     ctx: PlanContext<Ends, GraphqlDict, K>,
     desired: Declared<K>,
@@ -435,8 +445,9 @@ interface ErasedDecl<Key extends string> {
   readonly replaces: boolean;
   readonly mapping?: string;
   readonly recreate?: (live: object, write: ListWrite<string>) => ListWrite<string>;
+  readonly validate?: (entries: readonly object[]) => readonly DeclaredIssue[];
   readonly conflicts?: {
-    readonly declared?: (writes: readonly ListWrite<string>[]) => readonly string[];
+    readonly declared?: (writes: readonly ListWrite<string>[]) => readonly DeclaredIssue[];
     readonly live?: (
       writes: readonly ListWrite<string>[],
       live: readonly ListComparable<string>[],
@@ -519,22 +530,52 @@ function withoutPaths<T extends Fields>(record: T, paths: readonly string[]): T 
 
 // --- Identity ---------------------------------------------------------------
 
+/** One identity an entry claims, with the entry field it was read from (the issue path of a collision). */
+interface IdentityClaim<Key extends string> {
+  readonly key: Key;
+  readonly name: string;
+  readonly field: string;
+}
+
 /**
- * The ONE derivation behind the planner's duplicate check and the layered merge's pairing. Total over raw
- * records because the merge reads layers before validation: null when a claimed name is not a string,
- * which the merge refuses and a validated entry never is.
+ * The ONE derivation behind the duplicate check and the layered merge's pairing. Total over raw records
+ * because the merge reads layers before validation: null when a claimed name is not a string, which the
+ * merge refuses and a validated entry never is. A rename claims the written name under `renameKey`; an
+ * alias (the pre-rename name) is read from `field`.
  */
+function identityClaimSites<Key extends string>(
+  identity: ErasedDecl<Key>["identity"],
+  entry: Fields,
+): readonly IdentityClaim<Key>[] | null {
+  const { field, renameKey, fold } = identity;
+  const written = renameKey === undefined ? undefined : entry[renameKey];
+  const sites: { name: unknown; field: string }[] = [
+    written === undefined
+      ? { name: valueAt(entry, pathOf(field)), field }
+      : { name: written, field: renameKey as string },
+    ...(identity.aliases?.(entry) ?? []).map((name) => ({ name, field })),
+  ];
+  if (
+    !sites.every((site): site is { name: string; field: string } => typeof site.name === "string")
+  ) {
+    return null;
+  }
+  const seen = new Set<Key>();
+  return sites.flatMap((site) => {
+    const key = fold(site.name);
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{ key, name: site.name, field: site.field }];
+  });
+}
+
 function identityClaims<Key extends string>(
   identity: ErasedDecl<Key>["identity"],
   entry: Fields,
 ): readonly Key[] | null {
-  const { field, renameKey, fold } = identity;
-  const written = renameKey === undefined ? undefined : entry[renameKey];
-  const names = [written ?? valueAt(entry, pathOf(field)), ...(identity.aliases?.(entry) ?? [])];
-  if (!names.every((name): name is string => typeof name === "string")) {
-    return null;
-  }
-  return [...new Set(names.map(fold))];
+  return identityClaimSites(identity, entry)?.map((claim) => claim.key) ?? null;
 }
 
 /** The erased view lost the declaration's string typing, so the check happens once here. */
@@ -716,6 +757,41 @@ function comparison(
   };
 }
 
+/**
+ * The list's file-only checks, in the order a reader fixes them: two entries claiming one identity (a rename target
+ * and a current name included) would fight on every run; the declaration's own entry checks; then the declared
+ * conflicts over the writes, which run only over entries the entry checks passed (toWrite treats a failed one as a BUG).
+ */
+function validateList<Key extends string>(
+  decl: ErasedDecl<Key>,
+  declared: ErasedDeclared,
+): DeclaredIssue[] {
+  const { identity, lens, noun } = decl;
+  const { entries, path } = declaredEntries(declared);
+  const under = (issue: DeclaredIssue): DeclaredIssue => ({
+    ...issue,
+    path: `${path}${issue.path}`,
+  });
+  const claims = entries.flatMap((entry, index) =>
+    (identityClaimSites(identity, entry as Fields) ?? []).map((claim) => ({ ...claim, index })),
+  );
+  const issues = duplicateIssues(
+    claims,
+    {
+      keyOf: (claim) => claim.key,
+      describe: (claim) => claim.name,
+      at: (claim) => `[${claim.index}].${claim.field}`,
+    },
+    noun,
+  );
+  const entryIssues = decl.validate?.(entries) ?? [];
+  issues.push(...entryIssues);
+  if (entryIssues.length === 0) {
+    issues.push(...(decl.conflicts?.declared?.(entries.map((entry) => lens.toWrite(entry))) ?? []));
+  }
+  return issues.map(under);
+}
+
 async function planList<Key extends string>(
   decl: ErasedDecl<Key>,
   section: SectionMeta<ListSectionKey>,
@@ -730,6 +806,7 @@ async function planList<Key extends string>(
   const defaultPolicy = defaultUndeclaredPolicy(section);
   const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
 
+  // Every identity an entry claims is its alone: validateList refused the document otherwise.
   const writes = entries.map((entry) => {
     const write = lens.toWrite(entry);
     const name = nameOf(write, identity.field);
@@ -741,22 +818,6 @@ async function planList<Key extends string>(
     }
     return { write, name, claims };
   });
-  // Every identity an entry claims must be its alone: two entries resolving to one resource would fight on every run.
-  raise(
-    rejectDuplicates(
-      section,
-      writes.flatMap((w) => w.claims.map((claim) => ({ claim, name: w.name }))),
-      (c) => c.claim,
-      (c) => c.name,
-    ),
-  );
-
-  const declaredConflicts = decl.conflicts?.declared?.(writes.map((w) => w.write)) ?? [];
-  if (declaredConflicts.length > 0) {
-    throw new Error(
-      `${key}: the settings file declares conflicting ${plural(noun)}: ${declaredConflicts.join("; ")}. Fix the settings file, then re-run`,
-    );
-  }
 
   const live = await readLive(decl, ctx);
   const liveItems = live.managed.map((item) => {
@@ -1065,6 +1126,7 @@ export function listSection<
       ...(decl.layering?.nested === undefined ? {} : { nested: decl.layering.nested }),
       ...(decl.layering?.nullValued === undefined ? {} : { nullValued: decl.layering.nullValued }),
     },
+    validate: (declared) => validateList(erased, declared as unknown as ErasedDeclared),
     plan: (ctx, desired) =>
       planList(
         erased,

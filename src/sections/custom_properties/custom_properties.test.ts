@@ -174,11 +174,11 @@ describe("custom_properties", () => {
     });
   });
 
-  test.each<[form: string, declared: Parameters<typeof plan>[1], error: RegExp]>([
+  test.each<[form: string, declared: Parameters<typeof plan>[1], issue: RegExp]>([
     [
       "a multi_select listing one option twice",
       [{ property_name: "compliance", value: ["soc2", "hipaa", "soc2"] }],
-      /"compliance" entry lists the value "soc2" more than once/,
+      /^\[0\]\.value: the "compliance" entry lists the value "soc2" more than once/,
     ],
     [
       "the same, in the wrapped form",
@@ -186,12 +186,12 @@ describe("custom_properties", () => {
         _undeclared: "delete",
         entries: [{ property_name: "compliance", value: ["soc2", "soc2"] }],
       },
-      /"compliance" entry lists the value "soc2" more than once/,
+      /^\.entries\[0\]\.value: the "compliance" entry lists the value "soc2" more than once/,
     ],
     [
       "an empty list",
       [{ property_name: "compliance", value: [] }],
-      /"compliance" entry declares an empty list; declare value: null/,
+      /^\[0\]\.value: the "compliance" entry declares an empty list; declare value: null/,
     ],
     [
       "two entries naming one property",
@@ -199,13 +199,18 @@ describe("custom_properties", () => {
         { property_name: "team", value: "a" },
         { property_name: "team", value: "b" },
       ],
-      /same custom_properties entry/,
+      /^\[1\]\.property_name: "team" names the same custom property as "team" declared earlier/,
     ],
-  ])("%s is rejected after the owner probe alone", async (_form, declared, error) => {
-    const api = new MockApi({ "GET /orgs/o": { data: { login: "o" } } });
-    await expect(plan(api, declared)).rejects.toThrow(error);
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /orgs/o"]);
-  });
+  ])(
+    "%s is one validate issue at the offending field, so the document fails before the owner probe",
+    (_form, declared, issue) => {
+      expect(
+        customPropertiesSection
+          .validate(declared)
+          .map((found) => `${found.path}: ${found.message}`),
+      ).toEqual([expect.stringMatching(issue)]);
+    },
+  );
 
   test("a live entry without a string property_name fails loudly as a contract violation", async () => {
     const api = new MockApi(orgRoutes([{ value: "x" } as never]));

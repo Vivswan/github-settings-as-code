@@ -256,15 +256,19 @@ describe("secret_scanning_custom_patterns", () => {
     expect(result.ops[0]?.drift).toHaveLength(3);
   });
 
-  test("two entries with the same name are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("two entries with the same name are a validate issue, so the document fails before any API call", () => {
+    expect(
+      secretScanningPatternsSection.validate([
         { name: "dup", pattern: "a" },
         { name: "dup", pattern: "b" },
       ]),
-    ).rejects.toThrow(/same secret_scanning_custom_patterns entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"dup" names the same custom pattern as "dup" declared earlier; keep exactly one entry per custom pattern',
+      },
+    ]);
   });
 
   test.each<[form: string, live: Record<string, unknown>, at: RegExp]>([

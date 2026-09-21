@@ -74,6 +74,49 @@ describe("section shape validation", () => {
   });
 });
 
+describe("file-only checks run inside document validation", () => {
+  // Thrown from a section's plan() instead, a duplicate would surface only after the sections before it had written.
+  test("a duplicated identity is a malformed-sections issue at the later entry's field, beside a sibling section's shape issue", () => {
+    expect(
+      issuesOf({
+        labels: [{ name: "bug" }, { name: "Bug" }],
+        pages: { source: null },
+      }),
+    ).toEqual([
+      'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
+      expect.stringMatching(/^pages\.source: .*expected object/),
+    ]);
+  });
+
+  test("the wrapped form's issue path goes through .entries, as a zod issue on the same entry would", () => {
+    expect(
+      issuesOf({ labels: { _undeclared: "keep", entries: [{ name: "a" }, { name: "A" }] } }),
+    ).toEqual([
+      'labels.entries[1].name: "A" names the same label as "a" declared earlier; keep exactly one entry per label',
+    ]);
+  });
+
+  test("a non-finite number in a passthrough field is refused at the boundary, where a typed field's shape already refuses it", () => {
+    expect(
+      issuesOf({
+        repository: { description: "changed" },
+        actions_variables: [{ name: "REGION", value: "eu", extra: Number.NaN }],
+      }),
+    ).toEqual([
+      "actions_variables[0].extra is NaN, which JSON cannot carry (it would become null); declare a finite number or remove the key",
+    ]);
+    expect(
+      issuesOf({ actions: { cache: { max_cache_size_gb: Number.POSITIVE_INFINITY } } }),
+    ).toEqual([expect.stringMatching(/^actions\.cache\.max_cache_size_gb: .*received Infinity/)]);
+  });
+
+  test("a section whose shape failed is not handed to its hook: the shape issue is the one reported", () => {
+    expect(issuesOf({ labels: [{ name: "a" }, { name: 2 }] })).toEqual([
+      expect.stringMatching(/^labels\[1\]\.name: .*expected string/),
+    ]);
+  });
+});
+
 describe("YAML-tagged values are rejected anywhere in a section", () => {
   // zod object schemas accept a Date or Set as an empty mapping, so without the plain-data gate these would validate and silently configure nothing.
   test("a tagged section VALUE is rejected for a mapping section that has no required key", () => {
@@ -91,11 +134,97 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
     ]);
   });
 
-  test("a cyclic document (YAML anchors) does not hang the validator", () => {
-    const cyclic: Record<string, unknown> = { description: "x" };
-    cyclic.self = cyclic;
-    // Not endorsed, but the walk must terminate; the shape parse still rules.
-    expect(() => issuesOf({ repository: cyclic } as Record<string, unknown>)).not.toThrow();
+  // Without this gate, plan()'s payload proof would throw on the cycle only after earlier sections wrote.
+  test("a YAML alias cycle in a passthrough field is refused at the boundary with its path", () => {
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(issuesOf({ repository: { enable_git_lfs: loop } })).toEqual([
+      expect.stringMatching(/^repository\.enable_git_lfs: .*a mapping is not a boolean/),
+    ]);
+    expect(
+      issuesOf({
+        repository: { description: "changed" },
+        actions_variables: [{ name: "REGION", value: "eu", extra: loop }],
+      }),
+    ).toEqual([
+      "actions_variables[0].extra.self refers back to one of its own containers (a YAML alias cycle), which JSON cannot carry; spell the value out instead",
+    ]);
+    const shared = { enabled: true };
+    expect(
+      validateSectionShapes({ repository: { first: shared, second: shared } }, "f.yml").isOk(),
+    ).toBe(true);
+  });
+
+  // YAML spells none of these, but a library caller's document can; each would reach plan()'s payload proof through a
+  // passthrough field and throw there, after the repository section beside it had written.
+  test.each<[what: string, value: unknown, reason: string]>([
+    ["a bigint", 10n, "a bigint"],
+    ["a function", () => true, "a function"],
+    ["a symbol", Symbol("s"), "a symbol"],
+    [
+      "a symbol-keyed mapping",
+      { ok: true, [Symbol("hidden")]: 1 },
+      "a mapping with a symbol-keyed property, which JSON drops",
+    ],
+    [
+      "a list of a subclass",
+      new (class Tagged extends Array {})(),
+      "a list of a subclass, which JSON serializes as a plain list",
+    ],
+    [
+      "a list carrying named properties",
+      Object.assign([1], { extra: 2 }),
+      "a list carrying named properties, which JSON drops",
+    ],
+    [
+      // The walk must not call the list's own keys(): here it is a number.
+      "a list whose named property shadows a method",
+      Object.assign([1], { keys: 0 }),
+      "a list carrying named properties, which JSON drops",
+    ],
+    [
+      "a list with a hole",
+      Object.assign(new Array(3), { 0: 1, 2: 3 }),
+      "a list with a hole (which JSON renders as null) or a non-enumerable item",
+    ],
+    ["a class instance", new Date(0), "a Date, e.g. from a YAML !!timestamp tag"],
+  ])(
+    "%s in a passthrough field is refused at the boundary with its path",
+    (_what, value, reason) => {
+      expect(
+        issuesOf({
+          repository: { description: "changed" },
+          actions_variables: [{ name: "REGION", value: "eu", extra: value }],
+        }),
+      ).toEqual([
+        `actions_variables[0].extra is not plain YAML data (${reason}); replace it with a plain value`,
+      ]);
+    },
+  );
+
+  // zod reads a schema field by name whatever its enumerability, so its output carries what Object.entries skipped.
+  test("a non-plain value under a NON-ENUMERABLE schema field is refused on zod's output", () => {
+    const branch = Object.defineProperty({ name: "main" }, "protection", {
+      value: { extra: 10n },
+      enumerable: false,
+    });
+    expect(issuesOf({ repository: { description: "changed" }, branches: [branch] })).toEqual([
+      "branches[0].protection.extra is not plain YAML data (a bigint); replace it with a plain value",
+    ]);
+  });
+
+  test("an undefined LIST ITEM is refused at its path; an undefined FIELD is what JSON drops, so it passes", () => {
+    expect(
+      issuesOf({ actions_variables: [{ name: "REGION", value: "eu", extra: [undefined] }] }),
+    ).toEqual([
+      "actions_variables[0].extra[0] is not plain YAML data (an undefined list item, which JSON would turn into null); replace it with a plain value",
+    ]);
+    expect(
+      validateSectionShapes(
+        { actions_variables: [{ name: "REGION", value: "eu", extra: undefined }] },
+        "f.yml",
+      ).isOk(),
+    ).toBe(true);
   });
 });
 

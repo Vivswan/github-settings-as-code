@@ -10,7 +10,10 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  type DeclaredIssue,
+  declaredEntries,
   defaultUndeclaredPolicy,
+  duplicateIssues,
   keyedBy,
   loosen,
   ORG_PROBE,
@@ -23,7 +26,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { knobbed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
@@ -65,24 +67,31 @@ function show(value: WireValue): string {
  * because GitHub does not document whether [] stores or normalizes to unset, so it could re-write
  * on every apply; value: null is the documented unset.
  */
-function rejectMalformedList(property: CustomPropertyConfig): void {
+function malformedListIssues(property: CustomPropertyConfig, path: string): DeclaredIssue[] {
   if (!Array.isArray(property.value)) {
-    return;
+    return [];
   }
   if (property.value.length === 0) {
-    throw new Error(
-      `custom_properties: the "${property.property_name}" entry declares an empty list; declare value: null to unset the property instead`,
-    );
+    return [
+      {
+        path,
+        message: `the "${property.property_name}" entry declares an empty list; declare value: null to unset the property instead`,
+      },
+    ];
   }
   const seen = new Set<string>();
-  for (const element of property.value) {
+  return property.value.flatMap((element) => {
     if (seen.has(element)) {
-      throw new Error(
-        `custom_properties: the "${property.property_name}" entry lists the value ${JSON.stringify(element)} more than once; a multi_select value is a set, so keep each option exactly once`,
-      );
+      return [
+        {
+          path,
+          message: `the "${property.property_name}" entry lists the value ${JSON.stringify(element)} more than once; a multi_select value is a set, so keep each option exactly once`,
+        },
+      ];
     }
     seen.add(element);
-  }
+    return [];
+  });
 }
 
 const ENDPOINTS = {
@@ -135,7 +144,7 @@ interface PendingUpdate {
 export const customPropertiesSection = {
   key: "custom_properties",
   undeclaredDefault: "keep",
-  // Verbatim, as plan() passes to rejectDuplicates: GitHub documents no case folding for property names.
+  // Verbatim, the key validate() rejects duplicates by: GitHub documents no case folding for property names.
   // `value: null` unsets the property, so a higher layer's null is the value, never a marker for the lower one.
   layering: keyedBy("property_name", { nullValued: ["value"] }),
   permission,
@@ -152,20 +161,26 @@ export const customPropertiesSection = {
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },
+  // GitHub documents no case folding for property names, so entries are duplicates only when they match verbatim.
+  validate(declared) {
+    const { entries, path } = declaredEntries(declared);
+    return [
+      ...duplicateIssues(
+        entries,
+        {
+          keyOf: (p) => p.property_name,
+          describe: (p) => p.property_name,
+          at: (_p, index) => `${path}[${index}].property_name`,
+        },
+        "custom property",
+      ),
+      ...entries.flatMap((property, index) =>
+        malformedListIssues(property, `${path}[${index}].value`),
+      ),
+    ];
+  },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
-    // GitHub documents no case folding for property names, so entries are duplicates only when they match verbatim.
-    raise(
-      rejectDuplicates(
-        this,
-        desired,
-        (p) => p.property_name,
-        (p) => p.property_name,
-      ),
-    );
-    for (const property of desired) {
-      rejectMalformedList(property);
-    }
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // Not paginated upstream: one GET carries every value.
     const live = await ctx.read.list.call(z.array(LiveProperty));
@@ -239,7 +254,8 @@ export const customPropertiesSection = {
     return plan;
   },
   // An unset (null) live value is the org default, which no declaration needs to restate; an empty
-  // list is read the same way (the planner refuses `[]`, whose storage GitHub leaves undocumented).
+  // list is read the same way (the validate hook refuses a declared `[]`, whose storage GitHub
+  // leaves undocumented).
   // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
     const live = await ctx.read.list.call(z.array(LiveProperty));

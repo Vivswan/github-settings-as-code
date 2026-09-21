@@ -181,12 +181,15 @@ export const rulesetsSection = listSection({
   // GitHub keeps one rule per type, and the comparison pairs rules by it, so a repeated type is a settings-file mistake.
   conflicts: {
     declared: (writes) =>
-      writes.flatMap((write) => {
+      writes.flatMap((write, index) => {
         const repeated = repeatedRuleTypes(write.rules as { readonly type: unknown }[] | undefined);
         return repeated === undefined
           ? []
           : [
-              `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
+              {
+                path: `[${index}].rules`,
+                message: `the ruleset "${write.name}" lists the ${repeated} more than once, and GitHub keeps one rule per type - declare each type once`,
+              },
             ];
       }),
   },

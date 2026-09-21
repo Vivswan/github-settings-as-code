@@ -1,6 +1,7 @@
 # Two declared prefixes where one begins the other. GitHub accepts the first
 # create and rejects the second, which would leave the run half-applied, so
-# the pair is refused before the section's read and nothing is requested.
+# the pair is refused when the document is validated, before any section
+# runs, and nothing is requested. The issue names the later entry by path.
 name: autolinks-overlapping-prefixes
 settings:
   autolinks:
@@ -13,9 +14,7 @@ token_permissions:
 expect:
   exit_code: 1
   result: failed
-  outcomes:
-    autolinks: failed
   stdout_contains:
-    - 'autolinks: the settings file declares conflicting autolinks: the key_prefix "TICKET-" begins the key_prefix "TICKET-A"'
+    - 'autolinks[1].key_prefix: the key_prefix "TICKET-" begins the key_prefix "TICKET-A"'
     - "choose prefixes where neither begins the other"
   zero_requests: true

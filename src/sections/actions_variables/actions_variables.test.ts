@@ -160,15 +160,19 @@ describe("actions_variables", () => {
     expect(result).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("two entries differing only in case are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("two entries differing only in case are a validate issue, so the document fails before any API call", () => {
+    expect(
+      actionsVariablesSection.validate([
         { name: "deploy_region", value: "a" },
         { name: "DEPLOY_REGION", value: "b" },
       ]),
-    ).rejects.toThrow(/same actions_variables entry/);
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"DEPLOY_REGION" names the same variable as "deploy_region" declared earlier; keep exactly one entry per variable',
+      },
+    ]);
   });
 
   test("a passthrough value JSON cannot carry fails the plan at the payload, on a create and on an update alike", async () => {

@@ -219,12 +219,16 @@ describe("milestones", () => {
     },
   );
 
-  test("duplicate titles are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(plan(api, [{ title: "v1" }, { title: "v1", state: "closed" }])).rejects.toThrow(
-      /same milestones entry/,
+  test("duplicate titles are a validate issue, so the document fails before any API call", () => {
+    expect(milestonesSection.validate([{ title: "v1" }, { title: "v1", state: "closed" }])).toEqual(
+      [
+        {
+          path: "[1].title",
+          message:
+            '"v1" names the same milestone as "v1" declared earlier; keep exactly one entry per milestone',
+        },
+      ],
     );
-    expect(api.calls).toHaveLength(0);
   });
 
   test("executing the plan against the mock converges: the re-plan is empty", async () => {

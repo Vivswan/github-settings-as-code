@@ -156,19 +156,19 @@ describe("labels", () => {
     ]);
   });
 
-  test("two entries resolving to the same label (via name or new_name) are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [
+  test("two entries resolving to the same label through their rename targets are a validate issue at the later new_name, so the document fails before any API call", () => {
+    expect(
+      labelsSection.validate([
         { name: "bug", new_name: "triage" },
         { name: "enhancement", new_name: "Triage" },
       ]),
-    ).rejects.toThrow(
-      new Error(
-        'labels: the settings file declares entries that name the same labels entry: "triage" and "Triage". Keep exactly one entry per resource',
-      ),
-    );
-    expect(api.calls).toHaveLength(0);
+    ).toEqual([
+      {
+        path: "[1].new_name",
+        message:
+          '"Triage" names the same label as "triage" declared earlier; keep exactly one entry per label',
+      },
+    ]);
   });
 
   test("a rename whose source and target both exist live cannot converge", async () => {

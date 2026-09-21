@@ -10,6 +10,8 @@ import type { UndeclaredPolicy } from "../../types.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  type DeclaredIssue,
+  duplicateIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
@@ -17,7 +19,6 @@ import {
   valueDrift,
 } from "../contract/module.js";
 import { type PlainData, plainData, type SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {
@@ -48,8 +49,6 @@ interface VariablesScopeProse {
   where?: string;
   /** Appended to change and describe lines (` in environment "prod"`). */
   suffix?: string;
-  /** What two declared entries under one name are reported as naming, when `<section> entry` understates it (`variable of the "prod" environment`). */
-  what?: string;
 }
 
 interface VariableCreate {
@@ -92,22 +91,22 @@ export interface VariablesPlanScope<
 }
 
 /**
- * Variable names are case-insensitive on GitHub, so two entries differing only in case name one
- * variable. planVariables runs it before its read, so no scope can skip it.
+ * Variable names are case-insensitive on GitHub, so two entries differing only in case name one variable.
+ * Every scope's validate hook runs it (planVariables trusts the document); `what` names the resource
+ * ("variable", `variable of the "prod" environment`).
  */
-function rejectDuplicateVariableNames(
-  section: SectionMeta,
+export function duplicateVariableNameIssues(
   entries: readonly VariableEntry[],
-  what?: string,
-): void {
-  raise(
-    rejectDuplicates(
-      section,
-      entries,
-      (variable) => variableKey(variable.name),
-      (variable) => variable.name,
-      what,
-    ),
+  what: string,
+): DeclaredIssue[] {
+  return duplicateIssues(
+    entries,
+    {
+      keyOf: (variable) => variableKey(variable.name),
+      describe: (variable) => variable.name,
+      at: (_variable, index) => `[${index}].name`,
+    },
+    what,
   );
 }
 
@@ -172,7 +171,6 @@ export async function planVariables<
   const suffix = scope.suffix ?? "";
   const plan: SectionPlan<Create | Update | Remove> = { ops: [], notes: [], drift: [] };
 
-  rejectDuplicateVariableNames(section, entries, scope.what);
   const liveByKey = liveVariablesByKey(section, scope.noun, await scope.list());
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
 

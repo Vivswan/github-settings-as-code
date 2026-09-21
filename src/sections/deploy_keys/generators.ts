@@ -16,27 +16,38 @@ import { deployKeysSection } from "./index.js";
 import { DeployKeyConfig } from "./schema.js";
 
 /**
- * Blobs are DISTINCT (GitHub rejects a reused public key with a 422). The comments are load-bearing:
- * the mock strips them on storage the way GitHub does, so a converging apply proves the section
- * compares algorithm + blob, not the string.
+ * Each title owns one blob, DISTINCT from the others (GitHub rejects a reused public key with a 422, and the section
+ * refuses the pair at validation), so two layers naming one title agree on its material and two titles never share
+ * one. The comments are load-bearing: the mock strips them on storage the way GitHub does, so a converging apply
+ * proves the section compares algorithm + blob, not the string.
  */
-const DEPLOY_KEY_POOL = [
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
-  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlieCharlie deploy@charlie",
-  "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
-] as const;
+const DEPLOY_KEY_POOL = {
+  bot: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
+  ci: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
+  mirror:
+    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlieCharlie deploy@charlie",
+  release:
+    "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
+} as const;
 
-const genDeployKey = (key: string) =>
+const DEPLOY_KEY_TITLES = Object.keys(DEPLOY_KEY_POOL) as (keyof typeof DEPLOY_KEY_POOL)[];
+
+const genDeployKey = (title: keyof typeof DEPLOY_KEY_POOL) =>
   generatorFromSlice(DeployKeyConfig, {
-    fields: { title: (rng) => `deploy-${rng.pick(["bot", "ci", "mirror"])}`, key: () => key },
+    fields: { title: () => `deploy-${title}`, key: () => DEPLOY_KEY_POOL[title] },
   });
 
 export function genDeployKeys(rng: Rng): Json[] {
-  // The pool is sliced, never sampled with replacement: a reused blob is rejected by the section's
-  // own conflict check before any request.
-  const count = rng.int(DEPLOY_KEY_POOL.length) + 1;
-  const keys = DEPLOY_KEY_POOL.slice(0, count).map((key) => genDeployKey(key)(rng));
+  // A run of distinct titles from a random start: never the same title twice, so never the same blob twice.
+  const count = rng.int(DEPLOY_KEY_TITLES.length) + 1;
+  const start = rng.int(DEPLOY_KEY_TITLES.length);
+  const keys = Array.from({ length: count }, (_, offset) => {
+    const title = DEPLOY_KEY_TITLES[(start + offset) % DEPLOY_KEY_TITLES.length];
+    if (title === undefined) {
+      throw new Error("BUG: deploy key title index out of range");
+    }
+    return genDeployKey(title)(rng);
+  });
   return uniqueBy(keys, ["title"]);
 }
 

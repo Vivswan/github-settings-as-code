@@ -8,6 +8,7 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  duplicateIssues,
   keyedBy,
   listEntries,
   loosen,
@@ -17,7 +18,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { WorkflowsConfig } from "./schema.js";
 
@@ -84,17 +84,22 @@ export const workflowsSection = {
     describe: (w) => w.path,
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
+  // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
+  validate(desired) {
+    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
+    const at = Array.isArray(desired) ? "" : ".entries";
+    return duplicateIssues(
+      listEntries(desired),
+      {
+        keyOf: (w) => workflowPath(w.path),
+        describe: (w) => w.path,
+        at: (_w, index) => `${at}[${index}].path`,
+      },
+      "workflow",
+    );
+  },
   async plan(ctx, desired) {
     const workflows = listEntries(desired);
-    // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
-    raise(
-      rejectDuplicates(
-        this,
-        workflows,
-        (w) => workflowPath(w.path),
-        (w) => w.path,
-      ),
-    );
     const present = workflowsByPath(
       this,
       await ctx.read.list.listAllEnveloped("workflows", LiveWorkflow),

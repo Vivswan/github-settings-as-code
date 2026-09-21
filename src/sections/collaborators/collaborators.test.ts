@@ -244,12 +244,19 @@ describe("collaborators", () => {
     ]);
   });
 
-  test("two entries naming the same login are rejected before any API call", async () => {
-    const api = new MockApi({});
-    await expect(
-      plan(api, [{ username: "alice" }, { username: "Alice", permission: "admin" }]),
-    ).rejects.toThrow(/same collaborators entry: "alice" and "Alice"/);
-    expect(api.calls).toHaveLength(0);
+  test("two entries naming the same login in different case are a validate issue, so the document fails before any API call", () => {
+    expect(
+      collaboratorsSection.validate([
+        { username: "alice" },
+        { username: "Alice", permission: "admin" },
+      ]),
+    ).toEqual([
+      {
+        path: "[1].username",
+        message:
+          '"Alice" names the same collaborator as "alice" declared earlier; keep exactly one entry per collaborator',
+      },
+    ]);
   });
 
   test("executing the plan against the mock fragment converges: the re-plan carries only the email note", async () => {

@@ -4,9 +4,9 @@ import type { SectionContext, SectionMeta } from "../../src/sections/contract/mo
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
 import { decodeBase64, sealForGithub } from "../../src/sections/shared/sealed-box.js";
 import {
+  duplicateSecretNameIssues,
   parseSealingKey,
   planSecrets,
-  rejectDuplicateSecretNames,
   type SealedSecretPayload,
   type SecretsPlanScope,
   secretKey,
@@ -141,17 +141,22 @@ describe("secretKey and duplicates", () => {
     expect(secretKey("npm_token")).toBe("NPM_TOKEN");
   });
 
-  test("two entries differing only by case are rejected upfront", () => {
-    expect(() =>
-      rejectDuplicateSecretNames(section, [
-        { name: "Deploy_Token", value: "$A" },
-        { name: "DEPLOY_TOKEN", value: "$B" },
-      ]),
-    ).toThrow(
-      new Error(
-        'actions_secrets: the settings file declares entries that name the same actions_secrets entry: "Deploy_Token" and "DEPLOY_TOKEN". Keep exactly one entry per resource',
+  test("two entries differing only by case are one issue at the later entry's name, so the last write cannot silently win", () => {
+    expect(
+      duplicateSecretNameIssues(
+        [
+          { name: "Deploy_Token", value: "$A" },
+          { name: "DEPLOY_TOKEN", value: "$B" },
+        ],
+        "secret",
       ),
-    );
+    ).toEqual([
+      {
+        path: "[1].name",
+        message:
+          '"DEPLOY_TOKEN" names the same secret as "Deploy_Token" declared earlier; keep exactly one entry per secret',
+      },
+    ]);
   });
 });
 

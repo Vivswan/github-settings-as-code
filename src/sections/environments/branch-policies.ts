@@ -9,13 +9,14 @@ import type { UndeclaredPolicy } from "../../types.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
+  type DeclaredIssue,
+  duplicateIssues,
   missingDrift,
   type SectionMeta,
   undeclaredDrift,
   undeclaredNote,
 } from "../contract/module.js";
 import { hasDrift, plainData } from "../contract/plan.js";
-import { rejectDuplicates } from "../contract/requests.js";
 import type { EnvironmentRestOp, EnvironmentsRestContext } from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
@@ -111,6 +112,25 @@ export async function listBranchPolicies(
   });
 }
 
+/**
+ * Two entries for one pattern could fight over its type on every run. The flag pairing is checked in the
+ * zod shape (schema.ts), not here, so both fail before any section writes.
+ */
+export function duplicateBranchPolicyIssues(
+  entries: readonly DeploymentBranchPolicyConfig[],
+  envName: string,
+): DeclaredIssue[] {
+  return duplicateIssues(
+    entries,
+    {
+      keyOf: (pattern) => pattern.name,
+      describe: (pattern) => pattern.name,
+      at: (_pattern, index) => `[${index}].name`,
+    },
+    `deployment branch policy of the "${envName}" environment`,
+  );
+}
+
 /** With custom_branch_policies off the pattern list 404s, so patterns already behind the flag reconcile on the next run. */
 export async function planBranchPolicies(
   ctx: EnvironmentsRestContext,
@@ -120,17 +140,6 @@ export async function planBranchPolicies(
   entries: readonly DeploymentBranchPolicyConfig[],
   liveEnv: LiveEnvironmentBody | undefined,
 ): Promise<NestedPlan> {
-  // Two entries for one pattern could fight over its type on every run. The flag pairing is checked
-  // in the zod shape (schema.ts), not here, so it fails before any section writes.
-  raise(
-    rejectDuplicates(
-      section,
-      entries,
-      (pattern) => pattern.name,
-      (pattern) => pattern.name,
-      `deployment branch policy of the "${envName}" environment`,
-    ),
-  );
   const params = { environment_name: envName };
   const planned: NestedPlan = { ops: [], notes: [] };
   const hidden =
