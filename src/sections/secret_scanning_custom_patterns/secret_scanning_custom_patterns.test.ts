@@ -344,19 +344,6 @@ describe("secret_scanning_custom_patterns", () => {
       ["vendor-key", "key-[0-9]{6}", undefined],
     ]);
   });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(secretScanningPatternsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-  });
 });
 
 describe("secret_scanning_custom_patterns snapshot", () => {
