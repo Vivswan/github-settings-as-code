@@ -70,14 +70,11 @@ describe("redactRanges", () => {
     ["an infix of another value", ["BC", "xABCDEy"], "see xABCDEy and BC", "see *** and ***"],
     ["two values touching end to start", ["ABC", "DEF"], "ABCDEF", "***"],
     ["a value absent from the line", ["ABC"], "nothing here", "nothing here"],
+    ["a value while an empty one masks nothing", ["", "text"], "plain text", "plain ***"],
   ])("leaves no fragment of %s", (_case, masks, line, redacted) => {
     // Replacing one value after another would leave "***D" for the overlap and
     // "***DEF" for the prefix; the ranges are merged in the original text instead.
     expect(redactRanges(line, new Set(masks))).toBe(redacted);
-  });
-
-  test("an empty registered value masks nothing", () => {
-    expect(redactRanges("plain text", new Set(["", "text"]))).toBe("plain ***");
   });
 });
 
