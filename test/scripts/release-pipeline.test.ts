@@ -16,6 +16,7 @@ import {
   type MainPosition,
   mainPosition,
   NEXT_BUILD_INPUTS,
+  NEXT_BUILD_UNPACKED,
   type NextVerdict,
   nextPublishVerdict,
   npmConfirm,
@@ -1207,8 +1208,9 @@ describe("prereleaseVersion", () => {
     ).toThrow(/not a version this pipeline mints/);
   });
 
-  /** The surface a skip names: the manifest, the fixture manifest's files list (lib/pkg/), the build inputs, and npm's always-packed root files. */
-  const SHIPPED = `package.json, lib/pkg/, ${NEXT_BUILD_INPUTS.join(", ")}, or a root README, COPYING, or LICENSE`;
+  /** The surface a skip names: the manifest, the fixture manifest's files list (lib/pkg/), the build inputs, npm's
+   * always-packed root files, and what under src/ does not count. */
+  const SHIPPED = `package.json, lib/pkg/, ${NEXT_BUILD_INPUTS.join(", ")}, or a root README, COPYING, or LICENSE (under src/, ${NEXT_BUILD_UNPACKED.join(", ")} are never packed and do not count)`;
 
   const registry = (versions: string[], tags: Record<string, string>): Packument => ({
     versions: Object.fromEntries(versions.map((v) => [v, {}])),
@@ -1553,6 +1555,49 @@ describe("prereleaseVersion", () => {
         stderr: "",
         status: 0,
       });
+    });
+  });
+
+  test("next: under src/, a merge touching only tests, scenarios, docs prose, mock handlers, or generators publishes nothing; one touching packed source publishes", () => {
+    const fx = seedFixture();
+    const main = mainAround(fx);
+    const further = git(fx.work, "ls-remote", "origin", "refs/heads/main").split("\t")[0] ?? "";
+    const lab = clone(fx.root, fx.origin, "lab");
+    const at = registry(["2.1.0", main.further], { latest: "2.1.0", next: main.further });
+    const skipped = (source: string, count: number): NextVerdict => ({
+      publish: false,
+      version: versionOf(lab, source, count),
+      reason: `no shipped file changed since ${main.further} (source ${further.slice(0, 7)}): no merge to main in ${further.slice(0, 7)}..${source.slice(0, 7)} touches ${SHIPPED}`,
+      notices: [],
+    });
+    // A section's tests alone: the merge that published a byte-identical tarball.
+    write(lab, "src/sections/x/x.test.ts", 'test("x", () => {});\n');
+    const tests = commitAll(lab, "test(x): a case");
+    expect(nextPublishVerdict(lab, tests, versionOf(lab, tests, 5), at)).toEqual(skipped(tests, 5));
+    // An e2e scenario alone, on top of it: two merges since the base, neither packed.
+    write(lab, "src/sections/x/scenarios/x-basic.yml", "name: x-basic\n");
+    const scenario = commitAll(lab, "test(x): a scenario");
+    expect(nextPublishVerdict(lab, scenario, versionOf(lab, scenario, 6), at)).toEqual(
+      skipped(scenario, 6),
+    );
+    // The rest of what the build never packs, in one merge.
+    write(lab, "src/sections/x/x.docs.yml", "title: X\n");
+    write(lab, "src/sections/x/mock.ts", "export const handlers = [];\n");
+    write(lab, "src/sections/x/mock.test.ts", 'test("mock", () => {});\n');
+    write(lab, "src/sections/x/generators.ts", "export const draw = 1;\n");
+    write(lab, "src/schema.docs.yml", "title: Schema\n");
+    const rest = commitAll(lab, "test(x): the mock, its generators, and the docs prose");
+    expect(nextPublishVerdict(lab, rest, versionOf(lab, rest, 7), at)).toEqual(skipped(rest, 7));
+    // A module named like an excluded directory is packed source, and so is the section's own module.
+    write(lab, "src/sections/x/scenarios.ts", "export const scenarios = 1;\n");
+    write(lab, "src/sections/x/index.ts", "export const x = 1;\n");
+    const packed = commitAll(lab, "feat(x): the section");
+    expect(nextPublishVerdict(lab, packed, versionOf(lab, packed, 8), at)).toEqual({
+      publish: true,
+      version: versionOf(lab, packed, 8),
+      notices: [
+        `2 shipped files changed since ${main.further} (source ${further.slice(0, 7)}): src/sections/x/index.ts, src/sections/x/scenarios.ts`,
+      ],
     });
   });
 
