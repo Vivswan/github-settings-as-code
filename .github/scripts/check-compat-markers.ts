@@ -40,7 +40,7 @@ const PLACEHOLDER = /^COMPAT\(vN\)[^`]*`/;
 // line. A `#` or `//` before the marker is not an opener: "/* See #123. COMPAT(v3): */" sits in the block comment.
 const BLOCK_OPENER = /\/\*|<!--/g;
 const CLOSER_OF: Readonly<Record<string, string>> = { "/*": "*/", "<!--": "-->" };
-const SYNTAX = "COMPAT(v<major>): <what stays working and what to delete>";
+export const SYNTAX = "COMPAT(v<major>): <what stays working and what to delete>";
 
 export interface Marker {
   path: string;

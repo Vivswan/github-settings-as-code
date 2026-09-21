@@ -134,36 +134,26 @@ describe("attachDescriptions", () => {
     expect(definitions.RepositoryConfig?.additionalProperties).toEqual({ type: "string" });
   });
 
-  test("overlapping brace alternatives claim a site once, not as a duplicate", () => {
-    const definitions = fixture();
-    const overlapping = COMPLETE.filter((d) => d.key !== "UndeclaredPolicyList<*>.entries");
-    overlapping.push({
-      key: "{UndeclaredPolicyList<*>,UndeclaredPolicyList<TeamConfig>}.entries",
-      text: "E.",
-      source: "s",
-    });
-    attachDescriptions(definitions, overlapping);
-    expect(definitions["UndeclaredPolicyList<TeamConfig>"]?.properties?.entries?.description).toBe(
-      "E.",
-    );
-  });
-
-  test("a brace key describes each listed definition's field once", () => {
+  test("a brace key describes each listed definition and its field once, overlapping alternatives claiming a site once", () => {
     const definitions = fixture();
     const braced = COMPLETE.filter((d) => !d.key.startsWith("UndeclaredPolicyList<*>"));
     braced.push(
+      // No suffix: the brace names the definitions themselves.
       {
         key: "{UndeclaredPolicyList<LabelConfig>,UndeclaredPolicyList<TeamConfig>}",
         text: "W.",
         source: "s",
       },
+      // The generic and a specific alternative both reach TeamConfig's entries; the site is claimed once, not as a duplicate.
       {
-        key: "{UndeclaredPolicyList<LabelConfig>,UndeclaredPolicyList<TeamConfig>}.entries",
+        key: "{UndeclaredPolicyList<*>,UndeclaredPolicyList<TeamConfig>}.entries",
         text: "E.",
         source: "s",
       },
     );
     attachDescriptions(definitions, braced);
+    expect(definitions["UndeclaredPolicyList<LabelConfig>"]?.description).toBe("W.");
+    expect(definitions["UndeclaredPolicyList<TeamConfig>"]?.description).toBe("W.");
     expect(definitions["UndeclaredPolicyList<TeamConfig>"]?.properties?.entries?.description).toBe(
       "E.",
     );

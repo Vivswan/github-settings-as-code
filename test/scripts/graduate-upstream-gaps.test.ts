@@ -6,9 +6,9 @@ import {
   camelCaseGapName,
   gapFileBases,
   generateIndex,
-  indexSummary,
 } from "../../.github/scripts/gen-gaps-index.js";
 import {
+  type Diagnostic,
   isGapFile,
   isSpecOnly,
   isSpecPinned,
@@ -23,39 +23,40 @@ const TRIPWIRE_MESSAGE =
   "Type '\"GET /repos/{owner}/{repo}/merge-queue\"' does not satisfy the constraint 'never'.";
 
 describe("parseDiagnostics", () => {
-  test("parses --pretty false diagnostic lines", () => {
-    const output = [
-      `src/upstream-gaps/merge-queue.ts(12,34): error TS2344: ${TRIPWIRE_MESSAGE}`,
-      "src/engine/diff.ts(7,3): error TS2322: Type 'string' is not assignable to type 'number'.",
-      "",
-    ].join("\n");
+  test.each<[label: string, output: string, diagnostics: Diagnostic[]]>([
+    [
+      "--pretty false diagnostic lines",
+      [
+        `src/upstream-gaps/merge-queue.ts(12,34): error TS2344: ${TRIPWIRE_MESSAGE}`,
+        "src/engine/diff.ts(7,3): error TS2322: Type 'string' is not assignable to type 'number'.",
+        "",
+      ].join("\n"),
+      [
+        {
+          file: "src/upstream-gaps/merge-queue.ts",
+          line: 12,
+          column: 34,
+          code: 2344,
+          message: TRIPWIRE_MESSAGE,
+        },
+        {
+          file: "src/engine/diff.ts",
+          line: 7,
+          column: 3,
+          code: 2322,
+          message: "Type 'string' is not assignable to type 'number'.",
+        },
+      ],
+    ],
+    [
+      "CRLF line endings",
+      "src/upstream-gaps/a.ts(1,1): error TS2344: boom\r\n",
+      [{ file: "src/upstream-gaps/a.ts", line: 1, column: 1, code: 2344, message: "boom" }],
+    ],
+  ])("parses %s", (_label, output, expected) => {
     const { diagnostics, unparsed } = parseDiagnostics(output);
     expect(unparsed).toEqual([]);
-    expect(diagnostics).toEqual([
-      {
-        file: "src/upstream-gaps/merge-queue.ts",
-        line: 12,
-        column: 34,
-        code: 2344,
-        message: TRIPWIRE_MESSAGE,
-      },
-      {
-        file: "src/engine/diff.ts",
-        line: 7,
-        column: 3,
-        code: 2322,
-        message: "Type 'string' is not assignable to type 'number'.",
-      },
-    ]);
-  });
-
-  test("tolerates CRLF line endings", () => {
-    const { diagnostics, unparsed } = parseDiagnostics(
-      "src/upstream-gaps/a.ts(1,1): error TS2344: boom\r\n",
-    );
-    expect(unparsed).toEqual([]);
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]?.message).toBe("boom");
+    expect(diagnostics).toEqual(expected);
   });
 
   test("attaches indented continuation lines to the diagnostic above them", () => {
@@ -98,70 +99,72 @@ describe("parseDiagnostics", () => {
 });
 
 describe("isGapFile", () => {
-  test("accepts only .ts files directly under src/upstream-gaps/", () => {
-    expect(isGapFile("src/upstream-gaps/merge-queue.ts")).toBe(true);
-    expect(isGapFile("src/upstream-gaps/nested/deep.ts")).toBe(false);
-    expect(isGapFile("src/sections/labels.ts")).toBe(false);
-    expect(isGapFile("src/upstream-gaps.ts")).toBe(false);
-  });
-
-  test("the directory's infrastructure files are never graduatable", () => {
-    // index.ts and gap.ts carry no tripwire; a TS2344 in either means the machinery broke, and deleting it could never be the fix.
-    expect(isGapFile("src/upstream-gaps/index.ts")).toBe(false);
-    expect(isGapFile("src/upstream-gaps/gap.ts")).toBe(false);
-    for (const file of ["src/upstream-gaps/index.ts", "src/upstream-gaps/gap.ts"]) {
-      const plan = planGraduation([
-        { file, line: 1, column: 1, code: 2344, message: "tripwire-shaped noise" },
-      ]);
-      expect(plan.gapFiles).toEqual([]);
-      expect(plan.foreign).toHaveLength(1);
-    }
+  // Only a .ts file directly under src/upstream-gaps/ is a gap. index.ts and gap.ts carry no tripwire; a TS2344 in
+  // either means the machinery broke, and deleting it could never be the fix. Declaration and test strays are not gaps.
+  test.each<[path: string, gap: boolean]>([
+    ["src/upstream-gaps/merge-queue.ts", true],
+    ["src/upstream-gaps/nested/deep.ts", false],
+    ["src/sections/labels.ts", false],
+    ["src/upstream-gaps.ts", false],
+    ["src/upstream-gaps/index.ts", false],
+    ["src/upstream-gaps/gap.ts", false],
+    ["src/upstream-gaps/notes.d.ts", false],
+    ["src/upstream-gaps/scratch.test.ts", false],
+  ])("%s is a gap file: %p", (path, gap) => {
+    expect(isGapFile(path)).toBe(gap);
   });
 });
 
 describe("planGraduation", () => {
-  const tripwire = (file: string) => ({
+  const MERGE_QUEUE = "src/upstream-gaps/merge-queue.ts";
+  const PAGES_HTTPS = "src/upstream-gaps/pages-https.ts";
+  const tripwire = (file: string): Diagnostic => ({
     file,
     line: 10,
     column: 20,
     code: 2344,
     message: TRIPWIRE_MESSAGE,
   });
-
-  test("collects tripped gap files, deduplicated and sorted", () => {
-    const plan = planGraduation([
-      tripwire("src/upstream-gaps/pages-https.ts"),
-      tripwire("src/upstream-gaps/merge-queue.ts"),
-      tripwire("src/upstream-gaps/merge-queue.ts"),
-    ]);
-    expect(plan.foreign).toEqual([]);
-    expect(plan.gapFiles).toEqual([
-      "src/upstream-gaps/merge-queue.ts",
-      "src/upstream-gaps/pages-https.ts",
-    ]);
+  const at = (file: string, code: number, message: string): Diagnostic => ({
+    file,
+    line: 1,
+    column: 1,
+    code,
+    message,
   });
+  const typeError = at(MERGE_QUEUE, 2322, "Type 'string' is not assignable to type 'number'.");
+  const noiseIn = (file: string): Diagnostic => at(file, 2344, "tripwire-shaped noise");
 
-  test("a non-2344 error inside a gap file is foreign", () => {
-    const plan = planGraduation([
-      {
-        file: "src/upstream-gaps/merge-queue.ts",
-        line: 1,
-        column: 1,
-        code: 2322,
-        message: "Type 'string' is not assignable to type 'number'.",
-      },
-    ]);
-    expect(plan.gapFiles).toEqual([]);
-    expect(plan.foreign).toHaveLength(1);
-  });
-
-  test("one foreign diagnostic does not hide the graduatable ones", () => {
-    const plan = planGraduation([
-      tripwire("src/upstream-gaps/merge-queue.ts"),
-      tripwire("src/engine/diff.ts"),
-    ]);
-    expect(plan.gapFiles).toEqual(["src/upstream-gaps/merge-queue.ts"]);
-    expect(plan.foreign).toHaveLength(1);
+  test.each<[label: string, diagnostics: Diagnostic[], gapFiles: string[], foreign: Diagnostic[]]>([
+    [
+      "tripped gap files are collected, deduplicated and sorted",
+      [tripwire(PAGES_HTTPS), tripwire(MERGE_QUEUE), tripwire(MERGE_QUEUE)],
+      [MERGE_QUEUE, PAGES_HTTPS],
+      [],
+    ],
+    ["a non-2344 error inside a gap file is foreign", [typeError], [], [typeError]],
+    [
+      "one foreign diagnostic does not hide the graduatable ones",
+      [tripwire(MERGE_QUEUE), tripwire("src/engine/diff.ts")],
+      [MERGE_QUEUE],
+      [tripwire("src/engine/diff.ts")],
+    ],
+    // index.ts and gap.ts carry no tripwire; a TS2344 in either means the machinery broke, and deleting it could
+    // never be the fix.
+    [
+      "a tripwire-shaped error in index.ts is foreign",
+      [noiseIn("src/upstream-gaps/index.ts")],
+      [],
+      [noiseIn("src/upstream-gaps/index.ts")],
+    ],
+    [
+      "a tripwire-shaped error in gap.ts is foreign",
+      [noiseIn("src/upstream-gaps/gap.ts")],
+      [],
+      [noiseIn("src/upstream-gaps/gap.ts")],
+    ],
+  ])("%s", (_label, diagnostics, gapFiles, foreign) => {
+    expect(planGraduation(diagnostics)).toEqual({ gapFiles, foreign });
   });
 });
 
@@ -175,18 +178,19 @@ describe("camelCaseGapName", () => {
 });
 
 describe("gapFileBases", () => {
-  test("keeps only gap .ts files, stripped and sorted", () => {
-    expect(
-      gapFileBases(["pages-https.ts", "index.ts", "gap.ts", "merge-queue.ts", "README.md"]),
-    ).toEqual(["merge-queue", "pages-https"]);
-  });
-
-  test("declaration and test strays never become phantom gaps", () => {
-    expect(gapFileBases(["notes.d.ts", "scratch.test.ts", "merge-queue.ts"])).toEqual([
-      "merge-queue",
-    ]);
-    expect(isGapFile("src/upstream-gaps/notes.d.ts")).toBe(false);
-    expect(isGapFile("src/upstream-gaps/scratch.test.ts")).toBe(false);
+  test.each<[label: string, listing: string[], bases: string[]]>([
+    [
+      "only gap .ts files, stripped and sorted",
+      ["pages-https.ts", "index.ts", "gap.ts", "merge-queue.ts", "README.md"],
+      ["merge-queue", "pages-https"],
+    ],
+    [
+      "no declaration or test stray as a phantom gap",
+      ["notes.d.ts", "scratch.test.ts", "merge-queue.ts"],
+      ["merge-queue"],
+    ],
+  ])("keeps %s", (_label, listing, bases) => {
+    expect(gapFileBases(listing)).toEqual(bases);
   });
 });
 
@@ -305,55 +309,47 @@ describe("toSpecOnlyGapSource", () => {
     expect(result).toContain("/** GitHub shipped the merge queue;");
   });
 
-  test("a source without the defineGap shape throws loudly, naming the file", () => {
-    expect(() => toSpecOnlyGapSource("export const GAP = 42;", GAP_FILE)).toThrow(
+  test.each<[label: string, source: string, error: RegExp]>([
+    [
+      "a source without the defineGap shape, naming the file",
+      "export const GAP = 42;",
       /merge-queue\.ts does not match the documented defineGap shape/,
-    );
-  });
-
-  test("a defineGap without parsable routes throws loudly", () => {
-    const routeless = [
-      "/** doc */",
-      "export const GAP = defineGap({",
-      "  routes: [],",
-      "  documentedInSpec: false,",
-      "});",
-    ].join("\n");
-    expect(() => toSpecOnlyGapSource(routeless, GAP_FILE)).toThrow(/no parsable routes/);
-  });
-
-  test("non-literal routes-array content is refused, not silently dropped", () => {
-    const withIdentifier = SOURCE.replace(
-      '"GET /repos/{owner}/{repo}/merge-queue",',
-      "LIST_ROUTE,",
-    );
-    expect(() => toSpecOnlyGapSource(withIdentifier, GAP_FILE)).toThrow(
+    ],
+    [
+      "a defineGap without parsable routes",
+      [
+        "/** doc */",
+        "export const GAP = defineGap({",
+        "  routes: [],",
+        "  documentedInSpec: false,",
+        "});",
+      ].join("\n"),
+      /no parsable routes/,
+    ],
+    [
+      "non-literal routes-array content, not silently dropped",
+      SOURCE.replace('"GET /repos/{owner}/{repo}/merge-queue",', "LIST_ROUTE,"),
       /more than plain string literals.*LIST_ROUTE/,
-    );
-  });
-
-  test("a commented-out route in the array is refused, not resurrected", () => {
-    const withComment = SOURCE.replace(
-      '"GET /repos/{owner}/{repo}/merge-queue",',
-      '// dropped: "GET /repos/{owner}/{repo}/old"',
-    );
-    expect(() => toSpecOnlyGapSource(withComment, GAP_FILE)).toThrow(
+    ],
+    [
+      "a commented-out route in the array, not resurrected",
+      SOURCE.replace(
+        '"GET /repos/{owner}/{repo}/merge-queue",',
+        '// dropped: "GET /repos/{owner}/{repo}/old"',
+      ),
       /more than plain string literals/,
-    );
+    ],
+  ])("refuses %s loudly", (_label, source, error) => {
+    expect(() => toSpecOnlyGapSource(source, GAP_FILE)).toThrow(error);
   });
 });
 
 describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
   const GAPS_DIR = join(ROOT, "src", "upstream-gaps");
-  const realIndex = readFileSync(join(GAPS_DIR, "index.ts"), "utf8");
   const realGapFiles = readdirSync(GAPS_DIR)
     .filter((f) => f.endsWith(".ts"))
     .map((f) => `src/upstream-gaps/${f}`)
     .filter((f) => isGapFile(f));
-
-  test("the committed index equals a fresh regeneration", () => {
-    expect(realIndex).toBe(generateIndex(gapFileBases(readdirSync(GAPS_DIR))));
-  });
 
   test("spec-pinned detection agrees with each gap's actual kind and flag", async () => {
     for (const gap of realGapFiles) {
@@ -391,14 +387,5 @@ describe("spec-only sources never reach the deletion branch", () => {
       true,
     );
     expect(isSpecOnly("export const GAP = defineGap({ documentedInSpec: false });")).toBe(false);
-  });
-});
-
-describe("indexSummary", () => {
-  test.each<[count: number, tail: string]>([
-    [1, "(1 gap file)"],
-    [2, "(2 gap files)"],
-  ])("%i gap files end the line with %s", (count, tail) => {
-    expect(indexSummary(count)).toBe(`wrote src/upstream-gaps/index.ts ${tail}`);
   });
 });

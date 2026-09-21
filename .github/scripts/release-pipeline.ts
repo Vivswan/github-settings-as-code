@@ -558,7 +558,7 @@ interface PackagedRelease {
   latest: PointerMove;
 }
 
-const FROZEN =
+export const FROZEN =
   "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
 
 /**

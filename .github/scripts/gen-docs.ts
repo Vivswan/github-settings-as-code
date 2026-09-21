@@ -134,7 +134,7 @@ function codeSpan(text: string, where: string): string {
 }
 
 /** The longest paragraph or bullet the page carries; a fact past it is two facts. */
-const FACT_WORD_CAP = 70;
+export const FACT_WORD_CAP = 70;
 
 /**
  * A paragraph of authored prose: one line, at most FACT_WORD_CAP words. A blank one would leave its heading

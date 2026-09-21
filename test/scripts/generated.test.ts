@@ -1,17 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { cpSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { GENERATED_OUTPUTS, generatedPaths } from "../../.github/scripts/generated.js";
 import {
   hasGeneratedRegion,
   markerSyntaxFor,
+  SYNTAX_BY_EXTENSION,
 } from "../../.github/scripts/lib/generated-regions.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
-/** The file types generated-regions.ts has a marker syntax for; a marker string anywhere else is test or script text. */
-const REGION_FILE = /\.(?:md|ya?ml)$/;
+/** Only a file type with a marker syntax carries a region; a marker string anywhere else is test or script text. */
+const regionFile = (path: string): boolean => extname(path) in SYNTAX_BY_EXTENSION;
 /** The outputs the marker scan cannot see: whole generated files. */
 const WHOLE_FILES = [
   "lib/settings.schema.json",
@@ -27,7 +28,7 @@ describe("the generated-output table", () => {
   test("is exactly the tree's generated files: every tracked marker-carrying page plus the whole files, once each", () => {
     const carrying = tracked.filter(
       (path) =>
-        REGION_FILE.test(path) &&
+        regionFile(path) &&
         hasGeneratedRegion(readFileSync(join(ROOT, path), "utf8"), markerSyntaxFor(path)),
     );
     const paths = generatedPaths();

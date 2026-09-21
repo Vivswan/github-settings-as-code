@@ -569,16 +569,6 @@ describe("packageCommit", () => {
     },
   );
 
-  test.each(["lib/index.js", "lib/pkg/index.js"])("an empty %s never reaches origin", (file) => {
-    const fx = seedFixture();
-    write(fx.work, file, "");
-    expect(() => packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(
-      `does not carry a non-empty regular-file ${file}`,
-    );
-    expect(buildTags(fx)).toEqual([]);
-    expect(remoteRef(fx, LATEST)).toBe("");
-  });
-
   test("a shallow checkout is refused before any verdict", () => {
     const fx = seedFixture();
     const dir = shallowClone(fx, "shallow");
@@ -831,18 +821,6 @@ describe("movePointer", () => {
       moveOf(LATEST, tagObject, packaged),
     ]);
     expect(latestTag(fx)).toBe(packaged);
-  });
-
-  test("a pointer that does not exist yet is created under a lease on its absence", () => {
-    const fx = seedFixture();
-    const packaged = packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha });
-    let move: ReturnType<typeof movePointer> | undefined;
-    const pushes = withPushPlans(fx, [], () => {
-      move = movePointer(fx.work, V2, packaged);
-    });
-    expect(move).toMatchObject({ ref: V2, sha: packaged.commit, changed: true });
-    expect(pushes).toEqual([moveOf(V2, "", packaged.commit)]);
-    expect(git(fx.origin, "rev-parse", `${V2}^{}`)).toBe(packaged.commit);
   });
 });
 

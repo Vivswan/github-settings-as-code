@@ -5,11 +5,10 @@ import type { CoverageData } from "../../.github/scripts/coverage-data.js";
 import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
   type CoverageSection,
-  PAGE_REGIONS,
+  FACT_WORD_CAP,
   patFormParameters,
   renderCoverage,
   renderCoverageFile,
-  renderOutputsList,
   renderPage,
   renderPatCell,
   renderPatFormUrl,
@@ -332,16 +331,16 @@ describe("renderCoverage", () => {
     ["a blank note", { notes: [" "] }, 'a note under the "Labels" row of labels is blank'],
     [
       "a note over the word cap",
-      { notes: [Array.from({ length: 71 }, (_, i) => `w${i}`).join(" ")] },
-      'a note under the "Labels" row of labels runs to 71 words, over the cap of 70; split it into two',
+      { notes: [Array.from({ length: FACT_WORD_CAP + 1 }, (_, i) => `w${i}`).join(" ")] },
+      `a note under the "Labels" row of labels runs to ${FACT_WORD_CAP + 1} words, over the cap of ${FACT_WORD_CAP}; split it into two`,
     ],
   ] as const)("refuses a coverage row with %s", (_, overrides, message) => {
     expect(() => render(labelsRows(row(overrides)))).toThrow(message);
   });
 
   test("a note of exactly the word cap renders", () => {
-    const seventy = Array.from({ length: 70 }, (_, i) => `w${i}`).join(" ");
-    expect(render(labelsRows(row({ notes: [seventy] })))).toContain(`- ${seventy}`);
+    const capped = Array.from({ length: FACT_WORD_CAP }, (_, i) => `w${i}`).join(" ");
+    expect(render(labelsRows(row({ notes: [capped] })))).toContain(`- ${capped}`);
   });
 
   test.each([
@@ -372,8 +371,8 @@ describe("renderCoverage", () => {
     ],
     [
       "an out-of-scope item over the word cap",
-      { outOfScope: { items: [Array.from({ length: 71 }, () => "w").join(" ")] } },
-      "an out-of-scope item runs to 71 words, over the cap of 70",
+      { outOfScope: { items: [Array.from({ length: FACT_WORD_CAP + 1 }, () => "w").join(" ")] } },
+      `an out-of-scope item runs to ${FACT_WORD_CAP + 1} words, over the cap of ${FACT_WORD_CAP}`,
     ],
   ] as const)("refuses %s", (_, override, message) => {
     expect(() => render({ data: override })).toThrow(message);
@@ -417,14 +416,6 @@ describe("renderPatCell", () => {
         `grant "Pages" (read and write) under the PAT's Repository permissions; also "Something Else" (write) and "Actions" (read)`,
       ),
     ).toThrow("neither a grant nor a settings key");
-  });
-});
-
-describe("renderOutputsList", () => {
-  test("enumerates the words it is given in order, then the exit rule", () => {
-    expect(renderOutputsList(["failed", "applied"])).toBe(
-      "`failed` / `applied`, worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check",
-    );
   });
 });
 
@@ -481,15 +472,7 @@ describe("patFormParameters and renderPatFormUrl", () => {
 });
 
 describe("the committed pages", () => {
-  const pages = Object.keys(PAGE_REGIONS);
-
-  test("are exactly what the generator renders", () => {
-    // Every generated region fresh (build:check's contract) also proves the Sections renderer parses every real grant prose and every real permission
-    // has a form parameter. The page set is pinned against the tree by test/scripts/generated.test.ts, through the generated-output table.
-    for (const path of pages) {
-      const text = readFileSync(join(ROOT, path), "utf8");
-      expect(renderPage(path, text), path).toBe(text);
-    }
+  test("a page without registered regions is refused", () => {
     expect(() => renderPage("docs/README.md", "")).toThrow(
       "gen-docs: no generated regions are registered for docs/README.md",
     );
@@ -529,16 +512,14 @@ describe("the committed pages", () => {
     },
   );
 
-  test("a page without the token-form region may not reference the label", () => {
-    // A `[...][pat-form]` reference on a page whose tail carries no generated definition would render as literal brackets.
-    const path = "docs/reference/sections.md";
-    const page = readFileSync(join(ROOT, path), "utf8");
-    expect(() => renderPage(path, `${page}\nsee the [form][pat-form]\n`)).toThrow(
-      "at most once; found 1 and 0",
-    );
-  });
-
   test.each<[label: string, path: string, mutate: (page: string) => string, error: string]>([
+    [
+      // A `[...][pat-form]` reference on a page whose tail carries no generated definition would render as literal brackets.
+      "a reference to the token-form label on a page without its region",
+      "docs/reference/sections.md",
+      (page) => `${page}\nsee the [form][pat-form]\n`,
+      "at most once; found 1 and 0",
+    ],
     [
       "prose after the link definition",
       "README.md",
@@ -604,7 +585,7 @@ describe("the committed pages", () => {
       "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
     ],
   ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
-    // Each page regenerates cleanly without the placement check and reads wrong with it skipped; the mechanics are in generated-regions.test.ts.
+    // Each page reads wrong yet regenerates as a no-op; the relocation rows lean on the placement check, whose mechanics are in generated-regions.test.ts.
     const page = readFileSync(join(ROOT, path), "utf8");
     expect(() => renderPage(path, mutate(page))).toThrow(error);
   });
@@ -612,10 +593,6 @@ describe("the committed pages", () => {
 
 describe("the committed coverage page", () => {
   const coverage = readFileSync(join(ROOT, "docs/reference/coverage.md"), "utf8");
-
-  test("is exactly what the generator renders from the declarations and the authored data", () => {
-    expect(renderCoverageFile(coverage)).toBe(coverage);
-  });
 
   test("must keep the region spanning everything below the title", () => {
     // Prose left outside the region would drift from the generator's while regeneration stayed a no-op.

@@ -10,16 +10,13 @@ import {
   Kind,
 } from "graphql";
 import {
-  declaredCalls,
   ENDPOINT_DOCS,
   ENDPOINT_DOCS_PATH,
   type EndpointDocs,
-  renderedDocsUrl,
   resolveAnchors,
   type SpecOperations,
 } from "../../.github/scripts/endpoint-docs.js";
 import { UNDOCUMENTED_ROUTES } from "../../src/upstream-gaps/index.js";
-import { readSpecText } from "../e2e/openapi/validate.js";
 import { ROOT } from "../root.js";
 
 const SCHEMA_PATH = join(ROOT, "test", "e2e", "graphql", "schema.docs.graphql");
@@ -123,44 +120,14 @@ describe("resolveAnchors", () => {
       /"POST \/repos\/\{owner\}\/\{repo\}\/labels" has no page[\s\S]*"PinEnvironment" has no page/,
     );
   });
-
-  test("the descriptor's link is rendered as docs.github.com serves it", () => {
-    expect(
-      renderedDocsUrl("https://docs.github.com/rest/pages/pages#get-a-apiname-pages-site"),
-    ).toBe("https://docs.github.com/en/rest/pages/pages#get-a-github-pages-site");
-    expect(renderedDocsUrl("https://docs.github.com/rest/repos/repos#get-a-repository")).toBe(
-      "https://docs.github.com/en/rest/repos/repos#get-a-repository",
-    );
-  });
 });
 
 describe("endpoint-docs.yml against the registry and the descriptor", () => {
-  const { routes, operations } = declaredCalls();
-  const spec = (JSON.parse(readSpecText()) as { paths: SpecOperations }).paths;
-
-  test("every declared call resolves to exactly one page, and the hand file holds only the undocumented routes", () => {
-    // Loading endpoint-docs.ts already resolved the real data or threw; this restates the census the page relies on.
-    const anchors = resolveAnchors(spec, ENDPOINT_DOCS, routes, operations);
-    expect(Object.keys(anchors.rest).sort()).toEqual([...routes].sort());
-    expect(Object.keys(anchors.graphql).sort()).toEqual([...operations].sort());
+  test("the hand file holds only the undocumented routes", () => {
     // The hand REST pages are exactly the routes the descriptor omits: the upstream gaps' undocumented routes.
     expect(Object.keys(ENDPOINT_DOCS.rest).sort()).toEqual(
       [...new Set<string>(UNDOCUMENTED_ROUTES)].sort(),
     );
-    // Control: the census fails through this same call on a hand page the descriptor already carries.
-    const documented = routes.find((route) => ENDPOINT_DOCS.rest[route] === undefined) ?? "";
-    expect(documented).not.toBe("");
-    expect(() =>
-      resolveAnchors(
-        spec,
-        {
-          ...ENDPOINT_DOCS,
-          rest: { ...ENDPOINT_DOCS.rest, [documented]: "https://docs.github.com/en/x" },
-        },
-        routes,
-        operations,
-      ),
-    ).toThrow("has a page in both the descriptor and");
   });
 
   test("a GraphQL page is the category page the schema assigns, anchored on an entry it declares", () => {

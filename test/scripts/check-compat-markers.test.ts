@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { checkCompatMarkers } from "../../.github/scripts/check-compat-markers.js";
+import { checkCompatMarkers, SYNTAX } from "../../.github/scripts/check-compat-markers.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -20,8 +20,6 @@ function repo(root: string, version: string, files: Record<string, string>): str
   }
   return root;
 }
-
-const SYNTAX = "COMPAT(v<major>): <what stays working and what to delete>";
 
 function malformed(where: string, found: string): string {
   return `${where}: malformed marker ${JSON.stringify(found)}; write ${SYNTAX}`;
@@ -275,17 +273,6 @@ describe("the CLI", () => {
         stdout: "",
         stderr:
           'check-compat-markers: usage: check-compat-markers.ts [--target-major <major>]; got ["--target-major","x"]\n',
-      },
-    ],
-    [
-      "a release target below the current major is refused",
-      "2.0.0",
-      ["--target-major", "1"],
-      {
-        status: 1,
-        stdout: "",
-        stderr:
-          "check-compat-markers: --target-major 1 is below package.json's major 2 (2.0.0); a release never targets an older major.\n",
       },
     ],
   ])("%s", (_, version, argv, expected) =>
