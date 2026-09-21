@@ -699,6 +699,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       422,
       '"secret":"***"',
       ["he said", "back", "slash", "too weak", "Hook"],
+      false,
     ],
     [
       "a plain-text 400 echoing a TOP-LEVEL secret",
@@ -709,6 +710,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       400,
       '"secret":"***"',
       ["he said", "back", "slash", "nope"],
+      false,
     ],
     [
       "a plain-text 400 echoing an encrypted_value",
@@ -719,10 +721,28 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       400,
       '"encrypted_value":"***"',
       ["he said", "back", "slash", "rejected"],
+      false,
+    ],
+    [
+      // The structural signals are read whatever the body's shape: this plaintext body never says "rate limit", so only the retry-after
+      // header proves the classification, and it must survive the wholesale replacement.
+      "a plain-text 403 with retry-after echoing a TOP-LEVEL secret",
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+      () =>
+        new Response(`Forbidden: ${hostileSecret}`, {
+          status: 403,
+          headers: { "retry-after": "60" },
+        }),
+      403,
+      '"secret":"***"',
+      ["he said", "back", "slash", "Forbidden"],
+      true,
     ],
   ])(
-    "%s is replaced wholesale; only the status survives",
-    async (_shape, method, path, payload, response, status, masked, fragments) => {
+    "%s is replaced wholesale; only the status and the rate-limit classification survive",
+    async (_shape, method, path, payload, response, status, masked, fragments, limited) => {
       const wire = JSON.stringify(payload);
       const sent = stubFetchCapturingBodies(response);
       const dbg = traceIo();
@@ -732,6 +752,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
         throw new Error("expected an error result");
       }
       expect(result.error.status).toBe(status);
+      expect(isRateLimitError(result.error)).toBe(limited);
       expect(result.error.documentationUrl).toBeUndefined();
       expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
       expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
@@ -1110,27 +1131,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(trace).toContain('"__proto__":{"note":"kept"}');
     expect(trace).toContain('"secret":"***"');
     expect(trace).not.toContain("s3cret-here");
-  });
-
-  test("a string-body 403 rate limit on a secret request still classifies as one", async () => {
-    // The structural signals are read whatever the body's shape: a plaintext body must not lose the retry-after classification.
-    stubFetch([
-      () =>
-        new Response(`You have exceeded a secondary rate limit. ${hostileSecret}`, {
-          status: 403,
-          headers: { "retry-after": "60" },
-        }),
-    ]);
-    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-      url: "https://example.test/hook",
-      secret: hostileSecret,
-    });
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(isRateLimitError(result.error)).toBe(true);
-    expect(JSON.stringify(result.error)).not.toContain("he said");
   });
 
   test("a non-secret request's trace and error are unchanged by the scan", async () => {
