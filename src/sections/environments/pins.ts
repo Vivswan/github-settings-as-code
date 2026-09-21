@@ -12,7 +12,7 @@ import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
-import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
+import { type EnvironmentKey, environmentKey, MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
 /** The pins selection both pins reads share, so the snapshot's read cannot lag the planner's. */
 const PINS_SELECTION =
@@ -138,7 +138,7 @@ export function snapshotPins(ctx: EnvironmentsPlanContext): Read<PinnedNames> {
   });
 }
 
-/** The pins in rank order, under the duplicate-live guard (one pin per environment, names folded as pinKey folds them). */
+/** The pins in rank order, under the duplicate-live guard (one pin per environment, names folded by environmentKey). */
 function rankPins(
   ctx: EnvironmentsPlanContext,
   nodes: readonly z.infer<typeof LivePinNode>[],
@@ -150,14 +150,9 @@ function rankPins(
     { key: ctx.section },
     "pinned environment",
     pins,
-    (pin) => pinKey(pin.name),
+    (pin) => environmentKey(pin.name),
     (pin) => liveIdentity(pin.name, { position: pin.position }),
   ).map(() => pins);
-}
-
-/** Environment names are case-insensitive on GitHub. */
-function pinKey(name: string): string {
-  return name.toLowerCase();
 }
 
 /**
@@ -183,36 +178,36 @@ function planPins(
   liveOrder: string[];
 } {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
-  const desiredKeys = new Set(desired.map(pinKey));
+  const desiredKeys = new Set(desired.map(environmentKey));
   const unpinKeys = new Set(
-    declarations.filter((entry) => !entry.pinned).map((entry) => pinKey(entry.name)),
+    declarations.filter((entry) => !entry.pinned).map((entry) => environmentKey(entry.name)),
   );
-  const liveKeys = new Set(live.map((pin) => pinKey(pin.name)));
+  const liveKeys = new Set(live.map((pin) => environmentKey(pin.name)));
 
   const unpins = declarations
-    .filter((entry) => !entry.pinned && liveKeys.has(pinKey(entry.name)))
+    .filter((entry) => !entry.pinned && liveKeys.has(environmentKey(entry.name)))
     .map((entry) => entry.name);
-  const pins = desired.filter((name) => !liveKeys.has(pinKey(name)));
+  const pins = desired.filter((name) => !liveKeys.has(environmentKey(name)));
 
   // The rank order once the unpins are gone and the missing pins have appended at the tail
   // (verified live): the state the reorder loop starts from.
   const postUnpin = live
-    .filter((pin) => !unpinKeys.has(pinKey(pin.name)))
-    .map((pin) => pinKey(pin.name));
-  const order = [...postUnpin, ...pins.map(pinKey)];
+    .filter((pin) => !unpinKeys.has(environmentKey(pin.name)))
+    .map((pin) => environmentKey(pin.name));
+  const order = [...postUnpin, ...pins.map(environmentKey)];
 
   const interleaved = live
     .filter(
       (pin) =>
-        !desiredKeys.has(pinKey(pin.name)) &&
-        !unpinKeys.has(pinKey(pin.name)) &&
-        postUnpin.indexOf(pinKey(pin.name)) < desired.length,
+        !desiredKeys.has(environmentKey(pin.name)) &&
+        !unpinKeys.has(environmentKey(pin.name)) &&
+        postUnpin.indexOf(environmentKey(pin.name)) < desired.length,
     )
     .map((pin) => pin.name);
 
   const reorders: Array<{ name: string; rank: number }> = [];
   desired.forEach((name, index) => {
-    const key = pinKey(name);
+    const key = environmentKey(name);
     if (order[index] === key) {
       return;
     }
@@ -238,17 +233,17 @@ function planPins(
 function resolvePinIds(
   declarations: readonly PinDeclaration[],
   names: readonly string[],
-): Result<ReadonlyMap<string, string>, SectionFailure> {
-  const byKey = new Map(declarations.map((entry) => [pinKey(entry.name), entry]));
+): Result<ReadonlyMap<EnvironmentKey, string>, SectionFailure> {
+  const byKey = new Map(declarations.map((entry) => [environmentKey(entry.name), entry]));
   return Result.combine(
     names.map((name) => {
-      const declaration = byKey.get(pinKey(name));
+      const declaration = byKey.get(environmentKey(name));
       if (declaration === undefined) {
         throw new Error(
           `BUG: environments: a pin mutation was planned for "${name}", which no entry declares a pin state for`,
         );
       }
-      return declaration.nodeId().map((id) => [pinKey(name), id] as const);
+      return declaration.nodeId().map((id) => [environmentKey(name), id] as const);
     }),
   ).map((pairs) => new Map(pairs));
 }
@@ -304,7 +299,7 @@ export function planPinned(
       notes.push(`apply will fail: ${overflow}`);
     }
 
-    let ids: Result<ReadonlyMap<string, string>, SectionFailure> | undefined;
+    let ids: Result<ReadonlyMap<EnvironmentKey, string>, SectionFailure> | undefined;
     const idOf = (name: string): Result<string, SectionFailure> => {
       if (overflow !== undefined) {
         return err(sectionFailure("refused", `environments: ${overflow}`));
@@ -315,7 +310,7 @@ export function planPinned(
         ...plan.reorders.map((reorder) => reorder.name),
       ]);
       return ids.map((resolved) => {
-        const id = resolved.get(pinKey(name));
+        const id = resolved.get(environmentKey(name));
         if (id === undefined) {
           throw new Error(
             `BUG: environments: no node id was resolved for the pin mutation of "${name}"`,

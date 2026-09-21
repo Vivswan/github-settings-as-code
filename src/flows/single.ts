@@ -9,6 +9,7 @@ import type { RepoRef } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { GitHubClient } from "../github/api.js";
 import { createVisibilityResolver } from "../github/repo-visibility.js";
+import { slugKey } from "../github/slug.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
@@ -48,7 +49,7 @@ export async function openSingleRepoChannel(
   if (cfg.privateRepos !== "redact") {
     return shown();
   }
-  if (cfg.repo.slug.toLowerCase() === cfg.selfSlug.toLowerCase()) {
+  if (slugKey(cfg.repo.slug) === slugKey(cfg.selfSlug)) {
     return shown();
   }
   const visibility = await createVisibilityResolver(api)(cfg.repo.slug);

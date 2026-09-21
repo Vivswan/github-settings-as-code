@@ -15,8 +15,7 @@ import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   listEntries,
   loosen,
   type SectionMeta,
@@ -254,7 +253,8 @@ const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
   "For actor lists and richer controls, prefer the rulesets section (the modern successor of classic protection)";
 
 export const branchesSection = {
-  key: "branches",
+  // Branch names and patterns are verbatim keys; two entries for one would overwrite each other's write on every run.
+  ...identifiedBy("branches", "name", "branch"),
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
@@ -312,12 +312,6 @@ export const branchesSection = {
       }
     });
   }),
-  // Branch names and patterns are verbatim keys, as validate() rejects duplicates.
-  layering: keyedBy("name"),
-  // Two entries for one branch or pattern would overwrite each other's write on every run.
-  validate(desired) {
-    return duplicateFieldIssues(desired, { field: "name" }, "branch");
-  },
   async plan(ctx, desired): Promise<Result<BranchesPlan, SectionFailure>> {
     const section = this;
     return safeTry(async function* () {

@@ -6,6 +6,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type Result } from "neverthrow";
+import { type SlugKey, slugKey } from "../github/slug.js";
 import type { CentralFileProblem, ProblemOf } from "../problem.js";
 import { type CentralTarget, SLUG_RE } from "./targets.js";
 
@@ -26,13 +27,13 @@ export function resolveCentralTargets(
   // Invalid filenames and duplicate slugs are collected across the WHOLE walk: each fix is a rename or deletion, so N
   // bad files must cost one run to discover, not N.
   const errors: CentralFileProblem[] = [];
-  const seen = new Map<string, string>();
+  const seen = new Map<SlugKey, string>();
   const addTarget = (slug: string, filePath: string): void => {
     if (!SLUG_RE.test(slug)) {
       errors.push({ kind: "not-a-slug", filePath, slug });
       return;
     }
-    const key = slug.toLowerCase();
+    const key = slugKey(slug);
     const existing = seen.get(key);
     if (existing) {
       errors.push({ kind: "duplicate", slug, first: existing, second: filePath });

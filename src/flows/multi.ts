@@ -27,6 +27,7 @@ import type { SettingsSource } from "../engine/secret-refs.js";
 import { type GitHubClient, isPermissionError } from "../github/api.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
+import { type SlugKey, slugKey } from "../github/slug.js";
 import type { Io } from "../io.js";
 import type { Private } from "../private.js";
 import { describeProblem, type Problem, RERUN_ADVICE } from "../problem.js";
@@ -266,7 +267,7 @@ export function resolveTargets(
       repos: Parameters<typeof formatSkipNotice>[0]["repos"];
     }> = [];
     // Visibility learned from discovery is authoritative for those repos, so their per-target probe is skipped.
-    const knownVisibility = new Map<string, RepoVisibility>();
+    const knownVisibility = new Map<SlugKey, RepoVisibility>();
     // Private slugs discovery filtered out are masked but never placeholdered.
     const filteredPrivateSlugs: Private<string>[] = [];
     if (cfg.reposInput) {
@@ -285,7 +286,7 @@ export function resolveTargets(
           }
         }
         for (const repo of discovered.repos) {
-          knownVisibility.set(repo.slug.toLowerCase(), repo.visibility);
+          knownVisibility.set(slugKey(repo.slug), repo.visibility);
         }
         slugs = discovered.repos.map((repo) => repo.slug);
         origin = 'repos: "*" discovery';
@@ -306,7 +307,7 @@ export function resolveTargets(
     }
 
     const redact = cfg.privateRepos === "redact";
-    const self = cfg.selfSlug.toLowerCase();
+    const self = slugKey(cfg.selfSlug);
 
     // Visibility is resolved for every distinct target slug before the plan, and the resolved value (not a boolean) drives
     // two decisions that fail closed in opposite directions, so an unknown never posts a private report to a repo that
@@ -317,10 +318,10 @@ export function resolveTargets(
     //   report delivery            -> deliver only when proven private or internal
     const resolveVisibility = createVisibilityResolver(api);
     const orderedSlugs = [...central, ...remote].map((t) => t.slug);
-    const visibilityBySlug = new Map<string, RepoVisibility>();
+    const visibilityBySlug = new Map<SlugKey, RepoVisibility>();
     if (redact) {
       for (const slug of orderedSlugs) {
-        const key = slug.toLowerCase();
+        const key = slugKey(slug);
         if (visibilityBySlug.has(key)) {
           continue;
         }
@@ -335,7 +336,7 @@ export function resolveTargets(
     // Under `redact` the map holds every target slug, so the fallback only fires under `show`, where visibility is never
     // consulted; it still fails CLOSED, since "unknown" redacts as private and delivers as unproven.
     const visibilityOf = (slug: string): RepoVisibility =>
-      visibilityBySlug.get(slug.toLowerCase()) ?? "unknown";
+      visibilityBySlug.get(slugKey(slug)) ?? "unknown";
 
     const plan = planRedaction(
       cfg.privateRepos,

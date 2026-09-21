@@ -4,6 +4,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
+import { type SlugKey, slugKey } from "../github/slug.js";
 import type { ProblemOf } from "../problem.js";
 
 interface TargetBase {
@@ -55,16 +56,16 @@ export function dedupeTargets(
   display: (slug: string) => string,
   isRedacted: (slug: string) => boolean = () => false,
 ): Target[] {
-  const centralBySlug = new Map<string, CentralTarget>();
+  const centralBySlug = new Map<SlugKey, CentralTarget>();
   for (const target of central) {
-    const key = target.slug.toLowerCase();
+    const key = slugKey(target.slug);
     if (!centralBySlug.has(key)) {
       centralBySlug.set(key, target);
     }
   }
   const out: Target[] = [...central];
   for (const target of remote) {
-    const winner = centralBySlug.get(target.slug.toLowerCase());
+    const winner = centralBySlug.get(slugKey(target.slug));
     if (winner) {
       const centralOrigin = isRedacted(target.slug) ? "a repos-dir file" : winner.origin;
       notice(

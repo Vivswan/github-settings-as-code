@@ -9,6 +9,7 @@
 import type { Target } from "../discovery/targets.js";
 import type { RunOutcome } from "../engine/outcome.js";
 import type { RepoVisibility } from "../github/repo-visibility.js";
+import { type SlugKey, slugKey } from "../github/slug.js";
 import { type CollectedLine, type Io, prefixedIo } from "../io.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
@@ -178,13 +179,13 @@ export function planRedaction(
   if (policy === "show") {
     return SHOW_EVERYTHING;
   }
-  const self = selfSlug.toLowerCase();
-  const placeholders = new Map<string, string>();
-  const masked = new Map<string, string>();
+  const self = slugKey(selfSlug);
+  const placeholders = new Map<SlugKey, string>();
+  const masked = new Map<SlugKey, string>();
 
   let n = 0;
   for (const slug of orderedTargetSlugs) {
-    const key = slug.toLowerCase();
+    const key = slugKey(slug);
     if (key === self || !isPrivateSlug(slug) || placeholders.has(key)) {
       continue;
     }
@@ -194,7 +195,7 @@ export function planRedaction(
   }
   for (const sealed of extraPrivateSlugs) {
     const slug = revealPrivate(sealed);
-    const key = slug.toLowerCase();
+    const key = slugKey(slug);
     if (key === self || masked.has(key)) {
       continue;
     }
@@ -202,8 +203,8 @@ export function planRedaction(
   }
 
   return {
-    isRedacted: (slug) => placeholders.has(slug.toLowerCase()),
-    display: (slug) => placeholders.get(slug.toLowerCase()) ?? slug,
+    isRedacted: (slug) => placeholders.has(slugKey(slug)),
+    display: (slug) => placeholders.get(slugKey(slug)) ?? slug,
     maskedSlugs: [...masked.values()],
   };
 }

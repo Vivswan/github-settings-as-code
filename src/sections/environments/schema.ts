@@ -8,6 +8,15 @@
  */
 
 import { z } from "zod";
+
+/** Environment names are case-insensitive on GitHub; the brand marks a name already folded to the key every lookup reads. */
+declare const environmentNameKey: unique symbol;
+export type EnvironmentKey = string & { readonly [environmentNameKey]: true };
+
+export function environmentKey(name: string): EnvironmentKey {
+  return name.toLowerCase() as EnvironmentKey;
+}
+
 import { isMapping } from "../shared/raw-values.js";
 import {
   conditional,

@@ -12,8 +12,7 @@ import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
-  duplicateFieldIssues,
-  keyedBy,
+  identifiedBy,
   loosen,
   ORG_PROBE,
   type SectionMeta,
@@ -104,6 +103,14 @@ function probeTeamRole(
     );
 }
 
+/** A team's slug is its lowercased name; the brand marks a name or slug already folded to the key every lookup reads. */
+declare const teamSlugKey: unique symbol;
+type TeamKey = string & { readonly [teamSlugKey]: true };
+
+function teamKey(nameOrSlug: string): TeamKey {
+  return nameOrSlug.toLowerCase() as TeamKey;
+}
+
 /**
  * The listed teams by slug under the duplicate-live guard (slugs fold case-insensitively, as the
  * declared entries do); plan() and snapshot() both index through it.
@@ -111,21 +118,19 @@ function probeTeamRole(
 function teamsBySlug(
   section: SectionMeta,
   live: readonly LiveTeam[],
-): Result<Map<string, LiveTeam>, SectionFailure> {
+): Result<Map<TeamKey, LiveTeam>, SectionFailure> {
   return liveByIdentity(
     section,
     "team",
     live,
-    (team) => team.slug.toLowerCase(),
+    (team) => teamKey(team.slug),
     (team) => liveIdentity(team.slug, { team_id: team.id }),
   );
 }
 
 export const teamsSection = {
-  key: "teams",
+  ...identifiedBy("teams", "name", "team", { fold: teamKey }),
   undeclaredDefault: "keep",
-  // The fold validate() rejects duplicates by: slugs fold case-insensitively.
-  layering: keyedBy("name", { fold: (name) => name.toLowerCase() }),
   permission,
   // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
   ownerSensitivity: "org",
@@ -135,14 +140,6 @@ export const teamsSection = {
   closedSurface: {
     known: { name: true, permission: true },
     consequence: `a misspelled "permission" key would silently grant the default "${DEFAULT_ROLE}" role instead of the intended one`,
-  },
-  // A team's slug is its lowercased name, the identity every lookup below uses.
-  validate(declared) {
-    return duplicateFieldIssues(
-      declared,
-      { field: "name", fold: (name) => name.toLowerCase() },
-      "team",
-    );
   },
   async plan(ctx, declared) {
     const section = this;
@@ -157,7 +154,7 @@ export const teamsSection = {
       const live = yield* ctx.read.list
         .listAll(LiveTeam)
         .andThen((teams) => teamsBySlug(section, teams));
-      const declaredSlugs = new Set(desired.map((team) => team.name.toLowerCase()));
+      const declaredSlugs = new Set(desired.map((team) => teamKey(team.name)));
       for (const team of desired) {
         const role = team.permission ?? DEFAULT_ROLE;
         const params = { org: ctx.repo.owner, team_slug: team.name };
