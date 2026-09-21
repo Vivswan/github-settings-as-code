@@ -284,7 +284,7 @@ const sealed = await encryptReport(recipient, "# report");
 |---|---|---|
 | `SECTIONS` | const | Every section module in execution order |
 | `sectionModule` | function | One module by key |
-| `SectionModule` | type | A module: its `key`, `endpoints`, `permission`, `plan()`, and `snapshot()` when it has one |
+| `SectionModule` | type | A module: its `key`, `endpoints`, `permission`, `plan()`, `snapshot()` when it has one, and `validate()` on a list section (its file-only checks, run by document validation) |
 | `sectionGrant` | function | The PAT grant a section needs, as prose |
 | `allEndpoints` | function | Every declared REST route, tagged with its owner |
 | `allGraphqlOps` | function | Every declared GraphQL operation, tagged with its owner |
