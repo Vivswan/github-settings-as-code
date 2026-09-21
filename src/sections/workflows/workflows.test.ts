@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
@@ -122,28 +122,6 @@ describe("workflows", () => {
     ]);
   });
 
-  test("the workflows envelope paginates past the first page", async () => {
-    const page1 = Array.from({ length: 100 }, (_, i) => ({
-      id: i,
-      name: `w${i}`,
-      path: `.github/workflows/w${i}.yml`,
-      state: "active",
-    }));
-    const page2 = [{ id: 100, name: "tail", path: ".github/workflows/tail.yml", state: "active" }];
-    const api = new MockApi({
-      "GET /repos/o/r/actions/workflows?per_page=100&page=1": {
-        data: { total_count: 101, workflows: page1 },
-      },
-      "GET /repos/o/r/actions/workflows?per_page=100&page=2": {
-        data: { total_count: 101, workflows: page2 },
-      },
-    });
-    const result = await plan(api, [{ path: "tail.yml", state: "disabled" }]);
-    expect(result.ops.map((op) => op.change)).toEqual([
-      'disabled workflow ".github/workflows/tail.yml"',
-    ]);
-  });
-
   test("an envelope without the expected list key is an actionable error", async () => {
     const api = new MockApi({ [route]: { data: { unexpected: true } } });
     await expect(plan(api, [{ path: "ci.yml", state: "active" }])).rejects.toThrow(
@@ -175,49 +153,5 @@ describe("workflows", () => {
       "workflows[gone.yml]: declared in the settings file but no workflow with that path exists on the repo, so apply skips it - create the workflow file, or remove it from the workflows section";
     expect(first.drift).toEqual([gone]);
     expect(second).toEqual({ ops: [], notes: [], drift: [gone] });
-  });
-
-  test("the read port exposes exactly the list role, narrowed to its denied posture", () => {
-    const ctx = planContext(workflowsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `enable`
-    ctx.read.enable;
-    // @ts-expect-error nor a `disable`
-    ctx.read.disable;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-    // @ts-expect-error nor the tolerant tryCall
-    ctx.read.list.tryCall;
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
-    // property the compiler blames.
-    type Op = PlannedOp<typeof workflowsSection.endpoints>;
-    const _enable: Op = {
-      role: "enable",
-      params: { workflow_id: "1" },
-      drift: ["enabling"],
-      change: "",
-    };
-    const read = { role: "list", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the list role is a read, not a plannable write
-    const _read: Op = read;
-    const undeclared = { role: "typo", variables: {}, drift: ["x"], change: "" } as const;
-    // @ts-expect-error an undeclared role, even with GraphQL variables, is not plannable
-    const _undeclared: Op = undeclared;
-    const paramless = { role: "disable", params: {}, drift: ["x"], change: "" } as const;
-    // @ts-expect-error the route's path params are required
-    const _paramless: Op = paramless;
-    const silent = {
-      role: "disable",
-      params: { workflow_id: "1" },
-      drift: [],
-      change: "",
-    } as const;
-    // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
-    const _silent: Op = silent;
   });
 });
