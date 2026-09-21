@@ -13,6 +13,7 @@ import {
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
+import { LIST_SEPARATOR } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { LAYERINGS, type Layering, UNDECLARED_POLICIES } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
@@ -424,9 +425,6 @@ function readEnum<T extends string, F extends T | undefined>(
 function readUndeclared(input: Inputs): Result<UndeclaredPolicy | undefined, Problem> {
   return readEnum(input, "undeclared", UNDECLARED_POLICIES, undefined, "undeclared policy");
 }
-
-/** What separates the entries of a list input; a single path can never contain one. */
-const LIST_SEPARATOR = /[\n,]/;
 
 function splitList(value: string): string[] {
   return value

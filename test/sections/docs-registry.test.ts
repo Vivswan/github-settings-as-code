@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { ok } from "neverthrow";
+import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { readDocsYaml, SectionDocs } from "../../src/sections/contract/docs.js";
 import { endpointPath, type Route } from "../../src/sections/contract/endpoints.js";
@@ -18,11 +19,6 @@ import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "../docs/claims.js";
 import { ROOT } from "../root.js";
-
-/** `text` as a regex source matching itself literally. */
-function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 // Whole-identifier, case-insensitive: "the pinEnvironment mutation" names PinEnvironment, "DocumentPinEnvironmentAudit" does not.
 function namesOperation(prose: string, name: string): boolean {
@@ -261,7 +257,6 @@ describe("Endpoints cells vs declared operations", () => {
     // The cells are terse ("labels CRUD"), so the pin is each endpoint tail's leading segment, matched as a WHOLE word or its singular ("branch
     // protection" satisfies "branches"; "homepage" never satisfies "pages").
     const normalize = (text: string): string => text.toLowerCase().replace(/[-_]/g, " ");
-    const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // A compound satisfies its base segment only where the compound IS the resource's common name; extend this map, not the matching.
     const COMPOUND_MENTIONS: Record<string, readonly string[]> = { hooks: ["webhooks"] };
     for (const endpoint of Object.values(allEndpoints())) {

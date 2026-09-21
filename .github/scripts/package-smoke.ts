@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLI_COMMANDS } from "../../src/cli/program.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { SCHEMA_ID } from "./lib/schema-id.js";
 
 /** This script lives at .github/scripts/, two levels below the repository root. */
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -30,10 +31,6 @@ const PACKAGE = "@vivswan/github-settings-as-code";
  * PATH node and names the floor's binary here for the consumer alone.
  */
 const CONSUMER_NODE = process.env.SMOKE_CONSUMER_NODE ?? "node";
-
-/** The `$id` the committed schema publishes; the schema subpath must serve that document. */
-const SCHEMA_ID =
-  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/HEAD/lib/settings.schema.json";
 
 /**
  * The consumer's runtime import. The section list and the schema id are

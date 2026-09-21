@@ -29,7 +29,7 @@ import {
   type SectionPlan,
 } from "../contract/plan.js";
 import { leftOutOfSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
-import { InteractionLimitsConfig } from "./schema.js";
+import { BYPASS_MAX, InteractionLimitsConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["administration"] };
 
@@ -88,7 +88,7 @@ const ENDPOINTS = {
     statuses: { 204: "users added to the bypass list" },
     denialHint: BYPASS_DENIAL,
     hints: {
-      422: "every users entry must be an existing GitHub login, and the bypass list holds at most 100 users; see the bypass-list endpoint documentation",
+      422: `every users entry must be an existing GitHub login, and the bypass list holds at most ${BYPASS_MAX} users; see the bypass-list endpoint documentation`,
     },
   },
   bypassRemove: {

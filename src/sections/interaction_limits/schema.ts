@@ -16,6 +16,8 @@ const INTERACTION_EXPIRIES = [
 const LIMIT_RULE = `limit is one of ${INTERACTION_GROUPS.join(", ")} (GitHub's interaction groups)`;
 const EXPIRY_RULE = `expiry is one of ${INTERACTION_EXPIRIES.join(", ")} (GitHub's interaction durations)`;
 const CAP_RULE = "max_open_pull_requests is a whole number from 1 to 1000 (GitHub's range)";
+/** GitHub caps the list itself, and the cap is what makes single-request reconciliation valid: one write takes it whole. */
+export const BYPASS_MAX = 100;
 
 // GitHub reads the base limit back as limit, origin, and expires_at; the last two are never accepted, and an
 // expires_at declared here would compare unequal on every run.
@@ -86,13 +88,11 @@ const InteractionLimits = z
     if (!Array.isArray(bypass)) {
       return;
     }
-    if (bypass.length > 100) {
-      // GitHub caps the list itself at 100, and 100 is also what makes single-request reconciliation
-      // valid: the writes take at most 100 users per request.
+    if (bypass.length > BYPASS_MAX) {
       refineCtx.addIssue({
         code: "custom",
         path: ["pull_request_creation_bypass"],
-        message: `GitHub caps the bypass list at 100 users, but ${bypass.length} logins are declared; trim the list`,
+        message: `GitHub caps the bypass list at ${BYPASS_MAX} users, but ${bypass.length} logins are declared; trim the list`,
       });
     }
     const seen = new Map<string, string>();

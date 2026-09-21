@@ -12,11 +12,12 @@ const LabelColor = z
     'a label color is six hex digits, the leading "#" optional ("#d73a4a" or "d73a4a"); color names and three-digit shorthand are not accepted',
   );
 
-const DESCRIPTION_CAP = "a label description is at most 100 characters (GitHub's cap)";
-
 /** GitHub counts the cap in characters (code points), as JSON Schema's maxLength does. */
+const DESCRIPTION_MAX = 100;
+const DESCRIPTION_CAP = `a label description is at most ${DESCRIPTION_MAX} characters (GitHub's cap)`;
+
 const LabelDescription = boundedString(
-  100,
+  DESCRIPTION_MAX,
   "code points",
   (count) => `${DESCRIPTION_CAP}; this one has ${count}`,
 );
