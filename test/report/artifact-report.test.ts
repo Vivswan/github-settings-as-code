@@ -44,19 +44,15 @@ describe("encryptReport", () => {
 });
 
 describe("parseRecipient", () => {
-  test("accepts a generated age recipient", async () => {
-    const { recipient } = await testKeypair();
-    expect(parseRecipient(recipient)).toEqual(ok());
-  });
-
-  test.each([
-    "",
-    "age1shortandinvalid", // gitleaks:allow
-    "AGE-SECRET-KEY-1NOTPUBLIC",
-  ])("rejects a malformed recipient with the library's reason: %j", (recipient) => {
-    expect(parseRecipient(recipient)).toEqual(
-      err({ code: "age-recipient-invalid", reason: expect.any(String) }),
-    );
+  const REJECTED = err({ code: "age-recipient-invalid", reason: expect.any(String) });
+  test.each<[name: string, recipient: string | (() => Promise<string>), verdict: unknown]>([
+    ["a generated age recipient", async () => (await testKeypair()).recipient, ok()],
+    ["an empty string", "", REJECTED],
+    ["a truncated recipient", "age1shortandinvalid", REJECTED], // gitleaks:allow
+    ["a secret key", "AGE-SECRET-KEY-1NOTPUBLIC", REJECTED],
+  ])("%s: accepted, or rejected with the library's reason", async (_name, recipient, verdict) => {
+    const input = typeof recipient === "string" ? recipient : await recipient();
+    expect<unknown>(parseRecipient(input)).toEqual(verdict);
   });
 });
 

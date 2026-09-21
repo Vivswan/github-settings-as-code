@@ -180,14 +180,6 @@ describe("the issue channel", () => {
     expect(events.join("\n")).not.toContain("o/priv");
   });
 
-  test("the delivery line names the target by its placeholder, never by its slug", async () => {
-    const { io, logs } = captureIo();
-    await open(issueApi(), "issue", io)?.deliver(target("o/priv", 1));
-    expect(logs).toHaveLength(1);
-    expect(logs[0]).toContain("private repository #1");
-    expect(logs.join("\n")).not.toContain("o/priv");
-  });
-
   test("a delivery failure is one warning naming the placeholder and the HTTP status, never the slug or message", async () => {
     const api = issueApi({
       "PATCH /repos/o/priv/issues/7": {

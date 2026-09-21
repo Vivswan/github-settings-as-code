@@ -57,31 +57,25 @@ describe("composeReport", () => {
     );
   });
 
-  test("joins multi-line detail with <br> and escapes table pipes", () => {
-    const report = composeReport(
-      input({
-        outcomes: [{ key: "labels", status: "failed", detail: ["a | b", "second line"] }],
-      }),
-    );
-    expect(report).toContain("| labels | failed | a \\| b<br>second line |");
-  });
-
-  test("backslashes are escaped BEFORE pipes, so backslash-pipe cannot split a row", () => {
+  test.each<[name: string, detail: string[], cell: string]>([
+    [
+      "joins multi-line detail with <br> and escapes table pipes",
+      ["a | b", "second line"],
+      "a \\| b<br>second line",
+    ],
     // Without the backslash escape, "a\|b" renders as an escaped backslash followed by a LIVE pipe and the cell splits.
-    const report = composeReport(
-      input({
-        outcomes: [{ key: "labels", status: "failed", detail: ["a\\|b", "line1\nline2"] }],
-      }),
-    );
-    expect(report).toContain("| labels | failed | a\\\\\\|b<br>line1 line2 |");
-  });
-
-  test("a bare carriage return is a line ending too and is flattened", () => {
+    [
+      "backslashes are escaped BEFORE pipes, so backslash-pipe cannot split a row",
+      ["a\\|b", "line1\nline2"],
+      "a\\\\\\|b<br>line1 line2",
+    ],
     // CommonMark treats a standalone CR as a line ending, so an unflattened "\r" would still split the table row.
+    ["a bare carriage return is a line ending too and is flattened", ["cr\ronly"], "cr only"],
+  ])("%s", (_name, detail, cell) => {
     const report = composeReport(
-      input({ outcomes: [{ key: "labels", status: "failed", detail: ["cr\ronly"] }] }),
+      input({ outcomes: [{ key: "labels", status: "failed", detail }] }),
     );
-    expect(report).toContain("| labels | failed | cr only |");
+    expect(report).toContain(`| labels | failed | ${cell} |`);
   });
 
   test("a transcript containing code fences cannot break out of its block", () => {
