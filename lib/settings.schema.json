@@ -777,8 +777,9 @@
           "type": "string"
         },
         "key": {
-          "description": "The PUBLIC key material, e.g. \"ssh-ed25519 AAAAC3... comment\". Public by nature, so it is safe in a committed file. Compared as algorithm + blob with the trailing comment ignored (GitHub may strip or rewrite comments on storage); keys are immutable upstream, so a changed key is applied as delete plus recreate.",
-          "type": "string"
+          "description": "The PUBLIC key as one line, \"<algorithm> <base64> [comment]\" (the .pub file), the algorithm one of ssh-ed25519, ssh-rsa, ecdsa-sha2-nistp256/384/521, sk-ssh-ed25519@openssh.com, sk-ecdsa-sha2-nistp256@openssh.com (GitHub dropped DSA in 2022). Anything else, a line break included, is refused when the settings file is read; a private key is named, never echoed. Compared as algorithm + blob, comment ignored; immutable upstream, so a changed key is delete plus recreate.",
+          "type": "string",
+          "pattern": "^[ \\t]*(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\\.com|sk-ecdsa-sha2-nistp256@openssh\\.com)[ \\t]+((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=))(?:[ \\t][^\\r\\n]*)?$"
         },
         "read_only": {
           "description": "Whether the key is restricted to read-only access; GitHub defaults to false (read/write).",

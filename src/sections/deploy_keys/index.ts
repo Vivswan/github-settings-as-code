@@ -6,15 +6,38 @@
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { exactName, listSection } from "../shared/list-section.js";
-import { DeployKeyConfig } from "./schema.js";
+import {
+  DeployKeyConfig,
+  declaresAlgorithm,
+  PUBLIC_KEY_ALGORITHMS,
+  parsePublicKey,
+  parseStoredKey,
+} from "./schema.js";
 
-const LiveDeployKey = z.looseObject({
-  id: z.number(),
-  title: z.string(),
-  key: z.string(),
-  read_only: z.boolean(),
-});
-type LiveDeployKey = z.infer<typeof LiveDeployKey>;
+/**
+ * A live deploy key with its material parsed ONCE, at the response boundary: the two-field shape is the
+ * documented contract, the algorithm is GitHub's call. Material off that shape fails the read as a body
+ * outside the documented shape, so no hook downstream re-parses or re-checks it.
+ */
+const LiveDeployKey = z
+  .looseObject({
+    id: z.number(),
+    title: z.string(),
+    key: z.string(),
+    read_only: z.boolean(),
+  })
+  .transform((live, refineCtx) => {
+    const parsed = parseStoredKey(live.key);
+    if (!parsed.ok) {
+      refineCtx.addIssue({
+        code: "custom",
+        path: ["key"],
+        message: `key id ${String(live.id)} ("${live.title}") holds material that is not "<algorithm> <base64>": ${parsed.reason}`,
+      });
+      return z.NEVER;
+    }
+    return { ...live, key: parsed.material, algorithm: parsed.algorithm };
+  });
 
 const ENDPOINTS = {
   list: {
@@ -35,38 +58,12 @@ const ENDPOINTS = {
   },
 } as const satisfies Record<string, EndpointDecl>;
 
-/** GitHub may strip the trailing comment, so only the algorithm and the base64 blob compare. */
-export function normalizeKeyMaterial(key: string): string | null {
-  const fields = key.trim().split(/\s+/);
-  const algorithm = fields[0];
-  const blob = fields[1];
-  if (algorithm === undefined || blob === undefined) {
-    return null;
-  }
-  return `${algorithm} ${blob}`;
-}
-
 function declaredMaterial(title: string, key: string): string {
-  const normalized = normalizeKeyMaterial(key);
-  if (normalized === null) {
-    throw new Error(
-      `deploy_keys[${title}]: the declared key must have at least two whitespace-separated fields (an algorithm and a base64 blob, e.g. "ssh-ed25519 AAAAC3..."), got ${JSON.stringify(key)}`,
-    );
+  const parsed = parsePublicKey(key);
+  if (!parsed.ok) {
+    throw new Error(`deploy_keys[${title}]: ${parsed.reason}`);
   }
-  return normalized;
-}
-
-function liveMaterial(live: LiveDeployKey): string {
-  const normalized = normalizeKeyMaterial(live.key);
-  if (normalized === null) {
-    throw new Error(
-      `deploy_keys: GET /repos/{owner}/{repo}/keys returned key id ${live.id} ` +
-        `("${live.title}") whose material has fewer than two whitespace-separated fields ` +
-        `(${JSON.stringify(live.key)}); the response does not match the documented deploy key ` +
-        `shape - check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return normalized;
+  return parsed.material;
 }
 
 export const deployKeysSection = listSection({
@@ -87,10 +84,22 @@ export const deployKeysSection = listSection({
       ...(read_only === undefined ? {} : { read_only }),
       ...passthrough,
     }),
-    fromLive: (live) => ({ ...live, key: liveMaterial(live) }),
+    // The algorithm is the section's own reading of the material, not a field GitHub echoes, so it stays out of the compare.
+    fromLive: ({ algorithm: _algorithm, ...live }) => live,
     matchBy: {},
   },
   replaces: false,
+  // GitHub accepted the key, and the settings file has no form for its algorithm, so the section neither
+  // matches, deletes, nor snapshots it; the note says why it is missing from the snapshot.
+  foreign: (live) =>
+    declaresAlgorithm(live.algorithm)
+      ? null
+      : {
+          name: live.title,
+          reason:
+            `its algorithm "${live.algorithm}" is not one the settings file can declare ` +
+            `(${PUBLIC_KEY_ALGORITHMS.join(", ")}), so the section leaves the key as GitHub holds it`,
+        },
   /**
    * GitHub creates a key READ/WRITE when the body omits read_only, and this file does not manage an
    * undeclared flag, so the flag reaches a create body only from a source that holds it:

@@ -60,7 +60,11 @@ const FIXTURES: Record<SectionKey, unknown> = {
   deploy_keys: {
     _undeclared: "delete",
     entries: [
-      { title: "deploy-bot", key: "ssh-ed25519 AAAAC3declared deploy@bot", read_only: true },
+      {
+        title: "deploy-bot",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDeclaredDeclaredDeclaredDeclaredDeclare deploy@bot",
+        read_only: true,
+      },
     ],
   },
   // The declared pattern is missing live (create drift) and the live one is undeclared under `_undeclared: delete` (delete drift).
@@ -185,8 +189,18 @@ const ROUTES = {
   // A live key whose material diverges from the declared one, plus a stale undeclared key the wrapped `_undeclared: delete` fixture must flag.
   "GET /repos/o/r/keys?per_page=100&page=1": {
     data: [
-      { id: 1, title: "deploy-bot", key: "ssh-ed25519 AAAAC3live", read_only: false },
-      { id: 2, title: "stale-key", key: "ssh-rsa AAAAB3stale", read_only: true },
+      {
+        id: 1,
+        title: "deploy-bot",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILiveLiveLiveLiveLiveLiveLiveLiveLiveLiv",
+        read_only: false,
+      },
+      {
+        id: 2,
+        title: "stale-key",
+        key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCStaleStaleStaleStaleStaleStaleStaleStaleStale",
+        read_only: true,
+      },
     ],
   },
   // A live pattern the fixture does not declare (delete drift under the wrapped `_undeclared: delete`), while the declared one is missing.

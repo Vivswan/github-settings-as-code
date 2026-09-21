@@ -23,19 +23,20 @@ import { DeployKeyConfig } from "./schema.js";
 const DEPLOY_KEY_POOL = [
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzAlphaAlphaAlphaAlphaAlphaAlphaAlph deploy@alpha",
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE2e2eFuzzBravoBravoBravoBravoBravoBravoBrav deploy@bravo",
-  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlie deploy@charlie",
+  "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCe2eFuzzCharlieCharlieCharlieCharlieCharlieCharlie deploy@charlie",
   "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTZAAAAIbmlzdHAyNTYAAABBBe2e deploy@delta",
 ] as const;
 
-const genDeployKey = generatorFromSlice(DeployKeyConfig, {
-  fields: { title: (rng) => `deploy-${rng.pick(["bot", "ci", "mirror"])}` },
-});
+const genDeployKey = (key: string) =>
+  generatorFromSlice(DeployKeyConfig, {
+    fields: { title: (rng) => `deploy-${rng.pick(["bot", "ci", "mirror"])}`, key: () => key },
+  });
 
 export function genDeployKeys(rng: Rng): Json[] {
   // The pool is sliced, never sampled with replacement: a reused blob is rejected by the section's
   // own conflict check before any request.
   const count = rng.int(DEPLOY_KEY_POOL.length) + 1;
-  const keys = DEPLOY_KEY_POOL.slice(0, count).map((key) => ({ ...genDeployKey(rng), key }));
+  const keys = DEPLOY_KEY_POOL.slice(0, count).map((key) => genDeployKey(key)(rng));
   return uniqueBy(keys, ["title"]);
 }
 
@@ -45,7 +46,7 @@ export function deployKeysWitness(rng: Rng, declared: Json[], kind: LiveWitnessK
       section: deployKeysSection,
       // A blob outside DEPLOY_KEY_POOL; read_only is a boolean, so no sentinel can be disjoint.
       sentinels: {
-        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWitnessDriftWitnessDriftWitnessDrift",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWitnessDriftWitnessDriftWitnessDriftWit",
       },
     },
     rng,

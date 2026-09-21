@@ -20,7 +20,7 @@ live_state:
       created_at: "2026-01-01T00:00:00Z"
       read_only: true
     - id: 20
-      key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetiredRetired
+      key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCRetiredRetiredRetired
       url: https://api.github.com/repos/e2e-owner/e2e-repo/keys/20
       title: retired-service
       verified: true

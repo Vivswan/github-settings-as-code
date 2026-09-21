@@ -546,7 +546,7 @@ export function nextNumber(items: readonly Json[]): number {
 
 /**
  * Mirrors GitHub's normalization (algorithm and blob, comment stripped) as an INDEPENDENT implementation,
- * not an import of the section's normalizeKeyMaterial, so a bug there surfaces as a disagreement here.
+ * not an import of the section's parsePublicKey, so a bug there surfaces as a disagreement here.
  * Sub-two-field material is stored trimmed but otherwise as-is:
  * GitHub would reject it, but the mock invents no validation the exercised scenarios do not need.
  */
