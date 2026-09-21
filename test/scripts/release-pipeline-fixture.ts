@@ -28,7 +28,7 @@ const FIXTURE_AREA = realpathSync(tmpdir());
 const FIXTURE_PREFIX = "release-pipeline-";
 const PLANS_ENV = "RELEASE_PIPELINE_PUSH_PLANS";
 
-export const roots: string[] = [];
+const roots: string[] = [];
 
 /** The shim's refusal, as it prints it. */
 export function guardRefusal(cwd: string): string {

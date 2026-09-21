@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
 import { SECTION_KEYS } from "../../src/schema.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 import {
   ADMIN_OWNER,
   ADMIN_REPO,
@@ -324,29 +324,27 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
     expect(misnamed).toEqual([]);
   });
 
-  function withTempRoot(body: (root: string) => void): void {
-    const root = mkdtempSync(join(tmpdir(), "e2e-corpus-"));
-    try {
-      body(root);
-    } finally {
-      // The unreadable-root test leaves the directory at 000; restore it so
-      // the removal can descend into it.
-      chmodSync(root, 0o700);
-      rmSync(root, { recursive: true, force: true });
-    }
+  function withTempRoot(body: (root: string) => void): Promise<void> {
+    return withTempDir("e2e-corpus-", (root) => {
+      try {
+        body(root);
+      } finally {
+        // The unreadable-root test leaves the directory at 000; restore it so
+        // the removal can descend into it.
+        chmodSync(root, 0o700);
+      }
+    });
   }
 
-  test("a root that does not exist yields [] (a section may have no scenarios/ yet)", () => {
+  test("a root that does not exist yields [] (a section may have no scenarios/ yet)", () =>
     withTempRoot((root) => {
       expect(collectYmlFiles(join(root, "absent"))).toEqual([]);
-    });
-  });
+    }));
 
-  test("a readable empty root yields []", () => {
+  test("a readable empty root yields []", () =>
     withTempRoot((root) => {
       expect(collectYmlFiles(root)).toEqual([]);
-    });
-  });
+    }));
 
   // chmod 000 does not bar root from reading a directory, so as root there is
   // no unreadable root to test against; the skip names that rather than
@@ -354,7 +352,7 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
   const runningAsRoot = process.getuid?.() === 0;
   test.skipIf(runningAsRoot)(
     "an unreadable root fails naming it and the error, never passing as an empty corpus",
-    () => {
+    () =>
       withTempRoot((root) => {
         // A real file inside: were the permission bits ignored, the walk would
         // return this file rather than [], so the assertion cannot pass by
@@ -368,13 +366,12 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
         // loadScenarios is what run.ts and the coverage tripwire call, so the
         // failure must reach them through it.
         expect(() => loadScenarios([root])).toThrow(named);
-      });
-    },
+      }),
   );
 
   test.skipIf(runningAsRoot)(
     "an unreadable section directory fails the whole corpus, naming its scenarios/ root",
-    () => {
+    () =>
       // The roots are never filtered by existence: existsSync cannot tell an absent scenarios/ from one
       // under a mode-000 <key>/, so scenarioRoots lists it and the loader is what tells absent from unreadable.
       withTempRoot((sections) => {
@@ -398,8 +395,7 @@ describe("scenario corpus loader (collectYmlFiles)", () => {
           // directory needs its own restore before the recursive removal.
           chmodSync(section, 0o700);
         }
-      });
-    },
+      }),
   );
 });
 

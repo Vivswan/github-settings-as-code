@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ok } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
 import { parseRecipient } from "../../src/report/artifact-report.js";
+import { withTempDir } from "../temp-dir.js";
 import type { RerunCapture } from "./apply-idempotence-proof.js";
 import { ARTIFACT_TEST_RECIPIENT } from "./generators.js";
 import type { LoggedRequest } from "./mock/contract.js";
@@ -34,9 +34,8 @@ import {
 import type { Scenario } from "./schema.js";
 
 describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () => {
-  test("the dir form lists every .yml under the directory, relative to the temp dir, sorted", () => {
-    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
-    try {
+  test("the dir form lists every .yml under the directory, relative to the temp dir, sorted", () =>
+    withTempDir("written-snapshots-", (dir) => {
       mkdirSync(join(dir, "snapshots", "acme"), { recursive: true });
       writeFileSync(join(dir, "snapshots", "acme", "svc-b.yml"), "labels: {}\n");
       writeFileSync(join(dir, "snapshots", "acme", "svc-a.yml"), "labels: {}\n");
@@ -46,22 +45,15 @@ describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () =
         join("snapshots", "acme", "svc-a.yml"),
         join("snapshots", "acme", "svc-b.yml"),
       ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  test("the file form lists the one file when the run wrote it, nothing when it did not", () => {
-    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
-    try {
+  test("the file form lists the one file when the run wrote it, nothing when it did not", () =>
+    withTempDir("written-snapshots-", (dir) => {
       const inputs = { mode: "snapshot" as const, snapshot_file: "snapshot.yml" };
       expect(writtenSnapshotPaths(inputs, dir)).toEqual([]);
       writeFileSync(join(dir, "snapshot.yml"), "labels: {}\n");
       expect(writtenSnapshotPaths(inputs, dir)).toEqual(["snapshot.yml"]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
   test("a run without a snapshot destination wrote none", () => {
     expect(writtenSnapshotPaths({ mode: "apply" }, "/nonexistent")).toEqual([]);
@@ -71,9 +63,8 @@ describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () =
 describe("writtenSnapshotLeaks (the secret sweep over the written documents)", () => {
   // The negative control for the sweep: a resolved secret value planted into a written document
   // must fail, naming the document and the value, while the clean sibling stays quiet.
-  test("a planted secret value in a written document is a leak; a clean document is not", () => {
-    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
-    try {
+  test("a planted secret value in a written document is a leak; a clean document is not", () =>
+    withTempDir("written-snapshots-", (dir) => {
       mkdirSync(join(dir, "snapshots", "acme"), { recursive: true });
       const clean = join("snapshots", "acme", "clean.yml");
       const planted = join("snapshots", "acme", "planted.yml");
@@ -89,16 +80,12 @@ describe("writtenSnapshotLeaks (the secret sweep over the written documents)", (
         `leak: "hunter2-resolved" present in the written snapshot ${planted}`,
       ]);
       expect(writtenSnapshotLeaks(dir, [clean], ["hunter2-resolved"])).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
   // A multi-line value serializes as a block scalar: "|-" then one indented line per source line,
   // so the raw text never contains the value whole. Written through the same emitter the action uses.
-  test("a planted multi-line value, wrapped as a block scalar, is still a leak", () => {
-    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
-    try {
+  test("a planted multi-line value, wrapped as a block scalar, is still a leak", () =>
+    withTempDir("written-snapshots-", (dir) => {
       const secret = "line one of the key\nline two of the key";
       const path = "snapshot.yml";
       const text = stringifyYaml({ webhooks: { entries: [{ url: "https://x", secret }] } });
@@ -108,22 +95,15 @@ describe("writtenSnapshotLeaks (the secret sweep over the written documents)", (
       expect(writtenSnapshotLeaks(dir, [path], [secret])).toEqual([
         `leak: "${secret}" present in the written snapshot ${path}`,
       ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  test("a document that does not parse as YAML fails on its own instead of passing the sweep silently", () => {
-    const dir = mkdtempSync(join(tmpdir(), "written-snapshots-"));
-    try {
+  test("a document that does not parse as YAML fails on its own instead of passing the sweep silently", () =>
+    withTempDir("written-snapshots-", (dir) => {
       writeFileSync(join(dir, "broken.yml"), "labels: [unclosed\n");
       const failures = writtenSnapshotLeaks(dir, ["broken.yml"], ["hunter2"]);
       expect(failures).toHaveLength(1);
       expect(failures[0]).toMatch(/^the written snapshot broken.yml is not parseable YAML: /);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });
 
 describe("yamlStrings (every key and string leaf of a document)", () => {
@@ -592,9 +572,8 @@ describe("checkLeaks (redaction leak invariant)", () => {
 });
 
 describe("setReplay (nightly issue report contract)", () => {
-  test("swaps the fuzzer's command into the block writeReport left under the title, nothing else moves", () => {
-    const dir = mkdtempSync(join(tmpdir(), "set-replay-"));
-    try {
+  test("swaps the fuzzer's command into the block writeReport left under the title, nothing else moves", () =>
+    withTempDir("set-replay-", (dir) => {
       const written = [
         "# fuzz-42",
         "",
@@ -616,37 +595,26 @@ describe("setReplay (nightly issue report contract)", () => {
       const expected = [...written];
       expected[5] = "bun test/e2e/fuzz.ts --seed 42 --iterations 1";
       expect(readFileSync(join(dir, "report.md"), "utf8").split("\n")).toEqual(expected);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 
-  test("a report without the block under its title is a bug, not a silent insert", () => {
-    const dir = mkdtempSync(join(tmpdir(), "set-replay-"));
-    try {
+  test("a report without the block under its title is a bug, not a silent insert", () =>
+    withTempDir("set-replay-", (dir) => {
       writeFileSync(join(dir, "report.md"), "# fuzz-42\n\n## Failures\n\n- leak\n");
       expect(() => setReplay(dir, "bun test/e2e/fuzz.ts --seed 42 --iterations 1")).toThrow(
         /carries no replay block under its title/,
       );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });
 
 describe("markReportTitle (counterfactual disambiguation)", () => {
-  test("appends the marker to the title line only", () => {
-    const dir = mkdtempSync(join(tmpdir(), "mark-title-"));
-    try {
+  test("appends the marker to the title line only", () =>
+    withTempDir("mark-title-", (dir) => {
       writeFileSync(join(dir, "report.md"), "# fuzz-multi-42\n\n## Failures\n\n- leak\n");
       markReportTitle(dir, "redaction counterfactual");
       const lines = readFileSync(join(dir, "report.md"), "utf8").split("\n");
       expect(lines[0]).toBe("# fuzz-multi-42 (redaction counterfactual)");
       expect(lines.slice(1)).toEqual(["", "## Failures", "", "- leak", ""]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });
 
 describe("failureArtifacts (a verdict the runner did not reach)", () => {
@@ -770,9 +738,8 @@ describe("failureArtifacts (a verdict the runner did not reach)", () => {
     ],
   ])(
     "%s is merged into the existing report.md, deduplicated",
-    (_label, runnerFailures, callerFailures, listed) => {
-      const dir = mkdtempSync(join(tmpdir(), "failure-artifacts-"));
-      try {
+    (_label, runnerFailures, callerFailures, listed) =>
+      withTempDir("failure-artifacts-", (dir) => {
         writeFileSync(join(dir, "report.md"), "# stale\n");
         const dumped: ScenarioReport = {
           ...passed,
@@ -786,21 +753,14 @@ describe("failureArtifacts (a verdict the runner did not reach)", () => {
         expect(lines[0]).toBe("# fuzz-oracle-42");
         expect(lines.filter((line) => line.startsWith("- "))).toEqual(listed);
         expect(lines).toContain("Exit code: 1");
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    },
+      }),
   );
 
-  test("the runner's own failures alone leave its report.md untouched", () => {
-    const dir = mkdtempSync(join(tmpdir(), "failure-artifacts-"));
-    try {
+  test("the runner's own failures alone leave its report.md untouched", () =>
+    withTempDir("failure-artifacts-", (dir) => {
       writeFileSync(join(dir, "report.md"), "# the runner's own\n");
       const dumped: ScenarioReport = { ...passed, ok: false, failures: ["leak"], artifactDir: dir };
       expect(failureArtifacts(scenario, dumped, ["leak"])).toBe(dir);
       expect(readFileSync(join(dir, "report.md"), "utf8")).toBe("# the runner's own\n");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });
