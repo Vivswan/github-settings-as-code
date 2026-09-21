@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
-import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
+import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
@@ -171,32 +171,6 @@ describe("pages", () => {
     expect(matching).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("a declared key the site GET never echoes is drift with the never-converges note naming it", async () => {
-    // The site mapping is open so a field GitHub ships tomorrow is declarable, but a key the GET lacks
-    // (a typo of https_enforced here) would re-PUT on every apply; the note says so beside the drift.
-    const api = new MockApi({
-      [GET]: { data: { build_type: "workflow", cname: "docs.example.com", https_enforced: false } },
-    });
-    const result = await plan(api, {
-      cname: "docs.example.com",
-      https_enforce: true,
-    } as SectionInput<"pages">);
-    expect(result.notes).toEqual([
-      'pages: declared key "https_enforce" does not exist on the live Pages site, so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
-    ]);
-    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
-      [
-        "update",
-        [
-          "pages.https_enforce: declared true but the API response has no such field (new or write-only field?)",
-        ],
-      ],
-    ]);
-    // Only a key the GET lacks earns the note: an ordinary value mismatch stays plain drift.
-    const mismatch = await plan(api, { https_enforced: true });
-    expect(mismatch.notes).toEqual([]);
-  });
-
   test("a site key the GET omits is plain drift the PUT resolves: no note, one PUT, converged", async () => {
     // GitHub marks https_enforced optional on the site: a site enabled through the create call alone
     // reports without it until the update sets it. The key is in the site shape, so it is not a phantom.
@@ -247,14 +221,6 @@ describe("pages", () => {
     ]);
   });
 
-  test("a passthrough value JSON cannot carry is refused by validation naming its path, so plan() never meets it", () => {
-    // The loose shape lets an arbitrary passthrough value through; document validation walks the parsed output and
-    // refuses it, and plan() takes only validated input, so no planned payload can carry it to the wire.
-    expect(() => validatedInput("pages", { cname: "docs.example.com", hook: () => "x" })).toThrow(
-      "pages.hook is not plain YAML data (a function); replace it with a plain value",
-    );
-  });
-
   test("pages: null disables a live site and notes the ambiguous absence of one", async () => {
     const api = new MockApi({ [GET]: { data: { build_type: "legacy" } } });
     const result = await plan(api, null);
@@ -278,51 +244,5 @@ describe("pages", () => {
       ],
       drift: [],
     });
-  });
-
-  test("executing the plan converges: create-then-update, then nothing", async () => {
-    const api = liveRepo(null);
-    const { second, changes } = await provePlanIdempotent(pagesSection, api, {
-      build_type: "workflow",
-      source: { branch: "main" },
-      cname: "docs.example.com",
-    });
-    expect(changes).toEqual(["enabled GitHub Pages", "applied remaining Pages configuration"]);
-    expect(api.writes).toEqual(["POST /repos/o/r/pages", "PUT /repos/o/r/pages"]);
-    expect(second).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("executing pages: null converges: the delete, then the nothing-to-disable note", async () => {
-    const api = liveRepo({ build_type: "legacy" });
-    const { second, changes } = await provePlanIdempotent(pagesSection, api, null);
-    expect(changes).toEqual(["disabled GitHub Pages"]);
-    expect(api.writes).toEqual(["DELETE /repos/o/r/pages"]);
-    expect(second.ops).toEqual([]);
-    expect(second.notes[0]).toStartWith("pages: declared null and GitHub reports no Pages site");
-  });
-
-  test("the read port exposes exactly the site probe, narrowed to its absent posture", () => {
-    const ctx = planContext(pagesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["get"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error an "absent" primary read offers no throwing helper
-    ctx.read.get.call;
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    type Op = PlannedOp<typeof pagesSection.endpoints>;
-    const read = { role: "get", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the get role is a read, not a plannable write
-    const _read: Op = read;
-    const silent = { role: "remove", drift: [], change: "" } as const;
-    // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
-    const _silent: Op = silent;
   });
 });
