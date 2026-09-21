@@ -252,6 +252,24 @@ interface Def {
 const defOf = (schema: z.ZodType): Def => (schema as unknown as { _zod: { def: Def } })._zod.def;
 
 /** Every list of mappings the schema declares, by the path LIST_IDENTITY spells (a knob wrapper's `entries` transparent). */
+/** Whether a list of this element is a mapping list: a mapping, or a union whose options include one (a ruleset's rules). */
+function isMappingSchema(schema: z.ZodType): boolean {
+  const def = defOf(schema);
+  switch (def.type) {
+    case "optional":
+    case "nullable":
+    case "default":
+      return isMappingSchema(def.innerType as z.ZodType);
+    case "object":
+    case "record":
+      return true;
+    case "union":
+      return (def.options ?? []).some(isMappingSchema);
+    default:
+      return false;
+  }
+}
+
 function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): void {
   const def = defOf(schema);
   switch (def.type) {
@@ -266,11 +284,8 @@ function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): vo
       }
       return;
     case "array": {
-      let element = def.element as z.ZodType;
-      while (["optional", "nullable", "default"].includes(defOf(element).type)) {
-        element = defOf(element).innerType as z.ZodType;
-      }
-      if (["object", "record"].includes(defOf(element).type)) {
+      const element = def.element as z.ZodType;
+      if (isMappingSchema(element)) {
         out.add(path);
       }
       mappingListPaths(element, `${path}[]`, out);

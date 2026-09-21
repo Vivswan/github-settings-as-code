@@ -42,7 +42,13 @@ const MAIN_RULESET = {
     { type: "deletion" },
     {
       type: "pull_request",
-      parameters: { required_approving_review_count: 1, dismiss_stale_reviews_on_push: true },
+      parameters: {
+        required_approving_review_count: 1,
+        dismiss_stale_reviews_on_push: true,
+        require_code_owner_review: false,
+        require_last_push_approval: false,
+        required_review_thread_resolution: false,
+      },
     },
   ],
 };
@@ -470,6 +476,9 @@ describe("mergeLayers: keyed sections", () => {
                   parameters: {
                     required_approving_review_count: 2,
                     dismiss_stale_reviews_on_push: true,
+                    require_code_owner_review: false,
+                    require_last_push_approval: false,
+                    required_review_thread_resolution: false,
                   },
                 },
                 { type: "non_fast_forward" },

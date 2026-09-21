@@ -10,6 +10,7 @@ import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
 import { normalizeRefName, normalizeRuleset, rulesetsSection } from "./index.js";
+import type { RulesetConfig } from "./schema.js";
 
 describe("normalizeRefName", () => {
   test("branch short name", () => {
@@ -31,7 +32,7 @@ describe("normalizeRuleset", () => {
     const input = {
       name: "build-tags",
       target: "tag" as const,
-      enforcement: "active",
+      enforcement: "active" as const,
       conditions: { ref_name: { include: ["templates/*", "v*"], exclude: [] } },
     };
     const out = normalizeRuleset(input);
@@ -168,7 +169,7 @@ describe("rulesets", () => {
     const declared = {
       name: "main",
       target: "branch" as const,
-      enforcement: "active",
+      enforcement: "active" as const,
       conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
     };
     const clean = { ops: [], notes: [], drift: [] };
@@ -273,7 +274,7 @@ describe("rulesets", () => {
     const misspelled = {
       name: "main",
       target: "branch" as const,
-      enforcement: "active",
+      enforcement: "active" as const,
       enforcemant: "evaluate",
     };
     const result = await plan(api, [misspelled]);
@@ -306,7 +307,7 @@ describe("rulesets", () => {
     const misspelled = {
       name: "main",
       target: "branch" as const,
-      enforcement: "active",
+      enforcement: "active" as const,
       enforcemant: "evaluate",
     };
     const pass = async () =>
@@ -351,10 +352,10 @@ describe("rulesets", () => {
     const BASE = { id: 9, name: "main", target: "branch", enforcement: "active" };
     const HIDDEN_NOTE =
       "rulesets[main]: bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), so drift on it cannot be judged here; grant Administration write to check it";
-    const team = { actor_id: 1, actor_type: "Team", bypass_mode: "always" };
+    const team = { actor_id: 1, actor_type: "Team", bypass_mode: "always" } as const;
     const cases: Array<{
       name: string;
-      declared: Record<string, unknown>[];
+      declared: NonNullable<RulesetConfig["bypass_actors"]>;
       live: Record<string, unknown>;
       expected: Awaited<ReturnType<typeof plan>>;
     }> = [
@@ -533,7 +534,7 @@ describe("rulesets", () => {
 
   test("a repeated rule type is a settings-file error before any read, and a live body repeating one fails loudly naming the ruleset", async () => {
     // Rules pair by type, so a repeat has no pairing; the settings-file case names the fix, the live case the defect.
-    const bare = { name: "main", target: "branch" as const, enforcement: "active" };
+    const bare = { name: "main", target: "branch" as const, enforcement: "active" as const };
     const api = writable({
       [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
       "GET /repos/o/r/rulesets/9": {

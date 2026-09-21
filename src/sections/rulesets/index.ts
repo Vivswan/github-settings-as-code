@@ -127,10 +127,11 @@ function comparableRuleset(live: LiveRuleset): LiveRuleset {
     : { ...live, bypass_actors: live.bypass_actors.map(asStored) };
 }
 
-// Rules pass through verbatim, so a typo'd rules[].type reaches GitHub unchanged and comes back as
-// a 422; the valid types live in the endpoint docs, not here, so they cannot go stale.
+// A rule type the vendored spec does not know passes through verbatim (schema.ts UnknownRule), so a
+// typo'd rules[].type reaches GitHub unchanged and comes back as a 422 naming it; a known type's
+// parameters were already checked at parse, so what is left for GitHub is what only the live repository can judge.
 const RULES_HINT =
-  'Usually this means a rules[].type GitHub does not recognize, or "parameters" that do not fit that rule type (rules pass through verbatim, so a typo reaches GitHub unchanged)';
+  'Usually this means a rules[].type GitHub does not recognize (a type the vendored spec does not know passes through verbatim, so a typo reaches GitHub unchanged), or "parameters" the live repository rejects for that rule type';
 
 const ENDPOINTS = {
   list: {

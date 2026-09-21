@@ -33,6 +33,8 @@ export const LIST_IDENTITY: Readonly<Record<string, string>> = {
   labels: "name",
   rulesets: "name",
   "rulesets[].rules": "type",
+  "rulesets[].rules[].parameters.code_scanning_tools": "tool",
+  "rulesets[].rules[].parameters.required_reviewers": "reviewer.id",
   environments: "name",
   "environments[].deployment_branch_policies": "name",
   "environments[].deployment_protection_rules": "app",
@@ -68,6 +70,12 @@ export const LISTS_AS_WRITTEN: Readonly<Record<string, string>> = {
     "GitHub applies overlapping wildcard rules in creation order, and apply creates the entries in file order",
   "rulesets[].bypass_actors":
     "an actor is a pair of fields GitHub keys, with no one identity field",
+  "rulesets[].rules[].parameters.required_status_checks":
+    "a check is a context and an integration_id GitHub keys together, with no one identity field",
+  "rulesets[].rules[].parameters.workflows":
+    "a workflow is a repository_id, path, and ref GitHub keys together, with no one identity field",
+  "rulesets[].rules[].parameters.dismissal_restriction.allowed_actors":
+    "an actor is a type and an id, with no one identity field",
   "environments[].reviewers": "a reviewer is a type and an id, with no one identity field",
 };
 

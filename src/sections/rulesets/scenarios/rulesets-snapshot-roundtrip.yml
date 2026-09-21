@@ -24,6 +24,10 @@ live_state:
         - type: pull_request
           parameters:
             required_approving_review_count: 2
+            dismiss_stale_reviews_on_push: true
+            require_code_owner_review: false
+            require_last_push_approval: false
+            required_review_thread_resolution: false
       bypass_actors:
         - actor_id: 5
           actor_type: RepositoryRole
@@ -83,6 +87,10 @@ expect:
             - type: pull_request
               parameters:
                 required_approving_review_count: 2
+                dismiss_stale_reviews_on_push: true
+                require_code_owner_review: false
+                require_last_push_approval: false
+                required_review_thread_resolution: false
           bypass_actors:
             - actor_id: 5
               actor_type: RepositoryRole

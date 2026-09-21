@@ -2,7 +2,8 @@ import { rulesetsSection } from "../../../src/sections/rulesets/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
 
 // The all-grades token sees bypass_actors; the server fields fall away; the organization's ruleset
-// is noted, not declared.
+// is noted, not declared. A field GitHub adds to a rule's parameters or a bypass actor (the two
+// `future_*` keys) survives the projection, or the next full-payload update would clear it.
 export const row: Row = {
   section: rulesetsSection,
   live: {
@@ -18,9 +19,21 @@ export const row: Row = {
         conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
         rules: [
           { type: "deletion" },
-          { type: "pull_request", parameters: { required_approving_review_count: 2 } },
+          {
+            type: "pull_request",
+            parameters: {
+              required_approving_review_count: 2,
+              dismiss_stale_reviews_on_push: true,
+              require_code_owner_review: false,
+              require_last_push_approval: false,
+              required_review_thread_resolution: false,
+              future_knob: "kept",
+            },
+          },
         ],
-        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+        bypass_actors: [
+          { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always", future_field: true },
+        ],
         current_user_can_bypass: "always",
         _links: { self: { href: "https://api.github.com/repos/o/r/rulesets/42" } },
         created_at: "2026-01-01T00:00:00Z",
@@ -48,9 +61,26 @@ export const row: Row = {
           conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
           rules: [
             { type: "deletion" },
-            { type: "pull_request", parameters: { required_approving_review_count: 2 } },
+            {
+              type: "pull_request",
+              parameters: {
+                required_approving_review_count: 2,
+                dismiss_stale_reviews_on_push: true,
+                require_code_owner_review: false,
+                require_last_push_approval: false,
+                required_review_thread_resolution: false,
+                future_knob: "kept",
+              },
+            },
           ],
-          bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+          bypass_actors: [
+            {
+              actor_id: 5,
+              actor_type: "RepositoryRole",
+              bypass_mode: "always",
+              future_field: true,
+            },
+          ],
         },
       ],
     },

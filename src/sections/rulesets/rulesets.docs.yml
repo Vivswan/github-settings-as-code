@@ -11,23 +11,30 @@ coverage:
       GET/POST/PUT/DELETE /repos/{owner}/{repo}/rulesets: upsert-by-name, full-payload PUT,
       passthrough except ref-name prefixing (staging -> refs/heads/staging, ~DEFAULT_BRANCH passes
       through) and the actor fill GitHub applies (bypass_mode always, an OrganizationAdmin's
-      actor_id 1). The list carries summaries, so each matched ruleset is read whole before the
-      comparison. A live value the entry omits is drift, and apply refuses the PUT (the
-      [replace-write rule](docs/reference/semantics.md)). New rule
-      types/bypass fields/condition types GitHub ships work day one. Undeclared
-      rulesets kept by default (notes only); the wrapped `_undeclared: delete` form deletes them.
-      Org-sourced rulesets are outside the section (source_type other than Repository). GitHub
-      returns bypass_actors only to a token with write access to the ruleset, so under a token
-      without Administration write a declared bypass_actors is left out of the comparison and noted
-      as not visible instead of reported as drift. Snapshot reads repository rulesets back as entries
-      under the keep default (id, source, links, timestamps, and the caller's bypass state fall
-      away); an inherited organization ruleset is left out with a note, and so is a ruleset whose
-      bypass_actors the token cannot see (kept undeclared), since an entry without the key would
-      clear the bypass list on the next full-payload update.
+      actor_id 1). What the file alone shows wrong is refused at parse, before any request: the
+      enforcement level, a bypass actor's type, mode, and id rules, a "~" ref-name value other than
+      ~ALL or ~DEFAULT_BRANCH, and the parameters of the rule types the vendored OpenAPI spec knows
+      (types, enums in GitHub's casing, integer bounds, required fields). A rule type the spec does
+      not know passes through verbatim, as does a new field on a known rule or a bypass actor, so
+      what GitHub ships tomorrow works today. The list carries summaries, so each matched ruleset is
+      read whole before the comparison. A live value the entry omits is drift, and apply refuses the
+      PUT (the [replace-write rule](docs/reference/semantics.md)). Undeclared rulesets are kept by
+      default (notes only); the wrapped `_undeclared: delete` form deletes them. Org-sourced rulesets
+      are outside the section (source_type other than Repository). GitHub returns bypass_actors only
+      to a token with write
+      access to the ruleset, so under a token without Administration write a declared bypass_actors
+      is left out of the comparison and noted as not visible instead of reported as drift. Snapshot
+      reads repository rulesets back as entries under the keep default (id, source, links,
+      timestamps, and the caller's bypass state fall away); an inherited organization ruleset is
+      left out with a note, and so is a ruleset whose bypass_actors the token cannot see (kept
+      undeclared), since an entry without the key would clear the bypass list on the next
+      full-payload update.
   - area: "[Merge queue](https://docs.github.com/en/rest/repos/rules)"
     notes: >-
-      Configured as the merge_queue rule type inside a branch ruleset; passes through verbatim like
-      every other rule type. No dedicated endpoint exists; rulesets ARE the API for merge queue.
+      Configured as the merge_queue rule type inside a branch ruleset, its parameters typed from the
+      spec (merge_method MERGE, SQUASH, or REBASE; grouping_strategy ALLGREEN or HEADGREEN; the
+      minute and entry bounds), so a mis-cased value is refused at parse instead of as a 422. No dedicated
+      endpoint exists; rulesets ARE the API for merge queue.
   - area: "[Tag protection (modern)](https://docs.github.com/en/rest/repos/rules)"
     notes: >-
       target: tag rulesets cover everything the retired legacy tag-protection API did (legacy API
@@ -42,21 +49,156 @@ schema:
     What the ruleset applies to. Omitted, it is "branch", the default GitHub documents, so a live branch
     ruleset is not drift under an entry without the key.
   RulesetConfig.enforcement: >-
-    "active", "evaluate", or "disabled". Omitted, it is "active" (GitHub requires a value on create; this is
-    the one chosen), so a live active ruleset is not drift under an entry without the key.
+    "active", "evaluate", or "disabled", in that spelling ("enabled" and "Active" are refused at
+    parse). Omitted, it is "active" (GitHub requires a value on create; this is the one chosen), so a
+    live active ruleset is not drift under an entry without the key.
   RulesetConfig.conditions: Which refs the ruleset covers.
   RulesetConfig.conditions.ref_name: Short ref names are auto-prefixed (staging -> refs/heads/staging).
   RulesetConfig.conditions.ref_name.include: >-
-    Ref patterns the ruleset targets (fnmatch; ~DEFAULT_BRANCH and ~ALL are accepted).
-  RulesetConfig.conditions.ref_name.exclude: Ref patterns excluded from the ruleset.
-  RulesetConfig.rules: Rule list, passed through verbatim (future rule types included).
-  RulesetConfig.rules[].parameters: >-
-    The rule's parameters, passed through verbatim as the API documents them for its type.
-  RulesetConfig.rules[].type: >-
-    The rule type, as the rulesets API names it (e.g. pull_request, required_status_checks).
+    Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as
+    written; any other value carrying "~", or one of "^", ":", "\\", space, "..", "@{", or a control
+    character, is refused at parse: git refuses these in a ref name and a ruleset pattern has no use for
+    them. "*", "?", and "[" are pattern syntax and pass.
+  RulesetConfig.conditions.ref_name.exclude: >-
+    Ref patterns excluded from the ruleset; the same character rules apply.
+  RulesetConfig.rules: >-
+    Rule list. A rule type the vendored spec knows has its parameters checked at parse; a type it
+    does not know passes through verbatim, so a rule type GitHub ships tomorrow works today.
   RulesetConfig.bypass_actors: >-
     Who may bypass the ruleset; each actor is one (actor_type, actor_id) pair, bypass_mode
     defaulting to always. An entry without the key leaves a live bypass list as drift and apply
     refuses the PUT; `[]` clears it on purpose. GitHub returns it only to a token
     with write access to the ruleset, so without Administration write check mode notes it instead
     of judging drift.
+  BypassActorConfig: >-
+    One actor that may bypass the ruleset. Integration, RepositoryRole, Team, and User need their
+    numeric actor_id; DeployKey takes none (null); OrganizationAdmin ignores it.
+  BypassActorConfig.actor_type: >-
+    Integration, OrganizationAdmin, RepositoryRole, Team, DeployKey, or User, as GitHub spells them.
+  BypassActorConfig.actor_id: >-
+    The id GitHub assigns the app, role, team, or user. Required for Integration, RepositoryRole,
+    Team, and User; refused for DeployKey (write null or omit it); ignored for OrganizationAdmin.
+  BypassActorConfig.bypass_mode: >-
+    "always" (the default), "pull_request" (bypass only through a pull request; branch rulesets
+    only, and never for a DeployKey), or "exempt" (rules are not run for the actor).
+  RuleConfig: >-
+    One rule of the ruleset: a type the spec knows, with its parameters typed, or any other type,
+    passed through as written.
+  UnknownRule: >-
+    A rule type the vendored spec does not know, passed through verbatim so a type GitHub ships
+    tomorrow reaches it the day it ships; a typo comes back as GitHub's own 422 naming it.
+  UnknownRule.type: The rule type, as the rulesets API names it; none of the types the spec knows.
+  UnknownRule.parameters: The rule's parameters, as the API documents them for its type.
+  Rule<*>.type: The rule type, as the rulesets API names it.
+  Rule<*>.parameters: >-
+    The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.
+  Rule<creation>: Only actors with bypass permission may create matching refs.
+  Rule<update>: Only actors with bypass permission may update matching refs.
+  Rule<update>.parameters.update_allows_fetch_and_merge: >-
+    Whether the branch may still pull changes from its upstream repository.
+  Rule<deletion>: Only actors with bypass permission may delete matching refs.
+  Rule<required_linear_history>: No merge commits may be pushed to matching refs.
+  Rule<merge_queue>: Merges into matching branches go through a merge queue.
+  Rule<merge_queue>.parameters.check_response_timeout_minutes: >-
+    Minutes a required status check may take before it counts as failed (1 to 360).
+  Rule<merge_queue>.parameters.grouping_strategy: >-
+    ALLGREEN (every PR's merge commit must pass all required checks) or HEADGREEN (only the head of
+    the merge group must), in GitHub's upper-case spelling.
+  Rule<merge_queue>.parameters.max_entries_to_build: >-
+    Cap on queued pull requests building at the same time (0 to 100).
+  Rule<merge_queue>.parameters.max_entries_to_merge: Cap on pull requests merged as one group (0 to 100).
+  Rule<merge_queue>.parameters.merge_method: >-
+    MERGE, SQUASH, or REBASE, in GitHub's upper-case spelling (the lower-case pull_request
+    allowed_merge_methods spelling is refused here).
+  Rule<merge_queue>.parameters.min_entries_to_merge: Minimum pull requests merged as one group (0 to 100).
+  Rule<merge_queue>.parameters.min_entries_to_merge_wait_minutes: >-
+    Minutes the queue waits for the minimum group size before merging a smaller group (0 to 360).
+  Rule<required_deployments>: Named environments must deploy successfully before a push lands.
+  Rule<required_deployments>.parameters.required_deployment_environments: >-
+    The environment names that must be deployed to first.
+  Rule<required_signatures>: Commits pushed to matching refs must carry verified signatures.
+  Rule<pull_request>: Changes reach matching branches through a pull request only.
+  Rule<pull_request>.parameters.allowed_merge_methods: >-
+    The merge methods allowed, lower-case merge, squash, rebase (the upper-case merge_queue spelling
+    is refused here); at least one.
+  Rule<pull_request>.parameters.dismiss_stale_reviews_on_push: >-
+    Whether a new reviewable push dismisses earlier approvals.
+  Rule<pull_request>.parameters.dismissal_restriction: Who may dismiss pull request reviews.
+  Rule<pull_request>.parameters.dismissal_restriction.allowed_actors: >-
+    The people, teams, or apps allowed to dismiss reviews.
+  Rule<pull_request>.parameters.dismissal_restriction.enabled: >-
+    Whether review dismissal is restricted to the listed actors.
+  Rule<pull_request>.parameters.require_code_owner_review: >-
+    Whether files with a code owner need that owner's approving review.
+  Rule<pull_request>.parameters.require_last_push_approval: >-
+    Whether the most recent reviewable push must be approved by someone other than its pusher.
+  Rule<pull_request>.parameters.required_approving_review_count: Approving reviews required (0 to 10).
+  Rule<pull_request>.parameters.required_review_thread_resolution: >-
+    Whether every review conversation must be resolved before merging.
+  Rule<pull_request>.parameters.required_reviewers: >-
+    Teams that must review changes to given file patterns (GitHub marks this beta).
+  Rule<required_status_checks>: Named status checks must pass before the ref is updated.
+  Rule<required_status_checks>.parameters.do_not_enforce_on_create: >-
+    Whether a new ref may be created even when a check would otherwise block it.
+  Rule<required_status_checks>.parameters.required_status_checks: The checks that must pass.
+  Rule<required_status_checks>.parameters.strict_required_status_checks_policy: >-
+    Whether a pull request must be tested against the latest target commit.
+  Rule<non_fast_forward>: No force pushes to matching refs.
+  Rule<commit_message_pattern>: Commit messages must match (or not match) a pattern.
+  Rule<commit_author_email_pattern>: Commit author emails must match (or not match) a pattern.
+  Rule<committer_email_pattern>: Committer emails must match (or not match) a pattern.
+  Rule<branch_name_pattern>: Branch names must match (or not match) a pattern.
+  Rule<tag_name_pattern>: Tag names must match (or not match) a pattern.
+  PatternRuleParameters: The pattern and operator the five *_pattern rule types share.
+  PatternRuleParameters.name: How the rule appears when configuring it.
+  PatternRuleParameters.negate: Whether the rule fails when the pattern matches.
+  PatternRuleParameters.operator: >-
+    starts_with, ends_with, contains, or regex, in that spelling.
+  PatternRuleParameters.pattern: The pattern to match.
+  Rule<workflows>: Named workflows must pass before changes merge into matching branches.
+  Rule<workflows>.parameters.do_not_enforce_on_create: >-
+    Whether a new ref may be created even when a workflow would otherwise block it.
+  Rule<workflows>.parameters.workflows: The workflow files that must pass.
+  Rule<code_scanning>: Named code scanning tools must report before the ref is updated.
+  Rule<code_scanning>.parameters.code_scanning_tools: The tools that must provide results.
+  Rule<copilot_code_review>: Copilot code review is requested on new pull requests automatically.
+  Rule<copilot_code_review>.parameters.review_draft_pull_requests: >-
+    Whether drafts are reviewed before they are marked ready.
+  Rule<copilot_code_review>.parameters.review_on_push: Whether each new push is reviewed.
+  Rule<license_compliance_scanning>: >-
+    Added or changed dependencies must comply with the organization's license policy.
+  Rule<file_path_restriction>: Commits touching the listed paths are refused.
+  Rule<file_path_restriction>.parameters.restricted_file_paths: The file and folder paths refused.
+  Rule<max_file_path_length>: Commits with file paths over the length cap are refused.
+  Rule<max_file_path_length>.parameters.max_file_path_length: >-
+    The most characters a file path may have (1 to 32767).
+  Rule<file_extension_restriction>: Commits adding files with the listed extensions are refused.
+  Rule<file_extension_restriction>.parameters.restricted_file_extensions: The file extensions refused.
+  Rule<max_file_size>: Commits with a file over the size cap are refused.
+  Rule<max_file_size>.parameters.max_file_size: >-
+    The largest file allowed, in megabytes (1 to 100); Git LFS objects are exempt.
+  ReviewDismissalActorConfig: One actor allowed to dismiss pull request reviews.
+  ReviewDismissalActorConfig.id: The actor's id.
+  ReviewDismissalActorConfig.type: User, Team, IntegrationInstallation, or RepositoryRole.
+  RequiredReviewerConfig: A team and the file patterns whose changes it must approve.
+  RequiredReviewerConfig.file_patterns: fnmatch patterns of the files the team must review.
+  RequiredReviewerConfig.minimum_approvals: >-
+    Approvals required from the team; zero adds the team as a reviewer without requiring approval.
+  RequiredReviewerConfig.reviewer: The reviewing team.
+  RequiredReviewerConfig.reviewer.id: The team's id.
+  RequiredReviewerConfig.reviewer.type: Always "Team".
+  StatusCheckConfig: One required status check.
+  StatusCheckConfig.context: The status check context name that must be present on the commit.
+  StatusCheckConfig.integration_id: The GitHub App the check must come from, when pinned.
+  WorkflowFileConfig: One workflow that must run for the rule to pass.
+  WorkflowFileConfig.path: The path to the workflow file.
+  WorkflowFileConfig.ref: The branch or tag of the workflow file to use.
+  WorkflowFileConfig.repository_id: The id of the repository that holds the workflow.
+  WorkflowFileConfig.sha: The commit of the workflow file to use.
+  CodeScanningToolConfig: One tool that must provide code scanning results.
+  CodeScanningToolConfig.alerts_threshold: >-
+    The alert severity that blocks the update: none, errors, errors_and_warnings, or all.
+  CodeScanningToolConfig.security_alerts_threshold: >-
+    The security severity that blocks the update: none, critical, high_or_higher,
+    medium_or_higher, or all.
+  CodeScanningToolConfig.tool: The code scanning tool's name.
