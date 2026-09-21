@@ -51,12 +51,9 @@ const YAML_NEAR_MISSES = [
 ].join("\n");
 
 describe("markerSyntaxFor", () => {
-  test.each<[path: string, syntax: MarkerSyntax]>([
-    ["README.md", "html"],
-    ["action.yml", "yaml"],
-    [".github/workflows/x.yaml", "yaml"],
-  ])("%s uses %s markers", (path, syntax) => {
-    expect(markerSyntaxFor(path)).toBe(syntax);
+  test("a .yaml file uses yaml markers", () => {
+    // The .md and .yml entries carry every committed page and action.yml through build:check; no tracked .yaml file carries a region.
+    expect(markerSyntaxFor(".github/workflows/x.yaml")).toBe("yaml");
   });
 
   test("a file type without a marker syntax throws instead of guessing", () => {
