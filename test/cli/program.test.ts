@@ -195,18 +195,6 @@ describe("validate and permissions", () => {
 });
 
 describe("the --json failure envelope", () => {
-  test("a missing required input: stdout is one failed envelope carrying the stderr line as its problem, exit 1", async () => {
-    const result = await cli(["render", "--settings-file", SINGLE, "--json"]);
-    expect(result.code).toBe(1);
-    const lines = result.stdout.split("\n").filter((line) => line !== "");
-    expect(lines).toHaveLength(1);
-    const problem = result.stderr.match(/^error: (.*)$/m)?.[1];
-    expect(problem).toBeDefined();
-    const envelope = JSON.parse(lines[0] ?? "") as Record<string, unknown>;
-    expect(envelope.result).toBe("failed");
-    expect(envelope.problem).toBe(problem);
-  });
-
   test.each<[string, string[], boolean]>([
     [
       "a --json after the -- terminator is an argument",

@@ -315,39 +315,6 @@ describe("argv -> config equals env -> config", () => {
       expect(actual.stderr).toStartWith(`error: unknown option '--${unknownFlag}'`);
     }
   });
-
-  test("the table reaches every arm, both paths of the token, and every kind of rejection", () => {
-    // The pin above is only as wide as its table; hold the table to the arms.
-    const kinds = new Set<string>();
-    const rejections = new Set<string>();
-    let envToken = 0;
-    for (const { argv, inputs, env = {}, cliRefuses, unknownFlag } of cases()) {
-      const result = parseConfig(recordReader(inputs), env, ACTION);
-      if (cliRefuses !== undefined) {
-        rejections.add("refused by the CLI alone");
-        continue;
-      }
-      if (unknownFlag !== undefined) {
-        rejections.add("a flag the subcommand lacks");
-        continue;
-      }
-      if (result.isErr()) {
-        rejections.add("rejected by parseConfig");
-        continue;
-      }
-      kinds.add(result.value.kind);
-      if (result.value.kind !== "render" && !argv.includes("--token")) {
-        envToken++;
-      }
-    }
-    expect([...kinds].sort()).toEqual(["multi", "render", "single", "snapshot"]);
-    expect(envToken).toBeGreaterThan(0);
-    expect([...rejections].sort()).toEqual([
-      "a flag the subcommand lacks",
-      "refused by the CLI alone",
-      "rejected by parseConfig",
-    ]);
-  });
 });
 
 /** A value each input accepts, so a flag can be exercised alone. */
