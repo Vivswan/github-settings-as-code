@@ -56,7 +56,7 @@ export interface DeltaOptions {
    * item key to pair by; a missing or repeated key is a declaration bug.
    *
    * a list not named here  -> object items pair by shape, others by value
-   * matchBy omitted        -> lists fall back to the legacy `type` sniffing subsetDiff callers rely on
+   * matchBy omitted        -> lists fall back to the default `type` pairing subsetDiff callers use
    */
   readonly matchBy?: Readonly<Record<string, MatchKey>>;
   /**
@@ -241,7 +241,7 @@ function walkList(
     return;
   }
   if (opts.matchBy === undefined) {
-    // Legacy sniffing pairs by `type` only when types are unique on both sides (ruleset rules); environment reviewers
+    // The default pairing matches by `type` only when types are unique on both sides (ruleset rules); environment reviewers
     // repeat types and fall through to shape pairing below.
     const desiredTypes = desired.map(typeOf);
     const liveTypes = live.map(typeOf);

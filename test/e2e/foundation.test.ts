@@ -301,21 +301,7 @@ describe("scenario schema", () => {
     ).toThrow(/expect\.fixpoint/);
   });
 
-  test.each(["converges", "apply_idempotent"] as const)(
-    "the retired boolean expect.%s: true fails naming fixpoint and the rewrite",
-    (old) => {
-      expect(() =>
-        parseScenario(
-          { name: "x", settings: {}, expect: { exit_code: 0, [old]: true } },
-          "old.yml",
-        ),
-      ).toThrow(
-        `Unrecognized key: "${old}"; the expect key "${old}" was renamed to "fixpoint" - write fixpoint: ${old} and rewrite the scenario`,
-      );
-    },
-  );
-
-  test("an unknown expect key that is not a retired boolean stays a bare unrecognized-key issue", () => {
+  test("an unknown expect key stays a bare unrecognized-key issue", () => {
     expect(() =>
       parseScenario({ name: "x", settings: {}, expect: { exit_code: 0, bogus: true } }, "b.yml"),
     ).toThrow(/expect: Unrecognized key: "bogus"$/m);

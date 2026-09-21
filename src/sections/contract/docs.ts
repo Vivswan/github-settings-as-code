@@ -7,7 +7,6 @@ import { readFileSync } from "node:fs";
 import { err, ok, type Result } from "neverthrow";
 import { parse } from "yaml";
 import { z } from "zod";
-import { renamedKeyError } from "../shared/renamed-key.js";
 
 /** A role name as the section's ENDPOINTS or graphql dictionary spells it. */
 const Role = z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/, "a role is the declaration's own key");
@@ -42,32 +41,22 @@ export type CoverageRow = z.infer<typeof CoverageRow>;
  */
 const SchemaDescriptions = z.record(z.string().min(1), z.string().min(1)).readonly();
 
-const sectionDocsKeyError = renamedKeyError(
-  "Sections table cells",
-  "readme",
-  "sections_table",
-  "(the table renders into docs/reference/sections.md)",
-);
-
 export const SectionDocs = z
-  .strictObject(
-    {
-      /** The section's two authored cells in the Sections table on docs/reference/sections.md. */
-      sections_table: z
-        .strictObject({
-          /** The Endpoints cell: the API surface the section calls, in prose. */
-          endpoints: z.string().min(1),
-          /** The Notes cell: semantics, caveats, and the knob in passing. */
-          notes: z.string().min(1),
-        })
-        .readonly(),
-      // At least one: a section with no coverage row does not exist to the inventory, so the shape refuses [].
-      coverage: z.tuple([CoverageRow], CoverageRow).readonly(),
-      /** The section's own property on the document root and every definition its slice declares. */
-      schema: SchemaDescriptions,
-    },
-    { error: sectionDocsKeyError },
-  )
+  .strictObject({
+    /** The section's two authored cells in the Sections table on docs/reference/sections.md. */
+    sections_table: z
+      .strictObject({
+        /** The Endpoints cell: the API surface the section calls, in prose. */
+        endpoints: z.string().min(1),
+        /** The Notes cell: semantics, caveats, and the knob in passing. */
+        notes: z.string().min(1),
+      })
+      .readonly(),
+    // At least one: a section with no coverage row does not exist to the inventory, so the shape refuses [].
+    coverage: z.tuple([CoverageRow], CoverageRow).readonly(),
+    /** The section's own property on the document root and every definition its slice declares. */
+    schema: SchemaDescriptions,
+  })
   .readonly();
 export type SectionDocs = z.infer<typeof SectionDocs>;
 
