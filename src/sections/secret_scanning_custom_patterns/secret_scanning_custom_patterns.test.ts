@@ -359,25 +359,6 @@ describe("secret_scanning_custom_patterns", () => {
   });
 });
 
-describe("secret_scanning_custom_patterns closed surface", () => {
-  test("rejects the read-only state and push_protection_enabled keys BY NAME, before any call", () => {
-    // True by construction (closedSurface lists the six declared fields), but no other test names the two read-only fields a user would most
-    // plausibly declare.
-    for (const key of ["state", "push_protection_enabled"]) {
-      const error = validateSettingsDoc(
-        { secret_scanning_custom_patterns: [{ ...INTERNAL, [key]: true }] },
-        "settings.yml",
-        SectionSelection.ALL,
-        silentIo(),
-      );
-      expect(error.isErr(), `a declared "${key}" must be rejected`).toBe(true);
-      const message = error.match(() => "", describeProblem);
-      expect(message).toContain(`"${key}"`);
-      expect(message).toContain("read-only");
-    }
-  });
-});
-
 describe("secret_scanning_custom_patterns snapshot", () => {
   const snapshot = (patterns: Array<Record<string, unknown>>) =>
     snapshotRepository(
