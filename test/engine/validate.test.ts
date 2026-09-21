@@ -45,10 +45,66 @@ describe("section shape validation", () => {
     [
       "a null where the handler dereferences a mapping",
       { pages: { source: null } },
-      /^pages\.source: .*expected object/,
+      /^pages\.source has no empty state; write a mapping of its fields$/,
     ],
   ])("the fields handlers dereference are shape-checked: %s", (_what, doc, issue) => {
     expect(issuesOf(doc)).toEqual([expect.stringMatching(issue)]);
+  });
+
+  // The cascade's null is the EMPTY value on GitHub, so a key with no empty state refuses it naming the values that exist;
+  // a whole section takes null only where null is its off state. The messages are the fix, not zod's type prose.
+  test.each<[string, Record<string, unknown>, string]>([
+    [
+      "a boolean",
+      { repository: { enable_git_lfs: null } },
+      "repository.enable_git_lfs has no empty state; write true or false",
+    ],
+    [
+      "an enum",
+      { actions: { default_workflow_permissions: null } },
+      'actions.default_workflow_permissions has no empty state; write one of "read", "write"',
+    ],
+    [
+      "a string inside a keyed entry",
+      { labels: [{ name: "bug", description: null }] },
+      "labels[0].description has no empty state; write a string",
+    ],
+    [
+      "a list",
+      { rulesets: [{ name: "main", bypass_actors: null }] },
+      "rulesets[0].bypass_actors has no empty state; write a list ([] for none)",
+    ],
+    [
+      "a union of a string and a list",
+      { repository: { topics: null } },
+      "repository.topics has no empty state; write a string, or a list ([] for none)",
+    ],
+    [
+      "a nested list section",
+      { environments: [{ name: "prod", variables: null }] },
+      "environments[0].variables has no empty state; write a list of entries ([] for none)",
+    ],
+    [
+      "a whole mapping section",
+      { repository: null },
+      "repository: null has no meaning; remove the section or declare its fields",
+    ],
+    [
+      "a whole list section",
+      { labels: null },
+      "labels: null has no meaning; remove the section or declare its entries",
+    ],
+  ])("a null a key does not admit names the legal values: %s", (_what, doc, issue) => {
+    expect(issuesOf(doc)).toEqual([issue]);
+  });
+
+  test("a shape's own diagnostic for a null keeps its words: no value would make the key legal", () => {
+    // The environments slice refuses a singular `secret` key by name; the null rewrite has nothing truer to say.
+    expect(issuesOf({ environments: [{ name: "prod", secret: null }] })).toEqual([
+      expect.stringMatching(
+        /^environments\[0\]\.secret: environment secrets belong under the entry's `secrets` list/,
+      ),
+    ]);
   });
 
   test("the happy shapes pass, and the parsed document carries the unknown keys through untouched", () => {
@@ -84,7 +140,7 @@ describe("file-only checks run inside document validation", () => {
       }),
     ).toEqual([
       'labels[1].name: "Bug" names the same label as "bug" declared earlier; keep exactly one entry per label',
-      expect.stringMatching(/^pages\.source: .*expected object/),
+      "pages.source has no empty state; write a mapping of its fields",
     ]);
   });
 
@@ -488,7 +544,7 @@ describe("every parse error in a document is reported in one run", () => {
       { labels: [{ name: 1 }], pages: { source: null } },
       [
         /^labels\[0\]\.name: Invalid input: expected string/,
-        /^pages\.source: Invalid input: expected object/,
+        "pages.source has no empty state; write a mapping of its fields",
       ],
     ],
   ])("%s", (_what, doc, issues) => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { describeOptOut, stripNulls } from "../../src/engine/layers.js";
+import { describeRemoval, standaloneView } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
@@ -14,6 +14,7 @@ import {
   type Json,
   LAYERING_DIRECTIVES,
   type LiveWitnessKind,
+  REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
 import {
@@ -29,11 +30,11 @@ import {
   INVALID_SETTINGS_CASES,
   MERGE_FEATURES,
   MERGE_REFUSAL_KINDS,
-  markerNullsDropped,
   mergeFeaturesOf,
   NON_MAPPING_YAML,
   ORG_GATED_SECTIONS,
   SECTION_PRIMARY_READ,
+  standaloneViewOf,
   UNPARSEABLE_YAML,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
@@ -1164,11 +1165,12 @@ describe("genMergeScenario", () => {
   });
 });
 
-describe("markerNullsDropped (the harness's per-layer view)", () => {
-  test("agrees with the engine's stripNulls on every null placement a layer can spell", () => {
-    // The harness's view decides which generated layers are valid on their own; a placement it judges differently from
+describe("standaloneViewOf (the harness's per-layer view)", () => {
+  test("agrees with the engine's standaloneView: the two directives go, every value stays, null included", () => {
+    // The harness's view decides which generated layers are valid on their own; a document it judges differently from
     // the engine would either hide a fold the run refuses or refuse a layer the run accepts.
     const doc: Json = {
+      _layering: "replace",
       pages: null,
       interaction_limits: null,
       actions: null,
@@ -1176,18 +1178,33 @@ describe("markerNullsDropped (the harness's per-layer view)", () => {
       labels: {
         _undeclared: null,
         _layering: "deep",
-        entries: [{ name: "bug", description: null }],
+        entries: [
+          { name: "bug", description: null },
+          { name: "old", [REMOVE_KEY]: true },
+        ],
       },
-      // No wrapper directive: this one follows the run, so shallow and replace copy its entries as written and still drop the null knob.
-      rulesets: { _undeclared: null, entries: [{ name: "main", bypass_actors: null }] },
+      rulesets: [
+        {
+          name: "main",
+          bypass_actors: null,
+          rules: [{ type: "deletion", [REMOVE_KEY]: true }, { type: "x" }],
+        },
+        { name: "gone", [REMOVE_KEY]: true },
+      ],
       milestones: { _layering: "shallow", entries: [{ title: "v1", due_on: null }] },
       environments: [
         {
           name: "prod",
           wait_timer: null,
           deployment_branch_policy: null,
-          variables: { _undeclared: null, entries: [{ name: "A", value: null }] },
-          secrets: [{ name: "B", value: null }],
+          variables: {
+            _undeclared: "keep",
+            entries: [
+              { name: "A", value: null },
+              { name: "B", [REMOVE_KEY]: true },
+            ],
+          },
+          secrets: [{ name: "C", [REMOVE_KEY]: true }],
         },
       ],
       branches: [{ name: "main", protection: null, extra: null }],
@@ -1195,11 +1212,10 @@ describe("markerNullsDropped (the harness's per-layer view)", () => {
       // An own __proto__ key, as a YAML file can spell it: a document field, not the entry's prototype.
       ...(JSON.parse('{"actions": {"__proto__": {"a": null, "b": 1}}}') as Json),
     };
-    for (const run of LAYERING_DIRECTIVES) {
-      const view = markerNullsDropped(doc, run);
-      expect(view, run).toEqual(stripNulls(doc, run) as Json);
-      expect(Object.hasOwn(view.actions as object, "__proto__"), run).toBe(true);
-    }
+    const view = standaloneViewOf(doc);
+    expect(view).toEqual(standaloneView(doc) as Json);
+    expect(Object.hasOwn(view.actions as object, "__proto__")).toBe(true);
+    expect(JSON.stringify(view)).not.toContain(REMOVE_KEY);
   });
 });
 
@@ -1272,40 +1288,24 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
   });
 });
 
-describe("mergeFeaturesOf (a top-level null read the way the fold writes it)", () => {
-  // On pages and interaction_limits the fold writes a higher null as the section's value, so the section stays held:
-  // the null is never a deletion, and a later declaration over it is an override. Every other section keeps the
-  // marker reading, pinned by the controls.
+describe("mergeFeaturesOf (nulls and removals read the way the fold writes them)", () => {
+  // A higher null is the section's or the key's value, so the section stays held and a later declaration over it is an
+  // override; a removal is its own axis, at the top level and inside a deep-merged ruleset.
   const site = { build_type: "workflow", source: { branch: "main", path: "/" } };
   const cases: Array<[string, Record<string, unknown>[], string[]]> = [
     [
-      "a null over a held pages declaration stays, and deletes nothing",
+      "a null over a held pages declaration is the section's value",
       [{ pages: site }, { pages: null }],
-      ["null-stays"],
+      ["null-section"],
     ],
     [
-      "a pages declaration above the kept null overrides it",
+      "a pages declaration above the null overrides it",
       [
         { pages: site },
         { pages: null },
         { pages: { build_type: "legacy", source: { branch: "gh-pages", path: "/" } } },
       ],
-      ["override", "null-stays"],
-    ],
-    [
-      "a null over held interaction limits stays too",
-      [{ interaction_limits: { limit: "existing_users" } }, { interaction_limits: null }],
-      ["null-stays"],
-    ],
-    [
-      "control: a null over held labels deletes them",
-      [{ labels: [{ name: "a" }] }, { labels: null }],
-      ["null-deletes"],
-    ],
-    [
-      "control: a null over nothing on a marker section drops",
-      [{ pages: site }, { labels: null }],
-      ["null-drops"],
+      ["override", "null-section"],
     ],
   ];
   test.each(cases)("%s", (_name, docs, expected) => {
@@ -1336,10 +1336,6 @@ describe("merge oracle against the curated merge scenarios", () => {
     "%s: the oracle's fold reproduces expect.rendered",
     (_name, file) => {
       const scenario = parseScenario(parseYaml(readFileSync(file, "utf8")), file);
-      // Without a pinned document this comparison is vacuous; the corpus count above cannot tell.
-      if (scenario.expect.rendered === undefined) {
-        throw new Error(`${file}: a curated render scenario must pin expect.rendered`);
-      }
       const layers = [
         ...(scenario.settings_layers ?? []).map((doc, i) => ({ name: `layer-${i}.yml`, doc })),
         { name: "settings.yml", doc: scenario.settings as Record<string, unknown> },
@@ -1349,13 +1345,22 @@ describe("merge oracle against the curated merge scenarios", () => {
         layering: scenario.inputs?.layering ?? "deep",
         features: [],
       });
+      // A refusal scenario pins the exit and the message; the oracle must refuse the same layer.
+      if (scenario.expect.exit_code !== 0) {
+        expect(prediction).toEqual({ kind: "refused", layer: "settings.yml" });
+        return;
+      }
+      // Without a pinned document this comparison is vacuous; the corpus count above cannot tell.
+      if (scenario.expect.rendered === undefined) {
+        throw new Error(`${file}: a curated render scenario must pin expect.rendered`);
+      }
       expect(prediction.kind).toBe("merged");
       if (prediction.kind === "merged") {
         expect(prediction.merged).toEqual(scenario.expect.rendered);
         // Every notice the fold predicts is one the scenario pins on stdout, in the action's words (the e2e run itself
         // catches the converse, a pinned line the engine never prints).
         for (const notice of prediction.notices) {
-          expect(scenario.expect.stdout_contains ?? []).toContain(describeOptOut(notice));
+          expect(scenario.expect.stdout_contains ?? []).toContain(describeRemoval(notice));
         }
       }
     },

@@ -60,9 +60,9 @@ const UNORDERED_MERGED = [
   "",
 ].join("\n");
 
-/** Every e2e scenario mode: render runs, as the runner lays it out: the layers below, the scenario's settings on top. */
+/** Every e2e scenario mode: render writes a file for (a refused stack writes none), as the runner lays it out: the layers below, the scenario's settings on top. */
 const SCENARIO_STACKS: [string, Stack, Layering][] = loadScenarios(scenarioRoots())
-  .filter((scenario) => scenario.inputs?.mode === "render")
+  .filter((scenario) => scenario.inputs?.mode === "render" && scenario.expect.exit_code === 0)
   .map((scenario) => [
     scenario.name,
     [

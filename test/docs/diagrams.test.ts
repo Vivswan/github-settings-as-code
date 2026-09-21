@@ -198,12 +198,12 @@ describe("diagram guard (mutation checks)", () => {
 
   test("accepts a real path with its exported symbols", () => {
     expect(
-      diagramProblems(page("src/engine/layers.ts<br>stripNulls() mergeLayers()"), ROOT),
+      diagramProblems(page("src/engine/layers.ts<br>standaloneView() mergeLayers()"), ROOT),
     ).toEqual([]);
   });
 
   test("accepts a caption before the path, and symbols split across segments and commas", () => {
-    const label = "the fold<br>src/engine/layers.ts mergeLayers()<br>stripNulls(), Layer";
+    const label = "the fold<br>src/engine/layers.ts mergeLayers()<br>standaloneView(), Layer";
     expect(diagramProblems(page(label), ROOT)).toEqual([]);
   });
 

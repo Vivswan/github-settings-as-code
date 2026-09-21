@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { describeOptOut, mergeLayers, type OptOutNotice } from "../../src/engine/layers.js";
+import { describeRemoval, mergeLayers, type RemovalNotice } from "../../src/engine/layers.js";
+import { foldLayers } from "../../src/flows/layers.js";
+import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { LIST_SECTIONS } from "../../src/schema.js";
 import { listLayering } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
-import { type Json, LAYERING_KEY, type LayeringDirective, UNDECLARED_KEY } from "./gen-support.js";
+import {
+  type Json,
+  LAYERING_KEY,
+  type LayeringDirective,
+  REMOVE_KEY,
+  UNDECLARED_KEY,
+} from "./gen-support.js";
 import type { MergeLayer, MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
   type AbortVerdict,
@@ -1121,7 +1129,7 @@ function stack(...docs: Record<string, unknown>[]): MergeLayer[] {
 function engineNotices(
   layers: readonly MergeLayer[],
   layering: LayeringDirective = "deep",
-): OptOutNotice[] {
+): RemovalNotice[] {
   return mergeLayers(layers, { layering }).match(
     (folded) => folded.notices,
     (problem) => {
@@ -1174,49 +1182,29 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     ]);
   });
 
-  test("a null removes a lower declaration with a notice, stays when nothing below declares the key, and is the value where the section takes null", () => {
-    const { merged, notices } = foldMergeLayers(
-      stack(
-        {
-          pages: { build_type: "workflow" },
-          repository: { description: "x", homepage: "h" },
-          actions: { enabled: true },
-        },
-        { pages: null, repository: { homepage: null }, interaction_limits: null, actions: null },
-      ),
-      "deep",
+  test("a higher null wins at every depth and is written as the value, with no notice; the engine agrees", () => {
+    const layers = stack(
+      {
+        pages: { build_type: "workflow" },
+        repository: { description: "x", homepage: "h" },
+        actions: { enabled: true },
+      },
+      { pages: null, repository: { homepage: null }, interaction_limits: null, actions: null },
     );
-    expect(merged).toEqual({
-      repository: { description: "x" },
+    const expected = {
+      repository: { description: "x", homepage: null },
+      actions: null,
       interaction_limits: null,
       pages: null,
+    };
+    expect(foldMergeLayers(layers, "deep")).toEqual({ merged: expected, notices: [] });
+    expect(mergeLayers(layers, { layering: "deep" })._unsafeUnwrap()).toEqual({
+      settings: expected,
+      notices: [],
     });
-    expect(notices.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
-      { layer: "settings.yml", path: "actions" },
-      { layer: "settings.yml", path: "repository.homepage" },
-    ]);
   });
 
-  test.each([
-    ["one layer", stack({ repository: { has_wiki: true }, labels: null, pages: null })],
-    [
-      "a stack declaring it nowhere below",
-      stack({ repository: { has_wiki: true } }, { labels: null, pages: null }),
-    ],
-  ])(
-    "a top-level null over nothing drops unless null is the section's value, over %s; the engine agrees",
-    (_case, layers) => {
-      const expected = { repository: { has_wiki: true }, pages: null };
-      const oracle = foldMergeLayers(layers, "deep");
-      expect(oracle).toEqual({ merged: expected, notices: [] });
-      expect(mergeLayers(layers, { layering: "deep" })._unsafeUnwrap()).toEqual({
-        settings: expected,
-        notices: [],
-      });
-    },
-  );
-
-  test("a lower null is not a declaration: nulling it again earns no notice, declaring over it replaces", () => {
+  test("a null is a value below too: nulling it again changes nothing, declaring over it replaces", () => {
     const twice = foldMergeLayers(stack({ pages: null }, { pages: null }), "deep");
     expect(twice.merged).toEqual({ pages: null });
     expect(twice.notices).toEqual([]);
@@ -1421,6 +1409,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
           {
             name: "main",
             target: "branch",
+            enforcement: null,
             rules: [
               { type: "deletion" },
               { type: "non_fast_forward", parameters: { a: 1 } },
@@ -1431,10 +1420,10 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         ],
       },
     });
-    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[0].enforcement" }]);
+    expect(notices).toEqual([]);
   });
 
-  test("a notice names a merged entry by its index in the higher layer's list, not its key or lower slot", () => {
+  test("a removal notice names the entry by its index in the higher layer's list, not its key or lower slot; the engine agrees", () => {
     const layers = stack(
       {
         rulesets: [
@@ -1442,45 +1431,46 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
           { name: "lock-1", target: "branch", conditions: { ref_name: { include: ["~ALL"] } } },
         ],
       },
-      { rulesets: [{ name: "lock-1", conditions: null }] },
+      { rulesets: [{ name: "lock-1", [REMOVE_KEY]: true }] },
     );
     const { merged, notices } = foldMergeLayers(layers, "deep");
     expect(merged).toEqual({
-      rulesets: {
-        [UNDECLARED_KEY]: "keep",
-        entries: [
-          { name: "a", target: "branch" },
-          { name: "lock-1", target: "branch" },
-        ],
-      },
+      rulesets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "a", target: "branch" }] },
     });
-    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[0].conditions" }]);
-    expect(notices.map(describeOptOut)).toEqual([
-      "settings.yml: null removed rulesets[0].conditions declared by a lower layer",
+    expect(notices).toEqual([{ layer: "settings.yml", path: "rulesets[0]" }]);
+    expect(notices.map(describeRemoval)).toEqual([
+      "settings.yml: rulesets[0] carries _remove: true and dropped the entry a lower layer declared under its key",
     ]);
     // The engine's fold names the same site: the oracle's path is the one the action prints, not
     // merely a consistent spelling of its own.
     expect(engineNotices(layers)).toEqual(notices);
   });
 
-  test("a nested null inside a merged entry is named under the higher index, rules included", () => {
-    // Rules pair by type; this stack nulls a whole rule-level field, so the notice stops at the rule.
+  test("a nested removal inside a merged entry is named under the higher index, in either nested form", () => {
     const layers = stack(
       {
         rulesets: [
+          { name: "main", target: "branch", rules: [{ type: "deletion" }, { type: "x" }] },
+        ],
+        environments: [
           {
-            name: "main",
-            target: "branch",
-            rules: [{ type: "deletion" }],
-            conditions: { ref_name: { include: ["~ALL"], exclude: [] } },
+            name: "prod",
+            variables: {
+              [UNDECLARED_KEY]: "keep",
+              entries: [
+                { name: "A", value: "1" },
+                { name: "B", value: "2" },
+              ],
+            },
           },
         ],
       },
       {
         rulesets: [
           { name: "tags", target: "tag" },
-          { name: "main", rules: null, conditions: { ref_name: { exclude: null } } },
+          { name: "main", rules: [{ type: "deletion", [REMOVE_KEY]: true }] },
         ],
+        environments: [{ name: "Prod", variables: [{ name: "a", [REMOVE_KEY]: true }] }],
       },
     );
     const { merged, notices } = foldMergeLayers(layers, "deep");
@@ -1488,28 +1478,30 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       rulesets: {
         [UNDECLARED_KEY]: "keep",
         entries: [
-          { name: "main", target: "branch", conditions: { ref_name: { include: ["~ALL"] } } },
+          { name: "main", target: "branch", rules: [{ type: "x" }] },
           { name: "tags", target: "tag" },
         ],
       },
+      environments: [
+        {
+          name: "Prod",
+          variables: { [UNDECLARED_KEY]: "keep", entries: [{ name: "B", value: "2" }] },
+        },
+      ],
     });
     expect(notices).toEqual([
-      { layer: "settings.yml", path: "rulesets[1].rules" },
-      { layer: "settings.yml", path: "rulesets[1].conditions.ref_name.exclude" },
-    ]);
-    expect(notices.map(describeOptOut)).toEqual([
-      "settings.yml: null removed rulesets[1].rules declared by a lower layer",
-      "settings.yml: null removed rulesets[1].conditions.ref_name.exclude declared by a lower layer",
+      { layer: "settings.yml", path: "rulesets[1].rules[0]" },
+      { layer: "settings.yml", path: "environments[0].variables[0]" },
     ]);
     expect(engineNotices(layers)).toEqual(notices);
   });
 
-  test("a swapped entry (labels under shallow) earns no notice for the nulls inside it; merged under deep, the null deletes with one", () => {
+  test("a null inside an entry is the field's value under shallow and deep alike, with no notice; the engine agrees", () => {
     const layers = stack(
       {
         labels: [
           { name: "a", color: "111111" },
-          { name: "b", description: "x" },
+          { name: "b", description: "x", color: "222222" },
         ],
       },
       { labels: [{ name: "b", description: null }] },
@@ -1530,11 +1522,96 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     expect(deep.merged).toEqual({
       labels: {
         [UNDECLARED_KEY]: "delete",
-        entries: [{ name: "a", color: "111111" }, { name: "b" }],
+        entries: [
+          { name: "a", color: "111111" },
+          { name: "b", description: null, color: "222222" },
+        ],
       },
     });
-    expect(deep.notices).toEqual([{ layer: "settings.yml", path: "labels[0].description" }]);
-    expect(engineNotices(layers, "deep")).toEqual(deep.notices);
+    expect(deep.notices).toEqual([]);
+    expect(engineNotices(layers, "deep")).toEqual([]);
+  });
+
+  test.each<LayeringDirective>(["shallow", "deep"])(
+    "a removal under %s drops a held label through its case fold or its rename target, and the next layer may declare the key anew; the engine agrees",
+    (layering) => {
+      const layers = stack(
+        {
+          labels: [
+            { name: "Bug", color: "111111" },
+            { name: "docs", new_name: "documentation" },
+          ],
+        },
+        {
+          labels: [
+            { name: "bug", [REMOVE_KEY]: true },
+            { name: "documentation", [REMOVE_KEY]: true },
+          ],
+        },
+        { labels: [{ name: "bug", color: "333333" }] },
+      );
+      const oracle = foldMergeLayers(layers, layering);
+      expect(oracle).toEqual({
+        merged: {
+          labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "bug", color: "333333" }] },
+        },
+        notices: [
+          { layer: "layer-1.yml", path: "labels[0]" },
+          { layer: "layer-1.yml", path: "labels[1]" },
+        ],
+      });
+      expect(mergeLayers(layers, { layering })._unsafeUnwrap()).toEqual({
+        settings: oracle.merged,
+        notices: oracle.notices,
+      });
+    },
+  );
+
+  test.each<[string, LayeringDirective, Record<string, unknown>]>([
+    ["a removal no lower layer matches", "deep", { labels: [{ name: "zz", [REMOVE_KEY]: true }] }],
+    [
+      "a nested removal in a new entry",
+      "deep",
+      { rulesets: [{ name: "new", rules: [{ type: "t", [REMOVE_KEY]: true }] }] },
+    ],
+    [
+      "a nested removal under shallow",
+      "shallow",
+      { rulesets: [{ name: "r", rules: [{ type: "t", [REMOVE_KEY]: true }] }] },
+    ],
+    [
+      "a removal in a section nothing below declares",
+      "deep",
+      { milestones: [{ title: "v1", [REMOVE_KEY]: true }] },
+    ],
+  ])("%s is the fold's refusal, naming the layer; the engine agrees", (_case, layering, doc) => {
+    const layers = stack(
+      { labels: [{ name: "a" }], rulesets: [{ name: "r", rules: [{ type: "t" }] }] },
+      doc,
+    );
+    expect(predictMerge({ layers, layering, features: [] })).toEqual({
+      kind: "refused",
+      layer: "settings.yml",
+    });
+    expect(mergeLayers(layers, { layering }).isErr()).toBe(true);
+  });
+
+  test("two layers each carrying a refusal: the fold names the lower one, as the engine does, whatever the sections' order", () => {
+    // The oracle folds layer by layer; a section-first fold would meet the higher layer's labels before the lower's environments.
+    const layers = stack(
+      { environments: [{ name: "prod", [REMOVE_KEY]: true }] },
+      { labels: [{ name: "bug", [REMOVE_KEY]: true }] },
+    );
+    expect(predictMerge({ layers, layering: "deep", features: [] })).toEqual({
+      kind: "refused",
+      layer: "layer-0.yml",
+    });
+    expect(
+      mergeLayers(layers, { layering: "deep" }).match(
+        () => null,
+        (problem) => problem.layer,
+      ),
+    ).toBe("layer-0.yml");
   });
 
   test.each<[LayeringDirective, Record<string, unknown>[]]>([
@@ -1606,13 +1683,13 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     });
   });
 
-  test("a deleted keyed section declared again replaces: the lower entries are gone", () => {
+  test("a keyed section nulled below and declared again folds to the higher list alone: the null won whole, then was replaced", () => {
     const { merged, notices } = foldMergeLayers(
       stack({ labels: [{ name: "a" }] }, { labels: null }, { labels: [{ name: "b" }] }),
       "deep",
     );
     expect(merged).toEqual({ labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "b" }] } });
-    expect(notices).toEqual([{ layer: "layer-1.yml", path: "labels" }]);
+    expect(notices).toEqual([]);
   });
 
   test("only section keys survive: private underscore keys are not part of the written document", () => {
@@ -1624,9 +1701,17 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
 describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
   const admitted = { labels: [{ name: "a" }], rulesets: [{ name: "r", rules: [{ type: "t" }] }] };
 
-  test("admits a stack of well-formed layers, a file directive and a keyed milestone included", () => {
+  test("admits a stack of well-formed layers, a file directive, a keyed milestone, a removal, and a null-valued section included", () => {
     expect(
-      refusedMergeLayer(stack(admitted, { milestones: [{ title: "v1" }], _layering: "replace" })),
+      refusedMergeLayer(
+        stack(admitted, {
+          milestones: [{ title: "v1" }],
+          labels: { _layering: "deep", entries: [{ name: "a", [REMOVE_KEY]: true }] },
+          pages: null,
+          _layering: "replace",
+        }),
+        "deep",
+      ),
     ).toBeUndefined();
   });
 
@@ -1665,9 +1750,78 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
     ["a file directive outside the set", { _layering: "DEEP" }],
     ["a wrapper without an entries list", { labels: { [UNDECLARED_KEY]: "keep" } }],
     ["a non-mapping entry", { labels: ["bug"] }],
+    ["a removal marker that is not true", { labels: [{ name: "a", [REMOVE_KEY]: "yes" }] }],
+    [
+      "a removal beside another field",
+      { labels: [{ name: "a", [REMOVE_KEY]: true, color: "ffffff" }] },
+    ],
+    ["a removal under the run's replace", { labels: [{ name: "a", [REMOVE_KEY]: true }] }],
+    [
+      "a removal under the wrapper's replace",
+      { labels: { _layering: "replace", entries: [{ name: "a", [REMOVE_KEY]: true }] } },
+    ],
+    [
+      "a nested removal beside another field",
+      { rulesets: [{ name: "r", rules: [{ type: "t", [REMOVE_KEY]: true, parameters: {} }] }] },
+    ],
+    ["a whole-section null where null is not the section's value", { labels: null }],
   ];
-  test.each(refusals)("refuses %s, naming the layer", (_name, doc) => {
-    expect(refusedMergeLayer(stack(admitted, doc, admitted))).toBe("layer-1.yml");
+  test.each(refusals)("refuses %s, naming the layer the run names", (_name, doc) => {
+    const layers = stack(admitted, doc, admitted);
+    expect(refusedMergeLayer(layers, "replace")).toBe("layer-1.yml");
+    // The run's own verdict: per-layer validation or the fold's boundary, whichever fires, names the same layer.
+    expect(
+      foldLayers(layers, "merged", "replace", silentIo()).match(
+        () => null,
+        (problem) => ("layer" in problem ? problem.layer : problem.source),
+      ),
+    ).toBe("layer-1.yml");
+  });
+
+  test("a lower fold refusal comes before a higher boundary refusal, as the run admits and folds one layer at a time", () => {
+    const layers = stack(
+      { labels: [{ name: "gone", [REMOVE_KEY]: true }] },
+      { _layering: "invalid", labels: [{ name: "a" }] },
+    );
+    expect(predictMerge({ layers, layering: "deep", features: [] })).toEqual({
+      kind: "refused",
+      layer: "layer-0.yml",
+    });
+    expect(
+      foldLayers(layers, "merged", "deep", silentIo()).match(
+        () => null,
+        (problem) => ("layer" in problem ? problem.layer : problem.source),
+      ),
+    ).toBe("layer-0.yml");
+  });
+
+  test("nested removal notices come in the order the higher layer wrote its fields, as the action prints them", () => {
+    const layers = stack(
+      {
+        environments: [
+          {
+            name: "prod",
+            variables: [{ name: "A", value: "1" }],
+            secrets: [{ name: "B", value: "$B" }],
+          },
+        ],
+      },
+      {
+        environments: [
+          {
+            name: "prod",
+            secrets: { entries: [{ name: "B", [REMOVE_KEY]: true }] },
+            variables: { entries: [{ name: "A", [REMOVE_KEY]: true }] },
+          },
+        ],
+      },
+    );
+    const oracle = foldMergeLayers(layers, "deep");
+    expect(oracle.notices).toEqual([
+      { layer: "settings.yml", path: "environments[0].secrets[0]" },
+      { layer: "settings.yml", path: "environments[0].variables[0]" },
+    ]);
+    expect(engineNotices(layers)).toEqual(oracle.notices);
   });
 });
 
@@ -1680,9 +1834,7 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
       const declared = listLayering(key);
       const oracle = KEYED_MERGE_SECTIONS[key];
       expect(oracle.keyField, key).toBe(declared.keyField);
-      expect([...(oracle.nullValued ?? [])].sort(), key).toEqual(
-        [...(declared.nullValued ?? [])].sort(),
-      );
+      expect(oracle.removalPaths, key).toEqual(declared.removalPaths);
       expect(Object.keys(oracle.nested ?? {}).sort()).toEqual(
         Object.keys(declared.nested ?? {}).sort(),
       );
@@ -1692,9 +1844,7 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
           throw new Error(`${key}.${field}: the module declares no nested layering`);
         }
         expect(nested.keyField).toBe(declaredNested.keyField);
-        expect([...(nested.nullValued ?? [])].sort(), `${key}.${field}`).toEqual(
-          [...(declaredNested.nullValued ?? [])].sort(),
-        );
+        expect(nested.removalPaths, `${key}.${field}`).toEqual(declaredNested.removalPaths);
       }
     }
   });

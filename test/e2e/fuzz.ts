@@ -12,7 +12,7 @@
  */
 
 import { canonicalDocument } from "../../src/engine/canonical.js";
-import { describeOptOut } from "../../src/engine/layers.js";
+import { describeRemoval } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
@@ -1035,7 +1035,7 @@ async function runMergePredicted(
           // The oracle predicts the fold's content; the file is that fold in the canonical order, whose rules
           // test/engine/canonical.test.ts pins on its own, so this pin is content, never the layers' order.
           rendered: canonicalDocument(prediction.merged),
-          stdout_contains: prediction.notices.map(describeOptOut),
+          stdout_contains: prediction.notices.map(describeRemoval),
           summary_contains: ["Rendered document written to "],
         };
   const report = await runScenario(scenario);
@@ -1043,7 +1043,7 @@ async function runMergePredicted(
   if (/\n\s+at\s+\S+ \(/.test(report.stderr)) {
     problems.push("unhandled stack in stderr from a merge run");
   }
-  // Matched on ::error:: lines only: an opt-out ::notice:: line also starts with the layer name (describeOptOut).
+  // Matched on ::error:: lines only: a removal ::notice:: line also starts with the layer name (describeRemoval).
   const errorNames = (site: string): boolean =>
     report.stdout.split("\n").some((line) => line.startsWith("::error::") && line.includes(site));
   if (prediction.kind === "refused") {
@@ -1055,11 +1055,11 @@ async function runMergePredicted(
       problems.push("invalid fold: no ::error:: line names the rendered settings document");
     }
   } else {
-    // mode: render emits no other notices, so the count catches a deletion the oracle did not predict.
+    // mode: render emits no other notices, so the count catches a removal the oracle did not predict.
     const announced = report.stdout.split("\n").filter((line) => line.startsWith("::notice::"));
     if (announced.length !== prediction.notices.length) {
       problems.push(
-        `the run announced ${announced.length} null deletion(s); the oracle predicted ${prediction.notices.length}`,
+        `the run announced ${announced.length} removal(s); the oracle predicted ${prediction.notices.length}`,
       );
     }
   }

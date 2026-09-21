@@ -16,4 +16,4 @@ expect:
     - "POST /repos/{repo}/pages"
   stdout_contains:
     - "labels[0].name: Invalid input: expected string, received number"
-    - "pages.source: Invalid input: expected object, received null"
+    - "pages.source has no empty state; write a mapping of its fields"

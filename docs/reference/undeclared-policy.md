@@ -76,7 +76,7 @@ The knob is set per environment entry, and in a `mode: render` fold (the [layeri
 
 Under the default `layering: deep` the fold unions `environments` by name, case-insensitively, and merges a same-name pair field by field; each nested list unions by its own key, the one [the layering guide's key table](../operate/layering.md#the-rules) names.
 
-Two bare nested lists fold to a bare list. A wrapper on either side keeps the wrapper form, its `_undeclared` merged as a top-level knob is: a higher bare list, or a wrapper without the knob, inherits the lower wrapper's policy, an explicit higher knob wins, and a higher `_undeclared: null` removes the lower policy with a notice.
+Two bare nested lists fold to a bare list. A wrapper on either side keeps the wrapper form, its `_undeclared` merged as a top-level knob is: a higher bare list, or a wrapper without the knob, inherits the lower wrapper's policy, and an explicit higher knob wins. `_undeclared: null` is refused at validation, as at the top level: omit the key to inherit.
 
 The fold spells out no nested default, so a nested list still without a knob after the fold takes its fixed default when apply runs.
 
@@ -92,7 +92,7 @@ In a `mode: render` fold (the [layering guide](../operate/layering.md) owns the 
 
 - A plain list, or a bare `{entries}` wrapper, inherits the `_undeclared` a lower layer set for that section.
 - An explicit higher `_undeclared` wins.
-- A higher `_undeclared: null` removes the lower policy, with a notice, and the section default fills in.
+- `_undeclared: null` is refused at validation (`labels._undeclared has no empty state; write one of "keep", "delete"`): omit the key to inherit the lower policy, or name the one you want.
 - After the fold, every section that takes the knob carries an explicit policy in the rendered file, so the document apply runs is self-describing.
 
 So a fleet can set the policy once, in its lowest layer:

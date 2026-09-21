@@ -1,10 +1,11 @@
-# mode: render folds a layer stack into one document with ZERO requests. A
-# fleet layer declares labels, a `main` ruleset, Pages, and a repository knob;
-# the repo layer edits the labels and ruleset and nulls both Pages and the knob.
-# The rendered file pins the contrast: `pages: null` is kept as the value with no
-# notice (the only spelling of "Pages off"), while `repository: null` is removed
-# with a notice.
-name: render-union-optout
+# mode: render folds a layer stack into one document with ZERO requests, and a
+# higher layer's null WINS at every depth: it is the EMPTY or OFF value on
+# GitHub, never a delete marker, so no notice is printed. `pages: null` turns
+# Pages off over the fleet's site, `protection: null` strips the fleet's branch
+# protection, `value: null` unsets the fleet's custom property, and
+# `deployment_branch_policy: null` lifts the fleet's branch restriction. The
+# labels and rulesets union as before.
+name: render-null-wins
 inputs:
   mode: render
 settings_layers:
@@ -26,13 +27,24 @@ settings_layers:
             exclude: []
         rules:
           - type: deletion
+    branches:
+      - name: main
+        protection:
+          enforce_admins: true
+    environments:
+      - name: prod
+        deployment_branch_policy:
+          protected_branches: true
+          custom_branch_policies: false
+    custom_properties:
+      - property_name: team
+        value: fleet
     pages:
       build_type: workflow
       source:
         branch: main
         path: /
 settings:
-  repository: null
   labels:
     - name: docs
       color: ffffff
@@ -42,15 +54,23 @@ settings:
     - name: main
       rules:
         - type: non_fast_forward
+  branches:
+    - name: main
+      protection: null
+  environments:
+    - name: prod
+      deployment_branch_policy: null
+  custom_properties:
+    - property_name: team
+      value: null
   pages: null
 expect:
   exit_code: 0
   result: rendered
   zero_requests: true
-  stdout_contains:
-    - "settings.yml: null removed repository declared by a lower layer"
   stdout_lacks:
-    - "null removed pages"
+    - "_remove"
+    - "null"
   summary_contains:
     - "| 1 | "
     - "layer-0.yml |"
@@ -58,7 +78,8 @@ expect:
     - "settings.yml |"
     - "Rendered document written to "
   rendered:
-    pages: null
+    repository:
+      has_wiki: false
     labels:
       _undeclared: delete
       entries:
@@ -82,3 +103,15 @@ expect:
           rules:
             - type: deletion
             - type: non_fast_forward
+    environments:
+      - name: prod
+        deployment_branch_policy: null
+    branches:
+      - name: main
+        protection: null
+    pages: null
+    custom_properties:
+      _undeclared: keep
+      entries:
+        - property_name: team
+          value: null

@@ -81,11 +81,19 @@ const permission: SectionPermission = { repo: ["environments"] };
 const NESTED_OVERRIDES_CAVEAT =
   'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
 
-/** A reviewer is a `type` and a numeric `id`; users and teams number from separate spaces, so the pair is the key. */
+/**
+ * A reviewer is a `type` and a numeric `id`; users and teams number from separate spaces, so the pair is the key. A
+ * removal entry reaches here unvalidated (the standalone view drops it before the schema), so the type is read only
+ * as a string: a list or mapping there is a keyless entry, not a coerced name.
+ */
 const REVIEWER_LAYERING: KeyedListLayering = {
   keyField: "id",
   keyKind: "numeric",
-  keys: (entry) => (typeof entry.id === "number" ? [`${String(entry.type)}:${entry.id}`] : null),
+  keys: (entry) =>
+    typeof entry.id === "number" && typeof entry.type === "string"
+      ? [`${entry.type}:${entry.id}`]
+      : null,
+  removalPaths: ["type", "id"],
 };
 
 export const environmentsSection = {
@@ -99,12 +107,10 @@ export const environmentsSection = {
   /**
    * Environment names fold as plan() probes them (case-insensitive). The nested lists union by the key each
    * planner reconciles by: variable and secret names uppercased as GitHub stores them, branch policies by their
-   * pattern, protection rules by App slug, reviewers by type and id. `deployment_branch_policy: null` is the entry's
-   * own "no restriction" value, never a delete marker.
+   * pattern, protection rules by App slug, reviewers by type and id.
    */
   layering: keyedBy("name", {
     fold: (name) => name.toLowerCase(),
-    nullValued: ["deployment_branch_policy"],
     nested: {
       variables: keyedBy("name", { fold: variableKey }),
       secrets: keyedBy("name", { fold: secretKey }),

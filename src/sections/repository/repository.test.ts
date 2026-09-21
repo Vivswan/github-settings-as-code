@@ -1238,7 +1238,7 @@ describe("repository parse refusals", () => {
     expect(refusals({ topics: [] })).toEqual([]);
   });
 
-  const TOGGLE_NULL = "null is not a boolean, and a toggle has no empty state; write true or false";
+  const TOGGLE_NULL = "has no empty state; write true or false";
   const TOGGLE_QUOTED =
     " is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false " +
     '(YAML parses "no"/"off"/"yes" as strings, not booleans)';
@@ -1254,7 +1254,7 @@ describe("repository parse refusals", () => {
     for (const key of PATCH_TOGGLES) {
       expect(refusals({ [key]: true })).toEqual([]);
       expect(refusals({ [key]: false })).toEqual([]);
-      expect(refusals({ [key]: null })).toEqual([`repository.${key}: ${TOGGLE_NULL}`]);
+      expect(refusals({ [key]: null })).toEqual([`repository.${key} ${TOGGLE_NULL}`]);
       expect(refusals({ [key]: "true" })).toEqual([`repository.${key}: "true"${TOGGLE_QUOTED}`]);
     }
   });
@@ -1263,7 +1263,7 @@ describe("repository parse refusals", () => {
     [
       "default_branch: null",
       { default_branch: null },
-      "repository.default_branch: null is not a string; quote the value",
+      "repository.default_branch has no empty state; write a string",
     ],
     [
       "description: 7",

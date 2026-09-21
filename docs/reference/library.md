@@ -63,17 +63,17 @@ The examples continue from one another and form one program (the docs tests comp
 
 | Name | Kind | Says |
 |---|---|---|
-| `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a top-level `null` is a fold marker, not a document value (except on `pages` and `interaction_limits`, whose null is the section's value), so `validateSettings({ labels: null })` refuses where `mergeSettings([{ name, doc: { labels: null } }])` accepts and drops the section |
+| `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a `null` is a declared value, refused where the key has no empty state |
 | `ValidateOptions` | type | `source`, `sections`, `io` |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
 | `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
 | `MergeOptions` | type | `source`, `layering` (`"deep"` unless set), `io` |
-| `MergeReport` | type | `settings`, `notices` (one per null that deleted a lower declaration; a top-level null that met nothing drops without one, or stays where null is the section's value: `pages`, `interaction_limits`), `yaml` (the file text `rendered-file` gets), `log` |
+| `MergeReport` | type | `settings`, `notices` (one per `_remove: true` entry that dropped a lower entry), `yaml` (the file text `mode: render` writes, byte for byte), and `log` (the lines the fold printed) |
 | `Layer` | type | One layer: its `name` (a path, usually) and its parsed `doc` |
 | `Layering` | type | `"replace"`, `"shallow"`, or `"deep"`: how every list section's entries fold across layers, by the section's key |
-| `OptOutNotice` | type | A `null` that deleted what a lower layer declared: the layer and the path |
-| `describeOptOut` | function | One notice as the line the action prints |
+| `RemovalNotice` | type | A `_remove: true` entry that dropped what a lower layer declared: the layer and the entry's path |
+| `describeRemoval` | function | One notice as the line the action prints |
 | `readLayerFiles` | function | Read paths into `Layer`s in order; the first unreadable file is the problem |
 | `readSettingsFile` | function | Read and parse one YAML file, given its role (`settings-file`, `defaults-file`, `layer`, `central-file`), so the problem's advice fits |
 | `SettingsFileRole` | type | The four roles |

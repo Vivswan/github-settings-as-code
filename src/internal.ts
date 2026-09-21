@@ -13,7 +13,7 @@ export {
   VISIBILITY_FILTERS,
 } from "./discovery/discover.js";
 export { canonicalDocument, renderCanonicalYaml } from "./engine/canonical.js";
-export { mergeLayers, stripNulls } from "./engine/layers.js";
+export { mergeLayers } from "./engine/layers.js";
 export {
   preflightProbe,
   type RepoResult,

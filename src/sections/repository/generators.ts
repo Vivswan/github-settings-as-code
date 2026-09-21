@@ -42,5 +42,21 @@ export function genRepository(rng: Rng): Json {
   if (Object.keys(repo).length === 0) {
     repo.has_issues = rng.bool();
   }
+  // The clearable strings (null on GitHub is the empty field) are later draws on their own forked stream, after
+  // the fallback, so every earlier draw keeps its value on every seed; a document may gain these two keys.
+  const clearableRng = rng.fork("repo-clearable");
+  if (clearableRng.bool(0.3)) {
+    repo.description = clearableRng.pick([
+      "Repository settings as code",
+      "Managed by the settings action",
+      "Fixture repository",
+    ]);
+  }
+  if (clearableRng.bool(0.2)) {
+    repo.homepage = clearableRng.pick([
+      "https://example.test",
+      "https://docs.example.test/settings",
+    ]);
+  }
   return repo;
 }

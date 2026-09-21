@@ -70,9 +70,11 @@ The step ends with `result: rendered` and exit 0, or exit 1 with an error naming
 | `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it. The wrapper of a section without an undeclared policy (`environments`, `branches`, `workflows`) takes this one key beside `entries`, and the rendered file holds its bare list |
 | `_undeclared` | A knobbed list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
 
-The underscore marks this action's directives, never a GitHub setting, and each location takes a fixed set. A file's top level takes `_layering`; a knobbed section's wrapper takes `_layering` and `_undeclared`; a plain-list wrapper (`environments`, `branches`, `workflows`) takes `_layering` alone.
+Beside the two, `_remove: true` on a keyed entry drops the lower entry under that key ([the rules](#the-rules)); a single document refuses it. The underscore marks this action's directives, never a GitHub setting, and each location takes a fixed set. A file's top level takes `_layering`; a knobbed section's wrapper takes `_layering` and `_undeclared`; a plain-list wrapper (`environments`, `branches`, `workflows`) takes `_layering` alone; a keyed entry takes `_remove`.
 
-Any other underscore key at any of these locations fails validation with an error naming which directive belongs where (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
+Any other underscore key at the top level or on a wrapper fails validation with an error naming which directive belongs where (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
+
+Inside a keyed entry, an underscore key is a field like any other: a closed entry shape refuses it as unrecognized, and an open one keeps it, as it keeps every unknown key.
 
 ## The rules
 
@@ -82,8 +84,8 @@ Layers fold low to high. At each step the higher layer's value meets whatever th
 |---|---|---|
 | A mapping | A mapping | Merged key by key. Lower keys keep their order, higher-only keys follow |
 | A scalar, a list, or a YAML-tagged value | Anything | Replaces |
-| `null` (at any depth) | A declared value | Deletes the key, with a notice naming the layer and the path, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such, with no notice. Inside a list section's entry the deletion holds under `deep` only: under `shallow` and `replace` the entry is copied as written, so a `null` there is a value the section must accept. A field the entry's schema types nullable (`custom_properties[].value`, where `null` unsets the property; `branches[].protection`, where it removes the protection; `environments[].deployment_branch_policy`) is a value under every directive, never a marker |
-| `null` | Nothing, or another `null` | Below the top level, stays as written. At the top level it opted out of nothing and drops with no notice, except on `pages` and `interaction_limits`, where `null` is the section's value and stays (`pages: null` still means "disable Pages") |
+| `null` (at any depth) | Anything, or nothing | Wins, like any value, and is written as such: `null` is the EMPTY or OFF state on GitHub (`pages: null` turns Pages off, `protection: null` removes a branch's protection), never a marker that deletes a key. Where a key or a whole section admits `null` is the file's own rule ([null is the empty state](../reference/semantics.md#null-is-the-empty-state)); a `null` a key does not admit is refused at validation ([refusals](#refusals)) |
+| `_remove: true` on a keyed entry | A lower entry under the same key | Drops that lower entry, with a notice naming the layer and the removal by its index; the marker never reaches the rendered file. Refused where nothing meets it: under `replace`, inside an entry copied whole, or when no lower layer declares the key (see [Refusals](#refusals)). A removal names its key and nothing else |
 | A list section's entries, layering `deep` | Its entries | Union by the section's key (the table below). A same-key pair merges field by field, the higher fields winning, in the lower entry's place; a nested keyed list (a ruleset's `rules` by `type`, an environment's `variables` by name) unions the same way under `deep`, its same-key pairs merging field by field too, in its bare or `{_undeclared, entries}` form alike (a lower wrapper's policy is inherited by a higher bare list); new keys are appended in the higher order |
 | A list section's entries, layering `shallow` | Its entries | Union by the section's key. A same-key entry is swapped for the higher one in place, new keys are appended |
 | A list section's entries, layering `replace` | Its entries | The higher list wins. An omitted `_undeclared` still inherits the lower layer's |
@@ -165,13 +167,13 @@ pages:
     path: /
 ```
 
-The team layer removes the fleet's `has_projects` opinion, adds a label, and adds a rule to the `main` ruleset:
+The team layer drops the fleet's `bug` label, adds one of its own, and adds a rule to the `main` ruleset:
 
 ```yaml layer
 # .github/settings/team.yml
-repository:
-  has_projects: null
 labels:
+  - name: bug
+    _remove: true
   - name: team
     color: "00ff00"
 rulesets:
@@ -198,11 +200,10 @@ Rendered under the default `layering: deep`, the written file is:
 repository:
   description: mine
   has_wiki: false
+  has_projects: false
 labels:
   _undeclared: delete
   entries:
-    - name: bug
-      color: d73a4a
     - name: docs
       color: ffffff
     - name: team
@@ -219,19 +220,97 @@ rulesets:
 pages: null
 ```
 
-And the run annotates the one deletion:
+And the run annotates the one removal:
 
 ```text
-.github/settings/team.yml: null removed repository.has_projects declared by a lower layer
+.github/settings/team.yml: labels[0] carries _remove: true and dropped the entry a lower layer declared under its key
 ```
 
 Reading it back:
 
-- `has_projects` is gone: a higher `null` met a lower declaration.
-- `pages` is `null`, not gone: on this section `null` is the value that turns Pages off, so it replaces the fleet's site with no notice.
+- `bug` is gone: the team layer's removal named its key, and the marker itself was consumed.
+- `pages` is `null`: on this section `null` is the value that turns Pages off, so it replaces the fleet's site with no notice.
 - `docs` kept its position and took the higher color; under `deep` a same-key pair merges field by field, so a lower-only field would have survived too.
 - The `main` ruleset kept `target` and `enforcement` from the fleet and gained a rule.
 - Both list sections came out in wrapper form with their section default filled in.
+
+## Null wins, and _remove drops an entry
+
+The fold is a cascade: the higher layer's value wins, and `null` is a value like any other. Our `null` is the EMPTY or OFF state on GitHub, not the CSS `unset` that falls back to a default; an undeclared key keeps GitHub's current value, which CSS has no word for; and a keyed list unions by key, where `_remove` drops one entry. One example per rule, lowest layer first:
+
+```yaml layer
+# .github/settings/fleet.yml
+pages:
+  build_type: workflow
+  cname: docs.example.com
+branches:
+  - name: main
+    protection:
+      enforce_admins: true
+      required_deployments:
+        environments: [prod]
+environments:
+  - name: prod
+    deployment_branch_policy:
+      protected_branches: true
+      custom_branch_policies: false
+    variables:
+      - name: REGION
+        value: eu-west-1
+      - name: LOG_LEVEL
+        value: info
+custom_properties:
+  - property_name: team
+    value: fleet
+```
+
+```yaml layer
+# .github/settings/repo.yml
+pages:
+  cname: null
+branches:
+  - name: main
+    protection:
+      required_deployments: null
+environments:
+  - name: prod
+    deployment_branch_policy: null
+    variables:
+      - name: log_level
+        _remove: true
+custom_properties:
+  - property_name: team
+    _remove: true
+```
+
+```yaml settings
+pages:
+  build_type: workflow
+  cname: null
+environments:
+  - name: prod
+    deployment_branch_policy: null
+    variables:
+      - name: REGION
+        value: eu-west-1
+branches:
+  - name: main
+    protection:
+      enforce_admins: true
+      required_deployments: null
+custom_properties:
+  _undeclared: keep
+  entries: []
+```
+
+Reading it back, one line per rule:
+
+- `cname: null` (a mapping field) removes the custom domain: the field admits `null`, so it is written and apply sends it.
+- `required_deployments: null` (a nested entry field) turns that control off inside the merged `main` entry; `enforce_admins` survived the merge.
+- `deployment_branch_policy: null` (an entry field) lifts the restriction; the fleet's `REGION` survived, and `LOG_LEVEL` was dropped by a removal spelled in another case.
+- The `team` property was dropped by a top-level removal, so the section renders as an empty list under its resolved policy.
+
+What a `null` may not do is stand where GitHub has no empty state: `repository: {enable_git_lfs: null}` and `labels: null` are refused at validation, with the messages the [refusal table](#refusals) quotes.
 
 ## What the rendered file looks like
 
@@ -240,7 +319,8 @@ The rendered file is exactly what apply runs, so it is worth knowing its shape:
 - Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`.
 - `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list is written as the higher entry declared it, except where `deep` merged a pair through it: then a wrapper on either side keeps the wrapper form.
 - No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
-- A top-level `null` that met nothing below is gone, except `pages: null` and `interaction_limits: null`, which keep their engine meaning; a nested one stays as written.
+- Every `null` that won its key is there, at the top level (`pages: null`, `interaction_limits: null`) or below: the fold reads no `null` as a marker, and validation refused every one a key does not admit.
+- No `_remove` anywhere: each removal was consumed at its own layer's step, along with the entry it named.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
 
 ## The two-step workflow
@@ -281,7 +361,7 @@ Commit the rendered file only if you want to review it in pull requests; the ste
 
 ## Validation per layer
 
-Each layer must be a valid settings document on its own, judged after its `null` markers are removed. So a layer may say `labels: null`, or `rulesets: [{name: main, bypass_actors: null}]` under `deep`, the one directive that opens an entry; under `shallow` or `replace` the same `bypass_actors: null` is copied as written and fails the layer's validation, since the section takes no null there.
+Each layer must be a valid settings document on its own, judged with its two directives set aside: `_layering` (at the top or on a wrapper) and every `_remove: true` entry, which declares nothing. Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
 
 Whatever a standalone settings file may not say, a layer may not say either:
 
@@ -299,6 +379,11 @@ The per-layer validation catches what a standalone settings file could not say, 
 | The layer has | Caught by |
 |---|---|
 | A list section that is not a list or an `{entries}` wrapper (`labels: oops`) | Validation: `labels: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as string` |
+| A whole mapping section set to `null`, where `null` is not the section's value (`repository: null`) | Validation: `repository: null has no meaning; remove the section or declare its fields` |
+| A whole list section set to `null` (`labels: null`) | Validation: `labels: null has no meaning; remove the section or declare its entries` |
+| A `null` on a toggle, which has no empty state (`repository: {enable_git_lfs: null}`) | Validation: `repository.enable_git_lfs has no empty state; write true or false` |
+| A `null` on an enum (`actions: {default_workflow_permissions: null}`) | Validation: `actions.default_workflow_permissions has no empty state; write one of "read", "write"` |
+| A `null` on a list inside a keyed entry (`rulesets: [{name: main, bypass_actors: null}]`) | Validation: `rulesets[0].bypass_actors has no empty state; write a list ([] for none)` |
 | A plain-list section that is neither, named with the one directive its wrapper takes (`environments: oops`) | Validation: `environments: Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_layering" directive), but this section parsed as string` |
 | The policy on a plain-list wrapper (`environments: {_undeclared: keep, entries: []}`) | Validation: `environments: Unrecognized key: "_undeclared"; the wrapper's directives are "_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared"), and nothing else - there are no private-note keys. Remove the key, or keep the note as a YAML comment` |
 | A keyed entry without its key, here a label with no `name` (`labels: [{name: bug}, {color: d73a4a}]`) | Validation: `labels[1].name: Invalid input: expected string, received undefined` |
@@ -338,6 +423,12 @@ A render-mode log can therefore show your settings file's structure and, through
 | An unknown `_layering` value on a wrapper, the retired `merge` included (`labels: {_layering: merge, entries: [{name: bug}]}`) | `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value on a plain-list wrapper (`environments: {_layering: union, entries: []}`) | `environments._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
+| A removal marker that is not `true` (`labels: [{name: bug, _remove: yes}]`) | `labels[0]._remove takes only true; got a string. Write _remove: true to drop the lower entry, or remove the key to keep it` |
+| A removal carrying a field beside its key (`labels: [{name: bug, _remove: true, color: ffffff}]`) | `labels[0] carries _remove: true beside "color"; a removal names its name and nothing else. Drop the field, or the marker` |
+| A removal carrying a field inside its key's container (`webhooks: [{config: {url: "https://h.example/a", secret: s}, _remove: true}]`) | `webhooks[0] carries _remove: true beside "config.secret"; a removal names its config.url and nothing else. Drop the field, or the marker` |
+| A removal under `replace`, where the higher list already wins (`labels: {_layering: replace, entries: [{name: bug, _remove: true}]}`) | `labels[0] carries _remove: true, but under _layering: replace the higher list already wins, so there is nothing to remove. Remove the entry, or fix its key` |
+| A removal no lower layer matches, here in a one-layer stack (`labels: [{name: bug, _remove: true}]`) | `labels[0] carries _remove: true, but no lower layer declares an entry under its key. Remove the entry, or fix its key` |
+| A nested removal inside an entry copied whole, here a new ruleset (`rulesets: [{name: main, rules: [{type: deletion, _remove: true}]}]`) | `rulesets[0].rules[0] carries _remove: true, but its entry is copied whole (a new key, or a same-key swap under shallow), so its nested lists meet nothing to remove. Remove the entry, or fix its key` |
 
 ## Where to go next
 

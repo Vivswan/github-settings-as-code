@@ -4,7 +4,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import { describeOptOut, type Layering } from "../engine/layers.js";
+import { describeRemoval, type Layering } from "../engine/layers.js";
 import type { Io } from "../io.js";
 import type { Problem, ProblemOf } from "../problem.js";
 import type { FinishedRender } from "./deliver.js";
@@ -47,7 +47,7 @@ export function runRender(cfg: RenderConfig, io: Io): Result<FinishedRender, Pro
     .andThen((layers) => foldLayers(layers, RENDERED_LABEL, cfg.layering, io))
     .andThen((folded): Result<FinishedRender, Problem> => {
       for (const notice of folded.notices) {
-        io.annotate("notice", describeOptOut(notice));
+        io.annotate("notice", describeRemoval(notice));
       }
       return writeReplacing(cfg.renderedFile, folded.yaml)
         .mapErr(

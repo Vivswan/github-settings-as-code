@@ -146,7 +146,7 @@ export const customPropertiesSection = {
   undeclaredDefault: "keep",
   // Verbatim, the key validate() rejects duplicates by: GitHub documents no case folding for property names.
   // `value: null` unsets the property, so a higher layer's null is the value, never a marker for the lower one.
-  layering: keyedBy("property_name", { nullValued: ["value"] }),
+  layering: keyedBy("property_name"),
   permission,
   // Custom properties exist only under an organization owner; the registry's owner gate (contract/owner.ts)
   // probes the `org` role and no-ops with a note on a personal account.

@@ -9,6 +9,7 @@ import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import {
   type SettingsProblem,
+  singleDocumentRemovalIssue,
   type TopLevelShape,
   unknownDirectivesIssue,
   unknownSectionsIssue,
@@ -32,6 +33,7 @@ import { SECTIONS } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
 import type { MustBeNever } from "../types.js";
 import { executePlan } from "./execute.js";
+import { separateRemovals } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
 import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
@@ -152,7 +154,16 @@ export function validateSettingsDoc(
       );
     }
   }
-  const shapes = validateSectionShapes(settings as Record<string, unknown>, sourceLabel);
+  // `_remove: true` drops a LOWER layer's entry; this document is nobody's higher layer (a layer of a fold arrives as
+  // its standalone view, removals already gone). Left to the shapes, an open entry shape would pass the marker to
+  // GitHub as a field. The shapes judge the rest, as the fold's per-layer validation does: a removal carries only its
+  // key, so judged as written it would fail every other required field, and a closed shape would name the marker again.
+  const removals = separateRemovals(settings);
+  issues.push(...removals.sites.map(singleDocumentRemovalIssue));
+  const shapes = validateSectionShapes(
+    (removals.sites.length === 0 ? settings : removals.rest) as Record<string, unknown>,
+    sourceLabel,
+  );
   if (shapes.isErr()) {
     issues.push(...shapes.error.issues);
   }

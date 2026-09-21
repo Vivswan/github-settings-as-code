@@ -292,7 +292,7 @@ branches:
     protection: null
 ```
 
-A `mode: render` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `protection: null` is the branch entry's value where the two `branches` lists union by name. Elsewhere a `null` over a key a lower layer declared removes that key from the rendered document; the [layering guide](../operate/layering.md) has the rules.
+A `mode: render` fold keeps all three meanings: a higher `pages: null` or `interaction_limits: null` is written as the section's value even over a lower layer's declaration, and a higher `protection: null` is the branch entry's value where the two `branches` lists union by name. A `null` never removes a key; to drop a lower layer's keyed entry, write `_remove: true` on it, and the [layering guide](../operate/layering.md) has the rules.
 
 A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above.
 
@@ -302,7 +302,7 @@ A few individual fields accept `null` as a value of their own too, such as `page
 
 Unknown top-level sections are hard errors, so a typo cannot silently do nothing. The one exception: under a `sections` allowlist, unknown keys outside the allowlist warn instead of failing, which eases version skew; the [troubleshooting guide](../operate/troubleshooting.md) covers it.
 
-An underscore key is not an escape hatch: the underscore marks this action's two directives, `_layering` and `_undeclared` (the [layering guide](../operate/layering.md) owns them), and any other underscore key fails validation the same way. A note belongs in a YAML comment:
+An underscore key is not an escape hatch: the underscore marks this action's three directives, `_layering`, `_undeclared`, and `_remove` (the [layering guide](../operate/layering.md) owns them), and any other underscore key at the top level or on a list section's wrapper fails validation the same way. Inside a keyed entry, an underscore key is a field and follows the entry's open or closed shape. A note belongs in a YAML comment:
 
 ```yaml settings
 # owner: platform-team, see runbook RB-112

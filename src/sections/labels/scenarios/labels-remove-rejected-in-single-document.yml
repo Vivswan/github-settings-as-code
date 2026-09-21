@@ -1,0 +1,23 @@
+# `_remove: true` drops a LOWER layer's entry, and a single settings file has
+# no lower layer: the marker is refused inside document validation, BEFORE the
+# preflight barrier and the first write, in either mode. Without the refusal the
+# open label shape kept the marker as a field and POST /labels carried it. The
+# repository section pins the ordering: it never PATCHes. The issue names the
+# entry by path and the place a removal belongs, a higher layer of a fold.
+name: labels-remove-rejected-in-single-document
+settings:
+  repository:
+    description: should never be written
+  labels:
+    - name: old
+      _remove: true
+    - name: new
+      color: ffffff
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "labels[0]._remove: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)"

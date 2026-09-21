@@ -51,6 +51,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 - A flat `src/sections/<key>/` directory means repository scope, permanently; org/user scopes arrive as sibling scope directories with their own document, keys, and registry (the ":" reservation in `src/sections/registry.ts`).
 - The section directory is the unit of work: its `<key>.docs.yml` feeds the generated docs, and the compiler flags every forgotten registration step.
 - `src/upstream-gaps/` holds one file per GitHub feature an upstream artifact lags; `gap.ts` states how each kind graduates.
+- The layered fold is a CSS-like cascade in which `null` is a value: GitHub's EMPTY or OFF state, not CSS `unset`. docs/operate/layering.md owns the rules, including the two CSS has no analogue for (an undeclared key keeps GitHub's current value; `_remove: true` drops a keyed entry).
 
 ### Releases
 

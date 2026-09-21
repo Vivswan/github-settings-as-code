@@ -4,7 +4,7 @@ import { join, posix } from "node:path";
 import { DecodingMode, decodeHTML } from "entities";
 import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
-import { type Layer, mergeLayers, stripNulls } from "../../src/engine/layers.js";
+import { type Layer, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { RENDER_REJECTED_INPUTS, SNAPSHOT_REJECTED_INPUTS } from "../../src/flows/inputs.js";
@@ -32,7 +32,7 @@ function guidePages(): string[] {
 /**
  * The closed fence vocabulary; plain `yaml` is reserved for workflow files so a settings example cannot dodge validation by dropping its tag.
  *   yaml settings -> a complete settings document
- *   yaml layer    -> one layer of a merge, valid once its null markers are stripped
+ *   yaml layer    -> one layer of a merge, valid once its directives and removal entries are stripped
  *   yaml          -> a workflow file
  *   mermaid       -> a diagram, pinned to real code in diagrams.test.ts
  *   text, bash    -> never yaml
@@ -487,6 +487,20 @@ describe("docs/ guide pages", () => {
     expect(marked.sort()).toEqual([...extraFiles].sort());
   });
 
+  /** The example with every `_remove: true` turned into the plain entry it names: the lower layer every removal in it matches. */
+  function withoutMarkers(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map(withoutMarkers);
+    }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    const { _remove, ...rest } = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(rest).map(([key, inner]) => [key, withoutMarkers(inner)]),
+    );
+  }
+
   for (const page of guidePages()) {
     const markdown = readFileSync(join(DOCS, page), "utf8");
 
@@ -504,7 +518,7 @@ describe("docs/ guide pages", () => {
     });
 
     test(`docs/${page}: every \`yaml layer\` block is a valid layer`, () => {
-      // Judged as the render step judges a layer: stripNulls first, then document validation, then the fold's own gates.
+      // Judged as the render step judges a layer: the standalone view first, then document validation, then the fold's own gates.
       for (const block of fencedBlocks(markdown, "yaml layer")) {
         let doc: unknown;
         try {
@@ -512,9 +526,12 @@ describe("docs/ guide pages", () => {
         } catch (error) {
           throw new Error(`docs/${page} has an unparseable layer example: ${error}`);
         }
-        assertValidSettingsExample(stripNulls(doc, "deep"), `docs/${page} layer example`);
-        const folded = mergeLayers([{ name: `docs/${page}`, doc }], { layering: "deep" });
-        expect("error" in folded ? folded.error : null).toBeNull();
+        assertValidSettingsExample(standaloneView(doc), `docs/${page} layer example`);
+        // The raw layer meets every fold gate over a lower layer that declares what its removals name, so the fold
+        // has nothing to tolerate: the fold reports its first refusal only, and a tolerated one would hide the next.
+        const lower = { name: `docs/${page} (lower)`, doc: standaloneView(withoutMarkers(doc)) };
+        const folded = mergeLayers([lower, { name: `docs/${page}`, doc }], { layering: "deep" });
+        expect(folded.isErr() ? folded.error : null).toBeNull();
       }
     });
 
@@ -597,7 +614,15 @@ describe("docs/ guide pages", () => {
 
   test.each<[string, number, Array<{ layer: string; path: string }>]>([
     ["A first fold", 2, []],
-    ["A worked example", 3, [{ layer: "layer-1", path: "repository.has_projects" }]],
+    ["A worked example", 3, [{ layer: "layer-1", path: "labels[0]" }]],
+    [
+      "Null wins, and _remove drops an entry",
+      2,
+      [
+        { layer: "layer-1", path: "environments[0].variables[0]" },
+        { layer: "layer-1", path: "custom_properties[0]" },
+      ],
+    ],
   ])(
     'the layering guide\'s "%s" folds to the merged document it shows',
     (heading, count, notices) => {

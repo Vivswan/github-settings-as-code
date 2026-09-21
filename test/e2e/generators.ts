@@ -63,7 +63,7 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   maybeWrapUndeclared,
-  NULL_VALUED_ENTRY_PATHS,
+  REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
 import type { LiveState } from "./mock/state.js";
@@ -1690,17 +1690,25 @@ export interface MergeLayer {
 }
 
 /**
- * Each is refused at the layer boundary with a message naming the layer. A reference cycle cannot be spelled in
- * scenario JSON, so it is not generated.
+ * Each is refused with a message naming the layer: at the layer boundary, by the layer's own validation (null-section),
+ * or by the fold (remove-unmatched). A reference cycle cannot be spelled in scenario JSON, so it is not generated.
  *
  * duplicate-rule-type / duplicate-label      -> two entries of one keyed list sharing a key (rules by type, labels by case-folded name)
  * bad-wrapper-layering / bad-file-layering   -> a directive value outside replace|shallow|deep (the retired `merge` among them)
+ * remove-under-replace                       -> a `_remove: true` entry in a list whose effective directive is replace
+ * remove-unmatched                           -> a `_remove: true` entry no lower layer declares a key for
+ * remove-with-fields                         -> a `_remove: true` entry carrying a field beside its key
+ * null-section                               -> a whole-section null on a section whose value null is not
  */
 export const MERGE_REFUSAL_KINDS = [
   "duplicate-rule-type",
   "duplicate-label",
   "bad-wrapper-layering",
   "bad-file-layering",
+  "remove-under-replace",
+  "remove-unmatched",
+  "remove-with-fields",
+  "null-section",
 ] as const;
 type MergeRefusalKind = (typeof MERGE_REFUSAL_KINDS)[number];
 
@@ -1726,16 +1734,16 @@ export const MERGE_FEATURES = [
   "label-rename-union",
   /** A unioned ruleset re-declaring a held rule type with different parameters, so the swap (shallow) or the field merge (deep) is observable. */
   "rule-parameters",
-  /** A top-level null over a section the fold holds, where null is not the section's value. */
-  "null-deletes",
-  /** A null inside a mapping section (a nested key deletion). */
+  /** A top-level null on a section whose value null is (NULLABLE_SECTIONS), held below or not: the fold writes it. */
+  "null-section",
+  /** A null inside a mapping section, at a key the schema admits null for (a passthrough key, a nullable field). */
   "null-nested",
-  /** A null field inside a ruleset entry. */
+  /** A null field inside a keyed entry (a branch's `protection: null`). */
   "null-entry-field",
-  /** A top-level null on a section whose value null is (NULLABLE_SECTIONS), held below or not: the fold keeps it. */
-  "null-stays",
-  /** A top-level null over a section the fold does not hold and whose value null is not: it drops. */
-  "null-drops",
+  /** A `_remove: true` label dropping a held label. */
+  "remove-entry",
+  /** A `_remove: true` rule dropping a held rule type inside a deep-merged ruleset. */
+  "remove-nested",
   "wrapper-undeclared",
   "wrapper-layering-replace",
   "wrapper-layering-shallow",
@@ -1769,10 +1777,10 @@ export type MergeForce =
   | { kind: "valid"; layering: LayeringDirective }
   | { kind: "refused"; refusal: MergeRefusalKind };
 
-/** The sections whose top-level null is the section's value; on every other section a null over nothing drops. */
+/** The sections whose top-level null is the section's value; on every other section a whole-section null fails validation. */
 const NULLABLE_SECTIONS = ["pages", "interaction_limits"] as const satisfies readonly SectionKey[];
 
-export function isNullValued(key: string): boolean {
+function isNullValued(key: string): boolean {
   return (NULLABLE_SECTIONS as readonly string[]).includes(key);
 }
 
@@ -1805,104 +1813,56 @@ function isPlainMapping(value: unknown): value is Json {
 }
 
 /**
- * A layer as its standalone validation sees it, in the harness's own words: every null the fold reads as a marker is
- * dropped. A list section's entries are entered only under an effective `deep` (the wrapper's directive, else the
- * file's, else the run's), their nested keyed lists with them in either form (a nested wrapper's own null knob is a
- * marker too), and a null at a NULL_VALUED_ENTRY_PATHS path stays as the value; under `shallow` and `replace` the fold
- * copies entries as written, so a null inside one stays for the validator to judge, as does a null inside any other list.
+ * A layer as its standalone validation sees it, in the harness's own words: the document minus the two directives the
+ * fold consumes, `_layering` (top and wrapper) and every entry carrying `_remove` (top and nested, in either form, any
+ * value: the fold judges the marker). Every value stays, null included: a null a key does not admit is the layer's own
+ * validation error.
  */
-export function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
-  const dropDeep = (
-    value: unknown,
-    lists: readonly string[] = [],
-    valued: readonly string[] = [],
-    prefix = "",
-  ): unknown => {
-    if (!isPlainMapping(value)) {
-      return value;
-    }
-    const out: Json = {};
-    for (const [key, child] of Object.entries(value)) {
-      const path = prefix === "" ? key : `${prefix}.${key}`;
-      if (child === null) {
-        if (valued.includes(path)) {
-          put(out, key, null);
-        }
-        continue;
+export function standaloneViewOf(doc: Json): Json {
+  const withoutRemovals = (entries: readonly unknown[], nested: readonly string[]): unknown[] =>
+    entries
+      .filter((entry) => !(isPlainMapping(entry) && entry[REMOVE_KEY] !== undefined))
+      .map((entry) => (isPlainMapping(entry) ? withoutNested(entry, nested) : entry));
+  const withoutNested = (entry: Json, nested: readonly string[]): Json => {
+    const out: Json = { ...entry };
+    for (const field of nested) {
+      const value = entry[field];
+      if (Array.isArray(value)) {
+        out[field] = withoutRemovals(value, NESTED_OF_NESTED[field] ?? []);
+      } else if (isPlainMapping(value) && Array.isArray(value.entries)) {
+        const { entries, ...knobs } = value;
+        out[field] = { ...knobs, entries: withoutRemovals(entries, NESTED_OF_NESTED[field] ?? []) };
       }
-      put(
-        out,
-        key,
-        prefix === "" && lists.includes(key)
-          ? dropNested(child)
-          : dropDeep(child, [], valued, path),
-      );
     }
     return out;
   };
-  const dropNested = (value: unknown): unknown => {
-    if (Array.isArray(value)) {
-      return value.map((item) => dropDeep(item));
-    }
-    if (!isPlainMapping(value) || !Array.isArray(value.entries)) {
-      return dropDeep(value);
-    }
-    const { entries, ...knobs } = value;
-    return { ...(dropDeep(knobs) as Json), entries: entries.map((item) => dropDeep(item)) };
-  };
-  const file = isLayeringDirective(doc[LAYERING_KEY]) ? doc[LAYERING_KEY] : undefined;
-  const out: Json = {};
-  for (const [key, value] of Object.entries(doc)) {
-    if (value === null) {
-      // The section's own value where null is one (`pages: null`); a marker everywhere else.
-      if (isNullValued(key)) {
-        out[key] = null;
-      }
-      continue;
-    }
+  const { [LAYERING_KEY]: _file, ...out } = doc;
+  for (const [key, value] of Object.entries(out)) {
     if (!isListSectionKey(key)) {
-      out[key] = dropDeep(value);
       continue;
     }
-    const wrapper = wrapperDirective(value);
-    const effective = (isLayeringDirective(wrapper) ? wrapper : undefined) ?? file ?? run;
     const nested = NESTED_LIST_FIELDS[key] ?? [];
-    const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
-    // Under shallow and replace the entries are copied as written; only deep enters them.
-    const entries =
-      effective === "deep"
-        ? entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json)
-        : entriesOf(value);
     if (Array.isArray(value)) {
-      out[key] = entries;
-      continue;
+      out[key] = withoutRemovals(value, nested);
+    } else if (isPlainMapping(value) && Array.isArray(value.entries)) {
+      const { entries, [LAYERING_KEY]: _wrapper, ...knobs } = value;
+      out[key] = { ...knobs, entries: withoutRemovals(entries, nested) };
     }
-    // The wrapper's own knobs are mapping keys to the fold under every directive, so a null one (`_undeclared: null`) is a marker.
-    const { entries: _entries, ...knobs } = value as Json;
-    out[key] = { ...(dropDeep(knobs) as Json), entries };
   }
   return out;
 }
 
-/** Set an own data property whatever the key; assigning `__proto__` would set the prototype, as the engine's copier avoids too. */
-function put(record: Json, key: string, value: unknown): void {
-  Object.defineProperty(record, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
-}
+/** No nested keyed list nests another today; the table exists so the walk above stays total when one does. */
+const NESTED_OF_NESTED: Readonly<Partial<Record<string, readonly string[]>>> = {};
 
 /**
  * The published schema cannot spell the cross-field rules the zod shapes refine (interaction_limits needs one of its
  * limits, selected_actions is refused beside an allowed_actions other than selected), so null placements are probed
  * through the action's own validator.
  */
-function standaloneValid(doc: Json, run: LayeringDirective): boolean {
+function standaloneValid(doc: Json): boolean {
   return !(
-    "error" in
-    validateSettingsDoc(markerNullsDropped(doc, run), "layer", SectionSelection.ALL, silentIo())
+    "error" in validateSettingsDoc(standaloneViewOf(doc), "layer", SectionSelection.ALL, silentIo())
   );
 }
 
@@ -1934,26 +1894,6 @@ function nestedMappingPaths(doc: Json): string[][] {
   return paths;
 }
 
-function valueAtPath(doc: Json, path: readonly string[]): unknown {
-  let value: unknown = doc;
-  for (const key of path) {
-    if (!isPlainMapping(value)) {
-      return undefined;
-    }
-    value = value[key];
-  }
-  return value;
-}
-
-function withoutPath(doc: Json, path: readonly string[]): Json {
-  const out = structuredClone(doc);
-  const parent = valueAtPath(out, path.slice(0, -1));
-  if (isPlainMapping(parent)) {
-    delete parent[path[path.length - 1] as string];
-  }
-  return out;
-}
-
 function setPath(doc: Json, path: readonly string[], value: unknown): void {
   let node: Json = doc;
   for (const key of path.slice(0, -1)) {
@@ -1966,11 +1906,10 @@ function setPath(doc: Json, path: readonly string[], value: unknown): void {
   node[path[path.length - 1] as string] = value;
 }
 
-/** The standalone view of a layer whose null at `path` the validator strips. */
-function withParentsOnly(doc: Json, path: readonly string[]): Json {
+/** The layer with a null written at `path`, as the validator will see it: the null is a value it must admit. */
+function withNullAt(doc: Json, path: readonly string[]): Json {
   const out = structuredClone(doc);
   setPath(out, path, null);
-  delete (valueAtPath(out, path.slice(0, -1)) as Json)[path[path.length - 1] as string];
   return out;
 }
 
@@ -2043,12 +1982,18 @@ function heldLabelsFor(held: HeldKeyed, entry: Json): LabelIdentity[] {
   return held.labels.filter((label) => claimsIntersect(labelClaims(label), claims));
 }
 
+/**
+ * `effective` is the section's directive at this layer, or "replace" when the fold holds nothing yet: under replace
+ * the held identities start over, under shallow a same-key entry swaps whole (its rules with it), under deep the
+ * rules union by type. A removal drops what it names.
+ */
 function advanceHeld(
   held: HeldKeyed,
   key: "labels" | "rulesets",
   value: unknown,
-  unite: boolean,
+  effective: LayeringDirective,
 ): void {
+  const unite = effective !== "replace";
   if (value === null || !unite) {
     if (key === "labels") {
       held.labels = [];
@@ -2063,21 +2008,32 @@ function advanceHeld(
     if (typeof entry.name !== "string") {
       continue;
     }
+    const removal = entry[REMOVE_KEY] === true;
     if (key === "labels") {
       const identity = labelIdentity(entry) as LabelIdentity;
       const claims = labelClaims(identity);
       held.labels = held.labels.filter((label) => !claimsIntersect(labelClaims(label), claims));
-      held.labels.push(identity);
+      if (!removal) {
+        held.labels.push(identity);
+      }
       continue;
     }
-    const rules = unite
-      ? (held.rulesets.get(entry.name) ?? new Map<string, string>())
-      : new Map<string, string>();
-    if (entry.rules === null) {
-      rules.clear();
+    if (removal) {
+      held.rulesets.delete(entry.name);
+      continue;
     }
+    // Under deep the pair merges, so the held rules carry over; under shallow the entry swaps whole, so they start over.
+    const rules =
+      effective === "deep"
+        ? (held.rulesets.get(entry.name) ?? new Map<string, string>())
+        : new Map<string, string>();
     for (const rule of Array.isArray(entry.rules) ? entry.rules : []) {
-      if (isPlainMapping(rule) && typeof rule.type === "string") {
+      if (!isPlainMapping(rule) || typeof rule.type !== "string") {
+        continue;
+      }
+      if (rule[REMOVE_KEY] === true) {
+        rules.delete(rule.type);
+      } else {
         rules.set(rule.type, JSON.stringify(rule));
       }
     }
@@ -2123,17 +2079,12 @@ export function mergeFeaturesOf(
     for (const key of keys) {
       const value = doc[key];
       if (value === null) {
-        if (isNullValued(key)) {
-          // The fold writes `key: null` as the section's value, so the section stays held and a later declaration
-          // over it is an override, not a first declaration.
-          features.add("null-stays");
-          present.add(key);
-          continue;
-        }
-        features.add(present.has(key) ? "null-deletes" : "null-drops");
-        present.delete(key);
+        // The fold writes `key: null` as the section's value (only a null-valued section passes validation with one),
+        // so the section stays held and a later declaration over it is an override, not a first declaration.
+        features.add("null-section");
+        present.add(key);
         if (key === "labels" || key === "rulesets") {
-          advanceHeld(held, key, null, false);
+          advanceHeld(held, key, null, "replace");
         }
         continue;
       }
@@ -2161,12 +2112,20 @@ export function mergeFeaturesOf(
           }
         }
         if (key === "labels" || key === "rulesets") {
-          const effective = wrapperDirective(value) ?? fileDirective ?? run;
+          const wrapper = wrapperDirective(value);
+          const effective: LayeringDirective =
+            (isLayeringDirective(wrapper) ? wrapper : undefined) ??
+            (isLayeringDirective(fileDirective) ? fileDirective : undefined) ??
+            run;
           const unite = present.has(key) && effective !== "replace";
           if (unite) {
             features.add(key === "labels" ? "union-labels" : "union-rulesets");
             for (const entry of entriesOf(value)) {
               if (typeof entry.name !== "string") {
+                continue;
+              }
+              if (entry[REMOVE_KEY] === true) {
+                features.add("remove-entry");
                 continue;
               }
               if (key === "labels") {
@@ -2194,6 +2153,10 @@ export function mergeFeaturesOf(
                 if (!isPlainMapping(rule) || typeof rule.type !== "string") {
                   continue;
                 }
+                if (rule[REMOVE_KEY] === true) {
+                  features.add("remove-nested");
+                  continue;
+                }
                 const below = heldRules?.get(rule.type);
                 if (below !== undefined && below !== JSON.stringify(rule)) {
                   features.add("rule-parameters");
@@ -2201,14 +2164,12 @@ export function mergeFeaturesOf(
               }
             }
           }
-          if (key === "rulesets") {
-            for (const entry of entriesOf(value)) {
-              if (Object.values(entry).some((field) => field === null)) {
-                features.add("null-entry-field");
-              }
-            }
+          advanceHeld(held, key, value, unite ? effective : "replace");
+        }
+        for (const entry of entriesOf(value)) {
+          if (Object.values(entry).some((field) => field === null)) {
+            features.add("null-entry-field");
           }
-          advanceHeld(held, key, value, unite);
         }
       } else if (isPlainMapping(value) && hasNestedNull(value)) {
         features.add("null-nested");
@@ -2222,8 +2183,8 @@ export function mergeFeaturesOf(
 /**
  * Every admitted layer is valid on its own by construction; the folded document is what the oracle predicts, and it is
  * not always a merged one.
- *   nested null placement              -> probed through the action's validator on this layer and the one below
- *   top-level null                     -> drops out of the standalone view, so it needs no probe
+ *   nested null placement              -> probed through the action's validator with the null written into this layer
+ *   top-level null                     -> only on a section whose value null is, so it needs no probe
  *   the refused layer                  -> rewritten after the check, invalid by design
  *   two valid mapping sections merged  -> can trip a cross-field rule; the valid force gives every mapping section one contribution
  */
@@ -2268,9 +2229,10 @@ export function genMergeScenario(
     if (lower !== undefined) {
       renameLabelsIntoHeld(layerRng.fork("rename"), draft, held, effectiveRunLayering, present);
       respellLabels(layerRng.fork("case"), draft, held, effectiveRunLayering, present);
-      placeNulls(layerRng.fork("nulls"), draft, lower, present, pool, effectiveRunLayering);
+      placeNulls(layerRng.fork("nulls"), draft, lower, present, pool);
+      placeRemovals(layerRng.fork("removals"), draft, held, effectiveRunLayering, present);
     }
-    if (!standaloneValid(draft.doc, effectiveRunLayering)) {
+    if (!standaloneValid(draft.doc)) {
       // Every placement above is probed, so an invalid layer here is a hole in the probes, not a scenario to run.
       throw new Error(
         `BUG: merge layer ${name} fails its standalone validation: ${JSON.stringify(draft.doc)}`,
@@ -2289,7 +2251,7 @@ export function genMergeScenario(
           held,
           key,
           value,
-          present.has(section) && effectiveLayering(draft, key, effectiveRunLayering) !== "replace",
+          present.has(section) ? effectiveLayering(draft, key, effectiveRunLayering) : "replace",
         );
       }
       if (value === null) {
@@ -2473,9 +2435,14 @@ function effectiveLayering(
 }
 
 /**
- * The nested placements are probed through the action's validator on both sides (the lower document without the key,
- * this document with the key's parents but not the key), so the layer itself stays valid; the accumulated fold can
- * still trip a cross-field rule, which the oracle predicts.
+ * Every null placed here is one the schema admits, so the layer stays valid on its own:
+ *   a whole section         -> only where null is the section's value (pages, interaction limits), held below or not
+ *   a nested mapping key    -> a key the lower layer declares, probed through the action's validator with the null
+ *                              written into this document (a passthrough key, or a nullable field) and into the lower
+ *                              declaration, which is what the fold makes of the pair: a cross-field rule the null
+ *                              trips only beside the lower fields (runner_type: labeled with runner_label: null) is
+ *                              caught here, not read as an invalid fold
+ *   a keyed entry's field   -> a held branch's `protection: null`, the entry schema's own nullable field
  */
 function placeNulls(
   rng: Rng,
@@ -2483,7 +2450,6 @@ function placeNulls(
   lower: LayerDraft,
   present: ReadonlySet<SectionKey>,
   pool: readonly SectionKey[],
-  run: LayeringDirective,
 ): void {
   if (!rng.bool(0.6)) {
     return;
@@ -2491,33 +2457,24 @@ function placeNulls(
   const doc = draft.doc;
   const attempts = rng.int(2) + 1;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const roll = rng.int(5);
+    const roll = rng.int(3);
     if (roll === 0) {
-      const candidates = [...present];
+      const candidates = pool.filter((key) => isNullValued(key) && doc[key] === undefined);
       if (candidates.length > 0) {
         doc[rng.pick(candidates)] = null;
       }
       continue;
     }
-    if (roll === 1 || roll === 4) {
-      // 1 draws a null that stays (null-stays), 4 one that drops (null-drops).
-      const candidates = pool.filter(
-        (key) => isNullValued(key) === (roll === 1) && !present.has(key) && doc[key] === undefined,
-      );
-      if (candidates.length > 0) {
-        doc[rng.pick(candidates)] = null;
-      }
-      continue;
-    }
-    if (roll === 2) {
+    if (roll === 1) {
+      // Only a null the schema admits at that path (a passthrough key, a nullable field) keeps the layer valid, and
+      // only one the lower declaration admits beside its other fields keeps the fold valid.
       const candidates = nestedMappingPaths(lower.doc).filter((path) => {
         const top = path[0] as string;
-        if (doc[top] === null || isKnobbedSection(top)) {
-          return false;
-        }
         return (
-          standaloneValid(withoutPath(lower.doc, path), run) &&
-          standaloneValid(withParentsOnly(doc, path), run)
+          doc[top] !== null &&
+          !isKnobbedSection(top) &&
+          standaloneValid(withNullAt(doc, path)) &&
+          standaloneValid(withNullAt(lower.doc, path))
         );
       });
       if (candidates.length > 0) {
@@ -2525,36 +2482,77 @@ function placeNulls(
       }
       continue;
     }
-    // A null inside an entry is a marker only under deep; under shallow the entry is swapped in whole, null and all.
-    if (doc.rulesets === null || effectiveLayering(draft, "rulesets", run) !== "deep") {
+    if (!present.has("branches") || doc.branches === null) {
       continue;
     }
-    const candidates = rulesetEntries(lower.doc).flatMap((entry) =>
-      typeof entry.name === "string"
-        ? Object.keys(entry)
-            .filter((field) => field !== "name" && entry[field] !== null)
-            .map((field) => ({ name: entry.name as string, field }))
-        : [],
+    const claimed = new Set(entriesOf(doc.branches ?? []).map((entry) => entry.name));
+    const candidates = entriesOf(lower.doc.branches ?? []).flatMap((entry) =>
+      typeof entry.name === "string" && !claimed.has(entry.name) ? [entry.name] : [],
     );
-    const candidate = candidates.length > 0 ? rng.pick(candidates) : undefined;
-    if (candidate === undefined) {
-      continue;
+    if (candidates.length > 0) {
+      ensureEntries(doc, "branches").push({ name: rng.pick(candidates), protection: null });
     }
-    const lowerProbe = structuredClone(lower.doc);
-    const lowerEntry = rulesetEntries(lowerProbe).find((entry) => entry.name === candidate.name);
-    if (lowerEntry !== undefined) {
-      delete lowerEntry[candidate.field];
+  }
+}
+
+/**
+ * A removal names a held key: a label the fold holds (dropped under shallow or deep), or a rule type inside a held
+ * ruleset (dropped only when deep merges the pair). The removal never shares a claim with a sibling entry, as the
+ * boundary demands of every layer.
+ */
+function placeRemovals(
+  rng: Rng,
+  draft: LayerDraft,
+  held: HeldKeyed,
+  run: LayeringDirective,
+  present: ReadonlySet<SectionKey>,
+): void {
+  if (!rng.bool(0.45)) {
+    return;
+  }
+  const doc = draft.doc;
+  if (rng.bool(0.6) && unionsLabels(draft, run, present) && held.labels.length > 0) {
+    const entries = entriesOf(doc.labels);
+    const claimedHere = entries.flatMap((entry) => {
+      const identity = labelIdentity(entry);
+      return identity === undefined ? [] : labelClaims(identity);
+    });
+    const candidates = held.labels.filter(
+      (label) => !claimsIntersect(labelClaims(label), claimedHere),
+    );
+    if (candidates.length > 0) {
+      const target = rng.pick(candidates);
+      const spelled = rng.bool(0.5) ? target.name.toUpperCase() : target.name;
+      entries.push({ name: spelled, [REMOVE_KEY]: true });
     }
-    if (!standaloneValid(lowerProbe, run)) {
-      continue;
-    }
-    const entries = ensureEntries(doc, "rulesets");
-    const own = entries.find((entry) => entry.name === candidate.name);
-    if (own !== undefined) {
-      own[candidate.field] = null;
-    } else {
-      entries.push({ name: candidate.name, [candidate.field]: null });
-    }
+    return;
+  }
+  if (
+    doc.rulesets === undefined ||
+    doc.rulesets === null ||
+    !present.has("rulesets") ||
+    effectiveLayering(draft, "rulesets", run) !== "deep"
+  ) {
+    return;
+  }
+  const candidates = [...held.rulesets.entries()].flatMap(([name, rules]) =>
+    [...rules.keys()].map((type) => ({ name, type })),
+  );
+  if (candidates.length === 0) {
+    return;
+  }
+  const { name, type } = rng.pick(candidates);
+  const entries = ensureEntries(doc, "rulesets");
+  const own = entries.find((entry) => entry.name === name);
+  const rules = own === undefined ? [] : Array.isArray(own.rules) ? (own.rules as Json[]) : [];
+  if (rules.some((rule) => isPlainMapping(rule) && rule.type === type)) {
+    return;
+  }
+  rules.push({ type, [REMOVE_KEY]: true });
+  if (own === undefined) {
+    entries.push({ name, rules });
+  } else {
+    own.rules = rules;
   }
 }
 
@@ -2592,6 +2590,33 @@ function refuseLayer(rng: Rng, draft: LayerDraft, kind: MergeRefusalKind): void 
     }
     case "bad-file-layering": {
       doc[LAYERING_KEY] = rng.pick(BAD_LAYERING_VALUES);
+      return;
+    }
+    case "remove-under-replace": {
+      const entries = ensureEntries(doc, "labels");
+      doc.labels = {
+        entries: [...entries, { name: "zz-removed", [REMOVE_KEY]: true }],
+        [LAYERING_KEY]: "replace",
+      };
+      return;
+    }
+    case "remove-unmatched": {
+      // A name outside every generator pool, so no lower layer can hold it; a wrapper directive keeps replace away.
+      const entries = ensureEntries(doc, "labels");
+      doc.labels = {
+        entries: [...entries, { name: "zz-unmatched", [REMOVE_KEY]: true }],
+        [LAYERING_KEY]: "deep",
+      };
+      return;
+    }
+    case "remove-with-fields": {
+      const entries = ensureEntries(doc, "labels");
+      entries.push({ name: "zz-removed", [REMOVE_KEY]: true, color: "ffffff" });
+      return;
+    }
+    case "null-section": {
+      const declared = SECTION_KEYS.filter((key) => !isNullValued(key) && doc[key] !== undefined);
+      doc[declared.length > 0 ? rng.pick(declared) : "labels"] = null;
       return;
     }
     default: {
