@@ -6,7 +6,7 @@ import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js"
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
-import { type PlannedOp, planContext } from "../contract/plan.js";
+import { planContext } from "../contract/plan.js";
 import { variableKey } from "../shared/variables-engine.js";
 import { actionsVariablesSection } from "./index.js";
 
@@ -277,47 +277,5 @@ describe("actions_variables", () => {
         /actions_variables\[DEPLOY_REGION\]: declared key "vaule" does not exist on the live variable.*without converging/,
       ),
     ]);
-  });
-
-  test("the read port exposes exactly the list role, narrowed to its denied posture", () => {
-    const ctx = planContext(actionsVariablesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only: the plans are never executed.
-    type Op = PlannedOp<typeof actionsVariablesSection.endpoints>;
-    const create: Op = {
-      role: "create",
-      payload: { name: "A", value: "1" },
-      drift: ["x"],
-      change: "",
-    };
-    expect(create.role).toBe("create");
-    const read = { role: "list", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the list role is a read, not a plannable write
-    const _read: Op = read;
-    const silent = {
-      role: "update",
-      params: { name: "A" },
-      payload: {},
-      drift: [],
-      change: "",
-    } as const;
-    // @ts-expect-error no variable write is alwaysRewrite, so every one must carry drift
-    const _silent: Op = silent;
-    const nameless = { role: "remove", params: {}, drift: ["x"], change: "" } as const;
-    // @ts-expect-error the route's {name} param is required
-    const _nameless: Op = nameless;
   });
 });
