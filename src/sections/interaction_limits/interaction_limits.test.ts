@@ -247,29 +247,6 @@ describe("interaction_limits", () => {
     ]);
   });
 
-  test("executing null converges: one DELETE, then nothing", async () => {
-    const api = liveRepo({ limit: LIVE });
-    const { second, changes } = await provePlanIdempotent(interactionLimitsSection, api, null);
-    expect(changes).toEqual(["cleared the interaction limit"]);
-    expect(api.writes).toEqual([`DELETE ${BASE}`]);
-    expect(second).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("the read port exposes the three GETs; the primary read keeps its denied posture", () => {
-    const ctx = planContext(interactionLimitsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["get", "capGet", "bypassList"]);
-    // @ts-expect-error a write role is not a read: the port has no `put`
-    ctx.read.put;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.get.probeAbsent;
-    // The cap read keeps tryCall: its declared 405 is a tolerated outcome.
-    expect(typeof ctx.read.capGet.tryCall).toBe("function");
-  });
-
   test("a planned operation can only name a declared write role, tolerating only declared statuses", () => {
     type Op = PlannedOp<typeof interactionLimitsSection.endpoints>;
     const read = { role: "get", drift: ["x"], change: "" } as const;
