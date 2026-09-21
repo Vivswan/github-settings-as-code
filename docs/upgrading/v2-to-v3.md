@@ -27,7 +27,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | One wording per concept in drift lines and notes | Per-section spellings of "cannot verify", "left out", and field drift; quoted webhook labels | One template each | Only a grep over the output notices; [section 13](#13-one-wording-per-concept-in-drift-lines-and-notes) |
 | Webhooks manage web hooks only | A service hook was matched and deleted like any other | A service hook or url-less hook is outside the section | It is left alone and noted by snapshot; [section 14](#14-webhooks-manage-web-hooks-only) |
 | A ruleset without `source_type` is repository-owned | Kept with a note under `_undeclared: delete` | Deleted like any other undeclared repository ruleset | No error: under `_undeclared: delete` the ruleset is deleted, where v2 kept it with a note; [section 15](#15-a-ruleset-without-source_type-is-repository-owned) |
-| Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Only the directives `_layering`, `_undeclared`, and `_remove` exist; any other underscore key fails validation, on a wrapper and at the top level alike | Validation fails before any section runs, naming the directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
+| Underscore keys are directives, never notes | An unknown `_note: ...` at the top level was dropped silently | Three directives exist, each at its own place: `_layering` at the top level or on a list section's wrapper, `_undeclared` at the top level or on a knobbed wrapper, `_remove: true` on a keyed list entry only; any other underscore key, or a directive out of its place, fails validation | Validation fails before any section runs, naming the directives; [section 16](#16-underscore-keys-are-directives-never-notes) |
 | `teams` takes the `_undeclared` knob | A plain array; an undeclared team was never listed or touched | `teams: {_undeclared: keep, entries: [...]}` accepted, default `keep`; `delete` revokes undeclared direct grants | No error. Every run now lists the repository's teams and notes each undeclared direct grant (access granted at the organization level is noted only under `delete`); snapshots write the wrapper form; [section 17](#17-teams-takes-the-_undeclared-knob) |
 | `GSAC_RETRY_BASE_MS` | `RETRY_BASE_MS`, undocumented | `GSAC_RETRY_BASE_MS`, in the inputs reference | No error: an unknown environment variable is ignored, so a harness setting the old name waits real seconds; [section 18](#18-gsac_retry_base_ms) |
 | The sealing key is read at apply time | Check mode read `GET .../secrets/public-key` and failed on a malformed key | The first sealed PUT reads it at apply | Check mode issues one request fewer per secret family; a malformed key fails at apply; [section 19](#19-the-sealing-key-is-read-at-apply-time) |
@@ -296,7 +296,9 @@ v2 refused to delete an undeclared ruleset whose list entry lacked `source_type`
 
 v2 dropped any unknown top-level key starting with `_` as a private note, while rejecting the same key inside a section's `{entries}` wrapper.
 
-v3 has one rule everywhere: the underscore belongs to the directives, `_layering`, `_undeclared`, and `_remove` ([section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry)), and any other underscore key fails validation before any section runs.
+v3 has one rule everywhere: the underscore belongs to the three directives, and any other underscore key fails validation before any section runs. Each directive has its place: `_layering` at the top level or on a list section's wrapper, `_undeclared` at the top level or on a knobbed wrapper ([section 32](#32-file-wide-_undeclared-and-the-undeclared-input)), and `_remove: true` on a keyed list entry ([section 31](#31-null-wins-and-means-empty-and-_remove-drops-an-entry)).
+
+A directive out of its place is refused like any unknown key: `{name: bug, _remove: true}` drops an entry, while a top-level `_remove: true` or `labels: {_remove: true, entries: []}` fails validation.
 
 ```yaml settings
 # owner: platform-team, see runbook RB-112
@@ -513,7 +515,7 @@ layering: deep (default)  labels:                      # union by name; the same
                                 color: "0075ca"
 ```
 
-Every list section folds this way, by the key its planner matches on: labels, collaborators, teams, and environments case-folded; the secret and variable families uppercased; workflow paths as GitHub lists them; the rest verbatim (a ruleset's `rules` by `type` inside a deep pair). The pre-release builds unioned labels and rulesets only and replaced the other fourteen silently.
+Every list section folds this way, by the key its planner matches on: labels, collaborators, teams, and environments case-folded; the secret and variable families uppercased; workflow paths as GitHub lists them; the rest verbatim (a ruleset's `rules` by `type` inside a deep pair). The pre-release builds unioned labels and rulesets only and replaced the other seventeen silently, the three plain lists of [section 30](#30-environments-branches-and-workflows-layer-by-key) among them.
 
 The value `merge` is gone. `labels: {_layering: merge, entries: [...]}` fails with `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them`, and the `layering` input refuses it the same way.
 
@@ -892,11 +894,13 @@ v2   branches:
            url: https://api.github.com/repos/octocat/hello-world/branches/main/protection
            enforce_admins: {url: "...", enabled: true}
            required_status_checks: {strict: true, contexts: [ci], enforcement_level: everyone}
+           restrictions: {users: [{login: octocat}], teams: []}
      -> PUT .../branches/main/protection -> 422 on the {url, enabled} wrapper; without it the PUT landed and the other GET-only keys drifted on every check
 
 v3   branches[0].protection.required_status_checks.enforcement_level: ... is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)
      branches[0].protection.url: ... is a link GitHub's GET response carries and the protection PUT has no word for; remove it
      branches[0].protection.enforce_admins.enabled: ... is GitHub's GET wrapper around the toggle, which the protection PUT takes as a bare boolean; declare enforce_admins: true instead
+     branches[0].protection.restrictions.users[0]: ... carries an actor object copied from GitHub's GET response, which the protection PUT takes as the login string; write "octocat" instead
      (exit 1, zero requests)
 ```
 
@@ -907,8 +911,9 @@ v3   branches[0].protection.required_status_checks.enforcement_level: ... is Git
 | `required_approving_review_count: 7` | 422 at apply | Refused: a whole number 0 to 6 |
 | A `checks` item with a key other than `context` and `app_id` | Sent as written | Refused naming the key |
 | A scalar where `required_status_checks` or `required_pull_request_reviews` goes | Refused on a wildcard entry, passed through to the PUT on a literal one | Refused: a mapping or `null` on every entry |
+| An actor object copied from the GET (`restrictions.users: [{login: octocat}]`) | Sent to the PUT, which 422ed | Refused: write the `login` or `slug` string, `octocat` |
 
-Fix: declare the PUT's shape (bare booleans, `strict` beside the check list) instead of pasting the GET. Also new: a live `restrictions` holder whose `users`, `teams`, and `apps` are all empty is a push restriction that lets nobody through, so a file that omits it now sees the omitted-live drift line and a loud PUT instead of a silent lift.
+Fix: declare the PUT's shape (bare booleans, `strict` beside the check list, actors as their login or slug strings) instead of pasting the GET. Also new: a live `restrictions` holder whose `users`, `teams`, and `apps` are all empty is a push restriction that lets nobody through, so a file that omits it now sees the omitted-live drift line and a loud PUT instead of a silent lift.
 
 ## 42. Collaborators and teams: permissions and slugs
 
