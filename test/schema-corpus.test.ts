@@ -196,6 +196,11 @@ const KNOWN_DIVERGENCES: Record<string, string> = {
     "schema-looser: one key_prefix beginning another is the autolinks section's validate hook (a file-only check over every pair in the list), which JSON Schema cannot express",
   "environment-duplicate-secret-rejected-before-any-write.yml settings":
     "schema-looser: two nested secrets folding to one name are the environments validate hook over the nested list, which JSON Schema cannot express",
+  "actions-secrets-literal-value-rejected.yml settings":
+    "schema-looser: a secret value that is not a whole-value $NAME reference is validateSecretRef over the section's secretValues (validate.ts), " +
+    "whose verdict also turns on the document's provenance, which no schema keyword expresses; the zod shape, and so the schema generated from it, types the value as a plain string",
+  "actions-secrets-excluded-literal-value-rejected.yml settings":
+    "schema-looser: the same literal-value refusal, in a section the sections input excludes",
 };
 
 describe("published schema agrees with the runtime over the corpus", () => {

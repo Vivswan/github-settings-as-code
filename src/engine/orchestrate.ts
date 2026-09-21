@@ -36,8 +36,8 @@ import type { MustBeNever, UndeclaredPolicy } from "../types.js";
 import { executePlan } from "./execute.js";
 import { resolveUndeclaredPolicies, separateRemovals, UNDECLARED_POLICIES } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
-import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
-import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
+import { resolveSecretRefs, type SettingsSource } from "./secret-refs.js";
+import { collectSecretReferences } from "./secrets.js";
 import type { SectionSelection } from "./section-selection.js";
 import { validateSectionShapes } from "./validate.js";
 
@@ -77,8 +77,6 @@ export interface RepoRunOptions {
   mode: "apply" | "check";
   onMissingPermission: OnMissingPermission;
   sections: SectionSelection;
-  /** Omitted, "operator". The multi-repo flow passes "target" for a target's own settings.yml, so its secret references are refused. */
-  secretSource?: SettingsSource;
   secretEnv?: Record<string, string | undefined>;
 }
 
@@ -102,9 +100,14 @@ export function skippedSectionKeys(
   return outcomes.filter((o) => o.status === "skipped").map((o) => o.key);
 }
 
-/** The run's `undeclared` input: the fallback for a list whose wrapper and file set no policy, before the list's default. */
 export interface ValidateOptions {
+  /** The run's `undeclared` input: the fallback for a list whose wrapper and file set no policy, before the list's default. */
   readonly undeclared?: UndeclaredPolicy | undefined;
+  /**
+   * Who authored the document; "operator" when omitted. The multi-repo flow passes "target" for a target's own
+   * settings.yml, so a secret reference in it is refused here, with the rest of the document's problems.
+   */
+  readonly secretSource?: SettingsSource | undefined;
 }
 
 /**
@@ -177,6 +180,7 @@ export function validateSettingsDoc(
   const shapes = validateSectionShapes(
     (removals.sites.length === 0 ? settings : removals.rest) as Record<string, unknown>,
     sourceLabel,
+    options.secretSource ?? "operator",
   );
   if (shapes.isErr()) {
     issues.push(...shapes.error.issues.map(removals.asWritten));
@@ -250,9 +254,9 @@ export async function runForRepo(
   };
   const active = SECTIONS.filter((section) => disposition(section.key) === "active");
 
-  // Secret references are collected from the ACTIVE sections only (an excluded section's references must not fail the
-  // run) and their syntax and provenance checked in BOTH modes, before the preflight barrier and with no environment read.
-  const secretValues = collectSecretValues(settings, active, opts.secretSource ?? "operator");
+  // Validation judged every secret value's syntax and provenance, in the excluded sections too, so what is collected
+  // here is the ACTIVE sections' references, for apply to resolve; check mode reads no environment.
+  const secretReferences = collectSecretReferences(settings, active);
   const secretFailure = (errorsBySection: Map<SectionKey, string[]>): RepoRunResult => {
     const outcomes: SectionOutcome[] = [];
     for (const [key, errors] of errorsBySection) {
@@ -268,21 +272,6 @@ export async function runForRepo(
       preflightDenied: [],
     };
   };
-  const pushError = (map: Map<SectionKey, string[]>, key: SectionKey, message: string): void => {
-    const list = map.get(key) ?? [];
-    list.push(message);
-    map.set(key, list);
-  };
-  const syntaxErrors = new Map<SectionKey, string[]>();
-  for (const { section, value, source, label } of secretValues) {
-    const checked = validateSecretRef(value, source, label);
-    if (!checked.ok) {
-      pushError(syntaxErrors, section, checked.error);
-    }
-  }
-  if (syntaxErrors.size > 0) {
-    return secretFailure(syntaxErrors);
-  }
 
   // The API has no transactions, so a mid-apply permission failure would leave settings half-applied: under the strict
   // policy every active section is probed read-only FIRST. A token with read but not write access can still fail
@@ -307,18 +296,18 @@ export async function runForRepo(
   let tools: ExecTools | null = null;
   if (!check) {
     const resolved: Record<string, string> = {};
-    if (secretValues.length > 0) {
+    if (secretReferences.length > 0) {
       const env = opts.secretEnv ?? process.env;
-      const bySection = new Map<SectionKey, SectionSecretValue[]>();
-      for (const value of secretValues) {
-        const list = bySection.get(value.section) ?? [];
-        list.push(value);
-        bySection.set(value.section, list);
+      const bySection = new Map<SectionKey, string[]>();
+      for (const { section, name } of secretReferences) {
+        const list = bySection.get(section) ?? [];
+        list.push(name);
+        bySection.set(section, list);
       }
       const resolutionErrors = new Map<SectionKey, string[]>();
       const mask = new Set<string>();
-      for (const [key, values] of bySection) {
-        const resolution = resolveSecretRefs(values, env);
+      for (const [key, names] of bySection) {
+        const resolution = resolveSecretRefs(names, env);
         if (!resolution.ok) {
           resolutionErrors.set(key, resolution.errors);
           continue;

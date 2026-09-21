@@ -88,10 +88,7 @@ async function processTarget(ctx: {
   const fail = (richMessage: string): TargetResult => targetFailure(channel.io, richMessage);
 
   // Injection needs the typed labels, so it follows validation; the injected document is validated again inside.
-  const run = async (
-    settings: ValidatedSettings,
-    secretSource: SettingsSource,
-  ): Promise<TargetResult> => {
+  const run = async (settings: ValidatedSettings): Promise<TargetResult> => {
     const injected = applyMarkerInjection(settings, injectMarker);
     if (injected.notice) {
       channel.io.annotate("notice", injected.notice);
@@ -104,7 +101,6 @@ async function processTarget(ctx: {
         mode: cfg.mode,
         onMissingPermission: cfg.onMissingPermission,
         sections: cfg.sections,
-        secretSource,
       },
       channel.io,
     );
@@ -132,21 +128,22 @@ async function processTarget(ctx: {
       "notice",
       `applying the defaults file: the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch`,
     );
-    return run(defaults, "operator");
+    return run(defaults);
   }
 
-  // validateSettingsDoc names sourceLabel (the slug for remote targets) in its own warnings, so they go through the unprefixed sink.
+  // validateSettingsDoc names sourceLabel (the slug for remote targets) in its own warnings, so they go through the
+  // unprefixed sink. The document's provenance goes with it: a target-authored reference is refused there.
   const validated = validateSettingsDoc(
     read.doc,
     read.sourceLabel,
     cfg.sections,
     channel.unprefixed,
-    { undeclared: cfg.undeclared },
+    { undeclared: cfg.undeclared, secretSource: read.source },
   );
   if (validated.isErr()) {
     return fail(describeProblem(validated.error));
   }
-  return run(validated.value, read.source);
+  return run(validated.value);
 }
 
 /**

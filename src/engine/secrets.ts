@@ -1,37 +1,36 @@
 /**
- * Pairs each declared secret-field value (SectionModule.secretValues) with the document's provenance, so orchestrate.ts
- * validates every reference before any section runs and, in apply, resolves them all before the first write.
- * Provenance is one value per DOCUMENT: flows/multi.ts decides it where the document is chosen, and the single-repo
- * flow takes the "operator" default.
- *
- * a target repository's own settings.yml                       -> target
- * the single-repo file, a central file, the defaults document  -> operator
+ * Collects the secret references (SectionModule.secretValues) of the sections a run executes, so orchestrate.ts
+ * resolves them all in apply before the first write. The document is validated, so every value is a whole-value
+ * `$NAME` reference its provenance may carry (engine/validate.ts refused the rest, a target-authored reference
+ * included), and the collection names variables.
  *
  * The snapshot direction lives here too: snapshotSecretReference mints the reference a snapshot
  * writes for a live secret whose value GitHub never reveals.
  */
 
-import type { SectionKey, SettingsFile } from "../schema.js";
+import type { SectionKey } from "../schema.js";
 import type { SectionModule } from "../sections/contract/module.js";
-import { type SettingsSource, type SourcedSecretValue, validateSecretRef } from "./secret-refs.js";
+import type { ValidatedSettings } from "./orchestrate.js";
+import { referenceName, validateSecretRef } from "./secret-refs.js";
 
-export interface SectionSecretValue extends SourcedSecretValue {
-  section: SectionKey;
+/** One variable a section's secret field references, without the `$`. */
+export interface SectionSecretReference {
+  readonly section: SectionKey;
+  readonly name: string;
 }
 
-export function collectSecretValues(
-  settings: SettingsFile,
+export function collectSecretReferences(
+  settings: ValidatedSettings,
   sections: readonly SectionModule[],
-  source: SettingsSource,
-): SectionSecretValue[] {
-  const out: SectionSecretValue[] = [];
+): SectionSecretReference[] {
+  const out: SectionSecretReference[] = [];
   for (const section of sections) {
     const declared = settings[section.key];
     if (declared === undefined || section.secretValues === undefined) {
       continue;
     }
-    for (const { label, value } of section.secretValues(declared)) {
-      out.push({ section: section.key, label, value, source });
+    for (const { value } of section.secretValues(declared)) {
+      out.push({ section: section.key, name: referenceName(value) });
     }
   }
   return out;

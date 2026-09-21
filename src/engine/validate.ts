@@ -4,9 +4,14 @@ import { err, ok, type Result } from "neverthrow";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
-import { checksReportingBesideFailures, type DeclaredIssue } from "../sections/contract/module.js";
+import {
+  checksReportingBesideFailures,
+  type DeclaredIssue,
+  type DeclaredSecretValue,
+} from "../sections/contract/module.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
+import { type SettingsSource, validateSecretRef } from "./secret-refs.js";
 
 const LIST_KEYS: ReadonlySet<string> = new Set(LIST_SECTIONS);
 
@@ -189,12 +194,14 @@ function parsedOffence(value: unknown, at: "item" | "field"): string | null {
 
 /**
  * The result is zod's output (fresh plain objects at every node the shape describes), never the caller's document.
- * Every file-only check runs here: the plainness walks, the shape, the closed surface, and the section's own validate
- * hook, so a settings-file mistake fails the run before the preflight barrier and the first write, in every mode.
+ * Every file-only check runs here: the plainness walks, the shape, the closed surface, the section's own validate
+ * hook, and the secret-reference check under the document's provenance, so a settings-file mistake fails the run
+ * before the preflight barrier and the first write, in every mode and in a section the `sections` input excludes.
  */
 export function validateSectionShapes(
   settings: Record<string, unknown>,
   sourceLabel: string,
+  secretSource: SettingsSource = "operator",
 ): Result<SettingsFile, ProblemOf<"settings-malformed-sections">> {
   const problems: string[] = [];
   const parsedSections: Record<string, unknown> = {};
@@ -252,6 +259,7 @@ export function validateSectionShapes(
     problems.push(
       ...closedSurfaceProblems(key, parsed.data),
       ...fileOnlyProblems(key, parsed.data),
+      ...secretReferenceProblems(key, parsed.data, secretSource),
     );
     parsedSections[key] = parsed.data;
   }
@@ -268,6 +276,30 @@ function fileOnlyProblems(key: (typeof SECTION_KEYS)[number], parsed: unknown): 
     validate?(declared: unknown): readonly DeclaredIssue[];
   };
   return (module.validate?.(parsed) ?? []).map((issue) => `${key}${issue.path}: ${issue.message}`);
+}
+
+/**
+ * Every designated secret field (SectionModule.secretValues) as a whole-value `$NAME` reference the document's
+ * provenance may carry; the label names the owning entry, so the issue sits under the section key alone. No
+ * environment is read: check mode and the fold's per-layer validation run it too.
+ */
+function secretReferenceProblems(
+  key: (typeof SECTION_KEYS)[number],
+  parsed: unknown,
+  source: SettingsSource,
+): string[] {
+  // The registry's generic view types the declared value per section, so the parsed output is re-widened here.
+  const module = sectionModule(key) as {
+    secretValues?(declared: unknown): readonly DeclaredSecretValue[];
+  };
+  const problems: string[] = [];
+  for (const { label, value } of module.secretValues?.(parsed) ?? []) {
+    const checked = validateSecretRef(value, source, label);
+    if (!checked.ok) {
+      problems.push(`${key}: ${checked.error}`);
+    }
+  }
+  return problems;
 }
 
 /**
