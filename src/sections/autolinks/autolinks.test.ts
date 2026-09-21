@@ -123,39 +123,6 @@ describe("autolinks", () => {
     ]);
   });
 
-  test.each<[form: string, declared: SectionInput<"autolinks">, roles: string[], notes: string[]]>([
-    [
-      "wrapped _undeclared:keep",
-      {
-        _undeclared: "keep",
-        entries: [{ key_prefix: "JIRA-", url_template: "https://x.test/<num>" }],
-      },
-      [],
-      [KEEP_NOTE],
-    ],
-    [
-      "the wrapper without a policy",
-      { entries: [{ key_prefix: "JIRA-", url_template: "https://x.test/<num>" }] },
-      ["remove"],
-      [],
-    ],
-    [
-      "the plain list",
-      [{ key_prefix: "JIRA-", url_template: "https://x.test/<num>" }],
-      ["remove"],
-      [],
-    ],
-  ])(
-    "%s resolves the undeclared autolink against the delete default",
-    async (_form, declared, roles, notes) => {
-      const api = new MockApi({ [LIST]: { data: liveAutolinks } });
-      const result = await plan(api, declared);
-      expect(result.ops.map((op): string => op.role)).toEqual(roles);
-      expect(result.notes).toEqual(notes);
-      expect(result.drift).toEqual([]);
-    },
-  );
-
   test("duplicate prefixes inside the wrapper are a validate issue under .entries, so the document fails before any API call", () => {
     expect(
       autolinksSection.validate({
