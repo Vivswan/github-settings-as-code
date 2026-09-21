@@ -7,7 +7,7 @@ import {
 } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { checkSuitePreferencesSection } from "./index.js";
@@ -22,10 +22,12 @@ describe("check_suite_preferences", () => {
   };
   const note =
     "check_suite_preferences: GitHub exposes no read endpoint for check suite preferences, so check mode cannot verify them; apply re-asserts the declared preferences on every run";
-  const plan = (api: MockApi, desired: SectionInput<"check_suite_preferences">) =>
-    checkSuitePreferencesSection.plan(
-      planContext(checkSuitePreferencesSection, api, REPO),
-      validatedInput("check_suite_preferences", desired),
+  const plan = async (api: MockApi, desired: SectionInput<"check_suite_preferences">) =>
+    unwrap(
+      await checkSuitePreferencesSection.plan(
+        planContext(checkSuitePreferencesSection, api, REPO),
+        validatedInput("check_suite_preferences", desired),
+      ),
     );
   /** The change line the plan's one operation renders for a PATCH response. */
   const rendered = (of: SectionPlan, response: unknown): string => {
@@ -33,7 +35,7 @@ describe("check_suite_preferences", () => {
     if (typeof change !== "function") {
       throw new Error("the plan carries no change thunk to render");
     }
-    return String(change(response));
+    return String(unwrap(change(response)));
   };
 
   test("the plan is one driftless PATCH of the declared payload plus the cannot-verify note, and issues no request", async () => {
@@ -105,7 +107,7 @@ describe("check_suite_preferences", () => {
       },
     });
     expect(execution.status).toBe("failed");
-    const message = execution.status === "failed" ? (execution.error as Error).message : "";
+    const message = execution.status === "failed" ? execution.failure.message : "";
     expect(message).toMatch(/"Checks" \(read and write\)/);
     expect(message).toMatch(/repository administrator/);
     expect(execution.landed).toBe(0);

@@ -6,11 +6,13 @@
  * the gated sections reading through the same client.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import type { GitHubClient } from "../../github/api.js";
 import type { SectionKey } from "../../schema.js";
+import type { SectionFailure } from "./errors.js";
 import { ORG_PROBE, type SectionMeta, type SectionModule } from "./module.js";
-import { clientOf, type PlanContext } from "./plan.js";
+import { clientOf, type PlanContext, type Read } from "./plan.js";
 
 function personalAccountNote(
   section: Pick<SectionMeta, "key">,
@@ -29,7 +31,7 @@ interface OrgProbePort {
     probeAbsent(
       schema: z.ZodType<unknown>,
       opts: { params: { org: string } },
-    ): Promise<{ data: unknown } | { missing: true }>;
+    ): Read<{ data: unknown } | { missing: true }>;
   };
 }
 
@@ -38,9 +40,12 @@ interface OrgProbePort {
  * gated section probes, the rest read the answer. A failed probe (a denial, a server error) is not
  * kept, so every section reports it through its own port.
  */
-const personalByClient = new WeakMap<GitHubClient, Map<string, Promise<boolean>>>();
+const personalByClient = new WeakMap<
+  GitHubClient,
+  Map<string, Promise<Result<boolean, SectionFailure>>>
+>();
 
-function isPersonalAccount(ctx: PlanContext): Promise<boolean> {
+function isPersonalAccount(ctx: PlanContext): Promise<Result<boolean, SectionFailure>> {
   const api = clientOf(ctx);
   let byOwner = personalByClient.get(api);
   if (byOwner === undefined) {
@@ -52,10 +57,17 @@ function isPersonalAccount(ctx: PlanContext): Promise<boolean> {
   if (known !== undefined) {
     return known;
   }
-  const probing = (ctx.read as unknown as OrgProbePort).org
-    .probeAbsent(z.unknown(), { params: { org: owner } })
-    .then((answer) => "missing" in answer);
+  const probing = (async (): Promise<Result<boolean, SectionFailure>> => {
+    const answer = await (ctx.read as unknown as OrgProbePort).org
+      .probeAbsent(z.unknown(), { params: { org: owner } })
+      .map((probe) => "missing" in probe);
+    if (answer.isErr()) {
+      byOwner.delete(owner);
+    }
+    return answer;
+  })();
   byOwner.set(owner, probing);
+  // The client's own throw (a transport error on the probe) is not kept either.
   probing.catch(() => byOwner.delete(owner));
   return probing;
 }
@@ -76,23 +88,35 @@ export function gatedByOwner<K extends SectionKey>(module: SectionModule<K>): Se
   const personal = async (
     ctx: PlanContext,
     phase: "plan" | "snapshot",
-  ): Promise<string | undefined> =>
-    (await isPersonalAccount(ctx)) ? personalAccountNote(module, ctx.repo.owner, phase) : undefined;
+  ): Promise<Result<string | undefined, SectionFailure>> =>
+    (await isPersonalAccount(ctx)).map((isPersonal) =>
+      isPersonal ? personalAccountNote(module, ctx.repo.owner, phase) : undefined,
+    );
   const snapshot = module.snapshot;
   return {
     ...module,
     plan: async (ctx, desired) => {
-      const note = await personal(ctx, "plan");
-      return note === undefined ? module.plan(ctx, desired) : { ops: [], notes: [note], drift: [] };
+      const probed = await personal(ctx, "plan");
+      if (probed.isErr()) {
+        return err(probed.error);
+      }
+      const note = probed.value;
+      return note === undefined
+        ? module.plan(ctx, desired)
+        : ok({ ops: [], notes: [note], drift: [] });
     },
     ...(snapshot === undefined
       ? {}
       : {
           snapshot: async (ctx: Parameters<typeof snapshot>[0]) => {
-            const note = await personal(ctx, "snapshot");
+            const probed = await personal(ctx, "snapshot");
+            if (probed.isErr()) {
+              return err(probed.error);
+            }
+            const note = probed.value;
             return note === undefined
               ? snapshot.call(module, ctx)
-              : { value: undefined, notes: [note] };
+              : ok({ value: undefined, notes: [note] });
           },
         }),
   };

@@ -5,9 +5,10 @@
  * every value rides one write, so there is no per-item create, update, or delete to declare.
  */
 
+import { ok, type Result } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
@@ -19,6 +20,7 @@ import {
   ORG_PROBE,
   type SectionMeta,
   type SectionModule,
+  type SectionSnapshot,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
@@ -122,15 +124,13 @@ const LiveProperty = z.looseObject({
 function propertiesByName(
   section: SectionMeta,
   live: readonly z.infer<typeof LiveProperty>[],
-): Map<string, z.infer<typeof LiveProperty>> {
-  return raise(
-    liveByIdentity(
-      section,
-      "custom property",
-      live,
-      (p) => p.property_name,
-      (p) => liveIdentity(p.property_name),
-    ),
+): Result<Map<string, z.infer<typeof LiveProperty>>, SectionFailure> {
+  return liveByIdentity(
+    section,
+    "custom property",
+    live,
+    (p) => p.property_name,
+    (p) => liveIdentity(p.property_name),
   );
 }
 
@@ -175,97 +175,101 @@ export const customPropertiesSection = {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // Not paginated upstream: one GET carries every value.
-    const live = await ctx.read.list.call(z.array(LiveProperty));
-    const liveByName = propertiesByName(this, live);
-    const declaredNames = new Set(desired.map((p) => p.property_name));
+    return ctx.read.list.call(z.array(LiveProperty)).andThen((live) =>
+      propertiesByName(this, live).map((liveByName) => {
+        const declaredNames = new Set(desired.map((p) => p.property_name));
 
-    // A live null and an absent live entry both mean "unset".
-    const updates: PendingUpdate[] = [];
-    for (const property of desired) {
-      const name = property.property_name;
-      const wanted = normalizeValue(property.value);
-      const current = liveByName.get(name)?.value ?? null;
-      if (sameValue(wanted, current)) {
-        continue;
-      }
-      const label = `custom_properties[${name}]`;
-      updates.push(
-        wanted === null
-          ? {
-              property_name: name,
-              value: null,
-              drift: `${label}: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
-              change: `unset custom property "${name}"`,
-            }
-          : {
-              property_name: name,
-              value: wanted,
-              drift: valueDrift(label, show(wanted), show(current)),
-              change: `set custom property "${name}" to ${show(wanted)}`,
-            },
-      );
-    }
-    for (const property of live) {
-      const name = property.property_name;
-      if (declaredNames.has(name) || property.value === null) {
-        continue;
-      }
-      if (policy === "keep") {
-        plan.notes.push(
-          undeclaredNote({
-            subject: `custom property "${name}"`,
-            state: "is set on the repo but not declared",
-            action: "UNSET it",
-          }),
-        );
-        continue;
-      }
-      updates.push({
-        property_name: name,
-        value: null,
-        drift: undeclaredDrift(defaultUndeclaredPolicy(this), {
-          label: `custom_properties[${name}]`,
-          action: "unset it (reverting to the org default, if any)",
-        }),
-        change: `unset undeclared custom property "${name}"`,
-      });
-    }
-    const [first, ...rest] = updates;
-    if (first === undefined) {
-      return plan;
-    }
-    plan.ops.push({
-      role: "update",
-      payload: {
-        properties: updates.map(({ property_name, value }) => ({ property_name, value })),
-      },
-      describe: "updating custom property values",
-      drift: [first.drift, ...rest.map((update) => update.drift)],
-      change: () => [first.change, ...rest.map((update) => update.change)] as const,
-    });
-    return plan;
+        // A live null and an absent live entry both mean "unset".
+        const updates: PendingUpdate[] = [];
+        for (const property of desired) {
+          const name = property.property_name;
+          const wanted = normalizeValue(property.value);
+          const current = liveByName.get(name)?.value ?? null;
+          if (sameValue(wanted, current)) {
+            continue;
+          }
+          const label = `custom_properties[${name}]`;
+          updates.push(
+            wanted === null
+              ? {
+                  property_name: name,
+                  value: null,
+                  drift: `${label}: declared null but the live value is ${show(current)}; apply will unset it (reverting to the org default, if any)`,
+                  change: `unset custom property "${name}"`,
+                }
+              : {
+                  property_name: name,
+                  value: wanted,
+                  drift: valueDrift(label, show(wanted), show(current)),
+                  change: `set custom property "${name}" to ${show(wanted)}`,
+                },
+          );
+        }
+        for (const property of live) {
+          const name = property.property_name;
+          if (declaredNames.has(name) || property.value === null) {
+            continue;
+          }
+          if (policy === "keep") {
+            plan.notes.push(
+              undeclaredNote({
+                subject: `custom property "${name}"`,
+                state: "is set on the repo but not declared",
+                action: "UNSET it",
+              }),
+            );
+            continue;
+          }
+          updates.push({
+            property_name: name,
+            value: null,
+            drift: undeclaredDrift(defaultUndeclaredPolicy(this), {
+              label: `custom_properties[${name}]`,
+              action: "unset it (reverting to the org default, if any)",
+            }),
+            change: `unset undeclared custom property "${name}"`,
+          });
+        }
+        const [first, ...rest] = updates;
+        if (first === undefined) {
+          return plan;
+        }
+        plan.ops.push({
+          role: "update",
+          payload: {
+            properties: updates.map(({ property_name, value }) => ({ property_name, value })),
+          },
+          describe: "updating custom property values",
+          drift: [first.drift, ...rest.map((update) => update.drift)],
+          change: () => ok([first.change, ...rest.map((update) => update.change)] as const),
+        });
+        return plan;
+      }),
+    );
   },
   // An unset (null) live value is the org default, which no declaration needs to restate; an empty
   // list is read the same way (the validate hook refuses a declared `[]`, whose storage GitHub
   // leaves undocumented).
   // A list reads back as the SET the planner compares, so a live duplicate option is dropped.
   async snapshot(ctx) {
-    const live = await ctx.read.list.call(z.array(LiveProperty));
-    propertiesByName(this, live);
-    const set = live.flatMap((property) => {
-      if (property.value === null) {
-        return [];
-      }
-      if (!Array.isArray(property.value)) {
-        return [property];
-      }
-      const options = [...new Set(property.value)];
-      return options.length === 0 ? [] : [{ ...property, value: options }];
-    });
-    if (set.length === 0) {
-      return { value: undefined, notes: [] };
-    }
-    const entries = set.map((property) => projectOntoSchema(CustomPropertyConfig, property));
-    return { value: knobbedSnapshot(this, entries), notes: [] };
+    return ctx.read.list.call(z.array(LiveProperty)).andThen((live) =>
+      propertiesByName(this, live).map((): SectionSnapshot<"custom_properties"> => {
+        const set = live.flatMap((property) => {
+          if (property.value === null) {
+            return [];
+          }
+          if (!Array.isArray(property.value)) {
+            return [property];
+          }
+          const options = [...new Set(property.value)];
+          return options.length === 0 ? [] : [{ ...property, value: options }];
+        });
+        if (set.length === 0) {
+          return { value: undefined, notes: [] };
+        }
+        const entries = set.map((property) => projectOntoSchema(CustomPropertyConfig, property));
+        return { value: knobbedSnapshot(this, entries), notes: [] };
+      }),
+    );
   },
 } satisfies SectionModule<"custom_properties", typeof ENDPOINTS>;

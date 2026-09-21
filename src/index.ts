@@ -118,6 +118,7 @@ export {
   endpointPath,
   type Route,
 } from "./sections/contract/endpoints.js";
+export type { SectionFailure } from "./sections/contract/errors.js";
 export type { GraphqlOpDecl } from "./sections/contract/graphql.js";
 export {
   type SectionInput,

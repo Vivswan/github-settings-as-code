@@ -17,6 +17,7 @@ import {
   validateSettings,
 } from "../../src/index.js";
 import { MockApi } from "../mock-api.js";
+import { unwrap } from "../sections/section-run.js";
 import { validatedInput } from "../sections/validated-input.js";
 
 const REPO: RepoRef = { owner: "octo-org", name: "api", slug: "octo-org/api" };
@@ -27,11 +28,13 @@ describe("a section module called through the entry", () => {
   test("plan() over planContext() reports the drift the engine would, reading only", async () => {
     const api = new MockApi({ [LIST]: { data: liveLabels } });
     const labels = sectionModule("labels");
-    const plan: SectionPlan = await labels.plan(
-      planContext(labels, api, REPO),
-      validatedInput("labels", [
-        { name: "bug", color: "000000", description: "Something isn't working" },
-      ]),
+    const plan: SectionPlan = unwrap(
+      await labels.plan(
+        planContext(labels, api, REPO),
+        validatedInput("labels", [
+          { name: "bug", color: "000000", description: "Something isn't working" },
+        ]),
+      ),
     );
     expect(plan).toEqual({
       ops: [
@@ -80,7 +83,7 @@ describe("a section module called through the entry", () => {
     if (declared === undefined) {
       throw new Error("the document declares labels");
     }
-    const plan = await labels.plan(planContext(labels, api, REPO), declared);
+    const plan = unwrap(await labels.plan(planContext(labels, api, REPO), declared));
     expect(plan).toEqual({ ops: [], notes: [], drift: [] });
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([LIST]);
   });
@@ -89,7 +92,9 @@ describe("a section module called through the entry", () => {
     const api = new MockApi({ [LIST]: { data: liveLabels } });
     const labels = sectionModule("labels");
     const ctx = snapshotContext(labels, api, REPO, "warn");
-    const snapshot: SectionSnapshot<"labels"> | undefined = await labels.snapshot?.(ctx);
+    const read = await labels.snapshot?.(ctx);
+    const snapshot: SectionSnapshot<"labels"> | undefined =
+      read === undefined ? undefined : unwrap(read);
     expect(snapshot).toEqual({
       value: {
         _undeclared: "delete",

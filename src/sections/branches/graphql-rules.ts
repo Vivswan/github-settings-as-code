@@ -1,13 +1,22 @@
 /** index.ts decides which entries reach this module; nothing here classifies entries. */
 
+import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { MustBeNever } from "../../types.js";
 import { repoVariables } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import type { ExecTools, Late, PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import type {
+  ChangeLines,
+  ExecTools,
+  Late,
+  PlanContext,
+  PlannedOp,
+  Read,
+  SectionPlan,
+} from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import type { BooleanControl } from "./keys.js";
 import { type BranchConfig, type BranchProtectionConfig, parseBypassActor } from "./schema.js";
@@ -368,45 +377,48 @@ export type BranchesContext = PlanContext<typeof ENDPOINTS, typeof GRAPHQL>;
 
 export type BranchesPlan = SectionPlan<PlannedOp<typeof ENDPOINTS, typeof GRAPHQL>>;
 
-export async function fetchRules(ctx: BranchesContext): Promise<LiveRules> {
-  const read = await ctx.read.rulesQuery.listConnection(RuleNode, repoVariables(ctx));
-  if ("error" in read) {
+export function fetchRules(ctx: BranchesContext): Read<LiveRules> {
+  return ctx.read.rulesQuery.listConnection(RuleNode, repoVariables(ctx)).andThen((read) =>
     // The declared NOT_FOUND: the denial surfaces at the first write instead of here.
-    return null;
-  }
-  return indexRules(ctx, read.items);
+    "error" in read ? ok(null) : indexRules(ctx, read.items),
+  );
 }
 
-/** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
-export async function fetchRulesForSnapshot(ctx: BranchesContext): Promise<Map<string, RuleNode>> {
-  const read = await ctx.read.rulesSnapshot.listConnection(RuleNode, repoVariables(ctx));
-  if ("error" in read) {
-    throw new Error(
-      "BUG: branches: the snapshot rules query declares no tolerated outcome, yet its read returned an error instead of throwing",
-    );
-  }
-  return indexRules(ctx, read.items);
+/** The snapshot's read: the op tolerates no outcome, so a denial fails the read with the grant advice. */
+export function fetchRulesForSnapshot(ctx: BranchesContext): Read<Map<string, RuleNode>> {
+  return ctx.read.rulesSnapshot.listConnection(RuleNode, repoVariables(ctx)).andThen((read) => {
+    if ("error" in read) {
+      throw new Error(
+        "BUG: branches: the snapshot rules query declares no tolerated outcome, yet its read returned an error instead of failing",
+      );
+    }
+    return indexRules(ctx, read.items);
+  });
 }
 
 /** The rules by pattern under the duplicate-live guard: GitHub matches a pattern exactly, so the fold is the pattern itself. */
-function indexRules(ctx: BranchesContext, rules: readonly RuleNode[]): Map<string, RuleNode> {
+function indexRules(
+  ctx: BranchesContext,
+  rules: readonly RuleNode[],
+): Result<Map<string, RuleNode>, SectionFailure> {
   for (const rule of rules) {
     // The nested allowance connection is read in one 100-node page; a rule beyond that would
     // silently truncate, so check would report phantom drift against the truncated list.
     if (rule.bypassForcePushAllowances.pageInfo.hasNextPage) {
-      throw new Error(
-        `branches: the live protection rule "${rule.pattern}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
+      return err(
+        sectionFailure(
+          "live-shape",
+          `branches: the live protection rule "${rule.pattern}" allows more than 100 force-push bypass actors, which this section cannot read back completely; trim the live allowance list below 100 to manage it here`,
+        ),
       );
     }
   }
-  return raise(
-    liveByIdentity(
-      { key: ctx.section },
-      "protection rule",
-      rules,
-      (rule) => rule.pattern,
-      (rule) => liveIdentity(rule.pattern, { rule_id: rule.id }),
-    ),
+  return liveByIdentity(
+    { key: ctx.section },
+    "protection rule",
+    rules,
+    (rule) => rule.pattern,
+    (rule) => liveIdentity(rule.pattern, { rule_id: rule.id }),
   );
 }
 
@@ -581,14 +593,16 @@ function verifyDeploymentReadback(
   declared: NonNullable<BranchProtectionConfig["required_deployments"]> | null,
   response: unknown,
   payloadKey: MutationPayloadKey,
-): void {
+): Result<void, SectionFailure> {
+  const unverified = (message: string): Result<never, SectionFailure> =>
+    err(sectionFailure("unverified", message));
   const payload = (response as Record<string, unknown> | null)?.[payloadKey];
   const rule = (payload as Record<string, unknown> | null | undefined)?.branchProtectionRule as
     | RuleNode
     | null
     | undefined;
   if (typeof rule !== "object" || rule === null) {
-    throw new Error(
+    return unverified(
       `branches[${entryName}].protection.required_deployments: the mutation returned no rule to read back, so the applied deployment requirement cannot be verified; re-run the workflow, and retry later if it persists`,
     );
   }
@@ -597,16 +611,16 @@ function verifyDeploymentReadback(
     : [];
   if (declared === null) {
     if (rule.requiresDeployments === true) {
-      throw new Error(
+      return unverified(
         `branches[${entryName}].protection.required_deployments: declared null (not required) but the rule still requires deployments to [${echoed.join(", ")}] after the mutation; re-run the workflow, and report this if it persists`,
       );
     }
-    return;
+    return ok(undefined);
   }
   const echoedFold = new Set(echoed.map((name) => name.toLowerCase()));
   const dropped = declared.environments.filter((name) => !echoedFold.has(name.toLowerCase()));
   if (dropped.length > 0) {
-    throw new Error(
+    return unverified(
       `branches[${entryName}].protection.required_deployments: GitHub silently dropped [${dropped.join(", ")}] ` +
         "from the required deployment environments because no environment with that name exists on the repository. " +
         "Declare the environment in this settings file's environments: section (it applies before branches), " +
@@ -614,13 +628,14 @@ function verifyDeploymentReadback(
     );
   }
   if (rule.requiresDeployments !== true || !sameNamesFold(declared.environments, echoed)) {
-    throw new Error(
+    return unverified(
       `branches[${entryName}].protection.required_deployments: the settings file requires deployments to ` +
         `[${declared.environments.join(", ")}] but after the mutation the rule ` +
         `${rule.requiresDeployments === true ? `requires [${echoed.join(", ")}]` : "does not require deployments"}; ` +
         "re-run the workflow, and report this if it persists",
     );
   }
+  return ok(undefined);
 }
 
 function routedKeyDrift(
@@ -697,60 +712,71 @@ async function resolveActorId(
   exec: ExecTools,
   graphqlRun: GraphqlRun,
   raw: string,
-): Promise<string> {
+): Promise<Result<string, SectionFailure>> {
   const cacheKey = raw.toLowerCase();
   const cached = graphqlRun.actorIds.get(cacheKey);
   if (cached !== undefined) {
-    return cached;
+    return ok(cached);
   }
   const actor = parseBypassActor(raw);
   if (actor === null) {
     throw new Error(`BUG: force_push_bypassers actor "${raw}" escaped shape validation`);
   }
-  let id: string | undefined;
-  if (actor.kind === "user") {
-    const data = await ctx.read.actorUser.call(
-      exec,
-      UserLookup,
-      { ...repoVariables(ctx), login: actor.login },
-      { describe: `resolving force-push bypass user "${raw}"` },
-    );
-    adoptRepoId(graphqlRun, data);
-    id = data.user?.id;
-  } else if (actor.kind === "team") {
-    const data = await ctx.read.actorTeam.call(
-      exec,
-      TeamLookup,
-      { ...repoVariables(ctx), org: actor.org, team: actor.team },
-      { describe: `resolving force-push bypass team "${raw}"` },
-    );
-    adoptRepoId(graphqlRun, data);
-    const team = data.organization?.team;
-    if (team === null || team === undefined) {
-      throw new Error(
-        `branches: force_push_bypassers actor "${raw}": the organization "${actor.org}" has no team with slug "${actor.team}" (or the token cannot see it); check the actor spelling in the settings file`,
+  return safeTry(async function* () {
+    let id: string | undefined;
+    if (actor.kind === "user") {
+      const data = yield* ctx.read.actorUser.call(
+        exec,
+        UserLookup,
+        { ...repoVariables(ctx), login: actor.login },
+        { describe: `resolving force-push bypass user "${raw}"` },
+      );
+      adoptRepoId(graphqlRun, data);
+      id = data.user?.id;
+    } else if (actor.kind === "team") {
+      const data = yield* ctx.read.actorTeam.call(
+        exec,
+        TeamLookup,
+        { ...repoVariables(ctx), org: actor.org, team: actor.team },
+        { describe: `resolving force-push bypass team "${raw}"` },
+      );
+      adoptRepoId(graphqlRun, data);
+      const team = data.organization?.team;
+      if (team === null || team === undefined) {
+        return err(
+          sectionFailure(
+            "refused",
+            `branches: force_push_bypassers actor "${raw}": the organization "${actor.org}" has no team with slug "${actor.team}" (or the token cannot see it); check the actor spelling in the settings file`,
+          ),
+        );
+      }
+      id = team.id;
+    } else {
+      const result = yield* ctx.read.appLookup.tryCall(exec, AppLookup, {
+        params: { app_slug: actor.slug },
+        describe: `resolving force-push bypass App "${raw}"`,
+      });
+      if ("error" in result) {
+        return err(
+          sectionFailure(
+            "refused",
+            `branches: force_push_bypassers actor "${raw}": no GitHub App with slug "${actor.slug}" exists; check the actor spelling in the settings file`,
+          ),
+        );
+      }
+      id = result.data.node_id;
+    }
+    if (id === undefined || id.length === 0) {
+      return err(
+        sectionFailure(
+          "live-shape",
+          `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
+        ),
       );
     }
-    id = team.id;
-  } else {
-    const result = await ctx.read.appLookup.tryCall(exec, AppLookup, {
-      params: { app_slug: actor.slug },
-      describe: `resolving force-push bypass App "${raw}"`,
-    });
-    if ("error" in result) {
-      throw new Error(
-        `branches: force_push_bypassers actor "${raw}": no GitHub App with slug "${actor.slug}" exists; check the actor spelling in the settings file`,
-      );
-    }
-    id = result.data.node_id;
-  }
-  if (id === undefined || id.length === 0) {
-    throw new Error(
-      `branches: force_push_bypassers actor "${raw}": the ${actor.kind === "app" ? "App lookup" : "GraphQL lookup"} succeeded but returned no node id, so the allowance cannot be applied; re-run the workflow, and report this if it persists`,
-    );
-  }
-  graphqlRun.actorIds.set(cacheKey, id);
-  return id;
+    graphqlRun.actorIds.set(cacheKey, id);
+    return ok(id);
+  });
 }
 
 function adoptRepoId(graphqlRun: GraphqlRun, data: z.infer<typeof RepositoryLookup>): void {
@@ -764,17 +790,22 @@ function adoptRepoId(graphqlRun: GraphqlRun, data: z.infer<typeof RepositoryLook
  * Read at EXECUTION time when the plan-time fetch did not carry the rule: a PUT planned earlier may
  * have created it, or the rules query answered its tolerated NOT_FOUND.
  */
-async function lateRuleId(ctx: BranchesContext, pattern: string): Promise<unknown> {
-  const node = (await fetchRules(ctx))?.get(pattern);
-  if (node === undefined) {
-    throw new Error(
-      `branches[${pattern}]: the branch is protected but no branch protection rule with that ` +
-        `pattern is visible through GraphQL, so its GraphQL-only fields cannot be set; check ` +
-        `that the token can read branch protection rules, re-run the workflow, and report this ` +
-        `if it persists`,
-    );
-  }
-  return node.id;
+function lateRuleId(ctx: BranchesContext, pattern: string): Read<unknown> {
+  return fetchRules(ctx).andThen((rules) => {
+    const node = rules?.get(pattern);
+    if (node === undefined) {
+      return err(
+        sectionFailure(
+          "live-shape",
+          `branches[${pattern}]: the branch is protected but no branch protection rule with that ` +
+            `pattern is visible through GraphQL, so its GraphQL-only fields cannot be set; check ` +
+            `that the token can read branch protection rules, re-run the workflow, and report this ` +
+            `if it persists`,
+        ),
+      );
+    }
+    return ok(node.id);
+  });
 }
 
 /** IN DECLARED ORDER, one lookup at a time, so the request log stays deterministic. */
@@ -783,12 +814,14 @@ export async function resolveActorIds(
   exec: ExecTools,
   graphqlRun: GraphqlRun,
   actors: readonly string[],
-): Promise<string[]> {
-  const ids: string[] = [];
-  for (const actor of actors) {
-    ids.push(await resolveActorId(ctx, exec, graphqlRun, actor));
-  }
-  return ids;
+): Promise<Result<string[], SectionFailure>> {
+  return safeTry(async function* () {
+    const ids: string[] = [];
+    for (const actor of actors) {
+      ids.push(yield* await resolveActorId(ctx, exec, graphqlRun, actor));
+    }
+    return ok(ids);
+  });
 }
 
 function wildcardInput(protection: BranchProtectionConfig): Record<string, unknown> {
@@ -812,7 +845,7 @@ function ruleVariables(
   graphqlRun: GraphqlRun,
   fields: Record<string, unknown>,
   actors: readonly string[] | undefined,
-  late?: (exec: ExecTools) => Promise<Record<string, unknown>>,
+  late?: (exec: ExecTools) => Promise<Result<Record<string, unknown>, SectionFailure>>,
 ): RuleVariables {
   if (actors === undefined && late === undefined) {
     return { input: fields };
@@ -822,35 +855,44 @@ function ruleVariables(
   }
   // The actors resolve first: a user or team read also selects the repository's node id, which
   // spares a create its dedicated lookup (adoptRepoId).
-  return async (exec) => ({
-    input: {
-      ...fields,
-      ...(actors === undefined
-        ? {}
-        : { bypassForcePushActorIds: await resolveActorIds(ctx, exec, graphqlRun, actors) }),
-      ...(late === undefined ? {} : await late(exec)),
-    },
-  });
+  return async (exec) =>
+    safeTry(async function* () {
+      const actorIds =
+        actors === undefined
+          ? {}
+          : {
+              bypassForcePushActorIds: yield* await resolveActorIds(ctx, exec, graphqlRun, actors),
+            };
+      const lateFields = late === undefined ? {} : yield* await late(exec);
+      return ok({ input: { ...fields, ...actorIds, ...lateFields } });
+    });
 }
 
 async function repositoryNodeId(
   ctx: BranchesContext,
   exec: ExecTools,
   graphqlRun: GraphqlRun,
-): Promise<string> {
-  if (graphqlRun.repoId === null) {
-    const data = await ctx.read.repoLookup.call(exec, RepositoryLookup, repoVariables(ctx), {
-      describe: "resolving the repository's GraphQL node id",
-    });
-    const id = data.repository?.id;
-    if (id === undefined || id.length === 0) {
-      throw new Error(
-        "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow and retry if it persists",
-      );
-    }
-    graphqlRun.repoId = id;
+): Promise<Result<string, SectionFailure>> {
+  if (graphqlRun.repoId !== null) {
+    return ok(graphqlRun.repoId);
   }
-  return graphqlRun.repoId;
+  return ctx.read.repoLookup
+    .call(exec, RepositoryLookup, repoVariables(ctx), {
+      describe: "resolving the repository's GraphQL node id",
+    })
+    .andThen((data) => {
+      const id = data.repository?.id;
+      if (id === undefined || id.length === 0) {
+        return err(
+          sectionFailure(
+            "live-shape",
+            "branches: the repository lookup returned no GraphQL node id, so no protection rule can be created; re-run the workflow and retry if it persists",
+          ),
+        );
+      }
+      graphqlRun.repoId = id;
+      return ok(id);
+    });
 }
 
 /** Every planned write carries a non-empty drift list as its justification. */
@@ -864,14 +906,12 @@ function verifiedChange(
   entryName: string,
   declared: BranchProtectionConfig["required_deployments"],
   payloadKey: MutationPayloadKey,
-): string | ((response: unknown) => string) {
+): string | ((response: unknown) => Result<ChangeLines, SectionFailure>) {
   if (declared === undefined) {
     return line;
   }
-  return (response) => {
-    verifyDeploymentReadback(entryName, declared, response, payloadKey);
-    return line;
-  };
+  return (response) =>
+    verifyDeploymentReadback(entryName, declared, response, payloadKey).map(() => line);
 }
 
 export function planRoutedUpdate(
@@ -915,9 +955,9 @@ export function planRoutedUpdate(
             { branchProtectionRuleId: node.id, ...deploymentFields },
             forcePushBypassers,
           )
-        : ruleVariables(ctx, graphqlRun, deploymentFields, forcePushBypassers, async () => ({
-            branchProtectionRuleId: await lateRuleId(ctx, name),
-          })),
+        : ruleVariables(ctx, graphqlRun, deploymentFields, forcePushBypassers, async () =>
+            lateRuleId(ctx, name).map((id) => ({ branchProtectionRuleId: id })),
+          ),
     drift,
     change: verifiedChange(
       `set ${routedKeys} on "${name}"`,
@@ -958,9 +998,9 @@ export async function planWildcardEntry(
   if (node === undefined) {
     plan.ops.push({
       role: "createRule",
-      variables: ruleVariables(ctx, graphqlRun, { pattern, ...fields }, actors, async (exec) => ({
-        repositoryId: await repositoryNodeId(ctx, exec, graphqlRun),
-      })),
+      variables: ruleVariables(ctx, graphqlRun, { pattern, ...fields }, actors, async (exec) =>
+        (await repositoryNodeId(ctx, exec, graphqlRun)).map((id) => ({ repositoryId: id })),
+      ),
       describe: `creating the protection rule "${pattern}"`,
       drift: [
         `branches[${pattern}]: no live rule matches this pattern but the settings file declares protection; apply will create the rule`,

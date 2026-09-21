@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok, type Result } from "neverthrow";
 import {
   LIST_SECTIONS,
   type SECTION_KEYS,
@@ -14,6 +15,7 @@ import {
   matchesTemplate,
   toleratedStatuses,
 } from "../../src/sections/contract/endpoints.js";
+import type { SectionFailure } from "../../src/sections/contract/errors.js";
 import type {
   GraphqlOpDecl,
   GraphqlPaginatedReadDecl,
@@ -772,8 +774,8 @@ describe("handler contracts", () => {
     } as const;
     const planOnly = {
       ...base,
-      async plan(_ctx: PlanContext): Promise<SectionPlan> {
-        return { ops: [], notes: [], drift: [] };
+      async plan(_ctx: PlanContext): Promise<Result<SectionPlan, SectionFailure>> {
+        return ok({ ops: [], notes: [], drift: [] });
       },
     } satisfies SectionModule<"workflows">;
     const _withRun = {

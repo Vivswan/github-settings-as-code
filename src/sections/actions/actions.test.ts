@@ -11,10 +11,9 @@ import {
 } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { deniedDetail, REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { describeProblem } from "../../problem.js";
-import { PermissionDenied } from "../contract/errors.js";
 import { type SectionInput, sectionGrant } from "../contract/module.js";
 import { grantFor } from "../contract/permissions.js";
 import { actionsSection, endpointRouted } from "./index.js";
@@ -73,8 +72,13 @@ function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: st
 }
 
 describe("actions", () => {
-  const plan = (api: MockApi, desired: SectionInput<"actions">) =>
-    actionsSection.plan(planContext(actionsSection, api, REPO), validatedInput("actions", desired));
+  const plan = async (api: MockApi, desired: SectionInput<"actions">) =>
+    unwrap(
+      await actionsSection.plan(
+        planContext(actionsSection, api, REPO),
+        validatedInput("actions", desired),
+      ),
+    );
   const roles = (api: MockApi) => api.calls.map((c) => `${c.method} ${c.path}`);
 
   test("routes every divergent key to its own PUT: base, workflow, then the routed table", async () => {
@@ -564,8 +568,7 @@ describe("actions", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toContain("can also mean the repository is public");
+    expect(deniedDetail(thrown)).toContain("can also mean the repository is public");
   });
 
   test("a denied OIDC read renders the Actions grant, not the section's Administration", async () => {
@@ -578,12 +581,11 @@ describe("actions", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
+    const detail = deniedDetail(thrown);
     // The advice grades by the SECTION's need on the override permission: the OIDC PUT sibling writes with the same Actions permission, so read-only
     // advice would cost a second round trip.
-    expect(denied.detail).toContain(grantFor({ repo: ["actions"] }));
-    expect(denied.detail).not.toContain('"Administration"');
+    expect(detail).toContain(grantFor({ repo: ["actions"] }));
+    expect(detail).not.toContain('"Administration"');
   });
 
   test("each fork PR policy object is planned verbatim to its own endpoint, every toggle compared", async () => {
@@ -743,8 +745,8 @@ describe("actions", () => {
 });
 
 describe("actions snapshot", () => {
-  const snapshot = (api: GitHubClient, policy: OnMissingPermission = "fail") =>
-    actionsSection.snapshot(snapshotContext(actionsSection, api, REPO, policy));
+  const snapshot = async (api: GitHubClient, policy: OnMissingPermission = "fail") =>
+    unwrap(await actionsSection.snapshot(snapshotContext(actionsSection, api, REPO, policy)));
   /** The note a sub-read the fake has no body for produces: its 404 classifies as a denial. */
   const leftOut = (key: string, path: string, grant = sectionGrant(actionsSection)) =>
     `actions.${key}: left out of the snapshot - the token was denied GET ${path}: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grant}`;
@@ -972,8 +974,7 @@ describe("actions snapshot", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toContain(sectionGrant(actionsSection));
+    expect(deniedDetail(thrown)).toContain(sectionGrant(actionsSection));
   });
 
   test("under fail, a denied sub-read fails the section with that read's own grant advice, never a note", async () => {
@@ -1002,8 +1003,7 @@ describe("actions snapshot", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       `the token was denied GET /repos/o/r/actions/oidc/customization/sub: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, ${grantFor({ repo: ["actions"] }, undefined, "write")}`,
     );
     // The control: under warn the same fixture reads back with the denial as its one note.

@@ -3,7 +3,7 @@ import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { type PlannedOp, planContext } from "../contract/plan.js";
@@ -27,10 +27,12 @@ function listRoute(variables: Array<{ name: string; value: string }>) {
   };
 }
 
-const plan = (api: GitHubClient, declared: Declared) =>
-  actionsVariablesSection.plan(
-    planContext(actionsVariablesSection, api, REPO),
-    validatedInput("actions_variables", declared),
+const plan = async (api: GitHubClient, declared: Declared) =>
+  unwrap(
+    await actionsVariablesSection.plan(
+      planContext(actionsVariablesSection, api, REPO),
+      validatedInput("actions_variables", declared),
+    ),
   );
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
@@ -42,7 +44,7 @@ async function apply(api: GitHubClient, declared: Declared) {
     },
   });
   if (execution.status === "failed") {
-    throw execution.error;
+    throw new Error(execution.failure.message);
   }
   return { plan: planned, changes: execution.changes };
 }

@@ -3,13 +3,14 @@
  * planning. plan() gates the call on a declared `pinned` key, so a pin-free file never touches /graphql.
  */
 
+import { err, ok, Result } from "neverthrow";
 import { z } from "zod";
 import { agree, countNoun } from "../../text.js";
 import { repoVariables } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../contract/graphql.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
@@ -89,8 +90,8 @@ export type EnvironmentsPlan = SectionPlan<EnvironmentsOp>;
 export interface PinDeclaration {
   name: string;
   pinned: boolean;
-  /** Throws when the body lacks a node_id; the plan calls it only from a mutation thunk. */
-  nodeId: () => string;
+  /** Fails when the body lacks a node_id; the plan calls it only from a mutation thunk. */
+  nodeId: () => Result<string, SectionFailure>;
 }
 
 interface LivePin {
@@ -119,43 +120,39 @@ const LivePinNode = z.looseObject({
  * "no pins", the same absent posture as the REST probe, so the denial surfaces on the first pin
  * write instead of failing the read pass.
  */
-async function listLivePins(ctx: EnvironmentsPlanContext): Promise<LivePin[]> {
-  const listed = await ctx.read.pins.listConnection(LivePinNode, repoVariables(ctx));
-  if ("error" in listed) {
-    return [];
-  }
-  return rankPins(ctx, listed.items);
+function listLivePins(ctx: EnvironmentsPlanContext): Read<LivePin[]> {
+  return ctx.read.pins
+    .listConnection(LivePinNode, repoVariables(ctx))
+    .andThen((listed) => ("error" in listed ? ok([]) : rankPins(ctx, listed.items)));
 }
 
-/** The snapshot's read: the op tolerates no outcome, so a denial throws with the grant advice. */
-export async function snapshotPins(ctx: EnvironmentsPlanContext): Promise<PinnedNames> {
-  const listed = await ctx.read.pinsSnapshot.listConnection(LivePinNode, repoVariables(ctx));
-  if ("error" in listed) {
-    throw new Error(
-      "BUG: environments: the snapshot pins query declares no tolerated outcome, yet its read returned an error instead of throwing",
-    );
-  }
-  return rankPins(ctx, listed.items).map((pin) => pin.name);
+/** The snapshot's read: the op tolerates no outcome, so a denial fails the read with the grant advice. */
+export function snapshotPins(ctx: EnvironmentsPlanContext): Read<PinnedNames> {
+  return ctx.read.pinsSnapshot.listConnection(LivePinNode, repoVariables(ctx)).andThen((listed) => {
+    if ("error" in listed) {
+      throw new Error(
+        "BUG: environments: the snapshot pins query declares no tolerated outcome, yet its read returned an error instead of failing",
+      );
+    }
+    return rankPins(ctx, listed.items).map((pins) => pins.map((pin) => pin.name));
+  });
 }
 
 /** The pins in rank order, under the duplicate-live guard (one pin per environment, names folded as pinKey folds them). */
 function rankPins(
   ctx: EnvironmentsPlanContext,
   nodes: readonly z.infer<typeof LivePinNode>[],
-): LivePin[] {
+): Result<LivePin[], SectionFailure> {
   const pins = nodes
     .map((node) => ({ position: node.position, name: node.environment.name }))
     .sort((a, b) => a.position - b.position);
-  raise(
-    liveByIdentity(
-      { key: ctx.section },
-      "pinned environment",
-      pins,
-      (pin) => pinKey(pin.name),
-      (pin) => liveIdentity(pin.name, { position: pin.position }),
-    ),
-  );
-  return pins;
+  return liveByIdentity(
+    { key: ctx.section },
+    "pinned environment",
+    pins,
+    (pin) => pinKey(pin.name),
+    (pin) => liveIdentity(pin.name, { position: pin.position }),
+  ).map(() => pins);
 }
 
 /** Environment names are case-insensitive on GitHub. */
@@ -241,9 +238,9 @@ function planPins(
 function resolvePinIds(
   declarations: readonly PinDeclaration[],
   names: readonly string[],
-): ReadonlyMap<string, string> {
+): Result<ReadonlyMap<string, string>, SectionFailure> {
   const byKey = new Map(declarations.map((entry) => [pinKey(entry.name), entry]));
-  return new Map(
+  return Result.combine(
     names.map((name) => {
       const declaration = byKey.get(pinKey(name));
       if (declaration === undefined) {
@@ -251,19 +248,22 @@ function resolvePinIds(
           `BUG: environments: a pin mutation was planned for "${name}", which no entry declares a pin state for`,
         );
       }
-      return [pinKey(name), declaration.nodeId()];
+      return declaration.nodeId().map((id) => [pinKey(name), id] as const);
     }),
-  );
+  ).map((pairs) => new Map(pairs));
 }
 
-export function environmentNodeId(name: string, body: unknown): string {
+export function environmentNodeId(name: string, body: unknown): Result<string, SectionFailure> {
   const nodeId = nodeIdField(body);
   if (typeof nodeId !== "string") {
-    throw new Error(
-      `environments: the environment body for "${name}" carried no node_id, so its pin cannot be reconciled. Check the "api-version" input against the GitHub REST docs for the environments endpoint`,
+    return err(
+      sectionFailure(
+        "live-shape",
+        `environments: the environment body for "${name}" carried no node_id, so its pin cannot be reconciled. Check the "api-version" input against the GitHub REST docs for the environments endpoint`,
+      ),
     );
   }
-  return nodeId;
+  return ok(nodeId);
 }
 
 function nodeIdField(body: unknown): unknown {
@@ -274,90 +274,93 @@ function nodeIdField(body: unknown): unknown {
  * Mutations in cap-safe order: unpins, then pins, then leftward reorders. An overflow is a note
  * in both modes and fails the first pin thunk.
  */
-export async function planPinned(
+export function planPinned(
   ctx: EnvironmentsPlanContext,
   declarations: readonly PinDeclaration[],
-): Promise<{ ops: EnvironmentsOp[]; notes: string[] }> {
+): Read<{ ops: EnvironmentsOp[]; notes: string[] }> {
   const desired = declarations.filter((entry) => entry.pinned).map((entry) => entry.name);
-  const live = await listLivePins(ctx);
-  const plan = planPins(declarations, live);
-  const ops: EnvironmentsOp[] = [];
-  const notes: string[] = [];
+  return listLivePins(ctx).map((live) => {
+    const plan = planPins(declarations, live);
+    const ops: EnvironmentsOp[] = [];
+    const notes: string[] = [];
 
-  if (plan.interleaved.length > 0) {
-    const count = plan.interleaved.length;
-    notes.push(
-      `pinned ${agree(count, "environment", "environments")} ${plan.interleaved.map((name) => `"${name}"`).join(", ")} ` +
-        `${agree(count, "has", "have")} no pinned declaration in the settings file; ${agree(count, "it stays", "they stay")} pinned ` +
-        `(only a pinned: false entry unpins) and apply moves ${agree(count, "it", "them")} after the declared pins`,
-    );
-  }
-  const overflow =
-    plan.finalCount > MAX_PINNED_ENVIRONMENTS
-      ? `pinning the ${countNoun(plan.pins.length, "declared environment", "declared environments")} not yet pinned would leave ` +
-        `${plan.finalCount} environments pinned, but GitHub allows at most ` +
-        `${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration are left untouched, so ` +
-        `declare pinned: false on entries for some of the currently pinned environments, or ` +
-        `unpin them in the GitHub UI`
-      : undefined;
-  if (overflow !== undefined) {
-    notes.push(`apply will fail: ${overflow}`);
-  }
-
-  let ids: ReadonlyMap<string, string> | undefined;
-  const idOf = (name: string): string => {
-    if (overflow !== undefined) {
-      throw new Error(`environments: ${overflow}`);
-    }
-    ids ??= resolvePinIds(declarations, [
-      ...plan.unpins,
-      ...plan.pins,
-      ...plan.reorders.map((reorder) => reorder.name),
-    ]);
-    const id = ids.get(pinKey(name));
-    if (id === undefined) {
-      throw new Error(
-        `BUG: environments: no node id was resolved for the pin mutation of "${name}"`,
+    if (plan.interleaved.length > 0) {
+      const count = plan.interleaved.length;
+      notes.push(
+        `pinned ${agree(count, "environment", "environments")} ${plan.interleaved.map((name) => `"${name}"`).join(", ")} ` +
+          `${agree(count, "has", "have")} no pinned declaration in the settings file; ${agree(count, "it stays", "they stay")} pinned ` +
+          `(only a pinned: false entry unpins) and apply moves ${agree(count, "it", "them")} after the declared pins`,
       );
     }
-    return id;
-  };
+    const overflow =
+      plan.finalCount > MAX_PINNED_ENVIRONMENTS
+        ? `pinning the ${countNoun(plan.pins.length, "declared environment", "declared environments")} not yet pinned would leave ` +
+          `${plan.finalCount} environments pinned, but GitHub allows at most ` +
+          `${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration are left untouched, so ` +
+          `declare pinned: false on entries for some of the currently pinned environments, or ` +
+          `unpin them in the GitHub UI`
+        : undefined;
+    if (overflow !== undefined) {
+      notes.push(`apply will fail: ${overflow}`);
+    }
 
-  for (const name of plan.unpins) {
-    ops.push({
-      role: "pin",
-      variables: () => ({ environmentId: idOf(name), pinned: false }),
-      drift: [
-        `environments[${name}].pinned: pinned on the repo but declared pinned: false; apply will unpin it`,
-      ],
-      change: `unpinned environment "${name}"`,
-      describe: `unpinning environment "${name}"`,
+    let ids: Result<ReadonlyMap<string, string>, SectionFailure> | undefined;
+    const idOf = (name: string): Result<string, SectionFailure> => {
+      if (overflow !== undefined) {
+        return err(sectionFailure("refused", `environments: ${overflow}`));
+      }
+      ids ??= resolvePinIds(declarations, [
+        ...plan.unpins,
+        ...plan.pins,
+        ...plan.reorders.map((reorder) => reorder.name),
+      ]);
+      return ids.map((resolved) => {
+        const id = resolved.get(pinKey(name));
+        if (id === undefined) {
+          throw new Error(
+            `BUG: environments: no node id was resolved for the pin mutation of "${name}"`,
+          );
+        }
+        return id;
+      });
+    };
+
+    for (const name of plan.unpins) {
+      ops.push({
+        role: "pin",
+        variables: () => idOf(name).map((environmentId) => ({ environmentId, pinned: false })),
+        drift: [
+          `environments[${name}].pinned: pinned on the repo but declared pinned: false; apply will unpin it`,
+        ],
+        change: `unpinned environment "${name}"`,
+        describe: `unpinning environment "${name}"`,
+      });
+    }
+    for (const name of plan.pins) {
+      ops.push({
+        role: "pin",
+        variables: () => idOf(name).map((environmentId) => ({ environmentId, pinned: true })),
+        drift: [
+          `environments[${name}].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it`,
+        ],
+        change: `pinned environment "${name}"`,
+        describe: `pinning environment "${name}"`,
+      });
+    }
+    plan.reorders.forEach(({ name, rank }, index) => {
+      ops.push({
+        role: "reorder",
+        variables: () => idOf(name).map((environmentId) => ({ environmentId, position: rank })),
+        drift: [
+          index === 0
+            ? `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is ` +
+              `[${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`
+            : `environments.pinned: apply will also move "${name}" to position ${rank} in that reordering`,
+        ],
+        change: `moved pinned environment "${name}" to position ${rank}`,
+        describe: `moving pinned environment "${name}" to position ${rank}`,
+      });
     });
-  }
-  for (const name of plan.pins) {
-    ops.push({
-      role: "pin",
-      variables: () => ({ environmentId: idOf(name), pinned: true }),
-      drift: [
-        `environments[${name}].pinned: missing - declared pinned but the environment is not pinned on the repo; apply will pin it`,
-      ],
-      change: `pinned environment "${name}"`,
-      describe: `pinning environment "${name}"`,
-    });
-  }
-  plan.reorders.forEach(({ name, rank }, index) => {
-    ops.push({
-      role: "reorder",
-      variables: () => ({ environmentId: idOf(name), position: rank }),
-      drift: [
-        index === 0
-          ? `environments.pinned: the declared pin order is [${desired.join(", ")}] but the live pinned order is ` +
-            `[${plan.liveOrder.join(", ")}]; apply will reorder the pins so the declared ones lead in declaration order`
-          : `environments.pinned: apply will also move "${name}" to position ${rank} in that reordering`,
-      ],
-      change: `moved pinned environment "${name}" to position ${rank}`,
-      describe: `moving pinned environment "${name}" to position ${rank}`,
-    });
+    return { ops, notes };
   });
-  return { ops, notes };
 }

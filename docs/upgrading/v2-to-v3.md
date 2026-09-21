@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-five breaks. Seven are for library consumers (sections 9, 23, 24, 27, 34, 35, and 54), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve.
+Fifty-six breaks. Eight are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, and 56), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve.
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
@@ -67,6 +67,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | YAML merge keys resolve | `<<: *base` survived as a literal `<<` field and rode into the create payload | `<<` merges the aliased mapping, as the Probot Settings app's parser did | No error: an entry that carried a literal `<<` key now gets the merged fields instead; [section 53](#53-yaml-merge-keys-resolve) |
 | Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2739`, naming the missing keys); parse the document through `validateSettings`, or declare both keys; [section 54](#54-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
 | Branches: a `restrictions` block carries `users` and `teams` | `restrictions: {}`, or a block naming only `apps` or only `users`, parsed clean and the protection PUT 422ed at apply | Both lists are required on the block (`[]` when none) and `apps` stays optional; `restrictions: null` lifts the push restriction; `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal | Validation fails naming the two lists and the `null` form, with zero requests; [section 55](#55-branches-a-restrictions-block-carries-users-and-teams) |
+| Library: `plan()` and `snapshot()` resolve to a `Result` | `await labels.plan(ctx, declared)` resolved to the plan and rejected on a denied read, a duplicated live pair, or a live body the section could not reconcile | Both resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`; a rejection is left for the wrong-context refusal, the client's own throw, and `BUG:` invariants | Reading `.ops` or `.value` off the awaited value fails to compile (`TS2339`); `rejects.toThrow` assertions on a section call pass a resolved promise through; [section 56](#56-library-plan-and-snapshot-resolve-to-a-result) |
 
 ## 1. The defaults-file fallback
 
@@ -1179,6 +1180,27 @@ v3   branches[0].protection.restrictions.users: protection.restrictions must car
 GitHub's protection PUT requires `users` and `teams` under `restrictions` and takes `apps` as optional, so each missing list is refused before any request. The two review-side holders are unchanged: `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal, since GitHub documents the empty mapping there as "disabled".
 
 Fix: declare both lists (`users: []` and `teams: []` when none), or write `restrictions: null` to lift the push restriction.
+
+## 56. Library: `plan()` and `snapshot()` resolve to a `Result`
+
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in sections 24, 29, 35, and 54.
+
+A section never throws for what a user can cause. `plan()` and `snapshot()` resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`, whose `message` is the whole line the action reports and whose `kind` names the policy the engine applies (`"permission-denied"` carries the section, the detail, and the HTTP status beside it). Every line is the one the thrown error carried.
+
+```text
+pre-release   const plan = await labels.plan(ctx, declared);          // resolves to the plan, rejects on a denied read
+              plan.ops.length;
+
+v3            const planned = await labels.plan(ctx, declared);       // resolves to Result<SectionPlan, SectionFailure>
+              if (planned.isErr()) throw new Error(planned.error.message);
+              planned.value.ops.length;
+```
+
+The change hook of a planned operation, its capture hook, and its `before`, `payload`, and `variables` thunks return a `Result` too; a hook that used to throw its verification failure returns `err(...)` with the same text.
+
+A rejection out of `plan()` or `snapshot()` now means one of three things: the module was handed another section's context (the guard the [library page](../reference/library.md#sections) describes, unchanged), the `GitHubClient` you supplied threw on an unmarked request, or a `BUG:` invariant fired.
+
+Fix: match on the `Result` (`isErr()`, `match`, or `_unsafeUnwrap()` in a test) where the awaited value was read directly, and assert `Err` where a test asserted a rejection.
 
 ## Order of operations
 

@@ -4,10 +4,11 @@
  * (../environments/nested.ts) plan through it.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import { raise } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
@@ -83,7 +84,7 @@ export interface VariablesPlanScope<
   Remove extends AnyPlannedOp,
 > extends VariablesScopeProse {
   /** The parsed {name, value} identities of the enveloped list, all pages. */
-  readonly list: () => Promise<LiveVariable[]>;
+  readonly list: () => PromiseLike<Result<LiveVariable[], SectionFailure>>;
   /** The planned POST; the builders are function-valued so one demanding an unsupplied facet fails. */
   readonly create: (write: VariableCreate) => Create;
   readonly update: (write: VariableUpdate) => Update;
@@ -111,15 +112,13 @@ export function liveVariablesByKey(
   section: SectionMeta,
   noun: string,
   live: readonly LiveVariable[],
-): Map<string, LiveVariable> {
-  return raise(
-    liveByIdentity(
-      section,
-      noun,
-      live,
-      (variable) => variableKey(variable.name),
-      (variable) => liveIdentity(variable.name),
-    ),
+): Result<Map<string, LiveVariable>, SectionFailure> {
+  return liveByIdentity(
+    section,
+    noun,
+    live,
+    (variable) => variableKey(variable.name),
+    (variable) => liveIdentity(variable.name),
   );
 }
 
@@ -158,12 +157,18 @@ export async function planVariables<
      */
     defaultPolicy: UndeclaredPolicy;
   },
-): Promise<SectionPlan<Create | Update | Remove>> {
+): Promise<Result<SectionPlan<Create | Update | Remove>, SectionFailure>> {
   const { entries, policy, defaultPolicy } = opts;
   const suffix = scope.suffix ?? "";
   const plan: SectionPlan<Create | Update | Remove> = { ops: [], notes: [], drift: [] };
 
-  const liveByKey = liveVariablesByKey(section, scope.noun, await scope.list());
+  const indexed = (await scope.list()).andThen((live) =>
+    liveVariablesByKey(section, scope.noun, live),
+  );
+  if (indexed.isErr()) {
+    return err(indexed.error);
+  }
+  const liveByKey = indexed.value;
   const declaredKeys = new Set(entries.map((variable) => variableKey(variable.name)));
 
   for (const variable of entries) {
@@ -230,5 +235,5 @@ export async function planVariables<
       );
     }
   }
-  return plan;
+  return ok(plan);
 }

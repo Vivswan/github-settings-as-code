@@ -5,7 +5,7 @@ import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { MockApi } from "../mock-api.js";
-import { REPO } from "../sections/section-run.js";
+import { REPO, unwrap } from "../sections/section-run.js";
 import { validatedInput } from "../sections/validated-input.js";
 
 /** Frozen to the leaves: a fold step that touched an input would throw, so every test also pins that inputs are never mutated. */
@@ -293,9 +293,11 @@ describe("mergeLayers: keyed sections", () => {
   /** The labels planner over an empty repository rejects two entries claiming one label, so a merged document it plans is one apply accepts. */
   async function planLabels(entries: readonly Record<string, unknown>[]) {
     const api = new MockApi({ "GET /repos/o/r/labels?per_page=100&page=1": { data: [] } });
-    const plan = await labelsSection.plan(
-      planContext(labelsSection, api, REPO),
-      validatedInput("labels", entries),
+    const plan = unwrap(
+      await labelsSection.plan(
+        planContext(labelsSection, api, REPO),
+        validatedInput("labels", entries),
+      ),
     );
     return plan.ops.map((op) => op.describe);
   }

@@ -3,7 +3,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { workflowsSection } from "./index.js";
@@ -49,10 +49,12 @@ describe("workflows", () => {
     ],
   };
   const route = "GET /repos/o/r/actions/workflows?per_page=100&page=1";
-  const plan = (api: MockApi, desired: SectionInput<"workflows">) =>
-    workflowsSection.plan(
-      planContext(workflowsSection, api, REPO),
-      validatedInput("workflows", desired),
+  const plan = async (api: MockApi, desired: SectionInput<"workflows">) =>
+    unwrap(
+      await workflowsSection.plan(
+        planContext(workflowsSection, api, REPO),
+        validatedInput("workflows", desired),
+      ),
     );
 
   test("plans one toggle per divergent workflow by live id, matching bare file names", async () => {

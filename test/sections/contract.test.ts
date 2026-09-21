@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import {
   type GitHubClient,
@@ -11,12 +12,7 @@ import {
   endpointKind,
   toleratedStatuses,
 } from "../../src/sections/contract/endpoints.js";
-import {
-  errorOf,
-  failureFor,
-  PermissionDenied,
-  raise,
-} from "../../src/sections/contract/errors.js";
+import { failureFor, type SectionFailure } from "../../src/sections/contract/errors.js";
 import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
 import { parseLive } from "../../src/sections/contract/live.js";
 import {
@@ -51,6 +47,7 @@ import { customPropertiesSection } from "../../src/sections/custom_properties/in
 import { rulesetsSection } from "../../src/sections/rulesets/index.js";
 import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
 import { MockApi } from "../mock-api.js";
+import { deniedDetail, failureKind, SectionFailed, unwrap } from "./section-run.js";
 
 const section: SectionMeta = rulesetsSection;
 
@@ -263,7 +260,7 @@ function endpoint(
 }
 
 function raiseFor(...args: Parameters<typeof failureFor>): never {
-  throw errorOf(failureFor(...args));
+  throw new SectionFailed(failureFor(...args));
 }
 
 describe("failureFor context enrichment", () => {
@@ -392,8 +389,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       'the token was denied POST /repos/o/r/rulesets (creating ruleset "quality"): 403 Resource not accessible. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
     );
   });
@@ -457,11 +453,10 @@ describe("failureFor context enrichment", () => {
         thrown = caught;
       }
       if ("error" in expected) {
-        expect(thrown).not.toBeInstanceOf(PermissionDenied);
-        expect(thrown).toEqual(new Error(expected.error));
+        expect(failureKind(thrown)).not.toBe("permission-denied");
+        expect((thrown as Error).message).toBe(expected.error);
       } else {
-        expect(thrown).toBeInstanceOf(PermissionDenied);
-        expect((thrown as PermissionDenied).detail).toBe(expected.denied);
+        expect(deniedDetail(thrown)).toBe(expected.denied);
       }
     },
   );
@@ -483,8 +478,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       'the token was denied PUT /repos/o/r/lfs: 403 Git LFS is globally disabled. To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions. Note: a 403 here can also mean LFS is disabled account-wide',
     );
     // The generic branch never renders it.
@@ -547,10 +541,9 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
     // No rulesets sibling carries the synthetic permission, so the sibling scan finds no write and advises read; what matters is the RESOURCE: the
     // endpoint's own grant renders, never the section's.
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       'the token was denied POST /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read) under the PAT\'s Repository permissions',
     );
   });
@@ -570,8 +563,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       'the token was denied GET /repos/o/r/actions/oidc/customization/sub: 403 Resource not accessible. To fix, grant "Actions" (read and write) under the PAT\'s Repository permissions',
     );
   });
@@ -590,7 +582,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).not.toBeInstanceOf(PermissionDenied);
+    expect(failureKind(thrown)).not.toBe("permission-denied");
     expect((thrown as Error).message).toBe(
       'rulesets: GET /repos/o/r/rulesets: 403 Forbidden. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
     );
@@ -611,7 +603,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).not.toBeInstanceOf(PermissionDenied);
+    expect(failureKind(thrown)).not.toBe("permission-denied");
     expect((thrown as Error).message).not.toMatch(/grant/);
   });
 
@@ -634,8 +626,7 @@ describe("failureFor context enrichment", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       "the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. " +
         'To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
         'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +
@@ -807,14 +798,19 @@ describe("planContext read port", () => {
     );
     const ctx = planContext(section, api, REPO) as unknown as {
       read: {
-        list: { call(schema: z.ZodType): Promise<unknown> };
-        probe: { call(schema: z.ZodType, variables: Record<string, unknown>): Promise<unknown> };
+        list: { call(schema: z.ZodType): Promise<Result<unknown, SectionFailure>> };
+        probe: {
+          call(
+            schema: z.ZodType,
+            variables: Record<string, unknown>,
+          ): Promise<Result<unknown, SectionFailure>>;
+        };
       };
     };
     (endpoints.list as { route: string }).route = "DELETE /repos/{owner}/{repo}/labels";
     (graphql.probe as { kind: string }).kind = "write";
-    await ctx.read.list.call(z.unknown());
-    await ctx.read.probe.call(z.unknown(), { owner: "o", repo: "r" });
+    unwrap(await ctx.read.list.call(z.unknown()));
+    unwrap(await ctx.read.probe.call(z.unknown(), { owner: "o", repo: "r" }));
     expect(api.calls.map((c) => `${c.method} ${c.path} ${c.graphqlKind ?? ""}`.trim())).toEqual([
       "GET /repos/o/r/labels",
       "GRAPHQL PortProbe read",
@@ -858,15 +854,17 @@ describe("planContext read port", () => {
     ctx.read.probe.listAll;
     // @ts-expect-error nor an enveloped list
     ctx.read.probe.listAllEnveloped;
-    expect(await ctx.read.probe.tryCall(z.unknown(), { params: { branch: "main" } })).toEqual({
-      error: { status: 500, message: "Internal Server Error", body: "" },
-    });
+    expect(await ctx.read.probe.tryCall(z.unknown(), { params: { branch: "main" } })).toEqual(
+      ok({ error: { status: 500, message: "Internal Server Error", body: "" } }),
+    );
     // The control: the same status on a plain read classifies through failureFor.
     expect(typeof ctx.read.plain.call).toBe("function");
-    await expect(ctx.read.plain.tryCall(z.unknown())).rejects.toThrow(
-      new Error(
-        "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
-      ),
+    expect(await ctx.read.plain.tryCall(z.unknown())).toEqual(
+      err({
+        kind: "server-error",
+        message:
+          "branches: GET /repos/o/r/branches: 500 Internal Server Error. GitHub returned a server error; re-run the workflow, and retry later if it persists",
+      }),
     );
   });
 
@@ -937,13 +935,11 @@ describe("planContext read port", () => {
     expect([forgedRest, forgedGraphql].length).toBe(2);
     expect(
       await ctx.read.app.call(exec, z.unknown(), { params: { app_slug: "deploy-gate" } }),
-    ).toEqual({
-      node_id: "A_1",
-    });
-    expect(await ctx.read.repo.call(exec, z.unknown(), { owner: "o", repo: "r" })).toEqual({
-      repository: { id: "R_1" },
-    });
-    expect(await ctx.read.plain.call(z.unknown())).toEqual([]);
+    ).toEqual(ok({ node_id: "A_1" }));
+    expect(await ctx.read.repo.call(exec, z.unknown(), { owner: "o", repo: "r" })).toEqual(
+      ok({ repository: { id: "R_1" } }),
+    );
+    expect(await ctx.read.plain.call(z.unknown())).toEqual(ok([]));
     expect(api.calls.map((c) => c.path)).toEqual([
       "/apps/deploy-gate",
       "GateProbe",
@@ -973,13 +969,13 @@ describe("parseLive", () => {
     [1, "; and 1 more issue"],
     [2, "; and 2 more issues"],
   ])("three issues shown and %i hidden: the remainder agrees with its count", (hidden, tail) => {
-    expect(() => raise(parseLive(section, endpoint({}), strict, wrongIn(3 + hidden)))).toThrow(
+    expect(() => unwrap(parseLive(section, endpoint({}), strict, wrongIn(3 + hidden)))).toThrow(
       new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+${tail}\\. Check`),
     );
   });
 
   test("three issues or fewer render whole, with no remainder", () => {
-    expect(() => raise(parseLive(section, endpoint({}), strict, wrongIn(3)))).toThrow(
+    expect(() => unwrap(parseLive(section, endpoint({}), strict, wrongIn(3)))).toThrow(
       new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+\\. Check`),
     );
   });
@@ -1180,7 +1176,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       payload: { token: "hunter2" },
       carriesSecret,
       describe: "arming the setup",
-    }).then(raise);
+    }).then(unwrap);
   const graphql = (api: GitHubClient, carriesSecret: boolean) =>
     callGraphql(
       { ...ctx, api, resolveSecret: () => "" },
@@ -1191,7 +1187,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
         describe: "arming the setup",
         carriesSecret,
       },
-    ).then(raise);
+    ).then(unwrap);
 
   test.each([
     {
@@ -1243,7 +1239,7 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
 
   test("a tolerated status on a marked request comes back withheld too, keeping the status the tolerance reads", async () => {
     // The tolerance's outcome thunk may render error.message into a note or failure (shared/setup-section.ts does).
-    const result = raise(
+    const result = unwrap(
       await tryCallDeclared(
         { ...ctx, api: answering(409), resolveSecret: () => "" },
         actionsSection,
@@ -1311,7 +1307,7 @@ describe("tryCallDeclared", () => {
   test("a tolerated status comes back as { error }; any other classifies through failureFor", async () => {
     const tolerated = declaredTolerance(endpoint);
     expect(
-      raise(
+      unwrap(
         await tryCallDeclared(
           { ...ctx, api: answering(409, "Conflict"), resolveSecret: () => "" },
           actionsSection,
@@ -1326,7 +1322,7 @@ describe("tryCallDeclared", () => {
         actionsSection,
         endpoint,
         { tolerated, carriesSecret: false, describe: "arming the setup" },
-      ).then(raise),
+      ).then(unwrap),
     ).rejects.toThrow(
       new Error(
         'actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 Unprocessable. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above',
@@ -1354,16 +1350,16 @@ describe("tryCallDeclared", () => {
         actionsSection,
         declares403,
         { tolerated: declaredTolerance(declares403), carriesSecret: false },
-      ).then(raise),
+      ).then(unwrap),
     ).rejects.toThrow(limitHit);
     await expect(
-      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403).then(raise),
+      probeAbsent({ ...ctx, api: limited, check: true }, actionsSection, declares403).then(unwrap),
     ).rejects.toThrow(limitHit);
     const plain = new MockApi({
       "GET /repos/o/r/pages": { error: { status: 403, message: "Forbidden", body: "" } },
     });
     expect(
-      raise(
+      unwrap(
         await tryCallDeclared(
           { ...ctx, api: plain, resolveSecret: () => "" },
           actionsSection,
@@ -1373,7 +1369,7 @@ describe("tryCallDeclared", () => {
       ),
     ).toEqual({ error: { status: 403, message: "Forbidden", body: "" } });
     expect(
-      raise(await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403)),
+      unwrap(await probeAbsent({ ...ctx, api: plain, check: true }, actionsSection, declares403)),
     ).toEqual({ missing: true });
   });
 
@@ -1386,7 +1382,7 @@ describe("tryCallDeclared", () => {
     await expect(
       probeAbsent({ ...ctx, api, check: true }, actionsSection, probe, {
         tolerate: [422 as unknown as 404],
-      }).then(raise),
+      }).then(unwrap),
     ).rejects.toThrow(
       new Error(
         "BUG: GET /repos/{owner}/{repo}/pages was asked to tolerate status(es) 422, which it does not declare as a tolerable error status; a tolerance may only name declared 4xx statuses other than 401 and 429",
@@ -1469,8 +1465,7 @@ describe("samePermission", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    expect((thrown as PermissionDenied).detail).toBe(
+    expect(deniedDetail(thrown)).toBe(
       "the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. " +
         'To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
         'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +

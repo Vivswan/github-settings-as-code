@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { loosen, type SectionModule } from "../contract/module.js";
+import { loosen, type SectionModule, type SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
@@ -72,98 +72,101 @@ export const pagesSection = {
   shape: loosen(PagesConfig),
   async plan(ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    const probe = await ctx.read.get.probeAbsent(LiveSite);
-
-    if (desired === null) {
-      if ("missing" in probe) {
-        // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
-        // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
+    return ctx.read.get.probeAbsent(LiveSite).map((probe) => {
+      if (desired === null) {
+        if ("missing" in probe) {
+          // A 404 is ambiguous: no Pages site, or a fine-grained token without the Pages permission.
+          // The non-null path stays loud either way (the POST would fail); this no-op path must say so.
+          plan.notes.push(
+            "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
+          );
+          return plan;
+        }
+        plan.ops.push({
+          role: "remove",
+          drift: [
+            "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
+          ],
+          change: "disabled GitHub Pages",
+        });
+        return plan;
+      }
+      if (Object.keys(desired).length === 0) {
         plan.notes.push(
-          "pages: declared null and GitHub reports no Pages site, so there is nothing to disable. A fine-grained token missing the Pages permission gets the same answer; if this repo does have a Pages site, grant the token Pages read and write",
+          "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
         );
         return plan;
       }
-      plan.ops.push({
-        role: "remove",
-        drift: [
-          "pages: enabled live but the settings file declares pages: null; apply will disable GitHub Pages",
-        ],
-        change: "disabled GitHub Pages",
-      });
-      return plan;
-    }
-    if (Object.keys(desired).length === 0) {
-      plan.notes.push(
-        "pages: declared as an empty mapping, which configures nothing (the update endpoint rejects an empty body). Declare at least one field, use pages: null to disable the site, or remove the section",
-      );
-      return plan;
-    }
-    // The source is split off so the no-source form never carries a source key at all: an own
-    // `source: undefined` would count as a remainder below.
-    const { source, ...restConfig } = desired;
-    const payload: PagesWirePayload =
-      source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };
+      // The source is split off so the no-source form never carries a source key at all: an own
+      // `source: undefined` would count as a remainder below.
+      const { source, ...restConfig } = desired;
+      const payload: PagesWirePayload =
+        source === undefined ? restConfig : { ...restConfig, source: wireSource(source) };
 
-    if (!("missing" in probe)) {
-      // The site mapping passes unknown keys through, so a key the GET never echoes would re-PUT on
-      // every apply without converging; the note names it beside the drift it causes. A site key the
-      // GET omits (https_enforced on a site created without it) is drift the PUT resolves, so only a
-      // key outside the site shape is noted.
-      const phantom = phantomKeys(payload, probe.data).filter(
-        (name) => !Object.hasOwn(PAGES_SITE_SHAPE, name),
-      );
-      if (phantom.length > 0) {
-        plan.notes.push(phantomNote("pages", phantom, "Pages site", "this PUT will re-run"));
+      if (!("missing" in probe)) {
+        // The site mapping passes unknown keys through, so a key the GET never echoes would re-PUT on
+        // every apply without converging; the note names it beside the drift it causes. A site key the
+        // GET omits (https_enforced on a site created without it) is drift the PUT resolves, so only a
+        // key outside the site shape is noted.
+        const phantom = phantomKeys(payload, probe.data).filter(
+          (name) => !Object.hasOwn(PAGES_SITE_SHAPE, name),
+        );
+        if (phantom.length > 0) {
+          plan.notes.push(phantomNote("pages", phantom, "Pages site", "this PUT will re-run"));
+        }
+        const drift = subsetDiff(payload, probe.data, "pages");
+        if (hasDrift(drift)) {
+          plan.ops.push({
+            role: "update",
+            payload: plainData(payload),
+            drift,
+            change: "updated GitHub Pages configuration",
+          });
+          if (payload.public === false && probe.data.public === true) {
+            plan.notes.push(PUBLIC_VISIBILITY_NOTE);
+          }
+        }
+        return plan;
       }
-      const drift = subsetDiff(payload, probe.data, "pages");
-      if (hasDrift(drift)) {
+      const create: PagesCreateBody = {};
+      if (payload.build_type !== undefined) {
+        create.build_type = payload.build_type;
+      }
+      if (payload.source !== undefined) {
+        create.source = payload.source;
+      }
+      plan.ops.push({
+        role: "create",
+        payload: plainData(create),
+        drift: [
+          "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
+        ],
+        change: "enabled GitHub Pages",
+      });
+      const rest = Object.keys(payload).filter((k) => !Object.hasOwn(create, k));
+      if (rest.length > 0) {
         plan.ops.push({
           role: "update",
           payload: plainData(payload),
-          drift,
-          change: "updated GitHub Pages configuration",
+          drift: [
+            `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
+          ],
+          change: "applied remaining Pages configuration",
         });
-        if (payload.public === false && probe.data.public === true) {
-          plan.notes.push(PUBLIC_VISIBILITY_NOTE);
-        }
       }
       return plan;
-    }
-    const create: PagesCreateBody = {};
-    if (payload.build_type !== undefined) {
-      create.build_type = payload.build_type;
-    }
-    if (payload.source !== undefined) {
-      create.source = payload.source;
-    }
-    plan.ops.push({
-      role: "create",
-      payload: plainData(create),
-      drift: [
-        "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
-      ],
-      change: "enabled GitHub Pages",
     });
-    const rest = Object.keys(payload).filter((k) => !Object.hasOwn(create, k));
-    if (rest.length > 0) {
-      plan.ops.push({
-        role: "update",
-        payload: plainData(payload),
-        drift: [
-          `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
-        ],
-        change: "applied remaining Pages configuration",
-      });
-    }
-    return plan;
   },
   // No site is nothing to declare (not `pages: null`, which would DISABLE Pages on apply); the
   // engine notes the 404's other reading (a token without the Pages grant).
   async snapshot(ctx) {
-    const probe = await ctx.read.get.probeAbsent(LiveSite);
-    if ("missing" in probe) {
-      return { value: undefined, notes: [] };
-    }
-    return { value: projectOntoSchema(PagesConfig, probe.data), notes: [] };
+    return ctx.read.get
+      .probeAbsent(LiveSite)
+      .map(
+        (probe): SectionSnapshot<"pages"> =>
+          "missing" in probe
+            ? { value: undefined, notes: [] }
+            : { value: projectOntoSchema(PagesConfig, probe.data), notes: [] },
+      );
   },
 } satisfies SectionModule<"pages", typeof ENDPOINTS>;

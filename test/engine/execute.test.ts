@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { executePlan } from "../../src/engine/execute.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
-import { PermissionDenied } from "../../src/sections/contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../../src/sections/contract/errors.js";
 import { graphqlOp } from "../../src/sections/contract/graphql.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import {
+  type ChangeLines,
   driftOf,
   type ExecTools,
   type PlannedOp,
@@ -75,7 +77,7 @@ function planOf(op: Partial<SectionPlan["ops"][number]> & { role: string }): Sec
 }
 
 function errorOf(execution: Awaited<ReturnType<typeof executePlan>>): string {
-  return String((execution as { error: unknown }).error);
+  return (execution as { failure: SectionFailure }).failure.message;
 }
 
 describe("executePlan", () => {
@@ -85,7 +87,7 @@ describe("executePlan", () => {
       ops: [
         {
           role: "create",
-          payload: (exec) => ({ name: "bug", secret: exec.resolveSecret("$TOKEN") }),
+          payload: (exec) => ok({ name: "bug", secret: exec.resolveSecret("$TOKEN") }),
           drift: ["labels[bug]: missing"],
           change: 'created label "bug"',
         },
@@ -125,13 +127,16 @@ describe("executePlan", () => {
         },
         {
           role: "create",
-          payload: async () => ({ copies: JSON.stringify(await port.list.listAll(z.unknown())) }),
+          payload: async () =>
+            (await port.list.listAll(z.unknown())).map((copies) => ({
+              copies: JSON.stringify(copies),
+            })),
           drift: ["labels[copy]: missing"],
           change: "2",
         },
         {
           role: "write",
-          variables: async () => ({ deferred: true }),
+          variables: async () => ok({ deferred: true }),
           drift: ["toggle off"],
           change: "3",
         },
@@ -174,7 +179,7 @@ describe("executePlan", () => {
     expect(execution.status).toBe("failed");
     expect(execution.changes).toEqual(["flipped the toggle"]);
     expect(errorOf(execution)).toMatch(
-      /^Error: labels: POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
+      /^labels: POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
     );
   });
 
@@ -191,7 +196,7 @@ describe("executePlan", () => {
       TOOLS,
     );
     expect(errorOf(rest)).toMatch(
-      /^Error: labels: creating label "bug" failed - POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
+      /^labels: creating label "bug" failed - POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
     );
     const graphql = await executePlan(
       planOf({ role: "write", variables: {}, describe: "flipping the toggle" }),
@@ -201,7 +206,7 @@ describe("executePlan", () => {
       TOOLS,
     );
     expect(errorOf(graphql)).toMatch(
-      /^Error: labels: flipping the toggle failed - GRAPHQL ExecutorWrite: 502 Bad Gateway\. /,
+      /^labels: flipping the toggle failed - GRAPHQL ExecutorWrite: 502 Bad Gateway\. /,
     );
   });
 
@@ -215,7 +220,7 @@ describe("executePlan", () => {
         {
           role: "create",
           drift: ["labels[bug]: missing"],
-          change: (response) => `created label #${(response as { id: number }).id}`,
+          change: (response) => ok(`created label #${(response as { id: number }).id}`),
         },
         {
           role: "write",
@@ -224,7 +229,7 @@ describe("executePlan", () => {
           change: (response) => {
             const [head, ...tail] = (response as { noop: { moved: [string, ...string[]] } }).noop
               .moved;
-            return [`moved ${head}`, ...tail.map((key) => `moved ${key}`)];
+            return ok([`moved ${head}`, ...tail.map((key) => `moved ${key}`)]);
           },
         },
       ],
@@ -242,7 +247,7 @@ describe("executePlan", () => {
 
   test.each<[what: string, change: SectionPlan["ops"][number]["change"]]>([
     ["an empty change line", ""],
-    ["a thunk rendering no line (erased view only)", () => [] as unknown as readonly [string]],
+    ["a thunk rendering no line (erased view only)", () => ok([] as unknown as readonly [string])],
   ])("%s is a bug: the request landed, so apply must report it", async (_what, change) => {
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
     const execution = await executePlan(
@@ -257,26 +262,26 @@ describe("executePlan", () => {
       changes: [],
       notes: [],
       landed: 1,
-      error: expect.objectContaining({
+      failure: {
+        kind: "thrown",
         message: expect.stringMatching(
           /BUG: labels: operation "create" rendered no change line for a request that landed/,
         ),
-      }),
+      },
     });
   });
 
-  test("a change thunk that throws fails the operation without its line, after the request landed", async () => {
+  test("a change thunk that fails ends the operation without its line, after the request landed", async () => {
     // The verification lives in the thunk (an echo reporting the old value); the mutation really happened, so it counts as landed and reports like a
     // rejected request.
     const api = new MockApi({}).allowMutations("POST /repos/o/r/labels");
     let captured = false;
     const plan = planOf({
       role: "create",
-      change: () => {
-        throw new Error("the write did not take");
-      },
+      change: () => err(sectionFailure("unverified", "the write did not take")),
       capture: () => {
         captured = true;
+        return ok(undefined);
       },
     });
     const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
@@ -285,13 +290,13 @@ describe("executePlan", () => {
       changes: [],
       notes: [],
       landed: 1,
-      error: new Error("the write did not take"),
+      failure: { kind: "unverified", message: "the write did not take" },
     });
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(["POST /repos/o/r/labels"]);
     expect(captured).toBe(false);
   });
 
-  test("the capture hook receives the response before the line records, so its throw fails the operation without the line", async () => {
+  test("the capture hook receives the response before the line records, so its failure ends the operation without the line", async () => {
     const api = new MockApi({
       "POST /repos/o/r/labels": { data: { id: 7, node_id: "L_7" } },
       "GRAPHQL ExecutorWrite": { data: { toggled: true } },
@@ -305,6 +310,7 @@ describe("executePlan", () => {
           change: 'created label "bug"',
           capture: (response) => {
             seen.push(response);
+            return ok(undefined);
           },
         },
         {
@@ -312,9 +318,7 @@ describe("executePlan", () => {
           variables: {},
           drift: ["toggle off"],
           change: "flipped the toggle",
-          capture: () => {
-            throw new Error("the response carried no node id");
-          },
+          capture: () => err(sectionFailure("live-shape", "the response carried no node id")),
         },
         { role: "create", drift: ["labels[next]: missing"], change: "never reached" },
       ],
@@ -328,7 +332,7 @@ describe("executePlan", () => {
       changes: ['created label "bug"'],
       notes: [],
       landed: 2,
-      error: new Error("the response carried no node id"),
+      failure: { kind: "live-shape", message: "the response carried no node id" },
     });
     expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
       "POST /repos/o/r/labels",
@@ -337,15 +341,21 @@ describe("executePlan", () => {
   });
 
   test.each<[hook: string, op: Partial<SectionPlan["ops"][number]>]>([
-    ["capture hook", { capture: (async () => {}) as unknown as () => void }],
-    ["change thunk", { change: (async () => "late") as unknown as () => string }],
+    [
+      "capture hook",
+      { capture: (async () => {}) as unknown as () => Result<void, SectionFailure> },
+    ],
+    [
+      "change thunk",
+      { change: (async () => "late") as unknown as () => Result<ChangeLines, SectionFailure> },
+    ],
     // A REJECTING hook: the BUG is the report, and the discarded promise must not surface again as an unhandled rejection.
     [
       "capture hook",
       {
         capture: (async () => {
           throw new Error("late failure");
-        }) as unknown as () => void,
+        }) as unknown as () => Result<void, SectionFailure>,
       },
     ],
     // A custom thenable whose then() throws still reports the canonical BUG.
@@ -363,7 +373,7 @@ describe("executePlan", () => {
                     }
                   : undefined,
             },
-          )) as unknown as () => void,
+          )) as unknown as () => Result<void, SectionFailure>,
       },
     ],
   ])(
@@ -382,9 +392,10 @@ describe("executePlan", () => {
         changes: [],
         notes: [],
         landed: 1,
-        error: expect.objectContaining({
+        failure: {
+          kind: "thrown",
           message: `BUG: labels: the ${hook} of operation "create" returned a promise; it must be synchronous`,
-        }),
+        },
       });
     },
   );
@@ -397,10 +408,11 @@ describe("executePlan", () => {
       role: "create",
       change: () => {
         rendered = true;
-        return "never";
+        return ok("never");
       },
       capture: () => {
         captured = true;
+        return ok(undefined);
       },
     });
     const execution = await executePlan(plan, SECTION, api, REPO, TOOLS);
@@ -409,7 +421,7 @@ describe("executePlan", () => {
     expect(captured).toBe(false);
   });
 
-  test("a before hook runs ahead of the request, and its throw fails the operation with nothing sent", async () => {
+  test("a before hook runs ahead of the request, and its failure ends the operation with nothing sent", async () => {
     // The hook reads through the plan's port, the way a `before` resolution pins an input ahead of the first write.
     const api = new MockApi({
       "GET /repos/o/r/labels?per_page=100&page=1": { data: [{ name: "live" }] },
@@ -420,18 +432,18 @@ describe("executePlan", () => {
       ops: [
         {
           role: "create",
-          before: async () => {
-            seen.push(JSON.stringify(await port.list.listAll(z.unknown())));
-          },
+          before: async () =>
+            (await port.list.listAll(z.unknown())).andThen((live) => {
+              seen.push(JSON.stringify(live));
+              return ok(undefined);
+            }),
           payload: { name: "bug" },
           drift: ["labels[bug]: missing"],
           change: 'created label "bug"',
         },
         {
           role: "write",
-          before: () => {
-            throw new Error("the actor does not exist");
-          },
+          before: () => err(sectionFailure("refused", "the actor does not exist")),
           variables: {},
           drift: ["toggle off"],
           change: "flipped the toggle",
@@ -446,7 +458,7 @@ describe("executePlan", () => {
       changes: ['created label "bug"'],
       notes: [],
       landed: 1,
-      error: new Error("the actor does not exist"),
+      failure: { kind: "refused", message: "the actor does not exist" },
     });
     expect(seen).toEqual(['[{"name":"live"}]']);
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
@@ -497,9 +509,11 @@ describe("executePlan", () => {
       notes: ["labels: a label run is in progress, so the create was not applied (409)"],
       // A tolerated status is a request GitHub refused, so it never lands.
       landed: 1,
-      error: new Error(
-        "labels: POST answered 409 Conflict; a label run is in progress, re-run after it finishes",
-      ),
+      failure: {
+        kind: "refused",
+        message:
+          "labels: POST answered 409 Conflict; a label run is in progress, re-run after it finishes",
+      },
     });
   });
 
@@ -539,11 +553,12 @@ describe("executePlan", () => {
       changes: [],
       notes: [],
       landed: 0,
-      error: expect.objectContaining({
+      failure: {
+        kind: "validation",
         message: expect.stringMatching(
           /^labels: POST \/repos\/o\/r\/labels: 422 Validation Failed\. /,
         ),
-      }),
+      },
     });
     const denied = await executePlan(
       planOf({ role: "create", tolerate: { outcome } }),
@@ -557,14 +572,14 @@ describe("executePlan", () => {
       changes: [],
       notes: [],
       landed: 0,
-      error: expect.objectContaining({
+      failure: expect.objectContaining({
+        kind: "permission-denied",
         detail: expect.stringMatching(
           /^the token was denied POST \/repos\/o\/r\/labels: 403 Forbidden\. To fix, grant "Administration"/,
         ),
         status: 403,
       }),
     });
-    expect((denied as { error: unknown }).error).toBeInstanceOf(PermissionDenied);
     // The control: a tolerated operation that succeeds records its line.
     const succeeded = await executePlan(
       planOf({ role: "create", tolerate: { outcome } }),
@@ -593,7 +608,7 @@ describe("executePlan", () => {
     );
     expect(execution.status).toBe("failed");
     expect(errorOf(execution)).toMatch(
-      /^Error: BUG: POST \/repos\/\{owner\}\/\{repo\}\/labels was asked to tolerate status\(es\) 404, /,
+      /^BUG: POST \/repos\/\{owner\}\/\{repo\}\/labels was asked to tolerate status\(es\) 404, /,
     );
     expect(api.calls).toEqual([]);
   });
@@ -634,7 +649,7 @@ describe("executePlan", () => {
     );
     expect(execution.status).toBe("failed");
     expect(errorOf(execution)).toMatch(
-      /^Error: labels: POST \/repos\/o\/r\/labels: 403 API rate limit exceeded\. The API rate limit was hit; /,
+      /^labels: POST \/repos\/o\/r\/labels: 403 API rate limit exceeded\. The API rate limit was hit; /,
     );
     expect(consulted).toBe(false);
   });
@@ -663,7 +678,7 @@ describe("executePlan", () => {
     );
     expect(execution.status).toBe("failed");
     expect(errorOf(execution)).toMatch(
-      /^Error: labels: GRAPHQL ExecutorWrite: 502 Bad Gateway\. GitHub returned a server error; /,
+      /^labels: GRAPHQL ExecutorWrite: 502 Bad Gateway\. GitHub returned a server error; /,
     );
     expect(consulted).toBe(false);
   });
@@ -849,7 +864,7 @@ describe("executePlan", () => {
       ops: [
         {
           role: "create",
-          payload: (exec) => ({ name: "a", token: exec.resolveSecret("$A") }),
+          payload: (exec) => ok({ name: "a", token: exec.resolveSecret("$A") }),
           drift: ["a"],
           change: "a",
         },
@@ -858,6 +873,7 @@ describe("executePlan", () => {
           role: "create",
           before: (exec) => {
             exec.resolveSecret("$C");
+            return ok(undefined);
           },
           payload: { name: "c" },
           drift: ["c"],
@@ -865,7 +881,7 @@ describe("executePlan", () => {
         },
         {
           role: "write",
-          variables: (exec) => ({ token: exec.resolveSecret("$D") }),
+          variables: (exec) => ok({ token: exec.resolveSecret("$D") }),
           drift: ["d"],
           change: "d",
         },
@@ -905,7 +921,7 @@ describe("executePlan", () => {
       role: "create",
       payload: (exec) => {
         seen = exec;
-        return { name: exec.resolveSecret("$X") };
+        return ok({ name: exec.resolveSecret("$X") });
       },
     });
     const execution = await executePlan(plan, SECTION, api, REPO, leaky);
@@ -925,39 +941,39 @@ describe("executePlan", () => {
       what: "a REST read role",
       role: "list",
       message:
-        'Error: BUG: labels planned an operation under role "list", which is a read endpoint (GET /repos/{owner}/{repo}/labels); only write roles are plannable',
+        'BUG: labels planned an operation under role "list", which is a read endpoint (GET /repos/{owner}/{repo}/labels); only write roles are plannable',
     },
     {
       what: "a GraphQL read role",
       role: "read",
       message:
-        'Error: BUG: labels planned an operation under role "read", which is a GraphQL read operation; only write roles are plannable',
+        'BUG: labels planned an operation under role "read", which is a GraphQL read operation; only write roles are plannable',
     },
     {
       what: "an undeclared role",
       role: "typo",
       message:
-        'Error: BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
+        'BUG: labels planned an operation under role "typo", which names no declared endpoint or GraphQL operation',
     },
     // Inherited names resolve through a plain `dict[role]` lookup; the executor must read own properties only.
     {
       what: "an inherited role (constructor)",
       role: "constructor",
       message:
-        'Error: BUG: labels planned an operation under role "constructor", which names no declared endpoint or GraphQL operation',
+        'BUG: labels planned an operation under role "constructor", which names no declared endpoint or GraphQL operation',
     },
     // A number would coerce onto a matching key and a symbol would enter the property-key path; both are refused before any lookup.
     {
       what: "a numeric role",
       role: 0 as unknown as string,
       message:
-        "Error: BUG: labels planned an operation whose role is a number, not the name of a declared write",
+        "BUG: labels planned an operation whose role is a number, not the name of a declared write",
     },
     {
       what: "a symbol role",
       role: Symbol("create") as unknown as string,
       message:
-        "Error: BUG: labels planned an operation whose role is a symbol, not the name of a declared write",
+        "BUG: labels planned an operation whose role is a symbol, not the name of a declared write",
     },
   ];
   for (const { what, role, message } of refused) {

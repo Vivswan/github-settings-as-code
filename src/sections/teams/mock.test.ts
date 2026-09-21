@@ -8,7 +8,7 @@ import { planContext, snapshotContext } from "../../../src/sections/contract/pla
 import { handlerTestContext } from "../../../test/e2e/mock/handler-test-ctx.js";
 import { buildStateForSlug } from "../../../test/e2e/mock/state.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { teamsSection } from "./index.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "./mock.js";
@@ -38,16 +38,20 @@ describe("teams.probe answers by Accept media type, like GitHub", () => {
   test("the section's probe sends the media type: a converged team plans nothing and snapshots its role", async () => {
     const api = fragmentFake(teamsSection, teamsMockHandlers, LIVE);
     expect(
-      await teamsSection.plan(
-        planContext(teamsSection, api, REPO),
-        validatedInput("teams", [{ name: "platform", permission: "push" }]),
+      unwrap(
+        await teamsSection.plan(
+          planContext(teamsSection, api, REPO),
+          validatedInput("teams", [{ name: "platform", permission: "push" }]),
+        ),
       ),
     ).toEqual({
       ops: [],
       notes: [],
       drift: [],
     });
-    expect(await teamsSection.snapshot(snapshotContext(teamsSection, api, REPO, "fail"))).toEqual({
+    expect(
+      unwrap(await teamsSection.snapshot(snapshotContext(teamsSection, api, REPO, "fail"))),
+    ).toEqual({
       value: { _undeclared: "keep", entries: [{ name: "platform", permission: "push" }] },
       notes: [],
     });

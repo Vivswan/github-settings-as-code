@@ -1,6 +1,8 @@
 /** The permission vocabulary shared by collaborators and teams. */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
 import { leftOutOfSnapshot } from "./snapshot-helpers.js";
 
@@ -103,23 +105,23 @@ export const INVITATION_ROLES: ReadonlySet<string> = new Set([
 /**
  * The permission a live role reads back as, for a snapshot. A role no declaration plans as ("push" in a
  * settings file means the "write" role) has no entry: where the section's default policy deletes what
- * the file omits, dropping the entry would plan a removal, so it throws; elsewhere the entry is left out
- * with a note and undefined comes back.
+ * the file omits, dropping the entry would plan a removal, so it is the snapshot's failure; elsewhere
+ * the entry is left out with a note and undefined comes back.
  */
 export function readBackPermission(
   section: SectionMeta,
   label: string,
   role: string,
   notes: string[],
-): string | undefined {
+): Result<string | undefined, SectionFailure> {
   const permission = permissionForRole(role);
   if (permission !== undefined) {
-    return permission;
+    return ok(permission);
   }
   const reason = `the live role "${role}" has no declaration that plans as itself ("${role}" in a settings file means the "${roleForPermission(role)}" role)`;
   if (section.undeclaredDefault === "delete") {
-    throw new Error(`${label}: ${reason}, so it cannot be read back`);
+    return err(sectionFailure("live-shape", `${label}: ${reason}, so it cannot be read back`));
   }
   notes.push(leftOutOfSnapshot(label, reason));
-  return undefined;
+  return ok(undefined);
 }

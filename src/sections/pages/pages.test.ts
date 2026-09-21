@@ -3,7 +3,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { pagesSection } from "./index.js";
@@ -74,8 +74,13 @@ describe("pages shape", () => {
 });
 
 describe("pages", () => {
-  const plan = (api: MockApi, desired: SectionInput<"pages">) =>
-    pagesSection.plan(planContext(pagesSection, api, REPO), validatedInput("pages", desired));
+  const plan = async (api: MockApi, desired: SectionInput<"pages">) =>
+    unwrap(
+      await pagesSection.plan(
+        planContext(pagesSection, api, REPO),
+        validatedInput("pages", desired),
+      ),
+    );
 
   test("public drift carries the Enterprise Cloud note: github.com reports true and ignores the PUT, so it never converges", async () => {
     const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: true } } });

@@ -4,9 +4,8 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { deniedDetail, REPO, SectionFailed, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
-import { PermissionDenied } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
 import { interactionLimitsSection } from "./index.js";
 import type { InteractionLimitsConfig } from "./schema.js";
@@ -23,10 +22,12 @@ const TOOLS = { resolveSecret: () => "" };
 
 type Desired = SectionInput<"interaction_limits">;
 
-const plan = (api: GitHubClient, desired: Desired) =>
-  interactionLimitsSection.plan(
-    planContext(interactionLimitsSection, api, REPO),
-    validatedInput("interaction_limits", desired),
+const plan = async (api: GitHubClient, desired: Desired) =>
+  unwrap(
+    await interactionLimitsSection.plan(
+      planContext(interactionLimitsSection, api, REPO),
+      validatedInput("interaction_limits", desired),
+    ),
   );
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
@@ -196,7 +197,7 @@ describe("interaction_limits", () => {
     },
   );
 
-  test("a denied GET classifies as PermissionDenied carrying the status and the Administration grant", async () => {
+  test("a denied GET classifies as a denial carrying the status and the Administration grant", async () => {
     const api = new MockApi({ [GET]: { error: { status: 404, message: "Not Found", body: "" } } });
     let thrown: unknown;
     try {
@@ -204,11 +205,14 @@ describe("interaction_limits", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(PermissionDenied);
-    const denied = thrown as PermissionDenied;
-    expect(denied.section).toBe("interaction_limits");
-    expect(denied.status).toBe(404);
-    expect(denied.detail).toContain(
+    expect(thrown).toBeInstanceOf(SectionFailed);
+    const denied = (thrown as SectionFailed).failure;
+    expect(denied).toMatchObject({
+      kind: "permission-denied",
+      section: "interaction_limits",
+      status: 404,
+    });
+    expect(deniedDetail(thrown)).toContain(
       'grant "Administration" (read and write) under the PAT\'s Repository permissions',
     );
   });

@@ -3,7 +3,7 @@ import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { describeProblem } from "../../problem.js";
 import type { SectionInput } from "../contract/module.js";
@@ -54,10 +54,12 @@ function tools(resolved: Record<string, string> = {}): ExecTools {
   };
 }
 
-const plan = (api: MockApi, desired: SectionInput<"webhooks">) =>
-  webhooksSection.plan(
-    planContext(webhooksSection, api, REPO),
-    validatedInput("webhooks", desired),
+const plan = async (api: MockApi, desired: SectionInput<"webhooks">) =>
+  unwrap(
+    await webhooksSection.plan(
+      planContext(webhooksSection, api, REPO),
+      validatedInput("webhooks", desired),
+    ),
   );
 
 /** The requests a plan would issue: role, path params, and the payload sealed with `resolved`. */
@@ -67,7 +69,7 @@ async function requests(result: SectionPlan, resolved: Record<string, string> = 
     result.ops.map(async (op) => [
       op.role,
       op.params,
-      typeof op.payload === "function" ? await op.payload(exec) : op.payload,
+      typeof op.payload === "function" ? unwrap(await op.payload(exec)) : op.payload,
     ]),
   );
 }

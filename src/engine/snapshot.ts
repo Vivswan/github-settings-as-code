@@ -3,6 +3,7 @@
  * same rule.
  */
 
+import { err } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
@@ -13,7 +14,7 @@ import {
   endpointPath,
   matchesTemplate,
 } from "../sections/contract/endpoints.js";
-import { PermissionDenied } from "../sections/contract/errors.js";
+import { thrown } from "../sections/contract/errors.js";
 import {
   concealedAbsenceNote,
   gatedAbsentRead,
@@ -51,7 +52,7 @@ export interface SectionSnapshotOutcome {
 
 /**
  * The document exists only when the run did not fail: a failed section (a denial under the fail
- * policy, a throw, a value its own schema rejects) withholds it, so a failed result cannot be
+ * policy, a failure of any other kind, a value its own schema rejects) withholds it, so a failed result cannot be
  * rendered by mistake. "partial" says a section was skipped under the warn policy.
  */
 export type SnapshotResult =
@@ -132,40 +133,42 @@ export async function snapshotRepository(
     }
     const absentRead = gatedAbsentRead(section);
     const seen = { notFound: false };
-    let snapshot: SectionSnapshot;
-    try {
-      snapshot = await section.snapshot(
+    // The catch is for what still throws (the client's own transport error on an unmarked request, a BUG invariant).
+    const read = await section
+      .snapshot(
         snapshotContext(
           section,
           watchingNotFound(api, absentRead, seen),
           opts.repo,
           opts.onMissingPermission,
         ),
-      );
-    } catch (error) {
-      // A denial escapes the section from its primary read under both policies and from a
-      // sub-read (readOrNote) under fail, so this branch classifies every denial the run sees.
-      if (error instanceof PermissionDenied) {
+      )
+      .catch((error: unknown) => err(thrown(error)));
+    if (read.isErr()) {
+      const failure = read.error;
+      // A denial ends the section from its primary read under both policies and from a sub-read (readOrNote)
+      // under fail, so this branch classifies every denial the run sees.
+      if (failure.kind === "permission-denied") {
         const status = opts.onMissingPermission === "warn" ? "skipped" : "failed";
         if (status === "skipped") {
-          io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
+          io.annotate("warning", `${section.key}: skipped - ${failure.detail}`);
           partial = true;
         } else {
-          io.annotate("error", `${section.key}: not snapshotted - ${error.detail}`);
+          io.annotate("error", `${section.key}: not snapshotted - ${failure.detail}`);
           failed = true;
         }
-        outcomes.push({ key: section.key, status, detail: [error.detail] });
+        outcomes.push({ key: section.key, status, detail: [failure.detail] });
         continue;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      const prefixed = message.startsWith(`${section.key}:`)
-        ? message
-        : `${section.key}: ${message}`;
+      const prefixed = failure.message.startsWith(`${section.key}:`)
+        ? failure.message
+        : `${section.key}: ${failure.message}`;
       io.annotate("error", prefixed);
       outcomes.push({ key: section.key, status: "failed", detail: [prefixed] });
       failed = true;
       continue;
     }
+    const snapshot: SectionSnapshot = read.value;
     // The section's notes in code-point order: a section notes its entries in the order GitHub listed them, and the
     // file's header and the annotations must read the same on every run over the same repository.
     const notes = [...snapshot.notes].sort(compareByCodePoint);

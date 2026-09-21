@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -9,15 +10,16 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake, registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import {
+  failureOf,
   NO_SECRETS,
   REPO,
   secretTools,
   sectionRunners,
+  unwrap,
 } from "../../../test/sections/section-run.js";
 import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import { executePlan } from "../../engine/execute.js";
 import type { GitHubClient } from "../../github/api.js";
-import { PermissionDenied } from "../contract/errors.js";
 import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
@@ -256,7 +258,7 @@ describe("environments plan", () => {
     const sealed: Op = {
       role: "putSecret",
       params: { environment_name: "prod", secret_name: "S" },
-      payload: async () => ({ encrypted_value: "x", key_id: "k" }),
+      payload: async () => ok({ encrypted_value: "x", key_id: "k" }),
       // An alwaysRewrite endpoint may plan without drift.
       drift: [],
       change: "",
@@ -647,7 +649,7 @@ describe("environments nested secrets check mode", () => {
     expect(result.drift).toEqual([
       "environments[prod].secrets[DEPLOY_TOKEN]: missing - declared in the settings file but not on the environment; apply will create it",
     ]);
-    const cannotVerify = result.notes.filter((n) => n.includes("cannot be read back"));
+    const cannotVerify = result.notes.filter((n: string) => n.includes("cannot be read back"));
     expect(cannotVerify).toHaveLength(1);
     expect(cannotVerify[0]).toContain("prod environment secret values");
     expect(api.mutations()).toEqual([]);
@@ -1596,8 +1598,8 @@ describe("environments snapshot", () => {
       },
       environment_secrets: { qa: [{ name: "release_pat", ...STAMPS }] },
     });
-    const snapshot = await environmentsSection.snapshot(
-      snapshotContext(environmentsSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await environmentsSection.snapshot(snapshotContext(environmentsSection, api, REPO, "fail")),
     );
     expect(snapshot).toEqual({
       value: [
@@ -1672,8 +1674,8 @@ describe("environments snapshot", () => {
           : inner.tryRequest(method, path, payload, options),
       tryGraphql: (op, variables, slug) => inner.tryGraphql(op, variables, slug),
     };
-    const snapshot = await environmentsSection.snapshot(
-      snapshotContext(environmentsSection, api, REPO, "warn"),
+    const snapshot = unwrap(
+      await environmentsSection.snapshot(snapshotContext(environmentsSection, api, REPO, "warn")),
     );
     expect(snapshot).toEqual({
       value: [
@@ -1703,8 +1705,8 @@ describe("environments snapshot", () => {
 
   test("no environment reads back as nothing to declare", async () => {
     const api = fragmentFake(environmentsSection, environmentsMockHandlers, {});
-    const snapshot = await environmentsSection.snapshot(
-      snapshotContext(environmentsSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await environmentsSection.snapshot(snapshotContext(environmentsSection, api, REPO, "fail")),
     );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
   });
@@ -1769,11 +1771,11 @@ describe("environments snapshot", () => {
           },
         }),
     };
-    const failure = environmentsSection.snapshot(
-      snapshotContext(environmentsSection, api, REPO, "fail"),
+    const failure = failureOf(
+      await environmentsSection.snapshot(snapshotContext(environmentsSection, api, REPO, "fail")),
     );
-    await expect(failure).rejects.toBeInstanceOf(PermissionDenied);
-    await expect(failure).rejects.toThrow(
+    expect(failure.kind).toBe("permission-denied");
+    expect(failure.message).toContain(
       "environments: the token was denied GRAPHQL EnvironmentPinsSnapshot: 404 Could not resolve to a Repository " +
         'with the given name (a 404 here can also mean the resource does not exist). To fix, grant "Environments" ' +
         '(read and write) under the PAT\'s Repository permissions; declared "deployment_branch_policies" and ' +

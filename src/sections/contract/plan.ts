@@ -4,7 +4,7 @@
  * planned operation can only name a write role, so "check mode issued a write" is unrepresentable.
  */
 
-import { ok } from "neverthrow";
+import { ok, type Result, ResultAsync } from "neverthrow";
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { ApiError, GitHubClient } from "../../github/api.js";
@@ -15,7 +15,7 @@ import {
   endpointMethod,
   type PathParams,
 } from "./endpoints.js";
-import { raise } from "./errors.js";
+import type { SectionFailure } from "./errors.js";
 import type {
   GraphqlOpDecl,
   GraphqlPaginatedReadDecl,
@@ -200,23 +200,29 @@ type ListOpts<E extends EndpointDecl> = OptsArg<
 >;
 
 /**
+ * What every port helper resolves to: the parsed body, or the failure as a value. A ResultAsync awaits to a
+ * Result and also yields inside `safeTry(async function* () {...})`, so a plan threads its reads with `yield*`.
+ */
+export type Read<T> = ResultAsync<T, SectionFailure>;
+
+/**
  * The request helpers (./requests.ts) bound to ONE read endpoint, minus the declaration argument and any payload.
  * Every helper takes the zod schema of the body it returns and parses through parseLive (./live.ts) before the
  * section sees it, so an unparsed body is unrepresentable: a malformed answer is a loud "outside the documented
  * shape" failure naming the endpoint, never an undefined reaching a plan. The list helpers take the ITEM schema.
  */
 interface BoundRead<E extends EndpointDecl> {
-  call<T>(schema: z.ZodType<T>, ...args: CallOpts<E>): Promise<T>;
+  call<T>(schema: z.ZodType<T>, ...args: CallOpts<E>): Read<T>;
   tryCall<T>(
     schema: z.ZodType<T>,
     ...args: TryCallOpts<E>
-  ): Promise<{ data: T } | { error: ApiError }>;
+  ): Read<{ data: T } | { error: ApiError }>;
   probeAbsent<T>(
     schema: z.ZodType<T>,
     ...args: ProbeOpts<E>
-  ): Promise<{ data: T } | { missing: true }>;
-  listAll<T>(item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
-  listAllEnveloped<T>(envelopeKey: string, item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
+  ): Read<{ data: T } | { missing: true }>;
+  listAll<T>(item: z.ZodType<T>, ...args: ListOpts<E>): Read<T[]>;
+  listAllEnveloped<T>(envelopeKey: string, item: z.ZodType<T>, ...args: ListOpts<E>): Read<T[]>;
 }
 
 /**
@@ -225,24 +231,24 @@ interface BoundRead<E extends EndpointDecl> {
  * erases the per-call schema generic.
  */
 interface GatedBoundRead<E extends EndpointDecl> {
-  call<T>(exec: ExecTools, schema: z.ZodType<T>, ...args: CallOpts<E>): Promise<T>;
+  call<T>(exec: ExecTools, schema: z.ZodType<T>, ...args: CallOpts<E>): Read<T>;
   tryCall<T>(
     exec: ExecTools,
     schema: z.ZodType<T>,
     ...args: TryCallOpts<E>
-  ): Promise<{ data: T } | { error: ApiError }>;
+  ): Read<{ data: T } | { error: ApiError }>;
   probeAbsent<T>(
     exec: ExecTools,
     schema: z.ZodType<T>,
     ...args: ProbeOpts<E>
-  ): Promise<{ data: T } | { missing: true }>;
-  listAll<T>(exec: ExecTools, item: z.ZodType<T>, ...args: ListOpts<E>): Promise<T[]>;
+  ): Read<{ data: T } | { missing: true }>;
+  listAll<T>(exec: ExecTools, item: z.ZodType<T>, ...args: ListOpts<E>): Read<T[]>;
   listAllEnveloped<T>(
     exec: ExecTools,
     envelopeKey: string,
     item: z.ZodType<T>,
     ...args: ListOpts<E>
-  ): Promise<T[]>;
+  ): Read<T[]>;
 }
 
 type GraphqlTryOpts<O extends GraphqlOpDecl> = {
@@ -255,19 +261,19 @@ type BoundGraphqlRead<O extends GraphqlOpDecl> = {
     schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
     opts?: { describe?: string },
-  ): Promise<T>;
+  ): Read<T>;
   tryCall<T>(
     schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
     opts?: GraphqlTryOpts<O>,
-  ): Promise<{ data: T } | { error: ApiError }>;
+  ): Read<{ data: T } | { error: ApiError }>;
 } & (O extends GraphqlPaginatedReadDecl
   ? {
       /** Every node of the declared connection (the loop owns `$cursor`), each parsed by the node schema. */
       listConnection<T>(
         node: z.ZodType<T>,
         variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
-      ): Promise<{ items: T[] } | { error: ApiError }>;
+      ): Read<{ items: T[] } | { error: ApiError }>;
     }
   : { listConnection?: never });
 
@@ -278,20 +284,20 @@ type GatedBoundGraphqlRead<O extends GraphqlOpDecl> = {
     schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
     opts?: { describe?: string },
-  ): Promise<T>;
+  ): Read<T>;
   tryCall<T>(
     exec: ExecTools,
     schema: z.ZodType<T>,
     variables: Readonly<GraphqlVariablesOf<O>>,
     opts?: GraphqlTryOpts<O>,
-  ): Promise<{ data: T } | { error: ApiError }>;
+  ): Read<{ data: T } | { error: ApiError }>;
 } & (O extends GraphqlPaginatedReadDecl
   ? {
       listConnection<T>(
         exec: ExecTools,
         node: z.ZodType<T>,
         variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
-      ): Promise<{ items: T[] } | { error: ApiError }>;
+      ): Read<{ items: T[] } | { error: ApiError }>;
     }
   : { listConnection?: never });
 
@@ -398,21 +404,21 @@ export interface PlannedOpBase<D extends Justification = Justification> {
    */
   readonly drift: D;
   /**
-   * A thunk when the line depends on what the server echoed (one line or several, never none); a throw
-   * is the verification failure.
+   * A thunk when the line depends on what the server echoed (one line or several, never none); its failure
+   * is the verification failure, reported beside the requests that landed.
    */
-  readonly change: string | ((response: unknown) => string | readonly [string, ...string[]]);
+  readonly change: string | ((response: unknown) => Result<ChangeLines, SectionFailure>);
   /** The operation in settings-file terms ("arming the interaction limit"), for the failure prose; the `describe` the request helpers take. */
   readonly describe?: string;
   /**
    * For a server-assigned value (a created environment's node id) a later operation's thunk reads from
-   * where the hook stores it. It must not render; a throw fails the operation.
+   * where the hook stores it. It must not render; its failure fails the operation.
    */
-  readonly capture?: (response: unknown) => void;
+  readonly capture?: (response: unknown) => Result<void, SectionFailure>;
   /**
    * Execution-time reads before the request is sealed and issued (bypass actors' node ids, pinned ahead
-   * of the first write so a bad input fails while live state is untouched). A throw fails the operation
-   * with its request never sent.
+   * of the first write so a bad input fails while live state is untouched). Its failure fails the
+   * operation with its request never sent.
    */
   readonly before?: Late<void>;
 }
@@ -432,8 +438,16 @@ export function driftOf(op: Pick<PlannedOpBase, "drift">): readonly string[] {
   return "unverifiable" in op.drift ? op.drift.lines : op.drift;
 }
 
-/** The ONLY place a plan may touch a secret; async so it can read a value an earlier operation created. */
-export type Late<T> = (exec: ExecTools) => T | Promise<T>;
+/** One change line or several, never none: a request that landed always renders. */
+export type ChangeLines = string | readonly [string, ...string[]];
+
+/**
+ * The ONLY place a plan may touch a secret; async so it can read a value an earlier operation created. Its
+ * failure is the operation's, with the request never sent.
+ */
+export type Late<T> = (
+  exec: ExecTools,
+) => Result<T, SectionFailure> | PromiseLike<Result<T, SectionFailure>>;
 
 /**
  * A tolerated status means the operation did not apply: a note in place of its change line, or a
@@ -588,39 +602,29 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
     const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string) =>
       parseLive(meta, endpoint, schema, data, describe);
     const bound: BoundRead<EndpointDecl> = {
-      call: async (schema, ...args) =>
-        raise(
-          (await call(ctx, meta, endpoint, ...args)).andThen((data) =>
-            parse(schema, data, args[0]?.describe),
-          ),
+      call: (schema, ...args) =>
+        new ResultAsync(call(ctx, meta, endpoint, ...args)).andThen((data) =>
+          parse(schema, data, args[0]?.describe),
         ),
-      tryCall: async (schema, ...args) =>
-        raise(
-          (await tryCall(ctx, meta, endpoint, ...args)).andThen((result) =>
-            "error" in result
-              ? ok(result)
-              : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
-          ),
+      tryCall: (schema, ...args) =>
+        new ResultAsync(tryCall(ctx, meta, endpoint, ...args)).andThen((result) =>
+          "error" in result
+            ? ok(result)
+            : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
         ),
-      probeAbsent: async (schema, ...args) =>
-        raise(
-          (await probeAbsent(ctx, meta, endpoint, ...args)).andThen((result) =>
-            "missing" in result
-              ? ok(result)
-              : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
-          ),
+      probeAbsent: (schema, ...args) =>
+        new ResultAsync(probeAbsent(ctx, meta, endpoint, ...args)).andThen((result) =>
+          "missing" in result
+            ? ok(result)
+            : parse(schema, result.data, args[0]?.describe).map((data) => ({ data })),
         ),
-      listAll: async (item, ...args) =>
-        raise(
-          (await listAll(ctx, meta, endpoint, ...args)).andThen((items) =>
-            parse(z.array(item), items, args[0]?.describe),
-          ),
+      listAll: (item, ...args) =>
+        new ResultAsync(listAll(ctx, meta, endpoint, ...args)).andThen((items) =>
+          parse(z.array(item), items, args[0]?.describe),
         ),
-      listAllEnveloped: async (envelopeKey, item, ...args) =>
-        raise(
-          (await listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args)).andThen((items) =>
-            parse(z.array(item), items, args[0]?.describe),
-          ),
+      listAllEnveloped: (envelopeKey, item, ...args) =>
+        new ResultAsync(listAllEnveloped(ctx, meta, endpoint, envelopeKey, ...args)).andThen(
+          (items) => parse(z.array(item), items, args[0]?.describe),
         ),
     };
     port[role] = endpoint.phase === "execution" ? gated(bound) : bound;
@@ -633,33 +637,27 @@ function boundReads<E extends EndpointDict, G extends GraphqlDict>(
     const parse = <T>(schema: z.ZodType<T>, data: unknown, describe?: string) =>
       parseLive(meta, op, schema, data, describe);
     const bound: BoundGraphqlRead<GraphqlOpDecl> = {
-      call: async (schema, variables, opts) =>
-        raise(
-          (await callGraphql(ctx, meta, op, variables, opts)).andThen((data) =>
-            parse(schema, data, opts?.describe),
-          ),
+      call: (schema, variables, opts) =>
+        new ResultAsync(callGraphql(ctx, meta, op, variables, opts)).andThen((data) =>
+          parse(schema, data, opts?.describe),
         ),
-      tryCall: async (schema, variables, opts) =>
-        raise(
-          (await tryCallGraphql(ctx, meta, op, variables, opts)).andThen((result) =>
-            "error" in result
-              ? ok(result)
-              : parse(schema, result.data, opts?.describe).map((data) => ({ data })),
-          ),
+      tryCall: (schema, variables, opts) =>
+        new ResultAsync(tryCallGraphql(ctx, meta, op, variables, opts)).andThen((result) =>
+          "error" in result
+            ? ok(result)
+            : parse(schema, result.data, opts?.describe).map((data) => ({ data })),
         ),
       ...(op.connection === undefined
         ? {}
         : {
-            listConnection: async <T>(
+            listConnection: <T>(
               node: z.ZodType<T>,
               variables: Readonly<Record<string, unknown>> & { cursor?: never },
             ) =>
-              raise(
-                (await listGraphqlConnection(ctx, meta, op, variables)).andThen((result) =>
-                  "error" in result
-                    ? ok(result)
-                    : parse(z.array(node), result.items).map((items) => ({ items })),
-                ),
+              new ResultAsync(listGraphqlConnection(ctx, meta, op, variables)).andThen((result) =>
+                "error" in result
+                  ? ok(result)
+                  : parse(z.array(node), result.items).map((items) => ({ items })),
               ),
           }),
     };

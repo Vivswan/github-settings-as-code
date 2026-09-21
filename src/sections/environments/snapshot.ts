@@ -4,9 +4,11 @@
  * the pin state read off the GraphQL pins connection folded onto the entries.
  */
 
+import { ok, type Result, safeTry } from "neverthrow";
 import { compareByCodePoint } from "../../engine/canonical.js";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { UndeclaredPolicyList } from "../../types.js";
+import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
 import { liveSecretsByKey } from "../shared/secrets-engine.js";
@@ -84,77 +86,77 @@ export async function snapshotNested(
   section: SectionMeta,
   envName: string,
   liveEnv: LiveEnvironmentBody,
-): Promise<{ nested: NestedSnapshot; notes: string[] }> {
-  const nested: NestedSnapshot = {};
-  const notes: string[] = [];
-  const variables = [
-    ...liveVariablesByKey(
-      section,
-      "variable",
-      await listEnvironmentVariables(ctx, envName),
-    ).values(),
-  ];
-  if (variables.length > 0) {
-    nested.variables = wrapped(
-      "variables",
-      variables.map((variable) => projectOntoSchema(EnvironmentVariableConfig, variable)),
-    );
-  }
-  const secrets = [
-    ...liveSecretsByKey(
-      section,
-      `${envName} environment secret`,
-      await listEnvironmentSecrets(ctx, envName),
-    ).keys(),
-  ];
-  if (secrets.length > 0) {
-    // The engine's index hands back the uppercase form GitHub stores and the planner compares by,
-    // so a lowercase listing still mints a reference the settings-file grammar accepts.
-    const references = secrets.map((name) => ({
-      name,
-      ...snapshotSecretReference(secretStore(envName), name),
-    }));
-    nested.secrets = wrapped(
-      "secrets",
-      references.map(({ name, reference }) => ({ name, value: reference })),
-    );
-    for (const { name, variable } of references) {
-      notes.push(unreadableSecretNote(`environments[${envName}].secrets[${name}]`, name, variable));
+): Promise<Result<{ nested: NestedSnapshot; notes: string[] }, SectionFailure>> {
+  return safeTry(async function* () {
+    const nested: NestedSnapshot = {};
+    const notes: string[] = [];
+    const variables = [
+      ...(yield* listEnvironmentVariables(ctx, envName).andThen((live) =>
+        liveVariablesByKey(section, "variable", live),
+      )).values(),
+    ];
+    if (variables.length > 0) {
+      nested.variables = wrapped(
+        "variables",
+        variables.map((variable) => projectOntoSchema(EnvironmentVariableConfig, variable)),
+      );
     }
-  }
-  if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
-    const policies = await readOrNote(
+    const secrets = [
+      ...(yield* listEnvironmentSecrets(ctx, envName).andThen((live) =>
+        liveSecretsByKey(section, `${envName} environment secret`, live),
+      )).keys(),
+    ];
+    if (secrets.length > 0) {
+      // The engine's index hands back the uppercase form GitHub stores and the planner compares by,
+      // so a lowercase listing still mints a reference the settings-file grammar accepts.
+      const references = secrets.map((name) => ({
+        name,
+        ...snapshotSecretReference(secretStore(envName), name),
+      }));
+      nested.secrets = wrapped(
+        "secrets",
+        references.map(({ name, reference }) => ({ name, value: reference })),
+      );
+      for (const { name, variable } of references) {
+        notes.push(
+          unreadableSecretNote(`environments[${envName}].secrets[${name}]`, name, variable),
+        );
+      }
+    }
+    if (liveEnv.deployment_branch_policy?.custom_branch_policies === true) {
+      const policies = yield* await readOrNote(
+        ctx,
+        notes,
+        `environments[${envName}].deployment_branch_policies`,
+        () => listBranchPolicies(ctx, envName),
+      );
+      if ("value" in policies && policies.value.length > 0) {
+        const byName = yield* policiesByName(section, policies.value, envName);
+        nested.deployment_branch_policies = wrapped(
+          "deployment_branch_policies",
+          [...byName.values()].map((policy) =>
+            projectOntoSchema(DeploymentBranchPolicyConfig, policy),
+          ),
+        );
+      }
+    }
+    const rules = yield* await readOrNote(
       ctx,
       notes,
-      `environments[${envName}].deployment_branch_policies`,
-      () => listBranchPolicies(ctx, envName),
+      `environments[${envName}].deployment_protection_rules`,
+      () => listProtectionRules(ctx, envName),
     );
-    if ("value" in policies && policies.value.length > 0) {
-      const byName = policiesByName(section, policies.value, envName);
-      nested.deployment_branch_policies = wrapped(
-        "deployment_branch_policies",
-        [...byName.values()].map((policy) =>
-          projectOntoSchema(DeploymentBranchPolicyConfig, policy),
-        ),
-      );
+    if ("value" in rules) {
+      const enabled = [...(yield* enabledRulesBySlug(section, rules.value, envName)).keys()];
+      if (enabled.length > 0) {
+        nested.deployment_protection_rules = wrapped(
+          "deployment_protection_rules",
+          enabled.map((app) => ({ app })),
+        );
+      }
     }
-  }
-  const rules = await readOrNote(
-    ctx,
-    notes,
-    `environments[${envName}].deployment_protection_rules`,
-    () => listProtectionRules(ctx, envName),
-  );
-  if ("value" in rules) {
-    const enabled = [...enabledRulesBySlug(section, rules.value, envName).keys()];
-    if (enabled.length > 0) {
-      nested.deployment_protection_rules = wrapped(
-        "deployment_protection_rules",
-        enabled.map((app) => ({ app })),
-      );
-    }
-  }
-  return { nested, notes };
+    return ok({ nested, notes });
+  });
 }
 
 /**

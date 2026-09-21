@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import { PermissionDenied } from "../../../src/sections/contract/errors.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { deniedDetail, REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { collaboratorsSection } from "./index.js";
@@ -13,13 +12,17 @@ import { collaboratorsMockHandlers } from "./mock.js";
 
 const LIST = "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=1";
 const INVITATIONS = "GET /repos/o/r/invitations?per_page=100&page=1";
-const plan = (api: MockApi, desired: SectionInput<"collaborators">) =>
-  collaboratorsSection.plan(
-    planContext(collaboratorsSection, api, REPO),
-    validatedInput("collaborators", desired),
+const plan = async (api: MockApi, desired: SectionInput<"collaborators">) =>
+  unwrap(
+    await collaboratorsSection.plan(
+      planContext(collaboratorsSection, api, REPO),
+      validatedInput("collaborators", desired),
+    ),
   );
-const snapshot = (api: MockApi) =>
-  collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail"));
+const snapshot = async (api: MockApi) =>
+  unwrap(
+    await collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail")),
+  );
 const NO_SECRETS = {
   resolveSecret: (): string => {
     throw new Error("no secrets");
@@ -224,7 +227,7 @@ describe("collaborators", () => {
 
   test("a 404 on the collaborator list is a denial that stops the section before the invitation read", async () => {
     const api = new MockApi({ [INVITATIONS]: { data: [] } });
-    await expect(plan(api, [{ username: "alice" }])).rejects.toBeInstanceOf(PermissionDenied);
+    deniedDetail(await plan(api, [{ username: "alice" }]).catch((thrown: unknown) => thrown));
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 

@@ -3,7 +3,7 @@ import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { validateSettingsDoc } from "../../engine/orchestrate.js";
 import { SectionSelection } from "../../engine/section-selection.js";
@@ -37,10 +37,12 @@ function livePattern(overrides: Record<string, unknown>): Record<string, unknown
   };
 }
 
-const plan = (api: MockApi, desired: SectionInput<"secret_scanning_custom_patterns">) =>
-  secretScanningPatternsSection.plan(
-    planContext(secretScanningPatternsSection, api, REPO),
-    validatedInput("secret_scanning_custom_patterns", desired),
+const plan = async (api: MockApi, desired: SectionInput<"secret_scanning_custom_patterns">) =>
+  unwrap(
+    await secretScanningPatternsSection.plan(
+      planContext(secretScanningPatternsSection, api, REPO),
+      validatedInput("secret_scanning_custom_patterns", desired),
+    ),
   );
 
 /** A plan with every change thunk rendered; the section builds the lines at plan time. */
@@ -49,7 +51,7 @@ function rendered(result: SectionPlan) {
     ...result,
     ops: result.ops.map((op) => ({
       ...op,
-      change: typeof op.change === "function" ? [op.change(null)].flat() : [op.change],
+      change: typeof op.change === "function" ? [unwrap(op.change(null))].flat() : [op.change],
     })),
   };
 }

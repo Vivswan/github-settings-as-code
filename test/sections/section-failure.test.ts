@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { err } from "neverthrow";
 import { z } from "zod";
 import {
   type GitHubClient,
@@ -7,13 +6,7 @@ import {
   SECRET_TRANSPORT_WITHHELD,
 } from "../../src/github/api.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
-import {
-  errorOf,
-  failureFor,
-  PermissionDenied,
-  raise,
-  type SectionFailure,
-} from "../../src/sections/contract/errors.js";
+import { failureFor, type SectionFailure } from "../../src/sections/contract/errors.js";
 import { parseLive } from "../../src/sections/contract/live.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import { callDeclared, listAll } from "../../src/sections/contract/requests.js";
@@ -151,31 +144,5 @@ describe("the kinds the helpers add beside failureFor's", () => {
       message:
         'rulesets: GET /repos/{owner}/{repo}/rulesets returned a body outside the documented shape - id: Invalid input: expected number, received string. Check the "api-version" input against the GitHub REST docs for this endpoint',
     });
-  });
-});
-
-describe("errorOf is the thrown form the section loops classify", () => {
-  test("only a denial keeps its shape; every other kind is a plain Error with the same message", () => {
-    const denied = failureFor(
-      section,
-      "GET",
-      "/repos/o/r/rulesets",
-      { status: 404, message: "Not Found", body: "" },
-      { op: create },
-    );
-    const raised = errorOf(denied);
-    expect(raised).toBeInstanceOf(PermissionDenied);
-    expect(raised).toEqual(
-      new PermissionDenied(
-        "rulesets",
-        'the token was denied GET /repos/o/r/rulesets: 404 Not Found (a 404 here can also mean the resource does not exist). To fix, grant "Administration" (read and write) under the PAT\'s Repository permissions',
-        404,
-      ),
-    );
-    expect(raised.message).toBe(denied.message);
-    const limited: SectionFailure = { kind: "rate-limit", message: "rulesets: limited" };
-    expect(errorOf(limited)).not.toBeInstanceOf(PermissionDenied);
-    expect(errorOf(limited)).toEqual(new Error("rulesets: limited"));
-    expect(() => raise(err(limited))).toThrow(new Error("rulesets: limited"));
   });
 });

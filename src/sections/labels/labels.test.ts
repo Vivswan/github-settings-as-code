@@ -4,7 +4,7 @@ import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { labelsSection } from "./index.js";
@@ -15,8 +15,13 @@ const liveLabels = [
   { name: "bug", color: "d73a4a", description: "Something isn't working" },
   { name: "stale", color: "ffffff", description: null },
 ];
-const plan = (api: MockApi, desired: SectionInput<"labels">) =>
-  labelsSection.plan(planContext(labelsSection, api, REPO), validatedInput("labels", desired));
+const plan = async (api: MockApi, desired: SectionInput<"labels">) =>
+  unwrap(
+    await labelsSection.plan(
+      planContext(labelsSection, api, REPO),
+      validatedInput("labels", desired),
+    ),
+  );
 
 describe("labels", () => {
   test("plans a create per missing label, an update per drifted one, and a delete per undeclared one, reading only", async () => {

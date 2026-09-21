@@ -5,7 +5,7 @@ import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { teamsSection } from "./index.js";
 import { teamsMockHandlers } from "./mock.js";
@@ -17,9 +17,10 @@ const gated = sectionModule("teams") as SectionModule<"teams"> &
 const ORG = "GET /orgs/o";
 const LIST = "GET /repos/o/r/teams?per_page=100&page=1";
 const probeOf = (slug: string) => `GET /orgs/o/teams/${slug}/repos/o/r`;
-const plan = (api: MockApi, desired: SectionInput<"teams">) =>
-  gated.plan(planContext(gated, api, REPO), validatedInput("teams", desired));
-const snapshot = (api: MockApi) => gated.snapshot(snapshotContext(gated, api, REPO, "fail"));
+const plan = async (api: MockApi, desired: SectionInput<"teams">) =>
+  unwrap(await gated.plan(planContext(gated, api, REPO), validatedInput("teams", desired)));
+const snapshot = async (api: MockApi) =>
+  unwrap(await gated.snapshot(snapshotContext(gated, api, REPO, "fail")));
 
 describe("teams", () => {
   test("a personal account no-ops with a note after the org probe alone", async () => {

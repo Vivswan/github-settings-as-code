@@ -4,6 +4,7 @@
  * module is ONE setupSection() call over the shared verbatim-PATCH plan.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { SettingsFile } from "../../schema.js";
@@ -14,7 +15,7 @@ import {
   CodeScanningDefaultSetupConfig,
 } from "../code_scanning_default_setup/schema.js";
 import { expand } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
 import {
   type GraphqlDict,
@@ -88,14 +89,14 @@ type SetupPlan<K extends SetupKey> = {
   [F in SetupKey]: (
     ctx: PlanContext<SetupEndpoints<F>, GraphqlDict, F>,
     declared: ValidatedInput<F>,
-  ) => Promise<SectionPlan<PlannedOp<SetupEndpoints<F>>>>;
+  ) => Promise<Result<SectionPlan<PlannedOp<SetupEndpoints<F>>>, SectionFailure>>;
 }[K];
 
 type WideEndpoints = SetupEndpoints<SetupKey>;
 
 type WideContext = PlanContext<WideEndpoints>;
 
-type WidePlanned = Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
 
 /** The shared implementation's signature at setup F (the brand names the setup); the lockstep below compares it to the setup's own. */
 type SharedPlanAt<F extends SetupKey> = (
@@ -136,7 +137,7 @@ export interface SetupSectionModule<K extends SetupKey> {
   readonly plan: SetupPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
-  ) => Promise<SectionSnapshot<K>>;
+  ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
 }
 
 /** The GET body: the whole configuration as a mapping, which subsetDiff compares the declared keys against. */
@@ -207,7 +208,11 @@ export function setupSection<K extends SetupKey>(setup: {
   const plan: SharedPlan = async (ctx, declared) => {
     const desired: Record<string, unknown> = declared;
     const planned: SectionPlan<PlannedOp<WideEndpoints>> = { ops: [], notes: [], drift: [] };
-    const reported = await ctx.read.get.call(LiveSetup);
+    const read = await ctx.read.get.call(LiveSetup);
+    if (read.isErr()) {
+      return err(read.error);
+    }
+    const reported = read.value;
     // The keys pass through, so a key GitHub never echoes would re-PATCH on every apply without
     // converging. A slice key the GET lacks is drift the PATCH resolves (the GET reports every PATCH
     // field), so only a key outside the slice is noted.
@@ -225,7 +230,7 @@ export function setupSection<K extends SetupKey>(setup: {
     }
     const drift = subsetDiff(desired, live, key);
     if (!hasDrift(drift)) {
-      return planned;
+      return ok(planned);
     }
     planned.ops.push({
       role: "update",
@@ -238,16 +243,16 @@ export function setupSection<K extends SetupKey>(setup: {
           failure: `${key}: PATCH ${expand(wide.update, ctx)}: ${error.status} ${error.message}. A ${noun} configuration run is already in progress on the repository; re-run the workflow after it finishes`,
         }),
       },
-      change: (response) => {
-        const run = raise(parseLive(section, wide.update, LiveConfigurationRun, response));
-        if (run?.run_id === undefined) {
-          return `applied ${noun}`;
-        }
-        const url = run.run_url ? ` (${run.run_url})` : "";
-        return `applied ${noun}; GitHub started configuration run ${run.run_id}${url} to roll it out, and the settings take effect when it finishes`;
-      },
+      change: (response) =>
+        parseLive(section, wide.update, LiveConfigurationRun, response).map((run) => {
+          if (run?.run_id === undefined) {
+            return `applied ${noun}`;
+          }
+          const url = run.run_url ? ` (${run.run_url})` : "";
+          return `applied ${noun}; GitHub started configuration run ${run.run_id}${url} to roll it out, and the settings take effect when it finishes`;
+        }),
     });
-    return planned;
+    return ok(planned);
   };
 
   // The GET always answers with the whole configuration (a not-configured setup included), so
@@ -256,17 +261,17 @@ export function setupSection<K extends SetupKey>(setup: {
   // declared type; the casts are the wide-port and per-key boundaries.
   const snapshot = async (
     ctx: SnapshotContext<SetupEndpoints<K>, GraphqlDict, K>,
-  ): Promise<SectionSnapshot<K>> => {
-    const reported = await (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get.call(
-      LiveSetup,
-    );
-    const { live, undeclarable } = inPatchVocabulary(reported, languages);
-    const notes =
-      undeclarable.length > 0
-        ? [leftOutOfSnapshot(`${key}.languages`, undeclarableLanguages(undeclarable))]
-        : [];
-    return { value: projectOntoSchema(slice, live) as SetupDeclared<K>, notes };
-  };
+  ): Promise<Result<SectionSnapshot<K>, SectionFailure>> =>
+    (ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>).read.get
+      .call(LiveSetup)
+      .map((reported) => {
+        const { live, undeclarable } = inPatchVocabulary(reported, languages);
+        const notes =
+          undeclarable.length > 0
+            ? [leftOutOfSnapshot(`${key}.languages`, undeclarableLanguages(undeclarable))]
+            : [];
+        return { value: projectOntoSchema(slice, live) as SetupDeclared<K>, notes };
+      });
 
   const section: SetupSectionModule<K> = {
     key,
