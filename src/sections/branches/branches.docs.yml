@@ -26,7 +26,9 @@ coverage:
       bypass_pull_request_allowances, where the PUT takes login/slug strings (the refusal names the
       string to write).
       Check mode flattens the GET shape ({enabled} wrappers, actor objects -> login/slug strings,
-      *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection);
+      *_url dropped) to compare like with like (src/sections/branches/index.ts flattenProtection),
+      and notes a declared key outside the PUT vocabulary that the GET never echoes as never
+      converging (a documented key the GET omits, such as an off control, is drift the PUT resolves);
       actor logins and slugs compare case-insensitively (GitHub matches them in any case and reads
       back its own spelling), and a live review block without dismissal_restrictions or
       bypass_pull_request_allowances compares as the all-empty holder, which is how GitHub reads an
@@ -105,8 +107,9 @@ schema:
     prefer rulesets for new pattern-based configuration).
   BranchConfig.protection: PUT .../protection payload; null removes protection (Probot parity).
   BranchProtectionConfig: >-
-    The protection PUT payload, passed through verbatim except its routed keys. What the file alone
-    shows wrong is refused upfront, naming the fix: the GET-only keys a copied GET response carries
+    The protection PUT payload, passed through verbatim except its routed keys; a key the GET never
+    echoes is noted at check time as never converging. What the file alone shows wrong is refused
+    upfront, naming the fix: the GET-only keys a copied GET response carries
     (`name`, `enabled`, `enforcement_level`, `url` and `*_url`, at any depth), a status-check
     requirement without `strict` or a check list, and a review count outside 0-6.
   BranchProtectionConfig.required_status_checks: >-

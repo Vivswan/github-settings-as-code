@@ -722,6 +722,114 @@ describe("branches", () => {
       ]).success,
     ).toBe(true);
   });
+
+  test("a declared key outside the PUT vocabulary that the GET never echoes is noted as never converging: nested, under an absent holder, or holding a dot", async () => {
+    const api = new MockApi({
+      [PROTECTION]: {
+        data: {
+          enforce_admins: { enabled: true },
+          required_pull_request_reviews: {
+            dismiss_stale_reviews: true,
+            require_code_owner_reviews: false,
+          },
+        },
+      },
+    });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: {
+          enforce_admins: true,
+          enforce_admin: true,
+          required_pull_request_reviews: {
+            dismiss_stale_reviews: true,
+            dismiss_stale_review: true,
+          },
+          // The GET omits the whole holder, so the phantom stops there; the misspelled key is still
+          // named, and the empty one is skipped as the diff skips it.
+          required_status_checks: { strict: true, contexts: [], strcit: true, emptied: null },
+          // A literal top-level key, not the nested field it is spelled like.
+          "required_status_checks.strict": true,
+        },
+      },
+    ]);
+    expect(result.notes).toEqual([
+      'branches[main].protection: declared keys "required_status_checks.strcit", "required_pull_request_reviews.dismiss_stale_review", "enforce_admin", "required_status_checks.strict" ' +
+        "do not exist on the live branch protection, so if GitHub ignores them this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file",
+    ]);
+    expect(result.ops.map((op) => op.drift)).toEqual([
+      [
+        "branches[main].protection.required_status_checks: expected object, live has undefined",
+        "branches[main].protection.required_pull_request_reviews.dismiss_stale_review: declared true but the API response has no such field (new or write-only field?)",
+        "branches[main].protection.enforce_admin: declared true but the API response has no such field (new or write-only field?)",
+        "branches[main].protection.required_status_checks.strict: declared true but the API response has no such field (new or write-only field?)",
+      ],
+    ]);
+  });
+
+  test("an unprotected branch gets the note on the run that plans its first PUT; its documented keys stay unnoted", async () => {
+    const api = new MockApi({ [PROBE]: { data: { name: "main" } } });
+    const result = await plan(api, [
+      {
+        name: "main",
+        protection: {
+          enforce_admins: true,
+          enforce_admin: true,
+          lock_branch: true,
+          required_status_checks: { strict: true, contexts: [], strcit: true },
+        },
+      },
+    ]);
+    expect(result.notes).toEqual([
+      'branches[main].protection: declared keys "required_status_checks.strcit", "enforce_admin" do not exist on the live branch protection, ' +
+        "so if GitHub ignores them this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file",
+    ]);
+    expect(result.ops.map((op) => op.role)).toEqual(["putProtection"]);
+  });
+
+  test("a documented key the GET omits is drift the PUT resolves, never a note: one PUT, then the re-plan is empty", async () => {
+    // GitHub's GET marks the boolean controls, strict, the review count, and require_last_push_approval
+    // optional, so each is declared here against a live body that lacks it.
+    const api = liveRepo({
+      branches: ["main"],
+      branch_protection: {
+        main: {
+          enforce_admins: { enabled: true },
+          required_pull_request_reviews: {
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+          },
+        },
+      },
+    });
+    const { first, second, changes } = await provePlanIdempotent(branchesSection, api, [
+      {
+        name: "main",
+        protection: {
+          enforce_admins: true,
+          lock_branch: true,
+          required_status_checks: { strict: true, contexts: [] },
+          required_pull_request_reviews: {
+            dismiss_stale_reviews: false,
+            require_code_owner_reviews: false,
+            required_approving_review_count: 2,
+            require_last_push_approval: true,
+          },
+        },
+      },
+    ]);
+    expect(first.notes).toEqual([]);
+    expect(first.ops.map((op) => op.drift)).toEqual([
+      [
+        "branches[main].protection.required_status_checks: expected object, live has undefined",
+        "branches[main].protection.required_pull_request_reviews.required_approving_review_count: declared 2 but the API response has no such field (new or write-only field?)",
+        "branches[main].protection.required_pull_request_reviews.require_last_push_approval: declared true but the API response has no such field (new or write-only field?)",
+        "branches[main].protection.lock_branch: declared true but the API response has no such field (new or write-only field?)",
+      ],
+    ]);
+    expect(changes).toEqual(['applied protection to "main"']);
+    expect(second).toEqual({ ops: [], notes: [], drift: [] });
+  });
 });
 
 /** A required-deployment list naming an environment no live state seeds. */

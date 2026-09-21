@@ -1,0 +1,49 @@
+# A misspelled key on a routed mapping passes through (each mapping is open so
+# a field GitHub ships tomorrow is declarable), but the mapping's GET never
+# echoes it, so its PUT would re-run on every apply without converging. Check
+# mode notes exactly that per mapping, naming the key, alongside the drift it
+# causes, and writes nothing.
+name: actions-routed-unknown-key-noted
+settings:
+  actions:
+    artifact_and_log_retention:
+      days: 90
+      retention_days: 90
+    fork_pr_workflows_private_repos:
+      run_workflows_from_fork_pull_requests: true
+      send_write_tokens_to_workflows: false
+      send_secrets_and_variable: false
+      require_approval_for_fork_pr_workflows: true
+inputs:
+  mode: check
+live_state:
+  repo:
+    private: true
+    visibility: private
+  actions_retention:
+    days: 90
+    maximum_allowed_days: 400
+  fork_pr_workflows_private_repos:
+    run_workflows_from_fork_pull_requests: true
+    send_write_tokens_to_workflows: false
+    send_secrets_and_variables: false
+    require_approval_for_fork_pr_workflows: true
+token_permissions:
+  administration: write
+expect:
+  exit_code: 1
+  result: drift
+  outcomes:
+    actions: drift
+  stdout_contains:
+    - >-
+      actions.artifact_and_log_retention: declared key "retention_days" does not exist on the live
+      retention window, so if GitHub ignores it this PUT will re-run on every apply without
+      converging. Fix the key name, or remove it from the settings file
+    - >-
+      actions.fork_pr_workflows_private_repos: declared key "send_secrets_and_variable" does not
+      exist on the live fork PR workflow settings, so if GitHub ignores it this PUT will re-run on
+      every apply without converging. Fix the key name, or remove it from the settings file
+  never:
+    - "PUT /repos/{repo}/actions/permissions/artifact-and-log-retention"
+    - "PUT /repos/{repo}/actions/permissions/fork-pr-workflows-private-repos"

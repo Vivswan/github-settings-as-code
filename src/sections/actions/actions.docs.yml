@@ -64,8 +64,8 @@ schema:
   ActionsConfig.artifact_and_log_retention: >-
     PUT /repos/{r}/actions/permissions/artifact-and-log-retention: how many days artifacts and
     workflow logs are kept, e.g. { days: 90 }. The body passes through verbatim, so future fields
-    GitHub adds work unchanged; maximum_allowed_days, which the GET reports and the PUT does not
-    take, is refused.
+    GitHub adds work unchanged, and a key the GET never echoes is noted at check time as never
+    converging; maximum_allowed_days, which the GET reports and the PUT does not take, is refused.
   ActionsConfig.artifact_and_log_retention.days: How many days artifacts and workflow logs are kept; a whole number of days within the plan's maximum.
   ActionsConfig.cache: >-
     Actions cache limits, each key routed to its own endpoint: max_cache_retention_days -> PUT
@@ -76,39 +76,41 @@ schema:
   ActionsConfig.cache.max_cache_size_gb: The total cache storage the repository may use, in GB.
   ActionsConfig.oidc_customization_sub: >-
     PUT /repos/{r}/actions/oidc/customization/sub: the OIDC subject claim template for this
-    repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] }
-    (keys are unique and hold only letters, digits, and underscores; a list under use_default: true
-    is refused, since GitHub ignores it). Claim-key ORDER defines the subject format, so check mode
-    compares a declared list positionally; an omitted list on a custom template opts into the
-    organization template and is not compared. sub_claim_prefix, which the GET reports and the PUT
-    does not take, is refused. use_immutable_subject switches the whole subject to the stable
-    repository-ID-based format; omitted, the organization setting or the repository's creation date
-    decides, and only a declared value is compared. Unlike the rest of this section, these endpoints
-    need the "Actions" PAT permission rather than Administration.
+    repository's workflow tokens, e.g. { use_default: false, include_claim_keys: [repo, context] },
+    an endpoint pair that needs the "Actions" PAT permission rather than Administration. A list
+    under use_default: true is refused, since GitHub ignores it; so is sub_claim_prefix, which only
+    the GET reports. Other keys pass through verbatim, and one the GET never echoes is noted at
+    check time as never converging.
   ActionsConfig.oidc_customization_sub|0.use_default: "true: GitHub's default subject claim format; this variant carries no claim-key list."
-  ActionsConfig.oidc_customization_sub|0.use_immutable_subject: Switch the whole subject to the stable repository-ID-based format.
+  ActionsConfig.oidc_customization_sub|0.use_immutable_subject: >-
+    Switch the whole subject to the stable repository-ID-based format; omitted, the organization
+    setting or the repository's creation date decides, and only a declared value is compared.
   ActionsConfig.oidc_customization_sub|1.use_default: "false: a custom template, joined from include_claim_keys."
   ActionsConfig.oidc_customization_sub|1.include_claim_keys: >-
-    The claim keys the custom subject joins, in order (e.g. repo, context); the order defines the
-    subject format.
-  ActionsConfig.oidc_customization_sub|1.use_immutable_subject: Switch the whole subject to the stable repository-ID-based format.
+    The claim keys the custom subject joins, in order (e.g. repo, context); each is unique and holds
+    only letters, digits, and underscores. Claim-key ORDER defines the subject format, so check mode
+    compares a declared list positionally; an omitted list opts into the organization template and
+    is not compared.
+  ActionsConfig.oidc_customization_sub|1.use_immutable_subject: >-
+    Switch the whole subject to the stable repository-ID-based format; omitted, the organization
+    setting or the repository's creation date decides, and only a declared value is compared.
   ActionsConfig.fork_pr_contributor_approval: >-
     PUT /repos/{r}/actions/permissions/fork-pr-contributor-approval: when workflows triggered by
     fork pull requests need a maintainer's approval before they run, e.g. { approval_policy:
     first_time_contributors }. The policies GitHub accepts are
     first_time_contributors_new_to_github, first_time_contributors, and all_external_contributors;
     any other value is refused when the file is parsed. The body passes through verbatim, so future
-    fields GitHub adds work unchanged.
+    fields GitHub adds work unchanged, and a key the GET never echoes is noted at check time as
+    never converging.
   ActionsConfig.fork_pr_contributor_approval.approval_policy: >-
     Which fork contributors need a maintainer's approval before their workflows run:
     first_time_contributors_new_to_github, first_time_contributors, or all_external_contributors.
   ActionsConfig.fork_pr_workflows_private_repos: >-
     PUT /repos/{r}/actions/permissions/fork-pr-workflows-private-repos: whether pull requests from
     forks may run workflows on this private repository, and what those workflows receive. Only
-    run_workflows_from_fork_pull_requests is required, as in the request body; GitHub does not
-    document whether the PUT preserves or resets an omitted toggle, so declaring all four is the
-    posture that leaves no toggle unwatched. The body passes through verbatim, so future fields
-    GitHub adds work unchanged.
+    run_workflows_from_fork_pull_requests is required; GitHub does not document whether the PUT
+    preserves an omitted toggle, so declare all four. Other keys pass through verbatim, and one the
+    GET never echoes is noted at check time as never converging.
   ActionsConfig.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests: Whether pull requests from forks may run workflows at all.
   ActionsConfig.fork_pr_workflows_private_repos.send_write_tokens_to_workflows: Whether those workflows receive a GITHUB_TOKEN with write permissions.
   ActionsConfig.fork_pr_workflows_private_repos.send_secrets_and_variables: Whether those workflows receive the repository's secrets and variables.
