@@ -357,54 +357,72 @@ describe("interaction_limits pull request creation cap", () => {
 
 describe("interaction_limits pull request creation bypass list", () => {
   const liveUsers = [{ login: "keeper" }, { login: "goner" }];
-
-  test("the undeclared logins are removed FIRST, then the missing ones added, case-insensitively", async () => {
-    const api = new MockApi({ [BYPASS_GET]: { data: liveUsers } });
-    const result = await plan(api, { pull_request_creation_bypass: ["Keeper", "newcomer"] });
-    // Removal first: the list holds at most 100 users, so adding before removing could transiently overflow it.
-    expect(result.ops).toEqual([
-      {
-        role: "bypassRemove",
-        payload: { users: ["goner"] },
-        describe: "removing users from the pull request creation cap bypass list",
-        drift: [
-          "interaction_limits.pull_request_creation_bypass: live login [goner] is not declared; apply will remove it",
-        ],
-        change: "removed [goner] from the pull request creation cap bypass list",
-      },
-      {
-        role: "bypassAdd",
-        payload: { users: ["newcomer"] },
-        describe: "adding users to the pull request creation cap bypass list",
-        drift: [
-          "interaction_limits.pull_request_creation_bypass: declared login [newcomer] is not on the live bypass list; apply will add it",
-        ],
-        change: "added [newcomer] to the pull request creation cap bypass list",
-      },
-    ]);
-    const matching = await plan(api, { pull_request_creation_bypass: ["KEEPER", "Goner"] });
-    expect(matching.ops).toEqual([]);
+  const KEY = "interaction_limits.pull_request_creation_bypass";
+  const removal = (users: string[], drift: string) => ({
+    role: "bypassRemove" as const,
+    payload: { users },
+    describe: "removing users from the pull request creation cap bypass list",
+    drift: [`${KEY}: live ${drift}`] as const,
+    change: `removed [${users.join(", ")}] from the pull request creation cap bypass list`,
+  });
+  const addition = (users: string[], drift: string) => ({
+    role: "bypassAdd" as const,
+    payload: { users },
+    describe: "adding users to the pull request creation cap bypass list",
+    drift: [`${KEY}: declared ${drift}`] as const,
+    change: `added [${users.join(", ")}] to the pull request creation cap bypass list`,
   });
 
-  test("several removed and added logins read in the plural", async () => {
-    const api = new MockApi({ [BYPASS_GET]: { data: [{ login: "goner" }, { login: "gone2" }] } });
-    const result = await plan(api, { pull_request_creation_bypass: ["newcomer", "newer"] });
-    expect(result.ops.map((op) => op.drift)).toEqual([
+  // Removal first: the list holds at most 100 users, so adding before removing could transiently overflow it.
+  test.each([
+    [
+      "the undeclared logins are removed FIRST, then the missing ones added, case-insensitively",
+      liveUsers,
+      ["Keeper", "newcomer"],
       [
-        "interaction_limits.pull_request_creation_bypass: live logins [goner, gone2] are not declared; apply will remove them",
+        removal(["goner"], "login [goner] is not declared; apply will remove it"),
+        addition(
+          ["newcomer"],
+          "login [newcomer] is not on the live bypass list; apply will add it",
+        ),
       ],
+    ],
+    [
+      "a declared list spelling every live login in another case plans nothing",
+      liveUsers,
+      ["KEEPER", "Goner"],
+      [],
+    ],
+    [
+      "several removed and added logins read in the plural",
+      [{ login: "goner" }, { login: "gone2" }],
+      ["newcomer", "newer"],
       [
-        "interaction_limits.pull_request_creation_bypass: declared logins [newcomer, newer] are not on the live bypass list; apply will add them",
+        removal(
+          ["goner", "gone2"],
+          "logins [goner, gone2] are not declared; apply will remove them",
+        ),
+        addition(
+          ["newcomer", "newer"],
+          "logins [newcomer, newer] are not on the live bypass list; apply will add them",
+        ),
       ],
-    ]);
-  });
-
-  test("a declared empty list removes everyone", async () => {
-    const api = new MockApi({ [BYPASS_GET]: { data: liveUsers } });
-    const result = await plan(api, { pull_request_creation_bypass: [] });
-    expect(result.ops.map((op) => [op.role, op.payload])).toEqual([
-      ["bypassRemove", { users: ["keeper", "goner"] }],
-    ]);
+    ],
+    [
+      "a declared empty list removes everyone",
+      liveUsers,
+      [],
+      [
+        removal(
+          ["keeper", "goner"],
+          "logins [keeper, goner] are not declared; apply will remove them",
+        ),
+      ],
+    ],
+  ])("%s", async (_title, live, declared, ops) => {
+    const api = new MockApi({ [BYPASS_GET]: { data: live } });
+    const result = await plan(api, { pull_request_creation_bypass: declared });
+    expect(result.ops).toEqual(ops);
   });
 
   test("null reads the base limit only and never touches the cap or bypass list", async () => {
