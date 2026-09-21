@@ -6,7 +6,7 @@ import {
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
 import { ENVIRONMENT_PARSE_FIXTURES } from "../../../test/fixtures/environment-parse-rules.js";
-import { MockApi } from "../../../test/mock-api.js";
+import { MockApi, type Route } from "../../../test/mock-api.js";
 import { fragmentFake, registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import {
@@ -25,14 +25,18 @@ import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import { environmentsMockHandlers } from "./mock.js";
 import type { GRAPHQL_OPS } from "./pins.js";
-import {
-  type DeploymentBranchPolicyConfig,
-  EnvironmentConfig,
-  type EnvironmentVariableConfig,
-} from "./schema.js";
+import { EnvironmentConfig, type EnvironmentVariableConfig } from "./schema.js";
 import { sharedSecretNotes, withPins } from "./snapshot.js";
 
 const { plan, check, apply } = sectionRunners(environmentsSection);
+
+/** What a check run reports and an apply run does, side by side, for the tables that pin both modes at once. */
+type Outcome = {
+  drift: string[];
+  notes: string[];
+  changes: readonly string[];
+  mutations: string[];
+};
 
 /** A live environment body with no protection rules (the converged base). */
 function liveEnv(name: string, extra: Record<string, unknown> = {}) {
@@ -105,18 +109,36 @@ describe("environments plan", () => {
     ]);
   });
 
-  test("a converged environment plans nothing: no PUT, no nested traffic", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod", {
-        protection_rules: [{ id: 1, type: "wait_timer", wait_timer: 5 }],
-      }),
-    });
-    const planned = await plan(api, [{ name: "prod", wait_timer: 5 }]);
-    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      "GET /repos/o/r/environments/prod",
-    ]);
-  });
+  test.each([
+    [
+      "a live wait timer the entry declares",
+      [{ id: 1, type: "wait_timer", wait_timer: 5 }],
+      { name: "prod", wait_timer: 5 },
+    ],
+    ["no live rules against a bare entry", [], { name: "prod" }],
+    [
+      "live rules carrying the disabled values against a bare entry",
+      [
+        { id: 1, type: "wait_timer", wait_timer: 0 },
+        { id: 2, type: "required_reviewers", prevent_self_review: false, reviewers: [] },
+      ],
+      { name: "prod" },
+    ],
+  ] as Array<[string, Array<Record<string, unknown>>, EnvironmentConfig]>)(
+    "a converged environment plans nothing (%s): no PUT, no nested traffic",
+    async (_what, rules, entry) => {
+      // flattenEnvironment starts from wait_timer 0 / prevent_self_review false / reviewers [], and the
+      // full-payload sweep treats those as nothing to preserve, whether the values come from the absence
+      // of a rule or from a rule that carries the disabled value itself.
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod", { protection_rules: rules }),
+      });
+      expect(await plan(api, [entry])).toEqual({ ops: [], notes: [], drift: [] });
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+        "GET /repos/o/r/environments/prod",
+      ]);
+    },
+  );
 
   test("a declared key the environment GET never echoes is drift with the never-converges note naming it", async () => {
     // The entry is open so a field GitHub ships tomorrow is declarable, but a key the GET lacks (a typo
@@ -150,27 +172,6 @@ describe("environments plan", () => {
     ]);
     expect(api.writes).toEqual(["PUT /repos/o/r/environments/prod"]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("the disabled protection values are never omitted drift: a bare entry plans clean against no rules and against rules holding them", async () => {
-    // flattenEnvironment starts from wait_timer 0 / prevent_self_review false / reviewers [], and the
-    // full-payload sweep treats those as nothing to preserve, whether the values come from the absence
-    // of a rule or from a rule that carries the disabled value itself.
-    const unprotected = new MockApi({ "GET /repos/o/r/environments/prod": liveEnv("prod") });
-    expect(await plan(unprotected, [{ name: "prod" }])).toEqual({ ops: [], notes: [], drift: [] });
-    const disabledRules = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod", {
-        protection_rules: [
-          { id: 1, type: "wait_timer", wait_timer: 0 },
-          { id: 2, type: "required_reviewers", prevent_self_review: false, reviewers: [] },
-        ],
-      }),
-    });
-    expect(await plan(disabledRules, [{ name: "prod" }])).toEqual({
-      ops: [],
-      notes: [],
-      drift: [],
-    });
   });
 
   test("an omitted live branch policy offers null as its clearing spelling, the one the slice accepts for that object", async () => {
@@ -304,149 +305,118 @@ describe("environments variables check mode", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("value drift and undeclared variables report drift; the environment diff excludes variables", async () => {
-    const api = new MockApi(
-      {
-        "GET /repos/o/r/environments/prod": liveProd,
-        [VARIABLES_LIST]: variablesBody([
-          { name: "A", value: "2" },
-          { name: "B", value: "x" },
-        ]),
-      },
-      // A fake that would accept any write: planning must still issue none.
-      { unroutedMutations: "succeed" },
-    );
-    const result = await check(api, [
-      { name: "prod", wait_timer: 5, variables: [{ name: "A", value: "1" }] },
-    ]);
-    // A variables key leaking into subsetDiff would add an "environments[prod].variables: declared ..." line here.
-    expect(result.drift).toEqual([
-      'environments[prod].variables[A].value: declared "1" != live "2"; apply will set the declared value',
-      "environments[prod].variables[B]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
-    ]);
-    expect(api.mutations()).toEqual([]);
-  });
-
-  test("a missing declared variable is drift", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveProd,
-      [VARIABLES_LIST]: variablesBody([]),
-    });
-    const result = await check(api, [
-      { name: "prod", wait_timer: 5, variables: [{ name: "A", value: "1" }] },
-    ]);
-    expect(result.drift).toEqual([
-      'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
-    ]);
-  });
+  test.each([
+    [
+      "value drift and an undeclared variable",
+      [
+        { name: "A", value: "2" },
+        { name: "B", value: "x" },
+      ],
+      [
+        'environments[prod].variables[A].value: declared "1" != live "2"; apply will set the declared value',
+        "environments[prod].variables[B]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+      ],
+    ],
+    [
+      "a missing declared variable",
+      [],
+      [
+        'environments[prod].variables[A]: missing - declared in the settings file but not on environment "prod"; apply will create it',
+      ],
+    ],
+  ])(
+    "%s report drift; the environment diff excludes variables and nothing is written",
+    async (_what, live, drift) => {
+      const api = new MockApi(
+        {
+          "GET /repos/o/r/environments/prod": liveProd,
+          [VARIABLES_LIST]: variablesBody(live),
+        },
+        // A fake that would accept any write: planning must still issue none.
+        { unroutedMutations: "succeed" },
+      );
+      const result = await check(api, [
+        { name: "prod", wait_timer: 5, variables: [{ name: "A", value: "1" }] },
+      ]);
+      // A variables key leaking into subsetDiff would add an "environments[prod].variables: declared ..." line here.
+      expect(result.drift).toEqual(drift);
+      expect(api.mutations()).toEqual([]);
+    },
+  );
 });
 
 describe("environments variables case-insensitive matching", () => {
-  test("a case-differing live name matches and only the value is compared", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [VARIABLES_LIST]: variablesBody([{ name: "DEPLOY_REGION", value: "same" }]),
-    });
-    const result = await apply(api, [
-      { name: "prod", variables: [{ name: "deploy_region", value: "same" }] },
-    ]);
-    expect(result.changes).toEqual([]);
-  });
-
-  test("an update addresses the PATCH at the LIVE name", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [VARIABLES_LIST]: variablesBody([{ name: "DEPLOY_REGION", value: "old" }]),
-    }).allowMutations("PATCH /repos/o/r/environments/prod/variables/DEPLOY_REGION");
-    await apply(api, [{ name: "prod", variables: [{ name: "deploy_region", value: "new" }] }]);
-    const patch = api.calls.find((c) => c.method === "PATCH");
-    expect(patch?.path).toBe("/repos/o/r/environments/prod/variables/DEPLOY_REGION");
-    expect(patch?.payload).toEqual({ value: "new" });
-  });
-
-  test("two declared names that collapse case-insensitively are a validate issue under the nested list, so the document fails before any write", () => {
-    expect(
-      environmentsSection.validate([
-        {
-          name: "prod",
-          variables: [
-            { name: "Region", value: "a" },
-            { name: "REGION", value: "b" },
-          ],
-        },
-      ]),
-    ).toEqual([
-      {
-        path: "[0].variables[1].name",
-        message:
-          '"REGION" names the same variable of the "prod" environment as "Region" declared earlier; keep exactly one entry per variable of the "prod" environment',
-      },
-    ]);
-  });
+  test.each([
+    ["an equal value plans no write", "same", "same", [], undefined, []],
+    [
+      "a differing value is a PATCH at the LIVE name",
+      "old",
+      "new",
+      ["PATCH /repos/o/r/environments/prod/variables/DEPLOY_REGION"],
+      { value: "new" },
+      ['updated variable "deploy_region" in environment "prod"'],
+    ],
+  ])(
+    "a case-differing live name matches and only the value is compared: %s",
+    async (_what, liveValue, declaredValue, mutations, patchPayload, changes) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [VARIABLES_LIST]: variablesBody([{ name: "DEPLOY_REGION", value: liveValue }]),
+      }).allowMutations("PATCH /repos/o/r/environments/prod/variables/DEPLOY_REGION");
+      const result = await apply(api, [
+        { name: "prod", variables: [{ name: "deploy_region", value: declaredValue }] },
+      ]);
+      expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(mutations);
+      expect(api.calls.find((c) => c.method === "PATCH")?.payload).toEqual(patchPayload);
+      expect(result.changes).toEqual(changes);
+    },
+  );
 });
 
 describe("environments variables undeclared policy", () => {
-  test("the wrapped _undeclared:keep form keeps the live variable as a note", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
-    });
-    const result = await apply(api, [
-      { name: "prod", variables: { _undeclared: "keep", entries: [] } },
-    ]);
-    expect(result.notes).toEqual([
-      'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it',
-    ]);
-    expect(api.mutations()).toEqual([]);
-  });
+  const LEGACY_KEPT =
+    'variable "LEGACY" exists on environment "prod" but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it';
 
-  test("the plain array form deletes undeclared variables by default", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
-    }).allowMutations("DELETE /repos/o/r/environments/prod/variables/LEGACY");
-    const result = await apply(api, [{ name: "prod", variables: [] }]);
-    expect(result.changes).toEqual(['DELETED undeclared variable "LEGACY" in environment "prod"']);
-  });
-
-  test("check mode under _undeclared:keep converges (note, not drift)", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
-    });
-    const result = await check(api, [
-      { name: "prod", variables: { _undeclared: "keep", entries: [] } },
-    ]);
-    expect(result.drift).toEqual([]);
-    expect(result.notes).toHaveLength(1);
-  });
+  test.each([
+    [
+      "the wrapped _undeclared:keep form keeps the live variable as a note in both modes",
+      { _undeclared: "keep", entries: [] },
+      { drift: [], notes: [LEGACY_KEPT], changes: [], mutations: [] },
+    ],
+    [
+      "the plain array form deletes it by default",
+      [],
+      {
+        drift: [
+          "environments[prod].variables[LEGACY]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+        ],
+        notes: [],
+        changes: ['DELETED undeclared variable "LEGACY" in environment "prod"'],
+        mutations: ["DELETE /repos/o/r/environments/prod/variables/LEGACY"],
+      },
+    ],
+  ] as Array<[string, EnvironmentConfig["variables"], Outcome]>)(
+    "an undeclared live variable: %s",
+    async (_what, variables, expected) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [VARIABLES_LIST]: variablesBody([{ name: "LEGACY", value: "x" }]),
+      }).allowMutations("DELETE /repos/o/r/environments/prod/variables/LEGACY");
+      const checked = await check(api, [{ name: "prod", variables }]);
+      expect(api.mutations()).toEqual([]);
+      const applied = await apply(api, [{ name: "prod", variables }]);
+      expect({
+        drift: checked.drift,
+        notes: checked.notes,
+        changes: applied.changes,
+        mutations: api.mutations().map((m) => `${m.method} ${m.path}`),
+      }).toEqual(expected);
+      expect(applied.notes).toEqual(checked.notes);
+    },
+  );
 });
 
 describe("environments variables shape", () => {
-  test("both declared forms parse; extra entry fields pass through", () => {
-    const shape = environmentsSection.shape;
-    expect(
-      shape.safeParse([{ name: "prod", variables: [{ name: "A", value: "1" }] }]).success,
-    ).toBe(true);
-    expect(
-      shape.safeParse([
-        {
-          name: "prod",
-          variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
-        },
-      ]).success,
-    ).toBe(true);
-    // An extra entry field rides the POST/PATCH verbatim, so a field GitHub ships tomorrow can be declared the day it appears.
-    expect(
-      shape.safeParse([{ name: "prod", variables: [{ name: "A", value: "1", future: "x" }] }])
-        .success,
-    ).toBe(true);
-    // The wrapper stays strict: its keys are this action's own vocabulary.
-    expect(
-      shape.safeParse([{ name: "prod", variables: { entires: [], entries: [] } }]).success,
-    ).toBe(false);
-  });
-
   test("an extra entry field rides the POST and PATCH verbatim, with a phantom note", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
@@ -658,44 +628,11 @@ describe("environments nested secrets check mode", () => {
 });
 
 describe("environments nested secrets validation and shape", () => {
-  test("case-insensitive duplicate names are a validate issue naming the environment, in the wrapped form under .entries", () => {
-    expect(
-      environmentsSection.validate([
-        {
-          name: "prod",
-          secrets: {
-            entries: [
-              { name: "token", value: "$A" },
-              { name: "TOKEN", value: "$B" },
-            ],
-          },
-        },
-      ]),
-    ).toEqual([
-      {
-        path: "[0].secrets.entries[1].name",
-        message:
-          '"TOKEN" names the same secret of the "prod" environment as "token" declared earlier; keep exactly one entry per secret of the "prod" environment',
-      },
-    ]);
-  });
-
-  test("secret entries are strict; the singular entry-level `secret` key is rejected by name", () => {
-    const shape = environmentsSection.shape;
-    expect(shape.safeParse([{ name: "prod", secrets: [{ name: "A", value: "$A" }] }]).success).toBe(
-      true,
-    );
-    expect(
-      shape.safeParse([
-        { name: "prod", secrets: { _undeclared: "delete", entries: [{ name: "A", value: "$A" }] } },
-      ]).success,
-    ).toBe(true);
-    // An extra entry key has no destination (the PUT body is the sealed value alone), so it is rejected rather than silently doing nothing.
-    expect(
-      shape.safeParse([{ name: "prod", secrets: [{ name: "A", value: "$A", typo: 1 }] }]).success,
-    ).toBe(false);
+  test("the singular entry-level `secret` key is rejected by name", () => {
     // A singular `secret` would ride the environment PUT verbatim and configure nothing.
-    const misplaced = shape.safeParse([{ name: "prod", secret: [{ name: "A", value: "$A" }] }]);
+    const misplaced = environmentsSection.shape.safeParse([
+      { name: "prod", secret: [{ name: "A", value: "$A" }] },
+    ]);
     expect(misplaced.success).toBe(false);
     expect(JSON.stringify(misplaced.error?.issues)).toContain(
       "belong under the entry's `secrets` list",
@@ -821,18 +758,6 @@ describe("environments deployment branch policies apply mode", () => {
       /returned a policy without a name/,
     );
   });
-
-  test("the wrapped _undeclared:keep form keeps the live pattern as a note", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
-      [POLICIES_LIST]: policiesBody([{ id: 41, name: "legacy/*", type: "branch" }]),
-    });
-    const result = await apply(api, [envWithPolicies({ _undeclared: "keep", entries: [] })]);
-    expect(result.notes.join("\n")).toContain(
-      'deployment branch policy "legacy/*" exists on environment "prod" but is not declared',
-    );
-    expect(api.mutations()).toEqual([]);
-  });
 });
 
 describe("environments deployment branch policies check mode", () => {
@@ -896,45 +821,6 @@ describe("environments parse rules", () => {
         message: expect.stringContaining(fixture.refusal),
       });
     }
-  });
-});
-
-describe("environments deployment branch policies validation and shape", () => {
-  test("duplicate patterns are a validate issue naming the environment, so the document fails before any write", () => {
-    expect(
-      environmentsSection.validate([
-        envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
-      ]),
-    ).toEqual([
-      {
-        path: "[0].deployment_branch_policies[1].name",
-        message:
-          '"release/*" names the same deployment branch policy of the "prod" environment as "release/*" declared earlier; keep exactly one entry per deployment branch policy of the "prod" environment',
-      },
-    ]);
-  });
-
-  test("both declared forms parse; entries stay loose and the wrapper strict", () => {
-    const shape = environmentsSection.shape;
-    expect(shape.safeParse([envWithPolicies([{ name: "release/*", type: "tag" }])]).success).toBe(
-      true,
-    );
-    expect(
-      shape.safeParse([envWithPolicies({ _undeclared: "keep", entries: [{ name: "v*" }] })])
-        .success,
-    ).toBe(true);
-    // Loose entries: a field GitHub ships tomorrow rides the create verbatim.
-    expect(
-      shape.safeParse([
-        envWithPolicies([{ name: "release/*", future: "x" } as DeploymentBranchPolicyConfig]),
-      ]).success,
-    ).toBe(true);
-    // The wrapper stays strict: its keys are this action's own vocabulary.
-    expect(
-      shape.safeParse([
-        envWithPolicies({ entires: [], entries: [] } as unknown as DeploymentBranchPolicyConfig[]),
-      ]).success,
-    ).toBe(false);
   });
 });
 
@@ -1053,64 +939,43 @@ describe("environments deployment protection rules apply mode", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("the wrapped _undeclared:delete form DISABLES a live undeclared rule by id", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
-    }).allowMutations("DELETE /repos/o/r/environments/prod/deployment_protection_rules/41");
-    const result = await apply(api, [
-      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
-    ]);
-    expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual([
-      "DELETE /repos/o/r/environments/prod/deployment_protection_rules/41",
-    ]);
-    expect(result.changes).toEqual([
-      'DISABLED undeclared deployment protection rule "change-window" in environment "prod"',
-    ]);
-  });
-
-  test("a declared slug the apps listing does not carry fails loudly, naming the available slugs", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [RULES_LIST]: rulesBody([]),
-      [RULE_APPS_LIST]: ruleAppsBody([
+  test.each([
+    [
+      "names the available slugs",
+      [
         { id: 3515, slug: "deploy-gate" },
         { id: 3516, slug: "region-guard" },
-      ]),
-    }).allowMutations(RULE_CREATE);
-    await expect(
-      apply(api, [
-        {
-          name: "prod",
-          // deploy-gate comes first on purpose: every missing slug resolves before the first POST, so the unknown sibling aborts before anything is
-          // enabled.
-          deployment_protection_rules: [{ app: "deploy-gate" }, { app: "not-installed" }],
-        },
-      ]),
-    ).rejects.toThrow(
+      ],
+      // deploy-gate comes first on purpose: every missing slug resolves before the first POST, so the unknown sibling aborts before anything is
+      // enabled.
+      [{ app: "deploy-gate" }, { app: "not-installed" }],
       'environments: the deployment protection rule App "not-installed" is not available to ' +
         'environment "prod" (the available Apps are "deploy-gate", "region-guard"). Install the ' +
         "GitHub App providing the rule on this repository, or declare one of the available slugs",
-    );
-    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
-  });
-
-  test("an EMPTY apps listing says no Apps are available at all", async () => {
-    // A real user state, not a contract break: no protection-rule App is installed, so the error lists nothing.
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [RULES_LIST]: rulesBody([]),
-      [RULE_APPS_LIST]: ruleAppsBody([]),
-    }).allowMutations(RULE_CREATE);
-    await expect(
-      apply(api, [{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }]),
-    ).rejects.toThrow(
+    ],
+    [
+      // A real user state, not a contract break: no protection-rule App is installed, so the error lists nothing.
+      "says no Apps are available at all when the listing is EMPTY",
+      [],
+      [{ app: "deploy-gate" }],
       'environments: the deployment protection rule App "deploy-gate" is not available to ' +
         'environment "prod" (no protection-rule Apps are available to it). Install the GitHub ' +
         "App providing the rule on this repository, or declare one of the available slugs",
-    );
-    expect(api.calls.some((c) => c.method === "POST")).toBe(false);
-  });
+    ],
+  ])(
+    "a declared slug the apps listing does not carry fails loudly and %s",
+    async (_what, apps, rules, message) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [RULES_LIST]: rulesBody([]),
+        [RULE_APPS_LIST]: ruleAppsBody(apps),
+      }).allowMutations(RULE_CREATE);
+      await expect(
+        apply(api, [{ name: "prod", deployment_protection_rules: rules }]),
+      ).rejects.toThrow(message);
+      expect(api.calls.some((c) => c.method === "POST")).toBe(false);
+    },
+  );
 
   test("a live rule without an app slug fails loudly instead of being silently skipped", async () => {
     const api = new MockApi({
@@ -1169,34 +1034,50 @@ describe("environments deployment protection rules apply mode", () => {
     }
   });
 
-  test("a live rule reported as disabled does not satisfy its declared gate", async () => {
-    // The endpoint documents enabled rules only, so this is a belt over the contract: a declared gate whose live rule says enabled: false is
-    // re-enabled, never read as clean.
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [RULES_LIST]: rulesBody([{ ...liveRule(41, "deploy-gate"), enabled: false }]),
-      [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
-    }).allowMutations(RULE_CREATE);
-    const result = await apply(api, [
-      { name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] },
-    ]);
-    expect(result.changes).toEqual([
-      'enabled deployment protection rule "deploy-gate" in environment "prod"',
-    ]);
-  });
-
-  test("a disabled undeclared rule is not an active gate: neither noted nor disabled", async () => {
-    // Under _undeclared: delete the goal is "no undeclared gate is on", which a disabled rule already satisfies; a DELETE aimed at a disabled id
-    // would likely 404 mid-apply for a no-op.
-    const api = new MockApi({
-      "GET /repos/o/r/environments/prod": liveEnv("prod"),
-      [RULES_LIST]: rulesBody([{ ...liveRule(41, "change-window"), enabled: false }]),
-    });
-    const planned = await plan(api, [
-      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
-    ]);
-    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
-  });
+  test.each([
+    [
+      "a declared gate is re-enabled, never read as clean",
+      liveRule(41, "deploy-gate"),
+      [{ app: "deploy-gate" }],
+      {
+        drift: [
+          "environments[prod].deployment_protection_rules[deploy-gate]: missing - declared in the settings file but not enabled on the environment; apply will enable it if the App is available to this environment",
+        ],
+        notes: [],
+        changes: ['enabled deployment protection rule "deploy-gate" in environment "prod"'],
+        mutations: [RULE_CREATE],
+      },
+    ],
+    [
+      "an undeclared rule under _undeclared: delete is neither noted nor disabled",
+      liveRule(41, "change-window"),
+      { _undeclared: "delete", entries: [] },
+      { drift: [], notes: [], changes: [], mutations: [] },
+    ],
+  ] as Array<
+    [string, Record<string, unknown>, EnvironmentConfig["deployment_protection_rules"], Outcome]
+  >)(
+    "a live rule reported as disabled is not an active gate: %s",
+    async (_what, rule, declared, expected) => {
+      // The endpoint documents enabled rules only, so this is a belt over the contract: a declared gate whose live rule says enabled: false is
+      // re-enabled, never read as clean. Under _undeclared: delete the goal is "no undeclared gate is on", which a disabled rule already
+      // satisfies; a DELETE aimed at a disabled id would likely 404 mid-apply for a no-op.
+      const api = new MockApi({
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [RULES_LIST]: rulesBody([{ ...rule, enabled: false }]),
+        [RULE_APPS_LIST]: ruleAppsBody([{ id: 3515, slug: "deploy-gate" }]),
+      }).allowMutations(RULE_CREATE);
+      const entry = { name: "prod", deployment_protection_rules: declared };
+      const planned = await plan(api, [entry]);
+      const result = await apply(api, [entry]);
+      expect({
+        drift: planDrift(planned),
+        notes: result.notes,
+        changes: result.changes,
+        mutations: api.mutations().map((m) => `${m.method} ${m.path}`),
+      }).toEqual(expected);
+    },
+  );
 });
 
 describe("environments deployment protection rules check mode", () => {
@@ -1284,55 +1165,168 @@ describe("environments missing-environment planning across the nested families",
   );
 });
 
-describe("environments deployment protection rules validation and shape", () => {
-  test("duplicate App slugs are a validate issue naming the environment, so the document fails before any write", () => {
-    expect(
-      environmentsSection.validate([
-        {
-          name: "prod",
-          deployment_protection_rules: [{ app: "deploy-gate" }, { app: "deploy-gate" }],
-        },
-      ]),
-    ).toEqual([
+describe("environments nested lists validation", () => {
+  test.each([
+    [
+      "variables (case-insensitively)",
       {
-        path: "[0].deployment_protection_rules[1].app",
-        message:
-          '"deploy-gate" names the same deployment protection rule App of the "prod" environment as "deploy-gate" declared earlier; keep exactly one entry per deployment protection rule App of the "prod" environment',
+        name: "prod",
+        variables: [
+          { name: "Region", value: "a" },
+          { name: "REGION", value: "b" },
+        ],
       },
-    ]);
-  });
-
-  test("both declared forms parse; entries are STRICT (the POST carries only the resolved id)", () => {
-    const shape = environmentsSection.shape;
-    expect(
-      shape.safeParse([{ name: "prod", deployment_protection_rules: [{ app: "deploy-gate" }] }])
-        .success,
-    ).toBe(true);
-    expect(
-      shape.safeParse([
-        {
-          name: "prod",
-          deployment_protection_rules: {
-            _undeclared: "delete",
-            entries: [{ app: "deploy-gate" }],
-          },
+      "[0].variables[1].name",
+      '"REGION" names the same variable of the "prod" environment as "Region" declared earlier; keep exactly one entry per variable of the "prod" environment',
+    ],
+    [
+      "secrets (case-insensitively), in the wrapped form under .entries",
+      {
+        name: "prod",
+        secrets: {
+          entries: [
+            { name: "token", value: "$A" },
+            { name: "TOKEN", value: "$B" },
+          ],
         },
-      ]).success,
-    ).toBe(true);
-    // An extra entry key has no destination (the enable POST sends only the resolved integration_id), so it is rejected rather than silently doing
-    // nothing.
-    expect(
-      shape.safeParse([
-        { name: "prod", deployment_protection_rules: [{ app: "deploy-gate", typo: 1 }] },
-      ]).success,
-    ).toBe(false);
-    // The wrapper stays strict: its keys are this action's own vocabulary.
-    expect(
-      shape.safeParse([{ name: "prod", deployment_protection_rules: { entires: [], entries: [] } }])
-        .success,
-    ).toBe(false);
-  });
+      },
+      "[0].secrets.entries[1].name",
+      '"TOKEN" names the same secret of the "prod" environment as "token" declared earlier; keep exactly one entry per secret of the "prod" environment',
+    ],
+    [
+      "deployment_branch_policies",
+      envWithPolicies([{ name: "release/*" }, { name: "release/*", type: "tag" }]),
+      "[0].deployment_branch_policies[1].name",
+      '"release/*" names the same deployment branch policy of the "prod" environment as "release/*" declared earlier; keep exactly one entry per deployment branch policy of the "prod" environment',
+    ],
+    [
+      "deployment_protection_rules",
+      {
+        name: "prod",
+        deployment_protection_rules: [{ app: "deploy-gate" }, { app: "deploy-gate" }],
+      },
+      "[0].deployment_protection_rules[1].app",
+      '"deploy-gate" names the same deployment protection rule App of the "prod" environment as "deploy-gate" declared earlier; keep exactly one entry per deployment protection rule App of the "prod" environment',
+    ],
+  ] as Array<[string, EnvironmentConfig, string, string]>)(
+    "two %s entries naming one resource are a validate issue naming the environment, so the document fails before any write",
+    (_key, entry, path, message) => {
+      expect(environmentsSection.validate([entry])).toEqual([{ path, message }]);
+    },
+  );
+});
 
+describe("environments nested lists shape", () => {
+  // Loose entries carry the write verbatim, so a field GitHub ships tomorrow is declarable the day it appears; an entry whose write carries only
+  // the resolved value (a sealed secret, an integration_id) has no destination for an extra key, so it is rejected rather than silently doing
+  // nothing.
+  test.each([
+    [
+      "variables",
+      "rides the write",
+      [{ name: "A", value: "1" }],
+      (entries: unknown) => ({ name: "prod", variables: entries }),
+    ],
+    [
+      "secrets",
+      "is rejected",
+      [{ name: "A", value: "$A" }],
+      (entries: unknown) => ({ name: "prod", secrets: entries }),
+    ],
+    [
+      "deployment_branch_policies",
+      "rides the write",
+      [{ name: "release/*" }, { name: "v*", type: "tag" }],
+      envWithPolicies,
+    ],
+    [
+      "deployment_protection_rules",
+      "is rejected",
+      [{ app: "deploy-gate" }],
+      (entries: unknown) => ({ name: "prod", deployment_protection_rules: entries }),
+    ],
+  ] as Array<
+    [
+      string,
+      "rides the write" | "is rejected",
+      [Record<string, unknown>, ...Record<string, unknown>[]],
+      (entries: unknown) => unknown,
+    ]
+  >)(
+    "%s: both declared forms parse, the wrapper is strict, and an extra entry field %s",
+    (_key, extraField, entries, entryWith) => {
+      const parses = (declared: unknown) =>
+        environmentsSection.shape.safeParse([entryWith(declared)]).success;
+      expect(parses(entries)).toBe(true);
+      expect(parses({ _undeclared: "keep", entries })).toBe(true);
+      expect(parses({ _undeclared: "delete", entries })).toBe(true);
+      const accepted = extraField === "rides the write";
+      expect(parses([{ ...entries[0], future: "x" }])).toBe(accepted);
+      expect(parses([{ ...entries[0], typo: 1 }])).toBe(accepted);
+      // The wrapper stays strict: its keys are this action's own vocabulary.
+      expect(parses({ entires: [], entries: [] })).toBe(false);
+    },
+  );
+});
+
+describe("environments nested lists undeclared policy", () => {
+  const RULE_DISABLE = "DELETE /repos/o/r/environments/prod/deployment_protection_rules/41";
+
+  test.each([
+    [
+      "keep keeps a live deployment branch policy as a note",
+      {
+        "GET /repos/o/r/environments/prod": liveProdWithFlag(true),
+        [POLICIES_LIST]: policiesBody([{ id: 41, name: "legacy/*", type: "branch" }]),
+      },
+      envWithPolicies({ _undeclared: "keep", entries: [] }),
+      {
+        mutations: [],
+        changes: [],
+        notes: [
+          'deployment branch policy "legacy/*" exists on environment "prod" but is not declared',
+        ],
+      },
+    ],
+    [
+      "delete DISABLES a live deployment protection rule by id",
+      {
+        "GET /repos/o/r/environments/prod": liveEnv("prod"),
+        [RULES_LIST]: rulesBody([liveRule(41, "change-window")]),
+      },
+      { name: "prod", deployment_protection_rules: { _undeclared: "delete", entries: [] } },
+      {
+        mutations: [RULE_DISABLE],
+        changes: [
+          'DISABLED undeclared deployment protection rule "change-window" in environment "prod"',
+        ],
+        notes: [],
+      },
+    ],
+  ] as Array<
+    [
+      string,
+      Record<string, Route>,
+      EnvironmentConfig,
+      { mutations: string[]; changes: string[]; notes: string[] },
+    ]
+  >)(
+    "the wrapper's own _undeclared overrides the nested default: %s",
+    async (_what, routes, entry, expected) => {
+      const api = new MockApi(routes).allowMutations(RULE_DISABLE);
+      const result = await apply(api, [entry]);
+      expect(api.mutations().map((m) => `${m.method} ${m.path}`)).toEqual(expected.mutations);
+      expect(result.changes).toEqual(expected.changes);
+      // The keep note is prose the engine owns; the row pins the part that names this section's resource.
+      expect(result.notes).toHaveLength(expected.notes.length);
+      for (const [index, note] of expected.notes.entries()) {
+        expect(result.notes[index]).toContain(note);
+      }
+    },
+  );
+});
+
+describe("environments deployment protection rules validation and shape", () => {
   test("a required_reviewers rule without reviewers reads prevent_self_review back as off", () => {
     // The schema refuses the flag without a reviewer, so the snapshot of such a body must not carry it.
     const flattened = flattenEnvironment({

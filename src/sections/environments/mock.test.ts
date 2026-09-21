@@ -31,32 +31,30 @@ function get(key: SectionEndpointKey<"environments">, environment_name: string) 
 }
 
 describe("a request spelled another way reaches the seeded environment and its buckets", () => {
-  test("the probe answers 200 and echoes the STORED spelling", () => {
-    const response = get("environments.probe", "prod");
-    expect(response.status).toBe(200);
-    expect((response.body as { name: unknown }).name).toBe("Prod");
-  });
-
-  test("the branch-policy list carries the seeded pattern, not an empty list", () => {
-    const response = get("environments.listPolicies", "prod");
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      total_count: 1,
-      branch_policies: [{ name: "main", type: "branch" }],
-    });
-  });
-
-  test("the variables list carries the seeded variable", () => {
-    const response = get("environments.listVariables", "PROD");
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      total_count: 1,
-      variables: [{ name: "REGION", value: "eu" }],
-    });
-  });
-
-  test("an environment nobody seeded still 404s under every spelling", () => {
-    expect(get("environments.probe", "staging").status).toBe(404);
-    expect(get("environments.listPolicies", "Staging").status).toBe(404);
-  });
+  test.each([
+    ["environments.probe", "prod", 200, { name: "Prod" }],
+    [
+      "environments.listPolicies",
+      "prod",
+      200,
+      { total_count: 1, branch_policies: [{ name: "main", type: "branch" }] },
+    ],
+    [
+      "environments.listVariables",
+      "PROD",
+      200,
+      { total_count: 1, variables: [{ name: "REGION", value: "eu" }] },
+    ],
+    ["environments.probe", "staging", 404, undefined],
+    ["environments.listPolicies", "Staging", 404, undefined],
+  ] as Array<[SectionEndpointKey<"environments">, string, number, object | undefined]>)(
+    "%s spelled %s answers %i: the STORED spelling and the seeded bucket when one exists, 404 when nobody seeded it",
+    (key, spelling, status, body) => {
+      const response = get(key, spelling);
+      expect(response.status).toBe(status);
+      if (body !== undefined) {
+        expect(response.body).toMatchObject(body);
+      }
+    },
+  );
 });

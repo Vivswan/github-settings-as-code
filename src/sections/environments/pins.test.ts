@@ -5,6 +5,7 @@ import { executePlan } from "../../engine/execute.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { driftOf, planDrift } from "../contract/plan.js";
 import { environmentsSection } from "./index.js";
+import { MAX_PINNED_ENVIRONMENTS } from "./schema.js";
 
 const { plan, check, apply } = sectionRunners(environmentsSection);
 
@@ -107,36 +108,41 @@ describe("environments pinned apply mode", () => {
     ]);
   });
 
-  test("a converged pin state issues zero pin mutations", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GET /repos/o/r/environments/b": envBody("b"),
-      "GRAPHQL EnvironmentPins": pinsBody(["a", "b"]),
-    });
-    const planned = await plan(api, [
-      { name: "a", pinned: true },
-      { name: "b", pinned: true },
-    ]);
-    expect(planned).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("hole-y live positions in the right order are converged: rank, not literal numbers", async () => {
-    // Verified live: unpinning leaves a hole (positions 1 and 3, nothing at 2) and re-pins append via a monotonic counter, so rank order, not the
+  test.each([
+    ["contiguous positions in declaration order", ["a", "b"]],
+    // GitHub leaves a hole when it unpins (positions 1 and 3, nothing at 2) and appends re-pins via a monotonic counter, so rank order, not the
     // literal numbers, is what converges.
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GET /repos/o/r/environments/b": envBody("b"),
-      "GRAPHQL EnvironmentPins": pinsBody([
+    [
+      "hole-y positions in declaration order",
+      [
         { name: "a", position: 1 },
         { name: "b", position: 3 },
-      ]),
-    });
-    const planned = await plan(api, [
-      { name: "a", pinned: true },
-      { name: "b", pinned: true },
-    ]);
-    expect(planned.ops).toEqual([]);
-  });
+      ],
+    ],
+    [
+      "hole-y positions starting past 1",
+      [
+        { name: "a", position: 2 },
+        { name: "b", position: 5 },
+      ],
+    ],
+    ["the declared pins leading, an undeclared pin trailing", ["a", "b", "legacy"]],
+  ] as Array<[string, Array<string | { name: string; position: number }>]>)(
+    "a converged pin state plans nothing, by rank not position (%s): no mutation, no drift, no note",
+    async (_what, live) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/a": envBody("a"),
+        "GET /repos/o/r/environments/b": envBody("b"),
+        "GRAPHQL EnvironmentPins": pinsBody(live),
+      });
+      const planned = await plan(api, [
+        { name: "a", pinned: true },
+        { name: "b", pinned: true },
+      ]);
+      // A routed `pinned` reaching subsetDiff would add an "environments[a].pinned: declared true ..." drift line here.
+      expect(planned).toEqual({ ops: [], notes: [], drift: [] });
+    },
+  );
 
   test("two fresh pins land in declaration order with zero reorders (tail appends)", async () => {
     // Pins append at the tail (verified live), so pinning a then b onto an empty list already realizes the declared order.
@@ -155,59 +161,82 @@ describe("environments pinned apply mode", () => {
     ]);
   });
 
-  test("live pins nobody declared count toward the cap: overflow fails BEFORE any mutation", async () => {
-    // The shape's upfront cap sees only declared entries; ten live undeclared pins (never unpinned) plus one declared overflow GitHub's cap, so the
-    // first pin thunk refuses before its request leaves, after the environment PUT landed.
-    const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": envBody("prod"),
-      "GRAPHQL EnvironmentPins": pinsBody([
-        "u1",
-        "u2",
-        "u3",
-        "u4",
-        "u5",
-        "u6",
-        "u7",
-        "u8",
-        "u9",
-        "u10",
-      ]),
-    }).allowMutations("GRAPHQL PinEnvironment");
-    const planned = await plan(api, [{ name: "prod", pinned: true }]);
-    // u1 also earns the interleaving note: it leads the list the declared pin should lead.
-    expect(planned.notes).toEqual([
-      'pinned environment "u1" has no pinned declaration in the settings file; it stays pinned (only a pinned: false entry unpins) and apply moves it after the declared pins',
-      "apply will fail: pinning the 1 declared environment not yet pinned would leave 11 " +
-        "environments pinned, but GitHub allows at most 10. Pins without a pinned declaration " +
-        "are left untouched, so declare pinned: false on entries for some of the currently " +
-        "pinned environments, or unpin them in the GitHub UI",
-    ]);
-    const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
-    expect(execution.status).toBe("failed");
-    expect(execution.changes).toEqual(['applied environment "prod"']);
-    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
-      /would leave 11 environments pinned, but GitHub allows at most 10/,
-    );
-    expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
-  });
+  test.each([
+    [
+      "one declared pin over the cap",
+      MAX_PINNED_ENVIRONMENTS,
+      ["prod"],
+      // u1 also earns the interleaving note: it leads the list the declared pin should lead.
+      [
+        'pinned environment "u1" has no pinned declaration in the settings file; it stays pinned (only a pinned: false entry unpins) and apply moves it after the declared pins',
+        `apply will fail: pinning the 1 declared environment not yet pinned would leave ${MAX_PINNED_ENVIRONMENTS + 1} ` +
+          `environments pinned, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration ` +
+          "are left untouched, so declare pinned: false on entries for some of the currently " +
+          "pinned environments, or unpin them in the GitHub UI",
+      ],
+    ],
+    [
+      "two declared pins over the cap, counted in the plural",
+      MAX_PINNED_ENVIRONMENTS - 1,
+      ["prod", "stage"],
+      [
+        'pinned environments "u1", "u2" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+        `apply will fail: pinning the 2 declared environments not yet pinned would leave ${MAX_PINNED_ENVIRONMENTS + 1} ` +
+          `environments pinned, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS}. Pins without a pinned declaration ` +
+          "are left untouched, so declare pinned: false on entries for some of the currently " +
+          "pinned environments, or unpin them in the GitHub UI",
+      ],
+    ],
+  ])(
+    "live pins nobody declared count toward the cap (%s): overflow fails BEFORE any mutation",
+    async (_what, liveCount, declared, notes) => {
+      // The shape's upfront cap sees only declared entries; live undeclared pins (never unpinned) plus the declared ones overflow GitHub's cap, so
+      // the first pin thunk refuses before its request leaves, after the environment PUTs landed.
+      const api = new MockApi({
+        ...Object.fromEntries(
+          declared.map((name) => [`PUT /repos/o/r/environments/${name}`, envBody(name)]),
+        ),
+        "GRAPHQL EnvironmentPins": pinsBody(
+          Array.from({ length: liveCount }, (_, index) => `u${index + 1}`),
+        ),
+      }).allowMutations("GRAPHQL PinEnvironment");
+      const planned = await plan(
+        api,
+        declared.map((name) => ({ name, pinned: true })),
+      );
+      expect(planned.notes).toEqual(notes);
+      const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
+      expect(execution.status).toBe("failed");
+      expect(execution.changes).toEqual(declared.map((name) => `applied environment "${name}"`));
+      expect((execution as { failure: SectionFailure }).failure.message).toMatch(
+        new RegExp(
+          `would leave ${MAX_PINNED_ENVIRONMENTS + 1} environments pinned, but GitHub allows at most ${MAX_PINNED_ENVIRONMENTS}`,
+        ),
+      );
+      expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
+    },
+  );
 
   test("a raced-full pinned list surfaces GitHub's cap rejection on the pin mutation", async () => {
-    // Nine live pins pass the overflow gate (9 + 1 = 10); a pin raced in between the read and the mutation makes GitHub reject with UNPROCESSABLE,
-    // the belt under the gate.
+    // One live pin short of the cap passes the overflow gate; a pin raced in between the read and the mutation makes GitHub reject with
+    // UNPROCESSABLE, the belt under the gate.
+    const capMessage = `Repositories may only have ${MAX_PINNED_ENVIRONMENTS} pinned environments`;
     const api = new MockApi({
       "PUT /repos/o/r/environments/prod": envBody("prod"),
-      "GRAPHQL EnvironmentPins": pinsBody(["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"]),
+      "GRAPHQL EnvironmentPins": pinsBody(
+        Array.from({ length: MAX_PINNED_ENVIRONMENTS - 1 }, (_, index) => `u${index + 1}`),
+      ),
       "GRAPHQL PinEnvironment": {
         error: {
           status: 422,
-          message: "Repositories may only have 10 pinned environments",
+          message: capMessage,
           body: "",
           graphqlTypes: ["UNPROCESSABLE"],
         },
       },
     });
     await expect(apply(api, [{ name: "prod", pinned: true }])).rejects.toThrow(
-      'environments: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 Repositories may only have 10 pinned environments',
+      `environments: pinning environment "prod" failed - GRAPHQL PinEnvironment: 422 ${capMessage}`,
     );
   });
 
@@ -330,81 +359,38 @@ describe("environments pinned check mode", () => {
     ]);
   });
 
-  test("clean when the declared pins lead in declaration order; trailing undeclared pins earn nothing", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GET /repos/o/r/environments/b": envBody("b"),
-      "GRAPHQL EnvironmentPins": pinsBody(["a", "b", "legacy"]),
-    });
-    const result = await check(api, [
-      { name: "a", pinned: true },
-      { name: "b", pinned: true },
-    ]);
-    // A routed `pinned` reaching subsetDiff would add an "environments[a].pinned: declared true ..." line here.
-    expect(result.drift).toEqual([]);
-    expect(result.notes).toEqual([]);
-  });
-
-  test("hole-y live positions in rank order read clean, never as order drift", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GET /repos/o/r/environments/b": envBody("b"),
-      "GRAPHQL EnvironmentPins": pinsBody([
-        { name: "a", position: 2 },
-        { name: "b", position: 5 },
-      ]),
-    });
-    const result = await check(api, [
-      { name: "a", pinned: true },
-      { name: "b", pinned: true },
-    ]);
-    expect(result.drift).toEqual([]);
-  });
-
-  test("two undeclared pins ahead of the declared rank read in the plural", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GET /repos/o/r/environments/b": envBody("b"),
-      "GRAPHQL EnvironmentPins": pinsBody(["legacy", "older", "a", "b"]),
-    });
-    const checked = await check(api, [
-      { name: "a", pinned: true },
-      { name: "b", pinned: true },
-    ]);
-    expect(checked.notes).toEqual([
-      'pinned environments "legacy", "older" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
-    ]);
-  });
-
-  test("two declared pins overflowing the cap are counted in the plural", async () => {
-    const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": envBody("prod"),
-      "PUT /repos/o/r/environments/stage": envBody("stage"),
-      "GRAPHQL EnvironmentPins": pinsBody(["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"]),
-    }).allowMutations("GRAPHQL PinEnvironment");
-    const planned = await plan(api, [
-      { name: "prod", pinned: true },
-      { name: "stage", pinned: true },
-    ]);
-    expect(planned.notes.at(-1)).toStartWith(
-      "apply will fail: pinning the 2 declared environments not yet pinned would leave 11 environments pinned, but GitHub allows at most 10.",
-    );
-  });
-
-  test("an undeclared pin among the declared ranks earns the interleaving note in both modes", async () => {
-    const api = new MockApi({
-      "GET /repos/o/r/environments/a": envBody("a"),
-      "GRAPHQL EnvironmentPins": pinsBody(["legacy", "a"]),
-    }).allowMutations("GRAPHQL ReorderEnvironment");
-    const checked = await check(api, [{ name: "a", pinned: true }]);
-    expect(checked.notes).toEqual([
+  test.each([
+    [
+      "one undeclared pin ahead of one declared pin reads in the singular",
+      ["legacy", "a"],
+      ["a"],
       'pinned environment "legacy" has no pinned declaration in the settings file; it stays pinned (only a pinned: false entry unpins) and apply moves it after the declared pins',
-    ]);
-    const applied = await apply(api, [{ name: "a", pinned: true }]);
-    expect(applied.notes).toEqual(checked.notes);
-    // Apply moves a left to rank 1; legacy is never unpinned.
-    expect(graphqlWrites(api).map((c) => c.op)).toEqual(["ReorderEnvironment"]);
-  });
+      ["ReorderEnvironment"],
+    ],
+    [
+      "two undeclared pins ahead of two declared pins read in the plural",
+      ["legacy", "older", "a", "b"],
+      ["a", "b"],
+      'pinned environments "legacy", "older" have no pinned declaration in the settings file; they stay pinned (only a pinned: false entry unpins) and apply moves them after the declared pins',
+      ["ReorderEnvironment", "ReorderEnvironment"],
+    ],
+  ])(
+    "an undeclared pin among the declared ranks earns the interleaving note in both modes, agreeing in number: %s",
+    async (_what, live, declaredNames, note, reorders) => {
+      const api = new MockApi({
+        "GET /repos/o/r/environments/a": envBody("a"),
+        "GET /repos/o/r/environments/b": envBody("b"),
+        "GRAPHQL EnvironmentPins": pinsBody(live),
+      }).allowMutations("GRAPHQL ReorderEnvironment");
+      const declared = declaredNames.map((name) => ({ name, pinned: true }));
+      const checked = await check(api, declared);
+      expect(checked.notes).toEqual([note]);
+      const applied = await apply(api, declared);
+      expect(applied.notes).toEqual(checked.notes);
+      // Apply moves each declared pin left to its rank; the undeclared ones are never unpinned.
+      expect(graphqlWrites(api).map((c) => c.op)).toEqual(reorders);
+    },
+  );
 
   test("names match case-insensitively, like the section's natural key", async () => {
     const api = new MockApi({
@@ -440,16 +426,18 @@ describe("environments pinned shape", () => {
     expect(shape.safeParse([{ name: "prod", pinned: "yes" }]).success).toBe(false);
   });
 
-  test("more than 10 pinned entries are rejected upfront, naming GitHub's cap", () => {
+  test("more pinned entries than GitHub's cap are rejected upfront, naming the cap", () => {
     const shape = environmentsSection.shape;
     const entries = (count: number) =>
       Array.from({ length: count }, (_, i) => ({ name: `env-${i}`, pinned: true }));
-    expect(shape.safeParse(entries(10)).success).toBe(true);
-    const rejected = shape.safeParse(entries(11));
+    expect(shape.safeParse(entries(MAX_PINNED_ENVIRONMENTS)).success).toBe(true);
+    const rejected = shape.safeParse(entries(MAX_PINNED_ENVIRONMENTS + 1));
     expect(rejected.success).toBe(false);
     const issue = rejected.error?.issues[0];
-    expect(issue?.message).toContain("GitHub allows at most 10 pinned environments per repository");
+    expect(issue?.message).toContain(
+      `GitHub allows at most ${MAX_PINNED_ENVIRONMENTS} pinned environments per repository`,
+    );
     // The issue points at the first entry OVER the cap.
-    expect(issue?.path).toEqual([10, "pinned"]);
+    expect(issue?.path).toEqual([MAX_PINNED_ENVIRONMENTS, "pinned"]);
   });
 });
