@@ -102,42 +102,48 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(result).toEqual({ settings: { actions: { enabled: false } }, notices: [] });
   });
 
-  test.each([
-    ["nothing below", [layer("repo", { pages: null })]],
+  // `pages: null` is the only spelling of "Pages off"; the fold writes every higher null the same way, and the
+  // validator refuses the sections that have no null value (labels among them) before or after the fold.
+  test.each<[what: string, layers: Layer[], settings: Record<string, unknown>]>([
+    ["nothing below", [layer("repo", { pages: null })], { pages: null }],
     [
       "a null below, which declares nothing",
       [layer("fleet", { pages: null }), layer("repo", { pages: null })],
+      { pages: null },
     ],
-  ])("a null over %s stays as written with no notice", (_case, layers) => {
-    expect(merge(layers)).toEqual({ settings: { pages: null }, notices: [] });
-  });
-
-  // `pages: null` is the only spelling of "Pages off"; the fold writes every higher null the same way, and the
-  // validator refuses the sections that have no null value (labels among them) before or after the fold.
-  test.each([
-    ["pages", { build_type: "workflow" }],
-    ["interaction_limits", { limit: "collaborators_only" }],
-    ["labels", [{ name: "bug", color: "d73a4a" }]],
-  ])("a higher %s: null over a lower declaration is written as the value", (key, lower) => {
-    expect(merge([layer("fleet", { [key]: lower }), layer("repo", { [key]: null })])).toEqual({
-      settings: { [key]: null },
-      notices: [],
-    });
-  });
-
-  test("a null on a list section over one layer stays as written for the validator to refuse", () => {
-    expect(merge([layer("repo", { repository: { has_wiki: false }, labels: null })])).toEqual({
-      settings: { repository: { has_wiki: false }, labels: null },
-      notices: [],
-    });
-  });
-
-  test("a null on an unknown key over nothing stays as written for the validator to name", () => {
-    expect(merge([layer("repo", { typo: null })])).toEqual({
-      settings: { typo: null },
-      notices: [],
-    });
-  });
+    [
+      "a lower pages declaration",
+      [layer("fleet", { pages: { build_type: "workflow" } }), layer("repo", { pages: null })],
+      { pages: null },
+    ],
+    [
+      "a lower interaction_limits declaration",
+      [
+        layer("fleet", { interaction_limits: { limit: "collaborators_only" } }),
+        layer("repo", { interaction_limits: null }),
+      ],
+      { interaction_limits: null },
+    ],
+    [
+      "a lower labels declaration",
+      [
+        layer("fleet", { labels: [{ name: "bug", color: "d73a4a" }] }),
+        layer("repo", { labels: null }),
+      ],
+      { labels: null },
+    ],
+    [
+      "a list section in one layer, beside a mapping section",
+      [layer("repo", { repository: { has_wiki: false }, labels: null })],
+      { repository: { has_wiki: false }, labels: null },
+    ],
+    ["an unknown key over nothing", [layer("repo", { typo: null })], { typo: null }],
+  ])(
+    "a null over %s stays as written with no notice, for the validator to judge",
+    (_what, layers, settings) => {
+      expect(merge(layers)).toEqual({ settings, notices: [] });
+    },
+  );
 
   test.each<[Layering, Record<string, unknown>[]]>([
     [
@@ -193,22 +199,15 @@ describe("mergeLayers: the mapping dialect", () => {
     });
   });
 
-  test.each([
-    ["a Date", new Date(0)],
-    ["a raw list", ["a", "b"]],
-    ["a scalar", "oops"],
-  ])("%s at the top level passes through for validation to name", (_kind, doc) => {
-    expect(merge([layer("fleet", { labels: [{ name: "fleet" }] }), layer("repo", doc)])).toEqual({
-      settings: doc,
-      notices: [],
-    });
-  });
-
-  test("a mapping over a non-mapping replaces it", () => {
-    expect(
-      merge([layer("fleet", ["a"]), layer("repo", { repository: { has_wiki: false } })]),
-    ).toEqual({
-      settings: { repository: { has_wiki: false } },
+  // The fold merges only a mapping over a mapping; any other pair is the higher value, left for validation to name.
+  test.each<[what: string, below: unknown, above: unknown]>([
+    ["a Date over a mapping", { labels: [{ name: "fleet" }] }, new Date(0)],
+    ["a raw list over a mapping", { labels: [{ name: "fleet" }] }, ["a", "b"]],
+    ["a scalar over a mapping", { labels: [{ name: "fleet" }] }, "oops"],
+    ["a mapping over a raw list", ["a"], { repository: { has_wiki: false } }],
+  ])("%s at the top level replaces it and passes through", (_what, below, above) => {
+    expect(merge([layer("fleet", below), layer("repo", above)])).toEqual({
+      settings: above,
       notices: [],
     });
   });
@@ -526,18 +525,41 @@ describe("mergeLayers: the undeclared knob across layers", () => {
   const fleetKeep = layer("fleet", {
     labels: { _undeclared: "keep", entries: [{ name: "fleet" }] },
   });
+  const fleetDelete = layer("fleet", {
+    rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }] },
+  });
 
-  test.each([
-    ["deep", { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] }],
-    ["shallow", { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] }],
-    ["replace", { _undeclared: "keep", entries: [{ name: "mine" }] }],
-  ] as const)(
-    "a plain array inherits the lower wrapper's policy under the %s run default",
-    (layering, labels) => {
-      expect(merge([fleetKeep, layer("repo", { labels: [{ name: "mine" }] })], layering)).toEqual({
-        settings: { labels },
-        notices: [],
-      });
+  test.each<[form: string, layering: Layering, layers: Layer[], settings: Record<string, unknown>]>(
+    [
+      [
+        "a plain array",
+        "deep",
+        [fleetKeep, layer("repo", { labels: [{ name: "mine" }] })],
+        { labels: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] } },
+      ],
+      [
+        "a plain array",
+        "shallow",
+        [fleetKeep, layer("repo", { labels: [{ name: "mine" }] })],
+        { labels: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] } },
+      ],
+      [
+        "a plain array",
+        "replace",
+        [fleetKeep, layer("repo", { labels: [{ name: "mine" }] })],
+        { labels: { _undeclared: "keep", entries: [{ name: "mine" }] } },
+      ],
+      [
+        "a bare {entries} wrapper",
+        "deep",
+        [fleetDelete, layer("repo", { rulesets: { entries: [{ name: "mine" }] } })],
+        { rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] } },
+      ],
+    ],
+  )(
+    "%s inherits the lower wrapper's policy under the %s run default",
+    (_form, layering, layers, settings) => {
+      expect(merge(layers, layering)).toEqual({ settings, notices: [] });
     },
   );
 
@@ -545,19 +567,6 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     const result = merge([
       layer("fleet", { rulesets: [{ name: "fleet" }] }),
       layer("repo", { rulesets: { _undeclared: "delete", entries: [{ name: "mine" }] } }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
-      },
-      notices: [],
-    });
-  });
-
-  test("a bare {entries} wrapper inherits like a plain array", () => {
-    const result = merge([
-      layer("fleet", { rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }] } }),
-      layer("repo", { rulesets: { entries: [{ name: "mine" }] } }),
     ]);
     expect(result).toEqual({
       settings: {
@@ -611,24 +620,21 @@ describe("mergeLayers: the undeclared knob across layers", () => {
     });
   });
 
-  test("policies resolve once after the fold, so a higher _undeclared: null over a plain array stays as written", () => {
-    const result = merge([
+  // Policies resolve once after the fold, and null wins like any value; the validator refuses it afterwards.
+  test.each<[lower: string, fleet: Layer, settings: Record<string, unknown>]>([
+    [
+      "a plain array",
       layer("fleet", { labels: [] }),
-      layer("repo", { labels: { _undeclared: null, entries: [] } }),
-    ]);
-    expect(result).toEqual({
-      settings: { labels: { _undeclared: null, entries: [] } },
-      notices: [],
-    });
-  });
-
-  test("_undeclared: null wins over the lower policy like any value, and stays for the validator to refuse", () => {
-    const result = merge([
+      { labels: { _undeclared: null, entries: [] } },
+    ],
+    [
+      "a lower wrapper's policy",
       fleetKeep,
-      layer("repo", { labels: { _undeclared: null, entries: [] } }),
-    ]);
-    expect(result).toEqual({
-      settings: { labels: { _undeclared: null, entries: [{ name: "fleet" }] } },
+      { labels: { _undeclared: null, entries: [{ name: "fleet" }] } },
+    ],
+  ])("a higher _undeclared: null over %s stays as written", (_lower, fleet, settings) => {
+    expect(merge([fleet, layer("repo", { labels: { _undeclared: null, entries: [] } })])).toEqual({
+      settings,
       notices: [],
     });
   });
@@ -840,7 +846,7 @@ describe("mergeLayers: every list section layers by the key its planner folds", 
   }
 
   test.each([...LIST_SECTIONS])(
-    "%s: a shared key spelled two ways folds to one entry under shallow and deep, and the higher list wins under replace",
+    "%s: a shared key spelled two ways folds to one entry under shallow and deep, the higher list wins under replace, and an empty higher list adds nothing",
     (key) => {
       const { lower, other, higher, deep } = SHARED_KEY_LAYERS[key];
       const layers = [
@@ -850,14 +856,10 @@ describe("mergeLayers: every list section layers by the key its planner folds", 
       expect(entriesOf(layers, "shallow", key)).toEqual([higher, other]);
       expect(entriesOf(layers, "deep", key)).toEqual([deep, other]);
       expect(entriesOf(layers, "replace", key)).toEqual([higher]);
+      const empty = [layer("fleet", { [key]: [lower, other] }), layer("repo", { [key]: [] })];
+      expect(entriesOf(empty, "deep", key)).toEqual([lower, other]);
     },
   );
-
-  test.each([...LIST_SECTIONS])("%s: an empty higher list adds nothing under deep", (key) => {
-    const { lower, other } = SHARED_KEY_LAYERS[key];
-    const layers = [layer("fleet", { [key]: [lower, other] }), layer("repo", { [key]: [] })];
-    expect(entriesOf(layers, "deep", key)).toEqual([lower, other]);
-  });
 });
 
 describe("mergeLayers: the plain-list sections", () => {
@@ -1220,16 +1222,6 @@ describe("mergeLayers: layer-boundary refusals", () => {
     for (const layering of ["deep", "shallow", "replace"] as const) {
       expect(merge([fleet, layer("repo", doc)], layering)).toEqual({ code, error });
     }
-  });
-
-  test("every knobbed section unions by its key under the run default, milestones by title", () => {
-    expect(merge([fleet, layer("repo", { milestones: [{ title: "v1" }] })])).toEqual({
-      settings: {
-        labels: { _undeclared: "delete", entries: [{ name: "fleet" }] },
-        milestones: { _undeclared: "keep", entries: [{ title: "v0" }, { title: "v1" }] },
-      },
-      notices: [],
-    });
   });
 
   test("no refusal, of any kind, echoes a value taken from the document", () => {

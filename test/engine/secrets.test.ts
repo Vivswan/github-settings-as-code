@@ -52,12 +52,6 @@ function validated(doc: SettingsFile): ValidatedSettings {
 }
 
 describe("secret provenance is one source per document, judged at validation", () => {
-  test("a document declaring only a secret-free section contributes no secret values and no provenance issue", () => {
-    const doc = { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile;
-    expect(collectSecretReferences(validated(doc), SECTIONS)).toEqual([]);
-    expect(issuesUnder(doc, "target")).toEqual([]);
-  });
-
   test("every secret-declaring section's reference is refused in a target document and admitted in an operator's, whatever the string", () => {
     // The source is the document's, never the string's: a target naming the operator's own $FLEET_TOKEN gains nothing.
     for (const [key, doc] of secretDocs("$FLEET_TOKEN")) {

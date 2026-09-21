@@ -2,76 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   RESERVED_REF_PREFIXES,
   resolveSecretRefs,
+  type SettingsSource,
   validateSecretRef,
 } from "../../src/engine/secret-refs.js";
 
 /** The entry label validateSecretRef weaves into its error prose. */
 const LABEL = 'the secret entry "TEST_ENTRY"';
 
+/** An accepted reference by its name, or a refusal by the words its error says and the ones it withholds. */
+type Verdict = { name: string } | { says: string[]; never?: string[] };
+
 describe("validateSecretRef (syntax phase, never reads the environment)", () => {
-  test("a whole-value $NAME reference from an operator source is accepted", () => {
-    // The function takes no environment, so accepting here proves syntax validation cannot depend on a variable being set.
-    const result = validateSecretRef("$WEBHOOK_SECRET", "operator", LABEL);
-    expect(result.ok).toBe(true);
-    expect(result.ok && result.ref.name).toBe("WEBHOOK_SECRET");
-  });
-
-  test("a value that embeds $NAME without being one is rejected, naming the fragment", () => {
-    const result = validateSecretRef("prefix-$TOKEN", "operator", LABEL);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected rejection");
-    }
-    expect(result.error).toContain("$TOKEN");
-    // The surrounding text may itself be half a secret; it must not be echoed.
-    expect(result.error).not.toContain("prefix-");
-  });
-
-  test("a literal value is rejected and never echoed", () => {
-    const result = validateSecretRef("hunter2-plaintext", "operator", LABEL);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected rejection");
-    }
-    expect(result.error).toContain("literal");
-    expect(result.error).not.toContain("hunter2");
-  });
-
-  test("every reserved prefix is refused, naming the prefix", () => {
-    for (const prefix of RESERVED_REF_PREFIXES) {
-      const result = validateSecretRef(`$${prefix}SOMETHING`, "operator", LABEL);
-      expect(result.ok).toBe(false);
-      if (result.ok) {
-        throw new Error("expected rejection");
-      }
-      expect(result.error).toContain(`${prefix}*`);
-    }
-  });
-
-  test("a name merely starting like a reserved word is not reserved", () => {
-    // INPUTX does not match INPUT_ (the underscore is part of the prefix).
-    expect(validateSecretRef("$INPUTX", "operator", LABEL).ok).toBe(true);
-  });
-
-  test("a reference in a target-fetched settings source is a hard error", () => {
-    const result = validateSecretRef("$DEPLOY_KEY", "target", LABEL);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected rejection");
-    }
-    expect(result.error).toContain("target-fetched");
-  });
-
-  test("the target boundary precedes the reserved check", () => {
-    // A target-sourced reserved name is refused for the routing reason, so the error explains the boundary rather than the lesser rule.
-    const result = validateSecretRef("$GITHUB_TOKEN", "target", LABEL);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected rejection");
-    }
-    expect(result.error).toContain("target-fetched");
-  });
-
   const NOT_WHOLE_VALUE: Record<string, string> = {
     "an empty string": "",
     "a bare dollar": "$",
@@ -86,14 +27,89 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
     "a suffixed reference": "$TOKEN-suffix",
     "two references": "$A$B",
   };
-  for (const [name, value] of Object.entries(NOT_WHOLE_VALUE)) {
-    test(`${name} is not a whole-value reference`, () => {
-      expect(validateSecretRef(value, "operator", LABEL).ok).toBe(false);
-    });
-  }
 
-  test("an underscore-leading name is a valid reference", () => {
-    expect(validateSecretRef("$_PRIVATE", "operator", LABEL).ok).toBe(true);
+  test.each<[what: string, value: string, source: SettingsSource, verdict: Verdict]>([
+    // The function takes no environment, so accepting here proves syntax validation cannot depend on a variable being set.
+    [
+      "a whole-value $NAME reference from an operator source is accepted",
+      "$WEBHOOK_SECRET",
+      "operator",
+      { name: "WEBHOOK_SECRET" },
+    ],
+    [
+      "an underscore-leading name is a valid reference",
+      "$_PRIVATE",
+      "operator",
+      { name: "_PRIVATE" },
+    ],
+    // INPUTX does not match INPUT_ (the underscore is part of the prefix).
+    [
+      "a name merely starting like a reserved word is not reserved",
+      "$INPUTX",
+      "operator",
+      { name: "INPUTX" },
+    ],
+    // The surrounding text may itself be half a secret; it must not be echoed.
+    [
+      "a value that embeds $NAME without being one is rejected, naming the fragment",
+      "prefix-$TOKEN",
+      "operator",
+      { says: ["$TOKEN"], never: ["prefix-"] },
+    ],
+    [
+      "a literal value is rejected and never echoed",
+      "hunter2-plaintext",
+      "operator",
+      { says: ["literal"], never: ["hunter2"] },
+    ],
+    [
+      "a reference in a target-fetched settings source is a hard error",
+      "$DEPLOY_KEY",
+      "target",
+      { says: ["target-fetched"] },
+    ],
+    // A target-sourced reserved name is refused for the routing reason, so the error explains the boundary rather than the lesser rule.
+    [
+      "the target boundary precedes the reserved check",
+      "$GITHUB_TOKEN",
+      "target",
+      { says: ["target-fetched"] },
+    ],
+    ...Object.entries(NOT_WHOLE_VALUE).map(
+      ([what, value]): [string, string, SettingsSource, Verdict] => [
+        `${what} is not a whole-value reference`,
+        value,
+        "operator",
+        { says: [] },
+      ],
+    ),
+  ])("%s", (_what, value, source, verdict) => {
+    const result = validateSecretRef(value, source, LABEL);
+    if ("name" in verdict) {
+      expect(result).toEqual({ ok: true, ref: { name: verdict.name } });
+      return;
+    }
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected rejection");
+    }
+    for (const word of verdict.says) {
+      expect(result.error).toContain(word);
+    }
+    for (const word of verdict.never ?? []) {
+      expect(result.error).not.toContain(word);
+    }
+  });
+
+  test("every reserved prefix is refused, naming the prefix", () => {
+    for (const prefix of RESERVED_REF_PREFIXES) {
+      const result = validateSecretRef(`$${prefix}SOMETHING`, "operator", LABEL);
+      expect(result.ok).toBe(false);
+      if (result.ok) {
+        throw new Error("expected rejection");
+      }
+      expect(result.error).toContain(`${prefix}*`);
+    }
   });
 });
 
@@ -123,36 +139,40 @@ describe("resolveSecretRefs (resolution phase over validated names, injected env
     expect(result.mask).toEqual(["identical"]);
   });
 
-  test("an unset variable fails, naming the reference and the rule", () => {
-    const result = resolveSecretRefs(["MISSING_SECRET"], {});
+  // Each row: the names to resolve, the environment, and per failed reference the words its error must say.
+  test.each<[what: string, names: string[], env: Record<string, string>, errors: string[][]]>([
+    [
+      "an unset variable fails, naming the reference and the rule",
+      ["MISSING_SECRET"],
+      {},
+      [["$MISSING_SECRET", "unset"]],
+    ],
+    [
+      "a set-but-empty variable fails: an empty lookup must not write an empty secret",
+      ["EMPTY_SECRET"],
+      { EMPTY_SECRET: "" },
+      [["$EMPTY_SECRET", "set but empty"]],
+    ],
+    [
+      "every unresolved reference is reported, not just the first",
+      ["UNSET_ONE", "OK_SECRET", "EMPTY_ONE"],
+      { OK_SECRET: "fine", EMPTY_ONE: "" },
+      [
+        ["$UNSET_ONE", "unset"],
+        ["$EMPTY_ONE", "set but empty"],
+      ],
+    ],
+  ])("%s", (_what, names, env, errors) => {
+    const result = resolveSecretRefs(names, env);
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected failure");
     }
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toContain("$MISSING_SECRET");
-    expect(result.errors[0]).toContain("unset");
-  });
-
-  test("a set-but-empty variable fails: an empty lookup must not write an empty secret", () => {
-    const result = resolveSecretRefs(["EMPTY_SECRET"], { EMPTY_SECRET: "" });
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected failure");
-    }
-    expect(result.errors[0]).toContain("$EMPTY_SECRET");
-    expect(result.errors[0]).toContain("set but empty");
-  });
-
-  test("every unresolved reference is reported, not just the first", () => {
-    const result = resolveSecretRefs(["UNSET_ONE", "OK_SECRET", "EMPTY_ONE"], {
-      OK_SECRET: "fine",
-      EMPTY_ONE: "",
+    expect(result.errors).toHaveLength(errors.length);
+    errors.forEach((words, index) => {
+      for (const word of words) {
+        expect(result.errors[index]).toContain(word);
+      }
     });
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected failure");
-    }
-    expect(result.errors).toHaveLength(2);
   });
 });

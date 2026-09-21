@@ -280,32 +280,6 @@ describe("snapshotRepository", () => {
     expect(Object.keys(result.settings ?? {})).toEqual(["labels"]);
   });
 
-  test("a denied section is skipped under warn (partial) and fails the run under fail (no document)", async () => {
-    const denied = denying(registryFake(LIVE), /\/repos\/o\/r\/labels(\?|$)/);
-    const warn = captureIo();
-    const partial = await snapshotRepository(denied, opts("warn"), warn.io);
-    expect(partial.result).toBe("partial");
-    expect(partial.outcomes.find((o) => o.key === "labels")).toEqual({
-      key: "labels",
-      status: "skipped",
-      detail: [expect.stringContaining("the token was denied GET /repos/o/r/labels")],
-    });
-    expect(Object.keys(partial.settings ?? {})).not.toContain("labels");
-    expect(partial.settings?.actions_variables).toBeDefined();
-    expect(warn.annotations.filter((a) => a.startsWith("warning: labels: skipped"))).toHaveLength(
-      1,
-    );
-
-    const fail = captureIo();
-    const failed = await snapshotRepository(denied, opts("fail"), fail.io);
-    expect(failed.result).toBe("failed");
-    expect(failed.settings).toBeUndefined();
-    expect(failed.outcomes.find((o) => o.key === "labels")?.status).toBe("failed");
-    expect(
-      fail.annotations.filter((a) => a.startsWith("error: labels: not snapshotted")),
-    ).toHaveLength(1);
-  });
-
   /**
    * Every read a section's snapshot issues against its round-trip fixture, denied one at a time:
    * under fail the section and the run fail with the grant prose and no document, whatever the
