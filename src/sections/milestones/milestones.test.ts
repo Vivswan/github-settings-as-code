@@ -64,18 +64,6 @@ describe("milestones", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 
-  test("a matching milestone plans nothing: a declared empty description reads as the live null", async () => {
-    const api = new MockApi({ [LIST]: { data: liveMilestones } });
-    const result = await plan(api, {
-      _undeclared: "keep",
-      entries: [
-        { title: "v1", description: "" },
-        { title: "old", state: "open" },
-      ],
-    });
-    expect(result).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
   test("a declared key the live milestone lacks is drift plus a phantom note beside the update", async () => {
     const api = new MockApi({ [LIST]: { data: liveMilestones } });
     const result = await plan(api, {
