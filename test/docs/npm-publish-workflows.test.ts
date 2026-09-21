@@ -55,6 +55,9 @@ const stepNamed = (job: RunJob, name: string): Step =>
     job.steps.find((step) => step.name === name),
     `step ${name}`,
   );
+/** The npm the guard step's script refuses to publish below: its `floor=` line. */
+const guardFloor = (guard: Step): string =>
+  must(guard.run?.match(/^floor=(\S+)$/m)?.[1], "floor= line in the guard");
 const setupNode = (job: RunJob): Step =>
   must(
     job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")),
@@ -286,7 +289,11 @@ describe("the npm publish jobs", () => {
           runJob(w.jobs[NEXT_JOB], "next"),
           "Require an npm that publishes through OIDC",
         );
-        guard.run = guard.run?.replace("11.5.1", "11.6.0");
+        const floor = guardFloor(guard);
+        guard.run = guard.run?.replace(
+          `floor=${floor}`,
+          `floor=${Number(floor.split(".")[0]) + 1}.0.0`,
+        );
       },
       /"Require an npm that publishes through OIDC" diverged/,
     ],
@@ -362,13 +369,11 @@ describe("the OIDC probe under bash", () => {
 
 describe("the npm floor guard under bash", () => {
   const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);
-  const run = must(
-    stepNamed(stable, "Require an npm that publishes through OIDC").run,
-    "guard run",
-  );
+  const guard = stepNamed(stable, "Require an npm that publishes through OIDC");
+  const run = must(guard.run, "guard run");
   /** Trusted publishing exists from this npm on (npm's changelog for 11.5.1); the script must hold that floor or a newer one. */
   const OIDC_NPM = "11.5.1";
-  const floor = must(run.match(/^floor=(\S+)$/m)?.[1], "floor= line in the guard");
+  const floor = guardFloor(guard);
 
   test("the script's floor is not below the npm that introduced trusted publishing", () => {
     const [scriptFloor] = [floor, OIDC_NPM].sort((a, b) =>

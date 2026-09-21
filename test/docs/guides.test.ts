@@ -644,16 +644,19 @@ describe("docs/ guide pages", () => {
     },
   );
 
-  test("the layering guide's inputs table names every input mode: render rejects", () => {
-    // RENDER_REJECTED_INPUTS grows with the input declarations, so the table must name each one or the page under-reports the refusal.
-    const markdown = readFileSync(join(DOCS, "operate", "layering.md"), "utf8");
-    const section = sectionLines(markdown, "Inputs in mode: render", "docs/operate/layering.md");
+  test.each<[string, string, readonly string[]]>([
+    ["docs/operate/layering.md", "Inputs in mode: render", RENDER_REJECTED_INPUTS],
+    ["docs/operate/snapshot.md", "Inputs in mode: snapshot", SNAPSHOT_REJECTED_INPUTS],
+  ])('%s: the "%s" table names every input the mode rejects', (page, heading, rejected) => {
+    // The rejected set grows with the input declarations, so the table must name each one or the page under-reports the refusal.
+    const markdown = readFileSync(join(ROOT, page), "utf8");
+    const section = sectionLines(markdown, heading, page);
     const rejectedRow = section.find((line) => line.includes("| Rejected"));
     if (rejectedRow === undefined) {
-      throw new Error('docs/operate/layering.md has no "Rejected" row in its inputs table');
+      throw new Error(`${page} has no "Rejected" row in its inputs table`);
     }
     const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
-    expect(new Set(named)).toEqual(new Set(RENDER_REJECTED_INPUTS));
+    expect(new Set(named)).toEqual(new Set(rejected));
   });
 
   test("the layering guide's key table names every list section with the key field its module declares", () => {
@@ -673,20 +676,6 @@ describe("docs/ guide pages", () => {
     expect(documented).toEqual(
       new Map(LIST_SECTIONS.map((key) => [key, listLayering(key).keyField])),
     );
-  });
-
-  test("the snapshot guide's inputs table names every input mode: snapshot rejects", () => {
-    // Same derivation as the merge pin: a new apply/check-time input is
-    // rejected by the snapshot the moment it is declared, and the table must
-    // name it or the page under-reports the refusal.
-    const markdown = readFileSync(join(DOCS, "operate", "snapshot.md"), "utf8");
-    const section = sectionLines(markdown, "Inputs in mode: snapshot", "docs/operate/snapshot.md");
-    const rejectedRow = section.find((line) => line.includes("| Rejected"));
-    if (rejectedRow === undefined) {
-      throw new Error('docs/operate/snapshot.md has no "Rejected" row in its inputs table');
-    }
-    const named = [...rejectedRow.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]);
-    expect(new Set(named)).toEqual(new Set(SNAPSHOT_REJECTED_INPUTS));
   });
 
   describe("the layering guide's refusal tables quote the messages the render step emits", () => {
@@ -967,34 +956,43 @@ describe("refusal table parser (mutation checks)", () => {
   const header = ["| The layer has | The fold says |", "|---|---|"];
   const row = (has: string, says = "`the message`"): string => `| ${has} | ${says} |`;
 
-  test("an indented row is parsed as a row, not skipped", () => {
-    const rows = refusalRows([...header, `   ${row("Indented (`labels: oops`)")}`], "page");
-    expect(rows.map((parsed) => parsed.inputs)).toEqual([["labels: oops"]]);
-  });
-
-  test("a row without its outer pipes is parsed as a row, not prose", () => {
-    // GFM renders a row without its leading or trailing pipe as a row, so it must be pinned rather than skipped.
-    const unpiped = "New refusal (`_layering: union`) | `WRONG MESSAGE` |";
-    const bare = "Bare (`a: 1`) | `also wrong`";
-    const rows = refusalRows([...header, row("First (`labels: oops`)"), unpiped, bare], "page");
-    expect(rows.map((parsed) => [parsed.inputs, parsed.quoted])).toEqual([
-      [["labels: oops"], "the message"],
-      [["_layering: union"], "WRONG MESSAGE"],
-      [["a: 1"], "also wrong"],
-    ]);
-  });
-
-  test("a blank line closes a table; the next table needs its own header", () => {
-    const rows = refusalRows(
+  // A row without its leading or trailing pipe renders as a row under GFM, so it must be pinned rather than skipped.
+  test.each<[string, string[], [inputs: string[], quoted: string][]]>([
+    [
+      "an indented row is parsed as a row, not skipped",
+      [...header, `   ${row("Indented (`labels: oops`)")}`],
+      [[["labels: oops"], "the message"]],
+    ],
+    [
+      "a row without its outer pipes is parsed as a row, not prose",
+      [
+        ...header,
+        row("First (`labels: oops`)"),
+        "New refusal (`_layering: union`) | `WRONG MESSAGE` |",
+        "Bare (`a: 1`) | `also wrong`",
+      ],
+      [
+        [["labels: oops"], "the message"],
+        [["_layering: union"], "WRONG MESSAGE"],
+        [["a: 1"], "also wrong"],
+      ],
+    ],
+    [
+      "a blank line closes a table; the next table needs its own header",
       [...header, row("A (`a: 1`)"), "", "Prose with no pipes.", "", ...header, row("B (`b: 2`)")],
-      "page",
-    );
-    expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1"], ["b: 2"]]);
-  });
-
-  test("two alternatives joined by or are both inputs", () => {
-    const rows = refusalRows([...header, row("Either (`a: 1` or `b: 2`)")], "page");
-    expect(rows.map((parsed) => parsed.inputs)).toEqual([["a: 1", "b: 2"]]);
+      [
+        [["a: 1"], "the message"],
+        [["b: 2"], "the message"],
+      ],
+    ],
+    [
+      "two alternatives joined by or are both inputs",
+      [...header, row("Either (`a: 1` or `b: 2`)")],
+      [[["a: 1", "b: 2"], "the message"]],
+    ],
+  ])("%s", (_case, section, parsed) => {
+    const rows = refusalRows(section, "page");
+    expect(rows.map((found) => [found.inputs, found.quoted])).toEqual(parsed);
   });
 
   test.each<[string, string[], RegExp]>([
@@ -1042,15 +1040,12 @@ describe("refusal table parser (mutation checks)", () => {
 
 describe("fence policy guard (mutation checks)", () => {
   // Every mutation but the indented and four-backtick fences hides the example from fencedBlocks; those two break only the guides' one fence form.
-  test("accepts the canonical form", () => {
-    expect(fenceViolations("```yaml settings\nlabels: []\n```\n", ALLOWED_FENCE_INFO)).toEqual([]);
-  });
-
   const notAllowed = (line: number, info: string): string =>
     `line ${line}: fence info "${info}" is not in the allowed list (${[...ALLOWED_FENCE_INFO].join(", ")})`;
   const malformed = (line: number, fence: string): string =>
     `line ${line}: fence "${fence}" must start at column zero with exactly three backticks (no indent, no blockquote)`;
-  const MUTATIONS: Record<string, [markdown: string, violations: string[]]> = {
+  const FORMS: Record<string, [markdown: string, violations: string[]]> = {
+    "the canonical form": ["```yaml settings\nlabels: []\n```\n", []],
     "a missing tag": ["```\nlabels: []\n```\n", [notAllowed(1, "")]],
     "a misspelled tag": ["```yml settings\nlabels: []\n```\n", [notAllowed(1, "yml settings")]],
     "a space before the tag": [
@@ -1076,11 +1071,12 @@ describe("fence policy guard (mutation checks)", () => {
     ],
     "an unclosed fence": ["```yaml settings\nlabels: []\n", ["unclosed fence at end of document"]],
   };
-  for (const [name, [markdown, violations]] of Object.entries(MUTATIONS)) {
-    test(`rejects ${name}`, () => {
+  test.each(Object.entries(FORMS))(
+    "%s yields exactly the pinned violations",
+    (_form, [markdown, violations]) => {
       expect(fenceViolations(markdown, ALLOWED_FENCE_INFO)).toEqual(violations);
-    });
-  }
+    },
+  );
 });
 
 describe("github heading slugger", () => {
@@ -1103,42 +1099,41 @@ describe("github heading slugger", () => {
     });
   }
 
-  test("duplicate headings get -1/-2 suffixes", () => {
-    expect(headingSlugs("# Setup\n\n## Setup\n\n### Setup\n", "(inline)")).toEqual(
-      new Set(["setup", "setup-1", "setup-2"]),
-    );
-  });
-
-  test("a duplicate probes past an explicit -1 heading, as GitHub does", () => {
-    expect(headingSlugs("# Setup\n\n## Setup-1\n\n### Setup\n", "(inline)")).toEqual(
-      new Set(["setup", "setup-1", "setup-2"]),
-    );
-  });
-
-  test("a closing hash run is not part of the heading text", () => {
-    expect(headingSlugs("## Setup ##\n", "(inline)")).toEqual(new Set(["setup"]));
-  });
-
-  test("tilde fences hide heading-looking lines like backtick fences do", () => {
-    expect(headingSlugs("~~~text\n# not a heading\n~~~\n\n# Real\n", "(inline)")).toEqual(
-      new Set(["real"]),
-    );
-  });
-
-  test("heading-looking lines inside fenced blocks are not headings", () => {
-    const markdown = [
-      "```yaml settings",
-      "# yaml-language-server: $schema=https://example.com/schema.json",
-      "```",
-      "",
-      "## Real heading",
-      "",
-    ].join("\n");
-    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(["real-heading"]));
-  });
-
-  test("indented fences hide their contents too", () => {
-    const markdown = ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n");
-    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(["title"]));
+  test.each<[string, string, string[]]>([
+    [
+      "duplicate headings get -1/-2 suffixes",
+      "# Setup\n\n## Setup\n\n### Setup\n",
+      ["setup", "setup-1", "setup-2"],
+    ],
+    [
+      "a duplicate probes past an explicit -1 heading, as GitHub does",
+      "# Setup\n\n## Setup-1\n\n### Setup\n",
+      ["setup", "setup-1", "setup-2"],
+    ],
+    ["a closing hash run is not part of the heading text", "## Setup ##\n", ["setup"]],
+    [
+      "tilde fences hide heading-looking lines like backtick fences do",
+      "~~~text\n# not a heading\n~~~\n\n# Real\n",
+      ["real"],
+    ],
+    [
+      "heading-looking lines inside fenced blocks are not headings",
+      [
+        "```yaml settings",
+        "# yaml-language-server: $schema=https://example.com/schema.json",
+        "```",
+        "",
+        "## Real heading",
+        "",
+      ].join("\n"),
+      ["real-heading"],
+    ],
+    [
+      "indented fences hide their contents too",
+      ["   ```yaml", "   # a comment", "   ```", "# Title"].join("\n"),
+      ["title"],
+    ],
+  ])("%s", (_case, markdown, slugs) => {
+    expect(headingSlugs(markdown, "(inline)")).toEqual(new Set(slugs));
   });
 });
