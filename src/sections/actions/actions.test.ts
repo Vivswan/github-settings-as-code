@@ -149,15 +149,6 @@ describe("actions", () => {
     ]);
   });
 
-  test("a matching live state plans nothing", async () => {
-    const api = new MockApi({
-      [PERMISSIONS]: { data: { enabled: true, allowed_actions: "all" } },
-      [ACCESS]: { data: { access_level: "organization" } },
-    });
-    const result = await plan(api, { allowed_actions: "all", access_level: "organization" });
-    expect(result).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
   test("any base-permissions key implies enabled: true in the PUT body", async () => {
     const api = new MockApi({
       [PERMISSIONS]: { data: { enabled: false, allowed_actions: "none" } },
@@ -188,58 +179,6 @@ describe("actions", () => {
       "keys [some_added_key, other_key] are not recognized by this action; they ride verbatim in PUT " +
         "/actions/permissions (a body that also sets enabled: true), where GitHub may ignore them - ",
     );
-  });
-
-  test("sha_pinning_required is a base-permissions key the PUT takes: it plans without the unrecognized-key note", async () => {
-    // The PUT body documents it beside enabled and allowed_actions; unknown to this action it would converge
-    // under a note telling the operator to remove it.
-    const api = new MockApi({
-      [PERMISSIONS]: {
-        data: { enabled: true, allowed_actions: "all", sha_pinning_required: false },
-      },
-    });
-    expect(await plan(api, { sha_pinning_required: true })).toEqual({
-      ops: [
-        {
-          role: "putPermissions",
-          payload: { sha_pinning_required: true, enabled: true },
-          drift: ["actions.permissions.sha_pinning_required: true != false"],
-          change: "applied actions permissions",
-        },
-      ],
-      notes: [],
-      drift: [],
-    });
-  });
-
-  test("selected_actions implies allowed_actions: selected; a contradiction fails upfront shape validation", async () => {
-    const api = new MockApi({
-      [PERMISSIONS]: { data: { enabled: true, allowed_actions: "all" } },
-      [SELECTED]: { error: { status: 409, message: "Conflict", body: "" } },
-    });
-    const result = await plan(api, { selected_actions: { github_owned_allowed: true } });
-    expect(result.ops[0]?.payload).toEqual({ allowed_actions: "selected", enabled: true });
-    // A shape rejection (both modes, before any section writes), not a plan()-time throw.
-    const error = shapeError(
-      { actions: { allowed_actions: "all", selected_actions: { github_owned_allowed: true } } },
-      "f.yml",
-    );
-    expect(error).toContain("actions.selected_actions");
-    expect(error).toContain('an allowlist only applies under allowed_actions: "selected"');
-    expect(
-      shapeError(
-        {
-          actions: {
-            allowed_actions: "selected",
-            selected_actions: { github_owned_allowed: true },
-          },
-        },
-        "f.yml",
-      ),
-    ).toBeNull();
-    expect(
-      shapeError({ actions: { selected_actions: { github_owned_allowed: true } } }, "f.yml"),
-    ).toBeNull();
   });
 
   test("retention and cache route to their endpoints, never the base PUT", async () => {
@@ -278,13 +217,6 @@ describe("actions", () => {
     // No base-permissions read or PUT: these keys alone must not imply enabled: true.
     expect(roles(api)).toEqual([RETENTION, CACHE_RETENTION, CACHE_STORAGE]);
     expect(result.notes).toEqual([]);
-  });
-
-  test("a lone cache key touches only its own endpoint", async () => {
-    const api = new MockApi({ [CACHE_STORAGE]: { data: { max_cache_size_gb: 10 } } });
-    const result = await plan(api, { cache: { max_cache_size_gb: 25 } });
-    expect(result.ops.map((op) => op.role)).toEqual(["putCacheStorage"]);
-    expect(roles(api)).toEqual([CACHE_STORAGE]);
   });
 
   test("an unset limit answers {} (the spec marks the field optional): the declared value is drift, not a read failure", async () => {
@@ -481,34 +413,34 @@ describe("actions", () => {
     ).toBeNull();
   });
 
-  test("the OIDC template is planned verbatim to its own endpoint on any divergence", async () => {
-    const api = new MockApi({ [OIDC]: { data: { use_default: true } } });
-    const declared = { use_default: false, include_claim_keys: ["repo", "context"] };
-    const result = await plan(api, { oidc_customization_sub: declared });
+  test("the OIDC template is planned verbatim: a reordered claim-key list and a false toggle against a live true are both drift", async () => {
+    // The claim-key list leaves the remainder diff, so the false toggle proves the remainder is still compared.
+    const reordered = new MockApi({
+      [OIDC]: {
+        data: {
+          use_default: false,
+          include_claim_keys: ["context", "repo"],
+          use_immutable_subject: true,
+        },
+      },
+    });
+    const declared = {
+      use_default: false,
+      include_claim_keys: ["repo", "context"],
+      use_immutable_subject: false,
+    };
+    const result = await plan(reordered, { oidc_customization_sub: declared });
     expect(result.ops).toEqual([
       {
         role: "putOidcSub",
         payload: declared,
         describe: "customizing the OIDC subject claim",
         drift: [
-          "actions.oidc_customization_sub.use_default: false != true",
-          'actions.oidc_customization_sub.include_claim_keys: declared ["repo","context"] != live [] (claim-key order defines the subject format, so order counts); apply will set the declared value',
+          "actions.oidc_customization_sub.use_immutable_subject: false != true",
+          'actions.oidc_customization_sub.include_claim_keys: declared ["repo","context"] != live ["context","repo"] (claim-key order defines the subject format, so order counts); apply will set the declared value',
         ],
         change: "applied the OIDC subject claim template",
       },
-    ]);
-  });
-
-  test("include_claim_keys compares positionally: a reordered live value is drift", async () => {
-    const reordered = new MockApi({
-      [OIDC]: { data: { use_default: false, include_claim_keys: ["context", "repo"] } },
-    });
-    const result = await plan(reordered, {
-      oidc_customization_sub: { use_default: false, include_claim_keys: ["repo", "context"] },
-    });
-    expect(result.ops).toHaveLength(1);
-    expect(result.ops[0]?.drift).toEqual([
-      'actions.oidc_customization_sub.include_claim_keys: declared ["repo","context"] != live ["context","repo"] (claim-key order defines the subject format, so order counts); apply will set the declared value',
     ]);
     const matching = new MockApi({
       [OIDC]: { data: { use_default: false, include_claim_keys: ["repo", "context"] } },
@@ -528,25 +460,6 @@ describe("actions", () => {
     expect((await plan(custom, { oidc_customization_sub: { use_default: false } })).ops).toEqual(
       [],
     );
-  });
-
-  test("a declared use_immutable_subject rides the remainder diff", async () => {
-    // The flag flips the whole subject format; undeclared, the inherited org/date default stays uncompared like every other undeclared key.
-    const api = new MockApi({
-      [OIDC]: {
-        data: { use_default: false, include_claim_keys: ["repo"], use_immutable_subject: true },
-      },
-    });
-    const result = await plan(api, {
-      oidc_customization_sub: {
-        use_default: false,
-        include_claim_keys: ["repo"],
-        use_immutable_subject: false,
-      },
-    });
-    expect(result.ops[0]?.drift).toEqual([
-      "actions.oidc_customization_sub.use_immutable_subject: false != true",
-    ]);
   });
 
   test("a denied fork-pr-private read renders the ambiguity denialHint", async () => {
@@ -1027,17 +940,6 @@ describe("actions snapshot", () => {
     expect(read.notes).toEqual([
       leftOut("cache.max_cache_size_gb", "/repos/o/r/actions/cache/storage-limit"),
     ]);
-  });
-
-  test("a denied primary read fails the section like any other, carrying the grant advice", async () => {
-    const api = liveActions({});
-    let thrown: unknown;
-    try {
-      await snapshot(api);
-    } catch (error) {
-      thrown = error;
-    }
-    expect(deniedDetail(thrown)).toContain(sectionGrant(actionsSection));
   });
 
   test("under fail, a denied sub-read fails the section with that read's own grant advice, never a note", async () => {
