@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "neverthrow";
+import { type SlugKey, slugKey } from "../github/slug.js";
 import type { ProblemOf } from "../problem.js";
 import { SLUG_RE } from "./targets.js";
 
@@ -23,7 +24,7 @@ export function parseReposInput(
   }
   // Malformed and repeated entries are collected across the whole list, so N bad entries cost one run to discover, not
   // N; the pools are Sets, so a bad entry pasted twice is one offender.
-  const seen = new Set<string>();
+  const seen = new Set<SlugKey>();
   const invalid = new Set<string>();
   const duplicated = new Set<string>();
   for (const item of items) {
@@ -31,7 +32,7 @@ export function parseReposInput(
       invalid.add(item);
       continue;
     }
-    const key = item.toLowerCase();
+    const key = slugKey(item);
     if (seen.has(key)) {
       duplicated.add(item);
     }
