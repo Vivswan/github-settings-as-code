@@ -64,7 +64,7 @@ The examples continue from one another and form one program (the docs tests comp
 | Name | Kind | Says |
 |---|---|---|
 | `validateSettings` | function | Validate a parsed document into the branded `ValidatedSettings` every other verb takes; a `null` is a declared value, refused where the key has no empty state |
-| `ValidateOptions` | type | `source`, `sections`, `io`, `undeclared` (the action's input of that name: the fallback policy below a list's wrapper and the file's top-level `_undeclared`) |
+| `ValidateOptions` | type | `source`, `sections`, `io`, `undeclared` (the action's input of that name: the fallback policy below a list's wrapper and the file's top-level `_undeclared`), `secretSource` (who authored the document: `operator`, the default, honors `$NAME` secret references; `target` refuses them) |
 | `ValidateReport` | type | `settings` and `log` |
 | `ValidatedSettings` | type | The document as zod parsed it, branded by validation, every knobbed list in `{_undeclared, entries}` form with its policy resolved; `validateSettings`, `mergeSettings`, and a snapshot that did not fail hand one out |
 | `mergeSettings` | function | Fold an ordered list of `Layer`s into one validated document, as `mode: render` does: each layer validated alone, folded, validated again; its `yaml` is byte for byte the file `mode: render` writes, the fold in the canonical order every rendered document shares (sections in execution order, keys as the schema declares them, the entries of every list section by identity; `branches`, `bypass_actors`, `reviewers`, and scalar lists as written), so no layer's key order reaches the file |
@@ -147,7 +147,7 @@ const client = new GitHubApi({ token: process.env.GITHUB_TOKEN ?? "" });
 | Name | Kind | Says |
 |---|---|---|
 | `checkRepository` | function | Plan and diff every active section without writing |
-| `CheckOptions` | type | `sections`, `onMissingPermission`, `io`, and the secret knobs (`secretSource`, `secretEnv`) |
+| `CheckOptions` | type | `sections`, `onMissingPermission`, `io`, and `secretEnv`, the environment `applyRepository` resolves the secret references from; check mode reads none |
 | `CheckReport` | type | `repo`, `result`, `outcomes` (one `SectionOutcome` per section), `preflightDenied`, `log` |
 | `applyRepository` | function | Execute the plan: the repository converges on the document |
 | `ApplyOptions` | type | The same knobs as `CheckOptions` |

@@ -194,8 +194,8 @@ Every rename, old to new. An old name fails to compile, naming the missing expor
 | `GithubApi` | `GitHubApi` |
 | `GithubClient` | `GitHubClient` |
 | `MissingPermissionPolicy` | `OnMissingPermission` (the input's name) |
-| `checkRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `checkRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretSource?, secretEnv? })` |
-| `applyRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `applyRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretSource?, secretEnv? })` |
+| `checkRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `checkRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretEnv? })`; the document's `secretSource` is `validateSettings`'s knob |
+| `applyRepository(client, { repo, settings, onMissingPermission, sections }, io?)` | `applyRepository(client, repo, settings, { onMissingPermission?, sections?, io?, secretEnv? })` |
 | `RepoRunReport` | `CheckReport`, `ApplyReport` |
 | `RepoRunOptions` | `CheckOptions`, `ApplyOptions` (the knobs alone); the engine's `RepoRunOptions` is in the internal entry |
 | `snapshotRepository(client, repo, { sections?, onMissingPermission?, io? })` | Unchanged call; its options type is `SnapshotOptions` |
@@ -764,7 +764,7 @@ v3   -> ::error::settings.yml has malformed section entries: labels[1].name: "Bu
         result: failed, zero requests
 ```
 
-Every section's file-only checks run at validation, selected or not: duplicate identities (a rename target and the pre-rename name included), malformed lists, an unreadable deploy key, a non-plain value, a non-finite passthrough number, a passthrough alias cycle. The collected issues name their paths, and the run exits 1 before any request.
+Every section's file-only checks run at validation, selected or not: duplicate identities (a rename target and the pre-rename name included), malformed lists, an unreadable deploy key, a secret value that is not a whole-value `$NAME` reference the document's author may use, a non-plain value, a non-finite passthrough number, a passthrough alias cycle. The collected issues name their paths, and the run exits 1 before any request.
 
 Fix the declaration, in the excluded section too. For `@vivswan/github-settings-as-code` consumers: `SectionModule` gains a required `validate(declared)` hook on list modules, so a custom list module without one stops compiling; the [library page](../reference/library.md) documents its shape.
 

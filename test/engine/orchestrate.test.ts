@@ -227,8 +227,6 @@ describe("runForRepo secret references", () => {
       api,
       opts({
         settings: webhookSettings("$WEBHOOK_SECRET"),
-        // Spelled out, the way multi.ts runs the defaults document for a fileless target; the unset-variable test below takes the default.
-        secretSource: "operator",
         secretEnv: { WEBHOOK_SECRET: "s3cret-plaintext" },
       }),
       io,
@@ -260,7 +258,7 @@ describe("runForRepo secret references", () => {
     expect(annotations.some((a) => a.includes("$WEBHOOK_SECRET is unset"))).toBe(true);
   });
 
-  test("check mode validates syntax only: an unset variable passes, a literal fails", async () => {
+  test("check mode reads no environment: an unset variable passes", async () => {
     const api = new MockApi({ [HOOKS_LIST]: { data: [] } });
     const { io } = captureIo();
     const unset = await runForRepo(
@@ -269,70 +267,49 @@ describe("runForRepo secret references", () => {
       io,
     );
     expect(unset.result).toBe("drift"); // the declared hook is missing; no env was read
-    const literalApi = new MockApi({});
-    const literal = await runForRepo(
-      literalApi,
-      opts({ mode: "check", settings: webhookSettings("hunter2") }),
-      io,
+  });
+});
+
+describe("validateSettingsDoc secret references", () => {
+  const LITERAL_HOOK = {
+    webhooks: [{ config: { url: "https://x.test/h", secret: "a-literal-that-would-fail" } }],
+    repository: { has_wiki: false },
+  };
+
+  test("a literal in a section the `sections` allowlist excludes is refused all the same", () => {
+    const { io } = captureIo();
+    const only = SectionSelection.of({ only: ["repository"] })._unsafeUnwrap();
+    expect(validateSettingsDoc(LITERAL_HOOK, "f.yml", only, io)).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "f.yml",
+        issues: [
+          'webhooks: the webhook "https://x.test/h" config.secret carries a literal value, but settings files are committed plaintext - ' +
+            "exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step's env block",
+        ],
+      }),
     );
-    expect(literal.result).toBe("failed");
-    expect(literal.outcomes[0]?.detail[0]).toContain("committed plaintext");
-    // Syntax validation fires before any API call.
-    expect(literalApi.calls).toEqual([]);
+    // The selected section's verdict is the same issue, byte for byte.
+    expect(validateSettingsDoc(LITERAL_HOOK, "f.yml", SectionSelection.ALL, io)).toEqual(
+      validateSettingsDoc(LITERAL_HOOK, "f.yml", only, io),
+    );
   });
 
-  test.each(["apply", "check"] as const)(
-    "a target-sourced reference is refused in %s mode, before any API call",
-    async (mode) => {
-      const api = new MockApi({});
-      const { io, annotations } = captureIo();
-      const result = await runForRepo(
-        api,
-        opts({
-          mode,
-          settings: webhookSettings("$WEBHOOK_SECRET"),
-          secretSource: "target",
-          secretEnv: { WEBHOOK_SECRET: "present-but-irrelevant" },
-        }),
-        io,
-      );
-      expect(result.result).toBe("failed");
-      expect(result.outcomes).toEqual([
-        {
-          key: "webhooks",
-          status: "failed",
-          detail: [expect.stringContaining("target-fetched settings file")],
-        },
-      ]);
-      expect(annotations).toEqual([
-        expect.stringMatching(/^error: webhooks: .*target-fetched settings file/),
-      ]);
-      expect(api.calls).toEqual([]);
-    },
-  );
-
-  test("a section excluded by `sections` cannot fail the run on its references", async () => {
-    const api = new MockApi({ "GET /repos/o/r": { data: { has_wiki: false } } }).allowMutations(
-      "PATCH /repos/o/r",
-    );
+  test("a target-fetched document's reference is refused; the operator default admits it", () => {
     const { io } = captureIo();
-    const result = await runForRepo(
-      api,
-      opts({
-        settings: validated({
-          ...webhookSettings("a-literal-that-would-fail"),
-          repository: { has_wiki: false },
-        }),
-        sections: SectionSelection.of({ only: ["repository"] })._unsafeUnwrap(),
+    const doc = { webhooks: [{ config: { url: "https://x.test/h", secret: "$WEBHOOK_SECRET" } }] };
+    expect(validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, io).isOk()).toBe(true);
+    expect(
+      validateSettingsDoc(doc, "o/r:.github/settings.yml", SectionSelection.ALL, io, {
+        secretSource: "target",
       }),
-      io,
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "o/r:.github/settings.yml",
+        issues: [expect.stringContaining("in a target-fetched settings file")],
+      }),
     );
-    // The excluded section contributes no values, so its literal is never collected, let alone refused.
-    expect(result.result).toBe("applied");
-    expect(result.outcomes.map((o) => [o.key, o.status])).toEqual([
-      ["repository", "applied"],
-      ["webhooks", "excluded"],
-    ]);
   });
 });
 

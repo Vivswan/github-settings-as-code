@@ -1,18 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
-import { collectSecretValues, snapshotSecretReference } from "../../src/engine/secrets.js";
+import { collectSecretReferences, snapshotSecretReference } from "../../src/engine/secrets.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
+import { validateSectionShapes } from "../../src/engine/validate.js";
+import { silentIo } from "../../src/io.js";
 import type { SectionKey, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 
-/** The secret values of one document under the provenance multi.ts decides for its kind. */
-function valuesOf(doc: SettingsFile, source: SettingsSource) {
-  return collectSecretValues(doc, SECTIONS, source);
-}
-
-/** The label collectSecretValues derives for the fleet secret entry. */
+/** The label the actions_secrets module derives for the fleet secret entry. */
 const FLEET_LABEL = 'the secret entry "FLEET_TOKEN"';
-/** The label webhooks derives for the test hook's config.secret. */
-const HOOK_LABEL = 'the webhook "https://x.test/h" config.secret';
 
 /** One document shape per secret-declaring section; a new secret family fails the whole-document tests until its shape is added here. */
 const SECRET_SHAPES: Partial<Record<SectionKey, (ref: string) => unknown>> = {
@@ -36,62 +33,80 @@ function secretDocs(ref: string): Array<[SectionKey, SettingsFile]> {
   });
 }
 
-describe("secret provenance is one source per document", () => {
-  test("a document declaring only a secret-free section contributes no secret values under either source", () => {
+/** The issues validation raises for one document under the provenance multi.ts decides for its kind. */
+function issuesUnder(doc: SettingsFile, source: SettingsSource): readonly string[] {
+  return validateSectionShapes(doc as Record<string, unknown>, "f.yml", source).match(
+    () => [],
+    (problem) => problem.issues,
+  );
+}
+
+/** The operator's document as the run receives it: the collector takes validation's proof, never a raw file. */
+function validated(doc: SettingsFile): ValidatedSettings {
+  return validateSettingsDoc(doc, "f.yml", SectionSelection.ALL, silentIo()).match(
+    (settings) => settings,
+    (problem) => {
+      throw new Error(`fixture failed validation: ${JSON.stringify(problem)}`);
+    },
+  );
+}
+
+describe("secret provenance is one source per document, judged at validation", () => {
+  test("a document declaring only a secret-free section contributes no secret values and no provenance issue", () => {
     const doc = { labels: [{ name: "healthy", color: "00ff00" }] } as SettingsFile;
-    expect(valuesOf(doc, "target")).toEqual([]);
-    expect(valuesOf(doc, "operator")).toEqual([]);
+    expect(collectSecretReferences(validated(doc), SECTIONS)).toEqual([]);
+    expect(issuesUnder(doc, "target")).toEqual([]);
   });
 
-  test.each<[string, SettingsSource]>([
-    ["a remote target's own document is the target's", "target"],
-    ["an operator document (central file or defaults fallback) is the operator's", "operator"],
-  ])("every value in %s, whatever the reference string", (_name, source) => {
+  test("every secret-declaring section's reference is refused in a target document and admitted in an operator's, whatever the string", () => {
     // The source is the document's, never the string's: a target naming the operator's own $FLEET_TOKEN gains nothing.
     for (const [key, doc] of secretDocs("$FLEET_TOKEN")) {
-      expect(
-        valuesOf(doc, source).map((value) => [value.section, value.value, value.source]),
-        `${key}: ${source} document`,
-      ).toEqual([[key, "$FLEET_TOKEN", source]]);
+      expect(issuesUnder(doc, "operator"), `${key}: operator document`).toEqual([]);
+      expect(issuesUnder(doc, "target"), `${key}: target document`).toEqual([
+        expect.stringMatching(
+          new RegExp(
+            `^${key}: .* uses the secret reference \\$FLEET_TOKEN in a target-fetched settings file`,
+          ),
+        ),
+      ]);
     }
   });
 
-  test("the wrapped undeclared-policy form carries the document's source like the plain array", () => {
+  test("the wrapped undeclared-policy form is judged and collected like the plain array", () => {
     const wrapped = {
       actions_secrets: {
         _undeclared: "delete",
         entries: [{ name: "FLEET_TOKEN", value: "$FLEET_TOKEN" }],
       },
     } as SettingsFile;
-    expect(valuesOf(wrapped, "target")).toEqual([
-      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "target" },
+    expect(issuesUnder(wrapped, "target")).toEqual([
+      expect.stringContaining(
+        `actions_secrets: ${FLEET_LABEL} uses the secret reference $FLEET_TOKEN`,
+      ),
     ]);
-    expect(valuesOf(wrapped, "operator")).toEqual([
-      { section: "actions_secrets", label: FLEET_LABEL, value: "$FLEET_TOKEN", source: "operator" },
+    expect(collectSecretReferences(validated(wrapped), SECTIONS)).toEqual([
+      { section: "actions_secrets", name: "FLEET_TOKEN" },
     ]);
   });
 
-  test.each<[SettingsSource]>([["target"], ["operator"]])(
-    "a document mixing several secret sections carries the %s source throughout",
-    (source) => {
-      const doc = {
-        actions_secrets: [{ name: "A", value: "$A" }],
-        webhooks: [{ config: { url: "https://x.test/h", secret: "$H" } }],
-        environments: [{ name: "prod", secrets: [{ name: "E", value: "$E" }] }],
-      } as SettingsFile;
-      // Registry order, so a dropped or duplicated value fails the comparison.
-      expect(valuesOf(doc, source)).toEqual([
-        {
-          section: "environments",
-          label: 'the secret entry "E" of environment "prod"',
-          value: "$E",
-          source,
-        },
-        { section: "actions_secrets", label: 'the secret entry "A"', value: "$A", source },
-        { section: "webhooks", label: HOOK_LABEL, value: "$H", source },
-      ]);
-    },
-  );
+  test("a document mixing several secret sections is collected throughout, in registry order", () => {
+    const doc = {
+      actions_secrets: [{ name: "A", value: "$A" }],
+      webhooks: [{ config: { url: "https://x.test/h", secret: "$H" } }],
+      environments: [{ name: "prod", secrets: [{ name: "E", value: "$E" }] }],
+    } as SettingsFile;
+    // Registry order, so a dropped or duplicated reference fails the comparison.
+    expect(collectSecretReferences(validated(doc), SECTIONS)).toEqual([
+      { section: "environments", name: "E" },
+      { section: "actions_secrets", name: "A" },
+      { section: "webhooks", name: "H" },
+    ]);
+    expect(issuesUnder(doc, "target").map((issue) => issue.split(":")[0])).toEqual([
+      "environments",
+      "actions_secrets",
+      "webhooks",
+    ]);
+  });
 });
 
 describe("snapshotSecretReference", () => {

@@ -14,6 +14,7 @@ import {
   type ValidatedSettings,
   validateSettingsDoc,
 } from "../engine/orchestrate.js";
+import type { SettingsSource } from "../engine/secret-refs.js";
 import { SectionSelection } from "../engine/section-selection.js";
 import {
   type RenderableSnapshot,
@@ -51,6 +52,8 @@ export interface ValidateOptions {
   io?: Io;
   /** The action's `undeclared` input: the fallback policy below a list's wrapper and the file's own; unset by default. */
   undeclared?: UndeclaredPolicy;
+  /** Who authored the document: "operator" (the default) honors `$NAME` secret references, "target" refuses them. */
+  secretSource?: SettingsSource;
 }
 
 export interface ValidateReport {
@@ -69,7 +72,7 @@ export function validateSettings(
     options.source ?? UNNAMED_SOURCE,
     options.sections ?? SectionSelection.ALL,
     out.io,
-    { undeclared: options.undeclared },
+    { undeclared: options.undeclared, secretSource: options.secretSource },
   ).map((settings) => ({ settings, log: out.log() }));
 }
 
@@ -110,7 +113,6 @@ interface RepositoryOptions {
   sections?: SectionSelection;
   onMissingPermission?: RepoRunOptions["onMissingPermission"];
   io?: Io;
-  secretSource?: RepoRunOptions["secretSource"];
   secretEnv?: RepoRunOptions["secretEnv"];
 }
 
@@ -143,7 +145,6 @@ async function runMode(
       mode,
       onMissingPermission: options.onMissingPermission ?? "fail",
       sections: options.sections ?? SectionSelection.ALL,
-      secretSource: options.secretSource,
       secretEnv: options.secretEnv,
     },
     out.io,

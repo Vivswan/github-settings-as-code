@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   RESERVED_REF_PREFIXES,
   resolveSecretRefs,
-  type SourcedSecretValue,
   validateSecretRef,
 } from "../../src/engine/secret-refs.js";
 
@@ -98,15 +97,9 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   });
 });
 
-const operator = (value: string): SourcedSecretValue => ({
-  value,
-  label: LABEL,
-  source: "operator",
-});
-
-describe("resolveSecretRefs (resolution phase, injected environment)", () => {
+describe("resolveSecretRefs (resolution phase over validated names, injected environment)", () => {
   test("a valid reference resolves to the env value and lists it for masking", () => {
-    const result = resolveSecretRefs([operator("$WEBHOOK_SECRET")], {
+    const result = resolveSecretRefs(["WEBHOOK_SECRET"], {
       WEBHOOK_SECRET: "s3cret-value",
     });
     expect(result.ok).toBe(true);
@@ -118,7 +111,7 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   });
 
   test("two variables holding the same plaintext mask it once", () => {
-    const result = resolveSecretRefs([operator("$FIRST_NAME"), operator("$SECOND_NAME")], {
+    const result = resolveSecretRefs(["FIRST_NAME", "SECOND_NAME"], {
       FIRST_NAME: "identical",
       SECOND_NAME: "identical",
     });
@@ -131,7 +124,7 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   });
 
   test("an unset variable fails, naming the reference and the rule", () => {
-    const result = resolveSecretRefs([operator("$MISSING_SECRET")], {});
+    const result = resolveSecretRefs(["MISSING_SECRET"], {});
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected failure");
@@ -142,7 +135,7 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
   });
 
   test("a set-but-empty variable fails: an empty lookup must not write an empty secret", () => {
-    const result = resolveSecretRefs([operator("$EMPTY_SECRET")], { EMPTY_SECRET: "" });
+    const result = resolveSecretRefs(["EMPTY_SECRET"], { EMPTY_SECRET: "" });
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected failure");
@@ -151,46 +144,15 @@ describe("resolveSecretRefs (resolution phase, injected environment)", () => {
     expect(result.errors[0]).toContain("set but empty");
   });
 
-  test("every broken reference is reported, not just the first", () => {
-    const result = resolveSecretRefs(
-      [operator("$UNSET_ONE"), operator("literal"), operator("$OK_SECRET"), operator("$EMPTY_ONE")],
-      { OK_SECRET: "fine", EMPTY_ONE: "" },
-    );
+  test("every unresolved reference is reported, not just the first", () => {
+    const result = resolveSecretRefs(["UNSET_ONE", "OK_SECRET", "EMPTY_ONE"], {
+      OK_SECRET: "fine",
+      EMPTY_ONE: "",
+    });
     expect(result.ok).toBe(false);
     if (result.ok) {
       throw new Error("expected failure");
     }
-    expect(result.errors).toHaveLength(3);
-  });
-
-  test("a target-sourced value fails resolution even when the variable is set", () => {
-    const result = resolveSecretRefs(
-      [{ value: "$WEBHOOK_SECRET", label: LABEL, source: "target" }],
-      {
-        WEBHOOK_SECRET: "would-leak",
-      },
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected failure");
-    }
-    expect(result.errors[0]).toContain("target-fetched");
-    // The rejection is about routing, and it must not read or echo the value.
-    expect(result.errors[0]).not.toContain("would-leak");
-  });
-
-  test("a mixed batch cannot launder a target reference behind operator ones", () => {
-    // Every value carries its own provenance, so one resolution can span documents and the whole batch fails on the target's.
-    const result = resolveSecretRefs(
-      [operator("$FLEET_SECRET"), { value: "$FLEET_SECRET", label: LABEL, source: "target" }],
-      { FLEET_SECRET: "fleet-value" },
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("expected failure");
-    }
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toContain("target-fetched");
-    expect(result.errors[0]).not.toContain("fleet-value");
+    expect(result.errors).toHaveLength(2);
   });
 });

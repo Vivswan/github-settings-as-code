@@ -284,6 +284,58 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
   });
 });
 
+describe("secret values are judged at validation, under the document's provenance", () => {
+  const LITERAL =
+    'the secret entry "DEPLOY_TOKEN" carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step\'s env block';
+
+  test("a literal value is refused under the section key, in every secrets-carrying section", () => {
+    expect(issuesOf({ actions_secrets: [{ name: "DEPLOY_TOKEN", value: "hunter2" }] })).toEqual([
+      `actions_secrets: ${LITERAL}`,
+    ]);
+    expect(
+      issuesOf({
+        environments: [{ name: "prod", secrets: [{ name: "DEPLOY_TOKEN", value: "hunter2" }] }],
+      }),
+    ).toEqual([
+      `environments: ${LITERAL.replace('"DEPLOY_TOKEN"', '"DEPLOY_TOKEN" of environment "prod"')}`,
+    ]);
+    expect(
+      issuesOf({ webhooks: [{ config: { url: "https://x.test/h", secret: "prefix-$TOKEN" } }] }),
+    ).toEqual([
+      'webhooks: the webhook "https://x.test/h" config.secret embeds $TOKEN without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference',
+    ]);
+  });
+
+  test("a whole-value reference passes as an operator's; the same document from a target is refused", () => {
+    const doc = { actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }] };
+    expect(validateSectionShapes(doc, "f.yml").isOk()).toBe(true);
+    expect(validateSectionShapes(doc, "f.yml", "operator").isOk()).toBe(true);
+    expect(
+      validateSectionShapes(doc, "o/r:.github/settings.yml", "target").match(
+        () => null,
+        (problem) => problem.issues,
+      ),
+    ).toEqual([
+      'actions_secrets: the secret entry "DEPLOY_TOKEN" uses the secret reference $DEPLOY_TOKEN in a target-fetched settings file; ' +
+        "references are honored only in operator-owned settings sources, so a target repository cannot read the operator's environment",
+    ]);
+  });
+
+  test("a secret problem joins the section's other issues in one list, after the shape's own", () => {
+    expect(
+      issuesOf({
+        actions_secrets: [
+          { name: "A", value: "hunter2" },
+          { name: "a", value: "$A" },
+        ],
+      }),
+    ).toEqual([
+      expect.stringMatching(/^actions_secrets\[1\]\.name: /),
+      `actions_secrets: the secret entry "A" carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step's env block`,
+    ]);
+  });
+});
+
 describe("closed-surface sections reject unrecognized entry keys upfront", () => {
   const ENTRIES: Partial<Record<SectionKey, Record<string, unknown>>> = {
     collaborators: { username: "alice" },

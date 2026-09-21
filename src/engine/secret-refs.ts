@@ -79,38 +79,26 @@ export type SecretRefsResolution =
     }
   | { ok: false; errors: string[] };
 
-/**
- * One secret field's value with the provenance of the DOCUMENT that declared it, decided once where the document is
- * chosen (flows/multi.ts readTargetSettings).
- */
-export interface SourcedSecretValue {
-  readonly value: string;
-  /** The owning entry as the settings file spells it, never a value. */
-  readonly label: string;
-  readonly source: SettingsSource;
+/** The variable a validated whole-value reference names: REFERENCE_RE admits `$NAME`, so the name follows the `$`. */
+export function referenceName(reference: string): string {
+  return reference.slice(1);
 }
 
 /**
- * Every value re-runs validateSecretRef with ITS OWN source, so a mixed batch cannot launder a target-declared reference
- * behind operator-declared ones. All problems are collected: a run with three broken references says so once.
+ * Every reference arrives from a validated document (validateSectionShapes judged its form and its provenance), so
+ * resolution is the environment lookup alone. All problems are collected: a run with three unset variables says so once.
  *
  * unset variable          -> fails
  * set but empty variable  -> fails too: an empty vault lookup must not write an empty secret
  */
 export function resolveSecretRefs(
-  values: readonly SourcedSecretValue[],
+  names: readonly string[],
   env: Record<string, string | undefined> = process.env,
 ): SecretRefsResolution {
   const errors: string[] = [];
   const resolved: Record<string, string> = {};
   const mask = new Set<string>();
-  for (const { value, source, label } of values) {
-    const checked = validateSecretRef(value, source, label);
-    if (!checked.ok) {
-      errors.push(checked.error);
-      continue;
-    }
-    const { name } = checked.ref;
+  for (const name of names) {
     const plaintext = env[name];
     if (plaintext === undefined) {
       errors.push(
