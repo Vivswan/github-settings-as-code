@@ -1,5 +1,5 @@
 /**
- * No scenario reads the bypass_actors visibility rule off the wire directly, so it is pinned here against the handler.
+ * No scenario observes the list's bypass_actors omission or the write-grade `[]` fill off the wire, so both are pinned here against the handler.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -30,19 +30,6 @@ describe("rulesets bypass_actors visibility", () => {
     );
     expect(response).toEqual({ status: 200, body: [withoutBypass] });
   });
-
-  const grades = [
-    { grade: "read", body: withoutBypass },
-    { grade: "write", body: seeded },
-  ] as const;
-  for (const { grade, body } of grades) {
-    test(`the by-id read at grade ${grade} answers ${grade === "write" ? "with" : "without"} bypass_actors`, () => {
-      const response = rulesetsMockHandlers["rulesets.get"](
-        handlerTestContext("rulesets.get", state(), { params: { ruleset_id: "42" }, grade }),
-      );
-      expect(response).toEqual({ status: 200, body });
-    });
-  }
 
   test("a ruleset stored without the key reads bypass_actors: [] at write grade, like GitHub", () => {
     // Otherwise an admin declaring a non-empty list against such a ruleset would see the hidden-key notice instead of the genuine drift.
