@@ -49,49 +49,57 @@ describe("getRepoFile", () => {
     expect(result).toEqual({ missing: true });
   });
 
-  test.each([
-    ["404", notFound, 404],
-    ["403", forbidden, 403],
-  ])(
-    "a %s on the ref read is an inconclusive proof naming the grant and the empty-branch case, never a missing file",
-    async (_status, denied, status) => {
-      const state = stubFetch([notFound, repo(), denied]);
-      const result = await getRepoFile(api(), "o/r", FILE);
-      expect(state.paths).toEqual([CONTENTS, REPO, REF]);
-      expect(result).toEqual({
-        unproven:
-          `cannot prove ${FILE} is absent: reading the default branch ref heads/main returned ` +
-          `${status}. Grant the token Contents: read on this repository, or initialize its ` +
-          `default branch; a repository whose file cannot be read never receives the defaults`,
-      });
-    },
-  );
-
-  test("a rate-limited 403 on the ref read keeps its classification instead of blaming the grant", async () => {
-    const limited = () =>
-      new Response(JSON.stringify({ message: "API rate limit exceeded for user ID 1." }), {
-        status: 403,
-        headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
-      });
-    const state = stubFetch([notFound, repo(), limited]);
-    const result = await getRepoFile(api(), "o/r", FILE);
-    expect(state.paths).toEqual([CONTENTS, REPO, ...Array<string>(1 + MAX_RETRIES).fill(REF)]);
-    expect(result).toEqual({
-      error: {
-        status: 403,
-        message: "API rate limit exceeded for user ID 1.",
-        body: JSON.stringify({ message: "API rate limit exceeded for user ID 1." }),
-      },
-    });
+  const unproven = (status: number) => ({
+    unproven:
+      `cannot prove ${FILE} is absent: reading the default branch ref heads/main returned ` +
+      `${status}. Grant the token Contents: read on this repository, or initialize its ` +
+      `default branch; a repository whose file cannot be read never receives the defaults`,
   });
-
-  test("any other ref read failure surfaces as itself, after the client's own retries", async () => {
-    const state = stubFetch([notFound, repo(), () => json(500, { message: "boom" })]);
-    const result = await getRepoFile(api(), "o/r", FILE);
-    expect(state.paths).toEqual([CONTENTS, REPO, ...Array<string>(1 + MAX_RETRIES).fill(REF)]);
-    expect(result).toEqual({
-      error: { status: 500, message: "boom", body: JSON.stringify({ message: "boom" }) },
+  const limited = () =>
+    new Response(JSON.stringify({ message: "API rate limit exceeded for user ID 1." }), {
+      status: 403,
+      headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
     });
+  test.each([
+    [
+      "404",
+      "is an inconclusive proof naming the grant and the empty-branch case, never a missing file",
+      notFound,
+      1,
+      unproven(404),
+    ],
+    [
+      "403",
+      "is an inconclusive proof naming the grant and the empty-branch case, never a missing file",
+      forbidden,
+      1,
+      unproven(403),
+    ],
+    [
+      "rate-limited 403",
+      "keeps its classification instead of blaming the grant",
+      limited,
+      1 + MAX_RETRIES,
+      {
+        error: {
+          status: 403,
+          message: "API rate limit exceeded for user ID 1.",
+          body: JSON.stringify({ message: "API rate limit exceeded for user ID 1." }),
+        },
+      },
+    ],
+    [
+      "500",
+      "surfaces as itself, after the client's own retries",
+      () => json(500, { message: "boom" }),
+      1 + MAX_RETRIES,
+      { error: { status: 500, message: "boom", body: JSON.stringify({ message: "boom" }) } },
+    ],
+  ])("a %s on the ref read %s", async (_status, _outcome, refResponse, refReads, expected) => {
+    const state = stubFetch([notFound, repo(), refResponse]);
+    const result = await getRepoFile(api(), "o/r", FILE);
+    expect(state.paths).toEqual([CONTENTS, REPO, ...Array<string>(refReads).fill(REF)]);
+    expect(result).toEqual(expected);
   });
 
   test("a contents 404 on an invisible repo surfaces the repo-level error before any ref read", async () => {

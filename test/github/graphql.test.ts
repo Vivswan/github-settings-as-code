@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { GraphqlOp } from "../../src/github/api.js";
 import {
+  DEFAULT_API_VERSION,
   GitHubApi,
   isPermissionError,
   isRateLimitError,
@@ -74,38 +75,28 @@ describe("tryGraphql errors[] mapping", () => {
   const errorResponse = (type: string, message: string) =>
     graphql({ data: null, errors: [{ type, path: ["repository"], message }] });
 
-  test("NOT_FOUND maps to a 404 permission-classifiable error carrying its observed type", async () => {
-    stubFetch([() => errorResponse("NOT_FOUND", "Could not resolve to a Repository")]);
-    const result = await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.status).toBe(404);
-    expect(result.error.message).toBe("Could not resolve to a Repository");
-    expect(result.error.graphqlTypes).toEqual(["NOT_FOUND"]);
-    expect(isPermissionError(result.error)).toBe(true);
-  });
-
-  test("FORBIDDEN and INSUFFICIENT_SCOPES map to 403", async () => {
-    for (const type of ["FORBIDDEN", "INSUFFICIENT_SCOPES"]) {
-      stubFetch([() => errorResponse(type, "nope")]);
+  const typeRows: Array<[type: string, status: number, rateLimited: true | undefined]> = [
+    ["NOT_FOUND", 404, undefined],
+    ["FORBIDDEN", 403, undefined],
+    ["INSUFFICIENT_SCOPES", 403, undefined],
+    ["RATE_LIMITED", 403, true],
+  ];
+  test.each(typeRows)(
+    "errors[].type %s maps to a %d error carrying its observed type",
+    async (type, status, rateLimited) => {
+      stubFetch([() => errorResponse(type, "Could not resolve to a Repository")]);
       const result = await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-      expect("error" in result && result.error.status).toBe(403);
-      expect("error" in result && isPermissionError(result.error)).toBe(true);
-    }
-  });
-
-  test("RATE_LIMITED maps to 403 with the content-free rateLimited flag", async () => {
-    stubFetch([() => errorResponse("RATE_LIMITED", "API rate limit exceeded")]);
-    const result = await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r");
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.status).toBe(403);
-    expect(result.error.rateLimited).toBe(true);
-    expect(isRateLimitError(result.error)).toBe(true);
-    expect(isPermissionError(result.error)).toBe(false);
-  });
+      if (!("error" in result)) {
+        throw new Error("expected an error result");
+      }
+      expect(result.error.status).toBe(status);
+      expect(result.error.message).toBe("Could not resolve to a Repository");
+      expect(result.error.graphqlTypes).toEqual([type]);
+      expect(result.error.rateLimited).toBe(rateLimited);
+      expect(isRateLimitError(result.error)).toBe(rateLimited === true);
+      expect(isPermissionError(result.error)).toBe(rateLimited !== true);
+    },
+  );
 
   test("an unknown (or missing) type maps to 422 with joined messages", async () => {
     stubFetch([
@@ -152,21 +143,20 @@ describe("tryGraphql errors[] mapping", () => {
     expect(result.error.graphqlTypes).toEqual(["FORBIDDEN", "UNPROCESSABLE"]);
   });
 
-  test("a malformed errors value fails closed even beside valid-looking data", async () => {
-    // {data, errors: null} must never read as "no errors": the contract makes errors, when present, a non-empty list. (An errors OBJECT trips the
-    // throttling plugin's own inspection first and never reaches this guard.)
-    stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors: null })]);
-    expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
-      failed: expect.stringMatching(/GRAPHQL RepoToggles returned a malformed errors value/),
-    });
-  });
-
-  test("an empty errors array fails closed (present means non-empty)", async () => {
-    stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors: [] })]);
-    expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
-      failed: expect.stringMatching(/GRAPHQL RepoToggles returned a malformed errors value/),
-    });
-  });
+  // {data, errors: null} and {data, errors: []} must never read as "no errors": the contract makes errors, when present, a non-empty list. (An
+  // errors OBJECT trips the throttling plugin's own inspection first and never reaches this guard.)
+  test.each([
+    ["null", null],
+    ["an empty array", []],
+  ])(
+    "a malformed errors value (%s) fails closed even beside valid-looking data",
+    async (_shape, errors) => {
+      stubFetch([() => graphql({ data: { repository: { id: "R_1" } }, errors })]);
+      expect(await api().tryGraphql(READ_OP, { owner: "o", repo: "r" }, "o/r")).toEqual({
+        failed: expect.stringMatching(/GRAPHQL RepoToggles returned a malformed errors value/),
+      });
+    },
+  );
 
   // The ladder reads the rate limit first: beside FORBIDDEN it must not read as a permission failure (the user would be told to fix their PAT),
   // beside UNPROCESSABLE not as a bad payload.
@@ -446,7 +436,7 @@ describe("tryGraphql tracing and redaction", () => {
         token: "t",
         io: traceIo().io,
         baseUrl: "https://api.test",
-        apiVersion: "2022-11-28",
+        apiVersion: DEFAULT_API_VERSION,
         retryBaseMs: 1,
         scheduler,
       });

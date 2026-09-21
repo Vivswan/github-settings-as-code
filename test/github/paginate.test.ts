@@ -5,18 +5,24 @@ import { MockApi } from "../mock-api.js";
 const fullPage = (prefix: string) => Array.from({ length: 100 }, (_, i) => `${prefix}${i}`);
 
 describe("paginate", () => {
-  test("walks pages until a short one and concatenates the items", async () => {
-    const api = new MockApi({
-      "GET /things?per_page=100&page=1": { data: fullPage("a") },
-      "GET /things?per_page=100&page=2": { data: ["b0", "b1"] },
-    });
-    const result = await paginate(api, "/things");
-    expect(result).toEqual({ items: [...fullPage("a"), "b0", "b1"] });
-    expect(api.calls.map((c) => c.path)).toEqual([
-      "/things?per_page=100&page=1",
-      "/things?per_page=100&page=2",
-    ]);
-  });
+  test.each([
+    ["no stop", undefined],
+    ["a stop that never fires", () => false],
+  ])(
+    "with %s, the walk runs until a short page and concatenates the items",
+    async (_name, stop) => {
+      const api = new MockApi({
+        "GET /things?per_page=100&page=1": { data: fullPage("a") },
+        "GET /things?per_page=100&page=2": { data: ["b0", "b1"] },
+      });
+      const result = await paginate(api, "/things", undefined, stop);
+      expect(result).toEqual({ items: [...fullPage("a"), "b0", "b1"] });
+      expect(api.calls.map((c) => c.path)).toEqual([
+        "/things?per_page=100&page=1",
+        "/things?per_page=100&page=2",
+      ]);
+    },
+  );
 
   test("stop ends the walk early with the items collected so far", async () => {
     const api = new MockApi({
@@ -26,19 +32,6 @@ describe("paginate", () => {
     const result = await paginate(api, "/things", undefined, (items) => items.includes("a5"));
     expect(result).toEqual({ items: fullPage("a") });
     expect(api.calls.map((c) => c.path)).toEqual(["/things?per_page=100&page=1"]);
-  });
-
-  test("a stop that never fires leaves paging behavior unchanged", async () => {
-    const api = new MockApi({
-      "GET /things?per_page=100&page=1": { data: fullPage("a") },
-      "GET /things?per_page=100&page=2": { data: ["b0"] },
-    });
-    const result = await paginate(api, "/things", undefined, () => false);
-    expect(result).toEqual({ items: [...fullPage("a"), "b0"] });
-    expect(api.calls.map((c) => c.path)).toEqual([
-      "/things?per_page=100&page=1",
-      "/things?per_page=100&page=2",
-    ]);
   });
 
   test("an existing query string keeps its params and gains the page ones", async () => {
