@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { err, ok } from "neverthrow";
 import { collectingIo, concludeRender, type RenderConfig, runRender } from "../../src/index.js";
 import { withTempDir } from "../temp-dir.js";
@@ -155,25 +155,40 @@ describe("runRender writes through the shared writer", () => {
     }),
   );
 
-  test("a rendered-file that spells a layer's link in another case is refused on a case-insensitive filesystem", () =>
-    withTempDir("run-merge-", (dir) => {
-      writeFileSync(join(dir, "Probe"), "");
-      const caseInsensitive = existsSync(join(dir, "probe"));
-      twoLayers(dir);
-      const alias = join(dir, "alias.yml");
-      symlinkSync("repo.yml", alias);
-      const layers = [join(dir, "fleet.yml"), alias];
-      const renderedFile = join(dir, "ALIAS.YML");
-      const merged = merge(layers, renderedFile);
-      if (caseInsensitive) {
-        expect(merged).toEqual(
-          err({ code: "rendered-file-is-layer" as const, renderedFile, index: 1, layer: alias }),
-        );
-        expect(lstatSync(alias).isSymbolicLink()).toBe(true);
-      } else {
-        expect(merged).toEqual(ok({ layers, renderedFile }));
-      }
-    }));
+  test.each<[string, (dir: string) => string, boolean]>([
+    ["an existing layer", (dir) => join(dir, "repo.yml"), false],
+    [
+      "a layer's link",
+      (dir) => {
+        const alias = join(dir, "alias.yml");
+        symlinkSync("repo.yml", alias);
+        return alias;
+      },
+      true,
+    ],
+  ])(
+    "a rendered-file that spells %s in another case is refused on a case-insensitive filesystem",
+    (_case, layerAt, isLink) =>
+      withTempDir("run-merge-", (dir) => {
+        writeFileSync(join(dir, "Probe"), "");
+        const caseInsensitive = existsSync(join(dir, "probe"));
+        twoLayers(dir);
+        const layer = layerAt(dir);
+        const layers = [join(dir, "fleet.yml"), layer];
+        const renderedFile = join(dir, basename(layer).toUpperCase());
+        const merged = merge(layers, renderedFile);
+        if (caseInsensitive) {
+          expect(merged).toEqual(
+            err({ code: "rendered-file-is-layer" as const, renderedFile, index: 1, layer }),
+          );
+          expect(lstatSync(layer).isSymbolicLink()).toBe(isLink);
+          expect(readFileSync(join(dir, "repo.yml"), "utf8")).toBe(REPO);
+        } else {
+          expect(merged).toEqual(ok({ layers, renderedFile }));
+          expect(readFileSync(renderedFile, "utf8")).toBe(MERGED);
+        }
+      }),
+  );
 
   test("a layer that IS the link at the destination is refused: the rename would replace the layer's own entry", () =>
     withTempDir("run-merge-", (dir) => {
@@ -222,29 +237,6 @@ describe("runRender writes through the shared writer", () => {
       expect(readFileSync(join(dir, "elsewhere", "out.yml"), "utf8")).toBe(MERGED);
       expect(readdirSync(join(dir, "elsewhere")).sort()).toEqual(["inner", "out.yml"]);
       expect(readdirSync(dir).filter((name) => name.startsWith(".gsac-"))).toEqual([]);
-    }));
-
-  test("a rendered-file that spells an existing layer in another case is refused on a case-insensitive filesystem", () =>
-    withTempDir("run-merge-", (dir) => {
-      writeFileSync(join(dir, "Probe"), "");
-      const caseInsensitive = existsSync(join(dir, "probe"));
-      const layers = twoLayers(dir);
-      const renderedFile = join(dir, "REPO.YML");
-      const merged = merge(layers, renderedFile);
-      if (caseInsensitive) {
-        expect(merged).toEqual(
-          err({
-            code: "rendered-file-is-layer" as const,
-            renderedFile,
-            index: 1,
-            layer: join(dir, "repo.yml"),
-          }),
-        );
-        expect(readFileSync(join(dir, "repo.yml"), "utf8")).toBe(REPO);
-      } else {
-        expect(merged).toEqual(ok({ layers, renderedFile }));
-        expect(readFileSync(renderedFile, "utf8")).toBe(MERGED);
-      }
     }));
 
   test("a rendered-file with a trailing slash fails on the rename, staged under the directory's own hidden name", () =>

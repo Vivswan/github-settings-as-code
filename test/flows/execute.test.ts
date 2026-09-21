@@ -9,6 +9,7 @@ import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import {
   type ArtifactUploader,
   collectingIo,
+  DEFAULT_API_VERSION,
   executeRun,
   parseRepoSlug,
   type RunConfig,
@@ -26,7 +27,7 @@ type SingleConfig = Extract<RunConfig, { kind: "single" }>;
 const single = (overrides: Partial<SingleConfig> = {}): SingleConfig => ({
   kind: "single",
   token: "ghp_executor_test",
-  apiVersion: "2022-11-28",
+  apiVersion: DEFAULT_API_VERSION,
   mode: "check",
   repo: parseRepoSlug("o/r")._unsafeUnwrap(),
   settingsFile: join(ROOT, "test", "fixtures", "single.yml"),

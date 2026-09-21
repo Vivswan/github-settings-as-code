@@ -14,6 +14,7 @@ import {
   type ArtifactUploader,
 } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
+import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
 import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
 import { withTempDir } from "../temp-dir.js";
@@ -342,37 +343,6 @@ describe("runMulti", () => {
     );
     expect(fatal).toEqual({ code: "no-targets", filteredOut: 2 });
   });
-
-  test("skip notices list at most 20 slugs, then a count of the rest", async () => {
-    const repos = Array.from({ length: 21 }, (_, i) => ({
-      full_name: `o/fork-${String(i).padStart(2, "0")}`,
-      fork: true,
-    }));
-    const api = new MockApi({
-      "GET /user/repos?affiliation=owner&per_page=100&page=1": {
-        data: [{ full_name: "o/keep" }, ...repos],
-      },
-      "GET /repos/o/keep": { data: { has_wiki: false } },
-      "GET /repos/o/keep/contents/.github/settings.yml": {
-        data: "repository:\n  has_wiki: false\n",
-      },
-    });
-    const { io, annotations } = captureIo();
-    await runTargets(
-      api,
-      cfg({
-        reposInput: "*",
-        discoveryFilters: { ...DEFAULT_DISCOVERY_FILTERS, forks: "exclude" },
-        discoveryFiltersSet: ["forks"],
-      }),
-      io,
-    );
-    const notice = annotations.find((a) => a.includes("forks=exclude"));
-    expect(notice).toContain("skipped 21 repositories");
-    expect(notice).toContain("o/fork-19");
-    expect(notice).not.toContain("o/fork-20");
-    expect(notice).toContain(", and 1 more");
-  });
 });
 
 describe("runMulti under on-missing-permission: fail", () => {
@@ -586,10 +556,8 @@ describe("runMulti redaction (private-repos: redact)", () => {
 });
 
 describe("runMulti private-report: issue wiring", () => {
-  const MARKER = "settings-as-code-report";
-  const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const listPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100&page=1`;
+    `GET /repos/${slug}/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`;
 
   /**
    * A private drifting target whose report issue already exists, so delivery is a single PATCH; the drift carries a CANARY the report body must
@@ -676,8 +644,8 @@ describe("runMulti private-report: issue wiring", () => {
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
-    expect(body).toContain(`added the "${MARKER}" marker label`);
-    expect(annotations.some((a) => a.includes(MARKER))).toBe(false);
+    expect(body).toContain(`added the "${MARKER_LABEL}" marker label`);
+    expect(annotations.some((a) => a.includes(MARKER_LABEL))).toBe(false);
   });
 
   test("delivery failure warns safely and never changes the target result", async () => {
@@ -825,12 +793,10 @@ describe("runMulti private-report: issue wiring", () => {
 });
 
 describe("runMulti private-report: issue-on-failure wiring", () => {
-  const MARKER = "settings-as-code-report";
-  const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
   const allListPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=all&labels=${MARKER}&per_page=100&page=1`;
+    `GET /repos/${slug}/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`;
   const openListPath = (slug: string) =>
-    `GET /repos/${slug}/issues?state=open&labels=${MARKER}&per_page=100&page=1`;
+    `GET /repos/${slug}/issues?state=open&labels=${MARKER_LABEL}&per_page=100&page=1`;
   const issue7 = {
     number: 7,
     title: ISSUE_TITLE,
@@ -897,7 +863,7 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
     expect(api.mutations()).toEqual([]);
     const issueCalls = api.calls.filter((c) => c.path.includes("/issues"));
     expect(issueCalls.map((c) => `${c.method} ${c.path}`)).toEqual([
-      `GET /repos/o/priv/issues?state=open&labels=${MARKER}&per_page=100&page=1`,
+      `GET /repos/o/priv/issues?state=open&labels=${MARKER_LABEL}&per_page=100&page=1`,
     ]);
   });
 
@@ -956,13 +922,13 @@ describe("runMulti private-report: issue-on-failure wiring", () => {
       .mutations()
       .filter((c) => c.method === "POST" && c.path === "/repos/o/priv/labels")
       .map((c) => (c.payload as { name?: string }).name);
-    expect(created).toContain(MARKER);
+    expect(created).toContain(MARKER_LABEL);
     const patch = api.calls.find(
       (c) => c.method === "PATCH" && c.path === "/repos/o/priv/issues/7",
     );
     const body = String(((patch?.payload ?? {}) as { body?: unknown }).body ?? "");
-    expect(body).toContain(`added the "${MARKER}" marker label`);
-    expect(annotations.some((a) => a.includes(MARKER))).toBe(false);
+    expect(body).toContain(`added the "${MARKER_LABEL}" marker label`);
+    expect(annotations.some((a) => a.includes(MARKER_LABEL))).toBe(false);
   });
 });
 

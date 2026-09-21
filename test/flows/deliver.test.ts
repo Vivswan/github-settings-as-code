@@ -22,14 +22,12 @@ import {
 import type { Io } from "../../src/io.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem } from "../../src/problem.js";
-import type { ArtifactUploader } from "../../src/report/artifact-report.js";
+import { ARTIFACT_NAME, type ArtifactUploader } from "../../src/report/artifact-report.js";
 import { REPORT_HEADING } from "../../src/report/composer.js";
 import type { PrivateReportChannel } from "../../src/report/delivery.js";
+import { ISSUE_TITLE, MARKER_LABEL } from "../../src/report/issue-report.js";
 import { captureIo } from "../io/capture.js";
 import { MockApi } from "../mock-api.js";
-
-const MARKER = "settings-as-code-report";
-const ISSUE_TITLE = "[automated] settings-as-code: private settings report";
 
 /** A MockApi whose requests land in the same event log as the port's lines. */
 class TracingApi extends MockApi {
@@ -76,7 +74,7 @@ const SHOWN: Exposure = { kind: "shown" };
 
 const issueRoutes = {
   "POST /repos/o/priv/labels": { error: { status: 422, message: "exists", body: "" } },
-  [`GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`]: {
+  [`GET /repos/o/priv/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`]: {
     data: [
       {
         number: 7,
@@ -122,31 +120,28 @@ describe("runOutcome", () => {
 });
 
 describe("engineOutcome", () => {
-  test("passes a run through when preflight denied nothing", () => {
+  const denialLine = (count: string) =>
+    `annotate error: preflight failed: the token cannot access ${count}, so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections`;
+  test.each<[string[], RepoResult, string | undefined, string[]]>([
+    [[], "applied", undefined, []],
+    [
+      ["labels"],
+      "failed",
+      "preflight denied 1 section; nothing was applied to this repository",
+      [denialLine("1 section")],
+    ],
+    [
+      ["labels", "rulesets"],
+      "failed",
+      "preflight denied 2 sections; nothing was applied to this repository",
+      [denialLine("2 sections")],
+    ],
+  ])("a preflight denial of %j on a %s run", (denied, result, note, expectedEvents) => {
     const { io, events } = captureIo();
-    const ran = { repo: "o/r", result: "applied" as const, outcomes: [], preflightDenied: [] };
-    expect(engineOutcome(ran, io)).toEqual({ result: "applied", outcomes: [] });
-    expect(events).toEqual([]);
+    const ran = { repo: "o/r", result, outcomes: [], preflightDenied: denied };
+    expect(engineOutcome(ran, io)).toEqual({ result, outcomes: [], note });
+    expect(events).toEqual(expectedEvents);
   });
-
-  test.each<[string[], string]>([
-    [["labels"], "1 section"],
-    [["labels", "rulesets"], "2 sections"],
-  ])(
-    "turns a preflight denial of %j into one channel line and a note counting %s",
-    (denied, count) => {
-      const { io, events } = captureIo();
-      const ran = { repo: "o/r", result: "failed" as const, outcomes: [], preflightDenied: denied };
-      expect(engineOutcome(ran, io)).toEqual({
-        result: "failed",
-        outcomes: [],
-        note: `preflight denied ${count}; nothing was applied to this repository`,
-      });
-      expect(events).toEqual([
-        `annotate error: preflight failed: the token cannot access ${count}, so nothing was applied to this repository. Grant the permissions named above, or set on-missing-permission: warn to skip those sections`,
-      ]);
-    },
-  );
 });
 
 describe("withDelivery", () => {
@@ -224,7 +219,7 @@ describe("withDelivery", () => {
         );
         expect(events).toEqual([
           "api POST /repos/o/priv/labels",
-          `api GET /repos/o/priv/issues?state=all&labels=${MARKER}&per_page=100&page=1`,
+          `api GET /repos/o/priv/issues?state=all&labels=${MARKER_LABEL}&per_page=100&page=1`,
           "api PATCH /repos/o/priv/issues/7",
           "log: report: updated issue #7 in private repository #1",
           `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
@@ -290,7 +285,7 @@ describe("withDelivery", () => {
     expect(events).toEqual([
       `annotate warning: private repository #1: drift - labels. ${REDACTED_NOTE}`,
       `annotate warning: private repository #2: drift - labels. ${REDACTED_NOTE}`,
-      "upload settings-as-code-private-report",
+      `upload ${ARTIFACT_NAME}`,
     ]);
     expect(uploads).toHaveLength(1);
     expect(api.calls).toEqual([]);
@@ -322,7 +317,7 @@ describe("withDelivery", () => {
         uploader,
       ),
     ).rejects.toThrow("engine bug");
-    expect(uploads).toEqual(["settings-as-code-private-report"]);
+    expect(uploads).toEqual([ARTIFACT_NAME]);
   });
 });
 
