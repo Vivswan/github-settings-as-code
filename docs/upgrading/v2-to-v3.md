@@ -390,7 +390,7 @@ For `@vivswan/github-settings-as-code` consumers.
 | `parseConfig(read, env)`; the command line refused `private-report: artifact` before calling it, and the flows checked for the uploader again (`artifact-uploader-missing`) | `parseConfig(read, env, { artifactUpload })`: the one refusal, `input-artifact-unsupported`; `runSingle` and `runMulti` no longer check |
 | `executeRun(cfg, deps): Promise<number>`, with `deps.describe` rewording a fatal problem | `executeRun(cfg, deps): Promise<RunEnd>`, `{ exitCode, fatal? }`; `failRun(io, problem)` takes no wording hook |
 | `validateSettingsDoc(doc, source, onlySections: ReadonlySet<SectionKey>, io)`; `validateSettings(doc, { sections?: ReadonlySet<SectionKey> })` | Both take a `SectionSelection` (`SectionSelection.ALL` for no allowlist) |
-| `parseSnapshotFileConfig(read, env, snapshotFile)` | `parseSnapshotFileConfig(read, env, "settings-file")` reads the destination itself; `snapshotFileDestination(read, "settings-file")` names it before parsing |
+| `parseSnapshotFileConfig(read, env, snapshotFile)` | `parseSnapshotFileConfig(read, env)` reads the `settings-file` input itself; `snapshotFileDestination(read)` names it before parsing |
 | The snapshot staged through `<path>.tmp` and renamed; the rendered file and init wrote in place, each with its own try/catch | `writeReplacing(path, text): Result<void, string>` stages and renames for all three |
 | `SettingsFileRole`: `settings-file`, `defaults-file`, `layer` | plus `central-file`, the repos-dir file a multi-repo target is read from |
 

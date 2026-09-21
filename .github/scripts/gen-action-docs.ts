@@ -190,6 +190,11 @@ export function renderPolicyDefaultsTable(
   return [DEFAULTS_TABLE_HEADER, ...rows].join("\n");
 }
 
+/** The row every secret family shares: the value is write-only, so a wrong delete is a loss, not a drift. */
+const SECRET_ROW_PROSE: PolicyRowProse = {
+  override: "prune stale secrets - a deleted secret's value is unrecoverable",
+};
+
 export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> = {
   labels: {
     caveat: "Probot parity",
@@ -217,18 +222,10 @@ export const POLICY_ROW_PROSE: Record<UndeclaredPolicySection, PolicyRowProse> =
       "deployment tooling installs its own keys, and deleting a live key breaks whatever authenticates with it",
     override: "make the file the complete key inventory",
   },
-  actions_secrets: {
-    override: "prune stale secrets - a deleted secret's value is unrecoverable",
-  },
-  dependabot_secrets: {
-    override: "prune stale secrets - a deleted secret's value is unrecoverable",
-  },
-  codespaces_secrets: {
-    override: "prune stale secrets - a deleted secret's value is unrecoverable",
-  },
-  agents_secrets: {
-    override: "prune stale secrets - a deleted secret's value is unrecoverable",
-  },
+  actions_secrets: SECRET_ROW_PROSE,
+  dependabot_secrets: SECRET_ROW_PROSE,
+  codespaces_secrets: SECRET_ROW_PROSE,
+  agents_secrets: SECRET_ROW_PROSE,
   custom_properties: {
     caveat: "an unset can revert to an org default the file does not model",
     override: "make the file the complete property-value inventory, unsetting the rest",

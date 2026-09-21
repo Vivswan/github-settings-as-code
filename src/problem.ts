@@ -309,15 +309,11 @@ export function unknownDirectivesIssue(unknown: readonly string[]): string {
 }
 
 /** One line of the collected document problems: a file-wide `_undeclared` outside the two policies, with the values and the fix. */
-export function badDirectiveIssue(
-  key: "_undeclared",
-  actual: unknown,
-  allowed: readonly string[],
-): string {
+export function badDirectiveIssue(actual: unknown, allowed: readonly string[]): string {
   return (
-    `${key} must be one of ${allowed.map(quote).join(", ")}; got ${describeShape(actual)}` +
-    `${typeof actual === "string" ? " that is none of them" : ""}. Write ${key}: keep or ` +
-    `${key}: delete at the top of the file, or remove the key so each list's own policy applies`
+    `_undeclared must be one of ${allowed.map(quote).join(", ")}; got ${describeShape(actual)}` +
+    `${typeof actual === "string" ? " that is none of them" : ""}. Write _undeclared: keep or ` +
+    `_undeclared: delete at the top of the file, or remove the key so each list's own policy applies`
   );
 }
 

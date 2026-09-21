@@ -155,7 +155,7 @@ export function validateSettingsDoc(
   const directive = (settings as Record<string, unknown>)._undeclared;
   const policy = UNDECLARED_POLICIES.find((value) => value === directive);
   if (directive !== undefined && policy === undefined) {
-    issues.push(badDirectiveIssue("_undeclared", directive, UNDECLARED_POLICIES));
+    issues.push(badDirectiveIssue(directive, UNDECLARED_POLICIES));
   }
   const unknownKeys = strangers.filter((key) => !key.startsWith("_"));
   if (unknownKeys.length > 0) {

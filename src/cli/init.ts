@@ -70,7 +70,7 @@ export function parseInitConfig(
   force: boolean,
   env: ConfigEnv,
 ): Result<InitConfig, InitProblem> {
-  return parseSnapshotFileConfig(read, env, "settings-file").map(
+  return parseSnapshotFileConfig(read, env).map(
     (cfg): InitConfig => ({
       kind: "init",
       token: cfg.token,
