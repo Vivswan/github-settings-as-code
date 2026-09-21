@@ -1,9 +1,11 @@
 # The commit-back fixes a same-repo PR can need, pushed to its branch; an already-clean tree gets no commit. A PR
 # with unrelated type errors fails the build job by design: the graduation script refuses to half-fix a red build.
-#   src/sections/webhooks/events.ts              -> build:events (a Dependabot @octokit/openapi-webhooks bump changes the event list on a branch nobody builds)
+#   src/sections/webhooks/events.ts              -> build:events (a Dependabot @octokit/openapi-webhooks bump changes the event list on a
+#                                                   branch nobody builds)
 #   lib/settings.schema.json                     -> build:schema (a Dependabot generator bump changes its bytes on a branch nobody builds)
 #   README, COVERAGE, action.yml, docs/ regions  -> build:docs, build:action-docs
-#   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with; gen-gaps-index.ts re-renders index.ts
+#   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with;
+#                                                   gen-gaps-index.ts re-renders index.ts
 #   lib/index.js                                 -> never: main carries no bundle
 #
 # Regenerating the schema executes PR-controlled code, so the fix is computed in an unprivileged job and crosses to
