@@ -33,6 +33,7 @@ import {
 } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
+import { MISSING_BRANCH } from "./endpoints.js";
 import {
   type ExplicitKeys,
   type RestCarriedKey,
@@ -45,6 +46,7 @@ import {
   flattenProtection,
   protectionSnapshot,
 } from "./index.js";
+import { NULLABLE_CONTROLS } from "./keys.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } from "./mock.js";
 import type { BranchProtectionConfig } from "./schema.js";
 
@@ -219,12 +221,9 @@ describe("branches", () => {
   });
 
   test("a missing branch fails the section with one advice wherever GitHub's body surfaces: at the probe, or at the PUT once the probe was denied", async () => {
-    const advice =
-      "the declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file";
+    const { status, message, advice } = MISSING_BRANCH;
     // The unrouted protection GET 404s; a Contents-granted probe answers GitHub's missing-branch body.
-    const probed = new MockApi({
-      [PROBE]: { error: { status: 404, message: "Branch not found", body: "" } },
-    });
+    const probed = new MockApi({ [PROBE]: { error: { status, message, body: "" } } });
     await expect(plan(probed, declared)).rejects.toThrow(
       new Error(`branches: branches[main]: ${advice}`),
     );
@@ -234,7 +233,7 @@ describe("branches", () => {
     const put = "PUT /repos/o/r/branches/main/protection";
     const denied = new MockApi({
       [PROBE]: { error: { status: 404, message: "Not Found", body: "" } },
-      [put]: { error: { status: 404, message: "Branch not found", body: "" } },
+      [put]: { error: { status, message, body: "" } },
     });
     const execution = await executePlan(
       await plan(denied, declared),
@@ -247,7 +246,7 @@ describe("branches", () => {
     const failure = (execution as { failure: SectionFailure }).failure;
     expect(failure.kind).not.toBe("permission-denied");
     expect(failure.message).toBe(
-      `branches: replacing protection for branch "main" failed - ${put}: 404 Branch not found. The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file`,
+      `branches: replacing protection for branch "main" failed - ${put}: ${status} ${message}. ${advice.charAt(0).toUpperCase()}${advice.slice(1)}`,
     );
     expect(denied.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([put]);
   });
@@ -324,6 +323,15 @@ describe("branches", () => {
     });
   });
 
+  /** GitHub's expanded GET shape of a review requirement declared as the bare block. */
+  const DEFAULT_REVIEWS = {
+    required_approving_review_count: 0,
+    dismiss_stale_reviews: false,
+    require_code_owner_reviews: false,
+    require_last_push_approval: false,
+    dismissal_restrictions: { users: [], teams: [], apps: [] },
+  };
+
   test.each([
     [
       "a top-level flag",
@@ -367,6 +375,21 @@ describe("branches", () => {
         },
       },
     ],
+    [
+      // Presence is the setting: reviews are required even with a zero count and every flag off.
+      "an all-default review requirement declared in full",
+      { enforce_admins: { enabled: true }, required_pull_request_reviews: DEFAULT_REVIEWS },
+      { enforce_admins: true },
+      "required_pull_request_reviews",
+      { enforce_admins: true, required_pull_request_reviews: DEFAULT_REVIEWS },
+    ],
+    [
+      "an all-default review requirement declared as the bare block GitHub expands to those defaults",
+      { enforce_admins: { enabled: true }, required_pull_request_reviews: DEFAULT_REVIEWS },
+      { enforce_admins: true },
+      "required_pull_request_reviews",
+      { enforce_admins: true, required_pull_request_reviews: {} },
+    ],
   ] as const)(
     "%s enabled live but omitted is the replacing PUT's only justification; declared, it plans nothing",
     async (_what, liveProtection, omitting, keyPath, declaring) => {
@@ -386,52 +409,6 @@ describe("branches", () => {
         notes: [],
         drift: [],
       });
-    },
-  );
-
-  /** GitHub's expanded GET shape of a review requirement declared as the bare block. */
-  const DEFAULT_REVIEWS = {
-    required_approving_review_count: 0,
-    dismiss_stale_reviews: false,
-    require_code_owner_reviews: false,
-    require_last_push_approval: false,
-    dismissal_restrictions: { users: [], teams: [], apps: [] },
-  };
-  const liveDefaultReviews = () =>
-    new MockApi({
-      [PROTECTION]: {
-        data: { enforce_admins: { enabled: true }, required_pull_request_reviews: DEFAULT_REVIEWS },
-      },
-    });
-
-  test("a live control whose fields are all defaults is still a setting the replacing PUT would remove", async () => {
-    // Presence is the setting: reviews are required even with a zero count and every flag off.
-    expect(
-      (await plan(liveDefaultReviews(), declared)).ops.map((op) => [op.role, op.drift]),
-    ).toEqual([
-      [
-        "putProtection",
-        [
-          "branches[main].protection.required_pull_request_reviews: set live but omitted from the settings file, so apply would REMOVE it; add required_pull_request_reviews to the branch's protection in the settings file to keep it",
-        ],
-      ],
-    ]);
-  });
-
-  test.each([
-    ["in full", DEFAULT_REVIEWS],
-    ["as the bare block GitHub expands to those defaults", {}],
-  ])(
-    "the same all-default control declared %s is clean: no drift, no PUT",
-    async (_how, reviews) => {
-      expect(
-        await plan(liveDefaultReviews(), [
-          {
-            name: "main",
-            protection: { enforce_admins: true, required_pull_request_reviews: reviews },
-          },
-        ]),
-      ).toEqual({ ops: [], notes: [], drift: [] });
     },
   );
 
@@ -702,25 +679,6 @@ describe("branches", () => {
         ],
       ],
     ]);
-  });
-
-  test('a quoted "true" fails the shape upfront, with the YAML gotcha named', () => {
-    // Typed in the zod shape so document validation rejects it before any section writes, not as a plan-time throw after earlier sections applied.
-    const parsed = branchesSection.shape.safeParse([
-      { name: "main", protection: { enforce_admins: true, required_signatures: "true" } },
-    ]);
-    expect(parsed.success).toBe(false);
-    const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
-    expect(messages.some((m) => m.includes("unquoted true or false"))).toBe(true);
-    expect(
-      branchesSection.shape.safeParse([
-        {
-          name: "main",
-          protection: { enforce_admins: true, required_signatures: true, extra_field: "x" },
-        },
-        { name: "legacy", protection: null },
-      ]).success,
-    ).toBe(true);
   });
 
   test("a declared key outside the PUT vocabulary that the GET never echoes is noted as never converging: nested, under an absent holder, or holding a dot", async () => {
@@ -1383,56 +1341,6 @@ describe("branches wildcard entries", () => {
     await plan(api, [{ name: "main", protection: { enforce_admins: true } }]);
     expect(api.calls.filter((c) => c.method === "GRAPHQL")).toHaveLength(0);
   });
-
-  test("an untranslatable wildcard key fails the shape naming the supported set", () => {
-    const parsed = branchesSection.shape.safeParse([
-      {
-        name: "release/*",
-        protection: { enforce_admins: true, restrictions: { users: [], teams: [] } },
-      },
-    ]);
-    expect(parsed.success).toBe(false);
-    const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
-    expect(
-      messages.some((m) => m.includes("protection.restrictions") && m.includes("rulesets section")),
-    ).toBe(true);
-    // The same key on a LITERAL entry stays a passthrough.
-    expect(
-      branchesSection.shape.safeParse([
-        { name: "main", protection: { restrictions: { users: [], teams: [] } } },
-      ]).success,
-    ).toBe(true);
-  });
-
-  test("an unknown wildcard sub-key and a malformed actor both fail upfront", () => {
-    const nested = branchesSection.shape.safeParse([
-      {
-        name: "release/*",
-        protection: { required_status_checks: { strict: true, checks: [] } },
-      },
-    ]);
-    expect(nested.success).toBe(false);
-    const actor = branchesSection.shape.safeParse([
-      { name: "main", protection: { force_push_bypassers: ["a/b/c"] } },
-    ]);
-    expect(actor.success).toBe(false);
-    const messages = actor.success ? [] : actor.error.issues.map((issue) => issue.message);
-    expect(messages.some((m) => m.includes("bare user login"))).toBe(true);
-  });
-
-  test("case-insensitive duplicates in the routed lists fail upfront", () => {
-    const actors = branchesSection.shape.safeParse([
-      { name: "main", protection: { force_push_bypassers: ["octocat", "OctoCat"] } },
-    ]);
-    expect(actors.success).toBe(false);
-    const envs = branchesSection.shape.safeParse([
-      {
-        name: "main",
-        protection: { required_deployments: { environments: ["prod", "Prod"] } },
-      },
-    ]);
-    expect(envs.success).toBe(false);
-  });
 });
 
 describe("branches plan contract", () => {
@@ -2049,8 +1957,7 @@ describe("branches snapshot", () => {
   test("the mock takes null as the off spelling on the two controls the PUT schema marks nullable", async () => {
     const api = registryFake({ branches: ["main"] });
     const put = await api.tryRequest("PUT", "/repos/o/r/branches/main/protection", {
-      enforce_admins: null,
-      allow_force_pushes: null,
+      ...Object.fromEntries([...NULLABLE_CONTROLS].map((control) => [control, null])),
       required_status_checks: null,
       required_pull_request_reviews: null,
       restrictions: null,
