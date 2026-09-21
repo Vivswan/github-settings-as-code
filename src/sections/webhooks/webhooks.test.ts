@@ -4,7 +4,9 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { describeProblem } from "../../problem.js";
+import type { SectionInput } from "../contract/module.js";
 import {
   driftOf,
   type ExecTools,
@@ -52,8 +54,11 @@ function tools(resolved: Record<string, string> = {}): ExecTools {
   };
 }
 
-const plan = (api: MockApi, desired: Parameters<typeof webhooksSection.plan>[1]) =>
-  webhooksSection.plan(planContext(webhooksSection, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"webhooks">) =>
+  webhooksSection.plan(
+    planContext(webhooksSection, api, REPO),
+    validatedInput("webhooks", desired),
+  );
 
 /** The requests a plan would issue: role, path params, and the payload sealed with `resolved`. */
 async function requests(result: SectionPlan, resolved: Record<string, string> = {}) {

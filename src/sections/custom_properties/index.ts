@@ -13,7 +13,7 @@ import {
   type DeclaredIssue,
   declaredEntries,
   defaultUndeclaredPolicy,
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   loosen,
   ORG_PROBE,
@@ -165,15 +165,7 @@ export const customPropertiesSection = {
   validate(declared) {
     const { entries, path } = declaredEntries(declared);
     return [
-      ...duplicateIssues(
-        entries,
-        {
-          keyOf: (p) => p.property_name,
-          describe: (p) => p.property_name,
-          at: (_p, index) => `${path}[${index}].property_name`,
-        },
-        "custom property",
-      ),
+      ...duplicateFieldIssues(declared, { field: "property_name" }, "custom property"),
       ...entries.flatMap((property, index) =>
         malformedListIssues(property, `${path}[${index}].value`),
       ),

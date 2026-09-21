@@ -1,7 +1,8 @@
 import { executePlan } from "../../src/engine/execute.js";
 import type { GitHubClient } from "../../src/github/api.js";
-import type { SectionModule } from "../../src/sections/contract/module.js";
+import type { SectionInput, SectionModule } from "../../src/sections/contract/module.js";
 import { type ExecTools, planContext, planDrift } from "../../src/sections/contract/plan.js";
+import { validatedInput } from "./validated-input.js";
 
 /** The one target every per-section unit test addresses. */
 export const REPO = { owner: "o", name: "r", slug: "o/r" } as const;
@@ -29,10 +30,13 @@ export function secretTools(resolved: Record<string, string>): ExecTools {
 }
 
 export function sectionRunners<M extends SectionModule>(section: M) {
-  type Desired = Parameters<M["plan"]>[1];
+  type Desired = SectionInput<M["key"]>;
   // Calling through the constraint would widen the plan to its erased op type; the section's own plan type is what the suites assert against.
   const plan = (api: GitHubClient, desired: Desired) =>
-    section.plan(planContext(section, api, REPO), desired) as ReturnType<M["plan"]>;
+    section.plan(
+      planContext(section, api, REPO),
+      validatedInput(section.key, desired),
+    ) as ReturnType<M["plan"]>;
   const check = async (api: GitHubClient, desired: Desired) => {
     const planned = await plan(api, desired);
     return { drift: planDrift(planned), notes: planned.notes };

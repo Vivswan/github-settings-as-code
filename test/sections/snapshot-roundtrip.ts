@@ -12,6 +12,7 @@ import type { LiveState } from "../e2e/mock/state.js";
 import type { FragmentFake } from "./fragment-fake.js";
 import { identityOf, unconvergedOps } from "./plan-idempotence.js";
 import { REPO } from "./section-run.js";
+import { validatedInput } from "./validated-input.js";
 
 /** A section module that declares snapshot(). */
 export type SnapshotSection = SectionModule & Required<Pick<SectionModule, "snapshot">>;
@@ -37,7 +38,8 @@ export async function proveSnapshotRoundTrip(
       `${section.key}: the seeded live state produced no snapshot value, so there is nothing to round-trip; seed at least one resource`,
     );
   }
-  const plan = await section.plan(ctx, snapshot.value);
+  // A snapshot value is a settings document in the making, so it passes the same validation a file would.
+  const plan = await section.plan(ctx, validatedInput(section.key, snapshot.value));
   expect(
     planDrift(plan),
     `${section.key}: the snapshot value drifts from the live state it was read from, so the projection does not match the section's write shape`,

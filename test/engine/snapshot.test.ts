@@ -152,11 +152,11 @@ describe("snapshotRepository", () => {
       "code_quality_setup",
       "actions_variables",
     ]);
-    expect(result.settings?.labels).toEqual({
+    expect<unknown>(result.settings?.labels).toEqual({
       _undeclared: "delete",
       entries: [{ name: "bug", color: "d73a4a", description: "Something is broken" }],
     });
-    expect(result.settings?.actions_secrets).toEqual({
+    expect<unknown>(result.settings?.actions_secrets).toEqual({
       _undeclared: "keep",
       entries: [{ name: "DEPLOY_TOKEN", value: "$SECRET_ACTIONS_DEPLOY_TOKEN" }],
     });

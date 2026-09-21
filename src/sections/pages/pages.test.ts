@@ -4,6 +4,8 @@ import { type PlannedOp, planContext } from "../../../src/sections/contract/plan
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { pagesSection } from "./index.js";
 
 const GET = "GET /repos/o/r/pages";
@@ -72,8 +74,8 @@ describe("pages shape", () => {
 });
 
 describe("pages", () => {
-  const plan = (api: MockApi, desired: Parameters<typeof pagesSection.plan>[1]) =>
-    pagesSection.plan(planContext(pagesSection, api, REPO), desired);
+  const plan = (api: MockApi, desired: SectionInput<"pages">) =>
+    pagesSection.plan(planContext(pagesSection, api, REPO), validatedInput("pages", desired));
 
   test("public drift carries the Enterprise Cloud note: github.com reports true and ignores the PUT, so it never converges", async () => {
     const api = new MockApi({ [GET]: { data: { build_type: "workflow", public: true } } });
@@ -177,7 +179,7 @@ describe("pages", () => {
     const result = await plan(api, {
       cname: "docs.example.com",
       https_enforce: true,
-    } as Parameters<typeof pagesSection.plan>[1]);
+    } as SectionInput<"pages">);
     expect(result.notes).toEqual([
       'pages: declared key "https_enforce" does not exist on the live Pages site, so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
     ]);
@@ -237,22 +239,19 @@ describe("pages", () => {
     const result = await plan(api, {
       source: { branch: "main" },
       constructor: "rides along",
-    } as Parameters<typeof pagesSection.plan>[1]);
+    } as SectionInput<"pages">);
     expect(result.ops.map((op) => [op.role, op.payload])).toEqual([
       ["create", { source: { branch: "main", path: "/" } }],
       ["update", { source: { branch: "main", path: "/" }, constructor: "rides along" }],
     ]);
   });
 
-  test("a passthrough value JSON cannot carry is a BUG naming its path, never a wire body", async () => {
-    // The loose shape lets an arbitrary passthrough value through; plainData() is where only a JSON-plain one may leave.
-    const api = new MockApi({ [GET]: { data: {} } });
-    await expect(
-      plan(api, { cname: "docs.example.com", hook: () => "x" } as unknown as Parameters<
-        typeof pagesSection.plan
-      >[1]),
-    ).rejects.toThrow(/BUG: a planned payload carries a value JSON cannot carry at hook/);
-    expect(api.mutations()).toEqual([]);
+  test("a passthrough value JSON cannot carry is refused by validation naming its path, so plan() never meets it", () => {
+    // The loose shape lets an arbitrary passthrough value through; document validation walks the parsed output and
+    // refuses it, and plan() takes only validated input, so no planned payload can carry it to the wire.
+    expect(() => validatedInput("pages", { cname: "docs.example.com", hook: () => "x" })).toThrow(
+      "pages.hook is not plain YAML data (a function); replace it with a plain value",
+    );
   });
 
   test("pages: null disables a live site and notes the ambiguous absence of one", async () => {

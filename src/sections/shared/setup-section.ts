@@ -21,6 +21,7 @@ import {
   loosen,
   requirePlainMapping,
   type SectionSnapshot,
+  type ValidatedInput,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
@@ -86,22 +87,36 @@ type SetupDeclared<K extends SetupKey> = Exclude<SettingsFile[K], undefined>;
 type SetupPlan<K extends SetupKey> = {
   [F in SetupKey]: (
     ctx: PlanContext<SetupEndpoints<F>, GraphqlDict, F>,
-    declared: SetupDeclared<F>,
+    declared: ValidatedInput<F>,
   ) => Promise<SectionPlan<PlannedOp<SetupEndpoints<F>>>>;
 }[K];
 
 type WideEndpoints = SetupEndpoints<SetupKey>;
 
-type SharedPlan = (
-  ctx: PlanContext<WideEndpoints>,
-  declared: SetupDeclared<SetupKey>,
-) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+type WideContext = PlanContext<WideEndpoints>;
 
-// Assignability, not equality: the shared plan takes the union of both declared values, and the
-// two languages vocabularies make that union wider than either key's own.
+type WidePlanned = Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+
+/** The shared implementation's signature at setup F (the brand names the setup); the lockstep below compares it to the setup's own. */
+type SharedPlanAt<F extends SetupKey> = (
+  ctx: WideContext,
+  declared: ValidatedInput<F>,
+) => WidePlanned;
+
+/** The one implementation: SharedPlanAt, generic over the setup it is called as. */
+type SharedPlan = <F extends SetupKey>(
+  ...args: Parameters<SharedPlanAt<F>>
+) => ReturnType<SharedPlanAt<F>>;
+
+type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+// Equality per setup: SharedPlanAt<K> takes the input validated AS that setup (the brand names it), so at each
+// key the shared plan's signature is the setup's own, languages vocabulary included.
 type _SharedPlanServesEverySetup = MustBeNever<
   {
-    [K in SetupKey]: [SharedPlan] extends [KeyErasedPlan<SetupPlan<K>>] ? never : K;
+    [K in SetupKey]: Invariant<SharedPlanAt<K>, KeyErasedPlan<SetupPlan<K>>> extends true
+      ? never
+      : K;
   }[SetupKey]
 >;
 

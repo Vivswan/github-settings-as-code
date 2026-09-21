@@ -120,9 +120,12 @@ export {
 } from "./sections/contract/endpoints.js";
 export type { GraphqlOpDecl } from "./sections/contract/graphql.js";
 export {
+  type SectionInput,
   type SectionModule,
   type SectionSnapshot,
   sectionGrant,
+  type ValidatedBrand,
+  type ValidatedInput,
 } from "./sections/contract/module.js";
 export {
   type DenialPolicy,

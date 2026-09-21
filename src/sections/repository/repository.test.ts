@@ -11,10 +11,11 @@ import {
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { validateSectionShapes } from "../../engine/validate.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
-import { sectionGrant } from "../contract/module.js";
+import { type SectionInput, sectionGrant } from "../contract/module.js";
 import { FEATURE_TOGGLES, repositorySection } from "./index.js";
 import { normalizeTopics, PATCH_FIELDS, RepositoryConfig } from "./schema.js";
 
@@ -25,10 +26,13 @@ function shapeError(doc: Record<string, unknown>, sourceLabel: string): string |
 const GET = "GET /repos/o/r";
 const TOOLS = { resolveSecret: () => "" };
 
-type Desired = Parameters<typeof repositorySection.plan>[1];
+type Desired = SectionInput<"repository">;
 
 const plan = (api: GitHubClient, desired: Desired) =>
-  repositorySection.plan(planContext(repositorySection, api, REPO), desired);
+  repositorySection.plan(
+    planContext(repositorySection, api, REPO),
+    validatedInput("repository", desired),
+  );
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
 async function apply(api: GitHubClient, desired: Desired) {

@@ -7,7 +7,7 @@
  */
 
 import type { z } from "zod";
-import { type ListSection, SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
+import { type ListSection, SECTION_KEYS, type SectionKey } from "../schema.js";
 import type { DeepReadonly, MustBeNever } from "../types.js";
 import { actionsSection } from "./actions/index.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
@@ -32,6 +32,7 @@ import {
   type KeyedListLayering,
   type ORG_PROBE,
   type SectionModule,
+  type ValidatedInput,
 } from "./contract/module.js";
 import { gatedByOwner } from "./contract/owner.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";
@@ -93,7 +94,7 @@ type ExpectedPlanDeclarations<K extends SectionKey, M> = {
   key: K;
   endpoints: M extends { endpoints: infer E extends EndpointDict } ? E : never;
   graphql: M extends { graphql: infer G extends GraphqlDict } ? G : GraphqlDict;
-  desired: Exclude<SettingsFile[K], undefined>;
+  desired: ValidatedInput<K>;
 };
 
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;

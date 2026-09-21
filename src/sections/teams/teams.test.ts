@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { SectionModule } from "../../../src/sections/contract/module.js";
+import type { SectionInput, SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { teamsSection } from "./index.js";
 import { teamsMockHandlers } from "./mock.js";
 
@@ -16,8 +17,8 @@ const gated = sectionModule("teams") as SectionModule<"teams"> &
 const ORG = "GET /orgs/o";
 const LIST = "GET /repos/o/r/teams?per_page=100&page=1";
 const probeOf = (slug: string) => `GET /orgs/o/teams/${slug}/repos/o/r`;
-const plan = (api: MockApi, desired: Parameters<typeof teamsSection.plan>[1]) =>
-  gated.plan(planContext(gated, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"teams">) =>
+  gated.plan(planContext(gated, api, REPO), validatedInput("teams", desired));
 const snapshot = (api: MockApi) => gated.snapshot(snapshotContext(gated, api, REPO, "fail"));
 
 describe("teams", () => {

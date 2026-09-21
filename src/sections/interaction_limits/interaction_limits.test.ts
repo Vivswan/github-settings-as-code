@@ -5,7 +5,9 @@ import { type PlannedOp, planContext } from "../../../src/sections/contract/plan
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
 import { PermissionDenied } from "../contract/errors.js";
+import type { SectionInput } from "../contract/module.js";
 import { interactionLimitsSection } from "./index.js";
 import type { InteractionLimitsConfig } from "./schema.js";
 
@@ -19,10 +21,13 @@ const CAP_405 = { error: { status: 405, message: "Method Not Allowed", body: "" 
 const CONFLICT = { error: { status: 409, message: "Conflict", body: "" } } as const;
 const TOOLS = { resolveSecret: () => "" };
 
-type Desired = Parameters<typeof interactionLimitsSection.plan>[1];
+type Desired = SectionInput<"interaction_limits">;
 
 const plan = (api: GitHubClient, desired: Desired) =>
-  interactionLimitsSection.plan(planContext(interactionLimitsSection, api, REPO), desired);
+  interactionLimitsSection.plan(
+    planContext(interactionLimitsSection, api, REPO),
+    validatedInput("interaction_limits", desired),
+  );
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
 async function apply(api: GitHubClient, desired: Desired) {

@@ -4,6 +4,8 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { milestonesSection } from "./index.js";
 import { githubStoresDueOn, milestonesMockHandlers } from "./mock.js";
 
@@ -18,8 +20,11 @@ const KEEP_NOTE =
   '"_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" ' +
   "to have apply DELETE it, detaching it from every issue that carries it (closing is not " +
   "enough; closed milestones are still listed)";
-const plan = (api: MockApi, desired: Parameters<typeof milestonesSection.plan>[1]) =>
-  milestonesSection.plan(planContext(milestonesSection, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"milestones">) =>
+  milestonesSection.plan(
+    planContext(milestonesSection, api, REPO),
+    validatedInput("milestones", desired),
+  );
 
 describe("milestones", () => {
   test("plans an update per drifted milestone and a create per missing one, keeps the undeclared one as a note, reading only", async () => {
@@ -187,7 +192,7 @@ describe("milestones", () => {
   test.each<
     [
       form: string,
-      declared: Parameters<typeof milestonesSection.plan>[1],
+      declared: SectionInput<"milestones">,
       ops: Awaited<ReturnType<typeof plan>>["ops"],
       notes: string[],
     ]

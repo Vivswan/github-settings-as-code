@@ -8,13 +8,11 @@
  */
 
 import type { z } from "zod";
-import type { SettingsFile } from "../../schema.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import {
   type DeclaredIssue,
-  declaredEntries,
   defaultUndeclaredPolicy,
   type GraphqlDict,
   type KeyedListLayering,
@@ -22,6 +20,7 @@ import {
   loosen,
   type SectionSnapshot,
   undeclaredPolicy,
+  type ValidatedInput,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
 import type {
@@ -97,8 +96,6 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
   };
 };
 
-type RepoVariablesDeclared<K extends RepoVariablesKey> = Exclude<SettingsFile[K], undefined>;
-
 /**
  * One family's plan() over exactly its own dictionary and declared value (the
  * registry's exactness lockstep); indexed by K so the generic factory can
@@ -107,7 +104,7 @@ type RepoVariablesDeclared<K extends RepoVariablesKey> = Exclude<SettingsFile[K]
 type RepoVariablesPlan<K extends RepoVariablesKey> = {
   [F in RepoVariablesKey]: (
     ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>, GraphqlDict, F>,
-    declared: RepoVariablesDeclared<F>,
+    declared: ValidatedInput<F>,
   ) => Promise<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>>;
 }[K];
 
@@ -116,10 +113,20 @@ type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
 
 type WideDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
 
-type SharedPlan = (
-  ctx: PlanContext<WideEndpoints>,
-  declared: WideDeclared,
-) => Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+type WideContext = PlanContext<WideEndpoints>;
+
+type WidePlanned = Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+
+/** The shared implementation's signature at family F (the brand names the family); the lockstep below compares it to the family's own. */
+type SharedPlanAt<F extends RepoVariablesKey> = (
+  ctx: WideContext,
+  declared: ValidatedInput<F>,
+) => WidePlanned;
+
+/** The one implementation: SharedPlanAt, generic over the family it is called as. */
+type SharedPlan = <F extends RepoVariablesKey>(
+  ...args: Parameters<SharedPlanAt<F>>
+) => ReturnType<SharedPlanAt<F>>;
 
 /** What every family's snapshot reads back: one shape, since the two entry slices are identical. */
 type WideSnapshot = {
@@ -131,7 +138,10 @@ type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : fals
 
 type _SharedPlanIsEveryFamilyPlan = MustBeNever<
   {
-    [K in RepoVariablesKey]: Invariant<SharedPlan, KeyErasedPlan<RepoVariablesPlan<K>>> extends true
+    [K in RepoVariablesKey]: Invariant<
+      SharedPlanAt<K>,
+      KeyErasedPlan<RepoVariablesPlan<K>>
+    > extends true
       ? never
       : K;
   }[RepoVariablesKey]
@@ -190,7 +200,8 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
 
   const plan: SharedPlan = async (ctx, declared) => {
     const defaultPolicy = defaultUndeclaredPolicy(section);
-    const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
+    const wideDeclared: WideDeclared = declared;
+    const { policy, entries } = undeclaredPolicy(wideDeclared, defaultPolicy);
     // Built where the routes are known, so params typecheck ({name} on update/remove).
     type Op = PlannedOp<WideEndpoints>;
     const scope: VariablesPlanScope<
@@ -245,13 +256,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     endpoints,
     shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
     layering: keyedBy("name", { fold: variableKey }),
-    validate: (declared) => {
-      const { entries, path } = declaredEntries(declared);
-      return duplicateVariableNameIssues(entries, "variable").map((issue) => ({
-        ...issue,
-        path: `${path}${issue.path}`,
-      }));
-    },
+    validate: (declared) => duplicateVariableNameIssues(declared, "variable"),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

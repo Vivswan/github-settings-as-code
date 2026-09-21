@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
+import type { SectionInput } from "../../src/sections/contract/module.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { LABELS_MOCK } from "../../src/sections/labels/mock.js";
@@ -23,6 +24,7 @@ import { MockApi } from "../mock-api.js";
 import { fragmentFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
 import { REPO } from "./section-run.js";
+import { validatedInput } from "./validated-input.js";
 
 const base = labelsSection.decl;
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";
@@ -95,12 +97,15 @@ describe("listSection", () => {
       'labels: GitHub holds labels that resolve to one identity: "bug" and "BUG". This section manages one label per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
     );
     await expect(
-      labelsSection.plan(planContext(labelsSection, api, REPO), [{ name: "bug" }]),
+      labelsSection.plan(
+        planContext(labelsSection, api, REPO),
+        validatedInput("labels", [{ name: "bug" }]),
+      ),
     ).rejects.toThrow(refusal);
     // Unclaimed, the pair is still one identity the planner cannot manage.
-    await expect(labelsSection.plan(planContext(labelsSection, api, REPO), [])).rejects.toThrow(
-      refusal,
-    );
+    await expect(
+      labelsSection.plan(planContext(labelsSection, api, REPO), validatedInput("labels", [])),
+    ).rejects.toThrow(refusal);
   });
 
   test("an entry claiming two identities that both exist live (a rename onto a taken name) is refused naming both", async () => {
@@ -113,9 +118,10 @@ describe("listSection", () => {
       },
     });
     await expect(
-      labelsSection.plan(planContext(labelsSection, api, REPO), [
-        { name: "bug", new_name: "defect" },
-      ]),
+      labelsSection.plan(
+        planContext(labelsSection, api, REPO),
+        validatedInput("labels", [{ name: "bug", new_name: "defect" }]),
+      ),
     ).rejects.toThrow(
       new Error(
         'labels: the entry "defect" matches 2 separate live labels ("defect", "bug"), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry',
@@ -208,8 +214,11 @@ describe("listSection", () => {
       },
     });
     const live = [{ name: "stray", color: "ffffff", description: null }];
-    const plan = (declared: Parameters<typeof worded.plan>[1]) =>
-      worded.plan(planContext(worded, new MockApi({ [LIST]: { data: live } }), REPO), declared);
+    const plan = (declared: SectionInput<"labels">) =>
+      worded.plan(
+        planContext(worded, new MockApi({ [LIST]: { data: live } }), REPO),
+        validatedInput("labels", declared),
+      );
     expect((await plan({ _undeclared: "keep", entries: [] })).notes).toEqual([
       'label "stray" lingers in the settings file; kept under "_undeclared: keep" - add them to the settings file to manage their fate, or set "_undeclared: delete" to have apply REMOVE them',
     ]);
@@ -444,7 +453,7 @@ describe("listSection listing", () => {
     const api = new MockApi({
       "GET /repos/o/r/labels?state=all&per_page=100&page=1": { data: [] },
     });
-    await queried.plan(planContext(queried, api, REPO), []);
+    await queried.plan(planContext(queried, api, REPO), validatedInput("labels", []));
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/o/r/labels?state=all&per_page=100&page=1",
     ]);
@@ -453,7 +462,7 @@ describe("listSection listing", () => {
   test("an unpaginated list is one bare GET on both sides: the section sends no page params and the derived mock ignores them", async () => {
     const whole = listSection({ ...base, listing: { unpaginated: true } });
     const api = new MockApi({ "GET /repos/o/r/labels": { data: [] } });
-    await whole.plan(planContext(whole, api, REPO), []);
+    await whole.plan(planContext(whole, api, REPO), validatedInput("labels", []));
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /repos/o/r/labels"]);
     const live = [
       { name: "a", color: "ffffff", description: null },
@@ -515,11 +524,14 @@ describe("listSection conflicts", () => {
   test("a live conflict fails after the one read and before any write, every line in one error", async () => {
     const api = new MockApi({ [LIST]: { data: live } });
     await expect(
-      clashing.plan(planContext(clashing, api, REPO), [
-        { name: "defect", color: "d73a4a" },
-        { name: "flaw", color: "ffffff" },
-        { name: "guide", color: "0075ca" },
-      ]),
+      clashing.plan(
+        planContext(clashing, api, REPO),
+        validatedInput("labels", [
+          { name: "defect", color: "d73a4a" },
+          { name: "flaw", color: "ffffff" },
+          { name: "guide", color: "0075ca" },
+        ]),
+      ),
     ).rejects.toThrow(
       'labels: the settings file conflicts with the live labels: "defect" reuses the color of "bug"; "guide" reuses the color of "docs". Resolve each conflict on GitHub, then re-run',
     );
@@ -528,9 +540,10 @@ describe("listSection conflicts", () => {
 
   test("no conflict reported, no interference: the plan proceeds as without the hook", async () => {
     const api = new MockApi({ [LIST]: { data: live } });
-    const planned = await clashing.plan(planContext(clashing, api, REPO), [
-      { name: "defect", color: "000000" },
-    ]);
+    const planned = await clashing.plan(
+      planContext(clashing, api, REPO),
+      validatedInput("labels", [{ name: "defect", color: "000000" }]),
+    );
     expect(planned.ops.map((op) => op.role)).toEqual(["create", "remove", "remove"]);
   });
 });

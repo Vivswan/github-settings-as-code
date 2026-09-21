@@ -14,7 +14,7 @@ import { matchesRejection } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   listEntries,
   loosen,
@@ -242,17 +242,7 @@ export const branchesSection = {
   }),
   // Two entries for one branch or pattern would overwrite each other's write on every run.
   validate(desired) {
-    // Under the {_layering, entries} wrapper an issue's path starts at `entries`.
-    const at = Array.isArray(desired) ? "" : ".entries";
-    return duplicateIssues(
-      listEntries(desired),
-      {
-        keyOf: (b) => b.name,
-        describe: (b) => b.name,
-        at: (_b, index) => `${at}[${index}].name`,
-      },
-      "branch",
-    );
+    return duplicateFieldIssues(desired, { field: "name" }, "branch");
   },
   async plan(ctx, desired): Promise<BranchesPlan> {
     const branches = listEntries(desired);

@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import type { UndeclaredPolicy } from "../../types.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -13,7 +13,7 @@ import {
   cannotVerifyNote,
   type DeclaredIssue,
   type DeclaredSecretValue,
-  duplicateIssues,
+  duplicateFieldIssues,
   missingDrift,
   type SectionMeta,
   secretValuesOf,
@@ -112,22 +112,14 @@ export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
 
 /**
  * GitHub folds two names equal uppercased into one secret, so the last write would silently win on every
- * run. Every scope's validate hook runs it (planSecrets trusts the document); `what` names the resource
- * ("secret", `secret of the "prod" environment`).
+ * run. Every scope's validate hook runs it over its declared value in either form (planSecrets trusts the
+ * document); `what` names the resource ("secret", `secret of the "prod" environment`).
  */
 export function duplicateSecretNameIssues(
-  entries: readonly SecretEntry[],
+  declared: readonly SecretEntry[] | UndeclaredPolicyList<SecretEntry>,
   what: string,
 ): DeclaredIssue[] {
-  return duplicateIssues(
-    entries,
-    {
-      keyOf: (entry) => secretKey(entry.name),
-      describe: (entry) => entry.name,
-      at: (_entry, index) => `[${index}].name`,
-    },
-    what,
-  );
+  return duplicateFieldIssues(declared, { field: "name", fold: secretKey }, what);
 }
 
 export interface SealingKey {

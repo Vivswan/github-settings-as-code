@@ -69,6 +69,7 @@ const TS_CONSUMER = `import {
   sectionModule,
   type SnapshotContext,
   snapshotContext,
+  type ValidatedInput,
   validateSettings,
 } from "${PACKAGE}";
 import { type InputName, INPUT_DECLS } from "${PACKAGE}/internal";
@@ -77,16 +78,23 @@ export const policy: InputName = "on-missing-permission";
 export const policyDefault: string = INPUT_DECLS["on-missing-permission"].default;
 const result = validateSettings({ labels: [] });
 export const ok: boolean = result.isOk() && first === "repository";
+const validatedLabels: ValidatedInput<"labels"> | undefined = result.isOk() ? result.value.settings.labels : undefined;
+if (validatedLabels === undefined) throw new Error("the validator returned no labels section");
 declare const client: GitHubClient;
 declare const repo: RepoRef;
 const labels = sectionModule("labels");
 const snapshotCtx = snapshotContext(labels, client, repo, "warn");
 export const direct = (): Promise<[SectionPlan, SectionSnapshot<"labels"> | undefined]> =>
-  Promise.all([labels.plan(planContext(labels, client, repo), []), labels.snapshot?.(snapshotCtx)]);
+  Promise.all([
+    labels.plan(planContext(labels, client, repo), validatedLabels),
+    labels.snapshot?.(snapshotCtx),
+  ]);
 // @ts-expect-error only snapshotContext() mints a DenialPolicy
 export const forged: SnapshotContext = { ...snapshotCtx, onMissingPermission: { notesDenials: true } };
 // @ts-expect-error a context built for branches is not labels' context
-export const foreign = () => labels.plan(planContext(sectionModule("branches"), client, repo), []);
+export const foreign = () => labels.plan(planContext(sectionModule("branches"), client, repo), validatedLabels);
+// @ts-expect-error a list not minted by the validator has no brand
+export const raw = () => labels.plan(planContext(labels, client, repo), []);
 `;
 
 /** The settings file the installed CLI validates: one section, valid as written. */

@@ -14,9 +14,8 @@ import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  declaredEntries,
   defaultUndeclaredPolicy,
-  duplicateIssues,
+  duplicateFieldIssues,
   keyedBy,
   loosen,
   missingDrift,
@@ -184,16 +183,7 @@ export const secretScanningPatternsSection = {
       'the pattern endpoints accept no other field - in particular "state" and "push_protection_enabled" are read-only through this API surface - so the key would be dropped silently and never converge',
   },
   validate(declared) {
-    const { entries, path } = declaredEntries(declared);
-    return duplicateIssues(
-      entries,
-      {
-        keyOf: (p) => p.name,
-        describe: (p) => p.name,
-        at: (_p, index) => `${path}[${index}].name`,
-      },
-      "custom pattern",
-    );
+    return duplicateFieldIssues(declared, { field: "name" }, "custom pattern");
   },
   async plan(ctx, declared) {
     const { policy, entries: desired } = undeclaredPolicy(declared, defaultUndeclaredPolicy(this));

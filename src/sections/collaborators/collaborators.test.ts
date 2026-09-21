@@ -6,13 +6,18 @@ import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO } from "../../../test/sections/section-run.js";
+import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionInput } from "../contract/module.js";
 import { collaboratorsSection } from "./index.js";
 import { collaboratorsMockHandlers } from "./mock.js";
 
 const LIST = "GET /repos/o/r/collaborators?affiliation=direct&per_page=100&page=1";
 const INVITATIONS = "GET /repos/o/r/invitations?per_page=100&page=1";
-const plan = (api: MockApi, desired: Parameters<typeof collaboratorsSection.plan>[1]) =>
-  collaboratorsSection.plan(planContext(collaboratorsSection, api, REPO), desired);
+const plan = (api: MockApi, desired: SectionInput<"collaborators">) =>
+  collaboratorsSection.plan(
+    planContext(collaboratorsSection, api, REPO),
+    validatedInput("collaborators", desired),
+  );
 const snapshot = (api: MockApi) =>
   collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail"));
 const NO_SECRETS = {
