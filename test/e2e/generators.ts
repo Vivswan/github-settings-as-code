@@ -11,6 +11,8 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import {
+  LIST_SECTIONS,
+  type ListSection,
   SECTION_KEYS,
   type SectionKey,
   type SettingsFile,
@@ -1627,6 +1629,10 @@ export const MERGE_FEATURES = [
   "union-labels",
   /** Rulesets declared under an effective shallow or deep layering while the fold holds rulesets. */
   "union-rulesets",
+  /** Environments declared under an effective shallow or deep layering while the fold holds environments: a plain-list union, its nested lists with it under deep. */
+  "union-environments",
+  /** A plain-list section (environments, branches, workflows) drawn in its `{_layering, entries}` wrapper form. */
+  "wrapper-layered",
   /** A unioned label whose name differs only by case from the spelling the fold holds. */
   "label-case-fold",
   /** A unioned label pairing with a held label through a rename: one of the two claims the other's name as its rename target or current name. */
@@ -1687,6 +1693,22 @@ function isKnobbedSection(key: string): key is (typeof UNDECLARED_POLICY_SECTION
   return (UNDECLARED_POLICY_SECTIONS as readonly string[]).includes(key);
 }
 
+function isListSectionKey(key: string): key is ListSection {
+  return (LIST_SECTIONS as readonly string[]).includes(key);
+}
+
+/** The nested keyed lists of a list section's entry, in the harness's own words (the oracle spells the keys). */
+const NESTED_LIST_FIELDS: Readonly<Partial<Record<ListSection, readonly string[]>>> = {
+  rulesets: ["rules"],
+  environments: [
+    "variables",
+    "secrets",
+    "deployment_branch_policies",
+    "deployment_protection_rules",
+    "reviewers",
+  ],
+};
+
 function isLayeringDirective(value: unknown): value is LayeringDirective {
   return (LAYERING_DIRECTIVES as readonly unknown[]).includes(value);
 }
@@ -1697,12 +1719,12 @@ function isPlainMapping(value: unknown): value is Json {
 
 /**
  * A layer as its standalone validation sees it, in the harness's own words: every null the fold reads as a marker is
- * dropped. A knobbed section's entries are entered only under an effective `deep` (the wrapper's directive, else the
- * file's, else the run's), a ruleset's rules with them, and a null at a NULL_VALUED_ENTRY_PATHS path stays as the
- * value; under `shallow` and `replace` the fold copies entries as written, so a null inside one stays for the validator
- * to judge, as does a null inside any other list.
+ * dropped. A list section's entries are entered only under an effective `deep` (the wrapper's directive, else the
+ * file's, else the run's), their nested keyed lists with them in either form (a nested wrapper's own null knob is a
+ * marker too), and a null at a NULL_VALUED_ENTRY_PATHS path stays as the value; under `shallow` and `replace` the fold
+ * copies entries as written, so a null inside one stays for the validator to judge, as does a null inside any other list.
  */
-function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
+export function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
   const dropDeep = (
     value: unknown,
     lists: readonly string[] = [],
@@ -1717,39 +1739,72 @@ function markerNullsDropped(doc: Json, run: LayeringDirective): Json {
       const path = prefix === "" ? key : `${prefix}.${key}`;
       if (child === null) {
         if (valued.includes(path)) {
-          out[key] = null;
+          put(out, key, null);
         }
         continue;
       }
-      out[key] =
-        prefix === "" && lists.includes(key) && Array.isArray(child)
-          ? child.map((item) => dropDeep(item))
-          : dropDeep(child, [], valued, path);
+      put(
+        out,
+        key,
+        prefix === "" && lists.includes(key)
+          ? dropNested(child)
+          : dropDeep(child, [], valued, path),
+      );
     }
     return out;
+  };
+  const dropNested = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map((item) => dropDeep(item));
+    }
+    if (!isPlainMapping(value) || !Array.isArray(value.entries)) {
+      return dropDeep(value);
+    }
+    const { entries, ...knobs } = value;
+    return { ...(dropDeep(knobs) as Json), entries: entries.map((item) => dropDeep(item)) };
   };
   const file = isLayeringDirective(doc[LAYERING_KEY]) ? doc[LAYERING_KEY] : undefined;
   const out: Json = {};
   for (const [key, value] of Object.entries(doc)) {
     if (value === null) {
+      // The section's own value where null is one (`pages: null`); a marker everywhere else.
+      if (isNullValued(key)) {
+        out[key] = null;
+      }
       continue;
     }
-    if (!isKnobbedSection(key)) {
+    if (!isListSectionKey(key)) {
       out[key] = dropDeep(value);
       continue;
     }
     const wrapper = wrapperDirective(value);
     const effective = (isLayeringDirective(wrapper) ? wrapper : undefined) ?? file ?? run;
-    if (effective !== "deep") {
-      out[key] = value;
+    const nested = NESTED_LIST_FIELDS[key] ?? [];
+    const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
+    // Under shallow and replace the entries are copied as written; only deep enters them.
+    const entries =
+      effective === "deep"
+        ? entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json)
+        : entriesOf(value);
+    if (Array.isArray(value)) {
+      out[key] = entries;
       continue;
     }
-    const nested = key === "rulesets" ? ["rules"] : [];
-    const valued = NULL_VALUED_ENTRY_PATHS[key] ?? [];
-    const entries = entriesOf(value).map((entry) => dropDeep(entry, nested, valued) as Json);
-    out[key] = Array.isArray(value) ? entries : { ...(value as Json), entries };
+    // The wrapper's own knobs are mapping keys to the fold under every directive, so a null one (`_undeclared: null`) is a marker.
+    const { entries: _entries, ...knobs } = value as Json;
+    out[key] = { ...(dropDeep(knobs) as Json), entries };
   }
   return out;
+}
+
+/** Set an own data property whatever the key; assigning `__proto__` would set the prototype, as the engine's copier avoids too. */
+function put(record: Json, key: string, value: unknown): void {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 /**
@@ -1769,7 +1824,7 @@ function mergeLayerName(index: number, count: number): string {
   return index === count - 1 ? "settings.yml" : `layer-${index}.yml`;
 }
 
-/** Every nested key path through a non-knobbed section's plain mappings; lists are data to the merge, so the walk never enters one. */
+/** Every nested key path through a mapping section's plain mappings; lists are data to the merge, so the walk never enters one, nor a list section's wrapper. */
 function nestedMappingPaths(doc: Json): string[][] {
   const paths: string[][] = [];
   const walk = (value: unknown, path: string[]): void => {
@@ -1785,7 +1840,7 @@ function nestedMappingPaths(doc: Json): string[][] {
     }
   };
   for (const [key, value] of Object.entries(doc)) {
-    if (!isKnobbedSection(key) && key !== LAYERING_KEY) {
+    if (!isListSectionKey(key) && key !== LAYERING_KEY) {
       walk(value, [key]);
     }
   }
@@ -1998,15 +2053,24 @@ export function mergeFeaturesOf(
       if (present.has(key)) {
         features.add("override");
       }
-      if (isKnobbedSection(key)) {
+      if (isListSectionKey(key)) {
         if (!Array.isArray(value)) {
           const wrapper = value as Json;
           if (wrapper[UNDECLARED_KEY] !== undefined) {
             features.add("wrapper-undeclared");
           }
+          if (!isKnobbedSection(key)) {
+            features.add("wrapper-layered");
+          }
           const directive = wrapper[LAYERING_KEY];
           if (isLayeringDirective(directive)) {
             features.add(`wrapper-layering-${directive}`);
+          }
+        }
+        if (key === "environments") {
+          const effective = wrapperDirective(value) ?? fileDirective ?? run;
+          if (present.has(key) && effective !== "replace") {
+            features.add("union-environments");
           }
         }
         if (key === "labels" || key === "rulesets") {
@@ -2147,7 +2211,7 @@ export function genMergeScenario(
         continue;
       }
       present.add(section);
-      if (!isKnobbedSection(key) && isPlainMapping(value)) {
+      if (!isListSectionKey(key) && isPlainMapping(value)) {
         heldMappings.add(section);
       } else {
         heldMappings.delete(section);
@@ -2181,11 +2245,11 @@ export function genMergeScenario(
   };
 }
 
-/** The knobbed sections are favored, so unions happen. */
+/** The list sections are favored, so unions happen. */
 function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
   const chosen = rng.bool(0.08)
     ? []
-    : pool.filter((key) => rng.bool(isKnobbedSection(key) ? 0.6 : 0.3));
+    : pool.filter((key) => rng.bool(isListSectionKey(key) ? 0.6 : 0.3));
   const doc: Json = {};
   for (const key of chosen) {
     doc[key] = genSettings(rng.fork(`settings:${key}`), key);
@@ -2204,7 +2268,7 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
   }
   const wrapperDirectives: LayerDraft["wrapperDirectives"] = {};
   for (const key of chosen) {
-    if (!isKnobbedSection(key)) {
+    if (!isListSectionKey(key)) {
       continue;
     }
     const entries = entriesOf(doc[key]);
@@ -2212,8 +2276,9 @@ function drawLayer(rng: Rng, pool: readonly SectionKey[]): LayerDraft {
       doc[key] = entries;
       continue;
     }
+    // A plain list's wrapper takes the directive alone; only a knobbed one carries the policy.
     const wrapper: Json = { entries };
-    if (rng.bool(0.5)) {
+    if (isKnobbedSection(key) && rng.bool(0.5)) {
       wrapper[UNDECLARED_KEY] = rng.pick(["keep", "delete"] as const);
     }
     const directive: LayeringDirective | undefined = rng.bool(0.5)
@@ -2431,9 +2496,7 @@ function refuseLayer(rng: Rng, draft: LayerDraft, kind: MergeRefusalKind): void 
       return;
     }
     case "bad-wrapper-layering": {
-      const declared = UNDECLARED_POLICY_SECTIONS.filter(
-        (key) => doc[key] !== undefined && doc[key] !== null,
-      );
+      const declared = LIST_SECTIONS.filter((key) => doc[key] !== undefined && doc[key] !== null);
       const key = declared.length > 0 ? rng.pick(declared) : "labels";
       const entries = ensureEntries(doc, key);
       doc[key] = { entries, [LAYERING_KEY]: rng.pick(BAD_LAYERING_VALUES) };

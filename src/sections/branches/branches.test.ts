@@ -45,7 +45,8 @@ import {
 import { branchesMockGraphqlHandlers, branchesMockHandlers, wildcardMatches } from "./mock.js";
 import type { BranchProtectionConfig } from "./schema.js";
 
-type Desired = Parameters<typeof branchesSection.plan>[1];
+/** The bare-list form of the section's value; the tests never hand plan() the `{_layering, entries}` wrapper. */
+type Desired = Extract<Parameters<typeof branchesSection.plan>[1], readonly unknown[]>;
 
 const plan = (api: GitHubClient, desired: Desired) =>
   branchesSection.plan(planContext(branchesSection, api, REPO), desired);

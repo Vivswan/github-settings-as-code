@@ -14,7 +14,7 @@ import { SectionSelection } from "../engine/section-selection.js";
 import type { Io } from "../io.js";
 import { isPlainObject } from "../plain-data.js";
 import type { LayerProblem, ProblemOf, SettingsProblem } from "../problem.js";
-import { SECTION_KEYS, UNDECLARED_POLICY_SECTIONS } from "../schema.js";
+import { LIST_SECTIONS, SECTION_KEYS } from "../schema.js";
 import { readSettingsFile } from "./settings-read.js";
 
 export function readLayerFiles(
@@ -49,7 +49,7 @@ function standaloneView(doc: unknown, layering: Layering): unknown {
       stripped[key] = null;
     }
   }
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
+  for (const key of LIST_SECTIONS) {
     const value = stripped[key];
     if (isPlainObject(value)) {
       delete value._layering;

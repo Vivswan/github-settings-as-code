@@ -5,7 +5,7 @@ import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
-import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../../src/schema.js";
+import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { MockApi } from "../mock-api.js";
@@ -165,22 +165,23 @@ describe("mergeLayers: the mapping dialect", () => {
   ])(
     "lists outside the list sections replace wholesale under %s, while a list section's entries follow the directive",
     (layering, autolinks) => {
+      // A scalar list and a mapping list inside a mapping section: neither is a list section, so neither unions.
       const layers = [
         layer("fleet", {
           autolinks: [{ key_prefix: "F-", url_template: "https://f/<num>" }],
-          branches: [{ name: "main", protection: { enforce_admins: true } }],
+          check_suite_preferences: { auto_trigger_checks: [{ app_id: 1, setting: true }] },
           repository: { topics: ["fleet", "shared"] },
         }),
         layer("repo", {
           autolinks: [{ key_prefix: "R-", url_template: "https://r/<num>" }],
-          branches: [{ name: "release", protection: null }],
+          check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
           repository: { topics: ["mine"] },
         }),
       ];
       expect(merge(layers, layering)).toEqual({
         settings: {
           autolinks: { _undeclared: "delete", entries: autolinks },
-          branches: [{ name: "release", protection: null }],
+          check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
           repository: { topics: ["mine"] },
         },
         notices: [],
@@ -690,12 +691,13 @@ describe("mergeLayers: the _layering directive", () => {
 });
 
 /**
- * Two layers sharing ONE key per knobbed section, spelled as the section's planner folds it (case for labels,
- * collaborators, and teams; case for the uppercased secret and variable names; verbatim elsewhere), with a lower-only
- * field so the field merge is visible. Typed over every knobbed section, so a new one fails here until it has a row.
+ * Two layers sharing ONE key per list section, spelled as the section's planner folds it (case for labels,
+ * collaborators, teams, and environments; case for the uppercased secret and variable names; a workflow's bare file
+ * name against its .github/workflows/ path; verbatim elsewhere), with a lower-only field so the field merge is
+ * visible. Typed over every list section, so a new one fails here until it has a row.
  */
 const SHARED_KEY_LAYERS: {
-  [K in UndeclaredPolicySection]: {
+  [K in ListSection]: {
     lower: Record<string, unknown>;
     /** A second lower entry under another key: it survives a union and goes with the list under replace. */
     other: Record<string, unknown>;
@@ -714,6 +716,24 @@ const SHARED_KEY_LAYERS: {
     other: { name: "tags", target: "tag" },
     higher: { name: "main", enforcement: "active" },
     deep: { name: "main", target: "branch", enforcement: "active" },
+  },
+  environments: {
+    lower: { name: "Prod", wait_timer: 5 },
+    other: { name: "staging" },
+    higher: { name: "prod", prevent_self_review: true },
+    deep: { name: "prod", wait_timer: 5, prevent_self_review: true },
+  },
+  branches: {
+    lower: { name: "main", protection: { enforce_admins: true } },
+    other: { name: "release", protection: null },
+    higher: { name: "main", protection: { required_signatures: true } },
+    deep: { name: "main", protection: { enforce_admins: true, required_signatures: true } },
+  },
+  workflows: {
+    lower: { path: "ci.yml", state: "active" },
+    other: { path: "nightly.yml", state: "disabled" },
+    higher: { path: ".github/workflows/ci.yml", state: "disabled" },
+    deep: { path: ".github/workflows/ci.yml", state: "disabled" },
   },
   autolinks: {
     lower: { key_prefix: "J-", url_template: "https://j/<num>" },
@@ -808,18 +828,18 @@ const SHARED_KEY_LAYERS: {
   },
 };
 
-describe("mergeLayers: every knobbed section layers by the key its planner folds", () => {
-  /** The folded entries of one section, the resolved `_undeclared` knob set aside. */
-  function entriesOf(layers: Layer[], layering: Layering, key: UndeclaredPolicySection): unknown {
+describe("mergeLayers: every list section layers by the key its planner folds", () => {
+  /** The folded entries of one section: a knobbed one's `entries` (the resolved knob set aside), a plain list itself. */
+  function entriesOf(layers: Layer[], layering: Layering, key: ListSection): unknown {
     const result = merge(layers, layering);
     if ("error" in result) {
       throw new Error(result.error);
     }
-    const section = (result.settings as Record<string, { entries: unknown }>)[key];
-    return section?.entries;
+    const section = (result.settings as Record<string, { entries: unknown } | unknown[]>)[key];
+    return Array.isArray(section) ? section : section?.entries;
   }
 
-  test.each([...UNDECLARED_POLICY_SECTIONS])(
+  test.each([...LIST_SECTIONS])(
     "%s: a shared key spelled two ways folds to one entry under shallow and deep, and the higher list wins under replace",
     (key) => {
       const { lower, other, higher, deep } = SHARED_KEY_LAYERS[key];
@@ -833,14 +853,180 @@ describe("mergeLayers: every knobbed section layers by the key its planner folds
     },
   );
 
-  test.each([...UNDECLARED_POLICY_SECTIONS])(
-    "%s: an empty higher list adds nothing under deep",
-    (key) => {
-      const { lower, other } = SHARED_KEY_LAYERS[key];
-      const layers = [layer("fleet", { [key]: [lower, other] }), layer("repo", { [key]: [] })];
-      expect(entriesOf(layers, "deep", key)).toEqual([lower, other]);
+  test.each([...LIST_SECTIONS])("%s: an empty higher list adds nothing under deep", (key) => {
+    const { lower, other } = SHARED_KEY_LAYERS[key];
+    const layers = [layer("fleet", { [key]: [lower, other] }), layer("repo", { [key]: [] })];
+    expect(entriesOf(layers, "deep", key)).toEqual([lower, other]);
+  });
+});
+
+describe("mergeLayers: the plain-list sections", () => {
+  const PROD = {
+    name: "prod",
+    wait_timer: 5,
+    variables: [
+      { name: "REGION", value: "eu" },
+      { name: "LOG_LEVEL", value: "info" },
+    ],
+    secrets: { _undeclared: "keep", entries: [{ name: "TOKEN", value: "$A" }] },
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    deployment_branch_policies: [{ name: "release/*" }],
+    deployment_protection_rules: [{ app: "gate" }],
+    reviewers: [
+      { type: "User", id: 1 },
+      { type: "Team", id: 1 },
+    ],
+  };
+
+  test.each<[Layering, unknown]>([
+    ["replace", [{ name: "qa" }]],
+    ["shallow", [{ name: "prod", wait_timer: 5 }, { name: "qa" }]],
+    ["deep", [{ name: "prod", wait_timer: 5 }, { name: "qa" }]],
+  ])(
+    "a plain-list section folds under its wrapper's _layering: %s and comes out as the bare list, the directive consumed",
+    (directive, environments) => {
+      const result = merge([
+        layer("fleet", { environments: [{ name: "prod", wait_timer: 5 }] }),
+        layer("repo", { environments: { _layering: directive, entries: [{ name: "qa" }] } }),
+      ]);
+      expect(result).toEqual({ settings: { environments }, notices: [] });
     },
   );
+
+  test("a bare {entries} wrapper on a plain-list section folds like the plain list, under the file's directive", () => {
+    const result = merge([
+      layer("fleet", { workflows: [{ path: "ci.yml", state: "active" }] }),
+      layer("repo", {
+        _layering: "replace",
+        workflows: { entries: [{ path: "nightly.yml", state: "disabled" }] },
+      }),
+    ]);
+    expect(result).toEqual({
+      settings: { workflows: [{ path: "nightly.yml", state: "disabled" }] },
+      notices: [],
+    });
+  });
+
+  test("under deep an environment's nested lists union by their own keys, in either form, with the lower wrapper's policy inherited", () => {
+    const result = merge([
+      layer("fleet", { environments: [PROD] }),
+      layer("repo", {
+        environments: [
+          {
+            name: "Prod",
+            variables: [
+              { name: "region", value: "us" },
+              { name: "TIMEOUT", value: "30" },
+            ],
+            secrets: [{ name: "token", value: "$B" }],
+            deployment_branch_policies: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
+            deployment_protection_rules: { entries: [{ app: "gate" }, { app: "scan" }] },
+            reviewers: [
+              { type: "Team", id: 1 },
+              { type: "User", id: 2 },
+            ],
+          },
+        ],
+      }),
+    ]);
+    expect(result).toEqual({
+      settings: {
+        environments: [
+          {
+            name: "Prod",
+            wait_timer: 5,
+            variables: [
+              { name: "region", value: "us" },
+              { name: "LOG_LEVEL", value: "info" },
+              { name: "TIMEOUT", value: "30" },
+            ],
+            secrets: { _undeclared: "keep", entries: [{ name: "token", value: "$B" }] },
+            deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+            deployment_branch_policies: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
+            deployment_protection_rules: { entries: [{ app: "gate" }, { app: "scan" }] },
+            reviewers: [
+              { type: "User", id: 1 },
+              { type: "Team", id: 1 },
+              { type: "User", id: 2 },
+            ],
+          },
+        ],
+      },
+      notices: [],
+    });
+  });
+
+  test("a higher nested wrapper's explicit _undeclared wins over a lower bare list, and the wrapper form is kept", () => {
+    const result = merge([
+      layer("fleet", { environments: [{ name: "prod", variables: [{ name: "A", value: "1" }] }] }),
+      layer("repo", {
+        environments: [
+          {
+            name: "prod",
+            variables: { _undeclared: "delete", entries: [{ name: "B", value: "2" }] },
+          },
+        ],
+      }),
+    ]);
+    expect(result).toEqual({
+      settings: {
+        environments: [
+          {
+            name: "prod",
+            variables: {
+              _undeclared: "delete",
+              entries: [
+                { name: "A", value: "1" },
+                { name: "B", value: "2" },
+              ],
+            },
+          },
+        ],
+      },
+      notices: [],
+    });
+  });
+
+  test("under shallow the same-name environment is swapped whole, its nested lists with it", () => {
+    const higher = { name: "prod", variables: [{ name: "TIMEOUT", value: "30" }] };
+    const result = merge(
+      [layer("fleet", { environments: [PROD] }), layer("repo", { environments: [higher] })],
+      "shallow",
+    );
+    expect(result).toEqual({ settings: { environments: [higher] }, notices: [] });
+  });
+
+  test("a null at a plain-list entry's nullable path is the value under deep; a null elsewhere in the entry deletes with a notice", () => {
+    const result = merge([
+      layer("fleet", {
+        branches: [
+          {
+            name: "main",
+            protection: { enforce_admins: true, required_deployments: { environments: ["prod"] } },
+          },
+          { name: "release/*", protection: { required_signatures: true } },
+        ],
+        environments: [PROD],
+      }),
+      layer("repo", {
+        branches: [
+          { name: "main", protection: { required_deployments: null } },
+          { name: "release/*", protection: null },
+        ],
+        environments: [{ name: "prod", deployment_branch_policy: null, wait_timer: null }],
+      }),
+    ]);
+    expect(result).toEqual({
+      settings: {
+        branches: [
+          { name: "main", protection: { enforce_admins: true, required_deployments: null } },
+          { name: "release/*", protection: null },
+        ],
+        environments: [{ ...PROD, deployment_branch_policy: null, wait_timer: undefined }],
+      },
+      notices: [{ layer: "repo", path: "environments[0].wait_timer" }],
+    });
+  });
 });
 
 describe("mergeLayers: layer-boundary refusals", () => {
@@ -894,6 +1080,68 @@ describe("mergeLayers: layer-boundary refusals", () => {
       { labels: "oops" },
       "layer-wrong-shape",
       'layer "repo": labels must be a list of mappings or an {_undeclared, entries} wrapper; got a string',
+    ],
+    [
+      "a scalar where a plain list belongs, named with the wrapper it does take",
+      { environments: "oops" },
+      "layer-wrong-shape",
+      'layer "repo": environments must be a list of mappings or an {_layering, entries} wrapper; got a string',
+    ],
+    [
+      "two environments under one name, spelled two ways",
+      { environments: [{ name: "Prod" }, { name: "prod" }] },
+      "layer-duplicate-key",
+      'layer "repo": environments[0] and environments[1] both claim one name; each name belongs to one entry within a layer',
+    ],
+    [
+      "a nameless environment variable, under the nested wrapper form",
+      { environments: [{ name: "prod", variables: { entries: [{ value: "x" }] } }] },
+      "layer-no-key",
+      'layer "repo": environments[0].variables[0] carries no string "name", which every entry needs to layer by',
+    ],
+    [
+      "two environment secrets under one uppercased name",
+      {
+        environments: [
+          {
+            name: "prod",
+            secrets: [
+              { name: "token", value: "$A" },
+              { name: "TOKEN", value: "$B" },
+            ],
+          },
+        ],
+      },
+      "layer-duplicate-key",
+      'layer "repo": environments[0].secrets[0] and environments[0].secrets[1] both claim one name; each name belongs to one entry within a layer',
+    ],
+    [
+      "a reviewer whose id is not a number",
+      { environments: [{ name: "prod", reviewers: [{ type: "User", id: "1" }] }] },
+      "layer-no-key",
+      'layer "repo": environments[0].reviewers[0] carries no numeric "id", which every entry needs to layer by',
+    ],
+    [
+      "a workflow named twice, by its bare name and its path",
+      {
+        workflows: [
+          { path: "ci.yml", state: "active" },
+          { path: ".github/workflows/ci.yml", state: "disabled" },
+        ],
+      },
+      "layer-duplicate-key",
+      'layer "repo": workflows[0] and workflows[1] both claim one path; each path belongs to one entry within a layer',
+    ],
+    [
+      "a branch protected twice",
+      {
+        branches: [
+          { name: "main", protection: null },
+          { name: "main", protection: null },
+        ],
+      },
+      "layer-duplicate-key",
+      'layer "repo": branches[0] and branches[1] both claim one name; each name belongs to one entry within a layer',
     ],
     [
       "a wrapper without entries",
@@ -1066,7 +1314,17 @@ describe("stripNulls", () => {
       a: null,
       b: { c: null, d: 1, e: { f: null } },
       list: [null, { g: null }],
-      branches: [null, { name: "release", protection: null }],
+      branches: [null, { name: "release", protection: null, extra: null }],
+      environments: [
+        {
+          name: "prod",
+          wait_timer: null,
+          deployment_branch_policy: null,
+          variables: { _undeclared: null, entries: [{ name: "A", value: null }] },
+          secrets: [{ name: "B", value: null }],
+        },
+      ],
+      workflows: { _layering: "shallow", entries: [{ path: "ci.yml", state: null }] },
       labels: { _undeclared: null, entries: [{ name: "bug", description: null }] },
       milestones: { _undeclared: null, entries: [{ title: "v1", due_on: null }] },
       rulesets: [
@@ -1085,6 +1343,15 @@ describe("stripNulls", () => {
       b: { d: 1, e: {} },
       list: [null, { g: null }],
       branches: [null, { name: "release", protection: null }],
+      environments: [
+        {
+          name: "prod",
+          deployment_branch_policy: null,
+          variables: { entries: [{ name: "A" }] },
+          secrets: [{ name: "B" }],
+        },
+      ],
+      workflows: { _layering: "shallow", entries: [{ path: "ci.yml", state: null }] },
       labels: { entries: [{ name: "bug" }] },
       milestones: { entries: [{ title: "v1" }] },
       rulesets: [

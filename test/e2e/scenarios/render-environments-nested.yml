@@ -1,0 +1,103 @@
+# mode: render over a plain-list section: `environments` unions by name (case-
+# insensitive) and comes out as the BARE list, its wrapper's `_layering` consumed.
+# Under deep the same-name pair merges field by field and every nested list unions
+# by its own key: variables and secrets by uppercased name, branch policies by
+# pattern, protection rules by App slug, reviewers by type and id. The fleet's
+# secrets wrapper keeps its `_undeclared: keep` over the repo's bare list.
+name: render-environments-nested
+inputs:
+  mode: render
+settings_layers:
+  - environments:
+      - name: Prod
+        wait_timer: 5
+        reviewers:
+          - type: User
+            id: 1
+        variables:
+          - name: LOG_LEVEL
+            value: info
+          - name: REGION
+            value: eu-west-1
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: TOKEN
+              value: $E2E_SECRET_A
+        deployment_branch_policy:
+          protected_branches: false
+          custom_branch_policies: true
+        deployment_branch_policies:
+          - name: hotfix/*
+        deployment_protection_rules:
+          - app: gate-keeper
+settings:
+  environments:
+    _layering: deep
+    entries:
+      - name: prod
+        prevent_self_review: true
+        reviewers:
+          - type: Team
+            id: 1
+        variables:
+          - name: Region
+            value: us-east-1
+          - name: TIMEOUT
+            value: "30"
+        secrets:
+          - name: token
+            value: $E2E_SECRET_B
+        # Each layer validates on its own, so the flag the patterns need rides along here too.
+        deployment_branch_policy:
+          protected_branches: false
+          custom_branch_policies: true
+        deployment_branch_policies:
+          - name: hotfix/*
+            type: branch
+          - name: release/*
+            type: tag
+        deployment_protection_rules:
+          entries:
+            - app: gate-keeper
+            - app: scanner
+      - name: qa
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  rendered:
+    environments:
+      - name: prod
+        wait_timer: 5
+        prevent_self_review: true
+        reviewers:
+          - type: User
+            id: 1
+          - type: Team
+            id: 1
+        deployment_branch_policy:
+          protected_branches: false
+          custom_branch_policies: true
+        deployment_branch_policies:
+          - name: hotfix/*
+            type: branch
+          - name: release/*
+            type: tag
+        deployment_protection_rules:
+          entries:
+            - app: gate-keeper
+            - app: scanner
+        variables:
+          - name: LOG_LEVEL
+            value: info
+          - name: Region
+            value: us-east-1
+          - name: TIMEOUT
+            value: "30"
+        secrets:
+          _undeclared: keep
+          entries:
+            - name: token
+              value: $E2E_SECRET_B
+      - name: qa

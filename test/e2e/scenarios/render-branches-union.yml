@@ -1,0 +1,49 @@
+# mode: render over `branches`, a plain-list section: entries union by name under
+# the file-level `_layering: deep`, keeping the fleet's order (GitHub applies
+# overlapping wildcard rules in creation order) and appending new names. A higher
+# `protection: null` is the entry's own value (no protection), never a delete
+# marker, so it lands in the rendered file with no notice; a higher
+# `required_deployments: null` likewise turns that control off.
+name: render-branches-union
+inputs:
+  mode: render
+settings_layers:
+  - branches:
+      - name: main
+        protection:
+          enforce_admins: true
+          required_signatures: true
+          required_deployments:
+            environments: [prod]
+      - name: release/*
+        protection:
+          required_signatures: true
+settings:
+  _layering: deep
+  branches:
+    - name: release/*
+      protection: null
+    - name: main
+      protection:
+        required_deployments: null
+    - name: develop
+      protection:
+        enforce_admins: false
+expect:
+  exit_code: 0
+  result: rendered
+  zero_requests: true
+  stdout_lacks:
+    - "null removed"
+  rendered:
+    branches:
+      - name: main
+        protection:
+          enforce_admins: true
+          required_signatures: true
+          required_deployments: null
+      - name: release/*
+        protection: null
+      - name: develop
+        protection:
+          enforce_admins: false

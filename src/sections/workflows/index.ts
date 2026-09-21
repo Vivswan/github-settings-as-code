@@ -7,10 +7,18 @@ import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
+import {
+  keyedBy,
+  listEntries,
+  loosen,
+  type SectionMeta,
+  type SectionModule,
+  valueDrift,
+} from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
+import { layeredList } from "../shared/schema-helpers.js";
 import { WorkflowsConfig } from "./schema.js";
 
 const LiveWorkflow = z.looseObject({
@@ -67,7 +75,9 @@ export const workflowsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(WorkflowsConfig),
+  shape: loosen(layeredList(WorkflowsConfig)),
+  // Folded as plan() folds a path: a bare file name and its .github/workflows/ spelling are one workflow.
+  layering: keyedBy("path", { fold: workflowPath }),
   // The enable/disable PUTs carry no body at all, so an extra key can only be a typo that would silently do nothing.
   closedSurface: {
     known: { path: true, state: true },
@@ -75,11 +85,12 @@ export const workflowsSection = {
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
   async plan(ctx, desired) {
+    const workflows = listEntries(desired);
     // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
     raise(
       rejectDuplicates(
         this,
-        desired,
+        workflows,
         (w) => workflowPath(w.path),
         (w) => w.path,
       ),
@@ -90,7 +101,7 @@ export const workflowsSection = {
     );
 
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
-    for (const workflow of desired) {
+    for (const workflow of workflows) {
       const match = present.get(workflowPath(workflow.path));
       if (!match) {
         // No operation can create a workflow file.

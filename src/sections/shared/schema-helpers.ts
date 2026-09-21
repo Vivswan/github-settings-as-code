@@ -32,16 +32,35 @@ const renamedPolicyKeyError = renamedKeyError(
 );
 
 /**
- * The wrapper's unrecognized keys, one clause per kind, joined: the pre-v3 policy spelling names its rename, and
- * any other underscore key names the two directives, since a wrapper takes no private notes either (the document
- * level says the same in src/problem.ts). A misspelled entry field beside them stays on zod's own line, so the
- * directives clause names the underscore keys it is about whenever the list holds anything else.
+ * The two wrapper kinds, each named as its published definition is (`<name><Entry>`) and with the directives its key
+ * error names. Only the knobbed wrapper ever spelled the policy without its underscore, so only it names the rename.
  */
-function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
+const WRAPPER_KINDS = {
+  knobbed: {
+    name: "UndeclaredPolicyList",
+    directives: '"_undeclared" and, on a top-level section, "_layering"',
+    renamed: true,
+  },
+  layered: {
+    name: "LayeredList",
+    directives:
+      '"_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared")',
+    renamed: false,
+  },
+} as const;
+type WrapperKind = (typeof WRAPPER_KINDS)[keyof typeof WRAPPER_KINDS];
+
+/**
+ * The wrapper's unrecognized keys, one clause per kind, joined: the pre-v3 policy spelling names its rename, and
+ * any other underscore key names the wrapper's directives, since a wrapper takes no private notes either (the
+ * document level says the same in src/problem.ts). A misspelled entry field beside them stays on zod's own line, so
+ * the directives clause names the underscore keys it is about whenever the list holds anything else.
+ */
+function wrapperKeyError(issue: z.core.$ZodRawIssue, kind: WrapperKind): string | undefined {
   if (issue.code !== "unrecognized_keys") {
     return undefined;
   }
-  const renamed = renamedPolicyKeyError(issue);
+  const renamed = kind.renamed ? renamedPolicyKeyError(issue) : undefined;
   const directives = issue.keys.filter((key) => key.startsWith("_"));
   if (directives.length === 0) {
     return renamed;
@@ -49,7 +68,7 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
   const quoted = (keys: readonly string[]) => keys.map((key) => JSON.stringify(key)).join(", ");
   const clause =
     `${directives.length < issue.keys.length ? `${quoted(directives)}: ` : ""}the wrapper's directives are ` +
-    '"_undeclared" and, on a top-level section, "_layering", and nothing else - there are no ' +
+    `${kind.directives}, and nothing else - there are no ` +
     "private-note keys. Remove the key, or keep the note as a YAML comment";
   return renamed === undefined
     ? `${agree(issue.keys.length, "Unrecognized key", "Unrecognized keys")}: ${quoted(issue.keys)}; ${clause}`
@@ -57,14 +76,32 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue): string | undefined {
 }
 
 /**
- * loosen() (../contract/module.ts) recognizes this union and rewraps it with the routed check that keeps
- * per-entry issue paths. The wrapper's definition name derives from the entry's own .meta({id}), so the
- * document composition and a section's runtime derivation can never label one entry differently.
+ * The bare list beside its strict wrapper, whose keys `shape` chooses around `entries`. loosen() (../contract/module.ts)
+ * and engine/canonical.ts recognize the union by the wrapper's `entries`. The wrapper's definition name derives from
+ * the list element's own .meta({id}), so the document composition and a section's runtime derivation can never label
+ * one entry differently.
  *
- *   entry without an id                        -> throws at MODULE LOAD, not typecheck
+ *   element without an id                      -> throws at MODULE LOAD, not typecheck
  *   z.toJSONSchema(SettingsFile)               -> fine: it resolves metadata by schema identity
  *   a generator over z.globalRegistry's ids    -> sees only the last-registered wrapper (each call mints a fresh one under the same id)
  */
+function wrappedList<L extends z.ZodArray<z.ZodType>, S extends z.core.$ZodShape>(
+  list: L,
+  kind: WrapperKind,
+  shape: (entries: L) => S,
+) {
+  const entryName = z.globalRegistry.get(list.element)?.id;
+  if (entryName === undefined) {
+    throw new Error(
+      `BUG: ${kind.name}: the list's element schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})`,
+    );
+  }
+  const wrapper = z
+    .strictObject(shape(list), { error: (issue) => wrapperKeyError(issue, kind) })
+    .meta({ id: `${kind.name}<${entryName}>` });
+  return z.union([list, wrapper]);
+}
+
 function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
   entry: T,
   shape: (knobs: {
@@ -72,19 +109,9 @@ function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
     entries: z.ZodArray<T>;
   }) => S,
 ) {
-  const entryName = z.globalRegistry.get(entry)?.id;
-  if (entryName === undefined) {
-    throw new Error(
-      "BUG: knobbed(): the entry schema carries no .meta({id}) name to derive the wrapper's definition name from; give the entry config a .meta({id})",
-    );
-  }
-  const wrapper = z
-    .strictObject(
-      shape({ _undeclared: UndeclaredPolicySchema.optional(), entries: z.array(entry) }),
-      { error: wrapperKeyError },
-    )
-    .meta({ id: `UndeclaredPolicyList<${entryName}>` });
-  return z.union([z.array(entry), wrapper]);
+  return wrappedList(z.array(entry), WRAPPER_KINDS.knobbed, (entries) =>
+    shape({ _undeclared: UndeclaredPolicySchema.optional(), entries }),
+  );
 }
 
 /**
@@ -96,11 +123,24 @@ export function knobbed<T extends z.ZodType>(entry: T) {
 }
 
 /**
- * A nested list (environments[].variables) is replaced wholesale by a higher layer, so `_layering`
- * would be accepted and never act; the wrapper rejects it.
+ * A nested list (environments[].variables) unions by its own key under the directive its entry inherits, so
+ * `_layering` on its wrapper would be accepted and never act; the wrapper rejects it.
  */
 export function nestedKnobbed<T extends z.ZodType>(entry: T) {
   return knobbedList(entry, (knobs) => knobs);
+}
+
+/**
+ * The wrapper of a list section that applies no undeclared policy (environments, branches, workflows): the bare list
+ * beside `{_layering, entries}`. The directive is the only reason the wrapper exists, so the fold consumes it and
+ * writes the bare list, and a planner reads either form through listEntries() (../contract/module.ts). The list's own
+ * refinements (the pinned-environments cap) ride along as the wrapper's `entries`.
+ */
+export function layeredList<L extends z.ZodArray<z.ZodType>>(list: L) {
+  return wrappedList(list, WRAPPER_KINDS.layered, (entries) => ({
+    _layering: LayeringSchema.optional(),
+    entries,
+  }));
 }
 
 /** A repository-scope sealed secret entry (name + `$NAME` reference value). */

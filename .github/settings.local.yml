@@ -4,8 +4,10 @@
 # renders the same merge into .github/settings.yml.
 # Rendered once, repo-owned: template sync never rewrites it. Fleet defaults
 # merge UNDER this file - keys here win, null opts out, and every list section
-# unions by its key (labels and rulesets by name): a same-key entry merges field
-# by field (a ruleset's rules by type), other arrays replace wholesale. The fleet
+# unions by its key (labels and rulesets by name, environments by name with their
+# variables and secrets by name, branches by name, workflows by path): a same-key
+# entry merges field by field (a ruleset's rules by type), other arrays replace
+# wholesale. The fleet
 # invariants (squash-only merging, the main and non-bypassable rulesets) sit ABOVE
 # and cannot be overridden.
 # Undeclared labels are deleted against the MERGED roster; undeclared

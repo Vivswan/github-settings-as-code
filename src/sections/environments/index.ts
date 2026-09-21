@@ -4,15 +4,21 @@ import { raise } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
+  type KeyedListLayering,
+  keyedBy,
+  listEntries,
   loosen,
   missingDrift,
   type SectionModule,
+  secretValuesOf,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
 import { rejectDuplicates } from "../contract/requests.js";
-import { listSecretValues } from "../shared/secrets-engine.js";
+import { layeredList } from "../shared/schema-helpers.js";
+import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
+import { variableKey } from "../shared/variables-engine.js";
 import { ENDPOINTS } from "./endpoints.js";
 import { NESTED_KEYS, planNested, splitEntry } from "./nested.js";
 import {
@@ -67,6 +73,13 @@ const permission: SectionPermission = { repo: ["environments"] };
 const NESTED_OVERRIDES_CAVEAT =
   'declared "deployment_branch_policies" and "deployment_protection_rules" keys additionally need "Actions" (read) and "Administration" (read and write)';
 
+/** A reviewer is a `type` and a numeric `id`; users and teams number from separate spaces, so the pair is the key. */
+const REVIEWER_LAYERING: KeyedListLayering = {
+  keyField: "id",
+  keyKind: "numeric",
+  keys: (entry) => (typeof entry.id === "number" ? [`${String(entry.type)}:${entry.id}`] : null),
+};
+
 export const environmentsSection = {
   key: "environments",
   undeclaredDefault: "untouched",
@@ -74,20 +87,31 @@ export const environmentsSection = {
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: loosen(EnvironmentsConfig),
+  shape: loosen(layeredList(EnvironmentsConfig)),
+  /**
+   * Environment names fold as plan() probes them (case-insensitive). The nested lists union by the key each
+   * planner reconciles by: variable and secret names uppercased as GitHub stores them, branch policies by their
+   * pattern, protection rules by App slug, reviewers by type and id. `deployment_branch_policy: null` is the entry's
+   * own "no restriction" value, never a delete marker.
+   */
+  layering: keyedBy("name", {
+    fold: (name) => name.toLowerCase(),
+    nullValued: ["deployment_branch_policy"],
+    nested: {
+      variables: keyedBy("name", { fold: variableKey }),
+      secrets: keyedBy("name", { fold: secretKey }),
+      deployment_branch_policies: keyedBy("name"),
+      deployment_protection_rules: keyedBy("app"),
+      reviewers: REVIEWER_LAYERING,
+    },
+  }),
   /**
    * Labels carry the environment: sibling environments can declare same-named secrets.
    * A malformed container contributes nothing rather than throwing, so the actionable error
    * always comes from shape validation.
    */
   secretValues(declared: unknown): DeclaredSecretValue[] {
-    if (!Array.isArray(declared)) {
-      return [];
-    }
-    return declared.flatMap((entry) => {
-      if (typeof entry !== "object" || entry === null) {
-        return [];
-      }
+    return secretValuesOf(declared, (entry) => {
       const env = entry as EnvironmentConfig;
       const where =
         typeof env.name === "string" ? `environment "${env.name}"` : "an unnamed environment";
@@ -98,10 +122,11 @@ export const environmentsSection = {
     });
   },
   async plan(ctx, desired) {
+    const environments = listEntries(desired);
     raise(
       rejectDuplicates(
         this,
-        desired,
+        environments,
         (env) => env.name.toLowerCase(),
         (env) => env.name,
       ),
@@ -109,7 +134,7 @@ export const environmentsSection = {
     const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
     /** Each entry's declared pin state, in file order (order IS the pin order). */
     const pins: PinDeclaration[] = [];
-    for (const env of desired) {
+    for (const env of environments) {
       const { settings, nested, routed } = splitEntry(env);
       const name = env.name;
       const params = { environment_name: name };

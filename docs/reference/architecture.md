@@ -116,7 +116,7 @@ The stack folds bottom up, one layer per step:
 
 - The higher layer's mappings merge key by key; its scalars and lists replace.
 - Its `null` deletes what a lower layer declared, except on `pages` and `interaction_limits`, where `null` is the section's value and is written as such.
-- The list sections (`labels`, `rulesets`, every other section with an `_undeclared` knob) union their entries by the section's key instead of replacing; a same-key pair merges field by field under `deep`, is swapped under `shallow`, and the whole list is replaced under `replace`.
+- The list sections (`labels`, `rulesets`, every other section with an `_undeclared` knob, and the three plain lists `environments`, `branches`, and `workflows`) union their entries by the section's key instead of replacing; a same-key pair merges field by field under `deep`, is swapped under `shallow`, and the whole list is replaced under `replace`.
 
 The [layering guide](../operate/layering.md) has the full rule table and a worked example.
 

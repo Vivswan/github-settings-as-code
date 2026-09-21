@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { describeOptOut, mergeLayers, type OptOutNotice } from "../../src/engine/layers.js";
 import { describeProblem } from "../../src/problem.js";
-import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
+import { LIST_SECTIONS } from "../../src/schema.js";
 import { listLayering } from "../../src/sections/registry.js";
 import { ADMIN_SLUG } from "./constants.js";
-import { type LayeringDirective, UNDECLARED_KEY } from "./gen-support.js";
+import { type Json, LAYERING_KEY, type LayeringDirective, UNDECLARED_KEY } from "./gen-support.js";
 import type { MergeLayer, MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
 import {
   type AbortVerdict,
@@ -1131,6 +1131,49 @@ function engineNotices(
 }
 
 describe("foldMergeLayers (the oracle's own dialect)", () => {
+  test("keys named after Object.prototype members are ordinary document keys, inside a nested list too, as the engine reads them", () => {
+    // The oracle reads own properties only: an inherited `constructor` is not a lower declaration to delete, and an own
+    // `__proto__` is a key to carry, so the two folds agree on documents the generators never draw but a file can spell.
+    const proto = "__proto__";
+    // `constructor` beside the nested lists too: as a field it is data to union, never Object.prototype.constructor read as a keyed list.
+    const higher = JSON.parse(
+      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "environments": [{"name": "prod", "constructor": [{"name": "B"}], "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
+    ) as Json;
+    const layers = stack(
+      {
+        repository: {},
+        environments: [
+          { name: "prod", constructor: [{ name: "A" }], variables: [{ name: "A", value: "x" }] },
+        ],
+      },
+      higher,
+    );
+    const oracle = foldMergeLayers(layers, "deep");
+    const engine = mergeLayers(layers, { layering: "deep" });
+    expect(engine.isOk() ? engine.value : engine.error).toEqual({
+      settings: oracle.merged,
+      notices: oracle.notices,
+    });
+    expect(oracle).toEqual({
+      merged: {
+        repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
+        environments: [
+          {
+            name: "prod",
+            constructor: [{ name: "B" }],
+            variables: [{ name: "A", value: "y", constructor: null }],
+          },
+        ],
+      },
+      notices: [],
+    });
+    const repository = oracle.merged.repository as object;
+    expect([Object.hasOwn(repository, proto), Object.getPrototypeOf(repository)]).toEqual([
+      true,
+      Object.prototype,
+    ]);
+  });
+
   test("a null removes a lower declaration with a notice, stays when nothing below declares the key, and is the value where the section takes null", () => {
     const { merged, notices } = foldMergeLayers(
       stack(
@@ -1184,23 +1227,84 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     expect(over.merged).toEqual({ pages: { build_type: "legacy" } });
   });
 
-  test("mappings merge key by key at any depth; lists and scalars replace", () => {
+  test("mappings merge key by key at any depth; lists outside the list sections and scalars replace", () => {
     const { merged } = foldMergeLayers(
       stack(
         {
           repository: { description: "low", topics: ["a", "b"], has_issues: true },
-          branches: [{ name: "main", protection: null }],
+          check_suite_preferences: { auto_trigger_checks: [{ app_id: 1, setting: true }] },
         },
         {
           repository: { description: "high", topics: ["c"] },
-          branches: [{ name: "dev", protection: null }],
+          check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
         },
       ),
       "deep",
     );
     expect(merged).toEqual({
       repository: { description: "high", topics: ["c"], has_issues: true },
-      branches: [{ name: "dev", protection: null }],
+      check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
+    });
+  });
+
+  test("a plain-list section unions by key like a knobbed one and comes out as the bare list; an environment's nested lists union by their own keys", () => {
+    const { merged, notices } = foldMergeLayers(
+      stack(
+        {
+          branches: [
+            { name: "main", protection: { enforce_admins: true } },
+            { name: "release", protection: null },
+          ],
+          environments: [
+            {
+              name: "Prod",
+              wait_timer: 5,
+              variables: [{ name: "REGION", value: "eu" }],
+              secrets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "TOKEN", value: "$A" }] },
+            },
+          ],
+          workflows: [{ path: "ci.yml", state: "active" }],
+        },
+        {
+          branches: [{ name: "main", protection: null }],
+          environments: {
+            [LAYERING_KEY]: "deep",
+            entries: [
+              {
+                name: "prod",
+                variables: [
+                  { name: "region", value: "us" },
+                  { name: "TIMEOUT", value: "30" },
+                ],
+                secrets: [{ name: "token", value: "$B" }],
+              },
+            ],
+          },
+          workflows: [{ path: ".github/workflows/ci.yml", state: "disabled" }],
+        },
+      ),
+      "shallow",
+    );
+    expect({ merged, notices }).toEqual({
+      merged: {
+        branches: [
+          { name: "main", protection: null },
+          { name: "release", protection: null },
+        ],
+        environments: [
+          {
+            name: "prod",
+            wait_timer: 5,
+            variables: [
+              { name: "region", value: "us" },
+              { name: "TIMEOUT", value: "30" },
+            ],
+            secrets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "token", value: "$B" }] },
+          },
+        ],
+        workflows: [{ path: ".github/workflows/ci.yml", state: "disabled" }],
+      },
+      notices: [],
     });
   });
 
@@ -1568,11 +1672,11 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
 });
 
 describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
-  // The oracle spells every knobbed section's key in its own words; pinning that spelling against the
+  // The oracle spells every list section's key in its own words; pinning that spelling against the
   // modules' layering declarations as DATA makes a module changing its key fail here instead of quietly
   // making the fuzz predict a fold the engine no longer performs.
-  test("every knobbed module's key field and nested lists are the oracle's", () => {
-    for (const key of UNDECLARED_POLICY_SECTIONS) {
+  test("every list module's key field and nested lists are the oracle's", () => {
+    for (const key of LIST_SECTIONS) {
       const declared = listLayering(key);
       const oracle = KEYED_MERGE_SECTIONS[key];
       expect(oracle.keyField, key).toBe(declared.keyField);
@@ -1588,6 +1692,9 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
           throw new Error(`${key}.${field}: the module declares no nested layering`);
         }
         expect(nested.keyField).toBe(declaredNested.keyField);
+        expect([...(nested.nullValued ?? [])].sort(), `${key}.${field}`).toEqual(
+          [...(declaredNested.nullValued ?? [])].sort(),
+        );
       }
     }
   });
@@ -1615,10 +1722,13 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
     { config: { url: "https://hooks.example.com/A" } },
     { config: { url: 7 } },
     { config: "https://hooks.example.com/A" },
+    { path: "ci.yml", app: "gate", type: "User", id: 7 },
+    { path: ".github/workflows/ci.yml", app: 7, id: "7" },
+    { path: 7, type: "Team", id: 7 },
     {},
   ];
 
-  test.each([...UNDECLARED_POLICY_SECTIONS])(
+  test.each([...LIST_SECTIONS])(
     "%s: the key functions agree over the spellings the generators draw, renames and case included",
     (key) => {
       const declared = listLayering(key);
@@ -1645,6 +1755,17 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
     expect(keys.actions_secrets.keysOf({ name: "my_secret" })).toEqual(["MY_SECRET"]);
     expect(keys.agents_variables.keysOf({ name: "my_var" })).toEqual(["MY_VAR"]);
     expect(keys.milestones.keysOf({ title: "V1" })).toEqual(["V1"]);
+    expect(keys.environments.keysOf({ name: "Prod" })).toEqual(["prod"]);
+    expect(keys.environments.nested?.variables?.keysOf({ name: "log_level" })).toEqual([
+      "LOG_LEVEL",
+    ]);
+    // A user and a team may share an id; the key tells them apart without either being keyless.
+    const reviewers = keys.environments.nested?.reviewers;
+    expect(reviewers?.keysOf({ type: "User", id: 7 })).not.toBeNull();
+    expect(reviewers?.keysOf({ type: "User", id: 7 })).not.toEqual(
+      reviewers?.keysOf({ type: "Team", id: 7 }),
+    );
+    expect(keys.workflows.keysOf({ path: "ci.yml" })).toEqual([".github/workflows/ci.yml"]);
     expect(keys.webhooks.keysOf({ config: { url: "https://hooks.example.com/A" } })).toEqual([
       "https://hooks.example.com/A",
     ]);

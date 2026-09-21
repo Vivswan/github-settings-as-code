@@ -7,12 +7,7 @@
  */
 
 import type { z } from "zod";
-import {
-  SECTION_KEYS,
-  type SectionKey,
-  type SettingsFile,
-  type UndeclaredPolicySection,
-} from "../schema.js";
+import { type ListSection, SECTION_KEYS, type SectionKey, type SettingsFile } from "../schema.js";
 import type { DeepReadonly, MustBeNever } from "../types.js";
 import { actionsSection } from "./actions/index.js";
 import { actionsSecretsSection } from "./actions_secrets/index.js";
@@ -187,16 +182,16 @@ type OwnerGatesWithoutProbe = {
 type _OwnerGatesDeclareTheProbe = MustBeNever<OwnerGatesWithoutProbe>;
 
 /**
- * Every knobbed section layers by key, so a knobbed module registered without `layering` fails here by name:
+ * Every list section layers by key, so a list module registered without `layering` fails here by name:
  * the fold would otherwise have no key to union its entries by and would replace them silently.
  */
-type KnobbedModulesWithoutKey = {
-  [K in UndeclaredPolicySection]: SectionModules[K] extends { readonly layering: KeyedListLayering }
+type ListModulesWithoutKey = {
+  [K in ListSection]: SectionModules[K] extends { readonly layering: KeyedListLayering }
     ? never
     : K;
-}[UndeclaredPolicySection];
+}[ListSection];
 
-type _KnobbedModulesDeclareTheirKey = MustBeNever<KnobbedModulesWithoutKey>;
+type _ListModulesDeclareTheirKey = MustBeNever<ListModulesWithoutKey>;
 
 /**
  * Derived from each module's literal ENDPOINTS, so every consumer (the mock handler tables, dispatch,
@@ -284,8 +279,8 @@ export function sectionModule<K extends SectionKey>(key: K): SectionModule<K> {
   return guarded[key];
 }
 
-/** The key a knobbed section's entries layer by; total because the registry requires the declaration (_KnobbedModulesDeclareTheirKey). */
-export function listLayering(key: UndeclaredPolicySection): KeyedListLayering {
+/** The key a list section's entries layer by; total because the registry requires the declaration (_ListModulesDeclareTheirKey). */
+export function listLayering(key: ListSection): KeyedListLayering {
   const module: { readonly layering: KeyedListLayering } = byKey[key];
   return module.layering;
 }

@@ -1,7 +1,12 @@
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GitHubClient } from "../../github/api.js";
-import type { SectionKey, SettingsFile, UndeclaredPolicySection } from "../../schema.js";
+import type {
+  ListSection,
+  SectionKey,
+  SettingsFile,
+  UndeclaredPolicySection,
+} from "../../schema.js";
 import type {
   DeepReadonly,
   MustBeNever,
@@ -91,9 +96,9 @@ export interface SectionMeta<
   readonly undeclaredDefault: K extends UndeclaredPolicySection ? UndeclaredPolicy : "untouched";
   /**
    * Read by engine/layers.ts for the layered merge. Optional on the interface for the sections that take no
-   * list; ../registry.ts requires it of every knobbed section, so a knobbed module omitting it fails to compile.
+   * list; ../registry.ts requires it of every list section, so a list module omitting it fails to compile.
    */
-  readonly layering?: K extends UndeclaredPolicySection ? KeyedListLayering : never;
+  readonly layering?: K extends ListSection ? KeyedListLayering : never;
 }
 
 /**
@@ -109,7 +114,13 @@ export interface KeyedListLayering {
   readonly keys: (entry: Readonly<Record<string, unknown>>) => readonly string[] | null;
   /** The entry field the keys come from, for refusal prose ("name", "type"). */
   readonly keyField: string;
-  /** Fields of a merged entry that are themselves keyed lists (rulesets' `rules`). */
+  /** The field's kind in the same prose ("string" unless said otherwise; a reviewer's `id` is "numeric"). */
+  readonly keyKind?: string;
+  /**
+   * Fields of a merged entry that are themselves keyed lists (rulesets' `rules`, an environment's `variables`). A
+   * nested list arrives as a bare list or a nested `{_undeclared, entries}` wrapper and unions by its own key under
+   * the directive its entry inherits; its wrapper takes no `_layering` (nestedKnobbed in ../shared/schema-helpers.ts).
+   */
   readonly nested?: Readonly<Record<string, KeyedListLayering>>;
   /**
    * Dotted paths within the entry whose null the ENTRY SCHEMA types as a value (custom_properties' `value` unsets the
@@ -125,6 +136,7 @@ export function keyedBy(
   options: {
     readonly fold?: (name: string) => string;
     readonly nullValued?: readonly string[];
+    readonly nested?: Readonly<Record<string, KeyedListLayering>>;
   } = {},
 ): KeyedListLayering {
   const fold = options.fold ?? ((name: string) => name);
@@ -135,7 +147,21 @@ export function keyedBy(
       return typeof value === "string" ? [fold(value)] : null;
     },
     ...(options.nullValued === undefined ? {} : { nullValued: options.nullValued }),
+    ...(options.nested === undefined ? {} : { nested: options.nested }),
   };
+}
+
+/**
+ * The entries of a list section's value in either form, by reference: the bare list, or the `{entries}` wrapper (the
+ * knobbed `{_undeclared, entries}` and the plain-list `{_layering, entries}` alike). The one unwrap a planner over a
+ * plain-list section performs; the knobbed ones read theirs through undeclaredPolicy().
+ */
+export function listEntries<E>(
+  declared: readonly E[] | { readonly entries: readonly E[] },
+): readonly E[] {
+  return Array.isArray(declared)
+    ? declared
+    : (declared as { readonly entries: readonly E[] }).entries;
 }
 
 /** The wrapper type in ../../types.ts is zod-free and spells the directive's values itself; both pins fail when the two sets part. */
@@ -671,7 +697,7 @@ const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
   "null",
 ]);
 
-/** The knobbed() union (../shared/schema-helpers.ts): the entry array beside the strict {_undeclared, entries} wrapper; engine/canonical.ts walks it by this detector too. */
+/** The knobbed() and layeredList() unions (../shared/schema-helpers.ts): the entry array beside a strict wrapper with `entries`; engine/canonical.ts walks them by this detector too. */
 export function detectKnobUnion(
   options: readonly z.ZodType[],
 ): { list: z.ZodType; wrapper: z.ZodType } | null {
@@ -693,6 +719,11 @@ export function detectKnobUnion(
 
 /** A transform, not a union, so a failing entry keeps its precise issue path and the output is the routed shape's parsed data. */
 function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
+  // The wrapper's own words for what rides beside `entries`: the policy on a knobbed section, the directive alone on a plain list.
+  const beside =
+    defOf(wrapper).shape?._undeclared === undefined
+      ? 'an optional "_layering" directive'
+      : 'an optional "_undeclared" policy';
   return z
     .custom<unknown>(() => true)
     .transform((value, ctx) => {
@@ -704,7 +735,7 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
       if (shape === null) {
         ctx.addIssue({
           code: "custom",
-          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and an optional "_undeclared" policy), but this section parsed as ${value === null ? "null" : typeof value}`,
+          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`,
         });
         return z.NEVER;
       }

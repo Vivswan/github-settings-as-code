@@ -1,6 +1,7 @@
 /**
  * The settings document composed from the per-section slices (src/sections/<key>/schema.ts); this file adds only the
- * document-level wrappers (the undeclared knob, .optional()), so an org/user document can compose its own from the same
+ * document-level wrappers (the undeclared knob, the layered wrapper, .optional()), so an org/user document can compose
+ * its own from the same
  * slices. Only DECLARED keys are ever applied or compared. The sections in PROBOT_PARITY_KEYS keep the Probot Settings
  * app's plain-array form so an existing Probot config applies to them unchanged; every other section is an addition.
  *
@@ -36,7 +37,7 @@ import { PagesConfig } from "./sections/pages/schema.js";
 import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
-import { knobbed, LayeringSchema } from "./sections/shared/schema-helpers.js";
+import { knobbed, LayeringSchema, layeredList } from "./sections/shared/schema-helpers.js";
 import { TeamConfig } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
 import { WorkflowsConfig } from "./sections/workflows/schema.js";
@@ -49,15 +50,15 @@ export const SettingsFile = z
     repository: RepositoryConfig.optional(),
     labels: knobbed(LabelConfig).optional(),
     rulesets: knobbed(RulesetConfig).optional(),
-    branches: BranchesConfig.optional(),
-    environments: EnvironmentsConfig.optional(),
+    branches: layeredList(BranchesConfig).optional(),
+    environments: layeredList(EnvironmentsConfig).optional(),
     autolinks: knobbed(AutolinkConfig).optional(),
     actions: ActionsConfig.optional(),
     actions_secrets: knobbed(ActionsSecretConfig).optional(),
     dependabot_secrets: knobbed(DependabotSecretConfig).optional(),
     codespaces_secrets: knobbed(CodespacesSecretConfig).optional(),
     agents_secrets: knobbed(AgentsSecretConfig).optional(),
-    workflows: WorkflowsConfig.optional(),
+    workflows: layeredList(WorkflowsConfig).optional(),
     check_suite_preferences: CheckSuitePreferencesConfig.optional(),
     pages: PagesConfig.optional(),
     code_scanning_default_setup: CodeScanningDefaultSetupConfig.optional(),
@@ -137,14 +138,59 @@ export const UNDECLARED_POLICY_SECTIONS = [
 
 export type UndeclaredPolicySection = (typeof UNDECLARED_POLICY_SECTIONS)[number];
 
-/** Both branches are required, the plain array AND the wrapper, so a section whose config merely carries `entries` is not knobbed by accident. */
-type KnobbedByType = {
+/**
+ * Every list section, in execution order: the knobbed ones and the plain lists whose wrapper takes `_layering` alone.
+ * The fold (engine/layers.ts) unions each by the key its module declares; ./sections/registry.ts requires that
+ * declaration of every member, so a section added here without one fails to compile.
+ */
+export const LIST_SECTIONS = [
+  "labels",
+  "rulesets",
+  "environments",
+  "branches",
+  "autolinks",
+  "actions_secrets",
+  "dependabot_secrets",
+  "codespaces_secrets",
+  "agents_secrets",
+  "workflows",
+  "collaborators",
+  "teams",
+  "milestones",
+  "actions_variables",
+  "agents_variables",
+  "webhooks",
+  "custom_properties",
+  "deploy_keys",
+  "secret_scanning_custom_patterns",
+] as const satisfies readonly SectionKey[];
+
+export type ListSection = (typeof LIST_SECTIONS)[number];
+
+/** A list section outside the undeclared policy: its wrapper carries `_layering` only, and the fold writes the bare list. */
+export type PlainListSection = Exclude<ListSection, UndeclaredPolicySection>;
+
+/** The `{entries}` wrapper form of a section's value, or never where the section takes none. */
+type WrapperOf<K extends SectionKey> = Extract<
+  NonNullable<SettingsFile[K]>,
+  { entries: readonly unknown[] }
+>;
+
+/** Both branches are required, the plain array AND the wrapper, so a section whose config merely carries `entries` is not a list section by accident. */
+type ListByType = {
   [K in SectionKey]: [Extract<NonNullable<SettingsFile[K]>, readonly unknown[]>] extends [never]
     ? never
-    : [Extract<NonNullable<SettingsFile[K]>, { entries: readonly unknown[] }>] extends [never]
+    : [WrapperOf<K>] extends [never]
       ? never
       : K;
 }[SectionKey];
+type _ListComplete = MustBeNever<Exclude<ListByType, ListSection>>;
+type _ListSound = MustBeNever<Exclude<ListSection, ListByType>>;
+
+/** Knobbed: a list section whose wrapper takes the `_undeclared` policy. Read off the wrapper's keys, since a wrapper without the key is assignable to one with it optional. */
+type KnobbedByType = {
+  [K in ListByType]: "_undeclared" extends keyof WrapperOf<K> ? K : never;
+}[ListByType];
 type _KnobListComplete = MustBeNever<
   Exclude<KnobbedByType, (typeof UNDECLARED_POLICY_SECTIONS)[number]>
 >;
@@ -177,7 +223,8 @@ type _DirectiveNotASection = MustBeNever<Extract<DocumentDirectiveKey, SectionKe
 // --- Slice-composition pins -----------------------------------------------------
 
 /**
- * Each property's schema before .optional(): the slice verbatim, or the undeclared knob over the entry slice. A
+ * Each property's schema before .optional(): the slice verbatim, the undeclared knob over the entry slice, or the
+ * layered wrapper over the list slice. A
  * whole-section slice export is named <Key>Config, matching the <Entry>Config entry schemas; a new section fails to
  * compile until its derivation is declared here.
  */
@@ -185,15 +232,15 @@ type SliceDerivation = {
   repository: typeof RepositoryConfig;
   labels: ReturnType<typeof knobbed<typeof LabelConfig>>;
   rulesets: ReturnType<typeof knobbed<typeof RulesetConfig>>;
-  environments: typeof EnvironmentsConfig;
-  branches: typeof BranchesConfig;
+  environments: ReturnType<typeof layeredList<typeof EnvironmentsConfig>>;
+  branches: ReturnType<typeof layeredList<typeof BranchesConfig>>;
   autolinks: ReturnType<typeof knobbed<typeof AutolinkConfig>>;
   actions: typeof ActionsConfig;
   actions_secrets: ReturnType<typeof knobbed<typeof ActionsSecretConfig>>;
   dependabot_secrets: ReturnType<typeof knobbed<typeof DependabotSecretConfig>>;
   codespaces_secrets: ReturnType<typeof knobbed<typeof CodespacesSecretConfig>>;
   agents_secrets: ReturnType<typeof knobbed<typeof AgentsSecretConfig>>;
-  workflows: typeof WorkflowsConfig;
+  workflows: ReturnType<typeof layeredList<typeof WorkflowsConfig>>;
   check_suite_preferences: typeof CheckSuitePreferencesConfig;
   pages: typeof PagesConfig;
   code_scanning_default_setup: typeof CodeScanningDefaultSetupConfig;

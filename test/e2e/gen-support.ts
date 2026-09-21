@@ -30,10 +30,20 @@ export const DEFAULT_LAYERING_DIRECTIVE: LayeringDirective = "deep";
 
 /**
  * The entry paths whose null is a VALUE under deep (never a delete marker), in the harness's own words: a custom
- * property's `value: null` unsets the property. oracle.test.ts pins the spelling against each module's declaration.
+ * property's `value: null` unsets the property, an environment's `deployment_branch_policy: null` lifts its branch
+ * restriction, a branch's `protection: null` removes its protection and `protection.required_deployments: null` turns
+ * that control off. oracle.test.ts pins the spelling against each module's declaration.
  */
 export const NULL_VALUED_ENTRY_PATHS: Readonly<Partial<Record<string, readonly string[]>>> = {
   custom_properties: ["value"],
+  environments: ["deployment_branch_policy"],
+  branches: [
+    "protection",
+    "protection.required_deployments",
+    "protection.required_pull_request_reviews",
+    "protection.required_status_checks",
+    "protection.restrictions",
+  ],
 };
 
 export type EntriesForm = Json[] | { [UNDECLARED_KEY]?: "keep" | "delete"; entries: Json[] };
