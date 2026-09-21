@@ -421,12 +421,19 @@ describe("repository", () => {
     },
   );
 
-  test("non-boolean security toggles are rejected by upfront shape validation with the YAML hint", () => {
-    const error = shapeError({ repository: { enable_vulnerability_alerts: "no" } }, "f.yml");
-    expect(error).toContain("repository.enable_vulnerability_alerts");
-    expect(error).toContain("not a boolean");
-    expect(error).toContain('"no"');
-  });
+  /** The toggles the PATCH does not carry: the endpoint toggles and the GraphQL sponsor button, one shape between them. */
+  const NON_PATCH_TOGGLES = [...FEATURE_TOGGLES.map((toggle) => toggle.key), "enable_sponsorships"];
+
+  test.each(NON_PATCH_TOGGLES)(
+    "a non-boolean %s is rejected by upfront shape validation with the YAML hint; booleans and passthrough keys pass",
+    (key) => {
+      const error = shapeError({ repository: { [key]: "no" } }, "f.yml");
+      expect(error).toContain(`repository.${key}`);
+      expect(error).toContain("not a boolean");
+      expect(error).toContain('"no"');
+      expect(shapeError({ repository: { [key]: true, extra_field: "x" } }, "f.yml")).toBeNull();
+    },
+  );
 
   test("git LFS: the cannot-verify note, no drift, an always-rewrite operation, no requests beyond the GET", async () => {
     const api = new MockApi({ [GET]: { data: {} } });
@@ -439,16 +446,6 @@ describe("repository", () => {
       drift: [],
     });
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([GET]);
-  });
-
-  test("non-boolean git LFS values hit the shared toggle shape, booleans pass", () => {
-    const error = shapeError({ repository: { enable_git_lfs: "yes" } }, "f.yml");
-    expect(error).toContain("repository.enable_git_lfs");
-    expect(error).toContain("not a boolean");
-    // The section stays loose otherwise: booleans and passthrough keys pass.
-    expect(
-      shapeError({ repository: { enable_git_lfs: true, extra_field: "x" } }, "f.yml"),
-    ).toBeNull();
   });
 
   test("a cyclic toggle value is rejected with a message, never a formatter throw", () => {
@@ -783,30 +780,6 @@ describe("repository GraphQL-routed keys", () => {
     });
     expectAdministrationDenied(await rejection(plan(api, { enable_sponsorships: true })));
   });
-
-  test("a non-boolean enable_sponsorships is rejected upfront with the YAML hint", () => {
-    const error = shapeError({ repository: { enable_sponsorships: "yes" } }, "f.yml");
-    expect(error).toContain("repository.enable_sponsorships");
-    expect(error).toContain("not a boolean");
-  });
-
-  test("an unrecognized issue_creation_policy is rejected upfront naming the vocabulary", () => {
-    const error = shapeError({ repository: { issue_creation_policy: "everyone" } }, "f.yml");
-    expect(error).toContain("repository.issue_creation_policy");
-    expect(error).toContain('"collaborators_only"');
-    expect(shapeError({ repository: { issue_creation_policy: "all" } }, "f.yml")).toBeNull();
-  });
-
-  test("prototype-chain property names never pass the policy vocabulary", () => {
-    // `"constructor" in ISSUE_CREATION_POLICIES` is true via the prototype chain, so the vocabulary check must be an own-property check or these
-    // would map to garbage at the GraphQL boundary.
-    for (const name of ["constructor", "toString", "__proto__"]) {
-      expect(
-        shapeError({ repository: { issue_creation_policy: name } }, "f.yml"),
-        `"${name}" must be rejected`,
-      ).toContain("repository.issue_creation_policy");
-    }
-  });
 });
 
 describe("repository snapshot", () => {
@@ -1097,15 +1070,6 @@ describe("repository parse refusals", () => {
     },
   );
 
-  test("security_and_analysis accepts the null the PATCH body documents, and the validity-checks sub-key the descriptor omits", () => {
-    expect(refusals({ security_and_analysis: null })).toEqual([]);
-    expect(
-      refusals({
-        security_and_analysis: { secret_scanning_validity_checks: { status: "enabled" } },
-      }),
-    ).toEqual([]);
-  });
-
   test.each([
     [
       "a squash message without its title",
@@ -1139,36 +1103,10 @@ describe("repository parse refusals", () => {
     },
   );
 
-  test.each([
-    ["PR_TITLE", "PR_BODY"],
-    ["PR_TITLE", "BLANK"],
-    ["PR_TITLE", "COMMIT_MESSAGES"],
-    ["COMMIT_OR_PR_TITLE", "COMMIT_MESSAGES"],
-  ])("commit message defaults: the legal squash pair %s with %s parses", (title, message) => {
-    expect(
-      refusals({ squash_merge_commit_title: title, squash_merge_commit_message: message }),
-    ).toEqual([]);
-  });
-
-  test.each([
-    [
-      "the default merge pair",
-      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
-    ],
-    [
-      "a merge pair GitHub documents no refusal for",
-      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
-    ],
-    [
-      "a lone title, whose pair is only decidable against the live message",
-      { squash_merge_commit_title: "PR_TITLE", merge_commit_title: "PR_TITLE" },
-    ],
-  ])("commit message defaults: %s parses", (_what, declared) => {
-    expect(refusals(declared)).toEqual([]);
-  });
-
   const TOPIC_RULE =
     "is not a topic GitHub accepts: a topic is 1 to 50 characters, each a letter, digit, or hyphen, starting with a letter or digit (uppercase is lowercased on the wire)";
+  const EMPTY_TOPIC =
+    "is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic";
 
   test.each([
     [
@@ -1191,17 +1129,6 @@ describe("repository parse refusals", () => {
       Array.from({ length: 21 }, (_, index) => `topic-${index}`),
       "repository.topics: 21 topics declared; GitHub allows at most 20",
     ],
-  ])(
-    "topics: %s is refused at parse instead of as a 422 from PUT /topics",
-    (_what, topics, message) => {
-      expect(refusals({ topics })).toEqual([message]);
-    },
-  );
-
-  const EMPTY_TOPIC =
-    "is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic";
-
-  test.each([
     [
       "an empty list item, once dropped silently",
       ["ci", ""],
@@ -1217,30 +1144,12 @@ describe("repository parse refusals", () => {
       "",
       `repository.topics: an empty topic ${EMPTY_TOPIC}`,
     ],
-  ])("topics: %s is refused at parse, the refusal naming the entry", (_what, topics, message) => {
-    expect(refusals({ topics })).toEqual([message]);
-  });
-
-  test("topics: the cap counts distinct topics after the fold, so 22 entries naming 2 topics parse", () => {
-    expect(
-      refusals({ topics: [...Array.from({ length: 20 }, () => "CI"), "ci", "tooling"] }),
-    ).toEqual([]);
-  });
-
-  test("topics: 20 well-formed topics, a 50-character one and uppercase input among them, parse", () => {
-    const topics = [
-      "Copier",
-      "a".repeat(50),
-      "9lives",
-      ...Array.from({ length: 17 }, (_, index) => `topic-${index}`),
-    ];
-    expect(refusals({ topics })).toEqual([]);
-    expect(refusals({ topics: topics.join(", ") })).toEqual([]);
-  });
-
-  test("topics: [] parses; it is the one spelling of the wholesale clear", () => {
-    expect(refusals({ topics: [] })).toEqual([]);
-  });
+  ])(
+    "topics: %s is refused at parse instead of as a 422 from PUT /topics, the refusal naming the entry",
+    (_what, topics, message) => {
+      expect(refusals({ topics })).toEqual([message]);
+    },
+  );
 
   const TOGGLE_NULL = "has no empty state; write true or false";
   const TOGGLE_QUOTED =
@@ -1263,7 +1172,9 @@ describe("repository parse refusals", () => {
     }
   });
 
-  test.each([
+  const POLICY_RULE = 'is not a recognized policy. Use "all" (everyone) or "collaborators_only"';
+
+  test.each<[string, Record<string, unknown>, string]>([
     [
       "default_branch: null",
       { default_branch: null },
@@ -1277,25 +1188,88 @@ describe("repository parse refusals", () => {
     [
       "pull_request_creation_policy: everyone",
       { pull_request_creation_policy: "everyone" },
-      'repository.pull_request_creation_policy: "everyone" is not a recognized policy. Use "all" (everyone) or "collaborators_only"',
+      `repository.pull_request_creation_policy: "everyone" ${POLICY_RULE}`,
     ],
+    [
+      "issue_creation_policy: everyone",
+      { issue_creation_policy: "everyone" },
+      `repository.issue_creation_policy: "everyone" ${POLICY_RULE}`,
+    ],
+    // Names the prototype chain offers: an `in` check against the vocabulary would let them through.
+    ...["constructor", "toString", "__proto__"].map(
+      (name): [string, Record<string, unknown>, string] => [
+        `issue_creation_policy: ${name}`,
+        { issue_creation_policy: name },
+        `repository.issue_creation_policy: "${name}" ${POLICY_RULE}`,
+      ],
+    ),
   ])(
-    "a PATCH field outside its type (%s) is refused at parse instead of as GitHub's 422",
+    "a typed field outside its type (%s) is refused at parse, never discovered at apply",
     (_what, declared, message) => {
       expect(refusals({ has_issues: true, ...declared })).toEqual([message]);
     },
   );
 
-  test("the PATCH strings take what GitHub does: null clears description and homepage, and default_branch and visibility are plain strings", () => {
-    expect(
-      refusals({
+  const WELL_FORMED_TOPICS = [
+    "Copier",
+    "a".repeat(50),
+    "9lives",
+    ...Array.from({ length: 17 }, (_, index) => `topic-${index}`),
+  ];
+
+  test.each<[string, Record<string, unknown>]>([
+    [
+      "security_and_analysis: null, which the PATCH body documents",
+      { security_and_analysis: null },
+    ],
+    [
+      "the validity-checks sub-key the security_and_analysis descriptor omits",
+      { security_and_analysis: { secret_scanning_validity_checks: { status: "enabled" } } },
+    ],
+    ...[
+      ["PR_TITLE", "PR_BODY"],
+      ["PR_TITLE", "BLANK"],
+      ["PR_TITLE", "COMMIT_MESSAGES"],
+      ["COMMIT_OR_PR_TITLE", "COMMIT_MESSAGES"],
+    ].map(([title, message]): [string, Record<string, unknown>] => [
+      `the legal squash pair ${title} with ${message}`,
+      { squash_merge_commit_title: title, squash_merge_commit_message: message },
+    ]),
+    [
+      "the default merge pair",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
+    ],
+    [
+      "a merge pair GitHub documents no refusal for",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
+    ],
+    [
+      "a lone commit title, whose pair is only decidable against the live message",
+      { squash_merge_commit_title: "PR_TITLE", merge_commit_title: "PR_TITLE" },
+    ],
+    [
+      "22 topic entries naming 2 topics: the cap counts distinct topics after the fold",
+      { topics: [...Array.from({ length: 20 }, () => "CI"), "ci", "tooling"] },
+    ],
+    [
+      "20 well-formed topics, a 50-character one and uppercase input among them",
+      { topics: WELL_FORMED_TOPICS },
+    ],
+    ["the same 20 topics as a comma string", { topics: WELL_FORMED_TOPICS.join(", ") }],
+    ["topics: [], the one spelling of the wholesale clear", { topics: [] }],
+    [
+      "null clearing description and homepage; default_branch and visibility as plain strings; a creation policy from the vocabulary",
+      {
         description: null,
         homepage: null,
         default_branch: "trunk",
         visibility: "internal",
         pull_request_creation_policy: "collaborators_only",
-      }),
-    ).toEqual([]);
-    expect(refusals({ description: "docs", homepage: "https://example.com" })).toEqual([]);
+      },
+    ],
+    ["a description and a homepage", { description: "docs", homepage: "https://example.com" }],
+    ["issue_creation_policy: all", { issue_creation_policy: "all" }],
+  ])("%s parses clean", (_what, declared) => {
+    expect(refusals(declared)).toEqual([]);
   });
 });
