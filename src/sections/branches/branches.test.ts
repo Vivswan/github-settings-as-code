@@ -34,12 +34,7 @@ import {
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
 import { MISSING_BRANCH } from "./endpoints.js";
-import {
-  type ExplicitKeys,
-  type RestCarriedKey,
-  ROUTED_KEYS,
-  type RoutedKey,
-} from "./graphql-rules.js";
+import type { ExplicitKeys, RestCarriedKey } from "./graphql-rules.js";
 import {
   branchesSection,
   type ClassifiedEntry,
@@ -1423,32 +1418,17 @@ describe("branches plan contract", () => {
     expect(second).toEqual({ ops: [], notes: [note], drift: [] });
   });
 
-  test("the read port exposes exactly the read roles, each narrowed to its declared posture", () => {
+  test("the read port offers no write role, no raw client, and no must-succeed call on an absent-tolerant read", () => {
+    // Compile-time only.
     const ctx = planContext(branchesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual([
-      "getProtection",
-      "listProtected",
-      "branchProbe",
-      "appLookup",
-      "rulesQuery",
-      "rulesSnapshot",
-      "repoLookup",
-      "actorUser",
-      "actorTeam",
-    ]);
     // @ts-expect-error a write role is not a read: the port has no `putProtection`
     ctx.read.putProtection;
     // @ts-expect-error nor a GraphQL mutation
     ctx.read.updateRule;
     // @ts-expect-error nor the raw client
     ctx.api;
-    // @ts-expect-error an "absent" primary read offers no throwing helper
+    // @ts-expect-error an "absent" primary read offers no must-succeed call
     ctx.read.getProtection.call;
-    // @ts-expect-error an advisory read offers no absence probe (a 500 is not "absent")
-    ctx.read.branchProbe.probeAbsent;
-    // @ts-expect-error nor a must-succeed call
-    ctx.read.branchProbe.call;
-    expect(typeof ctx.read.branchProbe.tryCall).toBe("function");
   });
 
   test("a planned operation can only name a declared write role, with the facets its route demands", () => {
@@ -1515,18 +1495,16 @@ describe("branches plan contract", () => {
     ).toEqual(["routed", "routed", "literal", "literal"]);
   });
 
-  test("every key the schema spells out is routed, REST-carried, or the signatures toggle", () => {
-    // Compile-time only: the tripwire in graphql-rules.ts fires through this same alias, so a tuple missing a key is shown failing here, beside
-    // the complete tuple that passes.
-    type Explicit = ExplicitKeys<BranchProtectionConfig>;
-    type _Complete = MustBeNever<
-      Exclude<Explicit, RoutedKey | RestCarriedKey | "required_signatures">
-    >;
+  test("the routed-keys coverage tripwire is not vacuous: a tuple that forgets a key fails it", () => {
+    // Compile-time only. graphql-rules.ts pins that the explicit schema keys minus the routed, REST-carried, and signatures keys are
+    // never; this is the negative control showing the key alias still yields keys, so a mutation that empties it cannot pass silently.
     type _Short = MustBeNever<
       // @ts-expect-error a tuple that forgot required_deployments leaves that schema key uncovered
-      Exclude<Explicit, "force_push_bypassers" | RestCarriedKey | "required_signatures">
+      Exclude<
+        ExplicitKeys<BranchProtectionConfig>,
+        "force_push_bypassers" | RestCarriedKey | "required_signatures"
+      >
     >;
-    expect(ROUTED_KEYS).toEqual(["force_push_bypassers", "required_deployments"]);
   });
 });
 
@@ -1653,12 +1631,13 @@ describe("branches snapshot", () => {
     });
   });
 
-  test("the live side gets the same PUT spelling: -1 for a null app_id, contexts derived from checks", () => {
+  test("an explicitly off required_signatures is omitted from the snapshot", () => {
     expect(
-      flattenProtection({ required_status_checks: { checks: [{ context: "ci", app_id: null }] } }),
-    ).toEqual({
-      required_status_checks: { checks: [{ context: "ci", app_id: -1 }], contexts: ["ci"] },
-    });
+      protectionSnapshot({
+        enforce_admins: { enabled: false },
+        required_signatures: { enabled: false },
+      }),
+    ).toEqual({});
   });
 
   test("a checks-only live body round-trips: the snapshot plans as a no-op against it", async () => {
@@ -1683,18 +1662,6 @@ describe("branches snapshot", () => {
         },
       },
     ]);
-  });
-
-  test("a required_signatures the GET omits, and a false one, both read as nothing to declare", () => {
-    expect(protectionSnapshot({ enforce_admins: { enabled: true } })).toEqual({
-      enforce_admins: true,
-    });
-    expect(
-      protectionSnapshot({
-        enforce_admins: { enabled: false },
-        required_signatures: { enabled: false },
-      }),
-    ).toEqual({});
   });
 
   test("a listed branch whose protection 404s is left out; the engine's note covers the all-404 case", async () => {

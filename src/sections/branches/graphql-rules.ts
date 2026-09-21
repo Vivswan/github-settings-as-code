@@ -55,7 +55,7 @@ export const GRAPHQL_STATUS_CHECK_TWINS = {
  * The keys no REST protection endpoint carries: they ride the updateBranchProtectionRule mutation
  * alone. The ONE spelling; the routed types, the guard, the drift, and the snapshot derive from it.
  */
-export const ROUTED_KEYS = [
+const ROUTED_KEYS = [
   "force_push_bypassers",
   "required_deployments",
 ] as const satisfies readonly (keyof BranchProtectionConfig)[];
