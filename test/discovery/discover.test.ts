@@ -14,26 +14,19 @@ import { describeProblem } from "../../src/problem.js";
 import { MockApi } from "../mock-api.js";
 
 describe("excludeMatches", () => {
-  test("* spans any characters, anchored at both ends", () => {
-    expect(excludeMatches("tmp-*", "o/tmp-x")).toBe(true);
-    expect(excludeMatches("tmp", "o/tmp-x")).toBe(false);
-    expect(excludeMatches("*-archive", "o/old-archive")).toBe(true);
-  });
-
-  test("regex metacharacters are literal", () => {
-    expect(excludeMatches("a.b", "o/a.b")).toBe(true);
-    expect(excludeMatches("a.b", "o/axb")).toBe(false);
-  });
-
-  test("matching is case-insensitive", () => {
-    expect(excludeMatches("TMP-*", "o/tmp-x")).toBe(true);
-  });
-
-  test("a pattern with a slash matches the full slug, otherwise the name", () => {
-    expect(excludeMatches("octo/*", "octo/anything")).toBe(true);
-    expect(excludeMatches("octo/*", "viv/anything")).toBe(false);
-    expect(excludeMatches("web*", "weborg/api")).toBe(false);
-    expect(excludeMatches("web*", "anyowner/web-x")).toBe(true);
+  test.each<[string, string, string, boolean]>([
+    ["* spans any characters, anchored at both ends", "tmp-*", "o/tmp-x", true],
+    ["* spans any characters, anchored at both ends", "tmp", "o/tmp-x", false],
+    ["* spans any characters, anchored at both ends", "*-archive", "o/old-archive", true],
+    ["regex metacharacters are literal", "a.b", "o/a.b", true],
+    ["regex metacharacters are literal", "a.b", "o/axb", false],
+    ["matching is case-insensitive", "TMP-*", "o/tmp-x", true],
+    ["a pattern with a slash matches the full slug", "octo/*", "octo/anything", true],
+    ["a pattern with a slash matches the full slug", "octo/*", "viv/anything", false],
+    ["a pattern without a slash matches the name only", "web*", "weborg/api", false],
+    ["a pattern without a slash matches the name only", "web*", "anyowner/web-x", true],
+  ])("%s: %p against %p is %p", (_rule, pattern, slug, matches) => {
+    expect(excludeMatches(pattern, slug)).toBe(matches);
   });
 });
 
@@ -57,6 +50,7 @@ describe("discoverRepos", () => {
   /** Filtered refs by reason; a non-public one compares against its sealed slug (`hidden`). */
   const filteredSlugs = (filtered: Array<{ reason: string; repos: FilteredRepoRef[] }>) =>
     filtered.map((group) => ({ reason: group.reason, slugs: group.repos.map((r) => r.slug) }));
+  type FilteredSlugs = ReturnType<typeof filteredSlugs>;
   const hidden = markPrivate;
   const OWNED = "GET /user/repos?affiliation=owner&per_page=100&page=1";
 
@@ -69,14 +63,47 @@ describe("discoverRepos", () => {
     );
   });
 
-  test("default filters list owned repos, skipping archived ones", async () => {
-    const discovered = await discover({
-      [OWNED]: { data: [{ full_name: "o/x" }, { full_name: "o/y", archived: true }] },
-    });
-    expect(slugs(discovered.repos)).toEqual(["o/x"]);
-    expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "archived", slugs: [hidden("o/y")] },
-    ]);
+  test.each<[string, Partial<DiscoveryFilters>, string[], FilteredSlugs]>([
+    [
+      "default filters list owned repos, skipping archived ones",
+      {},
+      ["o/x", "o/copy"],
+      [{ reason: "archived", slugs: [hidden("o/y")] }],
+    ],
+    ["archived: include keeps them", { archived: "include" }, ["o/x", "o/y", "o/copy"], []],
+    [
+      "archived: only inverts the skip",
+      { archived: "only" },
+      ["o/y"],
+      [{ reason: "archived=only", slugs: [hidden("o/x"), hidden("o/copy")] }],
+    ],
+    [
+      "forks: exclude splits on the fork field",
+      { forks: "exclude" },
+      ["o/x"],
+      [
+        { reason: "archived", slugs: [hidden("o/y")] },
+        { reason: "forks=exclude", slugs: [hidden("o/copy")] },
+      ],
+    ],
+    [
+      "forks: only splits on the fork field",
+      { forks: "only" },
+      ["o/copy"],
+      [
+        { reason: "forks=only", slugs: [hidden("o/x")] },
+        { reason: "archived", slugs: [hidden("o/y")] },
+      ],
+    ],
+  ])("%s", async (_case, overrides, kept, filtered) => {
+    const data = [
+      { full_name: "o/x" },
+      { full_name: "o/y", archived: true },
+      { full_name: "o/copy", fork: true },
+    ];
+    const discovered = await discover({ [OWNED]: { data } }, overrides);
+    expect(slugs(discovered.repos)).toEqual(kept);
+    expect(filteredSlugs(discovered.filtered)).toEqual(filtered);
   });
 
   test("visibility normalization fails closed: private wins, both-missing is private", async () => {
@@ -108,69 +135,49 @@ describe("discoverRepos", () => {
     ]);
   });
 
-  test("archived: include keeps them; only inverts the skip", async () => {
-    const data = [{ full_name: "o/x" }, { full_name: "o/y", archived: true }];
-    const both = await discover({ [OWNED]: { data } }, { archived: "include" });
-    expect(slugs(both.repos)).toEqual(["o/x", "o/y"]);
-    expect(both.filtered).toEqual([]);
-    const only = await discover({ [OWNED]: { data } }, { archived: "only" });
-    expect(slugs(only.repos)).toEqual(["o/y"]);
-    expect(filteredSlugs(only.filtered)).toEqual([
-      { reason: "archived=only", slugs: [hidden("o/x")] },
-    ]);
-  });
-
-  test("forks: exclude and only split on the fork field", async () => {
-    const data = [{ full_name: "o/src" }, { full_name: "o/copy", fork: true }];
-    const noForks = await discover({ [OWNED]: { data } }, { forks: "exclude" });
-    expect(slugs(noForks.repos)).toEqual(["o/src"]);
-    expect(filteredSlugs(noForks.filtered)).toEqual([
-      { reason: "forks=exclude", slugs: [hidden("o/copy")] },
-    ]);
-    const onlyForks = await discover({ [OWNED]: { data } }, { forks: "only" });
-    expect(slugs(onlyForks.repos)).toEqual(["o/copy"]);
-  });
-
-  test("visibility: public and private go into the query string", async () => {
+  // public and private go to the server as a query parameter; internal has no server parameter, and the private
+  // route still returns internal repos, so both of those split client-side.
+  test.each<
+    [
+      string,
+      DiscoveryFilters["visibility"],
+      string,
+      Array<{ full_name: string; visibility?: string }>,
+      string[],
+      FilteredSlugs,
+    ]
+  >([
+    [
+      "visibility: public and private go into the query string",
+      "public",
+      "&visibility=public",
+      [{ full_name: "o/pub" }],
+      ["o/pub"],
+      [],
+    ],
+    [
+      "visibility: private drops internal repos client-side",
+      "private",
+      "&visibility=private",
+      [{ full_name: "o/priv" }, { full_name: "o/int", visibility: "internal" }],
+      ["o/priv"],
+      [{ reason: "visibility=private", slugs: [hidden("o/int")] }],
+    ],
+    [
+      "visibility: internal filters client-side with no server param",
+      "internal",
+      "",
+      [{ full_name: "o/pub" }, { full_name: "o/int", visibility: "internal" }],
+      ["o/int"],
+      [{ reason: "visibility=internal", slugs: [hidden("o/pub")] }],
+    ],
+  ])("%s", async (_case, visibility, param, data, kept, filtered) => {
     const discovered = await discover(
-      {
-        "GET /user/repos?affiliation=owner&visibility=public&per_page=100&page=1": {
-          data: [{ full_name: "o/pub" }],
-        },
-      },
-      { visibility: "public" },
+      { [`GET /user/repos?affiliation=owner${param}&per_page=100&page=1`]: { data } },
+      { visibility },
     );
-    expect(slugs(discovered.repos)).toEqual(["o/pub"]);
-  });
-
-  test("visibility: private drops internal repos client-side", async () => {
-    const discovered = await discover(
-      {
-        "GET /user/repos?affiliation=owner&visibility=private&per_page=100&page=1": {
-          data: [{ full_name: "o/priv" }, { full_name: "o/int", visibility: "internal" }],
-        },
-      },
-      { visibility: "private" },
-    );
-    expect(slugs(discovered.repos)).toEqual(["o/priv"]);
-    expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "visibility=private", slugs: [hidden("o/int")] },
-    ]);
-  });
-
-  test("visibility: internal filters client-side with no server param", async () => {
-    const discovered = await discover(
-      {
-        [OWNED]: {
-          data: [{ full_name: "o/pub" }, { full_name: "o/int", visibility: "internal" }],
-        },
-      },
-      { visibility: "internal" },
-    );
-    expect(slugs(discovered.repos)).toEqual(["o/int"]);
-    expect(filteredSlugs(discovered.filtered)).toEqual([
-      { reason: "visibility=internal", slugs: [hidden("o/pub")] },
-    ]);
+    expect(slugs(discovered.repos)).toEqual(kept);
+    expect(filteredSlugs(discovered.filtered)).toEqual(filtered);
   });
 
   test("topics keep repos carrying at least one listed topic, case-insensitively", async () => {
@@ -266,63 +273,67 @@ describe("formatSkipNotice", () => {
     visibility: FilteredRepoRef["visibility"] = "public",
   ): FilteredRepoRef =>
     visibility === "public" ? { slug, visibility } : { slug: markPrivate(slug), visibility };
+  const forks = (...repos: FilteredRepoRef[]) => ({ reason: "forks=exclude", repos });
+  const archived = (...repos: FilteredRepoRef[]) => ({ reason: "archived", repos });
+  const ARCHIVED_PROSE =
+    "because settings writes fail on archived repositories; unarchive them to manage them";
+  const twentyTwoPublic = Array.from({ length: 22 }, (_, i) => ref(`o/pub${i}`));
+  const firstTwenty = twentyTwoPublic
+    .slice(0, 20)
+    .map((repo) => repo.slug)
+    .join(", ");
 
-  test("without redaction, every slug is listed regardless of visibility", () => {
-    const group = {
-      reason: "forks=exclude",
-      repos: [ref("o/a"), ref("o/b", "private"), ref("o/c", "internal")],
-    };
-    expect(formatSkipNotice(group, false)).toBe(
+  test.each<[string, { reason: string; repos: FilteredRepoRef[] }, boolean, string]>([
+    [
+      "without redaction, every slug is listed regardless of visibility",
+      forks(ref("o/a"), ref("o/b", "private"), ref("o/c", "internal")),
+      false,
       'repos: "*" discovery skipped 3 repositories by forks=exclude: o/a, o/b, o/c',
-    );
-    expect(formatSkipNotice({ reason: "forks=exclude", repos: [ref("o/a")] }, false)).toBe(
+    ],
+    [
+      "without redaction, one repo takes the singular",
+      forks(ref("o/a")),
+      false,
       'repos: "*" discovery skipped 1 repository by forks=exclude: o/a',
-    );
-  });
-
-  test("redaction lists public slugs and counts the rest", () => {
-    const group = {
-      reason: "forks=exclude",
-      repos: [ref("o/a"), ref("o/b", "private"), ref("o/c"), ref("o/d", "internal")],
-    };
-    expect(formatSkipNotice(group, true)).toBe(
+    ],
+    [
+      "redaction lists public slugs and counts the rest",
+      forks(ref("o/a"), ref("o/b", "private"), ref("o/c"), ref("o/d", "internal")),
+      true,
       'repos: "*" discovery skipped 4 repositories by forks=exclude: o/a, o/c, and 2 private or internal repositories',
-    );
-  });
-
-  test("the archived prose survives every redaction form", () => {
-    const mixed = { reason: "archived", repos: [ref("o/a"), ref("o/b", "private")] };
-    expect(formatSkipNotice(mixed, false)).toBe(
-      'repos: "*" discovery skipped 2 repositories because settings writes fail on archived repositories; unarchive them to manage them: o/a, o/b',
-    );
-    expect(formatSkipNotice(mixed, true)).toBe(
-      'repos: "*" discovery skipped 2 repositories because settings writes fail on archived repositories; unarchive them to manage them: o/a, and 1 private or internal repository',
-    );
+    ],
+    [
+      "the archived prose survives without redaction",
+      archived(ref("o/a"), ref("o/b", "private")),
+      false,
+      `repos: "*" discovery skipped 2 repositories ${ARCHIVED_PROSE}: o/a, o/b`,
+    ],
+    [
+      "the archived prose survives redaction",
+      archived(ref("o/a"), ref("o/b", "private")),
+      true,
+      `repos: "*" discovery skipped 2 repositories ${ARCHIVED_PROSE}: o/a, and 1 private or internal repository`,
+    ],
     // The count-only branch at both of its boundaries: one hidden repository and more than one.
-    const onePrivate = { reason: "archived", repos: [ref("o/b", "private")] };
-    expect(formatSkipNotice(onePrivate, true)).toBe(
-      'repos: "*" discovery skipped 1 private or internal repository because settings writes fail on archived repositories; unarchive them to manage them',
-    );
-    const allPrivate = {
-      reason: "archived",
-      repos: [ref("o/b", "private"), ref("o/c", "internal")],
-    };
-    expect(formatSkipNotice(allPrivate, true)).toBe(
-      'repos: "*" discovery skipped 2 private or internal repositories because settings writes fail on archived repositories; unarchive them to manage them',
-    );
-  });
-
-  test("redaction caps the public list at 20 before counting the hidden", () => {
-    const repos = [
-      ...Array.from({ length: 22 }, (_, i) => ref(`o/pub${i}`)),
-      ref("o/secret", "private"),
-    ];
-    const notice = formatSkipNotice({ reason: "forks=exclude", repos }, true);
-    expect(notice).toBe(
-      `repos: "*" discovery skipped 23 repositories by forks=exclude: ${Array.from(
-        { length: 20 },
-        (_, i) => `o/pub${i}`,
-      ).join(", ")}, and 2 more, and 1 private or internal repository`,
-    );
+    [
+      "the archived prose survives a count-only notice of one",
+      archived(ref("o/b", "private")),
+      true,
+      `repos: "*" discovery skipped 1 private or internal repository ${ARCHIVED_PROSE}`,
+    ],
+    [
+      "the archived prose survives a count-only notice of many",
+      archived(ref("o/b", "private"), ref("o/c", "internal")),
+      true,
+      `repos: "*" discovery skipped 2 private or internal repositories ${ARCHIVED_PROSE}`,
+    ],
+    [
+      "redaction caps the public list at 20 before counting the hidden",
+      forks(...twentyTwoPublic, ref("o/secret", "private")),
+      true,
+      `repos: "*" discovery skipped 23 repositories by forks=exclude: ${firstTwenty}, and 2 more, and 1 private or internal repository`,
+    ],
+  ])("%s", (_case, group, redact, notice) => {
+    expect(formatSkipNotice(group, redact)).toBe(notice);
   });
 });
