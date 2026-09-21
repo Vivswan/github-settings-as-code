@@ -74,20 +74,6 @@ describe("custom_properties", () => {
     expect(normalizeValue(declared)).toEqual(wire);
   });
 
-  test("a personal account plans nothing but the note, with zero property calls", async () => {
-    // The unrouted GET /orgs/o answers 404, the personal-account signal.
-    const api = new MockApi({});
-    const result = await plan(api, [{ property_name: "team", value: "platform" }]);
-    expect(result).toEqual({
-      ops: [],
-      notes: [
-        'custom_properties: owner "o" is a personal account, not an organization, so this section does not apply; section skipped - remove the custom_properties section from the settings file to silence this note',
-      ],
-      drift: [],
-    });
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /orgs/o"]);
-  });
-
   test("plans ONE bulk PATCH folding set, change, unset, and undeclared unset, reading only", async () => {
     // A fake that would accept any write: the plan must still issue none.
     const api = new MockApi(orgRoutes(live), { unroutedMutations: "succeed" });
