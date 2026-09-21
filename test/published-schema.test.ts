@@ -12,6 +12,7 @@ import addFormats from "ajv-formats";
 import { ok } from "neverthrow";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
+import { NESTED_KEYS } from "../src/sections/environments/nested.js";
 import { ENVIRONMENT_PARSE_FIXTURES } from "./fixtures/environment-parse-rules.js";
 import { ROOT } from "./root.js";
 
@@ -38,8 +39,8 @@ describe("published schema wrapper strictness", () => {
     const wrappers = Object.entries(schema.definitions).filter(([name]) =>
       name.startsWith("UndeclaredPolicyList<"),
     );
-    // The four nested {_undeclared, entries} knobs inside an environment entry: variables, secrets, branch policies, protection rules.
-    expect(wrappers.length).toBe(UNDECLARED_POLICY_SECTIONS.length + 4);
+    // Plus one wrapper per nested {_undeclared, entries} knob inside an environment entry.
+    expect(wrappers.length).toBe(UNDECLARED_POLICY_SECTIONS.length + NESTED_KEYS.length);
     for (const [name, definition] of wrappers) {
       expect(
         definition.additionalProperties,
@@ -332,45 +333,42 @@ describe("format keywords stay out of the published schema", () => {
   );
 });
 
-describe("the document-level _layering directive", () => {
-  test("the published schema and the zod document both accept a supported value", () => {
-    const doc: SettingsFile = { _layering: "replace", labels: [{ name: "bug" }] };
-    expect(validate(doc)).toBe(true);
-    expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
-  });
+type Directive = "_layering" | "_undeclared";
+/** A row's supported value is typed by its own directive, so the table cannot pair a policy with `_layering`. */
+type DirectiveRow = {
+  [K in Directive]: [
+    directive: K,
+    good: NonNullable<SettingsFile[K]>,
+    bad: string,
+    allowed: string[],
+  ];
+}[Directive];
 
-  test("both reject an unsupported value with the enum error, naming the key", () => {
-    const doc = { _layering: "union", labels: [{ name: "bug" }] };
-    expect(validate(doc)).toBe(false);
-    expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
-      ["/_layering", "enum", { allowedValues: ["replace", "shallow", "deep"] }],
-    ]);
-    const parsed = SettingsFile.safeParse(doc);
-    expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
-      [["_layering"], "invalid_value"],
-    ]);
-  });
+describe("the document-level directives", () => {
+  test.each<DirectiveRow>([
+    ["_layering", "replace", "union", ["replace", "shallow", "deep"]],
+    ["_undeclared", "keep", "remove", ["keep", "delete"]],
+  ])(
+    "%s: the published schema and the zod document both accept %s and reject %s with the enum error, naming the key",
+    (directive, good, bad, allowed) => {
+      const doc = { [directive]: good, labels: [{ name: "bug" }] };
+      expect(validate(doc)).toBe(true);
+      expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
+      const rejected = { [directive]: bad, labels: [{ name: "bug" }] };
+      expect(validate(rejected)).toBe(false);
+      expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
+        [`/${directive}`, "enum", { allowedValues: allowed }],
+      ]);
+      const parsed = SettingsFile.safeParse(rejected);
+      expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
+        [[directive], "invalid_value"],
+      ]);
+    },
+  );
 
   test("the apply-path shape validation copies only sections, so the directive never reaches the engine", () => {
     expect(
       validateSectionShapes({ _layering: "replace", labels: [{ name: "bug" }] }, "settings.yml"),
     ).toEqual(ok({ labels: [{ name: "bug" }] }));
-  });
-});
-
-describe("the document-level _undeclared directive", () => {
-  test("the published schema and the zod document both accept a policy and reject anything else, naming the key", () => {
-    const doc: SettingsFile = { _undeclared: "keep", labels: [{ name: "bug" }] };
-    expect(validate(doc)).toBe(true);
-    expect(SettingsFile.safeParse(doc)).toEqual({ success: true, data: doc });
-    const bad = { _undeclared: "remove", labels: [{ name: "bug" }] };
-    expect(validate(bad)).toBe(false);
-    expect((validate.errors ?? []).map((e) => [e.instancePath, e.keyword, e.params])).toEqual([
-      ["/_undeclared", "enum", { allowedValues: ["keep", "delete"] }],
-    ]);
-    const parsed = SettingsFile.safeParse(bad);
-    expect(parsed.success ? [] : parsed.error.issues.map((i) => [i.path, i.code])).toEqual([
-      [["_undeclared"], "invalid_value"],
-    ]);
   });
 });
