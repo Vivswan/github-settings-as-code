@@ -29,6 +29,7 @@ import {
 } from "../report/delivery.js";
 import type { SectionKey } from "../schema.js";
 import { countNoun } from "../text.js";
+import type { UndeclaredPolicy } from "../types.js";
 import {
   emitRedactedResult,
   isPrivateVisibility,
@@ -108,6 +109,8 @@ export interface RunFlowConfig extends DeliveryConfig {
   sections: SectionSelection;
   /** Whether to hide private/internal targets from the public view. */
   privateRepos: PrivateReposPolicy;
+  /** The `undeclared` input: the fallback policy below a list's wrapper and the file's top-level `_undeclared`; unset by default. */
+  undeclared?: UndeclaredPolicy | undefined;
 }
 
 export type Exposure = { kind: "shown" } | { kind: "redacted"; visibility: RepoVisibility };

@@ -57,20 +57,22 @@ Mappings merged key by key, the two label lists unioned by name, and `labels` ca
 | `settings-file` | The ordered list of layer paths, newline- or comma-separated, lowest layer first |
 | `rendered-file` | Required: where the rendered document is written (parent directories are created). It must not name one of the `settings-file` layers, compared as resolved paths: the run refuses that, naming the layer's position, because the render would overwrite the layer and the next run would fold the rendered document as one |
 | `layering` | `replace`, `shallow`, or `deep` (default): the run-wide default for how every list section's entries combine, see below |
+| `undeclared` | `keep` or `delete`, unset by default: the fallback policy for every list without one of its own, below the file-wide `_undeclared`; resolved into the rendered document, so the apply step needs none |
 | `token` | Ignored: a render makes no GitHub API call, so a token a workflow sets on every step does no harm |
 | `repository`, `repos`, `repos-dir`, `defaults-file`, `snapshot-file`, `snapshot-dir`, `visibility`, `archived`, `forks`, `exclude`, `topics`, `affiliation`, `sections`, `required-sections`, `on-missing-permission`, `api-version`, `private-repos`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a render addresses no repository, fleet, or report, calls no API, and writes every section its layers declare; a `sections` allowlist belongs on the step that runs the rendered document |
 
 The step ends with `result: rendered` and exit 0, or exit 1 with an error naming the layer that was refused.
 
-## Three knobs
+## Four knobs
 
 | Knob | Where | Axis | Meaning |
 |---|---|---|---|
 | `layering` | The action input | Merge time | Run-wide default for how a list section combines with the layers below it: `deep` (default) unions the entries by the section's key and merges a same-key pair field by field, `shallow` unions and swaps a same-key entry for the higher one, `replace` lets the higher list win |
 | `_layering` | A list section's `{entries}` wrapper, or a file's top level | Merge time | Overrides `layering` for that section, or for every section of that file. Consumed by the render: the rendered file never carries it. The wrapper of a section without an undeclared policy (`environments`, `branches`, `workflows`) takes this one key beside `entries`, and the rendered file holds its bare list |
-| `_undeclared` | A knobbed list section's `{entries}` wrapper | Live state | What apply does to live resources the document does not declare: `keep` or `delete`. Travels through the render and is resolved in the rendered file. The [undeclared policy](../reference/undeclared-policy.md) page owns it |
+| `_undeclared` | A knobbed list's wrapper, or a file's top level | Live state | `keep` or `delete` for live resources the document does not declare; at the top level a directive the render consumes ([precedence](../reference/undeclared-policy.md)) |
+| `undeclared` | The action input | Live state | `keep` or `delete`, unset by default; the same page places it in the precedence |
 
-Beside the two, `_remove: true` on a keyed entry drops the lower entry under that key ([the rules](#the-rules)); a single document refuses it. The underscore marks this action's directives, never a GitHub setting, and each location takes a fixed set. A file's top level takes `_layering`; a knobbed section's wrapper takes `_layering` and `_undeclared`; a plain-list wrapper (`environments`, `branches`, `workflows`) takes `_layering` alone; a keyed entry takes `_remove`.
+Beside these, `_remove: true` on a keyed entry drops the lower entry under that key ([the rules](#the-rules)); a single document refuses it. The underscore marks this action's directives, never a GitHub setting, and each location takes a fixed set. A file's top level takes `_layering` and `_undeclared`; a knobbed section's wrapper takes the same two; a plain-list wrapper (`environments`, `branches`, `workflows`) takes `_layering` alone; a keyed entry takes `_remove`.
 
 Any other underscore key at the top level or on a wrapper fails validation with an error naming which directive belongs where (a note belongs in a YAML comment). A misspelled directive can therefore never pass as a private note and quietly merge a layer meant to replace.
 
@@ -136,9 +138,10 @@ Reordering keys, or the entries of a keyed list, in a layer changes nothing in t
 
 The `_undeclared` knob across layers:
 
-- A plain list, or a bare `{entries}` wrapper, inherits the policy a lower layer set.
-- An explicit higher `_undeclared` wins.
-- After the fold, a section that still has no explicit policy takes the section default, so the rendered file is self-describing.
+- A plain list, or a bare `{entries}` wrapper, inherits the policy a lower layer's wrapper set.
+- An explicit higher `_undeclared` on the wrapper wins.
+- A file's top-level `_undeclared` is a directive, not a merged value: the highest layer that sets one steers the whole fold, below every wrapper's own policy.
+- After the fold, every list that takes the knob carries an explicit policy, the nested ones included, so the rendered file is self-describing; [the undeclared policy](../reference/undeclared-policy.md#where-a-lists-policy-comes-from) owns the precedence.
 
 ## A worked example
 
@@ -291,8 +294,10 @@ environments:
   - name: prod
     deployment_branch_policy: null
     variables:
-      - name: REGION
-        value: eu-west-1
+      _undeclared: delete
+      entries:
+        - name: REGION
+          value: eu-west-1
 branches:
   - name: main
     protection:
@@ -307,7 +312,7 @@ Reading it back, one line per rule:
 
 - `cname: null` (a mapping field) removes the custom domain: the field admits `null`, so it is written and apply sends it.
 - `required_deployments: null` (a nested entry field) turns that control off inside the merged `main` entry; `enforce_admins` survived the merge.
-- `deployment_branch_policy: null` (an entry field) lifts the restriction; the fleet's `REGION` survived, and `LOG_LEVEL` was dropped by a removal spelled in another case.
+- `deployment_branch_policy: null` (an entry field) lifts the restriction; the fleet's `REGION` survived, `LOG_LEVEL` was dropped by a removal spelled in another case, and the variables list came out wrapped with its own default policy spelled out.
 - The `team` property was dropped by a top-level removal, so the section renders as an empty list under its resolved policy.
 
 What a `null` may not do is stand where GitHub has no empty state: `repository: {enable_git_lfs: null}` and `labels: null` are refused at validation, with the messages the [refusal table](#refusals) quotes.
@@ -317,8 +322,9 @@ What a `null` may not do is stand where GitHub has no empty state: `repository: 
 The rendered file is exactly what apply runs, so it is worth knowing its shape:
 
 - Every list section that takes the `_undeclared` knob (the sections the [undeclared policy](../reference/undeclared-policy.md) counts in its opening sentence) is in its `{_undeclared, entries}` wrapper form, with `_undeclared` resolved to an explicit `keep` or `delete`.
-- `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed. A nested per-environment list is written as the higher entry declared it, except where `deep` merged a pair through it: then a wrapper on either side keeps the wrapper form.
-- No `_layering` anywhere: the directive is consumed before the file is written, and YAML comments do not survive the fold.
+- `environments`, `branches`, and `workflows` are bare lists: their wrapper carried only `_layering`, which the render consumed.
+  An environment's variables, secrets, deployment branch policies, and deployment protection rules are in their `{_undeclared, entries}` wrapper form too, each policy resolved; its reviewers take no knob and stay as declared.
+- No `_layering` and no top-level `_undeclared` anywhere: both directives are consumed before the file is written, and YAML comments do not survive the fold.
 - Every `null` that won its key is there, at the top level (`pages: null`, `interaction_limits: null`) or below: the fold reads no `null` as a marker, and validation refused every one a key does not admit.
 - No `_remove` anywhere: each removal was consumed at its own layer's step, along with the entry it named.
 - Every layer was validated on its own before the fold, and the result is validated again before it is written.
@@ -361,7 +367,8 @@ Commit the rendered file only if you want to review it in pull requests; the ste
 
 ## Validation per layer
 
-Each layer must be a valid settings document on its own, judged with its two directives set aside: `_layering` (at the top or on a wrapper) and every `_remove: true` entry, which declares nothing. Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
+Each layer must be a valid settings document on its own, judged with its directives set aside: `_layering` (at the top or on a wrapper), the top-level `_undeclared`, and every `_remove: true` entry, which declares nothing.
+Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
 
 Whatever a standalone settings file may not say, a layer may not say either:
 
@@ -423,6 +430,8 @@ A render-mode log can therefore show your settings file's structure and, through
 | An unknown `_layering` value on a wrapper, the retired `merge` included (`labels: {_layering: merge, entries: [{name: bug}]}`) | `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value at the file's top level (`_layering: union`) | `_layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
 | An unknown `_layering` value on a plain-list wrapper (`environments: {_layering: union, entries: []}`) | `environments._layering must be one of "replace", "shallow", "deep"; got a string that is none of them` |
+| A file-wide `_undeclared` outside the two policies (`_undeclared: remove`) | `_undeclared must be one of "keep", "delete"; got a string that is none of them` |
+| A file-wide `_undeclared: null`, since the knob has no empty state (`_undeclared: null`) | `_undeclared must be one of "keep", "delete"; got null` |
 | A removal marker that is not `true` (`labels: [{name: bug, _remove: yes}]`) | `labels[0]._remove takes only true; got a string. Write _remove: true to drop the lower entry, or remove the key to keep it` |
 | A removal carrying a field beside its key (`labels: [{name: bug, _remove: true, color: ffffff}]`) | `labels[0] carries _remove: true beside "color"; a removal names its name and nothing else. Drop the field, or the marker` |
 | A removal carrying a field inside its key's container (`webhooks: [{config: {url: "https://h.example/a", secret: s}, _remove: true}]`) | `webhooks[0] carries _remove: true beside "config.secret"; a removal names its config.url and nothing else. Drop the field, or the marker` |

@@ -8,3 +8,11 @@ schema:
     document's; `deep` unions by key and merges a same-key pair field by field, a nested keyed
     list (a ruleset's rules, by type) unioning the same way. Consumed by the render, never applied:
     the rendered document carries no `_layering`, and apply and check ignore it like any `_` key.
+  SettingsFile._undeclared: >-
+    The file-wide undeclared policy: what apply does to a live resource a list does not declare, for
+    every list in this document that takes the `_undeclared` knob (the knobbed sections and an
+    environment's variables, secrets, deployment branch policies, and deployment protection rules)
+    and whose own wrapper sets none. A wrapper's `_undeclared` wins over it; it wins over the run's
+    `undeclared` input; each list's own default applies when none of the three is set. Resolved into
+    every list's wrapper, so the rendered document carries no `_undeclared` at its top. In a layered
+    merge the highest layer that sets it steers the whole fold: a directive, not a merged value.

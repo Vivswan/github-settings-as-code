@@ -8,11 +8,42 @@ order: 150
 Sixteen sections list the live resources sitting next to the declared ones: `labels`, `autolinks`, `collaborators`, `actions_variables`, `agents_variables`, `rulesets`, `actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, `teams`, `milestones`, `webhooks`, `custom_properties`, `deploy_keys`, and `secret_scanning_custom_patterns`.
 <!-- END GENERATED: policy-count-sentence -->
 
-Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file. This page is the normative statement of that policy: the knob, the defaults per section, and how it travels through a layered merge. The [Sections table](sections.md) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
+Each has a default answer for a live resource the settings file does not declare, and each accepts a wrapped form that overrides it per file.
+This page is the normative statement of that policy: the knob, the defaults per section, and how it travels through a layered merge.
+
+The [Sections table](sections.md) states each section's default in its Undeclared default column; this page says what the defaults mean and how to change them.
+
+## Where a list's policy comes from
+
+Every list that takes the knob resolves its policy once, at the boundary the document crosses: after the fold in `mode: render`, and as the validator brands a single settings file for apply or check. The most specific setting wins:
+
+1. The list's own wrapper: `_undeclared` on `labels: {_undeclared: keep, entries}`, or on a nested `environments[].variables` wrapper.
+2. The file's top-level `_undeclared`: the fallback for every list of that document without one of its own.
+3. The run's `undeclared` input: the fallback below the file's, unset by default.
+4. The list's own default: the section default in the table below, or a nested list's fixed default.
+
+The nested lists inside an environment (variables, secrets, deployment branch policies, deployment protection rules) read the same resolution, so a file-wide `_undeclared: delete` also disables undeclared deployment gates.
+A planner never derives a policy: the resolved document carries one on every list.
+
+The file-wide knob is legal at the top of the file, and the wrapper knob on a knobbed section or a nested list; a plain-list section's wrapper (`environments`, `branches`, `workflows`) refuses it, since those sections apply no policy of their own.
+
+```yaml settings
+_undeclared: keep
+labels:
+  - name: bug
+    color: "d73a4a"
+milestones:
+  _undeclared: delete
+  entries:
+    - title: v1
+```
+
+Here undeclared labels are kept (the file-wide knob over the section's delete default), and undeclared milestones are deleted (the wrapper over the file-wide knob).
 
 ## The two forms
 
-The plain array form is unchanged and keeps the section's default policy (in a layered merge a lower layer can set the policy instead - see [layering in mode: render](#layering-in-mode-render) below):
+The plain array form is unchanged and takes the resolution above from the file-wide knob down: the section's default policy, unless the file or the run set one.
+In a layered merge a lower layer's wrapper can set the policy instead (see [layering in mode: render](#layering-in-mode-render) below):
 
 ```yaml settings
 labels:
@@ -20,7 +51,7 @@ labels:
     color: "d73a4a"
 ```
 
-The wrapped form names the policy explicitly. `entries` holds exactly what the array form would, and a wrapper that omits `_undeclared` behaves exactly like the plain array (the section default, or a policy inherited from a lower layer, applies):
+The wrapped form names the policy explicitly. `entries` holds exactly what the array form would, and a wrapper that omits `_undeclared` behaves exactly like the plain array (the resolution above applies, a policy inherited from a lower layer included):
 
 ```yaml settings
 labels:
@@ -72,28 +103,35 @@ Four lists carry the same wrapped form WITHOUT being top-level sections. Each en
 | `environments[].secrets` | keep | Matches the top-level secret sections: a deleted secret's value is unrecoverable, so deletion stays opt-in |
 | `environments[].deployment_protection_rules` | keep | GitHub Apps can enable themselves as deployment gates; silently disabling a gate the file never named would weaken a protection nobody asked to weaken, so `_undeclared: delete` opts in |
 
-The knob is set per environment entry, and in a `mode: render` fold (the [layering guide](../operate/layering.md) owns the rules) it travels the way the top-level knob does.
+Each nested list resolves its policy [the same way a section does](#where-a-lists-policy-comes-from), its fixed default last, so a nested wrapper's own `keep` is the one way to hold a single gate list back from a file-wide `delete`.
+
+In a `mode: render` fold (the [layering guide](../operate/layering.md) owns the rules) the knob travels the way the top-level knob does.
 
 Under the default `layering: deep` the fold unions `environments` by name, case-insensitively, and merges a same-name pair field by field; each nested list unions by its own key, the one [the layering guide's key table](../operate/layering.md#the-rules) names.
 
-Two bare nested lists fold to a bare list. A wrapper on either side keeps the wrapper form, its `_undeclared` merged as a top-level knob is: a higher bare list, or a wrapper without the knob, inherits the lower wrapper's policy, and an explicit higher knob wins. `_undeclared: null` is refused at validation, as at the top level: omit the key to inherit.
+A wrapper on either side of the merge keeps the wrapper form, its `_undeclared` merged as a top-level knob is: a higher bare list, or a wrapper without the knob, inherits the lower wrapper's policy, and an explicit higher knob wins. `_undeclared: null` is refused at validation, as at the top level: omit the key to inherit.
 
-The fold spells out no nested default, so a nested list still without a knob after the fold takes its fixed default when apply runs.
+After the fold every nested list that takes the knob comes out in wrapper form with its resolved policy, two bare lists included, so apply reads it off the wrapper and never falls back to a default.
 
 Only `deep` enters an entry. Under `shallow` a same-name environment is swapped whole, its nested lists and knobs with it, and under `replace` the higher `environments` list wins.
 
 ## Deleting milestones detaches issues
 
-Deleting a milestone does not delete the issues in it; it detaches the milestone from every issue that carried it, and there is no undo beyond re-assigning the issues by hand. That is why milestones keep undeclared entries by default. Set `milestones: {_undeclared: delete, ...}` only when the settings file really is the complete list; the drift and change lines name the detachment every time, so a check run shows the consequence before an apply does it.
+Deleting a milestone does not delete the issues in it; it detaches the milestone from every issue that carried it, and there is no undo beyond re-assigning the issues by hand. That is why milestones keep undeclared entries by default.
+
+Set `milestones: {_undeclared: delete, ...}` only when the settings file really is the complete list; the drift and change lines name the detachment every time, so a check run shows the consequence before an apply does it.
 
 ## Layering in mode: render
 
 In a `mode: render` fold (the [layering guide](../operate/layering.md) owns the rules) the policy rides the section's wrapper as its own key:
 
-- A plain list, or a bare `{entries}` wrapper, inherits the `_undeclared` a lower layer set for that section.
-- An explicit higher `_undeclared` wins.
+- A plain list, or a bare `{entries}` wrapper, inherits the `_undeclared` a lower layer's wrapper set for that section.
+- An explicit higher `_undeclared` on the wrapper wins.
+- A file's top-level `_undeclared` is a directive: the highest layer that sets one is the fallback for every list of the fold without a wrapper policy, above the run's `undeclared` input.
+  A lower wrapper's policy, inherited by a higher bare list, still wins over it.
 - `_undeclared: null` is refused at validation (`labels._undeclared has no empty state; write one of "keep", "delete"`): omit the key to inherit the lower policy, or name the one you want.
-- After the fold, every section that takes the knob carries an explicit policy in the rendered file, so the document apply runs is self-describing.
+  At the file's top level the fold refuses it the same way (`_undeclared must be one of "keep", "delete"; got null`).
+- After the fold, every list that takes the knob carries an explicit policy in the rendered file, the nested ones included, and the top-level key is gone, so the document apply runs is self-describing.
 
 So a fleet can set the policy once, in its lowest layer:
 
@@ -107,10 +145,13 @@ labels:
 
 A higher layer declaring `labels: [{name: incident, color: "b60205"}]` comes out as `_undeclared: keep` over both labels (under the default `layering: deep`, which unions labels by name), and one declaring `labels: {_undeclared: delete, entries: [...]}` keeps its own delete policy.
 
-There is no way to set a policy without declaring an inventory: a wrapper requires `entries`, and `entries: []` is itself a declaration. Under `_undeclared: keep` an empty inventory only produces notes; under `_undeclared: delete` it deletes every eligible resource on the repository. A check run shows the resulting deletions as drift before an apply performs them.
+A wrapper cannot set a policy without declaring an inventory: it requires `entries`, and `entries: []` is itself a declaration (the file-wide knob declares nothing; it only steers the lists the document does declare).
+Under `_undeclared: keep` an empty inventory only produces notes; under `_undeclared: delete` it deletes every eligible resource on the repository. A check run shows the resulting deletions as drift before an apply performs them.
 
 The multi-repo `defaults-file` does not merge: it is applied whole to a repository that has no settings file, so a policy in it reaches exactly those repositories (see [multi-repo mode](../operate/multi-repo.md)).
 
 One boundary to know about: HAVING a policy and INHERITING one are different things. The top-level section lists take the policy through the fold as described above.
 
-The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults. A nested list never inherits a policy from its section or from another list; it inherits from one place only, the same list of the same-named environment in a lower layer under `deep` (see [the nested knobs](#the-nested-variables-secrets-and-deployment-knobs)).
+The nested `environments[].variables`, `environments[].secrets`, `environments[].deployment_branch_policies`, and `environments[].deployment_protection_rules` lists have their own knobs, set per environment entry with their own fixed defaults. A nested list never takes its policy from its section or from another list.
+
+What it shares with the sections is the file-wide `_undeclared` and the run's `undeclared` input; under `deep` it also inherits from one place, the same list of the same-named environment in a lower layer (see [the nested knobs](#the-nested-variables-secrets-and-deployment-knobs)).

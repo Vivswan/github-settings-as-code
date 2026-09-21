@@ -57,7 +57,7 @@ describe("readLayerFiles", () => {
 describe("foldLayers", () => {
   const fleet = { name: "fleet.yml", doc: { labels: [{ name: "bug", description: "fleet" }] } };
   const fold = (doc: Record<string, unknown>, layering: Layering) =>
-    foldLayers([fleet, { name: "repo.yml", doc }], "merged", layering, silentIo());
+    foldLayers([fleet, { name: "repo.yml", doc }], "merged", { layering }, silentIo());
 
   test.each<[string, Record<string, unknown>, Layering]>([
     ["the run directive", { labels: [{ name: "bug", description: null }] }, "shallow"],
@@ -145,7 +145,7 @@ describe("foldLayers", () => {
           },
         ],
         "merged",
-        "deep",
+        { layering: "deep" },
         silentIo(),
       );
     expect(fold("merge")).toEqual(

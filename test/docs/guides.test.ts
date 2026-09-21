@@ -716,7 +716,12 @@ describe("docs/ guide pages", () => {
           row.gate === "validation"
             ? malformedSectionEntries(layerName, row.quoted)
             : `layer "${layerName}": ${row.quoted}`;
-        const folded = foldLayers([{ name: layerName, doc }], "merged", "deep", silentIo());
+        const folded = foldLayers(
+          [{ name: layerName, doc }],
+          "merged",
+          { layering: "deep" },
+          silentIo(),
+        );
         expect(
           folded.match(() => null, describeProblem),
           `layer ${input}`,

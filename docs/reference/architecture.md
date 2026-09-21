@@ -122,7 +122,7 @@ flowchart TD
 
 One rule decides what belongs here: what the settings file alone shows wrong is refused when the file is parsed, naming the key and the fix, never discovered at apply time. A GET-only field, a value outside its enum, a contradictory key pair, two entries naming one label, a secret name GitHub would reject: each is an issue of this phase.
 
-The phase runs in check and apply before the first request to that repository's sections, and in render mode on every layer and on the fold. A layer of the fold is judged as its standalone view, the document minus the two directives the fold consumes; the fold itself is judged whole.
+The phase runs in check and apply before the first request to that repository's sections, and in render mode on every layer and on the fold. A layer of the fold is judged as its standalone view, the document minus the directives the fold consumes (`_layering`, the file-wide `_undeclared`, and the `_remove` entries); the fold itself is judged whole.
 
  In a multi-repo run the `defaults-file` document is validated before target resolution, so an invalid default stops the run before any write; a target's file is validated once fetched, so an earlier target's writes precede a later target's refusal. Three kinds of check take part:
 

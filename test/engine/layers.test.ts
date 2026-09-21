@@ -905,7 +905,7 @@ describe("mergeLayers: the plain-list sections", () => {
     });
   });
 
-  test("under deep an environment's nested lists union by their own keys, in either form, with the lower wrapper's policy inherited", () => {
+  test("under deep an environment's nested lists union by their own keys, in either form, with the lower wrapper's policy inherited and the rest resolved to their own defaults", () => {
     const result = merge([
       layer("fleet", { environments: [PROD] }),
       layer("repo", {
@@ -933,15 +933,24 @@ describe("mergeLayers: the plain-list sections", () => {
           {
             name: "Prod",
             wait_timer: 5,
-            variables: [
-              { name: "region", value: "us" },
-              { name: "LOG_LEVEL", value: "info" },
-              { name: "TIMEOUT", value: "30" },
-            ],
+            variables: {
+              _undeclared: "delete",
+              entries: [
+                { name: "region", value: "us" },
+                { name: "LOG_LEVEL", value: "info" },
+                { name: "TIMEOUT", value: "30" },
+              ],
+            },
             secrets: { _undeclared: "keep", entries: [{ name: "token", value: "$B" }] },
             deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-            deployment_branch_policies: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
-            deployment_protection_rules: { entries: [{ app: "gate" }, { app: "scan" }] },
+            deployment_branch_policies: {
+              _undeclared: "delete",
+              entries: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
+            },
+            deployment_protection_rules: {
+              _undeclared: "keep",
+              entries: [{ app: "gate" }, { app: "scan" }],
+            },
             reviewers: [
               { type: "User", id: 1 },
               { type: "Team", id: 1 },
@@ -991,7 +1000,14 @@ describe("mergeLayers: the plain-list sections", () => {
       [layer("fleet", { environments: [PROD] }), layer("repo", { environments: [higher] })],
       "shallow",
     );
-    expect(result).toEqual({ settings: { environments: [higher] }, notices: [] });
+    expect(result).toEqual({
+      settings: {
+        environments: [
+          { name: "prod", variables: { _undeclared: "delete", entries: higher.variables } },
+        ],
+      },
+      notices: [],
+    });
   });
 
   test("a null inside a plain-list entry is the field's value under deep, at a nullable path or not", () => {
@@ -1020,7 +1036,22 @@ describe("mergeLayers: the plain-list sections", () => {
           { name: "main", protection: { enforce_admins: true, required_deployments: null } },
           { name: "release/*", protection: null },
         ],
-        environments: [{ ...PROD, deployment_branch_policy: null, wait_timer: null }],
+        environments: [
+          {
+            ...PROD,
+            variables: { _undeclared: "delete", entries: PROD.variables },
+            deployment_branch_policies: {
+              _undeclared: "delete",
+              entries: PROD.deployment_branch_policies,
+            },
+            deployment_protection_rules: {
+              _undeclared: "keep",
+              entries: PROD.deployment_protection_rules,
+            },
+            deployment_branch_policy: null,
+            wait_timer: null,
+          },
+        ],
       },
       notices: [],
     });
@@ -1565,4 +1596,213 @@ describe("mergeLayers: _remove drops a lower entry", () => {
   ])("%s is refused naming the layer and the entry", (_case, layering, doc, code, error) => {
     expect(merge([fleet, layer("repo", doc)], layering)).toEqual({ code, error });
   });
+});
+
+describe("mergeLayers: the file-wide _undeclared and the run input", () => {
+  // Every knob a document carries, bare: the section default is what each would resolve to alone.
+  const BARE = {
+    labels: [{ name: "a" }],
+    milestones: [{ title: "v1" }],
+    environments: [
+      {
+        name: "prod",
+        variables: [{ name: "A", value: "1" }],
+        secrets: [{ name: "T", value: "$T" }],
+        deployment_branch_policies: [{ name: "release/*" }],
+        deployment_protection_rules: [{ app: "gate" }],
+        reviewers: [{ type: "User", id: 1 }],
+      },
+    ],
+    rulesets: [{ name: "main", rules: [{ type: "deletion" }] }],
+  };
+  const fold = (doc: Record<string, unknown>, undeclared?: "keep" | "delete") =>
+    mergeLayers([layer("repo", doc)], { layering: "deep", undeclared }).match(
+      (folded) => folded.settings as Record<string, unknown>,
+      (problem) => {
+        throw new Error(describeProblem(problem));
+      },
+    );
+  const resolved = (settings: Record<string, unknown>): Record<string, unknown> => {
+    const env = (settings.environments as Record<string, unknown>[])[0] ?? {};
+    const policyOf = (value: unknown) => (value as Record<string, unknown>)._undeclared;
+    return {
+      labels: policyOf(settings.labels),
+      milestones: policyOf(settings.milestones),
+      rulesets: policyOf(settings.rulesets),
+      variables: policyOf(env.variables),
+      secrets: policyOf(env.secrets),
+      deployment_branch_policies: policyOf(env.deployment_branch_policies),
+      deployment_protection_rules: policyOf(env.deployment_protection_rules),
+    };
+  };
+
+  test.each<
+    [string, Record<string, unknown>, "keep" | "delete" | undefined, Record<string, unknown>]
+  >([
+    [
+      "nothing set: every list takes its own default, the nested lists included",
+      BARE,
+      undefined,
+      {
+        labels: "delete",
+        milestones: "keep",
+        rulesets: "keep",
+        variables: "delete",
+        secrets: "keep",
+        deployment_branch_policies: "delete",
+        deployment_protection_rules: "keep",
+      },
+    ],
+    [
+      "the run input over the defaults, top-level and nested alike",
+      BARE,
+      "delete",
+      {
+        labels: "delete",
+        milestones: "delete",
+        rulesets: "delete",
+        variables: "delete",
+        secrets: "delete",
+        deployment_branch_policies: "delete",
+        deployment_protection_rules: "delete",
+      },
+    ],
+    [
+      "the file-wide _undeclared over the run input, so a file-wide delete disables undeclared deployment gates too",
+      { _undeclared: "delete", ...BARE },
+      "keep",
+      {
+        labels: "delete",
+        milestones: "delete",
+        rulesets: "delete",
+        variables: "delete",
+        secrets: "delete",
+        deployment_branch_policies: "delete",
+        deployment_protection_rules: "delete",
+      },
+    ],
+    [
+      "a wrapper key present with an explicit undefined (a library caller's object) is no policy: the fallback fills it and is not overwritten",
+      {
+        ...BARE,
+        labels: { _undeclared: undefined, entries: [{ name: "a" }] },
+        environments: [
+          {
+            name: "prod",
+            variables: { _undeclared: undefined, entries: [{ name: "A", value: "1" }] },
+            secrets: [{ name: "T", value: "$T" }],
+            deployment_branch_policies: [{ name: "release/*" }],
+            deployment_protection_rules: [{ app: "gate" }],
+          },
+        ],
+      },
+      "keep",
+      {
+        labels: "keep",
+        milestones: "keep",
+        rulesets: "keep",
+        variables: "keep",
+        secrets: "keep",
+        deployment_branch_policies: "keep",
+        deployment_protection_rules: "keep",
+      },
+    ],
+    [
+      "a wrapper's own policy over the file-wide one, on a section and on a nested list",
+      {
+        _undeclared: "delete",
+        ...BARE,
+        labels: { _undeclared: "keep", entries: [{ name: "a" }] },
+        environments: [
+          {
+            name: "prod",
+            variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+            secrets: [{ name: "T", value: "$T" }],
+            deployment_branch_policies: [{ name: "release/*" }],
+            deployment_protection_rules: { entries: [{ app: "gate" }] },
+          },
+        ],
+      },
+      undefined,
+      {
+        labels: "keep",
+        milestones: "delete",
+        rulesets: "delete",
+        variables: "keep",
+        secrets: "delete",
+        deployment_branch_policies: "delete",
+        deployment_protection_rules: "delete",
+      },
+    ],
+  ])("%s", (_case, doc, run, policies) => {
+    const settings = fold(doc, run);
+    expect(resolved(settings)).toEqual(policies);
+    // The directive is consumed: the rendered document spells every policy on its list instead.
+    expect(settings._undeclared).toBeUndefined();
+  });
+
+  test("a nested list resolves to the wrapper form with its policy leading, and a list without the knob stays bare", () => {
+    const settings = fold({ _undeclared: "keep", ...BARE });
+    expect(settings.environments).toEqual([
+      {
+        name: "prod",
+        variables: { _undeclared: "keep", entries: [{ name: "A", value: "1" }] },
+        secrets: { _undeclared: "keep", entries: [{ name: "T", value: "$T" }] },
+        deployment_branch_policies: { _undeclared: "keep", entries: [{ name: "release/*" }] },
+        deployment_protection_rules: { _undeclared: "keep", entries: [{ app: "gate" }] },
+        reviewers: [{ type: "User", id: 1 }],
+      },
+    ]);
+    expect(settings.rulesets).toEqual({
+      _undeclared: "keep",
+      entries: [{ name: "main", rules: [{ type: "deletion" }] }],
+    });
+  });
+
+  test.each<[string, Layer[], Record<string, unknown>]>([
+    [
+      "a higher layer's file-wide _undeclared wins over a lower layer's: a directive, so the highest one steers the whole fold",
+      [
+        layer("fleet", { _undeclared: "keep", labels: [{ name: "fleet" }] }),
+        layer("repo", { _undeclared: "delete", milestones: [{ title: "v1" }] }),
+      ],
+      {
+        labels: { _undeclared: "delete", entries: [{ name: "fleet" }] },
+        milestones: { _undeclared: "delete", entries: [{ title: "v1" }] },
+      },
+    ],
+    [
+      "a lower layer's file-wide _undeclared stays in force when no higher layer sets one",
+      [
+        layer("fleet", { _undeclared: "keep", labels: [{ name: "fleet" }] }),
+        layer("repo", { labels: [{ name: "mine" }] }),
+      ],
+      { labels: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] } },
+    ],
+    [
+      "a lower layer's wrapper policy, inherited by the higher bare list, still wins over the higher layer's file-wide one",
+      [
+        layer("fleet", { labels: { _undeclared: "keep", entries: [{ name: "fleet" }] } }),
+        layer("repo", { _undeclared: "delete", labels: [{ name: "mine" }] }),
+      ],
+      { labels: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] } },
+    ],
+  ])("%s", (_case, layers, settings) => {
+    // The whole document: the directive is consumed, and the lists it steered hold their entries as well as the policy.
+    expect(merge(layers)).toEqual({ settings, notices: [] });
+  });
+
+  test.each<[string, unknown, string]>([
+    ["a string outside the two values", "remove", "a string that is none of them"],
+    ["null, which no policy knob admits", null, "null"],
+    ["a boolean", true, "a boolean"],
+  ])(
+    "a file-wide _undeclared that is %s is refused naming the two values",
+    (_case, value, shape) => {
+      expect(merge([layer("repo", { _undeclared: value, labels: [{ name: "a" }] })])).toEqual({
+        code: "layer-bad-directive",
+        error: `layer "repo": _undeclared must be one of "keep", "delete"; got ${shape}`,
+      });
+    },
+  );
 });

@@ -91,7 +91,8 @@ export type Problem =
       readonly value: string;
       readonly noun: string;
       readonly allowed: readonly string[];
-      readonly fallback: string;
+      /** The value an unset input means; null when unset means "no value" (the `undeclared` input). */
+      readonly fallback: string | null;
     }
   | {
       readonly code: "input-unknown-sections";
@@ -299,12 +300,25 @@ const PAT_ADVICE =
  */
 const DIRECTIVES_ADVICE =
   "The underscore marks this action's directives, \"_layering\" (a file's top level or a list section's {entries} " +
-  'wrapper) and "_undeclared" (a wrapper), and nothing else; there are no private-note keys. Remove the key, or ' +
-  "keep the note as a YAML comment";
+  'wrapper) and "_undeclared" (a file\'s top level or a wrapper), and nothing else; there are no private-note keys. ' +
+  "Remove the key, or keep the note as a YAML comment";
 
 /** One line of the collected document problems: the strange underscore keys, with the rule they break. */
 export function unknownDirectivesIssue(unknown: readonly string[]): string {
   return `unknown underscore ${agree(unknown.length, "key", "keys")}: ${unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
+}
+
+/** One line of the collected document problems: a file-wide `_undeclared` outside the two policies, with the values and the fix. */
+export function badDirectiveIssue(
+  key: "_undeclared",
+  actual: unknown,
+  allowed: readonly string[],
+): string {
+  return (
+    `${key} must be one of ${allowed.map(quote).join(", ")}; got ${describeShape(actual)}` +
+    `${typeof actual === "string" ? " that is none of them" : ""}. Write ${key}: keep or ` +
+    `${key}: delete at the top of the file, or remove the key so each list's own policy applies`
+  );
 }
 
 /** One line of the collected document problems: a removal entry in a document that is not a layer of a fold, by its site. */
@@ -435,7 +449,8 @@ export function describeProblem(problem: Problem): string {
       const values = problem.allowed.map((v) =>
         v === problem.fallback ? `"${v}" (default)` : `"${v}"`,
       );
-      return `the "${problem.input}" input is "${problem.value}", which is not a supported ${problem.noun}. Set it to ${values.join(", ")}`;
+      const unset = problem.fallback === null ? ", or leave it unset" : "";
+      return `the "${problem.input}" input is "${problem.value}", which is not a supported ${problem.noun}. Set it to ${values.join(", ")}${unset}`;
     }
     case "input-unknown-sections":
       return problem.unknown

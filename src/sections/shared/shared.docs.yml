@@ -13,16 +13,17 @@ schema:
   UndeclaredPolicy: What apply does to live resources the settings file does not declare.
   UndeclaredPolicyList<*>: >-
     The wrapped form of a list, overriding what happens to live resources the file does not declare.
-    The plain array form keeps the list's own default policy (for a top-level section that is the
-    section default, and a multi-repo defaults file can set it; a nested list such as
-    environments[].variables has its own fixed default and never inherits one); this wrapper can set
-    it explicitly, and with `_undeclared` omitted it behaves exactly like the plain array. The
+    The plain array form takes the file's top-level `_undeclared`, else the run's `undeclared` input,
+    else the list's own default (the section default for a top-level section, a fixed default for a
+    nested list such as environments[].variables); this wrapper can set it explicitly, and with
+    `_undeclared` omitted it behaves exactly like the plain array. The
     wrapper is this action's own vocabulary (nothing here passes through to GitHub), so its keys are
     strict: anything besides `_undeclared`, `entries`, and `_layering` (the directives wear the
     underscore; a nested list's wrapper does not take `_layering`) is rejected upfront as a typo.
   UndeclaredPolicyList<*>._undeclared: >-
     What apply does to live resources `entries` does not declare: "delete" removes them, "keep"
-    leaves them alone and surfaces each as a note. Omitted, the list's own default applies.
+    leaves them alone and surfaces each as a note. Omitted, the file's top-level `_undeclared`
+    applies, else the run's `undeclared` input, else the list's own default.
   UndeclaredPolicyList<*>.entries: The declared entries, exactly as the plain array form lists them.
   LayeredList<*>: >-
     The wrapped form of a list section that applies no undeclared policy (environments, branches,

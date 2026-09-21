@@ -3,7 +3,10 @@
 # Under deep the same-name pair merges field by field and every nested list unions
 # by its own key: variables and secrets by uppercased name, branch policies by
 # pattern, protection rules by App slug, reviewers by type and id. The fleet's
-# secrets wrapper keeps its `_undeclared: keep` over the repo's bare list.
+# secrets wrapper keeps its `_undeclared: keep` over the repo's bare list, and
+# every other knobbed nested list comes out wrapped with its own default spelled
+# out (variables and branch policies delete, protection rules keep); reviewers
+# take no knob and stay bare.
 name: render-environments-nested
 inputs:
   mode: render
@@ -80,21 +83,26 @@ expect:
           protected_branches: false
           custom_branch_policies: true
         deployment_branch_policies:
-          - name: hotfix/*
-            type: branch
-          - name: release/*
-            type: tag
+          _undeclared: delete
+          entries:
+            - name: hotfix/*
+              type: branch
+            - name: release/*
+              type: tag
         deployment_protection_rules:
+          _undeclared: keep
           entries:
             - app: gate-keeper
             - app: scanner
         variables:
-          - name: LOG_LEVEL
-            value: info
-          - name: Region
-            value: us-east-1
-          - name: TIMEOUT
-            value: "30"
+          _undeclared: delete
+          entries:
+            - name: LOG_LEVEL
+              value: info
+            - name: Region
+              value: us-east-1
+            - name: TIMEOUT
+              value: "30"
         secrets:
           _undeclared: keep
           entries:

@@ -461,6 +461,9 @@ function childEnv(
   if (inputs.layering) {
     env.INPUT_LAYERING = inputs.layering;
   }
+  if (inputs.undeclared) {
+    env.INPUT_UNDECLARED = inputs.undeclared;
+  }
   if (inputs.on_missing_permission) {
     env["INPUT_ON-MISSING-PERMISSION"] = inputs.on_missing_permission;
   }

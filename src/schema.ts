@@ -37,7 +37,12 @@ import { PagesConfig } from "./sections/pages/schema.js";
 import { RepositoryConfig } from "./sections/repository/schema.js";
 import { RulesetConfig } from "./sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "./sections/secret_scanning_custom_patterns/schema.js";
-import { knobbed, LayeringSchema, layeredList } from "./sections/shared/schema-helpers.js";
+import {
+  knobbed,
+  LayeringSchema,
+  layeredList,
+  UndeclaredPolicySchema,
+} from "./sections/shared/schema-helpers.js";
 import { TeamConfig } from "./sections/teams/schema.js";
 import { WebhookConfig } from "./sections/webhooks/schema.js";
 import { WorkflowsConfig } from "./sections/workflows/schema.js";
@@ -73,8 +78,10 @@ export const SettingsFile = z
     custom_properties: knobbed(CustomPropertyConfig).optional(),
     deploy_keys: knobbed(DeployKeyConfig).optional(),
     secret_scanning_custom_patterns: knobbed(SecretScanningPatternConfig).optional(),
-    // The one non-section key: the merge's document-level directive (engine/layers.ts); the apply path never reads it.
+    // The non-section keys, the document's directives (engine/layers.ts): `_layering` steers the fold and never reaches
+    // the apply path; `_undeclared` is resolved into every list's wrapper, after the fold or by the validator.
     _layering: LayeringSchema.optional(),
+    _undeclared: UndeclaredPolicySchema.optional(),
   })
   .meta({ id: "SettingsFile" });
 export type SettingsFile = z.infer<typeof SettingsFile>;
@@ -214,6 +221,7 @@ export const PROBOT_PARITY_KEYS = [
  */
 export const DOCUMENT_DIRECTIVE_KEYS = [
   "_layering",
+  "_undeclared",
 ] as const satisfies readonly (keyof SettingsFile)[];
 type DocumentDirectiveKey = (typeof DOCUMENT_DIRECTIVE_KEYS)[number];
 

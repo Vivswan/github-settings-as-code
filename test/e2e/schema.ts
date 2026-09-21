@@ -7,7 +7,7 @@ import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { LAYERINGS } from "../../src/engine/layers.js";
+import { LAYERINGS, UNDECLARED_POLICIES } from "../../src/engine/layers.js";
 import { RESERVED_REF_PREFIXES } from "../../src/engine/secret-refs.js";
 import { FILTER_INPUTS } from "../../src/flows/inputs.js";
 import { MARKER_LABEL, MARKER_LABEL_CONFIG } from "../../src/report/issue-report.js";
@@ -93,6 +93,8 @@ const InputsSchema = z
     mode: z.enum(["apply", "check", "render", "snapshot"]).optional(),
     /** The mode: render run default for the list sections (INPUT_LAYERING). */
     layering: z.enum(LAYERINGS).optional(),
+    /** The run-wide fallback undeclared policy (INPUT_UNDECLARED): apply, check, and render. */
+    undeclared: z.enum(UNDECLARED_POLICIES).optional(),
     /**
      * mode: snapshot only, exactly one of the two: where the child writes,
      * relative to the scenario's temp dir (its working directory), forwarded

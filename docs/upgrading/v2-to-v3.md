@@ -315,7 +315,7 @@ settings.yml has malformed section entries: unknown underscore key: _owner. The 
 
 A `sections` allowlist does not soften it (an unknown plain section outside the allowlist still only warns). The reason is the loud-failure promise: a misspelled `_layerin: replace` dropped as a note would merge a layer its author meant to replace.
 
-Move each note into a YAML comment; the [layering guide](../operate/layering.md#three-knobs) states the rule beside the directives.
+Move each note into a YAML comment; the [layering guide](../operate/layering.md#four-knobs) states the rule beside the directives.
 
 ## 17. teams takes the _undeclared knob
 
@@ -519,7 +519,7 @@ Every list section folds this way, by the key its planner matches on: labels, co
 
 The value `merge` is gone. `labels: {_layering: merge, entries: [...]}` fails with `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them`, and the `layering` input refuses it the same way.
 
-Fix: write `deep` where a layer said `merge`, and `_layering: replace` on any list section a higher layer meant to replace whole. Under `shallow` and `deep` an empty higher list adds nothing; clearing a list takes `replace` with an empty list. The [layering guide](../operate/layering.md#three-knobs) owns the rules.
+Fix: write `deep` where a layer said `merge`, and `_layering: replace` on any list section a higher layer meant to replace whole. Under `shallow` and `deep` an empty higher list adds nothing; clearing a list takes `replace` with an empty list. The [layering guide](../operate/layering.md#four-knobs) owns the rules.
 
 ## 29. mode: merge is mode: render
 
@@ -716,10 +716,10 @@ v3            _undeclared: delete          # every knobbed section of this file,
 
 The run input `undeclared` (`keep` or `delete`, unset by default) sets the same default for every file an apply, check, or render reads; `mode: snapshot` rejects it. The precedence, highest first: the list's wrapper, then the file's top-level `_undeclared`, then the `undeclared` input, then the list's own default the [undeclared policy](../reference/undeclared-policy.md) page lists.
 
-A wrong value is refused before any section runs:
+A wrong value is refused before any section runs, one line in the collected list (abbreviated):
 
 ```text
-settings.yml: _undeclared must be one of "keep", "delete"; got a string that is none of them. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list's own policy applies
+settings.yml has malformed section entries: _undeclared must be one of "keep", "delete"; got a string that is none of them. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list's own policy applies (...)
 ```
 
 A file-wide `delete` reaches the nested `environments[].deployment_protection_rules` list too: an undeclared deployment gate is disabled, where the nested default is `keep`. Set the nested wrapper to `keep` on the environment that must keep its gates.

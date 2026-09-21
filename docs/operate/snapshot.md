@@ -202,7 +202,7 @@ Under both policies the error or the header line names the grant to add.
 | `on-missing-permission` | `fail` (default) fails the run on a read the token is denied, and no file is written for that target; `warn` reports the denial and writes what did read. What each policy does per read: [what a denial does](#what-a-denial-does) |
 | `private-repos` | `redact` (default) hides private and internal targets from the public surfaces; `show` reveals them |
 | `token`, `api-version` | The API calls, as in every mode that reaches GitHub |
-| `settings-file`, `rendered-file`, `layering`, `required-sections`, `defaults-file`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a snapshot applies no document, folds no layers, and delivers no report |
+| `settings-file`, `rendered-file`, `layering`, `undeclared`, `required-sections`, `defaults-file`, `private-report`, `report-public-key` | Rejected when set to a non-default value: a snapshot applies no document, folds no layers, and delivers no report |
 
 ## Results and exit codes
 

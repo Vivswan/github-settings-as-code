@@ -33,6 +33,8 @@ import {
   type LayeringDirective,
   REMOVE_KEY,
   UNDECLARED_KEY,
+  UNDECLARED_POLICIES,
+  type UndeclaredPolicyWord,
 } from "./gen-support.js";
 import {
   displayKeyOf,
@@ -860,15 +862,47 @@ export const KEYED_MERGE_SECTIONS: Readonly<Record<ListSection, KeyedList>> = {
   secret_scanning_custom_patterns: keyedBy("name"),
 };
 
-const UNDECLARED_DEFAULTS: Record<UndeclaredPolicySection, "keep" | "delete"> = Object.fromEntries(
-  UNDECLARED_POLICY_SECTIONS.map((key) => {
-    const section = SECTIONS.find((candidate) => candidate.key === key);
-    if (section === undefined || section.undeclaredDefault === "untouched") {
-      throw new Error(`${key} is knobbed but declares no keep/delete default`);
-    }
-    return [key, section.undeclaredDefault];
-  }),
-) as Record<UndeclaredPolicySection, "keep" | "delete">;
+const UNDECLARED_DEFAULTS: Record<UndeclaredPolicySection, UndeclaredPolicyWord> =
+  Object.fromEntries(
+    UNDECLARED_POLICY_SECTIONS.map((key) => {
+      const section = SECTIONS.find((candidate) => candidate.key === key);
+      if (section === undefined || section.undeclaredDefault === "untouched") {
+        throw new Error(`${key} is knobbed but declares no keep/delete default`);
+      }
+      return [key, section.undeclaredDefault];
+    }),
+  ) as Record<UndeclaredPolicySection, UndeclaredPolicyWord>;
+
+/**
+ * The nested lists that take the knob and their defaults, in the harness's own words (the environments module spells
+ * them in src/sections/environments/nested.ts; oracle.test.ts pins the two as data). A nested list absent here
+ * (reviewers, a ruleset's rules) takes no policy and stays bare after the fold.
+ */
+export const NESTED_UNDECLARED_DEFAULTS: Readonly<Record<string, UndeclaredPolicyWord>> = {
+  variables: "delete",
+  secrets: "keep",
+  deployment_branch_policies: "delete",
+  deployment_protection_rules: "keep",
+};
+
+function isPolicy(value: unknown): value is UndeclaredPolicyWord {
+  return UNDECLARED_POLICIES.some((policy) => policy === value);
+}
+
+/** A list in either form with its policy explicit: the wrapper's own, else the fold's fallback, else `own`. */
+function withPolicy(
+  value: unknown,
+  fallback: UndeclaredPolicyWord | undefined,
+  own: UndeclaredPolicyWord,
+): unknown {
+  const form = nestedForm(value);
+  if (form === null || form.knobs?.[UNDECLARED_KEY] !== undefined) {
+    return value;
+  }
+  // A key present with an explicit undefined is no policy, and must not overwrite the resolved one.
+  const { [UNDECLARED_KEY]: _unset, ...knobs } = form.knobs ?? {};
+  return { [UNDECLARED_KEY]: fallback ?? own, ...knobs, entries: form.entries };
+}
 
 function isMapping(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1119,16 +1153,35 @@ function reduceListStep(
   };
 }
 
-/** After the fold: a knobbed section takes its default policy, a plain list sheds the wrapper the directive rode in. */
-function finishList(key: ListSection, slot: Slot): Slot {
+/**
+ * After the fold: a knobbed section without a policy takes the fallback (the file's `_undeclared`, else the run input),
+ * else its default; an environment's nested lists likewise, each wrapped; a plain list sheds the wrapper the directive
+ * rode in.
+ */
+function finishList(
+  key: ListSection,
+  slot: Slot,
+  fallback: UndeclaredPolicyWord | undefined,
+): Slot {
   if (!isMapping(slot) || !Array.isArray(slot.entries)) {
     return slot;
   }
+  if (key === "environments") {
+    slot.entries = (slot.entries as unknown[]).map((entry) => {
+      if (!isMapping(entry)) {
+        return entry;
+      }
+      const out: Json = { ...entry };
+      for (const [field, own] of Object.entries(NESTED_UNDECLARED_DEFAULTS)) {
+        if (Object.hasOwn(out, field)) {
+          put(out, field, withPolicy(out[field], fallback, own));
+        }
+      }
+      return out;
+    });
+  }
   if (isKnobbed(key)) {
-    if (slot[UNDECLARED_KEY] === undefined) {
-      slot[UNDECLARED_KEY] = UNDECLARED_DEFAULTS[key];
-    }
-    return slot;
+    return withPolicy(slot, fallback, UNDECLARED_DEFAULTS[key]) as Slot;
   }
   return Object.keys(slot).every((knob) => knob === "entries") ? slot.entries : slot;
 }
@@ -1142,14 +1195,17 @@ function isSectionKey(key: string): key is SectionKey {
  * refusedMergeLayer admitted every layer. Layers fold low to high and, within a layer, its sections in the
  * order the layer wrote them, so a refusal names the layer that carries it and notices come in the order
  * the action prints them. `_layering` is consumed, never written: a layer's top-level directive governs its
- * list sections, a wrapper's governs its own section.
+ * list sections, a wrapper's governs its own section. A layer's top-level `_undeclared` is consumed too: the highest
+ * one set steers the policy of every list without its own, above the run's `undeclared` input.
  */
 export function foldMergeLayers(
   layers: readonly MergeLayer[],
   layering: LayeringDirective,
+  undeclared: UndeclaredPolicyWord | undefined = undefined,
 ): { merged: Json; notices: MergeNotice[] } {
   const notices: MergeNotice[] = [];
   const slots = new Map<SectionKey, Slot>();
+  let filePolicy: UndeclaredPolicyWord | undefined;
   for (const layer of layers) {
     // The engine admits a layer (its boundary gates) right before folding it, so a lower layer's fold refusal comes
     // before a higher layer's boundary refusal.
@@ -1159,6 +1215,9 @@ export function foldMergeLayers(
     const fileDirective = isDirective(layer.doc[LAYERING_KEY])
       ? layer.doc[LAYERING_KEY]
       : undefined;
+    if (isPolicy(layer.doc[UNDECLARED_KEY])) {
+      filePolicy = layer.doc[UNDECLARED_KEY];
+    }
     const site: Site = { layer: layer.name, notices };
     for (const key of Object.keys(layer.doc)) {
       const value = layer.doc[key];
@@ -1179,7 +1238,7 @@ export function foldMergeLayers(
   for (const key of SECTION_KEYS) {
     const slot = slots.get(key);
     if (slot !== undefined) {
-      merged[key] = isListSection(key) ? finishList(key, slot) : slot;
+      merged[key] = isListSection(key) ? finishList(key, slot, filePolicy ?? undeclared) : slot;
     }
   }
   return { merged, notices };
@@ -1245,12 +1304,17 @@ function refusedByValidation(layer: MergeLayer): boolean {
 }
 
 /**
- * What the fold's boundary refuses as it admits one layer, in the oracle's words: a directive outside the set, a
- * duplicated key, a malformed removal, a removal under an effective replace. `run` resolves a wrapper's directive.
+ * What the fold's boundary refuses as it admits one layer, in the oracle's words: a directive outside its set (the
+ * layering, or the file-wide policy), a duplicated key, a malformed removal, a removal under an effective replace.
+ * `run` resolves a wrapper's directive.
  */
 function refusedAtBoundary(layer: MergeLayer, run: LayeringDirective): boolean {
   const fileDirective = layer.doc[LAYERING_KEY];
   if (fileDirective !== undefined && !isDirective(fileDirective)) {
+    return true;
+  }
+  const filePolicy = layer.doc[UNDECLARED_KEY];
+  if (filePolicy !== undefined && !isPolicy(filePolicy)) {
     return true;
   }
   for (const key of LIST_SECTIONS) {
@@ -1297,7 +1361,7 @@ export function predictMerge(meta: MergeScenarioMeta): MergePrediction {
   }
   let folded: ReturnType<typeof foldMergeLayers>;
   try {
-    folded = foldMergeLayers(meta.layers, meta.layering);
+    folded = foldMergeLayers(meta.layers, meta.layering, meta.undeclared);
   } catch (error) {
     if (error instanceof FoldRefused) {
       return { kind: "refused", layer: error.layer };

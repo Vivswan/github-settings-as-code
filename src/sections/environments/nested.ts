@@ -143,6 +143,9 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
 };
 
 /**
+ * The policy a validated document carries on the nested wrapper is the resolved one (the wrapper's own, else the
+ * file's `_undeclared`, else the run's `undeclared` input, else this table's default, resolved once in
+ * engine/layers.ts); the table default here is the last fallback and the words the drift prose uses.
  * Generic over K so the table default and the declared value stay correlated to one literal key.
  * The parameter is spelled NonNullable<EnvironmentConfig[K]>, not the identical NestedDeclared[K]:
  * tsc relates the guarded env[key] to the former directly, while the mapped-type spelling falls

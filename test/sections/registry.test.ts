@@ -34,10 +34,12 @@ import type {
   SnapshotContext,
 } from "../../src/sections/contract/plan.js";
 import { call, probeAbsent } from "../../src/sections/contract/requests.js";
+import { NESTED_KEYS } from "../../src/sections/environments/nested.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import {
   allEndpoints,
   allGraphqlOps,
+  listLayering,
   type MisdeclaredPlanModule,
   type MisdeclaredSnapshotModule,
   type ReadingModuleWithoutSnapshot,
@@ -72,6 +74,37 @@ describe("section permissions", () => {
         `${key}: wrapper with a policy must parse only on a knobbed section`,
       ).toBe(knobbed.has(key));
     }
+  });
+
+  test("every nested list whose wrapper takes _undeclared declares the default the resolution fills, and no other does", () => {
+    // engine/layers.ts resolves a nested list only where its declaration carries undeclaredDefault: a knobbed nested
+    // list without one would reach the planner unresolved, and a default on a bare list would wrap what the schema refuses.
+    // The one sibling a probe entry needs to validate: declared branch policies require the flag that enables them.
+    const siblings: Partial<Record<(typeof LIST_SECTIONS)[number], Record<string, unknown>>> = {
+      environments: {
+        deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+      },
+    };
+    const knobbed = (key: (typeof LIST_SECTIONS)[number], field: string): boolean => {
+      const keyField = listLayering(key).keyField;
+      const entry = {
+        [keyField]: "x",
+        ...siblings[key],
+        [field]: { _undeclared: "keep", entries: [] },
+      };
+      return sectionShape(key).safeParse([entry]).success;
+    };
+    const declared = LIST_SECTIONS.flatMap((key) =>
+      Object.entries(listLayering(key).nested ?? {}).map(([field, nested]) => [
+        `${key}[].${field}`,
+        knobbed(key, field),
+        nested.undeclaredDefault !== undefined,
+      ]),
+    );
+    expect(declared.filter(([, takesKnob, hasDefault]) => takesKnob !== hasDefault)).toEqual([]);
+    expect(declared.filter(([, takesKnob]) => takesKnob).map(([path]) => path)).toEqual(
+      NESTED_KEYS.map((key) => `environments[].${key}`),
+    );
   });
 
   test("_layering is accepted on every top-level list wrapper and rejected on the nested ones", () => {

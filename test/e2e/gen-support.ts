@@ -17,6 +17,11 @@ export type Json = Record<string, unknown>;
 
 export const UNDECLARED_KEY = "_undeclared";
 
+/** The knob's values in the harness's own words: a value the engine adds or drops is a disagreement the fuzz surfaces. */
+export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
+
+export type UndeclaredPolicyWord = (typeof UNDECLARED_POLICIES)[number];
+
 /** The layering directive's key, on a knobbed wrapper or at a layer's top level. */
 export const LAYERING_KEY = "_layering";
 
@@ -31,7 +36,7 @@ export const DEFAULT_LAYERING_DIRECTIVE: LayeringDirective = "deep";
 /** The entry-level directive's key, in the harness's own words: `_remove: true` drops the lower entry under the same key. */
 export const REMOVE_KEY = "_remove";
 
-export type EntriesForm = Json[] | { [UNDECLARED_KEY]?: "keep" | "delete"; entries: Json[] };
+export type EntriesForm = Json[] | { [UNDECLARED_KEY]?: UndeclaredPolicyWord; entries: Json[] };
 
 /**
  * The SAME unwrap the engine uses. Entries come back by reference, so mutating them edits the generated document in

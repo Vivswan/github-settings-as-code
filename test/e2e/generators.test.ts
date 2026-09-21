@@ -1151,7 +1151,7 @@ describe("genMergeScenario", () => {
       for (const layer of meta.layers) {
         for (const key of Object.keys(layer.doc)) {
           expect(
-            key === "_layering" || (pool as string[]).includes(key),
+            key === "_layering" || key === "_undeclared" || (pool as string[]).includes(key),
             `seed ${seed}: ${key}`,
           ).toBe(true);
         }
@@ -1281,7 +1281,7 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
       name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
       doc,
     }));
-    const always: string[] = ["override", "run-layering-deep"];
+    const always: string[] = ["override", "run-layering-deep", "run-undeclared-default"];
     expect(mergeFeaturesOf(layers, "deep", false)).toEqual(
       MERGE_FEATURES.filter((feature) => always.includes(feature) || expected.includes(feature)),
     );
@@ -1315,7 +1315,10 @@ describe("mergeFeaturesOf (nulls and removals read the way the fold writes them)
     }));
     expect(mergeFeaturesOf(layers, "deep", false)).toEqual(
       MERGE_FEATURES.filter(
-        (feature) => feature === "run-layering-deep" || expected.includes(feature),
+        (feature) =>
+          feature === "run-layering-deep" ||
+          feature === "run-undeclared-default" ||
+          expected.includes(feature),
       ),
     );
   });
@@ -1343,6 +1346,7 @@ describe("merge oracle against the curated merge scenarios", () => {
       const prediction = predictMerge({
         layers,
         layering: scenario.inputs?.layering ?? "deep",
+        undeclared: scenario.inputs?.undeclared,
         features: [],
       });
       // A refusal scenario pins the exit and the message; the oracle must refuse the same layer.

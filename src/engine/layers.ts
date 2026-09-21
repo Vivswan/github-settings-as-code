@@ -5,6 +5,12 @@
  * else the run's. A list section is knobbed (`{_undeclared, entries}`, the policy resolved after the fold) or plain
  * (`{_layering, entries}`, unwrapped to the bare list after the fold: the directive was its only content).
  *
+ * The undeclared policy resolves once, here after the fold and in the validator for a single document
+ * (resolveUndeclaredPolicies), so a planner reads an explicit policy off every wrapper and never derives one:
+ * the wrapper's `_undeclared`, else the file's top-level `_undeclared`, else the run's `undeclared` input, else the
+ * list's own default. The file-wide key is a directive the boundary admits and the fold consumes: the highest layer
+ * that sets it steers the whole fold, and it never reaches the rendered document.
+ *
  * The cascade: the higher layer's value wins, and null is a value like any other, the EMPTY or OFF state on GitHub.
  * The fold never reads a null as a marker; whether a key admits null is the schema's question, asked of every layer
  * and of the fold (engine/validate.ts). What a higher layer cannot say with a value, it says with a directive.
@@ -29,11 +35,15 @@ import {
 } from "../schema.js";
 import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
 import { listLayering, sectionModule } from "../sections/registry.js";
-import { LAYERINGS, type Layering } from "../sections/shared/schema-helpers.js";
+import {
+  LAYERINGS,
+  type Layering,
+  UNDECLARED_POLICIES,
+} from "../sections/shared/schema-helpers.js";
 import type { DistributiveOmit, UndeclaredPolicy } from "../types.js";
 
-// The flows may not import src/sections (architecture.yml), so the value set reaches them through the engine.
-export { LAYERINGS, type Layering };
+// The flows may not import src/sections (architecture.yml), so the value sets reach them through the engine.
+export { LAYERINGS, type Layering, UNDECLARED_POLICIES };
 
 /** One settings document in the stack, named for notices and refusals. */
 export interface Layer {
@@ -49,11 +59,24 @@ export interface RemovalNotice {
 
 const LAYERING_KEY = "_layering";
 
+/** The policy knob's key: on a knobbed wrapper (top-level or nested) a value, at a file's top level a directive. */
+const UNDECLARED_KEY = "_undeclared";
+
 /** The one entry-level directive: `_remove: true` names a lower entry by its key and drops it. */
 const REMOVE_KEY = "_remove";
 
 function isLayering(value: unknown): value is Layering {
   return LAYERINGS.some((layering) => layering === value);
+}
+
+function isUndeclaredPolicy(value: unknown): value is UndeclaredPolicy {
+  return UNDECLARED_POLICIES.some((policy) => policy === value);
+}
+
+/** The knobs a fold or a single document is resolved under; `undeclared` is the run input, unset unless the workflow set it. */
+export interface FoldOptions {
+  readonly layering: Layering;
+  readonly undeclared?: UndeclaredPolicy | undefined;
 }
 
 /** The directives under which a knobbed list unions by key instead of being replaced. */
@@ -84,15 +107,71 @@ function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
 }
 
 /**
- * After the fold, a wrapper still without `_undeclared` takes the section default, so the merged document is
- * self-describing; the knob leads the wrapper, where an author's own sits after the fold.
+ * A list in either form with its policy made explicit: the wrapper's own, else `fallback`, else `own` (the list's
+ * default). A `_undeclared` that is present but not a policy (null) is left for the validator to refuse; the knob
+ * leads the wrapper, where an author's own sits after the fold. A library caller's object can carry the key with an
+ * explicit undefined, which is no policy: it is dropped before the resolved one is set, so it cannot overwrite it.
  */
-function resolveUndeclaredPolicies(merged: Record<string, unknown>): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = merged[key];
-    if (isPlainObject(value) && Array.isArray(value.entries) && value._undeclared === undefined) {
-      put(merged, key, { _undeclared: sectionDefaultPolicy(key), ...value });
+function resolvedWrapper(
+  value: unknown,
+  fallback: UndeclaredPolicy | undefined,
+  own: UndeclaredPolicy,
+): unknown {
+  const form = nestedForm(value);
+  if (form === null || form.knobs?.[UNDECLARED_KEY] !== undefined) {
+    return value;
+  }
+  const { [UNDECLARED_KEY]: _unset, ...knobs } = form.knobs ?? {};
+  return { [UNDECLARED_KEY]: fallback ?? own, ...knobs, entries: form.entries };
+}
+
+/** An entry with each nested list that takes the knob resolved; entries are shared with the layers, so a resolved one is a new object. */
+function resolveNestedPolicies(
+  entry: unknown,
+  keyed: KeyedListLayering,
+  fallback: UndeclaredPolicy | undefined,
+): unknown {
+  if (!isPlainObject(entry)) {
+    return entry;
+  }
+  let out: Record<string, unknown> | null = null;
+  for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
+    if (nested.undeclaredDefault === undefined) {
+      continue;
     }
+    const value = own(entry, field);
+    const resolved = resolvedWrapper(value, fallback, nested.undeclaredDefault);
+    if (resolved !== value) {
+      out ??= { ...entry };
+      put(out, field, resolved);
+    }
+  }
+  return out ?? entry;
+}
+
+/**
+ * The ONE resolution of the undeclared policy, over a folded or a validated document: every knobbed section and every
+ * nested list that takes the knob comes out in wrapper form with an explicit `_undeclared`: the wrapper's own, else
+ * `fallback` (the file's top-level directive, else the run input, both admitted by the caller), else the list's default.
+ */
+export function resolveUndeclaredPolicies(
+  doc: Record<string, unknown>,
+  fallback: UndeclaredPolicy | undefined,
+): void {
+  for (const key of UNDECLARED_POLICY_SECTIONS) {
+    const value = own(doc, key);
+    if (value !== undefined) {
+      put(doc, key, resolvedWrapper(value, fallback, sectionDefaultPolicy(key)));
+    }
+  }
+  for (const key of LIST_SECTIONS) {
+    const form = nestedForm(own(doc, key));
+    const keyed = listLayering(key);
+    if (form === null || keyed.nested === undefined) {
+      continue;
+    }
+    const entries = form.entries.map((entry) => resolveNestedPolicies(entry, keyed, fallback));
+    put(doc, key, form.knobs === null ? entries : { ...form.knobs, entries });
   }
 }
 
@@ -200,6 +279,8 @@ interface AdmittedLayer {
   readonly name: string;
   readonly doc: Readonly<Record<string, unknown>>;
   readonly sections: ReadonlyMap<string, AdmittedSection>;
+  /** The layer's file-wide `_undeclared`, when it sets one. */
+  readonly undeclared: UndeclaredPolicy | undefined;
 }
 
 function asMappings(list: readonly unknown[]): readonly Readonly<Record<string, unknown>>[] | null {
@@ -379,6 +460,22 @@ function fileLayering(
   return ok(value);
 }
 
+/** The file-wide policy, admitted here and carried as parsed, so the resolution after the fold never re-reads the key. */
+function fileUndeclared(
+  layer: string,
+  doc: Readonly<Record<string, unknown>>,
+): Result<UndeclaredPolicy | undefined, LayerProblem> {
+  const value = doc[UNDECLARED_KEY];
+  if (value === undefined || isUndeclaredPolicy(value)) {
+    return ok(value);
+  }
+  return refuse(layer, UNDECLARED_KEY, {
+    code: "layer-bad-directive",
+    actual: value,
+    allowed: UNDECLARED_POLICIES,
+  });
+}
+
 function admitSection(
   layer: string,
   key: ListSection,
@@ -446,21 +543,23 @@ function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerP
   if (!isPlainObject(doc)) {
     return ok(null);
   }
-  return fileLayering(layer.name, doc).andThen((file) => {
-    const sections = new Map<string, AdmittedSection>();
-    for (const key of LIST_SECTIONS) {
-      const value = doc[key];
-      if (value === undefined || value === null) {
-        continue;
+  return fileUndeclared(layer.name, doc).andThen((undeclared) =>
+    fileLayering(layer.name, doc).andThen((file) => {
+      const sections = new Map<string, AdmittedSection>();
+      for (const key of LIST_SECTIONS) {
+        const value = doc[key];
+        if (value === undefined || value === null) {
+          continue;
+        }
+        const admitted = admitSection(layer.name, key, value, { file, run });
+        if (admitted.isErr()) {
+          return err(admitted.error);
+        }
+        sections.set(key, admitted.value);
       }
-      const admitted = admitSection(layer.name, key, value, { file, run });
-      if (admitted.isErr()) {
-        return err(admitted.error);
-      }
-      sections.set(key, admitted.value);
-    }
-    return ok({ name: layer.name, doc, sections });
-  });
+      return ok({ name: layer.name, doc, sections, undeclared });
+    }),
+  );
 }
 
 function childPath(path: string, key: string): string {
@@ -734,7 +833,7 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, step: Step): unknown {
   const below = isPlainObject(acc) ? acc : {};
   const out: Record<string, unknown> = { ...below };
   for (const [key, value] of Object.entries(layer.doc)) {
-    if (key === LAYERING_KEY || value === undefined) {
+    if (key === LAYERING_KEY || key === UNDECLARED_KEY || value === undefined) {
       continue;
     }
     const section = layer.sections.get(key);
@@ -830,10 +929,11 @@ export function separateRemovals(doc: unknown): SeparatedRemovals {
 }
 
 /**
- * The layer as the standalone validation sees it: the document minus the two directives the fold consumes. Every
+ * The layer as the standalone validation sees it: the document minus the directives the fold consumes. Every
  * value, null included, stays for the shapes to judge: a null the schema does not admit is the layer's own error.
  *
  * `_layering`, at the top or on a list section's wrapper  -> dropped: the fold validates the directive itself
+ * `_undeclared` at the top                                -> dropped: the fold validates it and resolves it into the wrappers
  * an entry carrying `_remove`, at any depth, any value     -> dropped: it declares nothing, and the fold checks its shape
  *                                                             (a closed entry schema would otherwise name the marker an
  *                                                             unknown key before the fold could say it takes only true)
@@ -843,7 +943,7 @@ export function standaloneView(doc: unknown): unknown {
   if (!isPlainObject(rest)) {
     return rest;
   }
-  const { _layering: _directive, ...out } = rest;
+  const { _layering: _directive, _undeclared: _policy, ...out } = rest;
   for (const key of LIST_SECTIONS) {
     const value = out[key];
     if (isPlainObject(value) && Array.isArray(value.entries)) {
@@ -856,10 +956,12 @@ export function standaloneView(doc: unknown): unknown {
 
 export function mergeLayers(
   layers: readonly Layer[],
-  options: { readonly layering: Layering },
+  options: FoldOptions,
 ): Result<{ settings: unknown; notices: RemovalNotice[] }, LayerProblem> {
   const notices: RemovalNotice[] = [];
   let acc: unknown = {};
+  // The file-wide directive as the highest layer set it: a directive steering the fold, never a merged value.
+  let filePolicy: UndeclaredPolicy | undefined;
   for (const layer of layers) {
     const admitted = admit(layer, options.layering);
     if (admitted.isErr()) {
@@ -869,6 +971,7 @@ export function mergeLayers(
       acc = structuredClone(layer.doc);
       continue;
     }
+    filePolicy = admitted.value.undeclared ?? filePolicy;
     const step: Step = { layer: layer.name, notices, refusal: undefined };
     acc = mergeStep(acc, admitted.value, step);
     if (step.refusal !== undefined) {
@@ -876,7 +979,7 @@ export function mergeLayers(
     }
   }
   if (isPlainObject(acc)) {
-    resolveUndeclaredPolicies(acc);
+    resolveUndeclaredPolicies(acc, filePolicy ?? options.undeclared);
     unwrapPlainLists(acc);
   }
   return ok({ settings: acc, notices });

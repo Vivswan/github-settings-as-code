@@ -22,6 +22,7 @@ import {
   foldSectionOutcomes,
   judgePreflightAbort,
   KEYED_MERGE_SECTIONS,
+  NESTED_UNDECLARED_DEFAULTS,
   NO_READ_SECTIONS,
   orgGateDenied,
   type PreflightAbort,
@@ -1169,7 +1170,10 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
           {
             name: "prod",
             constructor: [{ name: "B" }],
-            variables: [{ name: "A", value: "y", constructor: null }],
+            variables: {
+              [UNDECLARED_KEY]: "delete",
+              entries: [{ name: "A", value: "y", constructor: null }],
+            },
           },
         ],
       },
@@ -1283,10 +1287,13 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
           {
             name: "prod",
             wait_timer: 5,
-            variables: [
-              { name: "region", value: "us" },
-              { name: "TIMEOUT", value: "30" },
-            ],
+            variables: {
+              [UNDECLARED_KEY]: "delete",
+              entries: [
+                { name: "region", value: "us" },
+                { name: "TIMEOUT", value: "30" },
+              ],
+            },
             secrets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "token", value: "$B" }] },
           },
         ],
@@ -1771,7 +1778,7 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
     expect(refusedMergeLayer(layers, "replace")).toBe("layer-1.yml");
     // The run's own verdict: per-layer validation or the fold's boundary, whichever fires, names the same layer.
     expect(
-      foldLayers(layers, "merged", "replace", silentIo()).match(
+      foldLayers(layers, "merged", { layering: "replace" }, silentIo()).match(
         () => null,
         (problem) => ("layer" in problem ? problem.layer : problem.source),
       ),
@@ -1788,7 +1795,7 @@ describe("refusedMergeLayer (the oracle's read of the layer boundary)", () => {
       layer: "layer-0.yml",
     });
     expect(
-      foldLayers(layers, "merged", "deep", silentIo()).match(
+      foldLayers(layers, "merged", { layering: "deep" }, silentIo()).match(
         () => null,
         (problem) => ("layer" in problem ? problem.layer : problem.source),
       ),
@@ -1893,6 +1900,17 @@ describe("KEYED_MERGE_SECTIONS lockstep with the section declarations", () => {
       }
     },
   );
+
+  test("the nested knob defaults the oracle spells match the environments module's, and only those lists take one", () => {
+    const declared = listLayering("environments").nested ?? {};
+    expect(
+      Object.fromEntries(
+        Object.entries(declared)
+          .filter(([, nested]) => nested.undeclaredDefault !== undefined)
+          .map(([field, nested]) => [field, nested.undeclaredDefault]),
+      ),
+    ).toEqual(NESTED_UNDECLARED_DEFAULTS);
+  });
 
   test("the folds are spelled out, so the lockstep above cannot pass on two functions agreeing on null", () => {
     // The alias union rests on the label claims; the folds are what pair Bug/bug, Octocat/octocat, and my_secret/MY_SECRET.

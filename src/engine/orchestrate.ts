@@ -8,6 +8,7 @@ import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import {
+  badDirectiveIssue,
   type SettingsProblem,
   singleDocumentRemovalIssue,
   type TopLevelShape,
@@ -31,9 +32,9 @@ import {
 } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
-import type { MustBeNever } from "../types.js";
+import type { MustBeNever, UndeclaredPolicy } from "../types.js";
 import { executePlan } from "./execute.js";
-import { separateRemovals } from "./layers.js";
+import { resolveUndeclaredPolicies, separateRemovals, UNDECLARED_POLICIES } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
 import { resolveSecretRefs, type SettingsSource, validateSecretRef } from "./secret-refs.js";
 import { collectSecretValues, type SectionSecretValue } from "./secrets.js";
@@ -101,16 +102,24 @@ export function skippedSectionKeys(
   return outcomes.filter((o) => o.status === "skipped").map((o) => o.key);
 }
 
+/** The run's `undeclared` input: the fallback for a list whose wrapper and file set no policy, before the list's default. */
+export interface ValidateOptions {
+  readonly undeclared?: UndeclaredPolicy | undefined;
+}
+
 /**
  * The ONE boundary that turns a raw parsed document into the ValidatedSettings the engine accepts. Unknown top-level
  * keys are errors, except outside a non-empty `sections` allowlist, where they downgrade to a warning; an unknown
  * underscore key is an error under every allowlist, since the underscore names this action's directives and nothing else.
+ * The branded document carries every undeclared policy explicit (resolveUndeclaredPolicies), so a planner reads one
+ * off its wrapper and never derives it; a rendered document arrives resolved already and passes through unchanged.
  */
 export function validateSettingsDoc(
   settings: unknown,
   sourceLabel: string,
   sections: SectionSelection,
   io: Io,
+  options: ValidateOptions = {},
 ): Result<ValidatedSettings, SettingsProblem> {
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
     return err({
@@ -139,6 +148,11 @@ export function validateSettingsDoc(
   const unknownDirectives = strangers.filter((key) => key.startsWith("_"));
   if (unknownDirectives.length > 0) {
     issues.push(unknownDirectivesIssue(unknownDirectives));
+  }
+  const directive = (settings as Record<string, unknown>)._undeclared;
+  const policy = UNDECLARED_POLICIES.find((value) => value === directive);
+  if (directive !== undefined && policy === undefined) {
+    issues.push(badDirectiveIssue("_undeclared", directive, UNDECLARED_POLICIES));
   }
   const unknownKeys = strangers.filter((key) => !key.startsWith("_"));
   if (unknownKeys.length > 0) {
@@ -170,7 +184,12 @@ export function validateSettingsDoc(
   if (issues.length > 0) {
     return err({ code: "settings-malformed-sections", source: sourceLabel, issues });
   }
-  return shapes.map((parsed) => parsed as ValidatedSettings);
+  return shapes.map((parsed) => {
+    // validateSectionShapes copies the sections alone, so the directive admitted above is passed, never re-read.
+    const resolved: Record<string, unknown> = { ...parsed };
+    resolveUndeclaredPolicies(resolved, policy ?? options.undeclared);
+    return resolved as ValidatedSettings;
+  });
 }
 
 /** A non-mapping document's top level in typeof terms; the only object left by the caller's guard is null. */

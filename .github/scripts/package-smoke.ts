@@ -46,7 +46,7 @@ import { INPUT_DECLS } from "${PACKAGE}/internal";
 import schema from "${PACKAGE}/settings.schema.json" with { type: "json" };
 const result = validateSettings({ labels: [] });
 if (result.isErr()) throw new Error("validateSettings rejected an empty labels list: " + result.error.code);
-deepStrictEqual(result.value, { settings: { labels: [] }, log: [] });
+deepStrictEqual(result.value, { settings: { labels: { _undeclared: "delete", entries: [] } }, log: [] });
 deepStrictEqual([...SECTION_KEYS], ${JSON.stringify(SECTION_KEYS)});
 deepStrictEqual(schema.$id, ${JSON.stringify(SCHEMA_ID)});
 deepStrictEqual(INPUT_DECLS["on-missing-permission"].default, "fail");
