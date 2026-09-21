@@ -81,42 +81,43 @@ describe("teams", () => {
     ]);
   });
 
-  test("an undeclared team with direct access is kept with a note by default; access granted above the repository passes silently", async () => {
-    const api = new MockApi({
-      [ORG]: { data: { login: "o" } },
-      [LIST]: {
-        data: [
-          { slug: "platform", access_source: "direct" },
-          { slug: "legacy", access_source: "direct" },
-          { slug: "everyone", access_source: "organization" },
-        ],
-      },
-      [probeOf("platform")]: { data: { role_name: "write" } },
-    });
-    const result = await plan(api, [{ name: "platform", permission: "push" }]);
-    expect(result).toEqual({
-      ops: [],
-      notes: [
+  // A converged declared team beside an undeclared direct team and a team whose access is granted above the repository.
+  const mixedAccess = {
+    [ORG]: { data: { login: "o" } },
+    [LIST]: {
+      data: [
+        { slug: "platform", access_source: "direct" },
+        { slug: "legacy", access_source: "direct" },
+        { slug: "everyone", access_source: "organization" },
+      ],
+    },
+    [probeOf("platform")]: { data: { role_name: "write" } },
+  };
+  const platform = [{ name: "platform", permission: "push" }];
+  test.each<[policy: string, desired: SectionInput<"teams">, ops: string[][], notes: string[]]>([
+    [
+      "by default an undeclared direct team is kept with a note, and access granted above the repository passes silently",
+      platform,
+      [],
+      [
         'team "legacy" has access but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage its access, or set "_undeclared: delete" to have apply REVOKE its access',
       ],
-      drift: [],
-    });
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG, LIST, probeOf("platform")]);
-  });
-
-  test('under "_undeclared: delete" access granted above the repository is noted as beyond the repository\'s reach', async () => {
-    const api = new MockApi({
-      [ORG]: { data: { login: "o" } },
-      [LIST]: { data: [{ slug: "everyone", access_source: "organization" }] },
-    });
-    const result = await plan(api, { _undeclared: "delete", entries: [] });
-    expect(result).toEqual({
-      ops: [],
-      notes: [
+    ],
+    [
+      'under "_undeclared: delete" the undeclared direct team is revoked, and access granted above the repository is noted as beyond the repository\'s reach',
+      { _undeclared: "delete", entries: platform },
+      [["revoke", "legacy"]],
+      [
         'teams[everyone]: access to o/r is granted at the organization level, not on the repository, so "_undeclared: delete" cannot revoke it; left untouched',
       ],
-      drift: [],
-    });
+    ],
+  ])("%s", async (_policy, desired, ops, notes) => {
+    const api = new MockApi(mixedAccess);
+    const result = await plan(api, desired);
+    expect(result.ops.map((op) => [op.role, op.params?.team_slug])).toEqual(ops);
+    expect([result.notes, result.drift]).toEqual([notes, []]);
+    // Only the declared team is probed; the undeclared ones are judged from the listing.
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([ORG, LIST, probeOf("platform")]);
   });
 
   test('under "_undeclared: delete" an undeclared direct team is revoked, and the re-plan is empty', async () => {
