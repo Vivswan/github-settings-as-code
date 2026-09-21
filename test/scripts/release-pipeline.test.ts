@@ -5,8 +5,7 @@
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import {
@@ -29,6 +28,7 @@ import {
   stablePublishVerdict,
 } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 import {
   ANCHOR_PUSH,
   BOT_IDENTITY,
@@ -57,7 +57,6 @@ import {
   pushGreenCommit,
   remoteRef,
   rivalPackage,
-  roots,
   seedFixture,
   shallowClone,
   subcommand,
@@ -71,33 +70,32 @@ setDefaultTimeout(60_000);
 installReleasePipelineFixture();
 
 describe("the fixture push guard", () => {
-  test("a push from outside the fixture area is refused before git runs (negative control)", () => {
-    const outside = mkdtempSync(join(tmpdir(), "not-a-release-pipeline-fixture-"));
-    roots.push(outside);
-    const origin = join(outside, "origin.git");
-    execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin]);
-    const repo = join(outside, "repo");
-    execFileSync("git", ["clone", "--quiet", origin, repo]);
-    git(repo, "config", "user.name", "fixture");
-    git(repo, "config", "user.email", "fixture@example.invalid");
-    git(repo, "config", "commit.gpgsign", "false");
-    git(repo, "commit", "--quiet", "--allow-empty", "-m", "must never land");
-    let error: unknown;
-    try {
-      execFileSync("git", ["push", "origin", "HEAD:refs/heads/main"], {
-        cwd: repo,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (thrown) {
-      error = thrown;
-    }
-    expect((error as { status?: number }).status).toBe(1);
-    expect(String((error as { stderr?: string }).stderr).trim()).toBe(
-      guardRefusal(realpathSync(repo)),
-    );
-    expect(git(repo, "ls-remote", "origin", "refs/heads/main")).toBe("");
-  });
+  test("a push from outside the fixture area is refused before git runs (negative control)", () =>
+    withTempDir("not-a-release-pipeline-fixture-", (outside) => {
+      const origin = join(outside, "origin.git");
+      execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin]);
+      const repo = join(outside, "repo");
+      execFileSync("git", ["clone", "--quiet", origin, repo]);
+      git(repo, "config", "user.name", "fixture");
+      git(repo, "config", "user.email", "fixture@example.invalid");
+      git(repo, "config", "commit.gpgsign", "false");
+      git(repo, "commit", "--quiet", "--allow-empty", "-m", "must never land");
+      let error: unknown;
+      try {
+        execFileSync("git", ["push", "origin", "HEAD:refs/heads/main"], {
+          cwd: repo,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect((error as { status?: number }).status).toBe(1);
+      expect(String((error as { stderr?: string }).stderr).trim()).toBe(
+        guardRefusal(realpathSync(repo)),
+      );
+      expect(git(repo, "ls-remote", "origin", "refs/heads/main")).toBe("");
+    }));
 
   test("a push from inside a fixture lands (positive control)", () => {
     const fx = seedFixture();

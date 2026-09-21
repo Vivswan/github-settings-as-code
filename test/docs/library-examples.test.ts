@@ -8,10 +8,10 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 const PAGE = "docs/reference/library.md";
 const PACKAGE = "@vivswan/github-settings-as-code";
@@ -98,11 +98,10 @@ const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
  * that symlinks this checkout's node_modules, so `types` and the runtime dependencies resolve
  * exactly as they do for src/; the project is removed on every path.
  */
-export function compileExamples(markdown: string, label: string): string[] {
+export function compileExamples(markdown: string, label: string): Promise<string[]> {
   const fences = tsFences(markdown);
   const { text, pageLine } = examplesProgram(fences);
-  const dir = mkdtempSync(join(tmpdir(), "gsac-library-examples-"));
-  try {
+  return withTempDir("gsac-library-examples-", (dir) => {
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
     const examples = join(dir, "examples.ts");
     writeFileSync(examples, text);
@@ -148,17 +147,15 @@ export function compileExamples(markdown: string, label: string): string[] {
       );
     }
     return problems;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  });
 }
 
 describe(`${PAGE} examples`, () => {
-  test("every ts fence compiles, in page order, against src/index.ts", () => {
+  test("every ts fence compiles, in page order, against src/index.ts", async () => {
     const markdown = readFileSync(join(ROOT, PAGE), "utf8");
     // A page with no fences would compile an empty program; the guard exists for the examples.
     expect(tsFences(markdown).length).toBeGreaterThan(0);
-    expect(compileExamples(markdown, PAGE)).toEqual([]);
+    expect(await compileExamples(markdown, PAGE)).toEqual([]);
   });
 
   // Each fence is one slip the page could ship; the pinned list is what tsc must say about it,
@@ -222,15 +219,15 @@ describe(`${PAGE} examples`, () => {
     ],
     ["a doubled comma in an import", syntaxSlip, ["page.md:2: TS1003"]],
     ["a name imported twice", doubledName, ["page.md:2: TS2300", "page.md:2: TS2300"]],
-  ])("%s fails with the page line and the TypeScript code", (_slips, lines, expected) => {
-    const problems = compileExamples(lines.join("\n"), "page.md");
+  ])("%s fails with the page line and the TypeScript code", async (_slips, lines, expected) => {
+    const problems = await compileExamples(lines.join("\n"), "page.md");
     expect(problems.map((problem) => problem.split(": ").slice(0, 2).join(": ")).sort()).toEqual(
       expected.sort(),
     );
   });
 
-  test("the .value read is reported as the property TypeScript cannot find on the Result", () => {
-    const problems = compileExamples(semanticSlips.join("\n"), "page.md");
+  test("the .value read is reported as the property TypeScript cannot find on the Result", async () => {
+    const problems = await compileExamples(semanticSlips.join("\n"), "page.md");
     expect(problems.find((problem) => problem.startsWith("page.md:14: TS2339"))).toMatch(
       /TS2339: Property 'value' does not exist on type 'Result</,
     );

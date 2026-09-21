@@ -1,14 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { ok } from "neverthrow";
 import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
@@ -19,6 +10,7 @@ import { DOCS } from "../../src/sections/docs-registry.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
 import { CLAIM_FAMILY, CLAIM_STEMS, defaultClaimProblems, stemNegation } from "../docs/claims.js";
 import { ROOT } from "../root.js";
+import { withTempDir } from "../temp-dir.js";
 
 // Whole-identifier, case-insensitive: "the pinEnvironment mutation" names PinEnvironment, "DocumentPinEnvironmentAudit" does not.
 function namesOperation(prose: string, name: string): boolean {
@@ -159,9 +151,8 @@ describe("section docs completeness", () => {
     expect(Object.keys(DOCS).sort()).toEqual([...SECTION_KEYS].sort());
   });
 
-  test("a malformed docs file fails naming the file and the issue, a missing one naming the path", () => {
-    const dir = mkdtempSync(join(tmpdir(), "docs-yml-"));
-    try {
+  test("a malformed docs file fails naming the file and the issue, a missing one naming the path", () =>
+    withTempDir("docs-yml-", (dir) => {
       const malformed = join(dir, "docs.yml");
       writeFileSync(
         malformed,
@@ -205,10 +196,7 @@ describe("section docs completeness", () => {
           schema: { LabelConfig: "One label." },
         }),
       );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    }));
 });
 
 describe("Notes cells vs undeclaredDefault", () => {
