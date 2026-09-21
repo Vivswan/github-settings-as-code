@@ -14,7 +14,8 @@ const cases: Array<{
   protection: Record<string, unknown>;
   name?: string;
   paths: string[];
-  fix: string;
+  /** Substrings every issue's message must carry (the path never stands in for them). */
+  fix: string | string[];
 }> = [
   {
     refused: "a status-check requirement without strict (the PUT 422s on it)",
@@ -118,14 +119,60 @@ const cases: Array<{
     paths: ["0.protection.required_pull_request_reviews.required_approving_review_count"],
     fix: "from 0 to 6",
   },
+  {
+    // Typed in the zod shape so document validation rejects it before any section writes, not as a
+    // plan-time throw after earlier sections applied.
+    refused: 'a quoted "true" for the signatures toggle, with the YAML gotcha named',
+    protection: { enforce_admins: true, required_signatures: "true" },
+    paths: ["0.protection.required_signatures"],
+    fix: "unquoted true or false",
+  },
+  {
+    // The same key on a LITERAL entry stays a passthrough (the parses-clean case below).
+    refused: "an untranslatable key on a wildcard rule, naming the supported set",
+    name: "release/*",
+    protection: { enforce_admins: true, restrictions: { users: [], teams: [] } },
+    paths: ["0.protection.restrictions"],
+    fix: ["protection.restrictions", "rulesets section"],
+  },
+  {
+    refused: "a wildcard sub-key the rule mutation has no word for",
+    name: "release/*",
+    protection: { required_status_checks: { strict: true, checks: [] } },
+    paths: ["0.protection.required_status_checks.checks"],
+    fix: "does not manage on wildcard rules",
+  },
+  {
+    refused: "a malformed actor in a routed list",
+    protection: { force_push_bypassers: ["a/b/c"] },
+    paths: ["0.protection.force_push_bypassers.0"],
+    fix: "bare user login",
+  },
+  {
+    refused: "case-insensitive duplicates in a routed actor list",
+    protection: { force_push_bypassers: ["octocat", "OctoCat"] },
+    paths: ["0.protection.force_push_bypassers"],
+    fix: "more than once",
+  },
+  {
+    refused: "case-insensitive duplicates in the required environments",
+    protection: { required_deployments: { environments: ["prod", "Prod"] } },
+    paths: ["0.protection.required_deployments.environments"],
+    fix: "more than once",
+  },
 ];
 
 describe("branches protection parse rules", () => {
   test.each(cases)("refuses $refused", ({ name, protection, paths, fix }) => {
-    const found = issues([{ name: name ?? "main", protection }]);
-    expect(found.map((issue) => issue.slice(0, issue.indexOf(":")))).toEqual(paths);
+    const found = issues([{ name: name ?? "main", protection }]).map((issue) => {
+      const colon = issue.indexOf(":");
+      return { path: issue.slice(0, colon), message: issue.slice(colon + 2) };
+    });
+    expect(found.map((issue) => issue.path)).toEqual(paths);
     for (const issue of found) {
-      expect(issue).toContain(fix);
+      for (const wording of [fix].flat()) {
+        expect(issue.message).toContain(wording);
+      }
     }
   });
 
@@ -279,6 +326,12 @@ describe("branches protection parse rules", () => {
           name: "release/*",
           protection: { required_status_checks: null, required_pull_request_reviews: null },
         },
+        // A key outside the PUT vocabulary passes the shape (the plan notes it); null removes protection.
+        {
+          name: "main",
+          protection: { enforce_admins: true, required_signatures: true, extra_field: "x" },
+        },
+        { name: "legacy", protection: null },
       ]),
     ).toEqual([]);
   });
