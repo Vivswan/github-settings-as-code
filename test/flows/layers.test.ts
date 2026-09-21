@@ -3,8 +3,6 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
 import type { Layering } from "../../src/engine/layers.js";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
 import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
 import { silentIo } from "../../src/io.js";
@@ -59,55 +57,66 @@ describe("foldLayers", () => {
   const fold = (doc: Record<string, unknown>, layering: Layering) =>
     foldLayers([fleet, { name: "repo.yml", doc }], "merged", { layering }, silentIo());
 
-  test.each<[string, Record<string, unknown>, Layering]>([
-    ["the run directive", { labels: [{ name: "bug", description: null }] }, "shallow"],
+  // The fold reads no null as a marker: each is the layer's own issue, named against the file as written.
+  test.each<[string, Record<string, unknown>, Layering, string]>([
+    [
+      "the run directive",
+      { labels: [{ name: "bug", description: null }] },
+      "shallow",
+      "labels[0].description has no empty state; write a string.",
+    ],
     [
       "the file directive",
       { _layering: "replace", labels: [{ name: "bug", description: null }] },
       "deep",
+      "labels[0].description has no empty state; write a string.",
     ],
     [
       "the wrapper directive",
       { labels: { _layering: "shallow", entries: [{ name: "bug", description: null }] } },
       "deep",
+      "labels.entries[0].description has no empty state; write a string.",
     ],
-    ["deep, where the pair merges", { labels: [{ name: "bug", description: null }] }, "deep"],
+    [
+      "deep, where the pair merges",
+      { labels: [{ name: "bug", description: null }] },
+      "deep",
+      "labels[0].description has no empty state; write a string.",
+    ],
+    [
+      "deep, for a whole section",
+      { labels: null },
+      "deep",
+      "labels: null has no meaning; remove the section or declare its entries.",
+    ],
+  ])("a null a key does not admit is the layer's own error under %s", (_case, repo, run, issue) => {
+    expect(fold(repo, run).match(() => null, describeProblem)).toStartWith(
+      `repo.yml has malformed section entries: ${issue}`,
+    );
+  });
+
+  // The standalone view drops the removal before the layer's own validation, so the layer never hears that a single
+  // document has no lower layer; the fold then consumes the marker.
+  test.each<[string, Record<string, unknown>, Layering, unknown[]]>([
+    [
+      "beside a kept entry under deep",
+      { labels: [{ name: "Bug", _remove: true }, { name: "docs" }] },
+      "deep",
+      [{ name: "docs" }],
+    ],
+    ["alone under shallow", { labels: [{ name: "bug", _remove: true }] }, "shallow", []],
   ])(
-    "a null a key does not admit is the layer's own error under %s: the fold reads no null as a marker",
-    (_case, repo, run) => {
-      expect(fold(repo, run).match(() => null, describeProblem)).toMatch(
-        /^repo\.yml has malformed section entries: labels(\.entries)?\[0\]\.description has no empty state; write a string\./,
+    "a removal entry %s validates alone and the fold drops the lower entry with a notice",
+    (_case, repo, run, entries) => {
+      expect(fold(repo, run).map((out): unknown[] => [out.notices, out.settings])).toEqual(
+        ok([
+          [{ layer: "repo.yml", path: "labels[0]" }],
+          { labels: { _undeclared: "delete", entries } },
+        ]),
       );
     },
   );
 
-  test("a removal entry validates alone (the standalone view drops it) and the fold drops the lower entry with a notice", () => {
-    const folded = fold({ labels: [{ name: "Bug", _remove: true }, { name: "docs" }] }, "deep");
-    expect(folded.map((out): unknown[] => [out.notices, out.settings])).toEqual(
-      ok([
-        [{ layer: "repo.yml", path: "labels[0]" }],
-        { labels: { _undeclared: "delete", entries: [{ name: "docs" }] } },
-      ]),
-    );
-  });
-
-  test("the removal a single document refuses folds as a higher layer: per-layer validation sees the standalone view, and the fold consumes the marker", () => {
-    const higher = { labels: [{ name: "bug", _remove: true }] };
-    expect(
-      validateSettingsDoc(higher, "repo.yml", SectionSelection.ALL, silentIo()).match(
-        () => null,
-        describeProblem,
-      ),
-    ).toMatch(
-      /^repo\.yml has malformed section entries: labels\[0\]\._remove: a single document has no lower layer/,
-    );
-    expect(fold(higher, "shallow").map((out): unknown[] => [out.notices, out.settings])).toEqual(
-      ok([
-        [{ layer: "repo.yml", path: "labels[0]" }],
-        { labels: { _undeclared: "delete", entries: [] } },
-      ]),
-    );
-  });
   test.each<[string, Record<string, unknown>, string]>([
     [
       "a plain list",
@@ -185,12 +194,6 @@ describe("foldLayers", () => {
         code: "layer-remove-not-true",
         actual: "yes",
       }),
-    );
-  });
-
-  test("a whole-section null is refused by the layer's own validation, naming the two fixes", () => {
-    expect(fold({ labels: null }, "deep").match(() => null, describeProblem)).toMatch(
-      /^repo\.yml has malformed section entries: labels: null has no meaning; remove the section or declare its entries\./,
     );
   });
 

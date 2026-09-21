@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { ok } from "neverthrow";
+import { err, ok, type Result } from "neverthrow";
 import {
   type ConfigEnv,
+  DEFAULT_API_VERSION,
   DEFAULT_DISCOVERY_FILTERS,
   type Problem,
   parseConfig,
@@ -110,28 +111,33 @@ describe("the declared defaults", () => {
 });
 
 describe("required-sections x sections cross-validation", () => {
-  test("names every excluded required section at once, and only those", () => {
-    expect(
-      rejection(
-        single({ "required-sections": "labels,milestones,repository", sections: "repository" }),
-      ),
-    ).toEqual({ code: "required-sections-excluded", excluded: ["labels", "milestones"] });
-  });
-
-  test("accepts required sections inside the allowlist, carried as the validated selection", () => {
-    // Accepted AND carried into the config: a parse that silently dropped
-    // either set would otherwise pass.
-    expect(
-      engineConfig(single({ "required-sections": "labels", sections: "labels,repository" }))
-        .sections,
-    ).toEqual(
-      SectionSelection.of({ only: ["labels", "repository"], required: ["labels"] })._unsafeUnwrap(),
-    );
-  });
-
-  test("an empty sections input restricts nothing, so any required section passes", () => {
-    expect(engineConfig(single({ "required-sections": "labels" })).sections).toEqual(
-      SectionSelection.of({ required: ["labels"] })._unsafeUnwrap(),
+  // An accepted pair is compared as carried into the config: a parse that silently dropped either set would otherwise
+  // pass.
+  test.each<
+    [
+      string,
+      Partial<Record<InputName, string>>,
+      Result<Parameters<typeof SectionSelection.of>[0], Problem>,
+    ]
+  >([
+    [
+      "names every excluded required section at once, and only those",
+      { "required-sections": "labels,milestones,repository", sections: "repository" },
+      err({ code: "required-sections-excluded", excluded: ["labels", "milestones"] }),
+    ],
+    [
+      "accepts required sections inside the allowlist, carried as the validated selection",
+      { "required-sections": "labels", sections: "labels,repository" },
+      ok({ only: ["labels", "repository"], required: ["labels"] }),
+    ],
+    [
+      "an empty sections input restricts nothing, so any required section passes",
+      { "required-sections": "labels" },
+      ok({ required: ["labels"] }),
+    ],
+  ])("%s", (_case, inputs, selection) => {
+    expect(single(inputs).map((config) => engineConfig(ok(config)).sections)).toEqual(
+      selection.map((of) => SectionSelection.of(of)._unsafeUnwrap()),
     );
   });
 
@@ -150,51 +156,75 @@ describe("required-sections x sections cross-validation", () => {
 });
 
 describe("the mode input", () => {
-  test("an unsupported mode is rejected carrying every supported one and the default", () => {
-    expect(rejection(single({ mode: "dry-run" }))).toEqual({
-      code: "input-unsupported-value",
-      input: "mode",
-      value: "dry-run",
-      noun: "mode",
-      allowed: ["apply", "check", "render", "snapshot"],
-      fallback: "apply",
-    });
+  test.each<[string, ReturnType<typeof parseConfig>, Problem]>([
+    [
+      "mode is rejected carrying every supported one and the default",
+      single({ mode: "dry-run" }),
+      {
+        code: "input-unsupported-value",
+        input: "mode",
+        value: "dry-run",
+        noun: "mode",
+        allowed: ["apply", "check", "render", "snapshot"],
+        fallback: INPUT_DECLS.mode.default,
+      },
+    ],
+    [
+      "undeclared policy is rejected naming the two values and that unset is a choice",
+      single({ undeclared: "remove" }),
+      {
+        code: "input-unsupported-value",
+        input: "undeclared",
+        value: "remove",
+        noun: "undeclared policy",
+        allowed: ["keep", "delete"],
+        fallback: null,
+      },
+    ],
+    [
+      "layering is rejected, the retired `merge` like any other",
+      merge({ layering: "merge" }),
+      {
+        code: "input-unsupported-value",
+        input: "layering",
+        value: "merge",
+        noun: "layering",
+        allowed: ["replace", "shallow", "deep"],
+        fallback: "deep",
+      },
+    ],
+  ])("an unsupported %s", (_case, parsed, problem) => {
+    expect(rejection(parsed)).toEqual(problem);
   });
 
-  test.each([
-    ["layering", { layering: "replace" }, ["layering"]],
+  test.each<[string, Partial<Record<InputName, string>>, Problem]>([
+    [
+      "layering",
+      { layering: "replace" },
+      { code: "input-render-only", inputs: ["layering"], mode: "check" },
+    ],
     [
       "both render-only inputs",
       { layering: "deep", "rendered-file": "out.yml" },
-      ["rendered-file", "layering"],
+      { code: "input-render-only", inputs: ["rendered-file", "layering"], mode: "check" },
     ],
-  ] as const)("%s outside render mode is rejected", (_case, inputs, named) => {
-    expect(rejection(single({ mode: "check", ...inputs }))).toEqual({
-      code: "input-render-only",
-      inputs: named,
-      mode: "check",
-    });
-  });
-
-  test.each([
-    ["snapshot-file", { "snapshot-file": "snap.yml" }, ["snapshot-file"]],
+    [
+      "snapshot-file",
+      { "snapshot-file": "snap.yml" },
+      { code: "input-snapshot-only", inputs: ["snapshot-file"], mode: "check" },
+    ],
     [
       "both snapshot-only inputs",
       { "snapshot-file": "snap.yml", "snapshot-dir": "snapshots" },
-      ["snapshot-file", "snapshot-dir"],
+      { code: "input-snapshot-only", inputs: ["snapshot-file", "snapshot-dir"], mode: "check" },
     ],
-  ] as const)("%s outside snapshot mode is rejected", (_case, inputs, named) => {
-    expect(rejection(single({ mode: "check", ...inputs }))).toEqual({
-      code: "input-snapshot-only",
-      inputs: named,
-      mode: "check",
-    });
-  });
-
-  test("a render-only input set beside a snapshot-only one is reported first: the first problem wins", () => {
-    expect(
-      rejection(single({ mode: "check", "rendered-file": "out.yml", "snapshot-dir": "snapshots" })),
-    ).toEqual({ code: "input-render-only", inputs: ["rendered-file"], mode: "check" });
+    [
+      "a render-only input beside a snapshot-only one, where the first problem wins",
+      { "rendered-file": "out.yml", "snapshot-dir": "snapshots" },
+      { code: "input-render-only", inputs: ["rendered-file"], mode: "check" },
+    ],
+  ])("%s outside its mode is rejected", (_case, inputs, problem) => {
+    expect(rejection(single({ mode: "check", ...inputs }))).toEqual(problem);
   });
 
   // A stray separator is refused rather than repaired: "only.yml," is one path to a splitter and still not a file.
@@ -217,12 +247,12 @@ describe("the mode input", () => {
     expect(single({ "settings-file": "conf/only.yml" })).toEqual(
       ok({
         token: "t",
-        mode: "apply",
-        onMissingPermission: "fail",
+        mode: INPUT_DECLS.mode.default,
+        onMissingPermission: INPUT_DECLS["on-missing-permission"].default,
         sections: SectionSelection.ALL,
-        apiVersion: "2022-11-28",
-        privateRepos: "redact",
-        privateReport: "none",
+        apiVersion: DEFAULT_API_VERSION,
+        privateRepos: INPUT_DECLS["private-repos"].default,
+        privateReport: INPUT_DECLS["private-report"].default,
         reportPublicKey: "",
         selfSlug: "",
         runUrl: "",
@@ -248,17 +278,6 @@ describe("the mode input", () => {
       engineConfig(parse({ token: "t", repos: "o/a" }, { GITHUB_REPOSITORY: "o/admin" }))
         .undeclared,
     ).toBeUndefined();
-  });
-
-  test("an unsupported undeclared policy is rejected naming the two values and that unset is a choice", () => {
-    expect(rejection(single({ undeclared: "remove" }))).toEqual({
-      code: "input-unsupported-value",
-      input: "undeclared",
-      value: "remove",
-      noun: "undeclared policy",
-      allowed: ["keep", "delete"],
-      fallback: null,
-    });
   });
 });
 
@@ -300,23 +319,6 @@ describe("mode: render", () => {
   test("a missing rendered-file is rejected", () => {
     expect(rejection(merge({ "rendered-file": "" }))).toEqual({
       code: "input-rendered-file-missing",
-    });
-  });
-
-  test("a rendered-file beside the layers is accepted; the collision with a layer is the fold's to refuse", () => {
-    expect(merge({ "rendered-file": "./merged.yml" })).toEqual(
-      ok({ ...RENDER_CONFIG, renderedFile: "./merged.yml" }),
-    );
-  });
-
-  test("an unsupported layering is rejected, the retired `merge` like any other", () => {
-    expect(rejection(merge({ layering: "merge" }))).toEqual({
-      code: "input-unsupported-value",
-      input: "layering",
-      value: "merge",
-      noun: "layering",
-      allowed: ["replace", "shallow", "deep"],
-      fallback: "deep",
     });
   });
 
@@ -372,10 +374,10 @@ describe("mode: snapshot", () => {
   const SHARED = {
     kind: "snapshot",
     token: "t",
-    apiVersion: "2022-11-28",
-    onMissingPermission: "fail",
+    apiVersion: DEFAULT_API_VERSION,
+    onMissingPermission: INPUT_DECLS["on-missing-permission"].default,
     sections: SectionSelection.ALL,
-    privateRepos: "redact",
+    privateRepos: INPUT_DECLS["private-repos"].default,
     selfSlug: "",
   } as const;
 

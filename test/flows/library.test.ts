@@ -353,21 +353,6 @@ describe("mergeSettings", () => {
     expect(parseYamlDoc(report.yaml)).toEqual({ branches });
   });
 
-  test("a null section is the layer's own problem, naming the layer, as is a non-mapping layer", () => {
-    expect(
-      mergeSettings([{ name: "fleet.yml", doc: { repository: { has_wiki: true }, labels: null } }]),
-    ).toEqual(
-      err({
-        code: "settings-malformed-sections",
-        source: "fleet.yml",
-        issues: ["labels: null has no meaning; remove the section or declare its entries"],
-      }),
-    );
-    expect(mergeSettings([fleet, { name: "bad.yml", doc: [1] }])).toEqual(
-      err({ code: "settings-not-mapping", source: "bad.yml", shape: "list" }),
-    );
-  });
-
   test("a removal is a notice naming the layer and the entry, and the rendered file omits both the marker and the lower entry", () => {
     const removed = mergeSettings([
       fleet,

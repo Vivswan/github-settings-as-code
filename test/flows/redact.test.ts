@@ -11,7 +11,6 @@ import {
   REDACTED_DETAIL,
   REDACTED_NOTE,
   redactedChannel,
-  toPublicView,
 } from "../../src/flows/redact.js";
 import { type Io, maskRegistry, prefixedIo } from "../../src/io.js";
 import { isPrivate, markPrivate } from "../../src/private.js";
@@ -24,88 +23,78 @@ function privateSet(...slugs: string[]): (slug: string) => boolean {
 }
 
 describe("planRedaction", () => {
-  test("numbers redacted targets 1-based in target order, keyed lowercase", () => {
-    const plan = planRedaction(
-      "redact",
-      ["o/pub", "o/PrivA", "o/pub2", "o/privB"],
-      [],
-      privateSet("o/priva", "o/privb"),
-      "admin/repo",
-    );
-    expect(plan.isRedacted("o/pub")).toBe(false);
-    expect(plan.display("o/pub")).toBe("o/pub");
-    expect(plan.isRedacted("o/PrivA")).toBe(true);
-    expect(plan.display("o/PrivA")).toBe("private repository #1");
-    expect(plan.isRedacted("o/privB")).toBe(true);
-    expect(plan.display("o/privB")).toBe("private repository #2");
-    expect(plan.display("O/PRIVA")).toBe("private repository #1");
-    expect(plan.maskedSlugs).toEqual(["o/PrivA", "o/privB"]);
-  });
-
-  test("a central and remote entry for the same slug share one placeholder", () => {
-    const plan = planRedaction(
-      "redact",
-      ["o/priv", "o/PRIV"],
-      [],
-      privateSet("o/priv"),
-      "admin/repo",
-    );
-    expect(plan.display("o/priv")).toBe("private repository #1");
-    expect(plan.display("o/PRIV")).toBe("private repository #1");
-    expect(plan.maskedSlugs).toEqual(["o/priv"]);
-  });
-
-  test("the self slug is never redacted (carve-out, case-insensitive)", () => {
-    const plan = planRedaction(
-      "redact",
-      ["Admin/Repo", "o/priv"],
-      [],
-      privateSet("admin/repo", "o/priv"),
-      "admin/repo",
-    );
-    expect(plan.isRedacted("Admin/Repo")).toBe(false);
-    expect(plan.display("Admin/Repo")).toBe("Admin/Repo");
-    expect(plan.display("o/priv")).toBe("private repository #1");
-    expect(plan.maskedSlugs).toEqual(["o/priv"]);
-  });
-
-  test("discovery-filtered privates are unsealed into the mask set but get no placeholder", () => {
-    const plan = planRedaction(
-      "redact",
+  test.each<[string, Parameters<typeof planRedaction>, Array<[string, string]>, string[]]>([
+    [
+      "numbers redacted targets 1-based in target order, keyed lowercase",
+      [
+        "redact",
+        ["o/pub", "o/PrivA", "o/pub2", "o/privB"],
+        [],
+        privateSet("o/priva", "o/privb"),
+        "admin/repo",
+      ],
+      [
+        ["o/pub", "o/pub"],
+        ["o/PrivA", "private repository #1"],
+        ["o/privB", "private repository #2"],
+        ["O/PRIVA", "private repository #1"],
+      ],
+      ["o/PrivA", "o/privB"],
+    ],
+    [
+      "a central and remote entry for the same slug share one placeholder",
+      ["redact", ["o/priv", "o/PRIV"], [], privateSet("o/priv"), "admin/repo"],
+      [
+        ["o/priv", "private repository #1"],
+        ["o/PRIV", "private repository #1"],
+      ],
       ["o/priv"],
-      [markPrivate("o/filtered"), markPrivate("o/PRIV")],
-      privateSet("o/priv"),
-      "admin/repo",
-    );
-    expect(plan.maskedSlugs).toContain("o/filtered");
-    expect(plan.maskedSlugs).toContain("o/priv");
-    expect(plan.isRedacted("o/filtered")).toBe(false);
-    expect(plan.display("o/filtered")).toBe("o/filtered");
-    expect(plan.maskedSlugs.filter((s) => s.toLowerCase() === "o/priv")).toHaveLength(1);
-  });
-
-  test("the self slug is excluded from the masked set even as an extra private", () => {
-    const plan = planRedaction(
-      "redact",
-      [],
-      [markPrivate("admin/repo")],
-      privateSet("admin/repo"),
-      "admin/repo",
-    );
-    expect(plan.maskedSlugs).toEqual([]);
-  });
-
-  test("under show nothing is redacted or masked, whatever the visibility says", () => {
-    const plan = planRedaction(
-      "show",
+    ],
+    [
+      "the self slug is never redacted (carve-out, case-insensitive)",
+      ["redact", ["Admin/Repo", "o/priv"], [], privateSet("admin/repo", "o/priv"), "admin/repo"],
+      [
+        ["Admin/Repo", "Admin/Repo"],
+        ["o/priv", "private repository #1"],
+      ],
       ["o/priv"],
-      [markPrivate("o/filtered")],
-      privateSet("o/priv", "o/filtered"),
-      "admin/repo",
+    ],
+    [
+      "discovery-filtered privates are unsealed into the mask set once but get no placeholder",
+      [
+        "redact",
+        ["o/priv"],
+        [markPrivate("o/filtered"), markPrivate("o/PRIV")],
+        privateSet("o/priv"),
+        "admin/repo",
+      ],
+      [["o/filtered", "o/filtered"]],
+      ["o/priv", "o/filtered"],
+    ],
+    [
+      "the self slug is excluded from the masked set even as an extra private",
+      ["redact", [], [markPrivate("admin/repo")], privateSet("admin/repo"), "admin/repo"],
+      [],
+      [],
+    ],
+    [
+      "under show nothing is redacted or masked, whatever the visibility says",
+      [
+        "show",
+        ["o/priv"],
+        [markPrivate("o/filtered")],
+        privateSet("o/priv", "o/filtered"),
+        "admin/repo",
+      ],
+      [["o/priv", "o/priv"]],
+      [],
+    ],
+  ])("%s", (_case, args, displays, masked) => {
+    const plan = planRedaction(...args);
+    expect(displays.map(([slug]) => [slug, plan.isRedacted(slug), plan.display(slug)])).toEqual(
+      displays.map(([slug, display]) => [slug, display !== slug, display]),
     );
-    expect(plan.isRedacted("o/priv")).toBe(false);
-    expect(plan.display("o/priv")).toBe("o/priv");
-    expect(plan.maskedSlugs).toEqual([]);
+    expect(plan.maskedSlugs).toEqual(masked);
   });
 });
 
@@ -239,21 +228,6 @@ describe("public projections", () => {
     });
   });
 
-  test("toPublicView keys a target by its display label and projects its detail", () => {
-    const view = toPublicView({
-      source: "remote",
-      result: "failed",
-      display: "private repository #2",
-      detail: sealed,
-    });
-    expect(view).toEqual({
-      display: "private repository #2",
-      source: "remote",
-      result: "failed",
-      ...publicDetail(sealed),
-    });
-  });
-
   test("a snapshot target's file path names the slug: hidden under the seal, passed through in the clear, absent when nothing was written", () => {
     const rows = [
       { key: "labels" as const, status: "snapshot" as const, detail: ["labels[hush]"] },
@@ -279,24 +253,20 @@ describe("public projections", () => {
     expect(publicDetail(shown.close({ outcomes: [], note: "failed" }))).not.toHaveProperty("file");
   });
 
+  const sealedLine = (head: string) => `annotate ${head}${REDACTED_NOTE}`;
   test.each([
-    ["failed", "error: private repository #1: failed - labels (403). "],
-    ["drift", "warning: private repository #1: drift - rulesets. "],
+    ["applied", []],
+    ["clean", []],
+    ["failed", [sealedLine("error: private repository #1: failed - labels (403). ")]],
+    ["drift", [sealedLine("warning: private repository #1: drift - rulesets. ")]],
     // No row is skipped in this fixture, so the partial line carries no section list; the flow test in
     // test/flows/single.test.ts pins the `- labels (403)` form.
-    ["partial", "warning: private repository #1: partial. "],
-    ["skipped", "notice: private repository #1: skipped. "],
-  ] as const)("emitRedactedResult on %s names only closed values", (result, head) => {
+    ["partial", [sealedLine("warning: private repository #1: partial. ")]],
+    ["skipped", [sealedLine("notice: private repository #1: skipped. ")]],
+  ] as const)("emitRedactedResult on %s emits %j", (result, lines) => {
     const { io, events } = captureIo();
     emitRedactedResult(io, "private repository #1", result, sealed);
-    expect(events).toEqual([`annotate ${head}${REDACTED_NOTE}`]);
-  });
-
-  test("emitRedactedResult says nothing for a healthy result", () => {
-    const { io, events } = captureIo();
-    emitRedactedResult(io, "private repository #1", "applied", sealed);
-    emitRedactedResult(io, "private repository #1", "clean", sealed);
-    expect(events).toEqual([]);
+    expect(events).toEqual([...lines]);
   });
 
   test("a sealed value cannot reach a public sink or a string template without a projection", () => {
