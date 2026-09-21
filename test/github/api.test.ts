@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
   type ApiError,
+  DEFAULT_API_VERSION,
   GitHubApi,
   isPermissionError,
   isRateLimitError,
@@ -66,26 +67,32 @@ describe("retry and throttling", () => {
     ]);
   }, 10_000);
 
-  test("permission 403 (rate limit not exhausted) is NOT retried", async () => {
-    const state = stubFetch([
+  test.each([
+    [
+      "a permission 403 with rate limit left",
+      "GET",
+      "/denied",
+      undefined,
       () =>
         new Response('{"message":"Forbidden"}', {
           status: 403,
           headers: { "x-ratelimit-remaining": "42" },
         }),
-    ]);
-    const result = await api().tryRequest("GET", "/denied");
-    expect(state.calls).toBe(1);
-    expect("error" in result && result.error.status).toBe(403);
-  });
-
-  test("4xx client errors are never retried", async () => {
-    const state = stubFetch([
+      403,
+    ],
+    [
+      "a 422 on a bad payload",
+      "PUT",
+      "/bad-payload",
+      { nope: true },
       () => new Response('{"message":"Validation Failed"}', { status: 422 }),
-    ]);
-    const result = await api().tryRequest("PUT", "/bad-payload", { nope: true });
+      422,
+    ],
+  ])("%s is never retried", async (_name, method, path, payload, response, status) => {
+    const state = stubFetch([response]);
+    const result = await api().tryRequest(method, path, payload);
     expect(state.calls).toBe(1);
-    expect("error" in result && result.error.status).toBe(422);
+    expect("error" in result && result.error.status).toBe(status);
   });
 
   test("exhausted rate-limit retries surface the API message", async () => {
@@ -96,21 +103,6 @@ describe("retry and throttling", () => {
     // No JSON content-type on the stubbed body, so the raw text is the message, and a string body carries no documentation_url.
     expect("error" in result && result.error.message).toBe('{"message":"rate limited"}');
     expect("error" in result && result.error.documentationUrl).toBeUndefined();
-  });
-
-  test("a rate-limit reset beyond the 60s cap fails now instead of stalling", async () => {
-    // The throttling plugin derives the wait from x-ratelimit-reset; an hour-away reset must fail loudly, not stall.
-    const reset = String(Math.floor(Date.now() / 1000) + 3600);
-    const state = stubFetch([
-      () =>
-        new Response('{"message":"rate limited"}', {
-          status: 429,
-          headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset },
-        }),
-    ]);
-    const result = await api().tryRequest("GET", "/long-reset");
-    expect(state.calls).toBe(1);
-    expect("error" in result && result.error.status).toBe(429);
   });
 });
 
@@ -159,7 +151,7 @@ describe("GSAC_RETRY_BASE_MS: millisecond units and the immediate scheduler, sam
 
   /** Constructed WITHOUT retryBaseMs so the client reads the env exactly as the spawned e2e bundle does. */
   const envKnobClient = (io: ReturnType<typeof traceIo>["io"]) =>
-    new GitHubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: "2022-11-28" });
+    new GitHubApi({ token: "t", io, baseUrl: "https://api.test", apiVersion: DEFAULT_API_VERSION });
 
   test("many writes complete without the write limiter's ~1s spacing", async () => {
     // Under the real timers, so the knob's millisecond units are what keeps the write limiter's minTime short; the immediate scheduler would
@@ -268,13 +260,44 @@ describe("GSAC_RETRY_BASE_MS: millisecond units and the immediate scheduler, sam
     ).toBeGreaterThanOrEqual(250);
   });
 
-  test("a 429 whose Retry-After exceeds the wait cap fails at once instead of being retried blind", async () => {
+  // The throttle callback alone refuses a wait beyond the cap, but each scheduler runs its own retry loop on that answer (Bottleneck under the
+  // timers, ImmediateLimiter under the knob), and the plugin reads a primary limit's wait from x-ratelimit-reset and a secondary limit's
+  // (recognized by its phrase) from retry-after. Every pairing must fail at once: neither stalling on an hour-away reset nor retrying blind.
+  const primaryResetOverCap = () =>
+    new Response('{"message":"rate limited"}', {
+      status: 429,
+      headers: {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+      },
+    });
+  const secondaryRetryAfterOverCap = secondaryLimit(String(MAX_RETRY_WAIT_S + 1));
+  const timers = () =>
+    new GitHubApi({
+      token: "t",
+      io: traceIo().io,
+      baseUrl: "https://api.test",
+      retryBaseMs: 1,
+      scheduler: TIMERS_SCHEDULER,
+    });
+  const immediate = () => {
     process.env.GSAC_RETRY_BASE_MS = "1";
-    const state = stubFetch([secondaryLimit(String(MAX_RETRY_WAIT_S + 1)), okJson]);
-    const result = await envKnobClient(traceIo().io).tryRequest("GET", "/rl");
-    expect(state.calls).toBe(1);
-    expect("error" in result && result.error).toMatchObject({ status: 429, rateLimited: true });
-  });
+    return envKnobClient(traceIo().io);
+  };
+  test.each([
+    ["primary limit's x-ratelimit-reset", "timers", primaryResetOverCap, timers],
+    ["primary limit's x-ratelimit-reset", "immediate", primaryResetOverCap, immediate],
+    ["secondary limit's retry-after", "timers", secondaryRetryAfterOverCap, timers],
+    ["secondary limit's retry-after", "immediate", secondaryRetryAfterOverCap, immediate],
+  ])(
+    `a 429 whose %s puts the wait beyond the ${MAX_RETRY_WAIT_S}s cap fails now under the %s scheduler`,
+    async (_header, _scheduler, response, client) => {
+      const state = stubFetch([response, okJson]);
+      const result = await client().tryRequest("GET", "/long-wait");
+      expect(state.calls).toBe(1);
+      expect("error" in result && result.error).toMatchObject({ status: 429, rateLimited: true });
+    },
+  );
 });
 
 describe("response shaping", () => {
@@ -331,55 +354,62 @@ describe("error classification", () => {
     expect(result.error.message).toBe("Forbidden");
   });
 
-  test("an exhausted primary limit classifies through its message, zero header or not", async () => {
-    stubFetch([
-      () =>
-        new Response(JSON.stringify({ message: "API rate limit exceeded for user" }), {
-          status: 403,
-          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
-        }),
-    ]);
-    const result = await api().tryRequest("GET", "/repos/o/r/labels");
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(isRateLimitError(result.error)).toBe(true);
-    expect(isPermissionError(result.error)).toBe(false);
-  });
-
-  test("a permission 403 on the token's LAST quota unit stays a permission error", async () => {
-    // x-ratelimit-remaining: 0 alone is ambiguous: a genuine denial on the last quota unit carries it too. The readable message disambiguates, so the
-    // zero header must contribute nothing here.
-    stubFetch([
-      () =>
-        new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
-          status: 403,
-          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
-        }),
-    ]);
-    const result = await api().tryRequest("GET", "/repos/o/r/labels");
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.rateLimited).toBeUndefined();
-    expect(isRateLimitError(result.error)).toBe(false);
-    expect(isPermissionError(result.error)).toBe(true);
-  });
+  // x-ratelimit-remaining: 0 alone is ambiguous: a genuine denial on the last quota unit carries it too. The readable message disambiguates, so the
+  // zero header must contribute nothing here.
+  test.each([
+    ["an exhausted primary limit", "API rate limit exceeded for user", true],
+    ["a genuine denial", "Resource not accessible by integration", false],
+  ])(
+    "%s on the token's LAST quota unit classifies through its message, not the zero header",
+    async (_name, message, limited) => {
+      stubFetch([
+        () =>
+          new Response(JSON.stringify({ message }), {
+            status: 403,
+            headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
+          }),
+      ]);
+      const result = await api().tryRequest("GET", "/repos/o/r/labels");
+      if (!("error" in result)) {
+        throw new Error("expected an error result");
+      }
+      expect(result.error.rateLimited).toBeUndefined();
+      expect(isRateLimitError(result.error)).toBe(limited);
+      expect(isPermissionError(result.error)).toBe(!limited);
+    },
+  );
 });
 
 describe("debug-trace hardening for redacted slugs", () => {
   // Every test reads the debug lines its OWN trace facet received, so a concurrent test's output cannot pollute the observation.
 
-  test("a slug masked through the Io port is redacted from the trace with no second registration", async () => {
+  test.each([
+    [
+      "a slug masked through the Io port is redacted from the trace with no second registration",
+      "o/priv",
+      ["PATCH <redacted> ->"],
+      ["o/priv", "CANARY", "payload:"],
+    ],
+    [
+      "an unregistered slug traces normally, with its payload",
+      undefined,
+      ["PATCH /repos/o/priv ->", "payload:", "CANARY"],
+      ["<redacted>"],
+    ],
+  ])("%s", async (_name, mask, present, absent) => {
     const dbg = traceIo();
-    dbg.io.mask("o/priv");
+    if (mask !== undefined) {
+      dbg.io.mask(mask);
+    }
     stubFetch([() => new Response(null, { status: 204 })]);
     await api(dbg.io).tryRequest("PATCH", "/repos/o/priv", { description: "CANARY" });
     const trace = dbg.lines.join("");
-    expect(trace).toContain("PATCH <redacted> ->");
-    expect(trace).not.toContain("o/priv");
-    expect(trace).not.toContain("CANARY");
-    expect(trace).not.toContain("payload:");
+    for (const fragment of present) {
+      expect(trace).toContain(fragment);
+    }
+    for (const fragment of absent) {
+      expect(trace).not.toContain(fragment);
+    }
   });
 
   test("a masked non-slug value collapses an octokit line; an empty mask matches nothing", () => {
@@ -404,15 +434,6 @@ describe("debug-trace hardening for redacted slugs", () => {
     expect(trace).toContain("PUT <redacted> ->");
     expect(trace).not.toContain("secret-team");
     expect(trace).not.toContain("acme/private");
-  });
-
-  test("an unregistered slug traces normally, with its payload", async () => {
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = traceIo();
-    await api(dbg.io).tryRequest("PATCH", "/repos/o/publicrepo", { description: "open" });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain("/repos/o/publicrepo");
-    expect(trace).toContain("payload:");
   });
 
   test("redactingOctokitLog routes every level to the debug channel, masked lines collapsed and unmasked lines intact, never to stderr", () => {
@@ -595,40 +616,77 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   const NOT_PLAIN_FALLBACK =
     "its payload is not plain JSON data (a value carrying a function or exotic prototype)";
 
-  test("config.secret is masked in the trace; the outgoing request is untouched", async () => {
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const dbg = traceIo();
-    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
-      name: "web",
-      config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
-    });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain('"secret":"***"');
-    expect(trace).not.toContain("he said");
-    expect(trace).toContain('"url":"https://example.test/hook"');
-    expect(sent.bodies).toEqual([
-      JSON.stringify({
+  test.each([
+    [
+      "config.secret (the hook create shape)",
+      "POST",
+      "/repos/hookco/hookrepo/hooks",
+      {
         name: "web",
         config: { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
-      }),
-    ]);
-  });
+      },
+      ['"secret":"***"', '"url":"https://example.test/hook"'],
+      ["he said"],
+    ],
+    [
+      "encrypted_value (the actions secret shape)",
+      "PUT",
+      "/repos/hookco/hookrepo/actions/secrets/DEPLOY_KEY",
+      { encrypted_value: "base64-SECRET-material", key_id: "568250167242549743" },
+      ['"encrypted_value":"***"', '"key_id":"568250167242549743"'],
+      ["base64-SECRET-material"],
+    ],
+    [
+      // PATCH /hooks/{id}/config sends the config object bare, so `secret` sits at the top level.
+      "a TOP-LEVEL secret (the hook config sub-endpoint shape)",
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
+      ['"secret":"***"', '"url":"https://example.test/hook"'],
+      ["he said"],
+    ],
+    [
+      "a secret field at any depth",
+      "POST",
+      "/repos/hookco/hookrepo/anything",
+      { outer: { hooks: [{ config: { secret: hostileSecret } }, { note: "clean" }] } },
+      ['"secret":"***"', '"note":"clean"'],
+      ["he said"],
+    ],
+    [
+      // A passthrough payload can carry arbitrary user keys, so a `Secret:` spelling must not slip the scan.
+      "a re-cased field name (matching is case-insensitive)",
+      "POST",
+      "/repos/hookco/hookrepo/anything",
+      { Secret: hostileSecret, config: { ENCRYPTED_VALUE: hostileSecret } },
+      ['"Secret":"***"', '"ENCRYPTED_VALUE":"***"'],
+      ["he said"],
+    ],
+  ])(
+    "%s is masked in the trace; the outgoing request is untouched",
+    async (_shape, method, path, payload, traced, absent) => {
+      // Rendered before the request, so a scan that masked the caller's own payload would show on the wire.
+      const wire = JSON.stringify(payload);
+      const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
+      const dbg = traceIo();
+      await api(dbg.io).tryRequest(method, path, payload);
+      const trace = dbg.lines.join("");
+      for (const fragment of traced) {
+        expect(trace).toContain(fragment);
+      }
+      for (const fragment of absent) {
+        expect(trace).not.toContain(fragment);
+      }
+      expect(sent.bodies).toEqual([wire]);
+    },
+  );
 
-  test("encrypted_value is masked in the trace", async () => {
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = traceIo();
-    await api(dbg.io).tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/DEPLOY_KEY", {
-      encrypted_value: "base64-SECRET-material",
-      key_id: "568250167242549743",
-    });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain('"encrypted_value":"***"');
-    expect(trace).not.toContain("base64-SECRET-material");
-    expect(trace).toContain('"key_id":"568250167242549743"');
-  });
-
-  test("a 422 echoing the secret is replaced wholesale; only the status survives", async () => {
-    stubFetch([
+  test.each([
+    [
+      "a JSON 422 echoing a config.secret",
+      "POST",
+      "/repos/hookco/hookrepo/hooks",
+      { name: "web", config: { url: "https://example.test/hook", secret: hostileSecret } },
       () =>
         new Response(
           JSON.stringify({
@@ -638,91 +696,80 @@ describe("secret-field request redaction and fail-closed error responses", () =>
           }),
           { status: 422, headers: { "content-type": "application/json" } },
         ),
-    ]);
-    const dbg = traceIo();
-    const result = await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/hooks", {
-      name: "web",
-      config: { url: "https://example.test/hook", secret: hostileSecret },
-    });
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.status).toBe(422);
-    expect(result.error.documentationUrl).toBeUndefined();
-    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
-    for (const fragment of ["he said", "back", "slash", "too weak", "Hook"]) {
-      expect(result.error.message).not.toContain(fragment);
-      expect(result.error.body).not.toContain(fragment);
-    }
-    expect(dbg.lines.join("")).not.toContain("he said");
-  });
-
-  test("a TOP-LEVEL secret (the hook config sub-endpoint shape) is masked and fail-closed", async () => {
-    // PATCH /hooks/{id}/config sends the config object bare, so `secret` sits at the top level.
-    const sent = stubFetchCapturingBodies(
+      422,
+      '"secret":"***"',
+      ["he said", "back", "slash", "too weak", "Hook"],
+    ],
+    [
+      "a plain-text 400 echoing a TOP-LEVEL secret",
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      { url: "https://example.test/hook", content_type: "json", secret: hostileSecret },
       () => new Response(`nope: ${hostileSecret}`, { status: 400 }),
-    );
-    const dbg = traceIo();
-    const result = await api(dbg.io).tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-      url: "https://example.test/hook",
-      content_type: "json",
-      secret: hostileSecret,
-    });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain('"secret":"***"');
-    expect(trace).not.toContain("he said");
-    expect(sent.bodies).toEqual([
-      JSON.stringify({
-        url: "https://example.test/hook",
-        content_type: "json",
-        secret: hostileSecret,
-      }),
-    ]);
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
-  });
+      400,
+      '"secret":"***"',
+      ["he said", "back", "slash", "nope"],
+    ],
+    [
+      "a plain-text 400 echoing an encrypted_value",
+      "PUT",
+      "/repos/hookco/hookrepo/actions/secrets/K",
+      { encrypted_value: hostileSecret, key_id: "1" },
+      () => new Response(`rejected: ${hostileSecret}`, { status: 400 }),
+      400,
+      '"encrypted_value":"***"',
+      ["he said", "back", "slash", "rejected"],
+    ],
+  ])(
+    "%s is replaced wholesale; only the status survives",
+    async (_shape, method, path, payload, response, status, masked, fragments) => {
+      const wire = JSON.stringify(payload);
+      const sent = stubFetchCapturingBodies(response);
+      const dbg = traceIo();
+      const result = await api(dbg.io).tryRequest(method, path, payload);
+      expect(sent.bodies).toEqual([wire]);
+      if (!("error" in result)) {
+        throw new Error("expected an error result");
+      }
+      expect(result.error.status).toBe(status);
+      expect(result.error.documentationUrl).toBeUndefined();
+      expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
+      expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
+      for (const fragment of fragments) {
+        expect(result.error.message).not.toContain(fragment);
+        expect(result.error.body).not.toContain(fragment);
+      }
+      const trace = dbg.lines.join("");
+      expect(trace).toContain(masked);
+      expect(trace).not.toContain("he said");
+    },
+  );
 
-  test("a secret field at any depth is found - the scan is recursive, not shape-listed", async () => {
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = traceIo();
-    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/anything", {
-      outer: { hooks: [{ config: { secret: hostileSecret } }, { note: "clean" }] },
-    });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain('"secret":"***"');
-    expect(trace).toContain('"note":"clean"');
-    expect(trace).not.toContain("he said");
-  });
-
-  test("a transport failure on a secret-carrying request withholds the error detail", async () => {
-    globalThis.fetch = (async () => {
-      throw new Error(`request to https://x failed, body was: {"secret":"${hostileSecret}"}`);
-    }) as unknown as typeof fetch;
-    const answer = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-      url: "https://example.test/hook",
-      secret: hostileSecret,
-    });
-    expect(answer).toEqual({
-      failed:
-        "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
+  test.each([
+    [
+      "a secret-carrying request withholds the error detail",
+      "PATCH",
+      "/repos/hookco/hookrepo/hooks/1/config",
+      { url: "https://example.test/hook", secret: hostileSecret },
+      `request to https://x failed, body was: {"secret":"${hostileSecret}"}`,
+      "PATCH /repos/hookco/hookrepo/hooks/1/config failed: the transport failed before an HTTP " +
         "response arrived (details withheld: the request carried a secret field). Check network " +
         "connectivity from the runner to https://api.test, then re-run",
-    });
-  });
-
-  test("a transport failure on a non-secret request keeps its diagnostic message", async () => {
+    ],
+    [
+      "a non-secret request keeps its diagnostic message",
+      "GET",
+      "/repos/hookco/hookrepo",
+      undefined,
+      "socket hang up",
+      "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
+    ],
+  ])("a transport failure on %s", async (_name, method, path, payload, reason, failed) => {
     globalThis.fetch = (async () => {
-      throw new Error("socket hang up");
+      throw new Error(reason);
     }) as unknown as typeof fetch;
-    const answer = await api().tryRequest("GET", "/repos/hookco/hookrepo", undefined);
-    expect(answer).toEqual({
-      failed:
-        "GET /repos/hookco/hookrepo failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run",
-    });
+    const answer = await api().tryRequest(method, path, payload);
+    expect(answer).toEqual({ failed });
   });
 
   test("the caller's mark withholds a payload the field-name scan cannot name; unmarked, the same request reads", async () => {
@@ -800,14 +847,21 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(JSON.stringify(result.error)).not.toContain("he said");
   });
 
-  test("a WITHHELD 403 with only the zero-quota header still reads as a rate limit", async () => {
-    // With the message destroyed, the ambiguous x-ratelimit-remaining: 0 is accepted on this path only: the lesser evil against telling a
-    // rate-limited user to fix their token.
+  // With the message destroyed, the ambiguous x-ratelimit-remaining: 0 is accepted on this path only: the lesser evil against telling a
+  // rate-limited user to fix their token.
+  test.each([
+    [
+      "with only the zero-quota header still reads as a rate limit",
+      { "x-ratelimit-remaining": "0" },
+      true,
+    ],
+    ["without it stays a permission failure, not a rate limit", {}, false],
+  ])("a WITHHELD 403 %s", async (_name, quota, limited) => {
     stubFetch([
       () =>
         new Response(JSON.stringify({ message: `denied (echo: ${hostileSecret})` }), {
           status: 403,
-          headers: { "content-type": "application/json", "x-ratelimit-remaining": "0" },
+          headers: { "content-type": "application/json", ...quota },
         }),
     ]);
     const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
@@ -818,7 +872,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       throw new Error("expected an error result");
     }
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(isRateLimitError(result.error)).toBe(true);
+    expect(isRateLimitError(result.error)).toBe(limited);
   });
 
   test("an echoed 'rate limit' string cannot spoof the classification", async () => {
@@ -951,23 +1005,32 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(sent.bodies).toHaveLength(0);
   });
 
-  test("an array subclass with an overridden map is rejected, its code never run", async () => {
-    // .map on a subclass dispatches to the override, foreign code that could substitute [secret]; only base-class arrays are plain data and the
-    // normalizer iterates by index.
-    let overrideRan = false;
-    class SneakyArray extends Array<unknown> {
-      override map<U>(_fn: (v: unknown, i: number, a: unknown[]) => U): U[] {
-        overrideRan = true;
-        return [hostileSecret] as unknown as U[];
-      }
+  // Only base-class arrays and plain objects are data; the normalizer iterates arrays by index, so a subclass's .map override is foreign code
+  // that could substitute [secret]. Octokit passes any other non-plain object (a Buffer) to fetch verbatim, unscanned. Nothing sends such a
+  // payload today; the rows pin the boundary with one message.
+  class SneakyArray extends Array<unknown> {
+    static overrideRan = false;
+    override map<U>(_fn: (v: unknown, i: number, a: unknown[]) => U): U[] {
+      SneakyArray.overrideRan = true;
+      return [hostileSecret] as unknown as U[];
     }
-    const sneaky = SneakyArray.from([{ name: "web" }]);
+  }
+  test.each([
+    [
+      "an array subclass with an overridden map",
+      () => SneakyArray.from([{ name: "web" }]),
+      () => SneakyArray.overrideRan,
+    ],
+    ["a Buffer", () => Buffer.from("raw-bytes-here"), undefined],
+  ])("%s is rejected as a non-plain container", async (_kind, payload, foreignCodeRan) => {
     const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", sneaky);
+    const answer = await api().tryRequest("POST", "/repos/hookco/hookrepo/anything", payload());
     expect(answer).toEqual({
       failed: `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
     });
-    expect(overrideRan).toBe(false);
+    if (foreignCodeRan !== undefined) {
+      expect(foreignCodeRan()).toBe(false);
+    }
     expect(sent.bodies).toHaveLength(0);
   });
 
@@ -991,40 +1054,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       failed: `POST /repos/hookco/hookrepo/anything was not sent: ${NOT_PLAIN_FALLBACK}${NOT_SENT_TAIL}`,
     });
     expect(sent.bodies).toHaveLength(0);
-  });
-
-  test("a non-plain-object payload (a Buffer) is never sent", async () => {
-    // Octokit passes non-plain objects to fetch verbatim; normalizing one would change the wire and sending it unscanned would be a blind spot, so it
-    // aborts. Nothing sends such a payload today; this pins the boundary.
-    const sent = stubFetchCapturingBodies(() => new Response(null, { status: 204 }));
-    const answer = await api().tryRequest(
-      "POST",
-      "/repos/hookco/hookrepo/anything",
-      Buffer.from("raw-bytes-here"),
-    );
-    expect(answer).toEqual({
-      failed: `POST /repos/hookco/hookrepo/anything was not sent: the value is not plain JSON data (a non-plain object)${NOT_SENT_TAIL}`,
-    });
-    expect(sent.bodies).toHaveLength(0);
-  });
-
-  test("a secret-carrying plain 403 stays a permission failure, not a rate limit", async () => {
-    stubFetch([
-      () =>
-        new Response(JSON.stringify({ message: "Resource not accessible by integration" }), {
-          status: 403,
-          headers: { "content-type": "application/json" },
-        }),
-    ]);
-    const result = await api().tryRequest("PATCH", "/repos/hookco/hookrepo/hooks/1/config", {
-      url: "https://example.test/hook",
-      secret: hostileSecret,
-    });
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(isRateLimitError(result.error)).toBe(false);
-    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
   test("a cyclic payload aborts at the cycle's field, never a stack overflow or a raw trace", async () => {
@@ -1068,20 +1097,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     ]);
   });
 
-  test("field-name matching is case-insensitive", async () => {
-    // A passthrough payload can carry arbitrary user keys, so a `Secret:` spelling must not slip the scan.
-    stubFetch([() => new Response(null, { status: 204 })]);
-    const dbg = traceIo();
-    await api(dbg.io).tryRequest("POST", "/repos/hookco/hookrepo/anything", {
-      Secret: hostileSecret,
-      config: { ENCRYPTED_VALUE: hostileSecret },
-    });
-    const trace = dbg.lines.join("");
-    expect(trace).toContain('"Secret":"***"');
-    expect(trace).toContain('"ENCRYPTED_VALUE":"***"');
-    expect(trace).not.toContain("he said");
-  });
-
   test("an own __proto__ key survives in the trace instead of vanishing", async () => {
     // JSON.parse creates __proto__ as an own DATA property; a plain {} copy target would hit the prototype setter and drop the branch.
     stubFetch([() => new Response(null, { status: 204 })]);
@@ -1116,21 +1131,6 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
     expect(isRateLimitError(result.error)).toBe(true);
     expect(JSON.stringify(result.error)).not.toContain("he said");
-  });
-
-  test("a plain-text error body to an encrypted_value request is withheld too", async () => {
-    stubFetch([() => new Response(`rejected: ${hostileSecret}`, { status: 400 })]);
-    const result = await api().tryRequest("PUT", "/repos/hookco/hookrepo/actions/secrets/K", {
-      encrypted_value: hostileSecret,
-      key_id: "1",
-    });
-    if (!("error" in result)) {
-      throw new Error("expected an error result");
-    }
-    expect(result.error.status).toBe(400);
-    expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(result.error.documentationUrl).toBeUndefined();
   });
 
   test("a non-secret request's trace and error are unchanged by the scan", async () => {
@@ -1179,7 +1179,7 @@ describe("DELETE request bodies reach the wire", () => {
         token: "t",
         io: traceIo().io,
         baseUrl: `http://localhost:${server.port}`,
-        apiVersion: "2022-11-28",
+        apiVersion: DEFAULT_API_VERSION,
         retryBaseMs: 1,
       });
       const result = await client.tryRequest(
