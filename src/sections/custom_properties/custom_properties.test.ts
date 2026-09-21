@@ -6,7 +6,7 @@ import { sectionModule } from "../../../src/sections/registry.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { customPropertiesSection, normalizeValue } from "./index.js";
 import { customPropertiesMockHandlers } from "./mock.js";
@@ -23,12 +23,14 @@ function orgRoutes(values: Array<{ property_name: string; value: unknown }>) {
   };
 }
 
-const plan = (api: MockApi, desired: SectionInput<"custom_properties">) =>
-  gated.plan(planContext(gated, api, REPO), validatedInput("custom_properties", desired));
+const plan = async (api: MockApi, desired: SectionInput<"custom_properties">) =>
+  unwrap(
+    await gated.plan(planContext(gated, api, REPO), validatedInput("custom_properties", desired)),
+  );
 
 /** The lines an op's change renders; the section builds them at plan time, so no response is needed. */
 function changeLines(op: SectionPlan["ops"][number]): readonly string[] {
-  return typeof op.change === "function" ? [op.change(null)].flat() : [op.change];
+  return typeof op.change === "function" ? [unwrap(op.change(null))].flat() : [op.change];
 }
 
 /**

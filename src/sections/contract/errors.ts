@@ -1,4 +1,3 @@
-import type { Result } from "neverthrow";
 import type { ApiError } from "../../github/api.js";
 import { isPermissionError, isRateLimitError } from "../../github/api.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
@@ -15,19 +14,20 @@ import { grantFor, type SectionPermission, samePermission } from "./permissions.
 /**
  * What ends a section's work, as a value. `message` is the whole line the loops report; `kind` is read for policy
  * alone (a denial's partial-success handling in engine/orchestrate.ts), never to rebuild prose.
+ *
+ *   request kinds (failureFor and the request helpers): rate-limit, rejected, server-error, unauthorized,
+ *                  validation, transport, malformed
+ *   duplicate kinds (the identity checks): declared-duplicate, live-duplicate
+ *   live-shape     -> GitHub's answer parsed but cannot be reconciled (an item without an id, a repeated rule type)
+ *   refused        -> the section declines to proceed: the settings file conflicts with live state, an actor cannot
+ *                     be resolved, a write would drop live values the file omits
+ *   unverified     -> a write landed but its echo disagrees with what was set
+ *   thrown         -> an exception escaped a section: the client's own throw on an unmarked request, or a BUG
+ *                     invariant; the loops report its message like any other failure
  */
 export type SectionFailure =
   | {
-      readonly kind:
-        | "rate-limit"
-        | "rejected"
-        | "server-error"
-        | "unauthorized"
-        | "validation"
-        | "transport"
-        | "malformed"
-        | "declared-duplicate"
-        | "live-duplicate";
+      readonly kind: PlainFailureKind;
       readonly message: string;
     }
   | {
@@ -39,55 +39,34 @@ export type SectionFailure =
       readonly message: string;
     };
 
+/** Every kind but the denial, whose value carries more than a message. */
+export type PlainFailureKind =
+  | "rate-limit"
+  | "rejected"
+  | "server-error"
+  | "unauthorized"
+  | "validation"
+  | "transport"
+  | "malformed"
+  | "declared-duplicate"
+  | "live-duplicate"
+  | "live-shape"
+  | "refused"
+  | "unverified"
+  | "thrown";
+
+/** A failure of any plain kind; `message` is the whole line, section key first. */
+export function sectionFailure(kind: PlainFailureKind, message: string): SectionFailure {
+  return { kind, message };
+}
+
+/** The value form of an exception a section loop caught; the message is the error's own. */
+export function thrown(error: unknown): SectionFailure {
+  return { kind: "thrown", message: error instanceof Error ? error.message : String(error) };
+}
+
 function permissionDenied(section: string, detail: string, status: number): SectionFailure {
   return { kind: "permission-denied", section, detail, status, message: `${section}: ${detail}` };
-}
-
-/** The thrown form of a denial, for the loops that still catch (engine/orchestrate.ts, engine/snapshot.ts). */
-export class PermissionDenied extends Error {
-  constructor(
-    readonly section: string,
-    readonly detail: string,
-    /** The HTTP status that raised the denial, for the redacted view's safe code. */
-    readonly status: number,
-  ) {
-    super(`${section}: ${detail}`);
-  }
-}
-
-/**
- * A failure as the section loops catch it: only a denial keeps its shape, since only a denial has a policy. The
- * switch is exhaustive so a new kind is placed here deliberately instead of falling into the plain Error arm.
- */
-export function errorOf(failure: SectionFailure): Error {
-  switch (failure.kind) {
-    case "permission-denied":
-      return new PermissionDenied(failure.section, failure.detail, failure.status);
-    case "rate-limit":
-    case "rejected":
-    case "server-error":
-    case "unauthorized":
-    case "validation":
-    case "transport":
-    case "malformed":
-    case "declared-duplicate":
-    case "live-duplicate":
-      return new Error(failure.message);
-    default:
-      return failure satisfies never;
-  }
-}
-
-/**
- * The ONE seam where a failure value becomes a throw: sections still leave by throwing, so the read port
- * (./plan.ts) and the duplicate checks raise here. It exists until sections return Results themselves; each
- * call then becomes a match and this function, the last request-layer throw, goes with them.
- */
-export function raise<T>(result: Result<T, SectionFailure>): T {
-  if (result.isErr()) {
-    throw errorOf(result.error);
-  }
-  return result.value;
 }
 
 /**

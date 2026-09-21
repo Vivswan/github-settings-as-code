@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test";
+import { ok } from "neverthrow";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { SectionSelection } from "../../src/engine/section-selection.js";
@@ -27,7 +28,7 @@ import { matchEndpoint } from "../e2e/mock/dispatch.js";
 import type { LiveState } from "../e2e/mock/state.js";
 import { captureIo } from "../io/capture.js";
 import { registryFake } from "../sections/fragment-fake.js";
-import { REPO } from "../sections/section-run.js";
+import { REPO, unwrap } from "../sections/section-run.js";
 import type { Row } from "../sections/snapshot-roundtrip.js";
 
 /** A failed snapshot fails the test here, on the discriminant; a cast would count as a second mint of the brand. */
@@ -242,8 +243,8 @@ describe("snapshotRepository", () => {
     );
     expect(present.outcomes).toEqual([{ key: "pages", status: "snapshot", detail: [] }]);
     const empty = spyOn(pagesSection, "snapshot").mockImplementation(async (ctx) => {
-      await ctx.read.get.probeAbsent(z.unknown());
-      return { value: undefined, notes: [] };
+      unwrap(await ctx.read.get.probeAbsent(z.unknown()));
+      return ok({ value: undefined, notes: [] });
     });
     try {
       const quiet = captureIo();
@@ -383,10 +384,12 @@ describe("snapshotRepository", () => {
   });
 
   test("a section returning a value its own schema rejects fails the run with the validation error, never a document", async () => {
-    const stubbed = spyOn(labelsSection, "snapshot").mockResolvedValue({
-      value: { _undeclared: "sometimes", entries: [{ name: "bug" }] } as never,
-      notes: ["a note the section still reported"],
-    });
+    const stubbed = spyOn(labelsSection, "snapshot").mockResolvedValue(
+      ok({
+        value: { _undeclared: "sometimes", entries: [{ name: "bug" }] } as never,
+        notes: ["a note the section still reported"],
+      }),
+    );
     try {
       const { io, annotations } = captureIo();
       const result = await snapshotRepository(registryFake(LIVE), opts(), io);
@@ -445,13 +448,12 @@ describe("renderSnapshotYaml", () => {
     // The labels note spans two physical lines (an API error body would) and a second note follows it: each line is
     // commented on its own, every message of an outcome is kept in code-point order, and the file still parses.
     const original = labelsSection.snapshot;
-    const stubbed = spyOn(labelsSection, "snapshot").mockImplementation(async (ctx) => {
-      const snapshot = await original.call(labelsSection, ctx);
-      return {
+    const stubbed = spyOn(labelsSection, "snapshot").mockImplementation(async (ctx) =>
+      (await original.call(labelsSection, ctx)).map((snapshot) => ({
         ...snapshot,
         notes: [...snapshot.notes, "retried once", "502 Bad Gateway\nupstream unavailable"],
-      };
-    });
+      })),
+    );
     try {
       const result = await snapshotRepository(
         registryFake(LIVE),

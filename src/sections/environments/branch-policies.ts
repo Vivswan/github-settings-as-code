@@ -3,10 +3,11 @@
  * change is a delete plus a recreate.
  */
 
+import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { raise } from "../contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
@@ -16,7 +17,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
 } from "../contract/module.js";
-import { hasDrift, plainData } from "../contract/plan.js";
+import { hasDrift, plainData, type Read } from "../contract/plan.js";
 import type { EnvironmentRestOp, EnvironmentsRestContext } from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
@@ -45,42 +46,50 @@ function livePolicyType(policy: LiveBranchPolicy): string {
   return typeof policy.type === "string" ? policy.type : "branch";
 }
 
-function livePolicyId(policy: LiveBranchPolicy, envName: string): string {
-  if (policy.id === undefined) {
-    throw new Error(
-      `environments: the deployment branch-policy list for environment "${envName}" returned a policy without an id, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
-  }
-  return String(policy.id);
+function unreconcilable(envName: string, what: string): SectionFailure {
+  return sectionFailure(
+    "live-shape",
+    `environments: the deployment branch-policy list for environment "${envName}" returned a policy without ${what}, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+  );
 }
 
-function livePolicyName(policy: LiveBranchPolicy, envName: string): string {
-  if (typeof policy.name !== "string") {
-    throw new Error(
-      `environments: the deployment branch-policy list for environment "${envName}" returned a policy without a name, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    );
+function livePolicyId(policy: LiveBranchPolicy, envName: string): Result<string, SectionFailure> {
+  if (policy.id === undefined) {
+    return err(unreconcilable(envName, "an id"));
   }
-  return policy.name;
+  return ok(String(policy.id));
+}
+
+function livePolicyName(policy: LiveBranchPolicy, envName: string): Result<string, SectionFailure> {
+  if (typeof policy.name !== "string") {
+    return err(unreconcilable(envName, "a name"));
+  }
+  return ok(policy.name);
 }
 
 /**
  * The live patterns by name under the duplicate-live guard; plan() and snapshot() both index through
- * it, so neither can read two same-named patterns as one.
+ * it, so neither can read two same-named patterns as one. A pattern without a name has no identity
+ * to reconcile by, so the listing fails as a whole.
  */
 export function policiesByName(
   section: SectionMeta,
   live: readonly LiveBranchPolicy[],
   envName: string,
-): Map<string, LiveBranchPolicy> {
-  return raise(
-    liveByIdentity(
-      section,
-      "deployment branch policy",
-      live,
-      (pattern) => livePolicyName(pattern, envName),
-      (pattern) => liveIdentity(livePolicyName(pattern, envName), { branch_policy_id: pattern.id }),
-    ),
-  );
+): Result<Map<string, LiveBranchPolicy>, SectionFailure> {
+  return Result.combine(
+    live.map((policy) => livePolicyName(policy, envName).map((name) => ({ policy, name }))),
+  )
+    .andThen((named) =>
+      liveByIdentity(
+        section,
+        "deployment branch policy",
+        named,
+        (pattern) => pattern.name,
+        (pattern) => liveIdentity(pattern.name, { branch_policy_id: pattern.policy.id }),
+      ),
+    )
+    .map((byName) => new Map([...byName].map(([name, pattern]) => [name, pattern.policy])));
 }
 
 function createPolicyOp(
@@ -102,10 +111,10 @@ function createPolicyOp(
  * One environment's live patterns. Only meaningful while its custom_branch_policies flag is on:
  * the endpoint 404s otherwise, which the caller reads off the environment body first.
  */
-export async function listBranchPolicies(
+export function listBranchPolicies(
   ctx: EnvironmentsRestContext,
   envName: string,
-): Promise<LiveBranchPolicy[]> {
+): Read<LiveBranchPolicy[]> {
   return ctx.read.listPolicies.listAllEnveloped("branch_policies", LiveBranchPolicy, {
     params: { environment_name: envName },
     describe: `environment "${envName}"`,
@@ -135,94 +144,96 @@ export async function planBranchPolicies(
   policy: UndeclaredPolicy,
   entries: readonly DeploymentBranchPolicyConfig[],
   liveEnv: LiveEnvironmentBody | undefined,
-): Promise<NestedPlan> {
-  const params = { environment_name: envName };
-  const planned: NestedPlan = { ops: [], notes: [] };
-  const hidden =
-    liveEnv !== undefined && liveEnv.deployment_branch_policy?.custom_branch_policies !== true;
-  let live: LiveBranchPolicy[] = [];
-  if (hidden) {
-    // With no list read, preflight never probes listPolicies for this environment, so an
-    // Actions-read denial shows up on the next run's read instead of this one's preflight.
-    planned.notes.push(
-      `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run`,
-    );
-  } else if (liveEnv !== undefined) {
-    live = await listBranchPolicies(ctx, envName);
-  }
-  const liveByName = policiesByName(section, live, envName);
-  const declared = new Set(entries.map((pattern) => pattern.name));
-
-  for (const pattern of entries) {
-    const label = `environments[${envName}].deployment_branch_policies[${pattern.name}]`;
-    const existing = liveByName.get(pattern.name);
-    if (!existing) {
-      planned.ops.push({
-        ...createPolicyOp(envName, pattern),
-        drift: [
-          hidden
-            ? `${label}: not verifiable until custom_branch_policies is true; apply will create it once the flag is set`
-            : missingDrift(label, { where: "on the environment" }),
-        ],
-        change: `created deployment branch policy "${pattern.name}" in environment "${envName}"`,
-      });
-      continue;
-    }
-    const desiredType = pattern.type ?? "branch";
-    const liveType = livePolicyType(existing);
-    if (liveType === desiredType) {
-      continue;
-    }
-    const typeDrift = subsetDiff({ type: desiredType }, { type: liveType }, label);
-    if (!hasDrift(typeDrift)) {
-      throw new Error(
-        `BUG: environments: the pattern "${pattern.name}" of environment "${envName}" has a type mismatch (${liveType} vs ${desiredType}) that subsetDiff did not render`,
-      );
-    }
-    planned.ops.push(
-      {
-        role: "removePolicy",
-        params: { ...params, branch_policy_id: livePolicyId(existing, envName) },
-        drift: [
-          `${label}: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it`,
-        ],
-        change: `deleted deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type (${liveType} -> ${desiredType})`,
-        describe: `deleting deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type`,
-      },
-      {
-        ...createPolicyOp(envName, pattern),
-        drift: typeDrift,
-        change: `recreated deployment branch policy "${pattern.name}" in environment "${envName}" as type ${desiredType}`,
-      },
-    );
-  }
-
-  for (const [name, existing] of liveByName) {
-    if (declared.has(name)) {
-      continue;
-    }
-    if (policy === "keep") {
+): Promise<Result<NestedPlan, SectionFailure>> {
+  return safeTry(async function* () {
+    const params = { environment_name: envName };
+    const planned: NestedPlan = { ops: [], notes: [] };
+    const hidden =
+      liveEnv !== undefined && liveEnv.deployment_branch_policy?.custom_branch_policies !== true;
+    let live: LiveBranchPolicy[] = [];
+    if (hidden) {
+      // With no list read, preflight never probes listPolicies for this environment, so an
+      // Actions-read denial shows up on the next run's read instead of this one's preflight.
       planned.notes.push(
-        undeclaredNote({
-          subject: `deployment branch policy "${name}"`,
-          state: `exists on environment "${envName}" but is not declared`,
-          action: "DELETE it",
-        }),
+        `environments[${envName}].deployment_branch_policies: patterns are not verifiable until custom_branch_policies is true; apply will set the flag and create the declared patterns, and any pattern already behind the flag reconciles on the next run`,
       );
-      continue;
+    } else if (liveEnv !== undefined) {
+      live = yield* listBranchPolicies(ctx, envName);
     }
-    planned.ops.push({
-      role: "removePolicy",
-      params: { ...params, branch_policy_id: livePolicyId(existing, envName) },
-      drift: [
-        undeclaredDrift(BRANCH_POLICIES_DEFAULT_POLICY, {
-          label: `environments[${envName}].deployment_branch_policies[${name}]`,
-          action: "DELETE it",
-        }),
-      ],
-      change: `DELETED undeclared deployment branch policy "${name}" from environment "${envName}"`,
-      describe: `deleting undeclared deployment branch policy "${name}" from environment "${envName}"`,
-    });
-  }
-  return planned;
+    const liveByName = yield* policiesByName(section, live, envName);
+    const declared = new Set(entries.map((pattern) => pattern.name));
+
+    for (const pattern of entries) {
+      const label = `environments[${envName}].deployment_branch_policies[${pattern.name}]`;
+      const existing = liveByName.get(pattern.name);
+      if (!existing) {
+        planned.ops.push({
+          ...createPolicyOp(envName, pattern),
+          drift: [
+            hidden
+              ? `${label}: not verifiable until custom_branch_policies is true; apply will create it once the flag is set`
+              : missingDrift(label, { where: "on the environment" }),
+          ],
+          change: `created deployment branch policy "${pattern.name}" in environment "${envName}"`,
+        });
+        continue;
+      }
+      const desiredType = pattern.type ?? "branch";
+      const liveType = livePolicyType(existing);
+      if (liveType === desiredType) {
+        continue;
+      }
+      const typeDrift = subsetDiff({ type: desiredType }, { type: liveType }, label);
+      if (!hasDrift(typeDrift)) {
+        throw new Error(
+          `BUG: environments: the pattern "${pattern.name}" of environment "${envName}" has a type mismatch (${liveType} vs ${desiredType}) that subsetDiff did not render`,
+        );
+      }
+      planned.ops.push(
+        {
+          role: "removePolicy",
+          params: { ...params, branch_policy_id: yield* livePolicyId(existing, envName) },
+          drift: [
+            `${label}: the declared type differs from the live pattern's, and a policy's type is immutable; apply will delete and recreate it`,
+          ],
+          change: `deleted deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type (${liveType} -> ${desiredType})`,
+          describe: `deleting deployment branch policy "${pattern.name}" in environment "${envName}" to change its immutable type`,
+        },
+        {
+          ...createPolicyOp(envName, pattern),
+          drift: typeDrift,
+          change: `recreated deployment branch policy "${pattern.name}" in environment "${envName}" as type ${desiredType}`,
+        },
+      );
+    }
+
+    for (const [name, existing] of liveByName) {
+      if (declared.has(name)) {
+        continue;
+      }
+      if (policy === "keep") {
+        planned.notes.push(
+          undeclaredNote({
+            subject: `deployment branch policy "${name}"`,
+            state: `exists on environment "${envName}" but is not declared`,
+            action: "DELETE it",
+          }),
+        );
+        continue;
+      }
+      planned.ops.push({
+        role: "removePolicy",
+        params: { ...params, branch_policy_id: yield* livePolicyId(existing, envName) },
+        drift: [
+          undeclaredDrift(BRANCH_POLICIES_DEFAULT_POLICY, {
+            label: `environments[${envName}].deployment_branch_policies[${name}]`,
+            action: "DELETE it",
+          }),
+        ],
+        change: `DELETED undeclared deployment branch policy "${name}" from environment "${envName}"`,
+        describe: `deleting undeclared deployment branch policy "${name}" from environment "${envName}"`,
+      });
+    }
+    return ok(planned);
+  });
 }

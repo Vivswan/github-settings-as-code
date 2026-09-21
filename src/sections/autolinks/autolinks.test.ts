@@ -3,7 +3,7 @@ import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { autolinksSection } from "./index.js";
@@ -17,10 +17,12 @@ const liveAutolinks = [
 ];
 const KEEP_NOTE =
   'autolink "OLD-" exists on the repo but is not declared in the settings file; kept under "_undeclared: keep" - add it to the settings file to manage it, or set "_undeclared: delete" to have apply DELETE it';
-const plan = (api: MockApi, desired: SectionInput<"autolinks">) =>
-  autolinksSection.plan(
-    planContext(autolinksSection, api, REPO),
-    validatedInput("autolinks", desired),
+const plan = async (api: MockApi, desired: SectionInput<"autolinks">) =>
+  unwrap(
+    await autolinksSection.plan(
+      planContext(autolinksSection, api, REPO),
+      validatedInput("autolinks", desired),
+    ),
   );
 
 describe("autolinks", () => {

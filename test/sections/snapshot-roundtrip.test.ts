@@ -9,6 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { ok } from "neverthrow";
 import type { GitHubClient } from "../../src/github/api.js";
 import type { SectionKey } from "../../src/schema.js";
 import { actionsSecretsSection } from "../../src/sections/actions_secrets/index.js";
@@ -19,7 +20,7 @@ import { labelsSection } from "../../src/sections/labels/index.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { webhooksSection } from "../../src/sections/webhooks/index.js";
 import { registryFake } from "./fragment-fake.js";
-import { REPO } from "./section-run.js";
+import { failureOf, REPO, unwrap } from "./section-run.js";
 import { proveSnapshotRoundTrip, type Row, type SnapshotSection } from "./snapshot-roundtrip.js";
 import { STAMPS } from "./snapshot-rows/families.js";
 
@@ -59,10 +60,11 @@ describe("snapshot round trip", () => {
     // Negative control: a snapshot claiming a color the live label does not have.
     const drifting: SnapshotSection = {
       ...labelsSection,
-      snapshot: async () => ({
-        value: { _undeclared: "delete", entries: [{ name: "bug", color: "000000" }] },
-        notes: [],
-      }),
+      snapshot: async () =>
+        ok({
+          value: { _undeclared: "delete", entries: [{ name: "bug", color: "000000" }] },
+          notes: [],
+        }),
     };
     const proof = proveSnapshotRoundTrip(
       drifting,
@@ -77,11 +79,11 @@ describe("snapshot round trip", () => {
     const writing: SnapshotSection = {
       ...labelsSection,
       snapshot: async () => {
-        const read = await labelsSection.snapshot(
-          snapshotContext(labelsSection, api, REPO, "fail"),
+        const read = unwrap(
+          await labelsSection.snapshot(snapshotContext(labelsSection, api, REPO, "fail")),
         );
         await api.tryRequest("DELETE", "/repos/o/r/labels/bug");
-        return read;
+        return ok(read);
       },
     };
     await expect(proveSnapshotRoundTrip(writing, api)).rejects.toThrow(
@@ -96,8 +98,8 @@ describe("snapshot round trip", () => {
         { id: 2, name: "slack", config: { url: "https://ci.example.com/hook" } },
       ],
     });
-    const read = await webhooksSection.snapshot(
-      snapshotContext(webhooksSection, mixed, REPO, "fail"),
+    const read = unwrap(
+      await webhooksSection.snapshot(snapshotContext(webhooksSection, mixed, REPO, "fail")),
     );
     expect(read.notes).toEqual([
       'webhooks[https://ci.example.com/hook]: left out of the snapshot - a "slack" service hook is not a web hook this section manages',
@@ -133,9 +135,13 @@ describe("snapshot round trip", () => {
       },
       environment_branch_policies: { prod: [{ id: 1 }, { id: 2 }] },
     });
-    await expect(
-      environmentsSection.snapshot(snapshotContext(environmentsSection, nested, REPO, "fail")),
-    ).rejects.toThrow(
+    expect(
+      failureOf(
+        await environmentsSection.snapshot(
+          snapshotContext(environmentsSection, nested, REPO, "fail"),
+        ),
+      ).message,
+    ).toContain(
       'environments: the deployment branch-policy list for environment "prod" returned a policy without a name, so it cannot be reconciled',
     );
   });
@@ -161,11 +167,13 @@ describe("snapshot round trip", () => {
             : fake.tryRequest(method, path, payload, options),
         tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
       };
-      await expect(
-        interactionLimitsSection.snapshot(
-          snapshotContext(interactionLimitsSection, api, REPO, "fail"),
-        ),
-      ).rejects.toThrow(
+      expect(
+        failureOf(
+          await interactionLimitsSection.snapshot(
+            snapshotContext(interactionLimitsSection, api, REPO, "fail"),
+          ),
+        ).message,
+      ).toContain(
         "interaction_limits: GET /repos/{owner}/{repo}/interaction-limits/pulls/creation-cap " +
           `(reading the pull request creation cap) returned a body outside the documented shape - ${issue}. ` +
           'Check the "api-version" input against the GitHub REST docs for this endpoint',
@@ -186,9 +194,10 @@ describe("snapshot round trip", () => {
           : fake.tryRequest(method, path, payload, options),
       tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
     };
-    await expect(
-      webhooksSection.snapshot(snapshotContext(webhooksSection, api, REPO, "fail")),
-    ).rejects.toThrow(
+    expect(
+      failureOf(await webhooksSection.snapshot(snapshotContext(webhooksSection, api, REPO, "fail")))
+        .message,
+    ).toContain(
       "webhooks: GET /repos/{owner}/{repo}/hooks returned a body outside the documented shape - " +
         "[0].config.secret: Invalid input: expected string, received number. Check the " +
         '"api-version" input against the GitHub REST docs for this endpoint',
@@ -197,8 +206,8 @@ describe("snapshot round trip", () => {
 
   test("a hook without a config.url is noted and left out; alone, it leaves nothing to declare", async () => {
     const api = registryFake({ hooks: [{ id: 7, config: {} }] });
-    const snapshot = await webhooksSection.snapshot(
-      snapshotContext(webhooksSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await webhooksSection.snapshot(snapshotContext(webhooksSection, api, REPO, "fail")),
     );
     expect(snapshot).toEqual({
       value: undefined,
@@ -227,7 +236,7 @@ describe("snapshot round trip", () => {
       "secret_scanning_custom_patterns",
     ] as const) {
       const { section } = (await loadRow(key)).row;
-      const snapshot = await section.snapshot(snapshotContext(section, api, REPO, "fail"));
+      const snapshot = unwrap(await section.snapshot(snapshotContext(section, api, REPO, "fail")));
       expect({ key, ...snapshot }).toEqual({ key, value: undefined, notes: [] });
     }
     expect(api.writes).toEqual([]);

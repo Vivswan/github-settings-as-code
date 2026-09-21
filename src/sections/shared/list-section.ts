@@ -5,6 +5,7 @@
  * the reasons `concealed` and `foreign` return; a section needing more stays bespoke.
  */
 
+import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import {
   type Delta,
@@ -20,7 +21,7 @@ import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
 import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity, plural } from "../contract/live.js";
 import {
   cannotVerifyNote,
@@ -51,6 +52,7 @@ import {
   type PlanContext,
   type PlannedOp,
   plainData,
+  type Read,
   type SectionPlan,
   type SnapshotContext,
   type Unverifiable,
@@ -414,8 +416,10 @@ export interface ListSectionModule<
   readonly plan: (
     ctx: PlanContext<Ends, GraphqlDict, K>,
     desired: ValidatedInput<K>,
-  ) => Promise<SectionPlan<PlannedOp<Ends>>>;
-  readonly snapshot: (ctx: SnapshotContext<Ends, GraphqlDict, K>) => Promise<SectionSnapshot<K>>;
+  ) => Promise<Result<SectionPlan<PlannedOp<Ends>>, SectionFailure>>;
+  readonly snapshot: (
+    ctx: SnapshotContext<Ends, GraphqlDict, K>,
+  ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
   /** The declaration, for the harness derivations (the mock's transformers, the fuzz witness). */
   readonly decl: ListSectionDecl<K, Ends, Live, F, Key, M>;
 }
@@ -598,13 +602,17 @@ function declaredSecrets(decl: ErasedDecl<string>, write: Fields): string[] {
 }
 
 /** The write with every declared secret reference resolved, for the request body. */
-function resolvedWrite(exec: ExecTools, write: Fields, fields: readonly string[]): PlainData {
+function resolvedWrite(
+  exec: ExecTools,
+  write: Fields,
+  fields: readonly string[],
+): Result<PlainData, SectionFailure> {
   const resolved = fields.reduce(
     (out: Fields, field) =>
       withValueAt(out, pathOf(field), exec.resolveSecret(String(valueAt(out, pathOf(field))))),
     write as Fields,
   );
-  return plainData(resolved);
+  return ok(plainData(resolved));
 }
 
 function leafOf(field: string): string {
@@ -674,10 +682,7 @@ function updateBody(decl: ErasedDecl<string>, write: Fields): Fields {
 
 // --- Reads ------------------------------------------------------------------
 
-async function readList(
-  decl: ErasedDecl<string>,
-  ctx: PlanContext<ListEndpoints>,
-): Promise<object[]> {
+function readList(decl: ErasedDecl<string>, ctx: PlanContext<ListEndpoints>): Read<object[]> {
   const query = decl.listing?.query;
   return decl.listing?.unpaginated === true
     ? ctx.read.list.call(z.array(decl.live), { query })
@@ -690,26 +695,24 @@ interface LiveItems {
 }
 
 /** The parsed list split by `foreign`, in live order on both sides. */
-async function readLive(
-  decl: ErasedDecl<string>,
-  ctx: PlanContext<ListEndpoints>,
-): Promise<LiveItems> {
-  const live = await readList(decl, ctx);
-  const out: LiveItems = { managed: [], foreign: [] };
-  for (const item of live) {
-    const foreign = decl.foreign?.(item) ?? null;
-    if (foreign === null) {
-      out.managed.push(item);
-    } else {
-      out.foreign.push(foreign);
+function readLive(decl: ErasedDecl<string>, ctx: PlanContext<ListEndpoints>): Read<LiveItems> {
+  return readList(decl, ctx).map((live) => {
+    const out: LiveItems = { managed: [], foreign: [] };
+    for (const item of live) {
+      const foreign = decl.foreign?.(item) ?? null;
+      if (foreign === null) {
+        out.managed.push(item);
+      } else {
+        out.foreign.push(foreign);
+      }
     }
-  }
-  return out;
+    return out;
+  });
 }
 
 /** The read port of the optional `get` role; the erased dictionary cannot type it, so the shape is spelled here. */
 interface ItemReadPort {
-  call<T>(schema: z.ZodType<T>, opts: { params: Readonly<Record<string, string>> }): Promise<T>;
+  call<T>(schema: z.ZodType<T>, opts: { params: Readonly<Record<string, string>> }): Read<T>;
 }
 
 /** The item's full body when the dictionary declares a `get`, the list item otherwise. */
@@ -717,9 +720,9 @@ async function readItem(
   decl: ErasedDecl<string>,
   ctx: PlanContext<ListEndpoints>,
   item: object,
-): Promise<object> {
+): Promise<Result<object, SectionFailure>> {
   if (!("get" in decl.endpoints)) {
-    return item;
+    return ok(item);
   }
   const port = (ctx.read as unknown as { readonly get: ItemReadPort }).get;
   return port.call(decl.live, { params: decl.address(item) });
@@ -798,221 +801,227 @@ async function planList<Key extends string>(
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
   declared: ErasedDeclared,
-): Promise<SectionPlan> {
-  const { key, noun, identity, lens, prose, endpoints, mapping } = decl;
-  const { fold } = identity;
-  const update = updateRole(endpoints);
-  const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
-  const sweep = decl.replaces ? replaceSweep(decl.entry) : undefined;
-  const defaultPolicy = defaultUndeclaredPolicy(section);
-  const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
+): Promise<Result<SectionPlan, SectionFailure>> {
+  return safeTry(async function* () {
+    const { key, noun, identity, lens, prose, endpoints, mapping } = decl;
+    const { fold } = identity;
+    const update = updateRole(endpoints);
+    const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
+    const sweep = decl.replaces ? replaceSweep(decl.entry) : undefined;
+    const defaultPolicy = defaultUndeclaredPolicy(section);
+    const { policy, entries } = undeclaredPolicy(declared, defaultPolicy);
 
-  // Every identity an entry claims is its alone: validateList refused the document otherwise.
-  const writes = entries.map((entry) => {
-    const write = lens.toWrite(entry);
-    const name = nameOf(write, identity.field);
-    const claims = identityClaims(identity, entry as Fields);
-    if (claims === null) {
-      throw new Error(
-        `BUG: the validated ${noun} entry ${JSON.stringify(entry)} claims a non-string name; the slice must type the identity fields as strings`,
-      );
-    }
-    return { write, name, claims };
-  });
+    // Every identity an entry claims is its alone: validateList refused the document otherwise.
+    const writes = entries.map((entry) => {
+      const write = lens.toWrite(entry);
+      const name = nameOf(write, identity.field);
+      const claims = identityClaims(identity, entry as Fields);
+      if (claims === null) {
+        throw new Error(
+          `BUG: the validated ${noun} entry ${JSON.stringify(entry)} claims a non-string name; the slice must type the identity fields as strings`,
+        );
+      }
+      return { write, name, claims };
+    });
 
-  const live = await readLive(decl, ctx);
-  const liveItems = live.managed.map((item) => {
-    const comparable = lens.fromLive(item);
-    const name = nameOf(comparable, identity.field);
-    return { item, comparable, name, key: fold(name) };
-  });
-  // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
-  const liveByKey = raise(
-    liveByIdentity(
+    const live = yield* readLive(decl, ctx);
+    const liveItems = live.managed.map((item) => {
+      const comparable = lens.fromLive(item);
+      const name = nameOf(comparable, identity.field);
+      return { item, comparable, name, key: fold(name) };
+    });
+    // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
+    const liveByKey = yield* liveByIdentity(
       section,
       noun,
       liveItems,
       (item) => item.key,
       (item) => liveIdentity(item.name, decl.address(item.item)),
-    ),
-  );
-  const liveConflicts =
-    decl.conflicts?.live?.(
-      writes.map((w) => w.write),
-      liveItems.map((l) => l.comparable),
-    ) ?? [];
-  if (liveConflicts.length > 0) {
-    throw new Error(
-      `${key}: the settings file conflicts with the live ${plural(noun)}: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
     );
-  }
-  const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
-
-  const plan: SectionPlan = { ops: [], notes: [], drift: [] };
-  for (const { write, name, claims } of writes) {
-    const matches = claims.flatMap((claim) => {
-      const match = liveByKey.get(claim);
-      return match === undefined ? [] : [match];
-    });
-    if (matches.length > 1) {
-      throw new Error(
-        `${key}: the entry "${name}" matches ${matches.length} separate live ${plural(noun)} (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
+    const liveConflicts =
+      decl.conflicts?.live?.(
+        writes.map((w) => w.write),
+        liveItems.map((l) => l.comparable),
+      ) ?? [];
+    if (liveConflicts.length > 0) {
+      return err(
+        sectionFailure(
+          "refused",
+          `${key}: the settings file conflicts with the live ${plural(noun)}: ${liveConflicts.join("; ")}. Resolve each conflict on GitHub, then re-run`,
+        ),
       );
     }
-    const existing = matches[0];
-    const label = `${key}[${name}]`;
-    const secrets = declaredSecrets(decl, write);
-    if (existing === undefined) {
-      plan.ops.push({
-        role: "create",
-        payload:
-          secrets.length === 0
-            ? plainData(write)
-            : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
-        describe: `creating ${noun} "${name}"`,
-        drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
-          missingDrift(label),
-        ]),
-        change: `created ${noun} "${name}"`,
+    const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
+
+    const plan: SectionPlan = { ops: [], notes: [], drift: [] };
+    for (const { write, name, claims } of writes) {
+      const matches = claims.flatMap((claim) => {
+        const match = liveByKey.get(claim);
+        return match === undefined ? [] : [match];
       });
-      continue;
-    }
-    const body = await readItem(decl, ctx, existing.item);
-    const compared = comparison(decl, label, write, body, lens.fromLive(body));
-    plan.notes.push(...compared.notes);
-    const found = [
-      ...deltas(compared.write, compared.live, { matchBy: lens.matchBy }),
-      ...(sweep === undefined
-        ? []
-        : omittedDeltas(compared.write, projectOntoSchema(decl.entry, compared.live), {
-            matchBy: lens.matchBy,
-            sweep,
-          })),
-    ];
-    const render = (delta: Delta): string =>
-      renderEntryDelta(key, identity.field, { want: name, live: existing.name }, delta, remedies);
-    const phantom = phantomPaths(found);
-    if (phantom.length > 0) {
-      plan.notes.push(phantomNote(label, phantom, noun, remedies.phantom));
-    }
-    if (update === undefined) {
-      const drift = found.map(render);
-      if (!hasDrift(drift)) {
+      if (matches.length > 1) {
+        return err(
+          sectionFailure(
+            "refused",
+            `${key}: the entry "${name}" matches ${matches.length} separate live ${plural(noun)} (${matches.map((m) => `"${m.name}"`).join(", ")}), so it cannot converge; delete all but one of them on GitHub, or declare each as its own entry`,
+          ),
+        );
+      }
+      const existing = matches[0];
+      const label = `${key}[${name}]`;
+      const secrets = declaredSecrets(decl, write);
+      if (existing === undefined) {
+        plan.ops.push({
+          role: "create",
+          payload:
+            secrets.length === 0
+              ? plainData(write)
+              : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
+          describe: `creating ${noun} "${name}"`,
+          drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
+            missingDrift(label),
+          ]),
+          change: `created ${noun} "${name}"`,
+        });
         continue;
       }
-      // The differing fields ride on the recreate; the generic line alone would leave the reader guessing which field forces the replace.
-      plan.ops.push(
-        {
-          role: "remove",
-          params: decl.address(existing.item),
-          describe: `deleting ${noun} "${name}" before recreating it`,
-          drift: [
-            `${label}: live settings differ from the settings file, and ${plural(noun)} cannot be edited; apply will delete and recreate it`,
-          ],
-          change: `deleted ${noun} "${name}" to recreate it with the declared settings`,
-        },
-        {
-          role: "create",
-          payload: plainData(decl.recreate?.(existing.item, write) ?? write),
-          describe: `recreating ${noun} "${name}"`,
-          drift,
-          change: `recreated ${noun} "${name}"`,
-        },
-      );
-      continue;
-    }
-    const params = decl.address(existing.item);
-    // The mapping's deltas go through updateConfig, which sets named fields only; the general update never carries the mapping.
-    const inMapping = (field: string): boolean =>
-      mapping !== undefined && pathOf(field)[0] === mapping;
-    const mappingDrift = found
-      .filter((delta) => mapping !== undefined && delta.path[0] === mapping)
-      .map(render);
-    const mappingSecrets = secrets.filter(inMapping);
-    if (mapping !== undefined && (hasDrift(mappingDrift) || mappingSecrets.length > 0)) {
-      const config = write[mapping] as ListWrite<string>;
+      const body = yield* await readItem(decl, ctx, existing.item);
+      const compared = comparison(decl, label, write, body, lens.fromLive(body));
+      plan.notes.push(...compared.notes);
+      const found = [
+        ...deltas(compared.write, compared.live, { matchBy: lens.matchBy }),
+        ...(sweep === undefined
+          ? []
+          : omittedDeltas(compared.write, projectOntoSchema(decl.entry, compared.live), {
+              matchBy: lens.matchBy,
+              sweep,
+            })),
+      ];
+      const render = (delta: Delta): string =>
+        renderEntryDelta(key, identity.field, { want: name, live: existing.name }, delta, remedies);
+      const phantom = phantomPaths(found);
+      if (phantom.length > 0) {
+        plan.notes.push(phantomNote(label, phantom, noun, remedies.phantom));
+      }
+      if (update === undefined) {
+        const drift = found.map(render);
+        if (!hasDrift(drift)) {
+          continue;
+        }
+        // The differing fields ride on the recreate; the generic line alone would leave the reader guessing which field forces the replace.
+        plan.ops.push(
+          {
+            role: "remove",
+            params: decl.address(existing.item),
+            describe: `deleting ${noun} "${name}" before recreating it`,
+            drift: [
+              `${label}: live settings differ from the settings file, and ${plural(noun)} cannot be edited; apply will delete and recreate it`,
+            ],
+            change: `deleted ${noun} "${name}" to recreate it with the declared settings`,
+          },
+          {
+            role: "create",
+            payload: plainData(decl.recreate?.(existing.item, write) ?? write),
+            describe: `recreating ${noun} "${name}"`,
+            drift,
+            change: `recreated ${noun} "${name}"`,
+          },
+        );
+        continue;
+      }
+      const params = decl.address(existing.item);
+      // The mapping's deltas go through updateConfig, which sets named fields only; the general update never carries the mapping.
+      const inMapping = (field: string): boolean =>
+        mapping !== undefined && pathOf(field)[0] === mapping;
+      const mappingDrift = found
+        .filter((delta) => mapping !== undefined && delta.path[0] === mapping)
+        .map(render);
+      const mappingSecrets = secrets.filter(inMapping);
+      if (mapping !== undefined && (hasDrift(mappingDrift) || mappingSecrets.length > 0)) {
+        const config = write[mapping] as ListWrite<string>;
+        plan.ops.push({
+          role: "updateConfig",
+          params,
+          payload:
+            mappingSecrets.length === 0
+              ? plainData(config)
+              : (exec: ExecTools) =>
+                  resolvedWrite(
+                    exec,
+                    config,
+                    mappingSecrets.map((field) => pathOf(field).slice(1).join(".")),
+                  ),
+          describe: `updating ${noun} "${name}" ${mapping}`,
+          drift: facetOr(
+            mappingSecrets.length === 0 ? null : secretFacet(decl, label, mappingSecrets),
+            mappingDrift,
+          ),
+          change:
+            mappingSecrets.length === 0
+              ? `updated ${noun} "${name}" ${mapping}`
+              : `updated ${noun} "${name}" ${mapping} (the declared ${mappingSecrets.map(leafOf).join(" and ")} is re-sent every run)`,
+        });
+      }
+      const generalDrift = found
+        .filter((delta) => mapping === undefined || delta.path[0] !== mapping)
+        .map(render);
+      const generalSecrets = secrets.filter((field) => !inMapping(field));
+      if (!hasDrift(generalDrift) && generalSecrets.length === 0) {
+        continue;
+      }
+      const general =
+        mapping === undefined ? (write as Fields) : withoutPaths(write as Fields, [mapping]);
       plan.ops.push({
-        role: "updateConfig",
+        role: "update",
         params,
         payload:
-          mappingSecrets.length === 0
-            ? plainData(config)
+          generalSecrets.length === 0
+            ? plainData(updateBody(decl, general))
             : (exec: ExecTools) =>
-                resolvedWrite(
-                  exec,
-                  config,
-                  mappingSecrets.map((field) => pathOf(field).slice(1).join(".")),
-                ),
-        describe: `updating ${noun} "${name}" ${mapping}`,
-        drift: facetOr(
-          mappingSecrets.length === 0 ? null : secretFacet(decl, label, mappingSecrets),
-          mappingDrift,
+                resolvedWrite(exec, updateBody(decl, general) as ListWrite<string>, generalSecrets),
+        before: refuseOmitted(
+          label,
+          found.flatMap((delta) => (delta.kind === "omitted" ? [render(delta)] : [])),
         ),
-        change:
-          mappingSecrets.length === 0
-            ? `updated ${noun} "${name}" ${mapping}`
-            : `updated ${noun} "${name}" ${mapping} (the declared ${mappingSecrets.map(leafOf).join(" and ")} is re-sent every run)`,
+        describe: `updating ${noun} "${name}"`,
+        drift: facetOr(
+          generalSecrets.length === 0 ? null : secretFacet(decl, label, generalSecrets),
+          generalDrift,
+        ),
+        change: `updated ${noun} "${name}"`,
       });
     }
-    const generalDrift = found
-      .filter((delta) => mapping === undefined || delta.path[0] !== mapping)
-      .map(render);
-    const generalSecrets = secrets.filter((field) => !inMapping(field));
-    if (!hasDrift(generalDrift) && generalSecrets.length === 0) {
-      continue;
-    }
-    const general =
-      mapping === undefined ? (write as Fields) : withoutPaths(write as Fields, [mapping]);
-    plan.ops.push({
-      role: "update",
-      params,
-      payload:
-        generalSecrets.length === 0
-          ? plainData(updateBody(decl, general))
-          : (exec: ExecTools) =>
-              resolvedWrite(exec, updateBody(decl, general) as ListWrite<string>, generalSecrets),
-      before: refuseOmitted(
-        label,
-        found.flatMap((delta) => (delta.kind === "omitted" ? [render(delta)] : [])),
-      ),
-      describe: `updating ${noun} "${name}"`,
-      drift: facetOr(
-        generalSecrets.length === 0 ? null : secretFacet(decl, label, generalSecrets),
-        generalDrift,
-      ),
-      change: `updated ${noun} "${name}"`,
-    });
-  }
 
-  for (const { item, name, key: liveKey } of liveItems) {
-    if (claimed.has(liveKey)) {
-      continue;
+    for (const { item, name, key: liveKey } of liveItems) {
+      if (claimed.has(liveKey)) {
+        continue;
+      }
+      if (policy === "keep") {
+        plan.notes.push(
+          undeclaredNote({
+            subject: `${noun} "${name}"`,
+            action: prose.undeclaredAction,
+            ...prose.undeclaredNote,
+          }),
+        );
+        continue;
+      }
+      plan.ops.push({
+        role: "remove",
+        params: decl.address(item),
+        describe: `deleting undeclared ${noun} "${name}"`,
+        drift: [
+          undeclaredDrift(defaultPolicy, {
+            label: `${key}[${name}]`,
+            action: prose.undeclaredAction,
+            ...prose.undeclaredDrift,
+          }),
+        ],
+        change: `DELETED undeclared ${noun} "${name}"`,
+      });
     }
-    if (policy === "keep") {
-      plan.notes.push(
-        undeclaredNote({
-          subject: `${noun} "${name}"`,
-          action: prose.undeclaredAction,
-          ...prose.undeclaredNote,
-        }),
-      );
-      continue;
-    }
-    plan.ops.push({
-      role: "remove",
-      params: decl.address(item),
-      describe: `deleting undeclared ${noun} "${name}"`,
-      drift: [
-        undeclaredDrift(defaultPolicy, {
-          label: `${key}[${name}]`,
-          action: prose.undeclaredAction,
-          ...prose.undeclaredDrift,
-        }),
-      ],
-      change: `DELETED undeclared ${noun} "${name}"`,
-    });
-  }
-  return plan;
+    return ok(plan);
+  });
 }
 
 // --- Snapshot ---------------------------------------------------------------
@@ -1027,56 +1036,58 @@ async function snapshotList(
   decl: ErasedDecl<string>,
   section: SectionMeta<ListSectionKey>,
   ctx: PlanContext<ListEndpoints>,
-): Promise<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }> {
-  const { key, noun, identity, lens } = decl;
-  const live = await readLive(decl, ctx);
-  const notes = live.foreign.map(({ name, reason }) =>
-    leftOutOfSnapshot(`${key}[${name}]`, reason),
-  );
-  if (live.managed.length === 0) {
-    return { value: undefined, notes };
-  }
-  const items = live.managed.map((item) => {
-    const name = nameOf(lens.fromLive(item), identity.field);
-    return { item, name, key: identity.fold(name) };
-  });
-  raise(
-    liveByIdentity(
+): Promise<
+  Result<{ value: UndeclaredPolicyList<object> | undefined; notes: string[] }, SectionFailure>
+> {
+  return safeTry(async function* () {
+    const { key, noun, identity, lens } = decl;
+    const live = yield* readLive(decl, ctx);
+    const notes = live.foreign.map(({ name, reason }) =>
+      leftOutOfSnapshot(`${key}[${name}]`, reason),
+    );
+    if (live.managed.length === 0) {
+      return ok({ value: undefined, notes });
+    }
+    const items = live.managed.map((item) => {
+      const name = nameOf(lens.fromLive(item), identity.field);
+      return { item, name, key: identity.fold(name) };
+    });
+    yield* liveByIdentity(
       section,
       noun,
       items,
       (item) => item.key,
       (item) => liveIdentity(item.name, decl.address(item.item)),
-    ),
-  );
-  const entries: object[] = [];
-  for (const { item, name } of items) {
-    const label = `${key}[${name}]`;
-    const body = await readItem(decl, ctx, item);
-    const hidden = decl.concealed?.(body) ?? [];
-    if (hidden.length > 0) {
-      for (const { field, reason, remedy } of hidden) {
-        notes.push(
-          leftOutOfSnapshot(
-            label,
-            `${field} is not visible to this token (${reason}), and an entry without it would clear it on the next update; ${remedy} to read it back`,
-          ),
-        );
+    );
+    const entries: object[] = [];
+    for (const { item, name } of items) {
+      const label = `${key}[${name}]`;
+      const body = yield* await readItem(decl, ctx, item);
+      const hidden = decl.concealed?.(body) ?? [];
+      if (hidden.length > 0) {
+        for (const { field, reason, remedy } of hidden) {
+          notes.push(
+            leftOutOfSnapshot(
+              label,
+              `${field} is not visible to this token (${reason}), and an entry without it would clear it on the next update; ${remedy} to read it back`,
+            ),
+          );
+        }
+        continue;
       }
-      continue;
+      let entry = projectOntoSchema(decl.entry, lens.fromLive(body)) as Fields;
+      for (const field of declaredSecrets(decl, entry)) {
+        const id = Object.values(decl.address(item)).join("_");
+        const { variable, reference } = snapshotSecretReference(noun, id);
+        notes.push(
+          unreadableSecretNote(`${label}.${field}`, `the ${noun} ${leafOf(field)}`, variable),
+        );
+        entry = withValueAt(entry, pathOf(field), reference);
+      }
+      entries.push(entry);
     }
-    let entry = projectOntoSchema(decl.entry, lens.fromLive(body)) as Fields;
-    for (const field of declaredSecrets(decl, entry)) {
-      const id = Object.values(decl.address(item)).join("_");
-      const { variable, reference } = snapshotSecretReference(noun, id);
-      notes.push(
-        unreadableSecretNote(`${label}.${field}`, `the ${noun} ${leafOf(field)}`, variable),
-      );
-      entry = withValueAt(entry, pathOf(field), reference);
-    }
-    entries.push(entry);
-  }
-  return { value: knobbedSnapshot(section, entries), notes };
+    return ok({ value: knobbedSnapshot(section, entries), notes });
+  });
 }
 
 // --- Module -----------------------------------------------------------------
@@ -1133,13 +1144,13 @@ export function listSection<
         section,
         ctx as unknown as PlanContext<ListEndpoints>,
         desired as unknown as ErasedDeclared,
-      ) as unknown as Promise<SectionPlan<PlannedOp<Ends>>>,
+      ) as unknown as Promise<Result<SectionPlan<PlannedOp<Ends>>, SectionFailure>>,
     snapshot: (ctx) =>
       snapshotList(
         erased,
         section,
         ctx as unknown as PlanContext<ListEndpoints>,
-      ) as unknown as Promise<SectionSnapshot<K>>,
+      ) as unknown as Promise<Result<SectionSnapshot<K>, SectionFailure>>,
     decl,
   };
   return section;

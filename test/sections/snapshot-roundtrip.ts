@@ -11,7 +11,7 @@ import { planDrift, type SectionPlan, snapshotContext } from "../../src/sections
 import type { LiveState } from "../e2e/mock/state.js";
 import type { FragmentFake } from "./fragment-fake.js";
 import { identityOf, unconvergedOps } from "./plan-idempotence.js";
-import { REPO } from "./section-run.js";
+import { REPO, unwrap } from "./section-run.js";
 import { validatedInput } from "./validated-input.js";
 
 /** A section module that declares snapshot(). */
@@ -31,7 +31,7 @@ export async function proveSnapshotRoundTrip(
   api: FragmentFake,
 ): Promise<{ snapshot: SectionSnapshot; plan: SectionPlan }> {
   const ctx = snapshotContext(section, api, REPO, "fail");
-  const snapshot = await section.snapshot(ctx);
+  const snapshot = unwrap(await section.snapshot(ctx));
   expect(api.writes, `${section.key}: snapshot() issued a write`).toEqual([]);
   if (snapshot.value === undefined) {
     throw new Error(
@@ -39,7 +39,7 @@ export async function proveSnapshotRoundTrip(
     );
   }
   // A snapshot value is a settings document in the making, so it passes the same validation a file would.
-  const plan = await section.plan(ctx, validatedInput(section.key, snapshot.value));
+  const plan = unwrap(await section.plan(ctx, validatedInput(section.key, snapshot.value)));
   expect(
     planDrift(plan),
     `${section.key}: the snapshot value drifts from the live state it was read from, so the projection does not match the section's write shape`,

@@ -3,7 +3,7 @@
  * share. All output goes through the Io sink; callers decide how to tag lines per repository.
  */
 
-import { err, type Result } from "neverthrow";
+import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
@@ -21,7 +21,7 @@ import {
   type SectionKey,
   type SettingsFile,
 } from "../schema.js";
-import { PermissionDenied } from "../sections/contract/errors.js";
+import { type SectionFailure, thrown } from "../sections/contract/errors.js";
 import type { ValidatedInput } from "../sections/contract/module.js";
 import {
   type ExecTools,
@@ -217,13 +217,13 @@ export async function preflightProbe(
         `BUG: preflightProbe was given section "${section.key}" but the settings document does not declare it; the active list must be filtered to declared sections`,
       );
     }
-    try {
-      await section.plan(planContext(section, api, repo), declared);
-    } catch (error) {
-      if (error instanceof PermissionDenied) {
-        denied.push(`${section.key}: ${error.detail}`);
-      }
-      // Other preflight errors are left for the section loop, which surfaces them with full context.
+    // A client throw (an unmarked request's transport error) is not a denial; like every other preflight failure it
+    // is left for the section loop, which surfaces it with full context.
+    const planned = await section
+      .plan(planContext(section, api, repo), declared)
+      .catch((error: unknown) => err(thrown(error)));
+    if (planned.isErr() && planned.error.kind === "permission-denied") {
+      denied.push(`${section.key}: ${planned.error.detail}`);
     }
   }
   return denied;
@@ -371,7 +371,7 @@ export async function runForRepo(
         `BUG: section "${section.key}" was classified active but the settings document does not declare it`,
       );
     }
-    let result:
+    type Outcome =
       | { check: true; drift: string[]; notes: string[] }
       | { check: false; changes: string[]; notes: string[] };
     // What the section produced before an operation failed, reported with the failure instead of vanishing. `landed`
@@ -381,20 +381,27 @@ export async function runForRepo(
       changes: [],
       landed: 0,
     };
-    try {
-      const plan = await section.plan(planContext(section, api, repo), desired);
-      if (tools === null) {
-        result = { check: true, drift: planDrift(plan), notes: planCheckNotes(plan) };
-      } else {
-        const execution = await executePlan(plan, section, api, repo, tools);
-        const notes = [...plan.notes, ...plan.drift, ...execution.notes];
-        produced = { notes, changes: execution.changes, landed: execution.landed };
-        if (execution.status === "failed") {
-          throw execution.error;
-        }
-        result = { check: false, changes: [...execution.changes], notes };
+    // The section's plan and its execution, each ending in a value; the catch is for what still throws (the
+    // client's own transport error on an unmarked request, a BUG invariant), reported like any other failure.
+    const step = await (async (): Promise<Result<Outcome, SectionFailure>> => {
+      const planned = await section.plan(planContext(section, api, repo), desired);
+      if (planned.isErr()) {
+        return err(planned.error);
       }
-    } catch (error) {
+      const plan = planned.value;
+      if (tools === null) {
+        return ok({ check: true, drift: planDrift(plan), notes: planCheckNotes(plan) });
+      }
+      const execution = await executePlan(plan, section, api, repo, tools);
+      const notes = [...plan.notes, ...plan.drift, ...execution.notes];
+      produced = { notes, changes: execution.changes, landed: execution.landed };
+      if (execution.status === "failed") {
+        return err(execution.failure);
+      }
+      return ok({ check: false, changes: [...execution.changes], notes });
+    })().catch((error: unknown) => err(thrown(error)));
+    if (step.isErr()) {
+      const failure = step.error;
       for (const note of produced.notes) {
         io.annotate("notice", `${section.key}: ${note}`);
       }
@@ -402,17 +409,17 @@ export async function runForRepo(
         io.log(`${section.key}: ${line}`);
       }
       const before = [...produced.notes, ...produced.changes];
-      if (error instanceof PermissionDenied) {
+      if (failure.kind === "permission-denied") {
         const required = opts.sections.required.has(section.key);
         // A denial after some operations landed is a partial mutation, never a skip: the warn policy applies only when nothing was written.
         const landed = produced.landed;
         if (opts.onMissingPermission === "warn" && !required && landed === 0) {
-          io.annotate("warning", `${section.key}: skipped - ${error.detail}`);
+          io.annotate("warning", `${section.key}: skipped - ${failure.detail}`);
           outcomes.push({
             key: section.key,
             status: "skipped",
-            detail: [...before, error.detail],
-            httpStatus: error.status,
+            detail: [...before, failure.detail],
+            httpStatus: failure.status,
           });
           partial = true;
           continue;
@@ -425,23 +432,22 @@ export async function runForRepo(
               : "";
         io.annotate(
           "error",
-          `${section.key}: ${landed > 0 ? "partially applied" : "not applied"}${why} - ${error.detail}`,
+          `${section.key}: ${landed > 0 ? "partially applied" : "not applied"}${why} - ${failure.detail}`,
         );
         outcomes.push({
           key: section.key,
           status: "failed",
-          detail: [...before, error.detail],
-          httpStatus: error.status,
+          detail: [...before, failure.detail],
+          httpStatus: failure.status,
         });
         failed = true;
         continue;
       }
       // failureFor() messages already carry section, cause, and fix; anything else gets the section prefixed. A landed
       // request is a real mutation with or without its line, so say so.
-      const message = error instanceof Error ? error.message : String(error);
-      const prefixed = message.startsWith(`${section.key}:`)
-        ? message
-        : `${section.key}: ${message}`;
+      const prefixed = failure.message.startsWith(`${section.key}:`)
+        ? failure.message
+        : `${section.key}: ${failure.message}`;
       const annotated =
         produced.landed > 0
           ? `${prefixed} (${countNoun(produced.landed, "request", "requests")} landed before this failure, so the repository is partially applied)`
@@ -451,21 +457,22 @@ export async function runForRepo(
       failed = true;
       continue;
     }
-    for (const note of result.notes) {
+    const outcome = step.value;
+    for (const note of outcome.notes) {
       io.annotate("notice", `${section.key}: ${note}`);
     }
-    if (result.check) {
-      if (result.drift.length > 0) {
+    if (outcome.check) {
+      if (outcome.drift.length > 0) {
         drifted = true;
-        for (const line of result.drift) {
+        for (const line of outcome.drift) {
           io.log(`drift: ${line}`);
         }
-        outcomes.push({ key: section.key, status: "drift", detail: result.drift });
+        outcomes.push({ key: section.key, status: "drift", detail: outcome.drift });
       } else {
-        outcomes.push({ key: section.key, status: "clean", detail: result.notes });
+        outcomes.push({ key: section.key, status: "clean", detail: outcome.notes });
       }
     } else {
-      for (const line of result.changes) {
+      for (const line of outcome.changes) {
         io.log(`${section.key}: ${line}`);
       }
       outcomes.push({
@@ -474,10 +481,10 @@ export async function runForRepo(
         // A section that changed nothing but left notes (a tolerated 409, a personal-account skip) is NOT "already in
         // the desired state"; the notes are shown instead of claiming no changes were needed.
         detail:
-          result.changes.length > 0
-            ? result.changes
-            : result.notes.length > 0
-              ? result.notes
+          outcome.changes.length > 0
+            ? outcome.changes
+            : outcome.notes.length > 0
+              ? outcome.notes
               : ["no changes needed"],
       });
     }

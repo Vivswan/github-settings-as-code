@@ -9,6 +9,8 @@
  * omits into an `omitted` delta, because that write would remove it.
  */
 
+import { err, type Result } from "neverthrow";
+import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
 import { agree } from "../text.js";
 
 type PathStep = string | number | { readonly key: string };
@@ -440,20 +442,18 @@ export function omittedDeltas(
 
 /**
  * Apply never issues a replacing write that would remove what the settings file omits: the operation's `before`
- * hook throws the omitted lines instead, so the run fails for that entry with its request never sent, while check
- * keeps reporting the same lines as drift. Undefined when nothing is omitted.
+ * hook fails with the omitted lines instead, so the run fails for that entry with its request never sent, while
+ * check keeps reporting the same lines as drift. Undefined when nothing is omitted.
  */
 export function refuseOmitted(
   label: string,
   omitted: readonly string[],
-): (() => never) | undefined {
+): (() => Result<never, SectionFailure>) | undefined {
   if (omitted.length === 0) {
     return undefined;
   }
   const message = `${label}: not applied - the update would remove ${agree(omitted.length, "a live value", "live values")} the settings file omits. ${omitted.join(" ")}`;
-  return () => {
-    throw new Error(message);
-  };
+  return () => err(sectionFailure("refused", message));
 }
 
 /** The phantom deltas as dotted paths (`security_and_analysis.foo`, `rules[deletion].x`), for the never-converges note. */

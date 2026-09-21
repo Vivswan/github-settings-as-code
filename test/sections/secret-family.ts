@@ -14,7 +14,7 @@ import {
   unsealSecretValue,
 } from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
-import { REPO } from "./section-run.js";
+import { REPO, unwrap } from "./section-run.js";
 import { validatedInput } from "./validated-input.js";
 
 /** The facts one family owns; everything else is the shared factory's. */
@@ -46,8 +46,10 @@ function listOf(...names: string[]) {
 export function pinSecretFamily({ section, segment, keyId, noun, secretName }: SecretFamilyFacts) {
   const LIST = `GET /repos/o/r/${segment}/secrets?per_page=100&page=1`;
   const PUBLIC_KEY = `GET /repos/o/r/${segment}/secrets/public-key`;
-  const plan = (api: MockApi, declared: SectionInput<RepoSecretsKey>) =>
-    section.plan(planContext(section, api, REPO), validatedInput(section.key, declared));
+  const plan = async (api: MockApi, declared: SectionInput<RepoSecretsKey>) =>
+    unwrap(
+      await section.plan(planContext(section, api, REPO), validatedInput(section.key, declared)),
+    );
 
   describe(section.key, () => {
     test("the plan's drift and notes carry this section's label and noun; the PUT is planned under its route", async () => {

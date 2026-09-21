@@ -7,10 +7,12 @@
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
+import { ok, type Result } from "neverthrow";
 import type { z } from "zod";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
+import type { SectionFailure } from "../contract/errors.js";
 import {
   type DeclaredIssue,
   defaultUndeclaredPolicy,
@@ -105,7 +107,9 @@ type RepoVariablesPlan<K extends RepoVariablesKey> = {
   [F in RepoVariablesKey]: (
     ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>, GraphqlDict, F>,
     declared: ValidatedInput<F>,
-  ) => Promise<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>>;
+  ) => Promise<
+    Result<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>, SectionFailure>
+  >;
 }[K];
 
 /** Every family's routes as one dictionary; see repo-secrets.ts for why the plan is written over it. */
@@ -115,7 +119,7 @@ type WideDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
 
 type WideContext = PlanContext<WideEndpoints>;
 
-type WidePlanned = Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
 
 /** The shared implementation's signature at family F (the brand names the family); the lockstep below compares it to the family's own. */
 type SharedPlanAt<F extends RepoVariablesKey> = (
@@ -159,7 +163,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>, GraphqlDict, K>,
-  ) => Promise<SectionSnapshot<K>>;
+  ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
 }
 
 /**
@@ -211,7 +215,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     > = {
       label: key,
       noun,
-      list: async () => ctx.read.list.listAllEnveloped("variables", LiveVariable),
+      list: () => ctx.read.list.listAllEnveloped("variables", LiveVariable),
       create: (write) => ({
         role: "create",
         payload: write.payload,
@@ -238,16 +242,20 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     return planVariables(section, scope, { entries, policy, defaultPolicy });
   };
 
-  const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
-    const live = await ctx.read.list.listAllEnveloped("variables", LiveVariable);
-    if (live.length === 0) {
-      return { value: undefined, notes: [] };
-    }
-    const entries = [...liveVariablesByKey(section, noun, live).values()].map((variable) =>
-      projectOntoSchema(VARIABLES_ENTRIES[key], variable),
-    );
-    return { value: knobbedSnapshot(section, entries), notes: [] };
-  };
+  const snapshot = async (
+    ctx: SnapshotContext<WideEndpoints>,
+  ): Promise<Result<WideSnapshot, SectionFailure>> =>
+    ctx.read.list.listAllEnveloped("variables", LiveVariable).andThen((live) => {
+      if (live.length === 0) {
+        return ok<WideSnapshot, SectionFailure>({ value: undefined, notes: [] });
+      }
+      return liveVariablesByKey(section, noun, live).map((byKey) => {
+        const entries = [...byKey.values()].map((variable) =>
+          projectOntoSchema(VARIABLES_ENTRIES[key], variable),
+        );
+        return { value: knobbedSnapshot(section, entries), notes: [] };
+      });
+    });
 
   const section: RepoVariablesSectionModule<K> = {
     key,

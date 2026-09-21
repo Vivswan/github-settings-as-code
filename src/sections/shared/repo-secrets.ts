@@ -7,12 +7,14 @@
  *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
  */
 
+import { ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { snapshotSecretReference } from "../../engine/secrets.js";
 import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
+import type { SectionFailure } from "../contract/errors.js";
 import {
   type DeclaredIssue,
   defaultUndeclaredPolicy,
@@ -118,7 +120,9 @@ type RepoSecretsPlan<K extends RepoSecretsKey> = {
   [F in RepoSecretsKey]: (
     ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<F>>, GraphqlDict, F>,
     declared: ValidatedInput<F>,
-  ) => Promise<SectionPlan<PlannedOp<RepoSecretsEndpoints<SecretsSegment<F>>>>>;
+  ) => Promise<
+    Result<SectionPlan<PlannedOp<RepoSecretsEndpoints<SecretsSegment<F>>>>, SectionFailure>
+  >;
 }[K];
 
 /**
@@ -132,7 +136,7 @@ type WideDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
 
 type WideContext = PlanContext<WideEndpoints>;
 
-type WidePlanned = Promise<SectionPlan<PlannedOp<WideEndpoints>>>;
+type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
 
 /** The shared implementation's signature at family F (the brand names the family); the lockstep below compares it to the family's own. */
 type SharedPlanAt<F extends RepoSecretsKey> = (
@@ -192,7 +196,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>, GraphqlDict, K>,
-  ) => Promise<SectionSnapshot<K>>;
+  ) => Promise<Result<SectionSnapshot<K>, SectionFailure>>;
 }
 
 /**
@@ -251,7 +255,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     const scope: SecretsPlanScope<Described<"put">, Described<"remove">> = {
       label: key,
       noun,
-      list: async () => ctx.read.list.listAllEnveloped("secrets", LiveSecretName),
+      list: () => ctx.read.list.listAllEnveloped("secrets", LiveSecretName),
       publicKey: (exec, describe) => ctx.read.publicKey.call(exec, z.unknown(), { describe }),
       publicKeyEndpoint: wide.publicKey,
       put: (write) => ({
@@ -276,21 +280,25 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
   // GitHub lists names only, so each entry carries the per-store reference the operator must
   // export before an apply, and a note says so per secret. The engine's index hands back the
   // uppercase keys GitHub stores and the planner compares by, so the reference grammar holds.
-  const snapshot = async (ctx: SnapshotContext<WideEndpoints>): Promise<WideSnapshot> => {
-    const live = await ctx.read.list.listAllEnveloped("secrets", LiveSecretName);
-    if (live.length === 0) {
-      return { value: undefined, notes: [] };
-    }
-    const references = [...liveSecretsByKey(section, noun, live).keys()].map((name) => ({
-      name,
-      ...snapshotSecretReference(pathSegment, name),
-    }));
-    const entries = references.map(({ name, reference }) => ({ name, value: reference }));
-    const notes = references.map(({ name, variable }) =>
-      unreadableSecretNote(`${key}[${name}]`, name, variable),
-    );
-    return { value: knobbedSnapshot(section, entries), notes };
-  };
+  const snapshot = async (
+    ctx: SnapshotContext<WideEndpoints>,
+  ): Promise<Result<WideSnapshot, SectionFailure>> =>
+    ctx.read.list.listAllEnveloped("secrets", LiveSecretName).andThen((live) => {
+      if (live.length === 0) {
+        return ok<WideSnapshot, SectionFailure>({ value: undefined, notes: [] });
+      }
+      return liveSecretsByKey(section, noun, live).map((byKey) => {
+        const references = [...byKey.keys()].map((name) => ({
+          name,
+          ...snapshotSecretReference(pathSegment, name),
+        }));
+        const entries = references.map(({ name, reference }) => ({ name, value: reference }));
+        const notes = references.map(({ name, variable }) =>
+          unreadableSecretNote(`${key}[${name}]`, name, variable),
+        );
+        return { value: knobbedSnapshot(section, entries), notes };
+      });
+    });
 
   const section: RepoSecretsSectionModule<K> = {
     key,

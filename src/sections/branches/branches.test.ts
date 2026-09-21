@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Result } from "neverthrow";
 import { executePlan } from "../../../src/engine/execute.js";
 import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
@@ -21,7 +22,7 @@ import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { registryFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { failureOf, REPO, unwrap } from "../../../test/sections/section-run.js";
 import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import {
@@ -30,7 +31,7 @@ import {
   matchesTemplate,
   pathSegments,
 } from "../contract/endpoints.js";
-import { PermissionDenied } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
 import {
   type ExplicitKeys,
@@ -50,10 +51,12 @@ import type { BranchProtectionConfig } from "./schema.js";
 /** The bare-list form of the section's value; the tests never hand plan() the `{_layering, entries}` wrapper. */
 type Desired = Extract<SectionInput<"branches">, readonly unknown[]>;
 
-const plan = (api: GitHubClient, desired: Desired) =>
-  branchesSection.plan(
-    planContext(branchesSection, api, REPO),
-    validatedInput("branches", desired),
+const plan = async (api: GitHubClient, desired: Desired) =>
+  unwrap(
+    await branchesSection.plan(
+      planContext(branchesSection, api, REPO),
+      validatedInput("branches", desired),
+    ),
   );
 
 /** The tools no branches plan ever needs: the section declares no secret values. */
@@ -241,9 +244,9 @@ describe("branches", () => {
       NO_SECRETS,
     );
     expect(execution.status).toBe("failed");
-    const error = (execution as { error: unknown }).error;
-    expect(error).not.toBeInstanceOf(PermissionDenied);
-    expect((error as Error).message).toBe(
+    const failure = (execution as { failure: SectionFailure }).failure;
+    expect(failure.kind).not.toBe("permission-denied");
+    expect(failure.message).toBe(
       `branches: replacing protection for branch "main" failed - ${put}: 404 Branch not found. The declared branch does not exist on the repo, so its protection cannot be applied; create the branch, or remove it from the settings file`,
     );
     expect(denied.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([put]);
@@ -833,7 +836,7 @@ describe("branches GraphQL-routed keys", () => {
         [],
         writes.length,
       ]);
-      expect(String((execution as { error: Error }).error.message)).toMatch(
+      expect((execution as { failure: SectionFailure }).failure.message).toMatch(
         /silently dropped \[ghost\].*environments: section/s,
       );
       expect(api.writes.map((w) => `${w.method} ${w.path}`)).toEqual(writes);
@@ -874,7 +877,15 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
     const variables = result.ops[0]?.variables;
     expect(typeof variables).toBe("function");
-    expect(await (variables as (exec: typeof NO_SECRETS) => unknown)(NO_SECRETS)).toEqual({
+    expect(
+      unwrap(
+        await (
+          variables as unknown as (
+            exec: typeof NO_SECRETS,
+          ) => Promise<Result<unknown, SectionFailure>>
+        )(NO_SECRETS),
+      ),
+    ).toEqual({
       input: {
         branchProtectionRuleId: "RULE:main",
         bypassForcePushActorIds: ["U_2"],
@@ -1012,7 +1023,7 @@ describe("branches GraphQL-routed keys", () => {
     // With no rule id in hand the update looks it up at execution, where the still-unreadable view fails the operation by name instead of silently.
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: Error }).error.message)).toMatch(
+    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
       /no branch protection rule with that pattern is visible through GraphQL/,
     );
     expect(api.mutations()).toHaveLength(0);
@@ -1039,7 +1050,7 @@ describe("branches GraphQL-routed keys", () => {
     expect(result.ops.map((op) => op.role)).toEqual(["putProtection", "updateRule"]);
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: Error }).error.message)).toMatch(
+    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
       /no team with slug "ghost-team"/,
     );
     expect(api.mutations()).toHaveLength(0);
@@ -1061,7 +1072,7 @@ describe("branches GraphQL-routed keys", () => {
     expect(api.calls.filter((c) => c.path.startsWith("BranchProtectionActor"))).toHaveLength(0);
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: Error }).error.message)).toBe(GHOST_ACTOR_ERROR);
+    expect((execution as { failure: SectionFailure }).failure.message).toBe(GHOST_ACTOR_ERROR);
     expect(execution.landed).toBe(0);
     expect(api.mutations()).toHaveLength(0);
   });
@@ -1093,7 +1104,7 @@ describe("branches GraphQL-routed keys", () => {
       changes: [],
       notes: [],
       landed: 0,
-      error: new Error(GHOST_ACTOR_ERROR),
+      failure: { kind: "live-shape", message: GHOST_ACTOR_ERROR },
     });
     expect(api.mutations()).toHaveLength(0);
   });
@@ -1115,7 +1126,7 @@ describe("branches GraphQL-routed keys", () => {
     ]);
     const execution = await executePlan(result, branchesSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: Error }).error.message)).toMatch(
+    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
       /returned no rule to read back/,
     );
   });
@@ -1193,7 +1204,15 @@ describe("branches wildcard entries", () => {
     expect(api.calls.map((c) => c.path)).toEqual(["BranchProtectionRules"]);
     const variables = create?.variables;
     expect(typeof variables).toBe("function");
-    expect(await (variables as (exec: typeof NO_SECRETS) => unknown)(NO_SECRETS)).toEqual({
+    expect(
+      unwrap(
+        await (
+          variables as unknown as (
+            exec: typeof NO_SECRETS,
+          ) => Promise<Result<unknown, SectionFailure>>
+        )(NO_SECRETS),
+      ),
+    ).toEqual({
       input: { repositoryId: "R_1", pattern: "release/*", isAdminEnforced: true },
     });
     expect(api.calls.map((c) => c.path)).toEqual([
@@ -1673,8 +1692,8 @@ describe("branches snapshot", () => {
         error: { status: 404, message: "Branch not protected", body: "" },
       },
     });
-    const snapshot = await branchesSection.snapshot(
-      snapshotContext(branchesSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail")),
     );
     expect(snapshot.value?.map((entry) => entry.name)).toEqual(["main"]);
     expect(snapshot.notes).toEqual([]);
@@ -1708,8 +1727,8 @@ describe("branches snapshot", () => {
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [] },
       "GRAPHQL BranchProtectionRulesSnapshot": rulesData([]),
     });
-    const snapshot = await branchesSection.snapshot(
-      snapshotContext(branchesSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail")),
     );
     expect(snapshot).toEqual({ value: undefined, notes: [] });
   });
@@ -1957,8 +1976,8 @@ describe("branches snapshot", () => {
         ruleNode("main", { isAdminEnforced: true }),
       ]),
     });
-    const snapshot = await branchesSection.snapshot(
-      snapshotContext(branchesSection, api, REPO, "fail"),
+    const snapshot = unwrap(
+      await branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail")),
     );
     expect(snapshot).toEqual({
       value: undefined,
@@ -1981,9 +2000,11 @@ describe("branches snapshot", () => {
       "GET /repos/o/r/branches?protected=true&per_page=100&page=1": { data: [{ name: "main" }] },
       "GRAPHQL BranchProtectionRulesSnapshot": { error: denied },
     });
-    const failure = branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail"));
-    await expect(failure).rejects.toBeInstanceOf(PermissionDenied);
-    await expect(failure).rejects.toThrow(
+    const failure = failureOf(
+      await branchesSection.snapshot(snapshotContext(branchesSection, api, REPO, "fail")),
+    );
+    expect(failure.kind).toBe("permission-denied");
+    expect(failure.message).toContain(
       "branches: the token was denied GRAPHQL BranchProtectionRulesSnapshot: 404 Could not resolve to a " +
         'Repository with the given name (a 404 here can also mean the resource does not exist). To fix, grant "Administration" ' +
         "(read and write) under the PAT's Repository permissions",

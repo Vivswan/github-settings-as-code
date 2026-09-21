@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { err } from "neverthrow";
+import { err, ok } from "neverthrow";
 
 import {
   preflightProbe,
@@ -126,7 +126,7 @@ describe("runForRepo", () => {
       desired: unknown,
     ) => {
       received.push(desired);
-      return { ops: [], notes: [], drift: [] };
+      return ok({ ops: [], notes: [], drift: [] });
     }) as never);
     try {
       const result = await runForRepo(
@@ -788,11 +788,13 @@ describe("runForRepo plan sections", () => {
     });
     const stub = (section: SectionModule, ...ops: SectionPlan["ops"]) => {
       // A restored spy no longer intercepts, so each test arms its own.
-      stubbed = spyOn(section, "plan").mockResolvedValue({
-        ops: ops as never,
-        notes: [],
-        drift: [],
-      });
+      stubbed = spyOn(section, "plan").mockResolvedValue(
+        ok({
+          ops: ops as never,
+          notes: [],
+          drift: [],
+        }),
+      );
     };
     const disabling = (workflowId: string): SectionPlan["ops"][number] => ({
       role: "disable",

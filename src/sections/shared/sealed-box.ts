@@ -7,6 +7,7 @@
 import { hsalsa, xsalsa20poly1305 } from "@noble/ciphers/salsa.js";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { blake2b } from "@noble/hashes/blake2.js";
+import { err, ok, type Result } from "neverthrow";
 
 /** An X25519 public key's length; parseSealingKey names it in a wrong-length rejection. */
 export const SEALED_BOX_PUBLIC_KEY_BYTES = 32;
@@ -27,16 +28,16 @@ const HSALSA_SIGMA = new Uint32Array(new TextEncoder().encode("expand 32-byte k"
 const ZERO_INPUT = new Uint32Array(4);
 
 /**
- * Decode canonical padded base64 (RFC 4648 section 4) or throw, as libsodium's
- * from_base64 did. Buffer's decoder skips bad characters and tolerates missing
- * padding and nonzero padding bits, so only a re-encode round trip is exact.
+ * Decode canonical padded base64 (RFC 4648 section 4), as strictly as libsodium's from_base64 did.
+ * Buffer's decoder skips bad characters and tolerates missing padding and nonzero padding bits, so
+ * only a re-encode round trip is exact; a text that does not round-trip is the failure.
  */
-export function decodeBase64(text: string): Uint8Array {
+export function decodeBase64(text: string): Result<Uint8Array, "not canonical base64"> {
   const bytes = new Uint8Array(Buffer.from(text, "base64"));
   if (Buffer.from(bytes).toString("base64") !== text) {
-    throw new Error("not canonical base64");
+    return err("not canonical base64");
   }
-  return bytes;
+  return ok(bytes);
 }
 
 /**

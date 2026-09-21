@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err } from "neverthrow";
 import {
   type Delta,
   deltas,
@@ -313,15 +314,23 @@ describe("replace-style writes", () => {
     expect(deltas(desired, live, { matchBy })).toEqual([]);
   });
 
-  test("refuseOmitted is nothing without omitted lines, and otherwise a hook that throws them as one failure", () => {
+  test("refuseOmitted is nothing without omitted lines, and otherwise a hook that refuses with them as one failure", () => {
     expect(refuseOmitted("rulesets[main]", [])).toBeUndefined();
     const one = refuseOmitted("rulesets[main]", ["rulesets[main].bypass_actors: live has [1]"]);
-    expect(one).toThrow(
-      "rulesets[main]: not applied - the update would remove a live value the settings file omits. rulesets[main].bypass_actors: live has [1]",
+    expect(one?.()).toEqual(
+      err({
+        kind: "refused",
+        message:
+          "rulesets[main]: not applied - the update would remove a live value the settings file omits. rulesets[main].bypass_actors: live has [1]",
+      }),
     );
     const two = refuseOmitted("environments[prod]", ["a line", "another line"]);
-    expect(two).toThrow(
-      "environments[prod]: not applied - the update would remove live values the settings file omits. a line another line",
+    expect(two?.()).toEqual(
+      err({
+        kind: "refused",
+        message:
+          "environments[prod]: not applied - the update would remove live values the settings file omits. a line another line",
+      }),
     );
   });
 });

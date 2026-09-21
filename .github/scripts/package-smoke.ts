@@ -63,6 +63,7 @@ const TS_CONSUMER = `import {
   planContext,
   type RepoRef,
   SECTION_KEYS,
+  type SectionFailure,
   type SectionKey,
   type SectionPlan,
   type SectionSnapshot,
@@ -73,6 +74,7 @@ const TS_CONSUMER = `import {
   validateSettings,
 } from "${PACKAGE}";
 import { type InputName, INPUT_DECLS } from "${PACKAGE}/internal";
+import type { Result } from "neverthrow";
 const first: SectionKey | undefined = SECTION_KEYS[0];
 export const policy: InputName = "on-missing-permission";
 export const policyDefault: string = INPUT_DECLS["on-missing-permission"].default;
@@ -84,7 +86,9 @@ declare const client: GitHubClient;
 declare const repo: RepoRef;
 const labels = sectionModule("labels");
 const snapshotCtx = snapshotContext(labels, client, repo, "warn");
-export const direct = (): Promise<[SectionPlan, SectionSnapshot<"labels"> | undefined]> =>
+export const direct = (): Promise<
+  [Result<SectionPlan, SectionFailure>, Result<SectionSnapshot<"labels">, SectionFailure> | undefined]
+> =>
   Promise.all([
     labels.plan(planContext(labels, client, repo), validatedLabels),
     labels.snapshot?.(snapshotCtx),

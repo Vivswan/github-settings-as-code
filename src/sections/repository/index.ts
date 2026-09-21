@@ -1,6 +1,8 @@
+import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
 import {
   cannotVerifyNote,
@@ -13,10 +15,12 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
+  type ChangeLines,
   hasDrift,
   type PlanContext,
   type PlannedOp,
   plainData,
+  type Read,
   type SectionPlan,
 } from "../contract/plan.js";
 import { readOrNote } from "../shared/snapshot-helpers.js";
@@ -365,18 +369,21 @@ function decodeRoutedFields(
   fields: Record<string, unknown>,
   routed: readonly RoutedKey[],
   opName: string,
-): Record<string, unknown> {
+): Result<Record<string, unknown>, SectionFailure> {
   const values: Record<string, unknown> = {};
   for (const entry of routed) {
     const decoded = entry.decode(fields[entry.field]);
     if (decoded === undefined) {
-      throw new Error(
-        `repository: ${unreadableRoutedValue(entry, fields[entry.field], opName)}. Drop the key, or update the action if GitHub's vocabulary moved`,
+      return err(
+        sectionFailure(
+          "live-shape",
+          `repository: ${unreadableRoutedValue(entry, fields[entry.field], opName)}. Drop the key, or update the action if GitHub's vocabulary moved`,
+        ),
       );
     }
     values[entry.key] = decoded;
   }
-  return values;
+  return ok(values);
 }
 
 interface LiveRoutedState {
@@ -402,24 +409,32 @@ const LiveFeatures = z.looseObject({
 /** The Repository object of a features read, with the node id the mutation addresses. */
 function repositoryNode(
   data: z.infer<typeof LiveFeatures>,
-): Record<string, unknown> & { id: string } {
+): Result<Record<string, unknown> & { id: string }, SectionFailure> {
   const repository = data.repository;
   if (repository === null || repository === undefined) {
-    throw new Error(
-      `repository: GRAPHQL ${FEATURES_QUERY.name} returned no repository object with an id, so the ${GRAPHQL_ROUTED_KEYS.map((entry) => entry.key).join("/")} state cannot be read. Check the token's repository access`,
+    return err(
+      sectionFailure(
+        "live-shape",
+        `repository: GRAPHQL ${FEATURES_QUERY.name} returned no repository object with an id, so the ${GRAPHQL_ROUTED_KEYS.map((entry) => entry.key).join("/")} state cannot be read. Check the token's repository access`,
+      ),
     );
   }
-  return repository;
+  return ok(repository);
 }
 
-async function fetchRoutedState(
+function fetchRoutedState(
   ctx: RepositoryContext,
   routed: readonly RoutedKey[],
-): Promise<LiveRoutedState> {
-  const repository = repositoryNode(
-    await ctx.read.featuresQuery.call(LiveFeatures, repoVariables(ctx)),
-  );
-  return { id: repository.id, values: decodeRoutedFields(repository, routed, FEATURES_QUERY.name) };
+): Read<LiveRoutedState> {
+  return ctx.read.featuresQuery
+    .call(LiveFeatures, repoVariables(ctx))
+    .andThen(repositoryNode)
+    .andThen((repository) =>
+      decodeRoutedFields(repository, routed, FEATURES_QUERY.name).map((values) => ({
+        id: repository.id,
+        values,
+      })),
+    );
 }
 
 /** Exported for the table-driven test that pins each toggle to its own PUT/DELETE pair, never the base PATCH. */
@@ -456,228 +471,249 @@ export const repositorySection = {
   graphql: GRAPHQL_OPS,
   shape: requirePlainMapping(loosen(RepositoryConfig)),
   async plan(ctx, declared) {
-    const plan: RepositoryPlan = { ops: [], notes: [], drift: [] };
-    const desired: Record<string, unknown> = declared;
-    const patch: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(desired)) {
-      if (!SPECIAL_KEYS.has(key)) {
-        patch[key] = value;
+    const section = this;
+    return safeTry(async function* () {
+      const plan: RepositoryPlan = { ops: [], notes: [], drift: [] };
+      const desired: Record<string, unknown> = declared;
+      const patch: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(desired)) {
+        if (!SPECIAL_KEYS.has(key)) {
+          patch[key] = value;
+        }
       }
-    }
 
-    const live = await ctx.read.get.call(LiveRepository);
-    if (Object.keys(patch).length > 0) {
-      // The PATCH is diff-gated and the fields pass through, so a declared key GitHub ignores would
-      // re-PATCH on every apply without converging.
-      const phantom = phantomKeys(patch, live);
-      if (phantom.length > 0) {
-        plan.notes.push(phantomNote("repository", phantom, "repository", "this PATCH will re-run"));
+      const live = yield* ctx.read.get.call(LiveRepository);
+      if (Object.keys(patch).length > 0) {
+        // The PATCH is diff-gated and the fields pass through, so a declared key GitHub ignores would
+        // re-PATCH on every apply without converging.
+        const phantom = phantomKeys(patch, live);
+        if (phantom.length > 0) {
+          plan.notes.push(
+            phantomNote("repository", phantom, "repository", "this PATCH will re-run"),
+          );
+        }
+        const drift = subsetDiff(patch, live, "repository");
+        if (hasDrift(drift)) {
+          plan.ops.push({
+            role: "update",
+            payload: plainData(patch),
+            drift,
+            change: `patched repository fields: ${Object.keys(patch).join(", ")}`,
+          });
+        }
       }
-      const drift = subsetDiff(patch, live, "repository");
-      if (hasDrift(drift)) {
+      if (declared.topics !== undefined) {
+        const names = normalizeTopics(declared.topics);
+        const drift = subsetDiff(
+          [...names].sort(),
+          [...(live.topics ?? [])].sort(),
+          "repository.topics",
+        );
+        if (hasDrift(drift)) {
+          plan.ops.push({
+            role: "topics",
+            payload: { names },
+            drift,
+            change: `set topics: ${names.join(", ") || "(none)"}`,
+          });
+        }
+      }
+      for (const toggle of READABLE_TOGGLES) {
+        if (!(toggle.key in desired)) {
+          continue;
+        }
+        const want = desired[toggle.key] === true;
+        const probe = yield* ctx.read[toggle.get].probeAbsent(toggle.live);
+        const live = "missing" in probe ? undefined : probe.data;
+        const enabled = live === undefined ? false : toggle.isEnabled(live);
+        if (enabled === want) {
+          continue;
+        }
+        const enforced = live !== undefined && toggle.isEnforced?.(live) === true;
+        const role = want ? toggle.put : toggle.remove;
+        // The write's declared tolerable statuses (409 owner-enforced, 404/422 already off on a remove)
+        // mean nothing changed: a note, never a change line. A write declaring none tolerates nothing.
         plan.ops.push({
-          role: "update",
-          payload: plainData(patch),
-          drift,
-          change: `patched repository fields: ${Object.keys(patch).join(", ")}`,
+          role,
+          drift: [
+            valueDrift(`repository.${toggle.key}`, String(want), String(enabled), {
+              remedy: enforced
+                ? `the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
+                : undefined,
+            }),
+          ],
+          tolerate: {
+            outcome: (error) => ({ note: toggleTolerated(section, toggle, role, error.status) }),
+          },
+          change: `${toggle.label}: ${want ? "enabled" : "disabled"}`,
         });
       }
-    }
-    if (declared.topics !== undefined) {
-      const names = normalizeTopics(declared.topics);
-      const drift = subsetDiff(
-        [...names].sort(),
-        [...(live.topics ?? [])].sort(),
-        "repository.topics",
-      );
-      if (hasDrift(drift)) {
-        plan.ops.push({
-          role: "topics",
-          payload: { names },
-          drift,
-          change: `set topics: ${names.join(", ") || "(none)"}`,
-        });
-      }
-    }
-    for (const toggle of READABLE_TOGGLES) {
-      if (!(toggle.key in desired)) {
-        continue;
-      }
-      const want = desired[toggle.key] === true;
-      const probe = await ctx.read[toggle.get].probeAbsent(toggle.live);
-      const live = "missing" in probe ? undefined : probe.data;
-      const enabled = live === undefined ? false : toggle.isEnabled(live);
-      if (enabled === want) {
-        continue;
-      }
-      const enforced = live !== undefined && toggle.isEnforced?.(live) === true;
-      const role = want ? toggle.put : toggle.remove;
-      // The write's declared tolerable statuses (409 owner-enforced, 404/422 already off on a remove)
-      // mean nothing changed: a note, never a change line. A write declaring none tolerates nothing.
-      plan.ops.push({
-        role,
-        drift: [
-          valueDrift(`repository.${toggle.key}`, String(want), String(enabled), {
-            remedy: enforced
-              ? `the repository owner enforces ${toggle.label}, so apply cannot change it from the repository`
-              : undefined,
+      for (const toggle of WRITE_ONLY_TOGGLES) {
+        if (!(toggle.key in desired)) {
+          continue;
+        }
+        const want = desired[toggle.key] === true;
+        plan.notes.push(
+          cannotVerifyNote(`repository.${toggle.key}`, {
+            why: "GitHub exposes no endpoint to read this state back",
+            what: "it",
+            reasserts: `re-asserts the declared value (${JSON.stringify(desired[toggle.key])})`,
           }),
-        ],
-        tolerate: {
-          outcome: (error) => ({ note: toggleTolerated(this, toggle, role, error.status) }),
-        },
-        change: `${toggle.label}: ${want ? "enabled" : "disabled"}`,
-      });
-    }
-    for (const toggle of WRITE_ONLY_TOGGLES) {
-      if (!(toggle.key in desired)) {
-        continue;
-      }
-      const want = desired[toggle.key] === true;
-      plan.notes.push(
-        cannotVerifyNote(`repository.${toggle.key}`, {
-          why: "GitHub exposes no endpoint to read this state back",
-          what: "it",
-          reasserts: `re-asserts the declared value (${JSON.stringify(desired[toggle.key])})`,
-        }),
-      );
-      plan.ops.push({
-        role: want ? toggle.put : toggle.remove,
-        drift: [],
-        change: `${toggle.label}: ${want ? "enabled" : "disabled"}`,
-      });
-    }
-    const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
-    if (declaredRouted.length > 0) {
-      // The routed-state read supplies the mutation's node id, so the comparison is free and a
-      // converged repo issues no GraphQL write.
-      const liveRouted = await fetchRoutedState(ctx, declaredRouted);
-      const diverged = declaredRouted.filter(
-        (routed) => desired[routed.key] !== liveRouted.values[routed.key],
-      );
-      const [first, ...rest] = diverged;
-      if (first !== undefined) {
-        const variables: FeatureVariables = Object.assign(
-          { repositoryId: liveRouted.id },
-          ...diverged.map((routed) => routed.variables(desired[routed.key])),
         );
         plan.ops.push({
-          role: "updateFeatures",
-          variables,
-          drift: diverged.map((routed) =>
-            valueDrift(
-              `repository.${routed.key}`,
-              routed.show(desired[routed.key]),
-              routed.show(liveRouted.values[routed.key]),
-            ),
-          ) as [string, ...string[]],
-          // The mutation selects the post-state on purpose: a silently ignored field is the REST
-          // failure mode that forced these keys onto GraphQL, so each value is verified against the echo.
-          change: (response) => {
-            const echoedRepo = (
-              response as { updateRepository?: { repository?: Record<string, unknown> } }
-            ).updateRepository?.repository;
-            if (!echoedRepo) {
-              throw new Error(
-                `repository: GRAPHQL ${UPDATE_FEATURES.name} returned no repository echo, so the write cannot be verified. GitHub may have changed the mutation payload; update the action`,
-              );
-            }
-            const echoed = decodeRoutedFields(echoedRepo, diverged, UPDATE_FEATURES.name);
-            const verified = (routed: RoutedKey): string => {
-              if (echoed[routed.key] !== desired[routed.key]) {
-                throw new Error(
-                  `repository: GRAPHQL ${UPDATE_FEATURES.name} was accepted, but GitHub ` +
-                    `reports repository.${routed.key} ${routed.show(echoed[routed.key])} where ` +
-                    `${routed.show(desired[routed.key])} was set, so the write did not take. ` +
-                    `GitHub may restrict this setting on the repository`,
-                );
-              }
-              return `${routed.label}: ${routed.changeText(echoed[routed.key])}`;
-            };
-            return [verified(first), ...rest.map(verified)];
-          },
+          role: want ? toggle.put : toggle.remove,
+          drift: [],
+          change: `${toggle.label}: ${want ? "enabled" : "disabled"}`,
         });
       }
-    }
-    return plan;
+      const declaredRouted = GRAPHQL_ROUTED_KEYS.filter((routed) => routed.key in desired);
+      if (declaredRouted.length > 0) {
+        // The routed-state read supplies the mutation's node id, so the comparison is free and a
+        // converged repo issues no GraphQL write.
+        const liveRouted = yield* fetchRoutedState(ctx, declaredRouted);
+        const diverged = declaredRouted.filter(
+          (routed) => desired[routed.key] !== liveRouted.values[routed.key],
+        );
+        const [first, ...rest] = diverged;
+        if (first !== undefined) {
+          const variables: FeatureVariables = Object.assign(
+            { repositoryId: liveRouted.id },
+            ...diverged.map((routed) => routed.variables(desired[routed.key])),
+          );
+          plan.ops.push({
+            role: "updateFeatures",
+            variables,
+            drift: diverged.map((routed) =>
+              valueDrift(
+                `repository.${routed.key}`,
+                routed.show(desired[routed.key]),
+                routed.show(liveRouted.values[routed.key]),
+              ),
+            ) as [string, ...string[]],
+            // The mutation selects the post-state on purpose: a silently ignored field is the REST
+            // failure mode that forced these keys onto GraphQL, so each value is verified against the echo.
+            change: (response) => {
+              const echoedRepo = (
+                response as { updateRepository?: { repository?: Record<string, unknown> } }
+              ).updateRepository?.repository;
+              if (!echoedRepo) {
+                return err(
+                  sectionFailure(
+                    "unverified",
+                    `repository: GRAPHQL ${UPDATE_FEATURES.name} returned no repository echo, so the write cannot be verified. GitHub may have changed the mutation payload; update the action`,
+                  ),
+                );
+              }
+              return decodeRoutedFields(echoedRepo, diverged, UPDATE_FEATURES.name).andThen(
+                (echoed) => {
+                  const verified = (routed: RoutedKey): Result<string, SectionFailure> => {
+                    if (echoed[routed.key] !== desired[routed.key]) {
+                      return err(
+                        sectionFailure(
+                          "unverified",
+                          `repository: GRAPHQL ${UPDATE_FEATURES.name} was accepted, but GitHub ` +
+                            `reports repository.${routed.key} ${routed.show(echoed[routed.key])} where ` +
+                            `${routed.show(desired[routed.key])} was set, so the write did not take. ` +
+                            `GitHub may restrict this setting on the repository`,
+                        ),
+                      );
+                    }
+                    return ok(`${routed.label}: ${routed.changeText(echoed[routed.key])}`);
+                  };
+                  return Result.combine([verified(first), ...rest.map(verified)]).map(
+                    ([lead, ...more]): ChangeLines => [lead as string, ...more],
+                  );
+                },
+              );
+            },
+          });
+        }
+      }
+      return ok(plan);
+    });
   },
   // A null PATCH field is GitHub's "unset", so it is left out rather than declared as null.
   async snapshot(ctx) {
-    const notes: string[] = [];
-    const live = await ctx.read.get.call(LiveRepository);
-    const value: Record<string, unknown> = {};
-    for (const field of PATCH_FIELDS) {
-      const read =
-        field === "security_and_analysis" ? snapshotSecurityAndAnalysis(live[field]) : live[field];
-      if (read !== undefined && read !== null) {
-        value[field] = read;
-      }
-    }
-    if (live.topics !== undefined && live.topics !== null && live.topics.length > 0) {
-      value.topics = [...live.topics];
-    }
-    const probes: Array<{
-      toggle: ReadableToggle;
-      live: LiveToggle | undefined;
-      concealable: boolean;
-    }> = [];
-    for (const toggle of READABLE_TOGGLES) {
-      const read = await readOrNote(ctx, notes, `repository.${toggle.key}`, async () => {
-        const answer = await ctx.read[toggle.get].tryCall(toggle.live);
-        if ("error" in answer) {
-          // The declared 422 ("not applicable") is answered only to a granted token.
-          return { live: undefined, concealable: answer.error.status === 404 };
+    const section = this;
+    return safeTry(async function* () {
+      const notes: string[] = [];
+      const live = yield* ctx.read.get.call(LiveRepository);
+      const value: Record<string, unknown> = {};
+      for (const field of PATCH_FIELDS) {
+        const read =
+          field === "security_and_analysis"
+            ? snapshotSecurityAndAnalysis(live[field])
+            : live[field];
+        if (read !== undefined && read !== null) {
+          value[field] = read;
         }
-        return { live: answer.data, concealable: false };
-      });
-      if (!("denied" in read)) {
-        probes.push({ toggle, ...read.value });
       }
-    }
-    // The toggle GETs share one grant and answer 404 for "off", the same 404 a fine-grained token
-    // missing the grant is concealed behind. One other answer proves the grant; all 404s prove
-    // nothing, so the toggles are left out rather than written as off.
-    if (probes.length > 0 && probes.every((probe) => probe.concealable)) {
-      notes.push(
-        `repository.${probes.map((probe) => probe.toggle.key).join("/")}: every toggle GET answered 404, which reads as off ` +
-          "but is also how a fine-grained token missing the grant is answered, so they are left out; " +
-          `if the token does ${sectionGrant(this)}, they are all off and can be declared false`,
+      if (live.topics !== undefined && live.topics !== null && live.topics.length > 0) {
+        value.topics = [...live.topics];
+      }
+      const probes: Array<{
+        toggle: ReadableToggle;
+        live: LiveToggle | undefined;
+        concealable: boolean;
+      }> = [];
+      for (const toggle of READABLE_TOGGLES) {
+        const read = yield* await readOrNote(ctx, notes, `repository.${toggle.key}`, () =>
+          ctx.read[toggle.get].tryCall(toggle.live).map((answer) =>
+            "error" in answer
+              ? // The declared 422 ("not applicable") is answered only to a granted token.
+                { live: undefined, concealable: answer.error.status === 404 }
+              : { live: answer.data, concealable: false },
+          ),
+        );
+        if (!("denied" in read)) {
+          probes.push({ toggle, ...read.value });
+        }
+      }
+      // The toggle GETs share one grant and answer 404 for "off", the same 404 a fine-grained token
+      // missing the grant is concealed behind. One other answer proves the grant; all 404s prove
+      // nothing, so the toggles are left out rather than written as off.
+      if (probes.length > 0 && probes.every((probe) => probe.concealable)) {
+        notes.push(
+          `repository.${probes.map((probe) => probe.toggle.key).join("/")}: every toggle GET answered 404, which reads as off ` +
+            "but is also how a fine-grained token missing the grant is answered, so they are left out; " +
+            `if the token does ${sectionGrant(section)}, they are all off and can be declared false`,
+        );
+      } else {
+        for (const { toggle, live } of probes) {
+          const enabled = live === undefined ? false : toggle.isEnabled(live);
+          value[toggle.key] = enabled;
+          if (live !== undefined && toggle.isEnforced?.(live) === true) {
+            notes.push(
+              `repository.${toggle.key}: ${OWNER_ENFORCED}, so it reads back as ${enabled} but cannot be changed from the repository`,
+            );
+          }
+        }
+      }
+      for (const toggle of WRITE_ONLY_TOGGLES) {
+        notes.push(
+          `repository.${toggle.key}: GitHub exposes no endpoint to read ${toggle.label} back, so the snapshot leaves it out; declare it yourself to manage it`,
+        );
+      }
+      const routed = yield* await readOrNote(
+        ctx,
+        notes,
+        GRAPHQL_ROUTED_KEYS.map((entry) => `repository.${entry.key}`).join(" and "),
+        () => ctx.read.featuresQuery.call(LiveFeatures, repoVariables(ctx)),
       );
-    } else {
-      for (const { toggle, live } of probes) {
-        const enabled = live === undefined ? false : toggle.isEnabled(live);
-        value[toggle.key] = enabled;
-        if (live !== undefined && toggle.isEnforced?.(live) === true) {
-          notes.push(
-            `repository.${toggle.key}: ${OWNER_ENFORCED}, so it reads back as ${enabled} but cannot be changed from the repository`,
-          );
+      if (!("denied" in routed)) {
+        const repository = yield* repositoryNode(routed.value);
+        for (const entry of GRAPHQL_ROUTED_KEYS) {
+          const decoded = entry.decode(repository[entry.field]);
+          if (decoded === undefined) {
+            notes.push(
+              `repository.${entry.key}: ${unreadableRoutedValue(entry, repository[entry.field], FEATURES_QUERY.name)}, so the snapshot leaves it out`,
+            );
+            continue;
+          }
+          value[entry.key] = decoded;
         }
       }
-    }
-    for (const toggle of WRITE_ONLY_TOGGLES) {
-      notes.push(
-        `repository.${toggle.key}: GitHub exposes no endpoint to read ${toggle.label} back, so the snapshot leaves it out; declare it yourself to manage it`,
-      );
-    }
-    const routed = await readOrNote(
-      ctx,
-      notes,
-      GRAPHQL_ROUTED_KEYS.map((entry) => `repository.${entry.key}`).join(" and "),
-      () => ctx.read.featuresQuery.call(LiveFeatures, repoVariables(ctx)),
-    );
-    if (!("denied" in routed)) {
-      const repository = repositoryNode(routed.value);
-      for (const entry of GRAPHQL_ROUTED_KEYS) {
-        const decoded = entry.decode(repository[entry.field]);
-        if (decoded === undefined) {
-          notes.push(
-            `repository.${entry.key}: ${unreadableRoutedValue(entry, repository[entry.field], FEATURES_QUERY.name)}, so the snapshot leaves it out`,
-          );
-          continue;
-        }
-        value[entry.key] = decoded;
-      }
-    }
-    return { value: value as RepositoryConfig, notes };
+      return ok({ value: value as RepositoryConfig, notes });
+    });
   },
 } satisfies SectionModule<"repository", typeof ENDPOINTS, typeof GRAPHQL_OPS>;

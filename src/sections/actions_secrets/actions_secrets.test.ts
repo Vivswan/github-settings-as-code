@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import { executePlan } from "../../../src/engine/execute.js";
 import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
 import { type GitHubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
@@ -10,7 +11,7 @@ import {
 import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { SectionSelection } from "../../engine/section-selection.js";
 import { describeProblem } from "../../problem.js";
@@ -54,10 +55,12 @@ function tools(resolved: Record<string, string> = {}): ExecTools & { lookups: st
   };
 }
 
-const plan = (api: GitHubClient, declared: Declared) =>
-  actionsSecretsSection.plan(
-    planContext(actionsSecretsSection, api, REPO),
-    validatedInput("actions_secrets", declared),
+const plan = async (api: GitHubClient, declared: Declared) =>
+  unwrap(
+    await actionsSecretsSection.plan(
+      planContext(actionsSecretsSection, api, REPO),
+      validatedInput("actions_secrets", declared),
+    ),
   );
 
 /** Plan, then execute against the same client; a failed execution rethrows its error. */
@@ -65,7 +68,7 @@ async function apply(api: GitHubClient, declared: Declared, exec: ExecTools = to
   const planned = await plan(api, declared);
   const execution = await executePlan(planned, actionsSecretsSection, api, REPO, exec);
   if (execution.status === "failed") {
-    throw execution.error;
+    throw new Error(execution.failure.message);
   }
   return { plan: planned, changes: execution.changes };
 }
@@ -164,7 +167,7 @@ describe("actions_secrets planning", () => {
     const payloads = await Promise.all(
       result.ops.map(async (op) =>
         typeof op.payload === "function"
-          ? sealedPayload({ payload: await op.payload(exec) })
+          ? sealedPayload({ payload: unwrap(await op.payload(exec)) })
           : null,
       ),
     );
@@ -368,10 +371,7 @@ describe("actions_secrets execution", () => {
     );
     expect(execution.status).toBe("failed");
     expect(api.mutations().map((call) => call.carriesSecret)).toEqual([true]);
-    const message =
-      execution.status === "failed" && execution.error instanceof Error
-        ? execution.error.message
-        : "";
+    const message = execution.status === "failed" ? execution.failure.message : "";
     expect(message).toBe(
       `actions_secrets: writing secret "DENIED_WRITE" failed - PUT /repos/o/r/actions/secrets/DENIED_WRITE: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions_secrets" values in the settings file to satisfy the message above`,
     );
@@ -473,7 +473,7 @@ describe("actions_secrets contract", () => {
     const sealed: Op = {
       role: "put",
       params: { secret_name: "A" },
-      payload: (exec) => ({ encrypted_value: exec.resolveSecret("$A"), key_id: "k" }),
+      payload: (exec) => ok({ encrypted_value: exec.resolveSecret("$A"), key_id: "k" }),
       // alwaysRewrite by declaration: no drift needed to justify the write.
       drift: [],
       change: "",

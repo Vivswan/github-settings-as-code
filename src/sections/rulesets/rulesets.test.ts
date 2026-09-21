@@ -8,8 +8,9 @@ import {
 } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
+import type { SectionFailure } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
 import { normalizeRefName, normalizeRuleset, rulesetsSection } from "./index.js";
 import type { RulesetConfig } from "./schema.js";
@@ -92,10 +93,12 @@ function liveRepo(
 
 describe("rulesets", () => {
   const listRoute = "GET /repos/o/r/rulesets?per_page=100&page=1";
-  const plan = (api: MockApi, desired: SectionInput<"rulesets">) =>
-    rulesetsSection.plan(
-      planContext(rulesetsSection, api, REPO),
-      validatedInput("rulesets", desired),
+  const plan = async (api: MockApi, desired: SectionInput<"rulesets">) =>
+    unwrap(
+      await rulesetsSection.plan(
+        planContext(rulesetsSection, api, REPO),
+        validatedInput("rulesets", desired),
+      ),
     );
   /** A mock that would accept every write the section declares. */
   const writable = (routes: ConstructorParameters<typeof MockApi>[0]) =>
@@ -255,7 +258,7 @@ describe("rulesets", () => {
     });
     expect(execution.status).toBe("failed");
     expect(execution.landed).toBe(0);
-    expect(String((execution as { error: Error }).error.message)).toBe(
+    expect((execution as { failure: SectionFailure }).failure.message).toBe(
       "rulesets[main]: not applied - the update would remove a live value the settings file omits. " +
         'rulesets[main].bypass_actors: live has [{"actor_id":1,"actor_type":"Team","bypass_mode":"always"}] but the settings file omits it, ' +
         "so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to remove it on purpose",
@@ -312,9 +315,11 @@ describe("rulesets", () => {
       enforcemant: "evaluate",
     };
     const pass = async () =>
-      rulesetsSection.plan(
-        planContext(rulesetsSection, api, REPO),
-        validatedInput("rulesets", [misspelled]),
+      unwrap(
+        await rulesetsSection.plan(
+          planContext(rulesetsSection, api, REPO),
+          validatedInput("rulesets", [misspelled]),
+        ),
       );
     const first = await pass();
     const execution = await executePlan(first, rulesetsSection, api, REPO, {
@@ -749,8 +754,8 @@ describe("rulesets", () => {
 });
 
 describe("rulesets snapshot", () => {
-  const snapshot = (api: GitHubClient) =>
-    rulesetsSection.snapshot(snapshotContext(rulesetsSection, api, REPO, "fail"));
+  const snapshot = async (api: GitHubClient) =>
+    unwrap(await rulesetsSection.snapshot(snapshotContext(rulesetsSection, api, REPO, "fail")));
 
   /** A live ruleset as the by-id GET returns it, server fields included. */
   const served = (
@@ -840,9 +845,11 @@ describe("rulesets snapshot", () => {
           "and an entry without it would clear it on the next update; grant Administration write to read it back",
       ],
     });
-    const planned = await rulesetsSection.plan(
-      planContext(rulesetsSection, api, REPO),
-      validatedInput("rulesets", read.value),
+    const planned = unwrap(
+      await rulesetsSection.plan(
+        planContext(rulesetsSection, api, REPO),
+        validatedInput("rulesets", read.value),
+      ),
     );
     expect({ ops: planned.ops, drift: planned.drift }).toEqual({ ops: [], drift: [] });
     expect(api.writes).toEqual([]);

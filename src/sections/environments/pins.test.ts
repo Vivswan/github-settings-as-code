@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { MockApi } from "../../../test/mock-api.js";
 import { NO_SECRETS, REPO, sectionRunners } from "../../../test/sections/section-run.js";
 import { executePlan } from "../../engine/execute.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { driftOf, planDrift } from "../contract/plan.js";
 import { environmentsSection } from "./index.js";
 
@@ -184,7 +185,7 @@ describe("environments pinned apply mode", () => {
     const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
     expect(execution.changes).toEqual(['applied environment "prod"']);
-    expect(String((execution as { error: unknown }).error)).toMatch(
+    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
       /would leave 11 environments pinned, but GitHub allows at most 10/,
     );
     expect(api.mutations().filter((c) => c.method === "GRAPHQL")).toEqual([]);
@@ -221,7 +222,7 @@ describe("environments pinned apply mode", () => {
     const execution = await executePlan(planned, environmentsSection, api, REPO, NO_SECRETS);
     expect(execution.status).toBe("failed");
     expect(execution.changes).toEqual([]);
-    expect(String((execution as { error: unknown }).error)).toMatch(
+    expect((execution as { failure: SectionFailure }).failure.message).toMatch(
       /the environment body for "prod" carried no node_id/,
     );
     expect(api.mutations().map((c) => `${c.method} ${c.path}`)).toEqual([

@@ -8,10 +8,11 @@
  * a WILDCARD name (contains `*`, `?`, or `[`)  -> invisible to every REST protection endpoint; the rule mutations, GraphQL-twin keys only
  */
 
+import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import { matchesRejection } from "../contract/endpoints.js";
-import { raise } from "../contract/errors.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   duplicateFieldIssues,
@@ -22,7 +23,7 @@ import {
   type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { plainData } from "../contract/plan.js";
+import { plainData, type Read } from "../contract/plan.js";
 import { isMapping } from "../shared/raw-values.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
@@ -236,113 +237,118 @@ export const branchesSection = {
   validate(desired) {
     return duplicateFieldIssues(desired, { field: "name" }, "branch");
   },
-  async plan(ctx, desired): Promise<BranchesPlan> {
-    const branches = listEntries(desired);
-    const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
-    // The first entry that needs the GraphQL surface starts the one rules read, ahead of every REST
-    // probe; a pure-REST declaration never starts it, so no separate predicate gates the fetch.
-    let graphqlRun: GraphqlRun | null = null;
-    const entries: ClassifiedEntry[] = [];
-    for (const branch of branches) {
-      const protection: SplitProtection | null = branch.protection;
-      if (isWildcardPattern(branch.name)) {
-        graphqlRun ??= await startGraphqlRun(ctx);
-        entries.push({ kind: "wildcard", branch, graphqlRun });
-      } else if (hasRoutedGraphqlKeys(protection)) {
-        graphqlRun ??= await startGraphqlRun(ctx);
-        entries.push({ kind: "routed", branch: { name: branch.name, protection }, graphqlRun });
-      } else {
-        entries.push({ kind: "literal", branch: { name: branch.name, protection } });
-      }
-    }
-    if (graphqlRun !== null) {
-      const declaredPatterns = new Set(branches.map((branch) => branch.name));
-      for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
-        if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
-          plan.notes.push(
-            `undeclared classic protection rule "${pattern}" exists on the repo - declare it to manage it (this action never deletes undeclared rules)`,
-          );
+  async plan(ctx, desired): Promise<Result<BranchesPlan, SectionFailure>> {
+    const section = this;
+    return safeTry(async function* () {
+      const branches = listEntries(desired);
+      const plan: BranchesPlan = { ops: [], notes: [], drift: [] };
+      // The first entry that needs the GraphQL surface starts the one rules read, ahead of every REST
+      // probe; a pure-REST declaration never starts it, so no separate predicate gates the fetch.
+      let graphqlRun: GraphqlRun | null = null;
+      const entries: ClassifiedEntry[] = [];
+      for (const branch of branches) {
+        const protection: SplitProtection | null = branch.protection;
+        if (isWildcardPattern(branch.name)) {
+          graphqlRun ??= yield* startGraphqlRun(ctx);
+          entries.push({ kind: "wildcard", branch, graphqlRun });
+        } else if (hasRoutedGraphqlKeys(protection)) {
+          graphqlRun ??= yield* startGraphqlRun(ctx);
+          entries.push({ kind: "routed", branch: { name: branch.name, protection }, graphqlRun });
+        } else {
+          entries.push({ kind: "literal", branch: { name: branch.name, protection } });
         }
       }
-    }
-    for (const entry of entries) {
-      if (entry.kind === "wildcard") {
-        await planWildcardEntry(ctx, entry.graphqlRun, entry.branch, plan);
-        continue;
+      if (graphqlRun !== null) {
+        const declaredPatterns = new Set(branches.map((branch) => branch.name));
+        for (const pattern of [...(graphqlRun.rules?.keys() ?? [])].sort()) {
+          if (isWildcardPattern(pattern) && !declaredPatterns.has(pattern)) {
+            plan.notes.push(
+              `undeclared classic protection rule "${pattern}" exists on the repo - declare it to manage it (this action never deletes undeclared rules)`,
+            );
+          }
+        }
       }
-      await planLiteralEntry(ctx, this, entry, plan);
-    }
-    // Every actor a planned mutation resolves at execution resolves ahead of the plan's FIRST write,
-    // whichever entry it belongs to: a misspelled actor fails while every branch's live protection
-    // is still untouched, and the mutations' thunks then find the ids cached.
-    const [lead, ...rest] = plan.ops;
-    if (graphqlRun !== null && graphqlRun.lateActors.length > 0 && lead !== undefined) {
-      plan.ops = [
-        {
-          ...lead,
-          before: async (exec) => {
-            await resolveActorIds(ctx, exec, graphqlRun, graphqlRun.lateActors);
+      for (const entry of entries) {
+        if (entry.kind === "wildcard") {
+          await planWildcardEntry(ctx, entry.graphqlRun, entry.branch, plan);
+          continue;
+        }
+        yield* await planLiteralEntry(ctx, section, entry, plan);
+      }
+      // Every actor a planned mutation resolves at execution resolves ahead of the plan's FIRST write,
+      // whichever entry it belongs to: a misspelled actor fails while every branch's live protection
+      // is still untouched, and the mutations' thunks then find the ids cached.
+      const [lead, ...rest] = plan.ops;
+      if (graphqlRun !== null && graphqlRun.lateActors.length > 0 && lead !== undefined) {
+        plan.ops = [
+          {
+            ...lead,
+            before: async (exec) =>
+              (await resolveActorIds(ctx, exec, graphqlRun, graphqlRun.lateActors)).map(
+                () => undefined,
+              ),
           },
-        },
-        ...rest,
-      ];
-    }
-    return plan;
+          ...rest,
+        ];
+      }
+      return ok(plan);
+    });
   },
   // The listing also names branches only a ruleset protects, whose classic protection probe answers
   // 404: nothing to declare here. The engine notes the denial that 404 could also be when every
   // listed branch answers it. The rules read is unconditional, unlike plan()'s: it is the only view
   // of the wildcard rules and of the two routed keys, and it names which rule protects a branch.
   async snapshot(ctx) {
-    const listed = await ctx.read.listProtected.listAll(LiveBranchSummary, {
-      query: { protected: "true" },
-    });
-    // Git refnames are exact, so the fold is the name itself.
-    raise(
-      liveByIdentity(
-        this,
+    const section = this;
+    return safeTry(async function* () {
+      const listed = yield* ctx.read.listProtected.listAll(LiveBranchSummary, {
+        query: { protected: "true" },
+      });
+      // Git refnames are exact, so the fold is the name itself.
+      yield* liveByIdentity(
+        section,
         "protected branch",
         listed,
         (branch) => branch.name,
         (branch) => liveIdentity(branch.name),
-      ),
-    );
-    const rules = await fetchRulesForSnapshot(ctx);
-    const entries: BranchConfig[] = [];
-    const notes: string[] = [];
-    for (const { name } of listed) {
-      const probe = await ctx.read.getProtection.probeAbsent(LiveProtection, {
-        params: { branch: name },
-        describe: `branch "${name}"`,
-      });
-      if ("missing" in probe) {
-        continue;
+      );
+      const rules = yield* fetchRulesForSnapshot(ctx);
+      const entries: BranchConfig[] = [];
+      const notes: string[] = [];
+      for (const { name } of listed) {
+        const probe = yield* ctx.read.getProtection.probeAbsent(LiveProtection, {
+          params: { branch: name },
+          describe: `branch "${name}"`,
+        });
+        if ("missing" in probe) {
+          continue;
+        }
+        const rule = rules.get(name);
+        if (rule === undefined) {
+          // The effective protection of a branch only a wildcard rule matches: that rule is written
+          // below as the wildcard entry, and a literal entry here would create a second rule on apply.
+          continue;
+        }
+        entries.push({
+          name,
+          protection: { ...protectionSnapshot(probe.data), ...routedKeysSnapshot(rule) },
+        });
       }
-      const rule = rules.get(name);
-      if (rule === undefined) {
-        // The effective protection of a branch only a wildcard rule matches: that rule is written
-        // below as the wildcard entry, and a literal entry here would create a second rule on apply.
-        continue;
+      const written = new Set(entries.map((entry) => entry.name));
+      // Connection order, never sorted: GitHub applies overlapping wildcard rules in creation order,
+      // which the connection lists, and apply creates the entries in file order.
+      for (const [pattern, rule] of rules) {
+        if (isWildcardPattern(pattern)) {
+          entries.push({ name: pattern, protection: wildcardSnapshot(rule) });
+        } else if (!written.has(pattern)) {
+          notes.push(unreachableLiteralRuleNote(pattern));
+        }
       }
-      entries.push({
-        name,
-        protection: { ...protectionSnapshot(probe.data), ...routedKeysSnapshot(rule) },
-      });
-    }
-    const written = new Set(entries.map((entry) => entry.name));
-    // Connection order, never sorted: GitHub applies overlapping wildcard rules in creation order,
-    // which the connection lists, and apply creates the entries in file order.
-    for (const [pattern, rule] of rules) {
-      if (isWildcardPattern(pattern)) {
-        entries.push({ name: pattern, protection: wildcardSnapshot(rule) });
-      } else if (!written.has(pattern)) {
-        notes.push(unreachableLiteralRuleNote(pattern));
+      if (entries.length === 0) {
+        return ok({ value: undefined, notes });
       }
-    }
-    if (entries.length === 0) {
-      return { value: undefined, notes };
-    }
-    return { value: entries, notes };
+      return ok({ value: entries, notes });
+    });
   },
 } satisfies SectionModule<"branches", typeof ENDPOINTS, typeof GRAPHQL>;
 
@@ -362,8 +368,13 @@ export function protectionSnapshot(live: Record<string, unknown>): BranchProtect
   return out as BranchProtectionConfig;
 }
 
-async function startGraphqlRun(ctx: BranchesContext): Promise<GraphqlRun> {
-  return { rules: await fetchRules(ctx), repoId: null, actorIds: new Map(), lateActors: [] };
+function startGraphqlRun(ctx: BranchesContext): Read<GraphqlRun> {
+  return fetchRules(ctx).map((rules) => ({
+    rules,
+    repoId: null,
+    actorIds: new Map(),
+    lateActors: [],
+  }));
 }
 
 async function planLiteralEntry(
@@ -371,147 +382,155 @@ async function planLiteralEntry(
   section: SectionMeta,
   entry: Exclude<ClassifiedEntry, { kind: "wildcard" }>,
   plan: BranchesPlan,
-): Promise<void> {
-  const { branch } = entry;
-  const params = { branch: branch.name };
-  const prefix = `branches[${branch.name}].protection`;
-  const probe = await ctx.read.getProtection.probeAbsent(LiveProtection, {
-    params,
-    describe: `branch "${branch.name}"`,
-  });
-  if (branch.protection === null) {
-    if ("missing" in probe) {
-      return;
-    }
-    plan.ops.push({
-      role: "removeProtection",
+): Promise<Result<void, SectionFailure>> {
+  return safeTry(async function* () {
+    const { branch } = entry;
+    const params = { branch: branch.name };
+    const prefix = `branches[${branch.name}].protection`;
+    const probe = yield* ctx.read.getProtection.probeAbsent(LiveProtection, {
       params,
-      drift: [
-        `branches[${branch.name}]: protected live but the settings file declares protection: null; apply will remove the protection`,
-      ],
-      change: `removed protection from "${branch.name}"`,
+      describe: `branch "${branch.name}"`,
     });
-    return;
-  }
-  // GitHub's protection PUT silently DROPS required_signatures, and the other two routed keys have
-  // no REST field at all, so none of them may ride the REST payload.
-  const {
-    required_signatures: requiredSignatures,
-    force_push_bypassers: forcePushBypassers,
-    required_deployments: requiredDeployments,
-    ...payload
-  } = branch.protection;
-  // The classic API rejects payloads missing the core keys; null is a valid value for each.
-  for (const key of REQUIRED_PROTECTION_KEYS) {
-    if (!(key in payload)) {
-      payload[key] = null;
+    if (branch.protection === null) {
+      if ("missing" in probe) {
+        return ok(undefined);
+      }
+      plan.ops.push({
+        role: "removeProtection",
+        params,
+        drift: [
+          `branches[${branch.name}]: protected live but the settings file declares protection: null; apply will remove the protection`,
+        ],
+        change: `removed protection from "${branch.name}"`,
+      });
+      return ok(undefined);
     }
-  }
-  if (isPlainMapping(payload.required_status_checks)) {
-    payload.required_status_checks = putStatusChecks(payload.required_status_checks);
-  }
-  let live: Record<string, unknown> | null = null;
-  // GitHub does not document whether the PUT preserves the sub-resource and the GraphQL-only
-  // fields, so a planned PUT re-applies every declared one.
-  let putPlanned = false;
-  if ("missing" in probe) {
-    // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied probe
-    // is a 404 "Not Found" as well (fine-grained tokens conceal denied reads), so only GitHub's own
-    // body counts and a denial keeps the plain unprotected reading.
-    const branchProbe = await ctx.read.branchProbe.tryCall(z.unknown(), { params });
-    if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
-      // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.
-      throw new Error(`${section.key}: branches[${branch.name}]: ${MISSING_BRANCH.advice}`);
-    }
-    plan.ops.push({
-      role: "putProtection",
-      params,
-      payload: plainData(payload),
-      describe: `replacing protection for branch "${branch.name}"`,
-      drift: [
-        `branches[${branch.name}]: unprotected live but the settings file declares protection; apply will protect it`,
-      ],
-      change: `applied protection to "${branch.name}"`,
-    });
-    putPlanned = true;
-  } else {
-    live = flattenProtection(probe.data);
-    // The protection GET OMITS required_signatures entirely when signed commits are not required,
-    // so an absent live field means false; normalized so declared false does not read as drift.
-    if (!("required_signatures" in live)) {
-      live.required_signatures = false;
-    }
-    const declaredRest: Record<string, unknown> = { ...payload };
+    // GitHub's protection PUT silently DROPS required_signatures, and the other two routed keys have
+    // no REST field at all, so none of them may ride the REST payload.
+    const {
+      required_signatures: requiredSignatures,
+      force_push_bypassers: forcePushBypassers,
+      required_deployments: requiredDeployments,
+      ...payload
+    } = branch.protection;
+    // The classic API rejects payloads missing the core keys; null is a valid value for each.
     for (const key of REQUIRED_PROTECTION_KEYS) {
-      if (!(key in branch.protection)) {
-        delete declaredRest[key];
+      if (!(key in payload)) {
+        payload[key] = null;
       }
     }
-    // Both sides compare in GitHub's spelling; the PUT payload keeps the file's.
-    const declaredView = foldActorNames(declaredRest);
-    const liveView = withEmptyReviewHolders(foldActorNames(live));
-    // The PUT replaces the whole protection, so live settings the declaration omits are REMOVED by
-    // it: drift, not silence. The signature toggle is the one live field the PUT never touches.
-    const { required_signatures: _liveSignatures, ...liveRest } = liveView;
-    const restDrift = [
-      ...subsetDiff(declaredView, liveView, prefix),
-      ...omittedLiveDrift(declaredView, liveRest, prefix),
-    ];
-    const drift = justified(restDrift);
-    if (drift !== null) {
+    if (isPlainMapping(payload.required_status_checks)) {
+      payload.required_status_checks = putStatusChecks(payload.required_status_checks);
+    }
+    let live: Record<string, unknown> | null = null;
+    // GitHub does not document whether the PUT preserves the sub-resource and the GraphQL-only
+    // fields, so a planned PUT re-applies every declared one.
+    let putPlanned = false;
+    if ("missing" in probe) {
+      // Protection 404s for a missing BRANCH too; the advisory probe tells the two apart. A denied probe
+      // is a 404 "Not Found" as well (fine-grained tokens conceal denied reads), so only GitHub's own
+      // body counts and a denial keeps the plain unprotected reading.
+      const branchProbe = yield* ctx.read.branchProbe.tryCall(z.unknown(), { params });
+      if ("error" in branchProbe && matchesRejection(MISSING_BRANCH, branchProbe.error)) {
+        // The same failure the PUT raises without the Contents grant, so the outcome does not depend on it.
+        return err(
+          sectionFailure(
+            "refused",
+            `${section.key}: branches[${branch.name}]: ${MISSING_BRANCH.advice}`,
+          ),
+        );
+      }
       plan.ops.push({
         role: "putProtection",
         params,
         payload: plainData(payload),
         describe: `replacing protection for branch "${branch.name}"`,
-        drift,
+        drift: [
+          `branches[${branch.name}]: unprotected live but the settings file declares protection; apply will protect it`,
+        ],
         change: `applied protection to "${branch.name}"`,
       });
       putPlanned = true;
+    } else {
+      live = flattenProtection(probe.data);
+      // The protection GET OMITS required_signatures entirely when signed commits are not required,
+      // so an absent live field means false; normalized so declared false does not read as drift.
+      if (!("required_signatures" in live)) {
+        live.required_signatures = false;
+      }
+      const declaredRest: Record<string, unknown> = { ...payload };
+      for (const key of REQUIRED_PROTECTION_KEYS) {
+        if (!(key in branch.protection)) {
+          delete declaredRest[key];
+        }
+      }
+      // Both sides compare in GitHub's spelling; the PUT payload keeps the file's.
+      const declaredView = foldActorNames(declaredRest);
+      const liveView = withEmptyReviewHolders(foldActorNames(live));
+      // The PUT replaces the whole protection, so live settings the declaration omits are REMOVED by
+      // it: drift, not silence. The signature toggle is the one live field the PUT never touches.
+      const { required_signatures: _liveSignatures, ...liveRest } = liveView;
+      const restDrift = [
+        ...subsetDiff(declaredView, liveView, prefix),
+        ...omittedLiveDrift(declaredView, liveRest, prefix),
+      ];
+      const drift = justified(restDrift);
+      if (drift !== null) {
+        plan.ops.push({
+          role: "putProtection",
+          params,
+          payload: plainData(payload),
+          describe: `replacing protection for branch "${branch.name}"`,
+          drift,
+          change: `applied protection to "${branch.name}"`,
+        });
+        putPlanned = true;
+      }
     }
-  }
-  // The toggle applies through its sub-endpoint once the PUT has ensured the protection (and with it
-  // the sub-resource) exists; an undeclared toggle leaves the live requirement alone.
-  if (requiredSignatures !== undefined) {
-    const sigDrift = subsetDiff(
-      { required_signatures: requiredSignatures },
-      { required_signatures: live?.required_signatures ?? false },
-      prefix,
-    );
-    if (sigDrift.length === 0 && putPlanned) {
-      sigDrift.push(
-        `${prefix}.required_signatures: re-applied after the protection PUT (GitHub does not document whether the PUT preserves it)`,
+    // The toggle applies through its sub-endpoint once the PUT has ensured the protection (and with it
+    // the sub-resource) exists; an undeclared toggle leaves the live requirement alone.
+    if (requiredSignatures !== undefined) {
+      const sigDrift = subsetDiff(
+        { required_signatures: requiredSignatures },
+        { required_signatures: live?.required_signatures ?? false },
+        prefix,
       );
+      if (sigDrift.length === 0 && putPlanned) {
+        sigDrift.push(
+          `${prefix}.required_signatures: re-applied after the protection PUT (GitHub does not document whether the PUT preserves it)`,
+        );
+      }
+      const drift = justified(sigDrift);
+      if (drift !== null) {
+        plan.ops.push(
+          requiredSignatures
+            ? {
+                role: "sigPost",
+                params,
+                describe: `requiring signed commits on branch "${branch.name}"`,
+                drift,
+                change: `required signed commits on "${branch.name}"`,
+              }
+            : {
+                role: "sigDelete",
+                params,
+                describe: `removing the signed-commit requirement from branch "${branch.name}"`,
+                drift,
+                change: `removed the signed-commit requirement from "${branch.name}"`,
+              },
+        );
+      }
     }
-    const drift = justified(sigDrift);
-    if (drift !== null) {
-      plan.ops.push(
-        requiredSignatures
-          ? {
-              role: "sigPost",
-              params,
-              describe: `requiring signed commits on branch "${branch.name}"`,
-              drift,
-              change: `required signed commits on "${branch.name}"`,
-            }
-          : {
-              role: "sigDelete",
-              params,
-              describe: `removing the signed-commit requirement from branch "${branch.name}"`,
-              drift,
-              change: `removed the signed-commit requirement from "${branch.name}"`,
-            },
-      );
+    if (entry.kind === "routed") {
+      planRoutedUpdate(ctx, entry.graphqlRun, plan, {
+        name: branch.name,
+        protection: entry.branch.protection,
+        prefix,
+        putPlanned,
+      });
     }
-  }
-  if (entry.kind === "routed") {
-    planRoutedUpdate(ctx, entry.graphqlRun, plan, {
-      name: branch.name,
-      protection: entry.branch.protection,
-      prefix,
-      putPlanned,
-    });
-  }
+    return ok(undefined);
+  });
 }
 
 /**

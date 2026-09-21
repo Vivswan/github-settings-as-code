@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
+import { err, ok } from "neverthrow";
 import {
   boxSharedKey,
   decodeBase64,
@@ -43,7 +44,7 @@ describe("sealBox against libsodium", () => {
 
   test("sealForGithub emits canonical base64 of the sealed box that libsodium opens", () => {
     const sealed = sealForGithub(recipient.publicKey, "hunter2");
-    const bytes = decodeBase64(sealed);
+    const bytes = decodeBase64(sealed)._unsafeUnwrap();
     expect(bytes.length).toBe(OVERHEAD + 7);
     expect(sodium.to_base64(bytes, sodium.base64_variants.ORIGINAL)).toBe(sealed);
     const opened = sodium.crypto_box_seal_open(bytes, recipient.publicKey, recipient.privateKey);
@@ -113,13 +114,13 @@ describe("decodeBase64", () => {
     ["whitespace", "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=\n"],
   ])("rejects %s, which Buffer would silently accept and libsodium refused", (_what, text) => {
     expect(() => sodium.from_base64(text, sodium.base64_variants.ORIGINAL)).toThrow();
-    expect(() => decodeBase64(text)).toThrow("not canonical base64");
+    expect(decodeBase64(text)).toEqual(err("not canonical base64"));
   });
 
   test("decodes canonical padded base64 to the exact bytes", () => {
-    expect(hex(decodeBase64("B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw="))).toBe(
+    expect(hex(decodeBase64("B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=")._unsafeUnwrap())).toBe(
       "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
     );
-    expect(decodeBase64("")).toEqual(new Uint8Array(0));
+    expect(decodeBase64("")).toEqual(ok(new Uint8Array(0)));
   });
 });

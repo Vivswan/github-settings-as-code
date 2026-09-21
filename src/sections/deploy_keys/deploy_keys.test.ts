@@ -3,7 +3,7 @@ import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import type { SectionInput } from "../contract/module.js";
 import { deployKeysSection } from "./index.js";
@@ -39,10 +39,12 @@ const PEM_PUBLIC_KEY =
 // A key under an algorithm this list lacks, in the two-field shape GitHub stores.
 const ED448_KEY =
   "ssh-ed448 AAAACXNzaC1lZDQ0OAAAADlFZDQ0OEZ1dHVyZUFsZ29yaXRobUZ1dHVyZUFsZ29yaXRobUZ1dHVyZUE=";
-const plan = (api: MockApi, desired: SectionInput<"deploy_keys">) =>
-  deployKeysSection.plan(
-    planContext(deployKeysSection, api, REPO),
-    validatedInput("deploy_keys", desired),
+const plan = async (api: MockApi, desired: SectionInput<"deploy_keys">) =>
+  unwrap(
+    await deployKeysSection.plan(
+      planContext(deployKeysSection, api, REPO),
+      validatedInput("deploy_keys", desired),
+    ),
   );
 
 describe("parsePublicKey", () => {

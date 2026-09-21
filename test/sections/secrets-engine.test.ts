@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
@@ -17,6 +18,7 @@ import {
   unsealSecretValue,
 } from "../e2e/mock/secrets.js";
 import { MockApi } from "../mock-api.js";
+import { unwrap } from "./section-run.js";
 
 const section: SectionMeta = {
   key: "actions_secrets",
@@ -52,12 +54,12 @@ function fabricatedPlanScope(live: string[], reads: string[]): SecretsPlanScope<
     noun: "Actions secret",
     list: async () => {
       reads.push("list");
-      return live.map((name) => ({ name }));
+      return ok(live.map((name) => ({ name })));
     },
     publicKeyEndpoint: PUBLIC_KEY_ENDPOINT,
     publicKey: async (_exec, describe) => {
       reads.push(describe);
-      return KEY_DATA;
+      return ok(KEY_DATA);
     },
     put: (write) => ({
       role: "put",
@@ -79,7 +81,7 @@ describe("sealing", () => {
   test("sealForGithub round-trips through the mock keypair, hostile characters included", async () => {
     await mockSodiumReady();
     const hostile = 'p@ss"word\\with\nnewline\tand unicode-éñ中';
-    const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY), hostile);
+    const sealed = sealForGithub(decodeBase64(MOCK_SECRETS_PUBLIC_KEY)._unsafeUnwrap(), hostile);
     expect(sealed).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(sealed).not.toContain("p@ss");
     expect(unsealSecretValue(sealed)).toBe(hostile);
@@ -111,9 +113,9 @@ describe("sealing", () => {
       `${WHERE}a key that is not a usable X25519 public key${ADVICE}`,
     ],
   ])("parseSealingKey rejects %s, naming the scope and the defect", (_what, body, message) => {
-    const attempt = () =>
-      parseSealingKey(section, { label: "actions_secrets" }, PUBLIC_KEY_ENDPOINT, body);
-    expect(attempt).toThrow(new Error(message));
+    expect(
+      parseSealingKey(section, { label: "actions_secrets" }, PUBLIC_KEY_ENDPOINT, body),
+    ).toEqual(err({ kind: "live-shape", message }));
   });
 
   test("a parsed sealing key seals synchronously into the {encrypted_value, key_id} body, fresh per seal", async () => {
@@ -124,7 +126,7 @@ describe("sealing", () => {
       { label: "actions_secrets" },
       PUBLIC_KEY_ENDPOINT,
       KEY_DATA,
-    );
+    )._unsafeUnwrap();
     expect(key.keyId).toBe("key-1");
     const a = key.seal("same-value");
     const b = key.seal("same-value");
@@ -164,14 +166,16 @@ describe("planSecrets and the execution-time resolver", () => {
   test("each PUT's thunk seals its OWN entry's resolved value, uppercasing the name; planning reads the list alone and the key once at execution", async () => {
     await mockSodiumReady();
     const reads: string[] = [];
-    const plan = await planSecrets(section, fabricatedPlanScope([], reads), {
-      entries: [
-        { name: "first", value: "$ONE" },
-        { name: "SECOND", value: "$TWO" },
-      ],
-      policy: "keep",
-      defaultPolicy: "keep",
-    });
+    const plan = unwrap(
+      await planSecrets(section, fabricatedPlanScope([], reads), {
+        entries: [
+          { name: "first", value: "$ONE" },
+          { name: "SECOND", value: "$TWO" },
+        ],
+        policy: "keep",
+        defaultPolicy: "keep",
+      }),
+    );
     // The sealing key is an execution-time read: check mode never issues it.
     expect(reads).toEqual(["list"]);
     expect(plan.ops.map((op) => op.params)).toEqual([
@@ -188,7 +192,9 @@ describe("planSecrets and the execution-time resolver", () => {
     const sealed = await Promise.all(
       plan.ops.map((op) =>
         typeof op.payload === "function"
-          ? (op.payload(exec) as Promise<SealedSecretPayload>)
+          ? Promise.resolve(op.payload(exec)).then(
+              (sealed) => unwrap(sealed) as SealedSecretPayload,
+            )
           : Promise.resolve(null),
       ),
     );
@@ -241,21 +247,25 @@ describe("planSecrets and the execution-time resolver", () => {
 
   test("an empty declaration plans nothing and never reads the sealing key", async () => {
     const reads: string[] = [];
-    const plan = await planSecrets(section, fabricatedPlanScope([], reads), {
-      entries: [],
-      policy: "keep",
-      defaultPolicy: "keep",
-    });
+    const plan = unwrap(
+      await planSecrets(section, fabricatedPlanScope([], reads), {
+        entries: [],
+        policy: "keep",
+        defaultPolicy: "keep",
+      }),
+    );
     expect(plan).toEqual({ ops: [], notes: [], drift: [] });
     expect(reads).toEqual(["list"]);
   });
 
   test("a value the engine never resolved fails the thunk loudly", async () => {
-    const plan = await planSecrets(section, fabricatedPlanScope([], []), {
-      entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
-      policy: "keep",
-      defaultPolicy: "keep",
-    });
+    const plan = unwrap(
+      await planSecrets(section, fabricatedPlanScope([], []), {
+        entries: [{ name: "A", value: "$NEVER_RESOLVED" }],
+        policy: "keep",
+        defaultPolicy: "keep",
+      }),
+    );
     const payload = plan.ops[0]?.payload;
     expect(typeof payload).toBe("function");
     if (typeof payload === "function") {

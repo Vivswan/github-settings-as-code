@@ -1,3 +1,4 @@
+import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import {
   omittedDeltas,
@@ -7,7 +8,8 @@ import {
   renderDelta,
   subsetDiff,
 } from "../../engine/diff.js";
-import { raise } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
+
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredSecretValue,
@@ -167,101 +169,112 @@ export const environmentsSection = {
     return issues;
   },
   async plan(ctx, desired) {
-    const environments = listEntries(desired);
-    const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
-    /** Each entry's declared pin state, in file order (order IS the pin order). */
-    const pins: PinDeclaration[] = [];
-    for (const env of environments) {
-      const { settings, nested, routed } = splitEntry(env);
-      const name = env.name;
-      const params = { environment_name: name };
-      const probe = await ctx.read.probe.probeAbsent(LiveEnvironmentBody, {
-        params,
-        describe: `environment "${name}"`,
-      });
-      const live = "missing" in probe ? undefined : probe.data;
-      const label = `environments[${name}]`;
-      const { drift, omitted, notes } =
-        live === undefined
-          ? { drift: [missingDrift(label)], omitted: [], notes: [] }
-          : environmentDrift(label, settings, flattenEnvironment(live));
-      plan.notes.push(...notes);
-      // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
-      // body is validated only when a mutation needs it.
-      const probedNodeId = live === undefined ? undefined : { node_id: live.node_id };
-      let createdNodeId: string | undefined;
-      const nodeId = (): string => {
-        if (probedNodeId !== undefined) {
-          return environmentNodeId(name, probedNodeId);
-        }
-        if (createdNodeId === undefined) {
-          throw new Error(
-            `BUG: environments: the pin of "${name}" ran before the PUT that creates the environment`,
-          );
-        }
-        return createdNodeId;
-      };
-      if (hasDrift(drift)) {
-        plan.ops.push({
-          role: "update",
+    const section = this;
+    return safeTry(async function* () {
+      const environments = listEntries(desired);
+      const plan: EnvironmentsPlan = { ops: [], notes: [], drift: [] };
+      /** Each entry's declared pin state, in file order (order IS the pin order). */
+      const pins: PinDeclaration[] = [];
+      for (const env of environments) {
+        const { settings, nested, routed } = splitEntry(env);
+        const name = env.name;
+        const params = { environment_name: name };
+        const probe = yield* ctx.read.probe.probeAbsent(LiveEnvironmentBody, {
           params,
-          payload: plainData(settings),
-          before: refuseOmitted(label, omitted),
-          drift,
-          change: `applied environment "${name}"`,
-          describe: `upserting environment "${name}"`,
-          capture:
-            live === undefined && routed.pinned !== undefined
-              ? (response) => {
-                  createdNodeId = environmentNodeId(name, response);
-                }
-              : undefined,
+          describe: `environment "${name}"`,
         });
+        const live = "missing" in probe ? undefined : probe.data;
+        const label = `environments[${name}]`;
+        const { drift, omitted, notes } =
+          live === undefined
+            ? { drift: [missingDrift(label)], omitted: [], notes: [] }
+            : environmentDrift(label, settings, flattenEnvironment(live));
+        plan.notes.push(...notes);
+        // The pin mutations' node id, off the probe or a created environment's PUT response. A probed
+        // body is validated only when a mutation needs it.
+        const probedNodeId = live === undefined ? undefined : { node_id: live.node_id };
+        let createdNodeId: string | undefined;
+        const nodeId = (): Result<string, SectionFailure> => {
+          if (probedNodeId !== undefined) {
+            return environmentNodeId(name, probedNodeId);
+          }
+          if (createdNodeId === undefined) {
+            throw new Error(
+              `BUG: environments: the pin of "${name}" ran before the PUT that creates the environment`,
+            );
+          }
+          return ok(createdNodeId);
+        };
+        if (hasDrift(drift)) {
+          plan.ops.push({
+            role: "update",
+            params,
+            payload: plainData(settings),
+            before: refuseOmitted(label, omitted),
+            drift,
+            change: `applied environment "${name}"`,
+            describe: `upserting environment "${name}"`,
+            capture:
+              live === undefined && routed.pinned !== undefined
+                ? (response) =>
+                    environmentNodeId(name, response).andThen((id) => {
+                      createdNodeId = id;
+                      return ok(undefined);
+                    })
+                : undefined,
+          });
+        }
+        if (routed.pinned !== undefined) {
+          pins.push({ name, pinned: routed.pinned, nodeId });
+        }
+        for (const key of NESTED_KEYS) {
+          const planned = yield* await planNested(ctx, section, key, name, nested, live);
+          plan.ops.push(...planned.ops);
+          plan.notes.push(...planned.notes);
+        }
       }
-      if (routed.pinned !== undefined) {
-        pins.push({ name, pinned: routed.pinned, nodeId });
+      // Pins plan after every environment op: a created environment's id comes from its PUT.
+      // Without a `pinned` key the section never touches /graphql.
+      if (pins.length > 0) {
+        const pinned = yield* planPinned(ctx, pins);
+        plan.ops.push(...pinned.ops);
+        plan.notes.push(...pinned.notes);
       }
-      for (const key of NESTED_KEYS) {
-        const planned = await planNested(ctx, this, key, name, nested, live);
-        plan.ops.push(...planned.ops);
-        plan.notes.push(...planned.notes);
-      }
-    }
-    // Pins plan after every environment op: a created environment's id comes from its PUT.
-    // Without a `pinned` key the section never touches /graphql.
-    if (pins.length > 0) {
-      const pinned = await planPinned(ctx, pins);
-      plan.ops.push(...pinned.ops);
-      plan.notes.push(...pinned.notes);
-    }
-    return plan;
+      return ok(plan);
+    });
   },
   async snapshot(ctx) {
-    const listed = await ctx.read.list.listAllEnveloped("environments", LiveEnvironment);
-    if (listed.length === 0) {
-      return { value: undefined, notes: [] };
-    }
-    // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
-    raise(
-      liveByIdentity(
-        this,
+    const section = this;
+    return safeTry(async function* () {
+      const listed = yield* ctx.read.list.listAllEnveloped("environments", LiveEnvironment);
+      if (listed.length === 0) {
+        return ok({ value: undefined, notes: [] });
+      }
+      // Environment names are case-insensitive on GitHub, the fold plan() probes and pins by.
+      yield* liveByIdentity(
+        section,
         "environment",
         listed,
         (live) => live.name.toLowerCase(),
         (live) => liveIdentity(live.name, { environment_id: live.id }),
-      ),
-    );
-    const notes: string[] = [];
-    const entries: EnvironmentConfig[] = [];
-    for (const live of listed) {
-      const settings = projectOntoSchema(EnvironmentConfig, flattenEnvironment(live));
-      const { nested, notes: nestedNotes } = await snapshotNested(ctx, this, live.name, live);
-      entries.push({ ...settings, ...nested });
-      notes.push(...nestedNotes);
-    }
-    const pinned = withPins(entries, await snapshotPins(ctx));
-    notes.push(...pinned.notes, ...sharedSecretNotes(pinned.entries));
-    return { value: pinned.entries, notes };
+      );
+      const notes: string[] = [];
+      const entries: EnvironmentConfig[] = [];
+      for (const live of listed) {
+        const settings = projectOntoSchema(EnvironmentConfig, flattenEnvironment(live));
+        const { nested, notes: nestedNotes } = yield* await snapshotNested(
+          ctx,
+          section,
+          live.name,
+          live,
+        );
+        entries.push({ ...settings, ...nested });
+        notes.push(...nestedNotes);
+      }
+      const pinned = withPins(entries, yield* snapshotPins(ctx));
+      notes.push(...pinned.notes, ...sharedSecretNotes(pinned.entries));
+      return ok({ value: pinned.entries, notes });
+    });
   },
 } satisfies SectionModule<"environments", typeof ENDPOINTS, typeof GRAPHQL_OPS>;
 

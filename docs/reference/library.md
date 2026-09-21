@@ -302,8 +302,9 @@ const sealed = await encryptReport(recipient, "# report");
 | `snapshotContext` | function | The context `snapshot()` reads through: the plan context plus the denial policy |
 | `SnapshotContext` | type | That context |
 | `DenialPolicy` | type | The policy as `snapshot()` sees it; only `snapshotContext` mints one |
-| `SectionPlan` | type | What `plan()` resolves to: the operations, notes, and drift |
-| `SectionSnapshot` | type | What `snapshot()` resolves to: the section's value and notes |
+| `SectionPlan` | type | What `plan()` resolves to on `Ok`: the operations, notes, and drift |
+| `SectionSnapshot` | type | What `snapshot()` resolves to on `Ok`: the section's value and notes |
+| `SectionFailure` | type | What `plan()` or `snapshot()` resolves to on `Err`: the whole line as `message`, and a `kind` for policy (`"permission-denied"` also carries the section, the detail, and the HTTP status) |
 
 ```ts
 import { planContext, sectionGrant, sectionModule, snapshotContext } from "@vivswan/github-settings-as-code";
@@ -318,6 +319,7 @@ A module's `plan()` and `snapshot()` are callable directly, each over a context 
 - `snapshotContext(module, client, repo, onMissingPermission)` for `snapshot()`; the fourth argument is the `OnMissingPermission`, `"fail"` or `"warn"`. The context carries it as a `DenialPolicy` only this factory mints, so a literal object cannot stand in for one.
 - A context belongs to the module it was built from: `labels.plan(planContext(branches, ...))` does not compile, and a module handed another section's context at runtime rejects with an error naming both sections before it reads anything.
 - `plan()` takes the section's value off a validated document (`settings.labels`, a `ValidatedInput<"labels">`), never a list you built by hand. Only `validateSettings()`, `mergeSettings()`, and a `snapshotRepository()` that did not fail mint that type.
+- `plan()` and `snapshot()` resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err` (a denied read, a live state the section cannot reconcile, a duplicated live pair). Neither rejects for anything a settings file can cause; a rejection is the wrong-context refusal above, the client's own throw, or a `BUG:` invariant.
 - A module's own `snapshot()` value is unbranded and goes through `validateSettings()` first. So the file-only checks (two entries naming one label) have run before any planner reads.
 - The brand names the section: on a module named by its key, a validated `branches` list is not a `labels` input. The erased `SectionModule` view is one key on both sides, as it is for contexts, so only the key-named module carries that check.
 - A `null` section value (`pages`, `interaction_limits`) carries no brand, since it holds nothing to check.
@@ -325,14 +327,22 @@ A module's `plan()` and `snapshot()` are callable directly, each over a context 
 Prefer `checkRepository()` and `snapshotRepository()` for the whole document: one run over every selected section, permission failures classified per section, and one report or rendered file at the end.
 
 ```ts
-import type { SectionPlan, SectionSnapshot, ValidatedInput } from "@vivswan/github-settings-as-code";
+import type { SectionFailure, SectionPlan, SectionSnapshot, ValidatedInput } from "@vivswan/github-settings-as-code";
 
 const declaredLabels: ValidatedInput<"labels"> | undefined = settings.labels;
 if (declaredLabels === undefined) throw new Error("the document declares no labels");
-const labelsPlan: SectionPlan = await labels.plan(planContext(labels, client, repo.value), declaredLabels);
-const labelsSnapshot: SectionSnapshot<"labels"> | undefined = await labels.snapshot?.(
-  snapshotContext(labels, client, repo.value, "warn"),
-);
+const planned = await labels.plan(planContext(labels, client, repo.value), declaredLabels);
+if (planned.isErr()) {
+  const failure: SectionFailure = planned.error;
+  throw new Error(`${failure.kind}: ${failure.message}`);
+}
+const labelsPlan: SectionPlan = planned.value;
+const read = await labels.snapshot?.(snapshotContext(labels, client, repo.value, "warn"));
+let labelsSnapshot: SectionSnapshot<"labels"> | undefined;
+if (read !== undefined) {
+  if (read.isErr()) throw new Error(read.error.message);
+  labelsSnapshot = read.value;
+}
 console.log(labelsPlan.ops.length, labelsSnapshot?.value, labelsSnapshot?.notes);
 ```
 

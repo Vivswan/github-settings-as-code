@@ -4,6 +4,7 @@ import type { GitHubClient } from "../../src/github/api.js";
 import type { SettingsFile } from "../../src/schema.js";
 import { codeQualitySetupSection } from "../../src/sections/code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "../../src/sections/code_scanning_default_setup/index.js";
+import type { SectionFailure } from "../../src/sections/contract/errors.js";
 import type { SectionInput, SectionModule } from "../../src/sections/contract/module.js";
 import { type PlanContext, planContext } from "../../src/sections/contract/plan.js";
 import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
@@ -12,7 +13,7 @@ import type { LiveState } from "../e2e/mock/state.js";
 import { MockApi } from "../mock-api.js";
 import { registryFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
-import { REPO } from "./section-run.js";
+import { REPO, unwrap } from "./section-run.js";
 import { proveSnapshotRoundTrip, type SnapshotSection } from "./snapshot-roundtrip.js";
 import { validatedInput } from "./validated-input.js";
 
@@ -187,8 +188,10 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
       conflict409,
       denied403,
     } = facts;
-    const plan = (api: GitHubClient, declared: Declared) =>
-      section.plan(planContext(section, api, REPO), validatedInput(section.key, declared));
+    const plan = async (api: GitHubClient, declared: Declared) =>
+      unwrap(
+        await section.plan(planContext(section, api, REPO), validatedInput(section.key, declared)),
+      );
 
     /** Every issue of a parse, as [path, message], so a refusal is pinned whole. */
     const issuesOf = (document: unknown): [string, string][] | "accepted" => {
@@ -364,7 +367,7 @@ describe.each(Object.values(SETUP_FACTS).map((facts) => [facts.section.key, fact
           tools,
         );
         expect(execution.status).toBe("failed");
-        expect((execution as { error: Error }).error.message).toBe(advice);
+        expect((execution as { failure: SectionFailure }).failure.message).toBe(advice);
       },
     );
   },

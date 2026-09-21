@@ -1,13 +1,14 @@
 /**
  * The ONE place a section's operations touch the API. Operations go through the request helpers so error classification
- * (a denial vs a hard failure, the hints) matches the reads'; a failure comes back as the thrown form the section loop
- * classifies (errorOf), beside what landed before it.
+ * (a denial vs a hard failure, the hints) matches the reads'; a failure comes back as the value the section loop
+ * classifies, beside what landed before it.
  */
 
+import { ok } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import { endpointMethod } from "../sections/contract/endpoints.js";
-import { errorOf } from "../sections/contract/errors.js";
+import { type SectionFailure, sectionFailure, thrown } from "../sections/contract/errors.js";
 import type { SectionContext, SectionMeta } from "../sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../sections/contract/plan.js";
 import {
@@ -26,7 +27,7 @@ interface PlanExecutionBase {
 
 type PlanExecution =
   | (PlanExecutionBase & { readonly status: "applied" })
-  | (PlanExecutionBase & { readonly status: "failed"; readonly error: unknown });
+  | (PlanExecutionBase & { readonly status: "failed"; readonly failure: SectionFailure });
 
 /**
  * OWN property only: an erased plan carries a bare string role, and an inherited name ("constructor") must read as
@@ -40,7 +41,8 @@ function noop(): void {}
 
 /**
  * The change thunk and capture hook are synchronous by contract: a promise would let the line record before the hook
- * settled and drop its rejection, so a thenable is a bug caught before the line records.
+ * settled and drop its rejection, so a thenable is a bug caught before the line records. A ResultAsync is a thenable
+ * too, so the check also refuses a hook that returned one where a Result was due.
  */
 function rejectThenable(section: SectionMeta, role: string, hook: string, value: unknown): void {
   const then = (value as { then?: unknown } | null)?.then;
@@ -109,19 +111,25 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a read endpoint (${endpoint.route}); only write roles are plannable`,
           );
         }
-        await op.before?.(exec);
-        const payload = typeof op.payload === "function" ? await op.payload(exec) : op.payload;
+        const before = await op.before?.(exec);
+        if (before?.isErr()) {
+          return { status: "failed", changes, notes, landed, failure: before.error };
+        }
+        const payload = typeof op.payload === "function" ? await op.payload(exec) : ok(op.payload);
+        if (payload.isErr()) {
+          return { status: "failed", changes, notes, landed, failure: payload.error };
+        }
         const request = {
           params: op.params,
           query: op.query,
-          payload,
+          payload: payload.value,
           carriesSecret: resolved(),
           describe: op.describe,
         };
         if (op.tolerate === undefined) {
           const called = await callDeclared(ctx, section, endpoint, request);
           if (called.isErr()) {
-            return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+            return { status: "failed", changes, notes, landed, failure: called.error };
           }
           response = called.value;
         } else {
@@ -130,13 +138,19 @@ export async function executePlan(
             tolerated: declaredTolerance(endpoint, op.tolerate.statuses),
           });
           if (called.isErr()) {
-            return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+            return { status: "failed", changes, notes, landed, failure: called.error };
           }
           const result = called.value;
           if ("error" in result) {
             const outcome = op.tolerate.outcome(result.error);
             if (outcome.failure !== undefined) {
-              throw new Error(outcome.failure);
+              return {
+                status: "failed",
+                changes,
+                notes,
+                landed,
+                failure: sectionFailure("refused", outcome.failure),
+              };
             }
             notes.push(outcome.note);
             continue;
@@ -155,30 +169,45 @@ export async function executePlan(
             `BUG: ${section.key} planned an operation under role "${op.role}", which is a GraphQL ${graphqlOp.kind} operation; only write roles are plannable`,
           );
         }
-        await op.before?.(exec);
+        const before = await op.before?.(exec);
+        if (before?.isErr()) {
+          return { status: "failed", changes, notes, landed, failure: before.error };
+        }
         const variables =
-          typeof op.variables === "function" ? await op.variables(exec) : op.variables;
-        const called = await callGraphql(ctx, section, graphqlOp, variables ?? {}, {
+          typeof op.variables === "function" ? await op.variables(exec) : ok(op.variables ?? {});
+        if (variables.isErr()) {
+          return { status: "failed", changes, notes, landed, failure: variables.error };
+        }
+        const called = await callGraphql(ctx, section, graphqlOp, variables.value, {
           describe: op.describe,
           carriesSecret: resolved(),
         });
         if (called.isErr()) {
-          return { status: "failed", changes, notes, landed, error: errorOf(called.error) };
+          return { status: "failed", changes, notes, landed, failure: called.error };
         }
         response = called.value;
       }
       landed++;
-      const lines = typeof op.change === "function" ? op.change(response) : op.change;
-      rejectThenable(section, op.role, "change thunk", lines);
+      const rendered = typeof op.change === "function" ? op.change(response) : ok(op.change);
+      rejectThenable(section, op.role, "change thunk", rendered);
+      if (rendered.isErr()) {
+        return { status: "failed", changes, notes, landed, failure: rendered.error };
+      }
+      const lines = rendered.value;
       if (lines.length === 0) {
         throw new Error(
           `BUG: ${section.key}: operation "${op.role}" rendered no change line for a request that landed`,
         );
       }
-      rejectThenable(section, op.role, "capture hook", op.capture?.(response));
+      const captured = op.capture?.(response);
+      rejectThenable(section, op.role, "capture hook", captured);
+      if (captured?.isErr()) {
+        return { status: "failed", changes, notes, landed, failure: captured.error };
+      }
       changes.push(...(typeof lines === "string" ? [lines] : lines));
     } catch (error) {
-      return { status: "failed", changes, notes, landed, error };
+      // The client's own throw on an unmarked request, or a BUG invariant: reported beside what landed.
+      return { status: "failed", changes, notes, landed, failure: thrown(error) };
     }
   }
   return { status: "applied", changes, notes, landed };

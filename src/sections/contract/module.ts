@@ -1,3 +1,4 @@
+import type { Result } from "neverthrow";
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GitHubClient } from "../../github/api.js";
@@ -22,6 +23,7 @@ import {
   type GatedReadDecl,
   type Route,
 } from "./endpoints.js";
+import type { SectionFailure } from "./errors.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
@@ -589,7 +591,8 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
 
 /**
  * plan() only READS (through the port in PlanContext) and returns the operations that would converge the
- * repository; the engine renders them as drift in check mode and executes them in apply mode.
+ * repository, or the failure that ended it as a value (a denied read, a live state it cannot reconcile); the
+ * engine renders the operations as drift in check mode and executes them in apply mode.
  * Modules register in ../registry.ts.
  *
  *   snapshot() required  -> the section declares a read (a GET or a GraphQL query), so the live state it
@@ -608,7 +611,7 @@ export type SectionModule<
     plan(
       ctx: PlanContext<E, G, K>,
       desired: ValidatedInput<K>,
-    ): Promise<SectionPlan<PlannedOp<E, G>>>;
+    ): Promise<Result<SectionPlan<PlannedOp<E, G>>, SectionFailure>>;
     /** Pinned so a non-literal object carrying a run() handler is not assignable either. */
     run?: never;
   };
@@ -625,8 +628,16 @@ export type DeclaresRead<E extends EndpointDict, G extends GraphqlDict> = string
 
 type SnapshotFacet<K extends SectionKey, E extends EndpointDict, G extends GraphqlDict> =
   DeclaresRead<E, G> extends true
-    ? { snapshot(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>> }
-    : { snapshot?(ctx: SnapshotContext<E, G, K>): Promise<SectionSnapshot<K>> };
+    ? {
+        snapshot(
+          ctx: SnapshotContext<E, G, K>,
+        ): Promise<Result<SectionSnapshot<K>, SectionFailure>>;
+      }
+    : {
+        snapshot?(
+          ctx: SnapshotContext<E, G, K>,
+        ): Promise<Result<SectionSnapshot<K>, SectionFailure>>;
+      };
 
 /**
  * Freezes in place through every nested object and array; functions are left as they are (nothing

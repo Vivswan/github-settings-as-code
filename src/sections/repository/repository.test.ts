@@ -10,11 +10,11 @@ import {
 } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
-import { REPO } from "../../../test/sections/section-run.js";
+import { deniedDetail, REPO, SectionFailed, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
 import { validateSectionShapes } from "../../engine/validate.js";
 import { describeProblem } from "../../problem.js";
-import { PermissionDenied } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { type SectionInput, sectionGrant } from "../contract/module.js";
 import { FEATURE_TOGGLES, repositorySection } from "./index.js";
 import { normalizeTopics, PATCH_FIELDS, RepositoryConfig } from "./schema.js";
@@ -28,10 +28,12 @@ const TOOLS = { resolveSecret: () => "" };
 
 type Desired = SectionInput<"repository">;
 
-const plan = (api: GitHubClient, desired: Desired) =>
-  repositorySection.plan(
-    planContext(repositorySection, api, REPO),
-    validatedInput("repository", desired),
+const plan = async (api: GitHubClient, desired: Desired) =>
+  unwrap(
+    await repositorySection.plan(
+      planContext(repositorySection, api, REPO),
+      validatedInput("repository", desired),
+    ),
   );
 
 /** Plan against `api`, then execute the plan against it: what apply would do. */
@@ -39,12 +41,13 @@ async function apply(api: GitHubClient, desired: Desired) {
   return executePlan(await plan(api, desired), repositorySection, api, REPO, TOOLS);
 }
 
-/** The rejection must be a PermissionDenied CARRYING the section's grant advice. */
-function expectAdministrationDenied(thrown: unknown): void {
-  expect(thrown).toBeInstanceOf(PermissionDenied);
-  expect((thrown as PermissionDenied).detail).toContain(
+/** The failure must be a denial CARRYING the section's grant advice; it comes back as the detail. */
+function expectAdministrationDenied(thrown: unknown): string {
+  const detail = deniedDetail(thrown);
+  expect(detail).toContain(
     'grant "Administration" (read and write) under the PAT\'s Repository permissions',
   );
+  return detail;
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -243,7 +246,7 @@ describe("repository", () => {
     expect(result).toEqual({ ops: [], notes: [], drift: [] });
   });
 
-  test("permission errors surface as PermissionDenied with the grant advice, at plan and at apply", async () => {
+  test("permission errors surface as denials with the grant advice, at plan and at apply", async () => {
     const denied = new MockApi({
       [GET]: { error: { status: 403, message: "Resource not accessible", body: "" } },
     });
@@ -254,7 +257,8 @@ describe("repository", () => {
     });
     const execution = await apply(refused, { description: "d" });
     expect(execution.status).toBe("failed");
-    expectAdministrationDenied((execution as { error: unknown }).error);
+    const failure = (execution as { failure: SectionFailure }).failure;
+    expectAdministrationDenied(new SectionFailed(failure));
   });
 
   /**
@@ -684,7 +688,9 @@ describe("repository GraphQL-routed keys", () => {
     });
     const execution = await apply(stale, { enable_sponsorships: true });
     expect(execution.status).toBe("failed");
-    expect(String((execution as { error: unknown }).error)).toContain("the write did not take");
+    expect((execution as { failure: SectionFailure }).failure.message).toContain(
+      "the write did not take",
+    );
     expect(stale.mutations()).toHaveLength(1);
     const silent = new MockApi({
       [GET]: { data: {} },
@@ -692,7 +698,7 @@ describe("repository GraphQL-routed keys", () => {
       "GRAPHQL UpdateRepositoryFeatures": { data: { updateRepository: {} } },
     });
     const unverified = await apply(silent, { enable_sponsorships: true });
-    expect(String((unverified as { error: unknown }).error)).toContain(
+    expect((unverified as { failure: SectionFailure }).failure.message).toContain(
       "returned no repository echo",
     );
   });
@@ -763,7 +769,7 @@ describe("repository GraphQL-routed keys", () => {
     });
   });
 
-  test("a GraphQL FORBIDDEN on the read surfaces as PermissionDenied", async () => {
+  test("a GraphQL FORBIDDEN on the read surfaces as a denial", async () => {
     const api = new MockApi({
       [GET]: { data: {} },
       "GRAPHQL RepositoryFeatures": {
@@ -804,8 +810,8 @@ describe("repository GraphQL-routed keys", () => {
 });
 
 describe("repository snapshot", () => {
-  const snapshot = (api: GitHubClient, policy: OnMissingPermission = "fail") =>
-    repositorySection.snapshot(snapshotContext(repositorySection, api, REPO, policy));
+  const snapshot = async (api: GitHubClient, policy: OnMissingPermission = "fail") =>
+    unwrap(await repositorySection.snapshot(snapshotContext(repositorySection, api, REPO, policy)));
   const LFS_NOTE =
     "repository.enable_git_lfs: GitHub exposes no endpoint to read Git LFS back, so the snapshot leaves it out; declare it yourself to manage it";
 
@@ -925,9 +931,8 @@ describe("repository snapshot", () => {
   });
 
   test("under fail, a denied toggle probe or a denied features query fails the section with the grant advice, never a note", async () => {
-    const probe = await rejection(snapshot(deniedProbeApi(), "fail"));
-    expectAdministrationDenied(probe);
-    expect((probe as PermissionDenied).detail).toContain(
+    const probe = expectAdministrationDenied(await rejection(snapshot(deniedProbeApi(), "fail")));
+    expect(probe).toContain(
       "the token was denied GET /repos/o/r/private-vulnerability-reporting: 403 Forbidden",
     );
     const features403 = new MockApi({
@@ -942,9 +947,8 @@ describe("repository snapshot", () => {
         },
       },
     });
-    const query = await rejection(snapshot(features403, "fail"));
-    expectAdministrationDenied(query);
-    expect((query as PermissionDenied).detail).toContain("GRAPHQL RepositoryFeatures");
+    const query = expectAdministrationDenied(await rejection(snapshot(features403, "fail")));
+    expect(query).toContain("GRAPHQL RepositoryFeatures");
   });
 
   test("four toggle 404s are left out under one note, since a concealed denial answers the same; one other answer proves the grant", async () => {
