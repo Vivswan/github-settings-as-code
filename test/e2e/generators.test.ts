@@ -1213,7 +1213,7 @@ describe("standaloneViewOf (the harness's per-layer view)", () => {
       ...(JSON.parse('{"actions": {"__proto__": {"a": null, "b": 1}}}') as Json),
     };
     const view = standaloneViewOf(doc);
-    expect(view).toEqual(standaloneView(doc) as Json);
+    expect(view).toEqual(standaloneView(doc).doc as Json);
     expect(Object.hasOwn(view.actions as object, "__proto__")).toBe(true);
     expect(JSON.stringify(view)).not.toContain(REMOVE_KEY);
   });

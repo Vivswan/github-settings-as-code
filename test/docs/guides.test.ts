@@ -526,10 +526,13 @@ describe("docs/ guide pages", () => {
         } catch (error) {
           throw new Error(`docs/${page} has an unparseable layer example: ${error}`);
         }
-        assertValidSettingsExample(standaloneView(doc), `docs/${page} layer example`);
+        assertValidSettingsExample(standaloneView(doc).doc, `docs/${page} layer example`);
         // The raw layer meets every fold gate over a lower layer that declares what its removals name, so the fold
         // has nothing to tolerate: the fold reports its first refusal only, and a tolerated one would hide the next.
-        const lower = { name: `docs/${page} (lower)`, doc: standaloneView(withoutMarkers(doc)) };
+        const lower = {
+          name: `docs/${page} (lower)`,
+          doc: standaloneView(withoutMarkers(doc)).doc,
+        };
         const folded = mergeLayers([lower, { name: `docs/${page}`, doc }], { layering: "deep" });
         expect(folded.isErr() ? folded.error : null).toBeNull();
       }

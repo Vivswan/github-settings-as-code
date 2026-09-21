@@ -370,6 +370,8 @@ Commit the rendered file only if you want to review it in pull requests; the ste
 Each layer must be a valid settings document on its own, judged with its directives set aside: `_layering` (at the top or on a wrapper), the top-level `_undeclared`, and every `_remove: true` entry, which declares nothing.
 Everything else is judged as written, `null` included: `rulesets: [{name: main, bypass_actors: null}]` fails under every directive, since the field has no empty state (`[]` is "no bypass actors"), and so does `labels: null`.
 
+An error that names an entry by its index counts the layer as written, removal entries included: `labels[1].color` is the second entry of the file, even when the first carries `_remove: true`.
+
 Whatever a standalone settings file may not say, a layer may not say either:
 
 - An unknown top-level section, a misspelled wrapper key, or a wrong shape in a closed section fails the render step, naming the layer, before any fold happens.
@@ -410,7 +412,7 @@ That guarantee covers the fold alone. The per-layer validation prints the same m
 - An unrecognized key in a strict object: `actions.cache: Unrecognized key: "cache_ttl"`, and `interaction_limits: Unrecognized key: "private_project"; interaction_limits takes limit, expiry, ...`, whose four keys are closed. A type mismatch prints only the type received, except a non-finite number, which prints as itself: `actions.cache.max_cache_size_gb: .inf` gives `Invalid input: expected number, received Infinity` (the vocabulary is Infinity, -Infinity, and NaN).
 - An unknown top-level section, by its name: `repo.yml has malformed section entries: unknown top-level section: lables (known: repository, labels, ...)`.
 - A key path through keys you chose, wherever a section accepts arbitrary ones: `repository.private_project is not plain YAML data`.
-- A closed section's entry, by its identity, with the key it does not know: `collaborators[octocat]: declares "permision", which this section does not recognize`.
+- A closed section's entry, by its index and identity, with the key it does not know: `collaborators[0] (username "octocat"): declares "permision", which this section does not recognize`.
 - A section-worded error that prints the rejected value:
   - `repository` toggles and the issue policy: `repository.enable_vulnerability_alerts: "yes" is not a boolean` and `repository.issue_creation_policy: "everyone" is not a recognized policy`.
   - `interaction_limits` logins: `interaction_limits.pull_request_creation_bypass: "Octocat" and "octocat" name the same login`.

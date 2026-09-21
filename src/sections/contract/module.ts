@@ -457,11 +457,6 @@ interface SectionModuleBase<
         known: {
           readonly [P in Extract<keyof EntryOf<NonNullable<SettingsFile[K]>>, string>]: true;
         };
-        /**
-         * Method syntax on purpose: a function-typed property is contravariant in its parameter, which
-         * would stop the module's exact type from erasing to SectionModule<SectionKey> in ../registry.ts.
-         */
-        describe(entry: EntryOf<NonNullable<SettingsFile[K]>>): string;
         /** What the unrecognized key would silently do, as message prose. */
         consequence: string;
       };

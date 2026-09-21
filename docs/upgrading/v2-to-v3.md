@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-six breaks. Eight are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, and 56), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve.
+Fifty-seven breaks. Eight are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, and 56), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve. Section 57 respells one validation message.
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
@@ -68,6 +68,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2739`, naming the missing keys); parse the document through `validateSettings`, or declare both keys; [section 54](#54-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
 | Branches: a `restrictions` block carries `users` and `teams` | `restrictions: {}`, or a block naming only `apps` or only `users`, parsed clean and the protection PUT 422ed at apply | Both lists are required on the block (`[]` when none) and `apps` stays optional; `restrictions: null` lifts the push restriction; `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal | Validation fails naming the two lists and the `null` form, with zero requests; [section 55](#55-branches-a-restrictions-block-carries-users-and-teams) |
 | Library: `plan()` and `snapshot()` resolve to a `Result` | `await labels.plan(ctx, declared)` resolved to the plan and rejected on a denied read, a duplicated live pair, or a live body the section could not reconcile | Both resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`; a rejection is left for the wrong-context refusal, the client's own throw, and `BUG:` invariants | Reading `.ops` or `.value` off the awaited value fails to compile (`TS2339`); `rejects.toThrow` assertions on a section call pass a resolved promise through; [section 56](#56-library-plan-and-snapshot-resolve-to-a-result) |
+| A closed section's unrecognized key names the entry by index | `collaborators[octocat]: declares "permision", which this section does not recognize ...` | `collaborators[0] (username "octocat"): declares "permision", which this section does not recognize ...`; under a wrapper, `collaborators.entries[0] (username "octocat")` | Anything that greps the bracket for the entry's identity needs the new spelling; [section 57](#57-a-closed-sections-unrecognized-key-names-the-entry-by-index) |
 
 ## 1. The defaults-file fallback
 
@@ -1201,6 +1202,20 @@ The change hook of a planned operation, its capture hook, and its `before`, `pay
 A rejection out of `plan()` or `snapshot()` now means one of three things: the module was handed another section's context (the guard the [library page](../reference/library.md#sections) describes, unchanged), the `GitHubClient` you supplied threw on an unmarked request, or a `BUG:` invariant fired.
 
 Fix: match on the `Result` (`isErr()`, `match`, or `_unsafeUnwrap()` in a test) where the awaited value was read directly, and assert `Err` where a test asserted a rejection.
+
+## 57. A closed section's unrecognized key names the entry by index
+
+A bracket in a validation issue's path always holds an index now. The unrecognized-key message of the closed sections (`collaborators`, `teams`, `workflows`, `custom_properties`, `secret_scanning_custom_patterns`, and the four secrets sections) was the one message that put the entry's identity there; it names the entry by its index and carries the identity in the text.
+
+```text
+v2   collaborators[octocat]: declares "permision", which this section does not recognize (known keys: username, permission) - ...
+
+v3   collaborators[0] (username "octocat"): declares "permision", which this section does not recognize (known keys: username, permission) - ...
+```
+
+Under an `{_undeclared, entries}` wrapper the path reads `collaborators.entries[0] (username "octocat")`, as every other issue under a wrapper does.
+
+Fix: anything that greps the bracket for the entry's identity reads the parenthesis instead.
 
 ## Order of operations
 

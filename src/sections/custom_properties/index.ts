@@ -157,7 +157,6 @@ export const customPropertiesSection = {
   // destination and is always a typo.
   closedSurface: {
     known: { property_name: true, value: true },
-    describe: (p) => p.property_name,
     consequence:
       "the key would silently never reach GitHub and the misdeclared property would keep its live value",
   },

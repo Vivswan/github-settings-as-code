@@ -81,7 +81,13 @@ jobs:
 
 ### A worked fix
 
-Suppose the old file carries a misspelled entry key in `collaborators`, say `permision: maintain`. The check run fails during upfront validation, before any section has touched the repository, with a message naming the entry: `collaborators[octocat]: declares "permision", which this section does not recognize (known keys: username, permission)`. The message also says what the typo would have done silently: granted the default `push` role instead of the intended one. The fix is the spelling:
+Suppose the old file carries a misspelled entry key in `collaborators`, say `permision: maintain`. The check run fails during upfront validation, before any section has touched the repository, with a message naming the entry by its index and identity:
+
+```text
+collaborators[0] (username "octocat"): declares "permision", which this section does not recognize (known keys: username, permission)
+```
+
+The message also says what the typo would have done silently: granted the default `push` role instead of the intended one. The fix is the spelling:
 
 ```yaml settings
 collaborators:

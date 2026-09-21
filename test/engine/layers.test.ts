@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type Layer, type Layering, mergeLayers } from "../../src/engine/layers.js";
+import { type Layer, type Layering, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";
 import { LIST_SECTIONS, type ListSection } from "../../src/schema.js";
 import { planContext } from "../../src/sections/contract/plan.js";
@@ -1807,4 +1807,120 @@ describe("mergeLayers: the file-wide _undeclared and the run input", () => {
       });
     },
   );
+});
+
+describe("standaloneView: the layer as its own validation sees it", () => {
+  test.each<[string, unknown, string, string]>([
+    [
+      "a plain list",
+      {
+        labels: [
+          { name: "old", _remove: true },
+          { name: "new", color: null },
+        ],
+      },
+      "labels[0].color has no empty state",
+      "labels[1].color has no empty state",
+    ],
+    [
+      "an {_layering, entries} wrapper",
+      {
+        labels: {
+          _layering: "deep",
+          entries: [
+            { name: "old", _remove: true },
+            { name: "new", color: null },
+          ],
+        },
+      },
+      "labels.entries[0].color has no empty state",
+      "labels.entries[1].color has no empty state",
+    ],
+    [
+      "a nested list, the outer entry shifted as well",
+      {
+        environments: [
+          { name: "stale", _remove: true },
+          {
+            name: "prod",
+            variables: [
+              { name: "A", _remove: true },
+              { name: "B", _remove: true },
+              { name: "C", value: null },
+            ],
+          },
+        ],
+      },
+      "environments[0].variables[0].value has no empty state",
+      "environments[1].variables[2].value has no empty state",
+    ],
+    [
+      "a nested wrapper",
+      {
+        environments: [
+          {
+            name: "prod",
+            variables: {
+              _undeclared: "keep",
+              entries: [
+                { name: "A", _remove: true },
+                { name: "C", value: null },
+              ],
+            },
+          },
+        ],
+      },
+      "environments[0].variables.entries[0].value has no empty state",
+      "environments[0].variables.entries[1].value has no empty state",
+    ],
+    [
+      "a message quoting a document value that reads like a path: only the leading path is renumbered",
+      { labels: [{ name: "old", _remove: true }, { name: "labels[0]" }, { name: "labels[0]" }] },
+      'labels[1].name: "labels[0]" names the same label as "labels[0]" declared earlier',
+      'labels[2].name: "labels[0]" names the same label as "labels[0]" declared earlier',
+    ],
+  ])(
+    "asWritten renumbers an issue's leading path to the layer's own through %s",
+    (_case, doc, issue, written) => {
+      expect(standaloneView(deepFreeze(doc)).asWritten(issue)).toBe(written);
+    },
+  );
+
+  test("asWritten leaves alone an index the view never shifted: a list with no removal, a list below a keyed entry, and a section it does not know", () => {
+    const view = standaloneView(
+      deepFreeze({
+        labels: [{ name: "old", _remove: true }, { name: "new" }],
+        rulesets: [
+          {
+            name: "main",
+            rules: [{ type: "deletion", _remove: true }, { type: "update" }],
+            bypass_actors: [1, 2],
+          },
+        ],
+        milestones: [{ title: "v1" }, { title: "v2" }],
+        collaborators: [
+          { username: "old", _remove: true },
+          { username: "octocat", permision: "x" },
+        ],
+      }),
+    );
+    for (const issue of [
+      "rulesets[0].bypass_actors[1] has no empty state",
+      "milestones[1].title: Invalid input",
+      "labels: null has no meaning",
+      "repository.labels[0] is not plain YAML data",
+    ]) {
+      expect(view.asWritten(issue)).toBe(issue);
+    }
+    expect(view.asWritten("rulesets[0].rules[0].type: Invalid input")).toBe(
+      "rulesets[0].rules[1].type: Invalid input",
+    );
+    expect(
+      view.asWritten(
+        'collaborators[0] (username "octocat"): declares "permision", which this section does not recognize',
+      ),
+    ).toBe(
+      'collaborators[1] (username "octocat"): declares "permision", which this section does not recognize',
+    );
+  });
 });

@@ -528,6 +528,59 @@ describe("validateSettingsDoc", () => {
     );
   });
 
+  test("a shape issue beside a refused removal names the entry by its index as written: the shapes judged the document minus the removal, and the index shifted", () => {
+    expect(
+      validateSettingsDoc(
+        {
+          labels: [
+            { name: "old", _remove: true },
+            { name: "new", color: null },
+          ],
+        },
+        "s.yml",
+        SectionSelection.ALL,
+        silentIo(),
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [
+          singleDocumentRemovalIssue("labels[0]._remove"),
+          "labels[1].color has no empty state; write a string",
+        ],
+      }),
+    );
+  });
+
+  test("a closed-surface issue beside a refused removal names the entry by its index as written and carries the identity in the text: an all-digit identity is never read as an index", () => {
+    expect(
+      validateSettingsDoc(
+        {
+          custom_properties: [
+            { property_name: "old", _remove: true },
+            { property_name: "tier", value: "gold" },
+            { property_name: "0", value: "x", permision: "y" },
+          ],
+        },
+        "s.yml",
+        SectionSelection.ALL,
+        silentIo(),
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [
+          singleDocumentRemovalIssue("custom_properties[0]._remove"),
+          expect.stringMatching(
+            /^custom_properties\[2\] \(property_name "0"\): declares "permision", /,
+          ),
+        ],
+      }),
+    );
+  });
+
   test("a list whose named property shadows a method is refused by the plainness check, never met by the removal walk", () => {
     // The walk for removals runs on the raw document, before the shapes; calling the list's own forEach would throw here.
     expect(

@@ -1,0 +1,23 @@
+# A layer is validated with its removal entries set aside, but an error names
+# the entry by its index in the layer as written, removal entries counted: the
+# null color sits at labels[1] in the file, after the removal, and that is the
+# index the reader opens. The fold never runs, and no file is written.
+name: render-remove-source-index
+inputs:
+  mode: render
+settings_layers:
+  - labels:
+      - name: old
+        color: ffffff
+settings:
+  labels:
+    - name: old
+      _remove: true
+    - name: new
+      color: null
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "settings.yml has malformed section entries: labels[1].color has no empty state; write a string"

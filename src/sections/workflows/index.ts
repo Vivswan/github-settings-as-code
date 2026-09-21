@@ -81,7 +81,6 @@ export const workflowsSection = {
   // The enable/disable PUTs carry no body at all, so an extra key can only be a typo that would silently do nothing.
   closedSurface: {
     known: { path: true, state: true },
-    describe: (w) => w.path,
     consequence: "the enable/disable calls send no payload, so the key would silently do nothing",
   },
   // Two entries naming the same file ("ci.yml" and ".github/workflows/ci.yml") would fight each other on every run.
