@@ -46,84 +46,94 @@ async function parsed(argv: readonly string[], env: ConfigEnv = {}) {
 }
 
 describe("init: argv -> config", () => {
-  test("the defaults: the settings file apply and check read, every section, the fail policy, no --force", async () => {
-    const result = await parsed(["--repository", "o/r"], { GITHUB_TOKEN: TOKEN });
+  test.each<[string, string[], ConfigEnv, InitConfig]>([
+    [
+      "the defaults: the settings file apply and check read, every section, the fail policy, no --force",
+      ["--repository", "o/r"],
+      { GITHUB_TOKEN: TOKEN },
+      {
+        kind: "init",
+        token: TOKEN,
+        apiVersion: DEFAULT_API_VERSION,
+        repo: parseRepoSlug("o/r")._unsafeUnwrap(),
+        settingsFile: DEFAULT_SETTINGS_FILE,
+        sections: SectionSelection.ALL,
+        onMissingPermission: "fail",
+        force: false,
+      },
+    ],
+    [
+      "every flag set, --force included",
+      [
+        "--token",
+        TOKEN,
+        "--repository",
+        "o/r",
+        "--settings-file",
+        "conf/settings.yml",
+        "--sections",
+        "labels,milestones",
+        "--on-missing-permission",
+        "warn",
+        "--api-version",
+        "2030-01-01",
+        "--force",
+      ],
+      {},
+      {
+        kind: "init",
+        token: TOKEN,
+        apiVersion: "2030-01-01",
+        repo: parseRepoSlug("o/r")._unsafeUnwrap(),
+        settingsFile: "conf/settings.yml",
+        sections: SectionSelection.of({ only: ["labels", "milestones"] })._unsafeUnwrap(),
+        onMissingPermission: "warn",
+        force: true,
+      },
+    ],
+  ])("%s", async (_case, argv, env, cfg) => {
+    const result = await parsed(argv, env);
     expect(result.code).toBe(0);
-    expect(result.cfg).toEqual({
-      kind: "init",
-      token: TOKEN,
-      apiVersion: DEFAULT_API_VERSION,
-      repo: parseRepoSlug("o/r")._unsafeUnwrap(),
-      settingsFile: DEFAULT_SETTINGS_FILE,
-      sections: SectionSelection.ALL,
-      onMissingPermission: "fail",
-      force: false,
-    });
+    expect(result.cfg).toEqual(cfg);
   });
 
-  test("every flag set, --force included", async () => {
-    const result = await parsed([
-      "--token",
-      TOKEN,
-      "--repository",
-      "o/r",
-      "--settings-file",
-      "conf/settings.yml",
-      "--sections",
-      "labels,milestones",
-      "--on-missing-permission",
-      "warn",
-      "--api-version",
-      "2030-01-01",
-      "--force",
-    ]);
-    expect(result.cfg).toEqual({
-      kind: "init",
-      token: TOKEN,
-      apiVersion: "2030-01-01",
-      repo: parseRepoSlug("o/r")._unsafeUnwrap(),
-      settingsFile: "conf/settings.yml",
-      sections: SectionSelection.of({ only: ["labels", "milestones"] })._unsafeUnwrap(),
-      onMissingPermission: "warn",
-      force: true,
-    });
-  });
-
-  test.each<[string, string[], ConfigEnv, string]>([
+  test.each<[string, string[], ConfigEnv, string | RegExp]>([
     [
       "no token",
       ["--repository", "o/r"],
       {},
-      'cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN',
+      'error: cannot call the GitHub API: no token was provided. Set the "token" input (--token on the command line), or export GITHUB_TOKEN\n',
     ],
     [
       "a settings file spelled as a list",
       ["--repository", "o/r", "--settings-file", "a.yml,b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file',
+      'error: the "settings-file" input is "a.yml,b.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file\n',
     ],
     [
       "a repeated settings file",
       ["--repository", "o/r", "--settings-file", "a.yml", "--settings-file", "b.yml"],
       { GITHUB_TOKEN: TOKEN },
-      'the "settings-file" input is "a.yml\nb.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file',
+      'error: the "settings-file" input is "a.yml\nb.yml", which contains a list separator: init writes exactly one settings file, and only mode: render takes a newline- or comma-separated list. Name one file\n',
+    ],
+    [
+      // The settings file is init's destination, so the snapshot destination flag is unknown to it.
+      "a snapshot destination flag",
+      ["--repository", "o/r", "--snapshot-file", "x.yml"],
+      { GITHUB_TOKEN: TOKEN },
+      /^error: unknown option '--snapshot-file'/,
     ],
   ])(
     "%s is refused before any config exists, with a remedy a terminal can follow",
-    async (_case, argv, env, message) => {
+    async (_case, argv, env, stderr) => {
       const result = await parsed(argv, env);
-      expect(result).toEqual({ cfg: undefined, code: 1, stderr: `error: ${message}\n` });
+      expect(result).toEqual({
+        cfg: undefined,
+        code: 1,
+        stderr: typeof stderr === "string" ? stderr : expect.stringMatching(stderr),
+      });
     },
   );
-
-  test("a snapshot destination flag is unknown to init: the settings file is the destination", async () => {
-    const result = await parsed(["--repository", "o/r", "--snapshot-file", "x.yml"], {
-      GITHUB_TOKEN: TOKEN,
-    });
-    expect(result.cfg).toBeUndefined();
-    expect(result.code).toBe(1);
-    expect(result.stderr).toStartWith("error: unknown option '--snapshot-file'");
-  });
 });
 
 describe("init: the written file and the printed grant", () => {

@@ -294,31 +294,25 @@ async function throughArgv(argv: readonly string[], env: ConfigEnv) {
 const ACTION = { artifactUpload: true } as const;
 
 describe("argv -> config equals env -> config", () => {
-  test("for every RunConfig arm and every rejection", async () => {
-    for (const { name, argv, inputs, env = {}, unknownFlag, cliRefuses } of cases()) {
-      const expected = parseConfig(recordReader(inputs), env, ACTION);
-      const actual = await throughArgv(argv, env);
-      if (cliRefuses !== undefined) {
-        // The action would ask for the channel's key next; the CLI's face has no artifact upload, so parseConfig refuses the channel for it.
-        expect(actual, name).toEqual({
-          parsed: undefined,
-          code: 1,
-          stderr: `error: ${cliRefuses}\n`,
-        });
-        continue;
-      }
-      if (expected.isOk()) {
-        expect(actual.parsed, name).toEqual(expected.value);
-        expect(actual.code, name).toBe(0);
-        continue;
-      }
-      expect(actual.parsed, name).toBeUndefined();
-      expect(actual.code, name).toBe(1);
-      if (unknownFlag === undefined) {
-        expect(actual.stderr, name).toBe(`error: ${describeProblem(expected.error)}\n`);
-      } else {
-        expect(actual.stderr, name).toStartWith(`error: unknown option '--${unknownFlag}'`);
-      }
+  test.each(cases())("$name", async ({ argv, inputs, env = {}, unknownFlag, cliRefuses }) => {
+    const expected = parseConfig(recordReader(inputs), env, ACTION);
+    const actual = await throughArgv(argv, env);
+    if (cliRefuses !== undefined) {
+      // The action would ask for the channel's key next; the CLI's face has no artifact upload, so parseConfig refuses the channel for it.
+      expect(actual).toEqual({ parsed: undefined, code: 1, stderr: `error: ${cliRefuses}\n` });
+      return;
+    }
+    if (expected.isOk()) {
+      expect(actual.parsed).toEqual(expected.value);
+      expect(actual.code).toBe(0);
+      return;
+    }
+    expect(actual.parsed).toBeUndefined();
+    expect(actual.code).toBe(1);
+    if (unknownFlag === undefined) {
+      expect(actual.stderr).toBe(`error: ${describeProblem(expected.error)}\n`);
+    } else {
+      expect(actual.stderr).toStartWith(`error: unknown option '--${unknownFlag}'`);
     }
   });
 
