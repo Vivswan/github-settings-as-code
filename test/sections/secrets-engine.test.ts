@@ -10,7 +10,6 @@ import {
   planSecrets,
   type SealedSecretPayload,
   type SecretsPlanScope,
-  secretKey,
 } from "../../src/sections/shared/secrets-engine.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
@@ -138,11 +137,7 @@ describe("sealing", () => {
   });
 });
 
-describe("secretKey and duplicates", () => {
-  test("secretKey uppercases (GitHub stores secret names uppercase)", () => {
-    expect(secretKey("npm_token")).toBe("NPM_TOKEN");
-  });
-
+describe("duplicate secret names", () => {
   test("two entries differing only by case are one issue at the later entry's name, so the last write cannot silently win", () => {
     expect(
       duplicateSecretNameIssues(

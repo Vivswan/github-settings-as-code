@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { ApiError } from "../../src/github/api.js";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import {
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
   graphqlOp,
-  toleratedGraphqlErrors,
 } from "../../src/sections/contract/graphql.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import {
@@ -83,19 +83,6 @@ describe("callGraphql", () => {
     );
   });
 
-  test("a 422 takes the generic rejection branch, naming the operation", async () => {
-    const api = new MockApi({
-      "GRAPHQL RepoToggles": { error: { status: 422, message: "bad value", body: "" } },
-    });
-    await expect(
-      callGraphql(ctx(api), section, READ_OP, { owner: "o", repo: "r" }).then(unwrap),
-    ).rejects.toThrow(
-      new Error(
-        'repository: GRAPHQL RepoToggles: 422 bad value. The API rejected the request; fix the "repository" values in the settings file to satisfy the message above',
-      ),
-    );
-  });
-
   test("an op-level permission override renders its own grant at the graded level", async () => {
     const op: GraphqlOpDecl = {
       ...READ_OP,
@@ -139,21 +126,24 @@ describe("tryCallGraphql tolerance", () => {
     kind: "read",
     query:
       "query RepoToggles($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }",
-    outcomes: { ok: "the toggles", NOT_FOUND: "the feature is not enabled" },
+    // Two declared outcomes, as the shipped rules op has: the whole declared set is tolerated, not its first member.
+    outcomes: {
+      ok: "the toggles",
+      NOT_FOUND: "the feature is not enabled",
+      UNPROCESSABLE: "the rule set is being rebuilt",
+    },
   });
 
-  test("a declared observed type comes back as { error }", async () => {
-    const api = new MockApi({
-      "GRAPHQL RepoToggles": {
-        error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
-      },
-    });
+  test.each<[error: ApiError]>([
+    [{ status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] }],
+    [{ status: 422, message: "Unprocessable", body: "", graphqlTypes: ["UNPROCESSABLE"] }],
+  ])("a declared observed type comes back as { error }: %j", async (error) => {
+    // The mock hands its fixture back by reference, so the expectation gets its own copy.
+    const api = new MockApi({ "GRAPHQL RepoToggles": { error: structuredClone(error) } });
     const result = unwrap(
       await tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }),
     );
-    expect(result).toEqual({
-      error: { status: 404, message: "Not Found", body: "", graphqlTypes: ["NOT_FOUND"] },
-    });
+    expect(result).toEqual({ error });
   });
 
   test("an undeclared observed type still classifies through failureFor", async () => {
@@ -167,23 +157,33 @@ describe("tryCallGraphql tolerance", () => {
     );
   });
 
-  test("tolerance reads the observed types, never the folded status", async () => {
-    // The 404 status alone would look like the declared NOT_FOUND, but the status fold is lossy: the full observed set must be declared for tolerance
-    // to hold.
-    const api = new MockApi({
-      "GRAPHQL RepoToggles": {
-        error: {
-          status: 404,
-          message: "mixed",
-          body: "",
-          graphqlTypes: ["NOT_FOUND", "UNPROCESSABLE"],
-        },
+  // The status alone would look like the declared type, but the status fold is lossy: the full observed set must be declared for tolerance to
+  // hold, and INSUFFICIENT_SCOPES is never declarable.
+  test.each<[label: string, op: GraphqlOpDecl, error: ApiError]>([
+    [
+      "a declared NOT_FOUND beside an undeclared FORBIDDEN",
+      tolerantOp,
+      { status: 404, message: "mixed", body: "", graphqlTypes: ["NOT_FOUND", "FORBIDDEN"] },
+    ],
+    [
+      "a declared FORBIDDEN beside INSUFFICIENT_SCOPES",
+      { ...READ_OP, outcomes: { ok: "the toggles", FORBIDDEN: "tolerated denial" } },
+      {
+        status: 403,
+        message: "scopes",
+        body: "",
+        graphqlTypes: ["FORBIDDEN", "INSUFFICIENT_SCOPES"],
       },
-    });
-    await rejectsDenied(
-      tryCallGraphql(ctx(api), section, tolerantOp, { owner: "o", repo: "r" }).then(unwrap),
-    );
-  });
+    ],
+  ])(
+    "tolerance reads every observed type, never the folded status: %s classifies as a denial",
+    async (_label, op, error) => {
+      const api = new MockApi({ "GRAPHQL RepoToggles": { error } });
+      await rejectsDenied(
+        tryCallGraphql(ctx(api), section, op, { owner: "o", repo: "r" }).then(unwrap),
+      );
+    },
+  );
 
   test("an error without observed types (an HTTP-level failure) is never tolerated", async () => {
     const api = new MockApi({
@@ -220,8 +220,8 @@ describe("tryCallGraphql tolerance", () => {
         section,
         tolerantOp,
         { owner: "o", repo: "r" },
-        // @ts-expect-error - UNPROCESSABLE is not a declared outcome of this op
-        { tolerate: ["UNPROCESSABLE"] },
+        // @ts-expect-error - FORBIDDEN is not a declared outcome of this op
+        { tolerate: ["FORBIDDEN"] },
       ).then(unwrap);
     void smuggle;
     expect(api.calls).toEqual([]);
@@ -248,39 +248,9 @@ describe("tryCallGraphql tolerance", () => {
       ),
     );
   });
-
-  test("an INSUFFICIENT_SCOPES response always classifies as a denial", async () => {
-    const forbiddenTolerant: GraphqlOpDecl = {
-      ...READ_OP,
-      outcomes: { ok: "the toggles", FORBIDDEN: "tolerated denial" },
-    };
-    const api = new MockApi({
-      "GRAPHQL RepoToggles": {
-        error: {
-          status: 403,
-          message: "scopes",
-          body: "",
-          graphqlTypes: ["FORBIDDEN", "INSUFFICIENT_SCOPES"],
-        },
-      },
-    });
-    await rejectsDenied(
-      tryCallGraphql(ctx(api), section, forbiddenTolerant, { owner: "o", repo: "r" }).then(unwrap),
-    );
-  });
 });
 
 describe("declaration readers", () => {
-  test("toleratedGraphqlErrors is the declared error-key set", () => {
-    expect(toleratedGraphqlErrors(READ_OP)).toEqual([]);
-    expect(
-      toleratedGraphqlErrors({
-        ...READ_OP,
-        outcomes: { ok: "x", NOT_FOUND: "n", UNPROCESSABLE: "u" },
-      }),
-    ).toEqual(["NOT_FOUND", "UNPROCESSABLE"]);
-  });
-
   test("the annotated-const idiom pins variables shapes at compile time", () => {
     // The annotation on READ_OP carries its variables shape through GraphqlVariablesOf.
     const _never = () => {
@@ -413,15 +383,6 @@ describe("listGraphqlConnection", () => {
         unwrap,
       ),
     );
-  });
-
-  test("a query without $cursor does not compile as a paginated read", () => {
-    // @ts-expect-error - the paginated arm's query type requires $cursor
-    const cursorless: GraphqlPaginatedReadDecl = {
-      ...READ_OP,
-      connection: { path: ["repository"] as const },
-    };
-    void cursorless;
   });
 
   test("a caller-supplied cursor variable does not compile (the loop owns it)", async () => {

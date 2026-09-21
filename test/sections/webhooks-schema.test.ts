@@ -21,57 +21,63 @@ const INSECURE_SSL = (spelled: string) =>
   `${spelled} is not a value GitHub accepts; use "0" (verify the TLS certificate) or "1" (skip verification), as a string or a number`;
 
 describe("webhooks values GitHub would refuse with 422 at apply time are refused at parse time", () => {
-  test.each<[label: string, hook: Record<string, unknown>, expected: string]>([
+  test.each<[label: string, hook: Record<string, unknown>, expected: string[]]>([
     [
       "an event GitHub does not deliver to repository webhooks",
       { config: { url: HOOK_URL }, events: ["push", "pushes"] },
-      `webhooks[0].events[1]: ${UNKNOWN_EVENT('"pushes"')}`,
+      [`webhooks[0].events[1]: ${UNKNOWN_EVENT('"pushes"')}`],
     ],
     [
       "an event name that is not a string",
       { config: { url: HOOK_URL }, events: [7] },
-      `webhooks[0].events[0]: ${UNKNOWN_EVENT("7")}`,
+      [`webhooks[0].events[0]: ${UNKNOWN_EVENT("7")}`],
     ],
     [
       "a content type spelled as a MIME type",
       { config: { url: HOOK_URL, content_type: "application/json" } },
-      'webhooks[0].config.content_type: "application/json" is not a payload encoding GitHub accepts; use "json" or "form"',
+      [
+        'webhooks[0].config.content_type: "application/json" is not a payload encoding GitHub accepts; use "json" or "form"',
+      ],
     ],
     [
       "an upper-case content type",
       { config: { url: HOOK_URL, content_type: "JSON" } },
-      'webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"',
+      [
+        'webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"',
+      ],
     ],
     [
       "insecure_ssl as a boolean",
       { config: { url: HOOK_URL, insecure_ssl: true } },
-      `webhooks[0].config.insecure_ssl: ${INSECURE_SSL("true")}`,
+      [`webhooks[0].config.insecure_ssl: ${INSECURE_SSL("true")}`],
     ],
     [
       "insecure_ssl as a number other than 0 or 1",
       { config: { url: HOOK_URL, insecure_ssl: 2 } },
-      `webhooks[0].config.insecure_ssl: ${INSECURE_SSL("2")}`,
+      [`webhooks[0].config.insecure_ssl: ${INSECURE_SSL("2")}`],
     ],
     [
       "a url without a scheme",
       { config: { url: "hooks.example.com/ci" } },
-      'webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the shape is https://hooks.example.com/ci); GitHub refuses the hook otherwise',
+      [
+        'webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the shape is https://hooks.example.com/ci); GitHub refuses the hook otherwise',
+      ],
+    ],
+    [
+      "every refused field of one entry, reported together so the fix takes one run",
+      {
+        config: { url: "hooks.example.com/ci", content_type: "JSON", insecure_ssl: true },
+        events: ["pushes"],
+      },
+      [
+        'webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the shape is https://hooks.example.com/ci); GitHub refuses the hook otherwise',
+        'webhooks[0].config.content_type: "JSON" is not a payload encoding GitHub accepts; use "json" or "form"',
+        `webhooks[0].config.insecure_ssl: ${INSECURE_SSL("true")}`,
+        `webhooks[0].events[0]: ${UNKNOWN_EVENT('"pushes"')}`,
+      ],
     ],
   ])("%s", (_label, hook, expected) => {
-    expect(problems([hook])).toEqual([expected]);
-  });
-
-  test("every refused field of one entry is reported together, so the fix takes one run", () => {
-    const hook = {
-      config: { url: "hooks.example.com/ci", content_type: "JSON", insecure_ssl: true },
-      events: ["pushes"],
-    };
-    expect(problems([hook])?.map((line) => line.slice(0, line.indexOf(":")))).toEqual([
-      "webhooks[0].config.url",
-      "webhooks[0].config.content_type",
-      "webhooks[0].config.insecure_ssl",
-      "webhooks[0].events[0]",
-    ]);
+    expect(problems([hook])).toEqual(expected);
   });
 
   test("a cyclic YAML alias in a refused field is described by kind, never serialized: JSON.stringify would throw and kill the run", () => {

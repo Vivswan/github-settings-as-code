@@ -1,15 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import {
-  type GitHubClient,
-  SECRET_RESPONSE_WITHHELD,
-  SECRET_TRANSPORT_WITHHELD,
-} from "../../src/github/api.js";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import { failureFor, type SectionFailure } from "../../src/sections/contract/errors.js";
 import { parseLive } from "../../src/sections/contract/live.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
-import { callDeclared, listAll } from "../../src/sections/contract/requests.js";
+import { listAll } from "../../src/sections/contract/requests.js";
 import { MockApi } from "../mock-api.js";
 
 /** The ladder's order decides the kind (a rate-limited 403 is never a denial); the line is the one the loops report. */
@@ -83,46 +78,6 @@ describe("the kinds the helpers add beside failureFor's", () => {
     check: false,
     resolveSecret: () => "",
   };
-
-  test("transport: a client throwing on a secret-carrying request is a withheld value, not a throw", async () => {
-    const throwing: GitHubClient = {
-      tryRequest: async () => {
-        throw new Error("ECONNRESET while sending hunter2");
-      },
-      tryGraphql: async () => {
-        throw new Error("unused");
-      },
-    };
-    const result = await callDeclared({ ...ctx, api: throwing }, section, create, {
-      payload: { token: "hunter2" },
-      carriesSecret: true,
-    });
-    expect(result.isErr() && result.error).toEqual({
-      kind: "transport",
-      message: `POST /repos/o/r/rulesets failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
-    });
-    // The control: an unmarked request lets the client's own throw through untouched.
-    await expect(
-      callDeclared({ ...ctx, api: throwing }, section, create, {
-        payload: { token: "hunter2" },
-        carriesSecret: false,
-      }),
-    ).rejects.toThrow(new Error("ECONNRESET while sending hunter2"));
-  });
-
-  test("a withheld response still classifies by status", async () => {
-    const api = new MockApi({
-      "POST /repos/o/r/rulesets": { error: { status: 422, message: "echo hunter2", body: "" } },
-    });
-    const result = await callDeclared({ ...ctx, api }, section, create, {
-      payload: { token: "hunter2" },
-      carriesSecret: true,
-    });
-    expect(result.isErr() && result.error).toEqual({
-      kind: "validation",
-      message: `rulesets: POST /repos/o/r/rulesets: 422 ${SECRET_RESPONSE_WITHHELD}${REJECTED_BODY}`,
-    });
-  });
 
   test("malformed: a page that is not a list, and a body off the documented shape", async () => {
     const list = {

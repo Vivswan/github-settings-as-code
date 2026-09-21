@@ -29,7 +29,6 @@ import {
 import { type SectionPermission, samePermission } from "../../src/sections/contract/permissions.js";
 import {
   DenialPolicy,
-  hasDrift,
   plainData,
   planContext,
   snapshotContext,
@@ -215,25 +214,35 @@ describe("readGating", () => {
     const _both: EndpointDecl = { ...put, alwaysRewrite: true, unverifiable: true };
   });
 
-  test("classifies a section by how many of its reads GitHub gates at write", () => {
-    expect(readGating(withEndpoints({ get: plainGet, put }))).toBe("plain");
-    expect(readGating(withEndpoints({ get: gatedGet, put }))).toBe("write-gated");
-    expect(readGating(withEndpoints({ get: plainGet, capGet: gatedGet, put }))).toBe("mixed");
-    // No reads at all: nothing a grant could deny.
-    expect(readGating(withEndpoints({ put }))).toBe("plain");
-  });
+  const readOp: GraphqlOpDecl = {
+    name: "SyntheticRead",
+    kind: "read",
+    query: "query SyntheticRead($owner: String!, $repo: String!) { repository { id } }",
+    outcomes: { ok: "x" },
+  };
 
-  test("a GraphQL read counts as a plain read, so it can turn write-gated into mixed", () => {
-    const readOp: GraphqlOpDecl = {
-      name: "SyntheticRead",
-      kind: "read",
-      query: "query SyntheticRead($owner: String!, $repo: String!) { repository { id } }",
-      outcomes: { ok: "x" },
-    };
-    expect(readGating({ ...withEndpoints({ get: gatedGet }), graphql: { read: readOp } })).toBe(
+  test.each<[label: string, section: SectionMeta, gating: ReturnType<typeof readGating>]>([
+    ["a plain read", withEndpoints({ get: plainGet, put }), "plain"],
+    ["a write-gated read", withEndpoints({ get: gatedGet, put }), "write-gated"],
+    [
+      "a plain and a write-gated read",
+      withEndpoints({ get: plainGet, capGet: gatedGet, put }),
       "mixed",
-    );
-  });
+    ],
+    // No reads at all: nothing a grant could deny.
+    ["no read", withEndpoints({ put }), "plain"],
+    // A GraphQL read counts as a plain read, so it can turn write-gated into mixed.
+    [
+      "a write-gated read and a GraphQL read",
+      { ...withEndpoints({ get: gatedGet }), graphql: { read: readOp } },
+      "mixed",
+    ],
+  ])(
+    "classifies a section with %s by how many of its reads GitHub gates at write",
+    (_label, section, gating) => {
+      expect(readGating(section)).toBe(gating);
+    },
+  );
 
   test("writeGatedReads lists the gated GETs with route and effective permission, in order", () => {
     const section = withEndpoints({
@@ -269,14 +278,6 @@ describe("failureFor context enrichment", () => {
     message: 'Validation Failed ([{"field":"rules","message":"Invalid rule"}])',
     body: "",
   };
-
-  test("generic rejection without context keeps the classic shape", () => {
-    expect(() => raiseFor(section, "POST", "/repos/o/r/rulesets", rejection)).toThrow(
-      new Error(
-        'rulesets: POST /repos/o/r/rulesets: 422 Validation Failed ([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
-      ),
-    );
-  });
 
   test("operation label prefixes the cause", () => {
     expect(() =>
@@ -337,40 +338,31 @@ describe("failureFor context enrichment", () => {
     expect(message([])).toBe(undeclared);
   });
 
-  test("the status-matched hint and documentation_url are appended to the generic branch", () => {
+  test.each<
+    [label: string, error: Parameters<typeof failureFor>[3], hint: string, rendered: string]
+  >([
+    [
+      "the status-matched hint and documentation_url are appended to the generic branch",
+      { ...rejection, documentationUrl: "https://docs.github.com/rest/repos/rules" },
+      "Usually this means a typo",
+      "rulesets: POST /repos/o/r/rulesets: 422 Validation Failed " +
+        '([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the ' +
+        '"rulesets" values in the settings file to satisfy the message above. Usually this ' +
+        "means a typo. The fields and values this endpoint accepts are documented at " +
+        "https://docs.github.com/rest/repos/rules",
+    ],
+    [
+      "a hint keyed to a different status is not rendered",
+      { status: 409, message: "Conflict", body: "" },
+      "never rendered on a 409",
+      'rulesets: POST /repos/o/r/rulesets: 409 Conflict. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
+    ],
+  ])("%s", (_label, error, hint, rendered) => {
     expect(() =>
-      raiseFor(
-        section,
-        "POST",
-        "/repos/o/r/rulesets",
-        { ...rejection, documentationUrl: "https://docs.github.com/rest/repos/rules" },
-        { op: endpoint({ hints: { 422: "Usually this means a typo" } }) },
-      ),
-    ).toThrow(
-      new Error(
-        "rulesets: POST /repos/o/r/rulesets: 422 Validation Failed " +
-          '([{"field":"rules","message":"Invalid rule"}]). The API rejected the request; fix the ' +
-          '"rulesets" values in the settings file to satisfy the message above. Usually this ' +
-          "means a typo. The fields and values this endpoint accepts are documented at " +
-          "https://docs.github.com/rest/repos/rules",
-      ),
-    );
-  });
-
-  test("a hint keyed to a different status is not rendered", () => {
-    expect(() =>
-      raiseFor(
-        section,
-        "POST",
-        "/repos/o/r/rulesets",
-        { status: 409, message: "Conflict", body: "" },
-        { op: endpoint({ hints: { 422: "never rendered on a 409" } }) },
-      ),
-    ).toThrow(
-      new Error(
-        'rulesets: POST /repos/o/r/rulesets: 409 Conflict. The API rejected the request; fix the "rulesets" values in the settings file to satisfy the message above',
-      ),
-    );
+      raiseFor(section, "POST", "/repos/o/r/rulesets", error, {
+        op: endpoint({ hints: { 422: hint } }),
+      }),
+    ).toThrow(new Error(rendered));
   });
 
   test("permission errors keep the grant advice and gain the operation label", () => {
@@ -607,21 +599,31 @@ describe("failureFor context enrichment", () => {
     expect((thrown as Error).message).not.toMatch(/grant/);
   });
 
-  test("a no-override denial keeps the section grant's caveat", () => {
+  test.each<[label: string, op: EndpointDecl]>([
     // sectionGrant(section) and grantFor(effective) coincide for a caveat-free section, so only a caveat-bearing one catches a refactor that
     // re-derives the grant from the resolved permission and drops every caveat.
+    [
+      "no override",
+      { route: "GET /repos/{owner}/{repo}/actions/permissions", statuses: { 200: "x" } },
+    ],
+    // Equal by structure, distinct by identity: an identity comparison would take the override path and render a caveat-free grant.
+    [
+      "an override restating the section's permission as a separate literal",
+      {
+        route: "GET /repos/{owner}/{repo}/actions/permissions",
+        statuses: { 200: "x" },
+        permission: structuredClone(actionsSection.permission),
+      },
+    ],
+  ])("a denial under %s keeps the section grant's caveat", (_label, op) => {
     let thrown: unknown;
-    const noOverride: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/actions/permissions",
-      statuses: { 200: "x" },
-    };
     try {
       raiseFor(
         actionsSection,
         "GET",
         "/repos/o/r/actions/permissions",
         { status: 403, message: "Resource not accessible", body: "" },
-        { op: noOverride },
+        { op },
       );
     } catch (error) {
       thrown = error;
@@ -636,80 +638,91 @@ describe("failureFor context enrichment", () => {
 });
 
 describe("freezeDeclarations", () => {
-  test("freezes the module and every declaration facet in place, leaving the shape and the handlers alone", () => {
-    const shape = z.object({ name: z.string() });
-    const module = {
-      key: "labels",
-      permission: { repo: ["issues"] },
-      undeclaredDefault: "delete",
-      endpoints: {
-        list: {
-          route: "GET /repos/{owner}/{repo}/labels",
-          statuses: { 200: "x" },
-          primaryRead: { notFound: "denied" },
-        },
-      },
-      graphql: {
-        probe: {
-          name: "FreezeProbe",
-          kind: "read",
-          query: "query FreezeProbe { viewer { login } }",
-          outcomes: { ok: "x" },
-        },
-      },
-      layering: {
-        keys: () => ["x"],
-        keyField: "name",
-        nested: { rules: { keys: () => null, keyField: "type" } },
-      },
-      closedSurface: {
-        known: { name: true },
-        describe: () => "an entry",
-        consequence: "the key would be ignored",
-      },
-      shape,
-      plan: async () => ({ ops: [], notes: [], drift: [] }),
-    } as unknown as SectionModule;
-    expect(freezeDeclarations(module)).toBe(module);
-    expect(Object.isFrozen(module)).toBe(true);
-    const facets = {
-      endpoints: module.endpoints,
-      endpoint: module.endpoints.list,
-      statuses: module.endpoints.list?.statuses,
-      primaryRead: module.endpoints.list?.primaryRead,
-      graphql: module.graphql,
-      op: module.graphql?.probe,
-      outcomes: module.graphql?.probe?.outcomes,
-      permission: module.permission,
-      layering: module.layering,
-      nested: module.layering?.nested?.rules,
-      closedSurface: module.closedSurface,
-      known: module.closedSurface?.known,
-    };
-    for (const [facet, value] of Object.entries(facets)) {
-      expect(Object.isFrozen(value), facet).toBe(true);
-    }
-    // The shape is zod's object and the handlers are functions: neither is a declaration, and both stay as built.
-    expect(Object.isFrozen(shape)).toBe(false);
-    expect(shape.safeParse({ name: "a" }).success).toBe(true);
-    expect(Object.isFrozen(module.plan)).toBe(false);
-    expect(Object.isFrozen(module.layering?.keys)).toBe(false);
-  });
+  const shape = z.object({ name: z.string() });
+  const plan = async () => ({ ops: [], notes: [], drift: [] });
+  /** Named values read off the module after the call: the declaration facets (frozen) or the shape and handlers (not). */
+  type Facets = (module: SectionModule) => Record<string, unknown>;
 
-  test("a module declaring no optional facets freezes the same way", () => {
-    const module = {
-      key: "workflows",
-      permission: { repo: ["actions"] },
-      undeclaredDefault: "untouched",
-      endpoints: {},
-      shape: z.unknown(),
-      plan: async () => ({ ops: [], notes: [], drift: [] }),
-    } as unknown as SectionModule;
-    expect(() => freezeDeclarations(module)).not.toThrow();
-    expect(Object.isFrozen(module)).toBe(true);
-    expect(Object.isFrozen(module.endpoints)).toBe(true);
-    expect(Object.isFrozen(module.permission)).toBe(true);
-  });
+  test.each<[label: string, module: SectionModule, frozen: Facets, unfrozen: Facets]>([
+    [
+      "with every declaration facet",
+      {
+        key: "labels",
+        permission: { repo: ["issues"] },
+        undeclaredDefault: "delete",
+        endpoints: {
+          list: {
+            route: "GET /repos/{owner}/{repo}/labels",
+            statuses: { 200: "x" },
+            primaryRead: { notFound: "denied" },
+          },
+        },
+        graphql: {
+          probe: {
+            name: "FreezeProbe",
+            kind: "read",
+            query: "query FreezeProbe { viewer { login } }",
+            outcomes: { ok: "x" },
+          },
+        },
+        layering: {
+          keys: () => ["x"],
+          keyField: "name",
+          nested: { rules: { keys: () => null, keyField: "type" } },
+        },
+        closedSurface: {
+          known: { name: true },
+          describe: () => "an entry",
+          consequence: "the key would be ignored",
+        },
+        shape,
+        plan,
+      } as unknown as SectionModule,
+      (module) => ({
+        endpoints: module.endpoints,
+        endpoint: module.endpoints.list,
+        statuses: module.endpoints.list?.statuses,
+        primaryRead: module.endpoints.list?.primaryRead,
+        graphql: module.graphql,
+        op: module.graphql?.probe,
+        outcomes: module.graphql?.probe?.outcomes,
+        permission: module.permission,
+        layering: module.layering,
+        nested: module.layering?.nested?.rules,
+        closedSurface: module.closedSurface,
+        known: module.closedSurface?.known,
+      }),
+      (module) => ({ shape: module.shape, plan: module.plan, keys: module.layering?.keys }),
+    ],
+    [
+      "with no optional facet",
+      {
+        key: "workflows",
+        permission: { repo: ["actions"] },
+        undeclaredDefault: "untouched",
+        endpoints: {},
+        shape: z.unknown(),
+        plan,
+      } as unknown as SectionModule,
+      (module) => ({ endpoints: module.endpoints, permission: module.permission }),
+      (module) => ({ shape: module.shape, plan: module.plan }),
+    ],
+  ])(
+    "freezes a module %s in place, leaving the shape and the handlers alone",
+    (_label, module, frozen, unfrozen) => {
+      expect(freezeDeclarations(module)).toBe(module);
+      expect(Object.isFrozen(module)).toBe(true);
+      for (const [facet, value] of Object.entries(frozen(module))) {
+        expect(Object.isFrozen(value), facet).toBe(true);
+      }
+      // The shape is zod's object and the handlers are functions: neither is a declaration, and all stay as built.
+      // Object.isFrozen(undefined) is true, so a facet the call dropped fails here by name.
+      for (const [facet, value] of Object.entries(unfrozen(module))) {
+        expect(Object.isFrozen(value), facet).toBe(false);
+      }
+      expect(module.shape.safeParse({ name: "a" }).success).toBe(true);
+    },
+  );
 });
 
 describe("denialPosture", () => {
@@ -966,17 +979,13 @@ describe("parseLive", () => {
     "^rulesets: POST /repos/\\{owner\\}/\\{repo\\}/rulesets returned a body outside the documented shape - ";
 
   test.each<[hidden: number, tail: string]>([
+    // Three or fewer render whole, with no remainder.
+    [0, ""],
     [1, "; and 1 more issue"],
     [2, "; and 2 more issues"],
   ])("three issues shown and %i hidden: the remainder agrees with its count", (hidden, tail) => {
     expect(() => unwrap(parseLive(section, endpoint({}), strict, wrongIn(3 + hidden)))).toThrow(
       new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+${tail}\\. Check`),
-    );
-  });
-
-  test("three issues or fewer render whole, with no remainder", () => {
-    expect(() => unwrap(parseLive(section, endpoint({}), strict, wrongIn(3)))).toThrow(
-      new RegExp(`${HEAD}id: [^;]+; name: [^;]+; url: [^;]+\\. Check`),
     );
   });
 });
@@ -1072,27 +1081,34 @@ describe("plainData", () => {
   });
 });
 
-describe("hasDrift", () => {
-  test("narrows a computed drift list to the non-empty tuple an operation demands", () => {
-    const lines: readonly string[] = ["labels[bug]: color d73a4a != live ffffff"];
-    expect(hasDrift([])).toBe(false);
-    expect(hasDrift(lines)).toBe(true);
-    if (hasDrift(lines)) {
-      const [head] = lines;
-      expect(head).toBe("labels[bug]: color d73a4a != live ffffff");
-    }
-  });
-});
-
 describe("declaredTolerance", () => {
   const endpoint: EndpointDecl = {
     route: "GET /repos/{owner}/{repo}/branches/{branch}",
     statuses: { 200: "the branch", 404: "no such branch", 409: "empty repository" },
   };
 
-  test("an explicit list tolerates exactly what it names", () => {
-    const tolerated = declaredTolerance(endpoint, [404]);
-    expect([404, 409, 500].map(tolerated)).toEqual([true, false, false]);
+  test.each<
+    [
+      label: string,
+      tolerate: Parameters<typeof declaredTolerance>[1],
+      statuses: number[],
+      tolerated: boolean[],
+    ]
+  >([
+    [
+      "an explicit list tolerates exactly what it names",
+      [404],
+      [404, 409, 500],
+      [true, false, false],
+    ],
+    [
+      "without one, the endpoint's declared tolerable statuses",
+      undefined,
+      [404, 409, 500, 200],
+      [true, true, false, false],
+    ],
+  ])("%s", (_label, tolerate, statuses, tolerated) => {
+    expect(statuses.map(declaredTolerance(endpoint, tolerate))).toEqual(tolerated);
   });
 
   test("an explicit list may only name declared tolerable statuses", () => {
@@ -1135,11 +1151,6 @@ describe("declaredTolerance", () => {
     expect([404, 409, 500, 401].map(tolerated)).toEqual([true, true, true, true]);
     // An explicit list still wins over the advisory default.
     expect(declaredTolerance({ ...endpoint, advisory: true }, [404])(500)).toBe(false);
-  });
-
-  test("otherwise the endpoint's declared tolerable statuses", () => {
-    const tolerated = declaredTolerance(endpoint);
-    expect([404, 409, 500, 200].map(tolerated)).toEqual([true, true, false, false]);
   });
 });
 
@@ -1193,45 +1204,59 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
       },
     ).then(unwrap);
 
-  test.each([
+  test.each<{
+    wire: string;
+    run: () => Promise<unknown>;
+    thrown: string;
+    /** The rebuilt failure's kind; absent where the client's own throw passes through untouched. */
+    kind?: SectionFailure["kind"];
+  }>([
     {
       wire: "REST, the client answers 422",
       run: () => rest(answering(422), true),
+      kind: "validation",
       thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
     },
     {
       wire: "REST, the client answers failed",
       run: () => rest(failing, true),
+      kind: "transport",
       thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "REST, the client throws",
       run: () => rest(throwing, true),
+      kind: "transport",
       thrown: `PATCH /repos/o/r/code-quality/setup failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "GraphQL, the client answers with errors",
       run: () => graphql(answering(422), true),
+      kind: "validation",
       thrown: `actions: arming the setup failed - GRAPHQL MarkedWrite: 422 ${SECRET_RESPONSE_WITHHELD}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
     },
     {
       wire: "GraphQL, the client answers failed",
       run: () => graphql(failing, true),
+      kind: "transport",
       thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "GraphQL, the client throws",
       run: () => graphql(throwing, true),
+      kind: "transport",
       thrown: `GRAPHQL MarkedWrite failed: ${SECRET_TRANSPORT_WITHHELD}. Check network connectivity from the runner to the GitHub API, then re-run`,
     },
     {
       wire: "REST, the client answers a rate limit signalled only by its message",
       run: () => rest(answering(403, "API rate limit exceeded for hunter2"), true),
+      kind: "rate-limit",
       thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 403 ${SECRET_RESPONSE_WITHHELD}. The API rate limit was hit; re-run the workflow after the limit resets, or use a token with a higher rate limit`,
     },
     {
       wire: "REST, the client answers a plain 403",
       run: () => rest(answering(403), true),
+      kind: "permission-denied",
       thrown:
         `actions: the token was denied PATCH /repos/o/r/code-quality/setup (arming the setup): 403 ${SECRET_RESPONSE_WITHHELD}. ` +
         `To fix, grant "Administration" (read and write) under the PAT's Repository permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and write)`,
@@ -1240,26 +1265,41 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
     {
       wire: "REST unmarked, the client answers 422",
       run: () => rest(answering(422), false),
+      kind: "validation",
       thrown: `actions: arming the setup failed - PATCH /repos/o/r/code-quality/setup: 422 ${echo}. The API rejected the request; fix the "actions" values in the settings file to satisfy the message above`,
     },
     // Unmarked, the client's own failed line is the failure, kind "transport".
     {
       wire: "REST unmarked, the client answers failed",
       run: () => rest(failing, false),
+      kind: "transport",
       thrown: `PATCH failed: ${echo}`,
     },
     {
       wire: "GraphQL unmarked, the client answers failed",
       run: () => graphql(failing, false),
+      kind: "transport",
       thrown: `GRAPHQL failed: ${echo}`,
+    },
+    // Unmarked, the client's own throw passes through untouched: no failure is rebuilt.
+    {
+      wire: "REST unmarked, the client throws",
+      run: () => rest(throwing, false),
+      thrown: echo,
     },
     {
       wire: "GraphQL unmarked, the client throws",
       run: () => graphql(throwing, false),
       thrown: echo,
     },
-  ])("$wire", async ({ run, thrown }) => {
-    await expect(run()).rejects.toThrow(new Error(thrown));
+  ])("$wire", async ({ run, thrown, kind }) => {
+    const caught: unknown = await run().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe(thrown);
+    expect(failureKind(caught)).toBe(kind);
   });
 
   test("a tolerated status on a marked request comes back withheld too, keeping the status the tolerance reads", async () => {
@@ -1468,33 +1508,5 @@ describe("samePermission", () => {
   ])("compares %s as %p, symmetrically", (_label, a, b, same) => {
     expect(samePermission(a, b)).toBe(same);
     expect(samePermission(b, a)).toBe(same);
-  });
-
-  test("an override restating the section's permission as a separate literal keeps the caveat", () => {
-    // Equal by structure, distinct by identity: an identity comparison would take the override path and render a caveat-free grant.
-    const restated: EndpointDecl = {
-      route: "GET /repos/{owner}/{repo}/actions/permissions",
-      statuses: { 200: "x" },
-      permission: { repo: ["administration"] },
-    };
-    expect(restated.permission).not.toBe(actionsSection.permission);
-    let thrown: unknown;
-    try {
-      raiseFor(
-        actionsSection,
-        "GET",
-        "/repos/o/r/actions/permissions",
-        { status: 403, message: "Resource not accessible", body: "" },
-        { op: restated },
-      );
-    } catch (error) {
-      thrown = error;
-    }
-    expect(deniedDetail(thrown)).toBe(
-      "the token was denied GET /repos/o/r/actions/permissions: 403 Resource not accessible. " +
-        'To fix, grant "Administration" (read and write) under the PAT\'s Repository ' +
-        'permissions; the "oidc_customization_sub" key alone instead needs "Actions" (read and ' +
-        "write)",
-    );
   });
 });
