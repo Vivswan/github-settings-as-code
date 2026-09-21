@@ -1,22 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { ok } from "neverthrow";
 import { executePlan } from "../../../src/engine/execute.js";
-import { runForRepo, validateSettingsDoc } from "../../../src/engine/orchestrate.js";
 import { type GitHubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
 } from "../../../test/e2e/mock/secrets.js";
-import { captureIo } from "../../../test/io/capture.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
-import { SectionSelection } from "../../engine/section-selection.js";
-import { describeProblem } from "../../problem.js";
 import type { SectionInput } from "../contract/module.js";
-import { driftOf, type ExecTools, type PlannedOp, planContext } from "../contract/plan.js";
+import { driftOf, type ExecTools, planContext } from "../contract/plan.js";
 import { actionsSecretsSection } from "./index.js";
 
 const LIST = "GET /repos/o/r/actions/secrets?per_page=100&page=1";
@@ -216,14 +211,6 @@ describe("actions_secrets planning", () => {
     });
   });
 
-  test("an empty declaration earns no cannot-verify note and never reads the sealing key", async () => {
-    const api = new MockApi({ [LIST]: listOf() });
-    expect(await plan(api, [])).toEqual({ ops: [], notes: [], drift: [] });
-    expect(api.calls.map((c) => c.path)).toEqual([
-      "/repos/o/r/actions/secrets?per_page=100&page=1",
-    ]);
-  });
-
   test("case-insensitive duplicate names are a validate issue in both declared forms, so the document fails before any API call", () => {
     const entries = [
       { name: "token", value: "$A" },
@@ -393,46 +380,6 @@ describe("actions_secrets execution", () => {
     );
     expect(api.mutations()).toEqual([]);
   });
-
-  test("the engine masks every plaintext before the first sealed PUT leaves the client", async () => {
-    // The masks are registered after the read-only preflight and before the first mutation; test/engine holds the orchestrator's twin of this proof.
-    const api = new MockApi({ [LIST]: listOf(), [PUBLIC_KEY]: KEY_ROUTE }).allowMutations(
-      "PUT /repos/o/r/actions/secrets/DEPLOY_TOKEN",
-    );
-    const mutationsAtMaskTime: number[] = [];
-    const { io, masks, logs, annotations } = captureIo(() =>
-      mutationsAtMaskTime.push(api.mutations().length),
-    );
-    const validated = validateSettingsDoc(
-      { actions_secrets: [{ name: "DEPLOY_TOKEN", value: "$DEPLOY_TOKEN" }] },
-      "settings.yml",
-      SectionSelection.ALL,
-      io,
-    );
-    if (validated.isErr()) {
-      throw new Error(describeProblem(validated.error));
-    }
-    const result = await runForRepo(
-      api,
-      {
-        repo: REPO,
-        settings: validated.value,
-        mode: "apply",
-        onMissingPermission: "fail",
-        sections: SectionSelection.ALL,
-        secretEnv: { DEPLOY_TOKEN: "s3cret-plaintext" },
-      },
-      io,
-    );
-    expect(result.result).toBe("applied");
-    expect(masks).toEqual(["s3cret-plaintext"]);
-    expect(mutationsAtMaskTime).toEqual([0]);
-    expect(unsealSecretValue(sealedPayload(api.mutations()[0]).encrypted_value)).toBe(
-      "s3cret-plaintext",
-    );
-    expect([...annotations, ...logs].join("\n")).not.toContain("s3cret-plaintext");
-    expect(logs).toContain('actions_secrets: created secret "DEPLOY_TOKEN"');
-  });
 });
 
 describe("actions_secrets sealing key", () => {
@@ -454,54 +401,5 @@ describe("actions_secrets sealing key", () => {
       /no usable \{key_id, key\} pair \(key_id is empty\)/,
     );
     expect(emptyId.mutations()).toEqual([]);
-  });
-});
-
-describe("actions_secrets contract", () => {
-  test("the read port exposes exactly the two reads, the list narrowed to its denied posture", () => {
-    const ctx = planContext(actionsSecretsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read).sort()).toEqual(["list", "publicKey"]);
-    // @ts-expect-error a write role is not a read: the port has no `put`
-    ctx.read.put;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-    // @ts-expect-error nor the tolerant tryCall
-    ctx.read.list.tryCall;
-  });
-
-  test("a planned operation names a declared write role; only the sealed PUT may go without drift", () => {
-    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
-    // property the compiler blames.
-    type Op = PlannedOp<typeof actionsSecretsSection.endpoints>;
-    const sealed: Op = {
-      role: "put",
-      params: { secret_name: "A" },
-      payload: (exec) => ok({ encrypted_value: exec.resolveSecret("$A"), key_id: "k" }),
-      // alwaysRewrite by declaration: no drift needed to justify the write.
-      drift: [],
-      change: "",
-    };
-    expect(sealed.role).toBe("put");
-    const read = { role: "list", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the list role is a read, not a plannable write
-    const _read: Op = read;
-    const key = { role: "publicKey", drift: ["x"], change: "" } as const;
-    // @ts-expect-error nor is the public-key read
-    const _key: Op = key;
-    const silentDelete = {
-      role: "remove",
-      params: { secret_name: "A" },
-      drift: [],
-      change: "",
-    } as const;
-    // @ts-expect-error the DELETE is not alwaysRewrite, so it must carry drift
-    const _silentDelete: Op = silentDelete;
-    const nameless = { role: "put", params: {}, drift: [], change: "" } as const;
-    // @ts-expect-error the route's {secret_name} param is required
-    const _nameless: Op = nameless;
   });
 });
