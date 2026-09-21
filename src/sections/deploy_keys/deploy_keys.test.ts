@@ -248,28 +248,28 @@ describe("deploy_keys validation before any read", () => {
 });
 
 describe("deploy_keys conflicts", () => {
-  test("material a live key holds under ANOTHER title is named after the one read, before any write", async () => {
-    const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", MIRROR_KEY)] } });
-    await expect(
-      plan(api, [{ title: "new-name", key: `${MIRROR_KEY} deploy@renamed` }]),
-    ).rejects.toThrow(
-      new RegExp(
-        '^deploy_keys: the settings file conflicts with the live deploy keys: the entry "new-name" ' +
-          String.raw`declares key material that live key "old-name" \(id 7\) already holds.*` +
-          String.raw`declare the entry under its live title "old-name"\. Resolve each conflict on GitHub, then re-run$`,
-        "s",
-      ),
-    );
-    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
-  });
-
-  test("the live holder conflict also fails under wrapped _undeclared:delete: the refusal runs before any operation is planned, so the delete-first order does not excuse it", async () => {
-    const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", BOT_KEY)] } });
-    await expect(
-      plan(api, { _undeclared: "delete", entries: [{ title: "new-name", key: BOT_KEY }] }),
-    ).rejects.toThrow(/live key "old-name" \(id 7\) already holds/);
-    expect(api.mutations()).toEqual([]);
-  });
+  const renamed = [{ title: "new-name", key: `${MIRROR_KEY} deploy@renamed` }];
+  test.each<[form: string, desired: SectionInput<"deploy_keys">]>([
+    ["a plain list", renamed],
+    [
+      "a wrapped _undeclared: delete, whose delete-first order does not excuse it",
+      { _undeclared: "delete", entries: renamed },
+    ],
+  ])(
+    "material a live key holds under ANOTHER title is named after the one read, before any write, under %s",
+    async (_form, desired) => {
+      const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", MIRROR_KEY)] } });
+      await expect(plan(api, desired)).rejects.toThrow(
+        new RegExp(
+          '^deploy_keys: the settings file conflicts with the live deploy keys: the entry "new-name" ' +
+            String.raw`declares key material that live key "old-name" \(id 7\) already holds.*` +
+            String.raw`declare the entry under its live title "old-name"\. Resolve each conflict on GitHub, then re-run$`,
+          "s",
+        ),
+      );
+      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
+    },
+  );
 
   test("two live keys under one title fail loudly, declared or not: GitHub does not enforce title uniqueness", async () => {
     const api = new MockApi({
@@ -402,40 +402,60 @@ describe("deploy_keys reconcile", () => {
       label: string,
       declaredReadOnly: boolean | undefined,
       live: ReturnType<typeof liveKey>[],
-      payload: Record<string, string | boolean>,
+      roles: ("create" | "remove")[],
+      createPayloads: Record<string, string | boolean>[],
     ]
   >([
     [
       "a fresh create carries the declared flag",
       true,
       [],
-      { title: "mirror-pull", key: MIRROR_KEY, read_only: true },
+      ["create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY, read_only: true }],
     ],
     [
       "a fresh create OMITS an undeclared flag, leaving GitHub's read/write default",
       undefined,
       [],
-      { title: "mirror-pull", key: MIRROR_KEY },
+      ["create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY }],
     ],
     [
       "a recreate re-sends the live true under an undeclared flag (no privilege widening)",
       undefined,
       [liveKey(10, "mirror-pull", STALE_KEY, true)],
-      { title: "mirror-pull", key: MIRROR_KEY, read_only: true },
+      ["remove", "create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY, read_only: true }],
     ],
     [
       "a recreate re-sends the live false under an undeclared flag",
       undefined,
       [liveKey(10, "mirror-pull", STALE_KEY, false)],
-      { title: "mirror-pull", key: MIRROR_KEY, read_only: false },
+      ["remove", "create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY, read_only: false }],
     ],
     [
       "a declared false beats the live true on a recreate",
       false,
       [liveKey(10, "mirror-pull", STALE_KEY, true)],
-      { title: "mirror-pull", key: MIRROR_KEY, read_only: false },
+      ["remove", "create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY, read_only: false }],
     ],
-  ])("%s", async (_label, declaredReadOnly, live, payload) => {
+    [
+      "a divergent DECLARED read_only alone forces the replace",
+      false,
+      [liveKey(10, "mirror-pull", MIRROR_KEY, true)],
+      ["remove", "create"],
+      [{ title: "mirror-pull", key: MIRROR_KEY, read_only: false }],
+    ],
+    [
+      "an undeclared read_only is never compared, so the same material converges",
+      undefined,
+      [liveKey(10, "mirror-pull", MIRROR_KEY, true)],
+      [],
+      [],
+    ],
+  ])("%s", async (_label, declaredReadOnly, live, roles, createPayloads) => {
     const api = new MockApi({ [LIST]: { data: live } });
     const result = await plan(api, [
       {
@@ -444,24 +464,11 @@ describe("deploy_keys reconcile", () => {
         ...(declaredReadOnly === undefined ? {} : { read_only: declaredReadOnly }),
       },
     ]);
-    expect(result.ops.map((op) => op.role)).toEqual(
-      live.length === 0 ? ["create"] : ["remove", "create"],
+    expect(result.ops.map((op) => op.role)).toEqual(roles);
+    expect(result.ops.filter((op) => op.role === "create").map((op) => op.payload)).toEqual(
+      createPayloads,
     );
-    expect(result.ops.filter((op) => op.role === "create").map((op) => op.payload)).toEqual([
-      payload,
-    ]);
-  });
-
-  test("a divergent DECLARED read_only alone forces the replace; an undeclared one is never compared", async () => {
-    const live = [liveKey(10, "deploy-bot", BOT_KEY, true)];
-    const forced = await plan(new MockApi({ [LIST]: { data: live } }), [
-      { title: "deploy-bot", key: BOT_KEY, read_only: false },
-    ]);
-    expect(forced.ops.map((op) => op.role)).toEqual(["remove", "create"]);
-    const ignored = await plan(new MockApi({ [LIST]: { data: live } }), [
-      { title: "deploy-bot", key: BOT_KEY },
-    ]);
-    expect(ignored).toEqual({ ops: [], notes: [], drift: [] });
+    expect([result.notes, result.drift]).toEqual([[], []]);
   });
 
   test('a declared passthrough field named "material" earns the phantom-key note, diffed against the RAW api body', async () => {
