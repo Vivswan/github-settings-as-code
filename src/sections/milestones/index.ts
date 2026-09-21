@@ -3,6 +3,7 @@
  * deleting a milestone detaches it from every issue carrying it.
  */
 
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import {
@@ -84,10 +85,11 @@ export const milestonesSection = listSection({
   lens: {
     toWrite: ({ due_on, ...rest }): MilestoneWrite =>
       due_on === undefined ? rest : { ...rest, due_on: dueDay(due_on) },
-    fromLive: (live): MilestoneComparable => ({
-      ...live,
-      due_on: live.due_on === null ? null : dueDay(live.due_on),
-    }),
+    fromLive: (live) =>
+      ok<MilestoneComparable>({
+        ...live,
+        due_on: live.due_on === null ? null : dueDay(live.due_on),
+      }),
     wire: ({ due_on, ...rest }) =>
       typeof due_on === "string" ? { ...rest, due_on: dueOnWire(due_on) } : rest,
     matchBy: {},

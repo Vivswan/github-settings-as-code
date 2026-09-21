@@ -1,6 +1,7 @@
 import { err, ok, type Result } from "neverthrow";
 import {
   type ApiError,
+  type ClientAnswer,
   isRateLimitError,
   type RequestMark,
   SECRET_RESPONSE_WITHHELD,
@@ -36,6 +37,11 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
   ? [opts?: { params?: undefined } & Extra]
   : [opts: { params: Readonly<Record<PathParams<E["route"]>, string>> } & Extra];
 
+/** The client's `failed` line as the section's failure: no status classifies it, so the line stands as given. */
+function unanswered(failed: string): SectionFailure {
+  return { kind: "transport", message: failed };
+}
+
 /**
  * A request the executor marked as carrying a resolved secret has its failure rebuilt HERE, on the engine's side of
  * the client port, so the guarantee holds for a library caller's own GitHubClient: such a client's 422 body echoing a
@@ -49,19 +55,21 @@ export type OptsArg<E extends EndpointDecl, Extra> = [PathParams<E["route"]>] ex
 async function issue<D>(
   label: string,
   carriesSecret: boolean,
-  send: (mark: RequestMark | undefined) => Promise<{ data: D } | { error: ApiError }>,
+  send: (mark: RequestMark | undefined) => Promise<ClientAnswer<D>>,
 ): Promise<Result<{ data: D } | { error: ApiError }, SectionFailure>> {
   if (!carriesSecret) {
-    return ok(await send(undefined));
+    const result = await send(undefined);
+    return "failed" in result ? err(unanswered(result.failed)) : ok(result);
   }
-  let result: { data: D } | { error: ApiError };
+  let result: ClientAnswer<D>;
   try {
     result = await send({ carriesSecret: true });
   } catch {
-    return err({
-      kind: "transport",
-      message: transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API"),
-    });
+    // A client that throws breaks the GitHubClient contract; the free text may still quote the body, so it is withheld.
+    return err(unanswered(transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API")));
+  }
+  if ("failed" in result) {
+    return err(unanswered(transportFailure(label, SECRET_TRANSPORT_WITHHELD, "the GitHub API")));
   }
   if (!("error" in result)) {
     return ok(result);
@@ -224,6 +232,9 @@ export async function probeAbsent<E extends EndpointDecl>(
   const path = expand(endpoint, ctx, options?.params, options?.query);
   const tolerated = declaredTolerance(endpoint, options?.tolerate);
   const result = await ctx.api.tryRequest("GET", path, undefined, { accept: options?.accept });
+  if ("failed" in result) {
+    return err(unanswered(result.failed));
+  }
   if ("error" in result) {
     // A rate-limited 403 is not an absent resource (the tryCallDeclared rule).
     if (!isRateLimitError(result.error) && tolerated(result.error.status)) {
@@ -250,6 +261,9 @@ async function listPages(
   describe?: string,
 ): Promise<Result<unknown[], SectionFailure>> {
   const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
+  if ("failed" in result) {
+    return err(unanswered(result.failed));
+  }
   if ("error" in result) {
     return err(
       failureFor(section, "GET", path, result.error, { operation: describe, op: endpoint }),
@@ -362,6 +376,9 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
 ): Promise<Result<{ data: Record<string, unknown> } | { error: ApiError }, SectionFailure>> {
   const tolerate: readonly GraphqlTolerableError[] = opts?.tolerate ?? toleratedGraphqlErrors(op);
   const result = await ctx.api.tryGraphql(op, variables, ctx.repo.slug);
+  if ("failed" in result) {
+    return err(unanswered(result.failed));
+  }
   if ("error" in result && !graphqlErrorTolerated(result.error, tolerate)) {
     return err(
       failureFor(section, "GRAPHQL", op.name, result.error, { operation: opts?.describe, op }),
@@ -387,6 +404,9 @@ export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   let cursor: string | null = null;
   for (;;) {
     const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
+    if ("failed" in result) {
+      return err(unanswered(result.failed));
+    }
     if ("error" in result) {
       if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
         return ok(result);

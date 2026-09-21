@@ -24,16 +24,10 @@ export function createVisibilityResolver(
 }
 
 async function probe(api: GitHubClient, slug: string): Promise<RepoVisibility> {
-  let result: Awaited<ReturnType<GitHubClient["tryRequest"]>>;
-  try {
-    // The probe decides redaction, so its own trace (and any throttle-callback trace) must fail closed before the answer
-    // is known: redactTrace holds the slug redacted for the request's duration.
-    result = await api.tryRequest("GET", `/repos/${slug}`, undefined, { redactTrace: true });
-  } catch {
-    // Network-level failure: tryRequest throws once the retries are spent.
-    return "unknown";
-  }
-  if ("error" in result) {
+  // The probe decides redaction, so its own trace (and any throttle-callback trace) must fail closed before the answer
+  // is known: redactTrace holds the slug redacted for the request's duration.
+  const result = await api.tryRequest("GET", `/repos/${slug}`, undefined, { redactTrace: true });
+  if ("failed" in result || "error" in result) {
     return "unknown";
   }
   const repo = result.data as { visibility?: unknown; private?: unknown } | null;

@@ -6,7 +6,11 @@
 
 import type { ApiError, GitHubClient } from "./api.js";
 
-export type PageResult = { items: unknown[] } | { error: ApiError } | { malformed: true };
+export type PageResult =
+  | { items: unknown[] }
+  | { error: ApiError }
+  | { failed: string }
+  | { malformed: true };
 
 export async function paginate(
   api: GitHubClient,
@@ -22,6 +26,9 @@ export async function paginate(
       "GET",
       `${path}${separator}per_page=${perPage}&page=${page}`,
     );
+    if ("failed" in result) {
+      return { failed: result.failed };
+    }
     if ("error" in result) {
       return { error: result.error };
     }

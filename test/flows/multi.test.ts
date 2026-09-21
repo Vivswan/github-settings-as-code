@@ -271,6 +271,16 @@ describe("runMulti", () => {
     expect(annotations.some((a) => a.includes("the token was denied"))).toBe(true);
   });
 
+  test("a target whose settings read has no HTTP answer fails with the client's line, and the run goes on", async () => {
+    const failed =
+      "GET /repos/o/x/contents/.github/settings.yml failed: socket hang up. Check network connectivity from the runner to https://api.test, then re-run";
+    const api = new MockApi({ "GET /repos/o/x/contents/.github/settings.yml": { failed } });
+    const { io, annotations } = captureIo();
+    const targets = await runTargets(api, cfg({ reposInput: "o/x" }), io);
+    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/x", "failed"]]);
+    expect(annotations).toEqual([`error: o/x: reading o/x:.github/settings.yml failed: ${failed}`]);
+  });
+
   test("a Contents-denied repo fails naming the grant; it neither skips nor receives the defaults", async () => {
     // The contents GET and the ref read 404 (the fine-grained denial) while the repo probe succeeds: the file cannot be proven absent, so nothing is
     // applied even with a defaults file in hand.
@@ -965,6 +975,7 @@ describe("runMulti private-report: artifact wiring", () => {
     const uploader: ArtifactUploader = {
       async upload(name, file) {
         uploads.push({ name, file });
+        return { uploaded: true as const };
       },
     };
     const decrypt = async (data: Uint8Array): Promise<string> => {

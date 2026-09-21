@@ -10,7 +10,7 @@
  * before the create that needs it is sent.
  */
 
-import { err, ok, type Result, safeTry } from "neverthrow";
+import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import {
   type Delta,
@@ -330,13 +330,14 @@ interface ListSectionDeclFields<
      */
     readonly toWrite: (entry: Entry<K>) => ListWrite<F>;
     /**
-     * A live item in the same terms as toWrite, so the two compare field by field.
+     * A live item in the same terms as toWrite, so the two compare field by field; a live item the section cannot
+     * compare (a ruleset repeating a rule type) is the failure that ends the plan or snapshot.
      *
      *   identity field          -> verbatim
      *   other declared fields   -> normalized as GitHub stores them (a color lowercased without "#", a null description as "")
      *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
      */
-    readonly fromLive: (live: Live) => ListComparable<F>;
+    readonly fromLive: (live: Live) => Result<ListComparable<F>, SectionFailure>;
     /**
      * The write as the request body spells it, when that differs from the compared form (a milestone's due
      * day sent as noon UTC): applied to every body the planner sends (create, recreate, update, and the
@@ -458,7 +459,7 @@ interface ErasedDecl<Key extends string> {
   readonly address: (live: object) => Readonly<Record<string, string>>;
   readonly lens: {
     readonly toWrite: (entry: object) => ListWrite<string>;
-    readonly fromLive: (live: object) => ListComparable<string>;
+    readonly fromLive: (live: object) => Result<ListComparable<string>, SectionFailure>;
     readonly wire?: (write: ListWrite<string>) => ListWrite<string>;
     readonly matchBy: Readonly<Record<string, MatchKey>>;
   };
@@ -841,11 +842,14 @@ async function planList<Key extends string>(
     });
 
     const live = yield* readLive(decl, ctx);
-    const liveItems = live.managed.map((item) => {
-      const comparable = lens.fromLive(item);
-      const name = nameOf(comparable, identity.field);
-      return { item, comparable, name, key: fold(name) };
-    });
+    const liveItems = yield* Result.combine(
+      live.managed.map((item) =>
+        lens.fromLive(item).map((comparable) => {
+          const name = nameOf(comparable, identity.field);
+          return { item, comparable, name, key: fold(name) };
+        }),
+      ),
+    );
     // The guard runs before the section's own live conflicts: a duplicated live pair makes every other judgment a guess.
     const liveByKey = yield* liveByIdentity(
       section,
@@ -923,7 +927,7 @@ async function planList<Key extends string>(
         continue;
       }
       const body = yield* await readItem(decl, ctx, existing.item);
-      const compared = comparison(decl, label, write, body, lens.fromLive(body));
+      const compared = comparison(decl, label, write, body, yield* lens.fromLive(body));
       plan.notes.push(...compared.notes);
       const found = [
         ...deltas(compared.write, compared.live, { matchBy: lens.matchBy }),
@@ -1068,10 +1072,14 @@ async function snapshotList(
     if (live.managed.length === 0) {
       return ok({ value: undefined, notes });
     }
-    const items = live.managed.map((item) => {
-      const name = nameOf(lens.fromLive(item), identity.field);
-      return { item, name, key: identity.fold(name) };
-    });
+    const items = yield* Result.combine(
+      live.managed.map((item) =>
+        lens.fromLive(item).map((comparable) => {
+          const name = nameOf(comparable, identity.field);
+          return { item, name, key: identity.fold(name) };
+        }),
+      ),
+    );
     yield* liveByIdentity(
       section,
       noun,
@@ -1095,7 +1103,7 @@ async function snapshotList(
         }
         continue;
       }
-      let entry = projectOntoSchema(decl.entry, lens.fromLive(body)) as Fields;
+      let entry = projectOntoSchema(decl.entry, yield* lens.fromLive(body)) as Fields;
       for (const field of declaredSecrets(decl, entry)) {
         const id = Object.values(decl.address(item)).join("_");
         const { variable, reference } = snapshotSecretReference(noun, id);

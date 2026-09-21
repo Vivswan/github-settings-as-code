@@ -91,6 +91,17 @@ function deliveryWarning(error: ApiError, landed: LandedWrites): Failure {
   };
 }
 
+/**
+ * A request with no HTTP answer: the client's line embeds the request path (the private slug), so nothing from it may
+ * escape; the warning is the same one a client that throws instead of answering earns (deliverIssueReport).
+ */
+const TRANSPORT_WARNING =
+  "could not deliver the private report: the request failed before an HTTP response arrived. Re-run, or set private-report: none if it persists";
+
+function transportWarning(landed: LandedWrites): Failure {
+  return { warning: TRANSPORT_WARNING, landed };
+}
+
 /** Under the same public-safety rule: `what` is a route template or a structural fact, never the expanded path or response content. */
 function malformedWarning(what: string, landed: LandedWrites): Failure {
   return {
@@ -171,6 +182,9 @@ async function findReportIssue(
     undefined,
     (items) => reportCandidatesIn(items).length > 0,
   );
+  if ("failed" in page) {
+    return transportWarning(landed);
+  }
   if ("error" in page) {
     return deliveryWarning(page.error, landed);
   }
@@ -225,6 +239,9 @@ async function closeIfOpen(
     expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
     { body, state: "closed" },
   );
+  if ("failed" in closed) {
+    return transportWarning(landed);
+  }
   if ("error" in closed) {
     return deliveryWarning(closed.error, landed);
   }
@@ -250,6 +267,9 @@ async function deliver(
     color: MARKER_LABEL_CONFIG.color,
     description: MARKER_LABEL_CONFIG.description,
   });
+  if ("failed" in label) {
+    return transportWarning(landed);
+  }
   if ("error" in label && label.error.status !== 422) {
     return deliveryWarning(label.error, landed);
   }
@@ -285,6 +305,9 @@ async function deliver(
       expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(found.number) }),
       relabel ? { body, state, labels: relabel } : { body, state },
     );
+    if ("failed" in updated) {
+      return transportWarning(landed);
+    }
     if ("error" in updated) {
       return deliveryWarning(updated.error, landed);
     }
@@ -295,6 +318,9 @@ async function deliver(
     body,
     labels: [MARKER_LABEL],
   });
+  if ("failed" in created) {
+    return transportWarning(landed);
+  }
   if ("error" in created) {
     return deliveryWarning(created.error, landed);
   }
@@ -313,6 +339,9 @@ async function deliver(
       expand(ISSUE_REPORT_ENDPOINTS.update, ref, { issue_number: String(issue.number) }),
       { state },
     );
+    if ("failed" in closed) {
+      return transportWarning(landed);
+    }
     if ("error" in closed) {
       return deliveryWarning(closed.error, landed);
     }
@@ -336,12 +365,8 @@ export async function deliverIssueReport(
   try {
     return await deliver(api, repo, body, needsAttention, mode, landed);
   } catch {
-    // A throw is a network-level failure whose message embeds the request path (the private slug), so nothing from it may escape.
-    return {
-      warning:
-        "could not deliver the private report: the request failed before an HTTP response arrived. Re-run, or set private-report: none if it persists",
-      landed,
-    };
+    // A client that throws breaks the GitHubClient contract; its message embeds the request path (the private slug), so nothing from it may escape.
+    return transportWarning(landed);
   }
 }
 

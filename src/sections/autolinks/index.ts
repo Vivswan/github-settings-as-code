@@ -1,5 +1,6 @@
 /** `autolinks:` section. GitHub cannot edit an autolink, so a changed one is deleted and recreated. */
 
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { exactName, listSection } from "../shared/list-section.js";
@@ -44,7 +45,7 @@ export const autolinksSection = listSection({
       ...(is_alphanumeric === undefined ? {} : { is_alphanumeric }),
       ...passthrough,
     }),
-    fromLive: (live) => live,
+    fromLive: (live) => ok(live),
     matchBy: {},
   },
   // A recreate re-sends the LIVE flag when the file leaves it undeclared (the write is spread last, so

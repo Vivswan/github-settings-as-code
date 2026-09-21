@@ -4,6 +4,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { err, ok, type Result } from "neverthrow";
 import { parse } from "yaml";
 import { z } from "zod";
 import { renamedKeyError } from "../shared/renamed-key.js";
@@ -58,18 +59,19 @@ export type SectionDocs = z.infer<typeof SectionDocs>;
 /** A docs file carrying schema descriptions only: the shared factories' and the document root's. */
 export const SchemaOnlyDocs = z.strictObject({ schema: SchemaDescriptions }).readonly();
 
-export function readDocsYaml<T>(path: string, schema: z.ZodType<T>): T {
+/** A docs file that does not load: the message names the file, and what stopped it. */
+export function readDocsYaml<T>(path: string, schema: z.ZodType<T>): Result<T, string> {
   let loaded: unknown;
   try {
     loaded = parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw new Error(
+    return err(
       `${path} is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   const result = schema.safeParse(loaded);
   if (!result.success) {
-    throw new Error(`${path} is not a valid docs document:\n${z.prettifyError(result.error)}`);
+    return err(`${path} is not a valid docs document:\n${z.prettifyError(result.error)}`);
   }
-  return result.data;
+  return ok(result.data);
 }

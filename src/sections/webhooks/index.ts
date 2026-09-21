@@ -5,6 +5,7 @@
  * a hook without a config.url is outside what this section manages.
  */
 
+import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import {
@@ -92,19 +93,19 @@ export const webhooksSection = listSection({
         config: normalizedConfig(hook.config),
       }) as ListWrite<"config.url">,
     // GitHub defaults a new hook to active with the push event, so an omitted field reads as that default.
-    fromLive: (live): ListComparable<"config.url"> => {
+    fromLive: (live) => {
       const url = urlOf(live);
       if (url === undefined) {
         throw new Error(
           `BUG: webhooks: hook ${live.id} has no config.url, which \`foreign\` filters before the lens`,
         );
       }
-      return {
+      return ok<ListComparable<"config.url">>({
         ...live,
         config: normalizedConfig({ ...live.config, url }),
         events: live.events ?? [],
         active: live.active ?? true,
-      };
+      });
     },
     matchBy: {},
   },

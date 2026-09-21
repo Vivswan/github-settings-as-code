@@ -70,6 +70,14 @@ export interface RequestMark {
   carriesSecret?: boolean;
 }
 
+/**
+ * What one request ends in. `error` is GitHub's answer, classified by status. `failed` is the whole line for a request
+ * with no HTTP answer to classify: not sent (its payload is not plain data), the transport failed once the retries
+ * were spent, or a GraphQL body broke the wire contract; its reason is already withheld where the mark or the trace
+ * redaction demands. The client never throws for either.
+ */
+export type ClientAnswer<D> = { data: D } | { error: ApiError } | { failed: string };
+
 export interface GitHubClient {
   /**
    * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
@@ -80,7 +88,7 @@ export interface GitHubClient {
     path: string,
     payload?: unknown,
     options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
-  ): Promise<{ data: unknown } | { error: ApiError }>;
+  ): Promise<ClientAnswer<unknown>>;
   /**
    * Failures, including the errors[] GitHub delivers inside an HTTP 200, come back as the same ApiError the REST
    * classifiers read. `slug` names the owner/repo: GraphQL carries the target in the request BODY, invisible to the
@@ -91,7 +99,7 @@ export interface GitHubClient {
     variables: Readonly<Record<string, unknown>>,
     slug: string,
     options?: RequestMark,
-  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }>;
+  ): Promise<ClientAnswer<Record<string, unknown>>>;
 }
 
 export type TraceIo = Pick<Io, "debug" | "masked">;
@@ -444,7 +452,7 @@ export class GitHubApi implements GitHubClient {
     path: string,
     payload?: unknown,
     options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
-  ): Promise<{ data: unknown } | { error: ApiError }> {
+  ): Promise<ClientAnswer<unknown>> {
     if (!options?.redactTrace) {
       return this.request(method, path, payload, options);
     }
@@ -465,7 +473,7 @@ export class GitHubApi implements GitHubClient {
     path: string,
     payload: unknown,
     options: (RequestMark & { accept?: string; raw?: boolean }) | undefined,
-  ): Promise<{ data: unknown } | { error: ApiError }> {
+  ): Promise<ClientAnswer<unknown>> {
     const started = Date.now();
     // One serialization, one truth: the scan normalizes the payload and the request sends that SAME tree. A payload that
     // cannot be normalized is never sent; sending what the scan could not inspect would let a stateful object show the
@@ -475,9 +483,9 @@ export class GitHubApi implements GitHubClient {
       const reason =
         secretScan.reason ??
         "its payload is not plain JSON data (a value carrying a function or exotic prototype)";
-      throw new Error(
-        `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
-      );
+      return {
+        failed: `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
+      };
     }
     // Either signal withholds: the caller's mark knows the value's origin, the scan knows the wire's field names.
     const marked = options?.carriesSecret === true;
@@ -518,13 +526,13 @@ export class GitHubApi implements GitHubClient {
         // Fail closed for a secret-carrying request: an error body may echo the rejected value.
         return { error: apiErrorFromHttp(error, carriesSecret) };
       }
-      throw new Error(
-        transportFailure(
+      return {
+        failed: transportFailure(
           `${method} ${path}`,
           transportReason(error, carriesSecret ? SECRET_TRANSPORT_WITHHELD : undefined),
           this.baseUrl,
         ),
-      );
+      };
     }
   }
 
@@ -539,7 +547,7 @@ export class GitHubApi implements GitHubClient {
     variables: Readonly<Record<string, unknown>>,
     slug: string,
     options?: RequestMark,
-  ): Promise<{ data: Record<string, unknown> } | { error: ApiError }> {
+  ): Promise<ClientAnswer<Record<string, unknown>>> {
     const started = Date.now();
     // The same one-serialization contract as tryRequest, so a future secret-bearing variable is masked and withheld like a REST payload field.
     const scan = redactSecretPayloadSafe(variables);
@@ -547,9 +555,9 @@ export class GitHubApi implements GitHubClient {
       const reason =
         scan.reason ??
         "its variables are not plain JSON data (a value carrying a function or exotic prototype)";
-      throw new Error(
-        `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
-      );
+      return {
+        failed: `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
+      };
     }
     const marked = options?.carriesSecret === true;
     const carriesSecret = marked || scan.carriesSecret;
@@ -602,8 +610,8 @@ export class GitHubApi implements GitHubClient {
           error: forRedacted(apiErrorFromGraphqlErrors(rethrownErrors, withholdContent())),
         };
       }
-      throw new Error(
-        transportFailure(
+      return {
+        failed: transportFailure(
           `GRAPHQL ${op.name}`,
           transportReason(
             error,
@@ -615,7 +623,7 @@ export class GitHubApi implements GitHubClient {
           ),
           this.baseUrl,
         ),
-      );
+      };
     }
     const body = (response.data ?? {}) as {
       data?: unknown;
@@ -635,9 +643,9 @@ export class GitHubApi implements GitHubClient {
     if (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length === 0)) {
       // The GraphQL contract makes errors, when present, a NON-EMPTY list; a malformed value must not read as "no errors"
       // and turn a partial response into a success. The body is never quoted.
-      throw new Error(
-        `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
-      );
+      return {
+        failed: `GRAPHQL ${op.name} returned a malformed errors value (not a non-empty list); the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
+      };
     }
     const errors = Array.isArray(body.errors) ? body.errors : [];
     if (errors.length > 0) {
@@ -646,9 +654,9 @@ export class GitHubApi implements GitHubClient {
     const data = body.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) {
       // A 200 with neither errors nor a data map is outside the GraphQL contract; the body is not quoted, since it could carry private live state.
-      throw new Error(
-        `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
-      );
+      return {
+        failed: `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
+      };
     }
     return { data: data as Record<string, unknown> };
   }

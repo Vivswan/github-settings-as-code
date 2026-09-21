@@ -197,6 +197,10 @@ async function readTargetSettings(
       error: `${file.unproven}. To stop managing it instead, remove ${target.slug} from the "repos" input`,
     };
   }
+  if ("failed" in file) {
+    // The client's line already names the request and the remedy; the target fails, the run goes on.
+    return { error: `reading ${sourceLabel} failed: ${file.failed}` };
+  }
   if ("error" in file) {
     return {
       error: isPermissionError(file.error)

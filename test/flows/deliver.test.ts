@@ -161,7 +161,7 @@ describe("withDelivery", () => {
   ])("under %s a %j target injects the marker: %p", async (channel, exposure, injects) => {
     // The artifact channel opens only with an upload port; nothing is delivered here.
     const uploader: ArtifactUploader | undefined =
-      channel === "artifact" ? { upload: async () => {} } : undefined;
+      channel === "artifact" ? { upload: async () => ({ uploaded: true as const }) } : undefined;
     await delivered(
       cfg(channel, "apply"),
       {},
@@ -262,6 +262,7 @@ describe("withDelivery", () => {
       async upload(name) {
         log.push(`upload ${name}`);
         uploads.push(name);
+        return { uploaded: true as const };
       },
     };
     const config = {
@@ -300,6 +301,7 @@ describe("withDelivery", () => {
     const uploader: ArtifactUploader = {
       async upload(name) {
         uploads.push(name);
+        return { uploaded: true as const };
       },
     };
     const config = {

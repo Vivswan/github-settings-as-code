@@ -25,15 +25,15 @@ function isPlainJsonContainer(value: unknown): boolean {
 
 /**
  * Carries WHERE (the key path: field names only, never a value) and WHAT (the value class). redactSecretPayloadSafe
- * reports only THIS class's information; anything else a hostile object throws is swallowed so no foreign message leaks.
+ * reports only THIS value's information; anything a hostile object throws is swallowed so no foreign message leaks.
+ * A class private to this module: no payload can be an instance of it, so the walk's own rejection cannot be forged
+ * by a field the payload spells.
  */
-class NotPlainDataError extends Error {
+class NotPlainData {
   constructor(
     readonly path: readonly string[],
     readonly kind: string,
-  ) {
-    super("not plain JSON data");
-  }
+  ) {}
 }
 
 function renderKeyPath(path: readonly string[]): string {
@@ -52,12 +52,14 @@ function renderKeyPath(path: readonly string[]): string {
  * an object's keys   -> only Object.keys are copied, so symbol and non-enumerable keys never reach the copy (array indices do)
  * a container again  -> rejected when it is one of its own ancestors (a YAML alias cycle); a sibling alias is copied twice
  * the wire           -> only the copy is sent
+ *
+ * A rejection is the NotPlainData the walk hands up, an instance no payload value can be.
  */
 function normalizePlainData(
   value: unknown,
   path: string[] = [],
   ancestors: Set<object> = new Set(),
-): unknown {
+): unknown | NotPlainData {
   if (value === null) {
     return null;
   }
@@ -72,15 +74,15 @@ function normalizePlainData(
     case "object":
       break;
     default:
-      throw new NotPlainDataError(path, nonPlainKind(value));
+      return new NotPlainData(path, nonPlainKind(value));
   }
-  // A class instance, a non-plain prototype, a function, a bigint: each THROWS into the caller's fail-closed catch.
-  // YAML reaches this through explicit tags: !!timestamp parses to a Date.
+  // A class instance, a non-plain prototype, a function, a bigint: each is handed up as the rejection. YAML reaches
+  // this through explicit tags: !!timestamp parses to a Date.
   if (!isPlainJsonContainer(value)) {
-    throw new NotPlainDataError(path, nonPlainKind(value));
+    return new NotPlainData(path, nonPlainKind(value));
   }
   if (ancestors.has(value)) {
-    throw new NotPlainDataError(path, "a reference back to one of its own containers");
+    return new NotPlainData(path, "a reference back to one of its own containers");
   }
   // One frame per nesting level: a helper for the container body would halve the depth a valid payload may reach.
   ancestors.add(value);
@@ -95,12 +97,15 @@ function normalizePlainData(
         continue;
       }
       if (!("value" in descriptor)) {
-        throw new NotPlainDataError([...path, String(index)], "an accessor property");
+        return new NotPlainData([...path, String(index)], "an accessor property");
       }
       const item: unknown = descriptor.value;
-      items.push(
-        item === undefined ? null : normalizePlainData(item, [...path, String(index)], ancestors),
-      );
+      const normalized =
+        item === undefined ? null : normalizePlainData(item, [...path, String(index)], ancestors);
+      if (normalized instanceof NotPlainData) {
+        return normalized;
+      }
+      items.push(normalized);
     }
     ancestors.delete(value);
     return items;
@@ -112,13 +117,17 @@ function normalizePlainData(
       continue;
     }
     if (!("value" in descriptor)) {
-      throw new NotPlainDataError([...path, key], "an accessor property");
+      return new NotPlainData([...path, key], "an accessor property");
     }
     const item: unknown = descriptor.value;
     if (item === undefined) {
       continue;
     }
-    out[key] = normalizePlainData(item, [...path, key], ancestors);
+    const normalized = normalizePlainData(item, [...path, key], ancestors);
+    if (normalized instanceof NotPlainData) {
+      return normalized;
+    }
+    out[key] = normalized;
   }
   ancestors.delete(value);
   return out;
@@ -155,25 +164,25 @@ export function redactSecretPayloadSafe(
         : { ok: false };
     }
     if (!isPlainJsonContainer(payload)) {
-      return {
-        ok: false,
-        reason: describeNotPlain(new NotPlainDataError([], nonPlainKind(payload))),
-      };
+      return { ok: false, reason: describeNotPlain(new NotPlainData([], nonPlainKind(payload))) };
     }
-    const normalized: unknown = normalizePlainData(payload);
+    const normalized = normalizePlainData(payload);
+    if (normalized instanceof NotPlainData) {
+      // Only our own rejection contributes prose: it carries key PATHS and a value-class word, never a value.
+      return { ok: false, reason: describeNotPlain(normalized) };
+    }
     const scanned = redactSecretPayload(normalized);
     return { ok: true, payload: normalized, ...scanned };
-  } catch (error) {
-    // Only our own typed rejection may contribute prose: it carries key PATHS and a value-class word, never a value.
-    return error instanceof NotPlainDataError
-      ? { ok: false, reason: describeNotPlain(error) }
-      : { ok: false };
+  } catch {
+    // A hostile object threw from a reflective read; its message never leaks.
+    return { ok: false };
   }
 }
 
-function describeNotPlain(error: NotPlainDataError): string {
-  const where = error.path.length > 0 ? `the value at "${renderKeyPath(error.path)}"` : "the value";
-  return `${where} is not plain JSON data (${error.kind})`;
+function describeNotPlain(rejection: NotPlainData): string {
+  const where =
+    rejection.path.length > 0 ? `the value at "${renderKeyPath(rejection.path)}"` : "the value";
+  return `${where} is not plain JSON data (${rejection.kind})`;
 }
 
 const SECRET_FIELD_NAMES = new Set(["secret", "encrypted_value"]);

@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-seven breaks. Eight are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, and 56), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve. Section 57 respells one validation message.
+Fifty-eight breaks. Nine are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, 56, and 58), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve. Section 57 respells one validation message.
 
 The silent ones include the fallback, the renamed `GSAC_RETRY_BASE_MS`, the rendered file (it reorders once), and the snapshot file (it reorders once and no longer dates itself). Run `mode: check` before the first v3 apply and diff the first v3 rendered file.
 
@@ -67,8 +67,9 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | YAML merge keys resolve | `<<: *base` survived as a literal `<<` field and rode into the create payload | `<<` merges the aliased mapping, as the Probot Settings app's parser did | No error: an entry that carried a literal `<<` key now gets the merged fields instead; [section 53](#53-yaml-merge-keys-resolve) |
 | Library: a parsed ruleset entry carries `target` and `enforcement` | `SettingsFile` left both keys optional on a ruleset entry, so `{ rulesets: [{ name: "main" }] }` typed as one | Both keys are required on the parsed entry, the one `SettingsFile` and `sectionModule("rulesets").plan` take; the settings file still omits either and the parse fills `branch` and `active` | The literal fails to compile (`TS2739`, naming the missing keys); parse the document through `validateSettings`, or declare both keys; [section 54](#54-library-a-parsed-ruleset-entry-carries-target-and-enforcement) |
 | Branches: a `restrictions` block carries `users` and `teams` | `restrictions: {}`, or a block naming only `apps` or only `users`, parsed clean and the protection PUT 422ed at apply | Both lists are required on the block (`[]` when none) and `apps` stays optional; `restrictions: null` lifts the push restriction; `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal | Validation fails naming the two lists and the `null` form, with zero requests; [section 55](#55-branches-a-restrictions-block-carries-users-and-teams) |
-| Library: `plan()` and `snapshot()` resolve to a `Result` | `await labels.plan(ctx, declared)` resolved to the plan and rejected on a denied read, a duplicated live pair, or a live body the section could not reconcile | Both resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`; a rejection is left for the wrong-context refusal, the client's own throw, and `BUG:` invariants | Reading `.ops` or `.value` off the awaited value fails to compile (`TS2339`); `rejects.toThrow` assertions on a section call pass a resolved promise through; [section 56](#56-library-plan-and-snapshot-resolve-to-a-result) |
+| Library: `plan()` and `snapshot()` resolve to a `Result` | `await labels.plan(ctx, declared)` resolved to the plan and rejected on a denied read, a duplicated live pair, or a live body the section could not reconcile | Both resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`; a rejection is left for the wrong-context refusal, a client that throws instead of answering, and `BUG:` invariants | Reading `.ops` or `.value` off the awaited value fails to compile (`TS2339`); `rejects.toThrow` assertions on a section call pass a resolved promise through; [section 56](#56-library-plan-and-snapshot-resolve-to-a-result) |
 | A closed section's unrecognized key names the entry by index | `collaborators[octocat]: declares "permision", which this section does not recognize ...` | `collaborators[0] (username "octocat"): declares "permision", which this section does not recognize ...`; under a wrapper, `collaborators.entries[0] (username "octocat")` | Anything that greps the bracket for the entry's identity needs the new spelling; [section 57](#57-a-closed-sections-unrecognized-key-names-the-entry-by-index) |
+| Library: `GitHubClient` and `ArtifactUploader` answer, never reject | `tryRequest()` and `tryGraphql()` rejected for a request with no HTTP answer (not sent, the transport failed, a GraphQL body off the wire contract); `upload()` rejected to report a failed upload | Both port methods resolve to a `ClientAnswer` whose third arm is `{ failed }`, the whole line; `upload()` resolves to `{ uploaded: true }` or `{ failed }`. A test double that still throws is read as a broken contract: the failure is reported, never classified | A double returning `void` from `upload()`, or a caller reading `.data` off a `ClientAnswer` without narrowing `failed`, fails to compile; [section 58](#58-library-githubclient-and-artifactuploader-answer-never-reject) |
 
 ## 1. The defaults-file fallback
 
@@ -1199,7 +1200,7 @@ v3            const planned = await labels.plan(ctx, declared);       // resolve
 
 The change hook of a planned operation, its capture hook, and its `before`, `payload`, and `variables` thunks return a `Result` too; a hook that used to throw its verification failure returns `err(...)` with the same text.
 
-A rejection out of `plan()` or `snapshot()` now means one of three things: the module was handed another section's context (the guard the [library page](../reference/library.md#sections) describes, unchanged), the `GitHubClient` you supplied threw on an unmarked request, or a `BUG:` invariant fired.
+A rejection out of `plan()` or `snapshot()` now means one of three things: the module was handed another section's context (the guard the [library page](../reference/library.md#sections) describes, unchanged), the `GitHubClient` you supplied threw instead of answering (section 58), or a `BUG:` invariant fired.
 
 Fix: match on the `Result` (`isErr()`, `match`, or `_unsafeUnwrap()` in a test) where the awaited value was read directly, and assert `Err` where a test asserted a rejection.
 
@@ -1216,6 +1217,32 @@ v3   collaborators[0] (username "octocat"): declares "permision", which this sec
 Under an `{_undeclared, entries}` wrapper the path reads `collaborators.entries[0] (username "octocat")`, as every other issue under a wrapper does.
 
 Fix: anything that greps the bracket for the entry's identity reads the parenthesis instead.
+
+## 58. Library: `GitHubClient` and `ArtifactUploader` answer, never reject
+
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
+
+`GitHubApi` never rejects. A request with no HTTP answer resolves to the `failed` arm of `ClientAnswer`, carrying the whole line the action reports (the request, the reason, the remedy). The reason is withheld where the request carried a secret, and for a GraphQL request where the repository is redacted.
+
+The engine reads that arm wherever it read the throw:
+
+- a section fails with kind `transport`
+- discovery reports its transport problem
+- a multi-repo target fails with the line, where the run used to stop
+- the private-report channels warn without it
+
+```text
+pre-release   const answer = await client.tryRequest("GET", path);      // rejects on a network failure
+              if ("error" in answer) ...
+
+v3            const answer = await client.tryRequest("GET", path);      // resolves to ClientAnswer<unknown>
+              if ("failed" in answer) throw new Error(answer.failed);
+              if ("error" in answer) ...
+```
+
+`ArtifactUploader.upload()` resolves to `{ uploaded: true }` or `{ failed }`; `deliverArtifactReport` renders `failed` into its warning as it rendered the throw. A client or uploader that still throws is not classified: a section reports it under kind `thrown`, the report channels warn with their slug-free line.
+
+Fix: add the `failed` arm to every `GitHubClient` double and read it before `error`; return `{ uploaded: true }` from every `ArtifactUploader` double.
 
 ## Order of operations
 

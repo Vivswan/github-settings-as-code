@@ -5,9 +5,11 @@
  * The list carries summaries, so each matched ruleset is read whole before the comparison.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { keyedBy } from "../contract/module.js";
 import { exactName, type ListWrite, listSection } from "../shared/list-section.js";
 import { RulesetConfig } from "./schema.js";
@@ -114,17 +116,22 @@ type LiveRuleset = z.infer<typeof LiveRuleset>;
  * concealed it. A live body repeating a rule type has no pairing; GitHub keeps one rule per type, so that names a
  * defect worth a look.
  */
-function comparableRuleset(live: LiveRuleset): LiveRuleset {
+function comparableRuleset(live: LiveRuleset): Result<LiveRuleset, SectionFailure> {
   const repeated = repeatedRuleTypes(live.rules);
   if (repeated !== undefined) {
-    throw new Error(
-      `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the ${repeated} more than once, ` +
-        "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
+    return err(
+      sectionFailure(
+        "live-shape",
+        `rulesets: GitHub returned the ruleset "${live.name}" (id ${live.id}) with the ${repeated} more than once, ` +
+          "so its rules cannot be paired by type; delete the repeated rule on GitHub, then re-run",
+      ),
     );
   }
-  return live.bypass_actors === undefined
-    ? live
-    : { ...live, bypass_actors: live.bypass_actors.map(asStored) };
+  return ok(
+    live.bypass_actors === undefined
+      ? live
+      : { ...live, bypass_actors: live.bypass_actors.map(asStored) },
+  );
 }
 
 // A rule type the vendored spec does not know passes through verbatim (schema.ts UnknownRule), so a
@@ -173,7 +180,7 @@ export const rulesetsSection = listSection({
     // The full ruleset is the wire body (the PUT replaces it whole). The slice types rule
     // parameters and bypass actors as unknown passthrough; the factory proves the body plain at the payload.
     toWrite: (ruleset) => ({ ...normalizeRuleset(ruleset) }) as ListWrite<"name">,
-    fromLive: (live) => comparableRuleset(live),
+    fromLive: comparableRuleset,
     // Rules pair by type, as the layered merge does; an actor is one per (type, id) pair, with no single identity field.
     matchBy: { rules: "type", bypass_actors: ["actor_type", "actor_id"] },
   },
