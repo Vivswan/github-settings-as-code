@@ -27,7 +27,7 @@ Apply is convergent: re-running preserves the declared state (some sections diff
 
 Anything the settings file alone proves wrong is refused when the file is parsed, before any section reads or writes the repository, with an error naming the key and the fix. That covers a field GitHub reports but cannot set, a value outside its enum, two keys that contradict each other, and an unknown key inside a closed shape.
 
-Under `private-repos: redact` the multi-repo flow first resolves the visibility of every target but the workflow's own repository, before it reads any settings file. Then it reads each target's file: a remote target's from that repository, a `repos-dir` target's from the local directory. Those are the flow's own reads; no section has run for that target.
+Under `private-repos: redact` the multi-repo flow reads and validates the shared `defaults-file` first when one is given, then resolves the visibility of every target but the workflow's own repository, before it reads any target's settings file. Then it reads each target's file: a remote target's from that repository, a `repos-dir` target's from the local directory. Those are the flow's own reads; no section has run for that target.
 
 The field GitHub reports but cannot set is the case that motivated the rule:
 
