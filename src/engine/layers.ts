@@ -750,27 +750,83 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, step: Step): unknown {
   return out;
 }
 
-/** A keyed list's entries minus its removals, each entry's nested lists likewise, in the form the layer wrote them. */
-function withoutRemovals(entries: readonly unknown[], keyed: KeyedListLayering): unknown[] {
-  return entries
-    .filter((entry) => !(isPlainObject(entry) && entry[REMOVE_KEY] !== undefined))
-    .map((entry) => (isPlainObject(entry) ? withoutNestedRemovals(entry, keyed) : entry));
+/** Whether an entry carries the marker at all, whatever its value: what the standalone view drops and a single document refuses. */
+function carriesRemoval(entry: Readonly<Record<string, unknown>>): boolean {
+  return entry[REMOVE_KEY] !== undefined;
 }
 
-function withoutNestedRemovals(
-  entry: Readonly<Record<string, unknown>>,
+/** A keyed list's removals set apart from it, its entries' nested lists likewise, in the form the layer wrote them. */
+interface Partition {
+  /** The entries minus the removals, each entry's declared nested lists partitioned in turn. */
+  readonly kept: unknown[];
+  /** Each removal by its marker's site (`labels[0]._remove`); a removal's own nested lists are not entered. */
+  readonly sites: string[];
+}
+
+function partitionRemovals(
+  entries: readonly unknown[],
   keyed: KeyedListLayering,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...entry };
-  for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-    const form = nestedForm(entry[field]);
+  path: string,
+): Partition {
+  const kept: unknown[] = [];
+  const sites: string[] = [];
+  // Indexed, not a method of the list: the walk runs on the raw document, before the plainness check that refuses a
+  // list whose named property shadows one (test/engine/validate.test.ts).
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!isPlainObject(entry)) {
+      kept.push(entry);
+      continue;
+    }
+    const site = `${path}[${index}]`;
+    if (carriesRemoval(entry)) {
+      sites.push(`${site}.${REMOVE_KEY}`);
+      continue;
+    }
+    const out: Record<string, unknown> = { ...entry };
+    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
+      const form = nestedForm(entry[field]);
+      if (form === null) {
+        continue;
+      }
+      const below = partitionRemovals(form.entries, nested, `${site}.${field}`);
+      sites.push(...below.sites);
+      out[field] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
+    }
+    kept.push(out);
+  }
+  return { kept, sites };
+}
+
+/** A document's removal entries set apart from it; `rest` is the document itself when it is not a mapping. */
+export interface SeparatedRemovals {
+  /** The document minus every entry carrying `_remove`, in either list form and at any depth; the wrappers' knobs stay. */
+  readonly rest: unknown;
+  /** Each removal's site (`labels[0]._remove`): list sections in LIST_SECTIONS order, each list as written, nested lists under their entry. */
+  readonly sites: readonly string[];
+}
+
+/**
+ * Every list section partitioned by the walk the fold uses. A single document has no lower layer to remove from, so
+ * validateSettingsDoc refuses the sites and judges `rest`; a layer of a fold reaches it as its standalone view,
+ * `rest` minus the `_layering` directives.
+ */
+export function separateRemovals(doc: unknown): SeparatedRemovals {
+  if (!isPlainObject(doc)) {
+    return { rest: doc, sites: [] };
+  }
+  const rest: Record<string, unknown> = { ...doc };
+  const sites: string[] = [];
+  for (const key of LIST_SECTIONS) {
+    const form = nestedForm(doc[key]);
     if (form === null) {
       continue;
     }
-    const entries = withoutRemovals(form.entries, nested);
-    out[field] = form.knobs === null ? entries : { ...form.knobs, entries };
+    const below = partitionRemovals(form.entries, listLayering(key), key);
+    sites.push(...below.sites);
+    rest[key] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
   }
-  return out;
+  return { rest, sites };
 }
 
 /**
@@ -783,23 +839,17 @@ function withoutNestedRemovals(
  *                                                             unknown key before the fold could say it takes only true)
  */
 export function standaloneView(doc: unknown): unknown {
-  if (!isPlainObject(doc)) {
-    return doc;
+  const { rest } = separateRemovals(doc);
+  if (!isPlainObject(rest)) {
+    return rest;
   }
-  const { _layering: _directive, ...out }: Record<string, unknown> = doc;
+  const { _layering: _directive, ...out } = rest;
   for (const key of LIST_SECTIONS) {
     const value = out[key];
-    const form = nestedForm(value);
-    if (form === null) {
-      continue;
+    if (isPlainObject(value) && Array.isArray(value.entries)) {
+      const { _layering: _wrapperDirective, ...knobs } = value;
+      out[key] = knobs;
     }
-    const entries = withoutRemovals(form.entries, listLayering(key));
-    if (form.knobs === null) {
-      out[key] = entries;
-      continue;
-    }
-    const { _layering: _wrapperDirective, ...knobs } = form.knobs;
-    out[key] = { ...knobs, entries };
   }
   return out;
 }

@@ -3,6 +3,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok } from "neverthrow";
 import type { Layering } from "../../src/engine/layers.js";
+import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../src/engine/section-selection.js";
 import { foldLayers, readLayerFiles } from "../../src/flows/layers.js";
 import * as settingsRead from "../../src/flows/settings-read.js";
 import { silentIo } from "../../src/io.js";
@@ -85,6 +87,24 @@ describe("foldLayers", () => {
       ok([
         [{ layer: "repo.yml", path: "labels[0]" }],
         { labels: { _undeclared: "delete", entries: [{ name: "docs" }] } },
+      ]),
+    );
+  });
+
+  test("the removal a single document refuses folds as a higher layer: per-layer validation sees the standalone view, and the fold consumes the marker", () => {
+    const higher = { labels: [{ name: "bug", _remove: true }] };
+    expect(
+      validateSettingsDoc(higher, "repo.yml", SectionSelection.ALL, silentIo()).match(
+        () => null,
+        describeProblem,
+      ),
+    ).toMatch(
+      /^repo\.yml has malformed section entries: labels\[0\]\._remove: a single document has no lower layer/,
+    );
+    expect(fold(higher, "shallow").map((out): unknown[] => [out.notices, out.settings])).toEqual(
+      ok([
+        [{ layer: "repo.yml", path: "labels[0]" }],
+        { labels: { _undeclared: "delete", entries: [] } },
       ]),
     );
   });

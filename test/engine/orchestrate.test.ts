@@ -13,6 +13,7 @@ import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import {
   describeProblem,
+  singleDocumentRemovalIssue,
   type TopLevelShape,
   unknownDirectivesIssue,
   unknownSectionsIssue,
@@ -444,6 +445,102 @@ describe("validateSettingsDoc", () => {
           expect.stringMatching(
             /^deploy_keys\[0\]\.key: entry "ci": the key has fewer than two fields separated by a space or tab/,
           ),
+        ],
+      }),
+    );
+  });
+
+  test("a removal entry in a single document is refused by its site, never branded: the open label shape would have carried _remove to GitHub as a field", () => {
+    expect(
+      validateSettingsDoc(
+        {
+          labels: [
+            { name: "old", _remove: true },
+            { name: "new", color: "ffffff" },
+          ],
+        },
+        "settings.yml",
+        SectionSelection.ALL,
+        silentIo(),
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "settings.yml",
+        issues: [
+          "labels[0]._remove: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)",
+        ],
+      }),
+    );
+  });
+
+  test.each<[form: string, doc: unknown, sites: string[]]>([
+    [
+      "a wrapper's entries",
+      { labels: { _undeclared: "keep", entries: [{ name: "old", _remove: true }] } },
+      ["labels[0]._remove"],
+    ],
+    [
+      "nested lists in both forms, the marker's value unjudged",
+      {
+        environments: [
+          {
+            name: "prod",
+            variables: { _undeclared: "keep", entries: [{ name: "V", _remove: true }] },
+            secrets: [{ name: "TOKEN", _remove: "yes" }],
+          },
+        ],
+      },
+      ["environments[0].variables[0]._remove", "environments[0].secrets[0]._remove"],
+    ],
+  ])("a removal entry under %s is refused by its site", (_form, doc, sites) => {
+    expect(validateSettingsDoc(doc, "s.yml", SectionSelection.ALL, silentIo())).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: sites.map(singleDocumentRemovalIssue),
+      }),
+    );
+  });
+
+  test("the shapes judge a document with removals minus its removal entries and nothing else: a closed shape does not name the marker again, and a wrapper's bad directive is still reported", () => {
+    expect(
+      validateSettingsDoc(
+        {
+          labels: { _layering: "sideways", entries: [{ name: "kept" }] },
+          deploy_keys: [{ title: "ci", _remove: true }],
+        },
+        "s.yml",
+        SectionSelection.ALL,
+        silentIo(),
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [
+          singleDocumentRemovalIssue("deploy_keys[0]._remove"),
+          expect.stringMatching(/^labels\._layering: Invalid option/),
+        ],
+      }),
+    );
+  });
+
+  test("a list whose named property shadows a method is refused by the plainness check, never met by the removal walk", () => {
+    // The walk for removals runs on the raw document, before the shapes; calling the list's own forEach would throw here.
+    expect(
+      validateSettingsDoc(
+        { labels: Object.assign([{ name: "bug" }], { forEach: 0 }) },
+        "s.yml",
+        SectionSelection.ALL,
+        silentIo(),
+      ),
+    ).toEqual(
+      err({
+        code: "settings-malformed-sections",
+        source: "s.yml",
+        issues: [
+          "labels is not plain YAML data (a list carrying named properties, which JSON drops); replace it with a plain value",
         ],
       }),
     );

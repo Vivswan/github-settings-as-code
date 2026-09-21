@@ -307,6 +307,11 @@ export function unknownDirectivesIssue(unknown: readonly string[]): string {
   return `unknown underscore ${agree(unknown.length, "key", "keys")}: ${unknown.join(", ")}. ${DIRECTIVES_ADVICE}`;
 }
 
+/** One line of the collected document problems: a removal entry in a document that is not a layer of a fold, by its site. */
+export function singleDocumentRemovalIssue(site: string): string {
+  return `${site}: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)`;
+}
+
 /** One line of the collected document problems: the misspelled section names beside every name the action knows. */
 export function unknownSectionsIssue(unknown: readonly string[], known: readonly string[]): string {
   return `unknown top-level ${agree(unknown.length, "section", "sections")}: ${unknown.join(", ")} (known: ${known.join(", ")}). Fix the typo, or set the "sections" input to limit processing`;
