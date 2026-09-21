@@ -145,9 +145,14 @@ jobs:
       # ancestry of the source sha it names: a version already there (a rerun
       # of this run) or a pre-release of a descendant of this commit (a stale
       # retry after newer runs published) publishes nothing, so next never
-      # moves back on what the run can see; a registry error stops the job
-      # instead of publishing blind. npm's provenance names the commit in
-      # GITHUB_SHA, so the source is passed in.
+      # moves back on what the run can see. It then walks the merges to main
+      # after the source of the build next names, up to this commit, over what
+      # the tarball ships and what builds it (package.json's files list beside
+      # the script's NEXT_BUILD_INPUTS): when none touched any of it, docs
+      # alone, this run publishes nothing either; a base the checkout cannot
+      # place publishes with a notice saying why. A registry error stops the job instead of
+      # publishing blind. npm's provenance names the commit in GITHUB_SHA, so
+      # the source is passed in.
       - name: Publish the pre-release under the next dist-tag
         id: publish
         if: steps.oidc.outputs.proceed == 'true'
@@ -172,8 +177,8 @@ jobs:
       # holder's verdict sees it; a record that never shows it warns. It then
       # fails the job if the record holds a descendant's pre-release and next
       # names none: OIDC authenticates npm publish alone, not npm dist-tag add,
-      # so no tag is moved here and the next green push moves next forward
-      # instead. A rerun of the failed run publishes nothing, skips this step,
+      # so no tag is moved here and the next green push that changes the
+      # shipped surface moves next forward instead. A rerun of the failed run publishes nothing, skips this step,
       # and passes.
       - name: Confirm the registry shows the publish and next moved forward
         if: steps.publish.outputs.published == 'true'

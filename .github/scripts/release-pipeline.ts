@@ -42,6 +42,25 @@ const PACKAGED_PATHS = ["lib/index.js", "lib/pkg/"] as const;
 /** What every packaged commit must carry as non-empty regular files. */
 const REQUIRED_BUILT_FILES = ["lib/index.js", "lib/pkg/index.js"] as const;
 const PACKAGED = "lib/index.js and lib/pkg/";
+/**
+ * What a `next` publish ships beyond package.json and the entries of its `files` list (read at the source: lib/pkg/,
+ * lib/settings.schema.json, LICENSE.md, README.md today): lib/pkg/ is tsdown's build of src/ under tsdown.config.ts
+ * and tsconfig.json with the versions bun.lock pins; the version is minted from the release manifest by this script;
+ * the publish job rewrites the manifest (npm version, npm pkg delete) before npm reads it; and .gitattributes shapes
+ * the bytes the checkout writes for every packed file. lib/index.js and action.yml ride the packaged commit, never
+ * the tarball, and src/ covers the bundle's inputs anyway. A commit that changes none of these since the source of
+ * the pre-release `next` names publishes nothing.
+ */
+export const NEXT_BUILD_INPUTS = [
+  "src/",
+  "tsdown.config.ts",
+  "tsconfig.json",
+  "bun.lock",
+  MANIFEST_FILE,
+  ".gitattributes",
+  ".github/scripts/release-pipeline.ts",
+  ".github/workflows/post-green.yml",
+] as const;
 const LATEST_REF = "refs/tags/latest";
 const BUILD_TAG_PREFIX = "refs/tags/build/";
 const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;
@@ -907,6 +926,9 @@ function mintedVersion(version: string): MintedVersion | null {
   return { release: [Number(major), Number(minor), Number(patch)], sha7 };
 }
 
+/** The source sha7 a pre-release this pipeline minted carries; null for a release or a version minted elsewhere. */
+const sha7Of = (version: string): string | null => mintedVersion(version)?.sha7 ?? null;
+
 /** A version a dist-tag names must be one this pipeline mints; anything else stops the run rather than being guessed at. */
 function parseMinted(version: string): MintedVersion {
   const minted = mintedVersion(version);
@@ -942,45 +964,193 @@ interface Descendant {
   sha: string;
 }
 
-/** The published pre-releases placed against this run's source by ancestry: the descendants, the one furthest along
- * main, and a notice for each the checkout cannot place (a sha it lacks, or one off the source's line of main). */
-function descendantsOf(
+/**
+ * Where a pre-release's source stands to this run's, once its sha resolves: the run's own commit, an ancestor on the
+ * source's first-parent chain (a main commit), an ancestor off that chain (inside a merged branch), a strict
+ * descendant, or one on neither side of the source (off its line of main).
+ */
+type Placement = "own" | "ancestor" | "merged" | "descendant" | "unrelated";
+/** A source placed, or one the checkout lacks (a sha it never fetched, or a short one naming several objects). */
+type Placed = { sha: string; placement: Placement } | { sha: null; placement: "unresolved" };
+
+function placeSource(
+  cwd: string,
+  sourceSha: string,
+  sha7: string,
+  onMain: (sha: string) => boolean,
+): Placed {
+  const sha = resolveCommit(cwd, sha7);
+  if (sha === null) {
+    return { sha, placement: "unresolved" };
+  }
+  const descends = (ancestor: string, descendant: string): boolean =>
+    gitOrNo(cwd, "merge-base", "--is-ancestor", ancestor, descendant) !== null;
+  if (sha === sourceSha) {
+    return { sha, placement: "own" };
+  }
+  if (descends(sourceSha, sha)) {
+    return { sha, placement: "descendant" };
+  }
+  if (!descends(sha, sourceSha)) {
+    return { sha, placement: "unrelated" };
+  }
+  return { sha, placement: onMain(sha) ? "ancestor" : "merged" };
+}
+
+/** Whether a sha is on the source's first-parent chain, main's own history: an ancestor off it came in with a merged
+ * branch. The chain is listed once, on the first ancestor asked about. */
+function mainChainOf(cwd: string, sourceSha: string): (sha: string) => boolean {
+  let chain: Set<string> | null = null;
+  return (sha) => {
+    chain ??= new Set(git(cwd, "rev-list", "--first-parent", sourceSha).split("\n"));
+    return chain.has(sha);
+  };
+}
+
+/** The build `next` names, placed: the base the shipped-surface comparison starts from. */
+interface NextBase {
+  version: string;
+  sha: string;
+  placement: Placement;
+}
+
+/**
+ * The published pre-releases placed against this run's source by ancestry: the descendants, the one furthest along
+ * main, and a notice for each the checkout cannot place. The version `next` names is placed with them, whether or not
+ * the record lists it; null when it names none, carries no sha, or the checkout lacks its commit.
+ */
+function placePublished(
   cwd: string,
   sourceSha: string,
   packument: Packument,
-): { descendants: Descendant[]; newest: Descendant | null; notices: string[] } {
+): {
+  descendants: Descendant[];
+  newest: Descendant | null;
+  notices: string[];
+  next: NextBase | null;
+} {
   const descendants: Descendant[] = [];
   const notices: string[] = [];
   let newest: Descendant | null = null;
-  const descends = (ancestor: string, sha: string): boolean =>
-    gitOrNo(cwd, "merge-base", "--is-ancestor", ancestor, sha) !== null;
-  for (const version of Object.keys(packument.versions)) {
-    const sha7 = mintedVersion(version)?.sha7;
-    if (sha7 === null || sha7 === undefined) {
+  const nextVersion = packument["dist-tags"].next;
+  let next: NextBase | null = null;
+  const versions = new Set(Object.keys(packument.versions));
+  if (nextVersion !== undefined) {
+    versions.add(nextVersion);
+  }
+  const onMain = mainChainOf(cwd, sourceSha);
+  for (const version of versions) {
+    const sha7 = sha7Of(version);
+    if (sha7 === null) {
       continue;
     }
-    const sha = resolveCommit(cwd, sha7);
-    if (sha === null) {
-      notices.push(`${version} names ${sha7}, which is no commit in this checkout; ignored`);
-    } else if (sha !== sourceSha && descends(sourceSha, sha)) {
-      descendants.push({ version, sha });
-      if (newest === null || descends(newest.sha, sha)) {
-        newest = { version, sha };
-      }
-    } else if (sha !== sourceSha && !descends(sha, sourceSha)) {
+    const placed = placeSource(cwd, sourceSha, sha7, onMain);
+    const isNext = version === nextVersion;
+    const noBase = isNext
+      ? ", and next names it, so there is no build to compare the shipped surface against: every change counts as shipped"
+      : "";
+    if (placed.sha === null) {
       notices.push(
-        `${version} names ${sha7}, which is neither an ancestor nor a descendant of ${sourceSha.slice(0, 7)} on main; ignored`,
+        `${version} names ${sha7}, which is no commit in this checkout; ignored${noBase}`,
+      );
+      continue;
+    }
+    if (isNext) {
+      next = { version, sha: placed.sha, placement: placed.placement };
+    }
+    if (placed.placement === "descendant") {
+      descendants.push({ version, sha: placed.sha });
+      if (
+        newest === null ||
+        gitOrNo(cwd, "merge-base", "--is-ancestor", newest.sha, placed.sha) !== null
+      ) {
+        newest = { version, sha: placed.sha };
+      }
+    } else if (placed.placement === "unrelated") {
+      notices.push(
+        `${version} names ${sha7}, which is neither an ancestor nor a descendant of ${sourceSha.slice(0, 7)} on main; ignored${noBase}`,
       );
     }
   }
-  return { descendants, newest, notices };
+  return { descendants, newest, notices, next };
+}
+
+/** A `files` entry names a file, or a directory with or without the trailing slash; a glob would need npm's packlist. */
+const FILES_GLOB = /[*?[\]{}!]/;
+
+/**
+ * The tree paths a `next` publish ships, read at the source: package.json itself (npm always packs the manifest), the
+ * entries of its `files` list, and the build's inputs. Null, with the reason, when the list is not plain paths: a
+ * manifest without one packs the whole tree, and a glob is not matched here; either way every change counts as shipped.
+ */
+function shippedPaths(
+  cwd: string,
+  sourceSha: string,
+): { paths: string[]; unreadable: null } | { paths: null; unreadable: string } {
+  const pkg = JSON.parse(git(cwd, "show", `${sourceSha}:${MANIFEST}`)) as { files?: unknown };
+  const files = pkg.files;
+  if (!Array.isArray(files) || !files.every((entry) => typeof entry === "string")) {
+    return {
+      paths: null,
+      unreadable: `${MANIFEST} at ${sourceSha.slice(0, 7)} has no files list, so npm packs the whole tree`,
+    };
+  }
+  const glob = files.find((entry) => FILES_GLOB.test(entry));
+  if (glob !== undefined) {
+    return {
+      paths: null,
+      unreadable: `${MANIFEST} at ${sourceSha.slice(0, 7)} lists ${JSON.stringify(glob)} in files, a pattern this comparison does not match`,
+    };
+  }
+  return { paths: [MANIFEST, ...files, ...NEXT_BUILD_INPUTS], unreadable: null };
+}
+
+/** The root files npm packs whatever `files` says, as npm-packlist spells them: `/readme{,.*[^~$]}`, `/copying{,.*[^~$]}`,
+ * `/licen[cs]e{,.*[^~$]}`, any case; a glob star crosses no separator, and an editor backup suffix is left out. */
+const ALWAYS_PACKED = /^(?:readme|copying|licen[cs]e)(?:\.[^/]*[^~$/])?$/i;
+const ALWAYS_PACKED_TEXT = "or a root README, COPYING, or LICENSE";
+
+/** Whether `path` is one of `shipped`, lies under one of its directories, or is a root file npm always packs. */
+function ships(shipped: string[], path: string): boolean {
+  return (
+    ALWAYS_PACKED.test(path) ||
+    shipped.some((entry) => {
+      const dir = entry.replace(/\/$/, "");
+      return path === dir || path.startsWith(`${dir}/`);
+    })
+  );
+}
+
+/**
+ * The shipped paths some merge to main after `base`, up to the source, touches: each first-parent step's own diff, not
+ * the two trees'. A change one merge makes and the next reverts leaves the trees equal, and the runs for the two can
+ * take the lane in either order: judged by trees, the revert's run would skip and the change's run would then publish
+ * what main no longer holds. `--no-renames` lists a moved file under both names, so one moved out of the surface still
+ * counts as a change to it.
+ */
+function shippedChanges(cwd: string, base: string, sourceSha: string, shipped: string[]): string[] {
+  const touched = git(
+    cwd,
+    "log",
+    "--first-parent",
+    "--diff-merges=first-parent",
+    "--format=",
+    "--name-only",
+    "--no-renames",
+    `${base}..${sourceSha}`,
+  )
+    .split("\n")
+    .filter((path) => path !== "" && ships(shipped, path));
+  return [...new Set(touched)].sort();
 }
 
 /**
  * Every published pre-release is placed by its source's ancestry, so a run for an older commit publishes nothing
  * once a newer commit's pre-release is on the registry, whatever order the two runs finished in (`npm publish --tag
- * next` moves next to whatever it publishes). The dist-tags need no separate read: whatever next names is among
- * the versions. Null is a package the registry has never seen: the first publish goes.
+ * next` moves next to whatever it publishes). Then the build `next` names is the base: when no merge to main after it,
+ * up to this source, touched a shipped path, the run publishes nothing, so a docs-only merge mints no version. A
+ * base the checkout cannot place, or a files list it cannot read as paths, is no reason to hold a build back: the run
+ * publishes, saying why in a notice. Null is a package the registry has never seen: the first publish goes.
  */
 export function nextPublishVerdict(
   cwd: string,
@@ -989,7 +1159,13 @@ export function nextPublishVerdict(
   packument: Packument | null,
 ): NextVerdict {
   if (packument === null) {
-    return { publish: true, version, notices: [] };
+    return {
+      publish: true,
+      version,
+      notices: [
+        "the registry holds no record of this package yet, so there is no build to compare the shipped surface against; publishing",
+      ],
+    };
   }
   if (version in packument.versions) {
     return {
@@ -999,7 +1175,7 @@ export function nextPublishVerdict(
       notices: [],
     };
   }
-  const { newest: newer, notices } = descendantsOf(cwd, sourceSha, packument);
+  const { newest: newer, notices, next } = placePublished(cwd, sourceSha, packument);
   if (newer !== null) {
     return {
       publish: false,
@@ -1007,6 +1183,40 @@ export function nextPublishVerdict(
       reason: `the registry already holds ${newer.version}, whose source ${newer.sha.slice(0, 7)} is a descendant of ${sourceSha.slice(0, 7)} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
       notices,
     };
+  }
+  const nextVersion = packument["dist-tags"].next;
+  if (nextVersion === undefined) {
+    notices.push(
+      "the registry's next names no version, so there is no build to compare the shipped surface against; publishing",
+    );
+  } else if (sha7Of(nextVersion) === null) {
+    notices.push(
+      `the registry's next is ${nextVersion}, which names no source sha, so there is no build to compare the shipped surface against; publishing`,
+    );
+  } else if (next !== null && next.placement === "merged") {
+    notices.push(
+      `the registry's next is ${next.version}, whose source ${next.sha.slice(0, 7)} is inside a branch merged to main, not a main commit, so the merges since it cannot be walked; publishing`,
+    );
+  } else if (next !== null && (next.placement === "ancestor" || next.placement === "own")) {
+    const shipped = shippedPaths(cwd, sourceSha);
+    if (shipped.paths === null) {
+      notices.push(
+        `${shipped.unreadable}; every change since ${next.version} counts as shipped, publishing`,
+      );
+    } else {
+      const changed = shippedChanges(cwd, next.sha, sourceSha, shipped.paths);
+      if (changed.length === 0) {
+        return {
+          publish: false,
+          version,
+          reason: `no shipped file changed since ${next.version} (source ${next.sha.slice(0, 7)}): no merge to main in ${next.sha.slice(0, 7)}..${sourceSha.slice(0, 7)} touches ${shipped.paths.join(", ")}, ${ALWAYS_PACKED_TEXT}`,
+          notices,
+        };
+      }
+      notices.push(
+        `${changed.length} shipped ${changed.length === 1 ? "file" : "files"} changed since ${next.version} (source ${next.sha.slice(0, 7)}): ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""}`,
+      );
+    }
   }
   return { publish: true, version, notices };
 }
@@ -1149,8 +1359,9 @@ export interface NpmConfirmOptions {
  * lane until the next holder's verdict can see this publish (npm makes a publish readable asynchronously; a verdict
  * read in that gap would move next back). Once it shows, and a descendant's pre-release is on the record, next
  * must name a descendant's, or this stale run moved it back. A drift is reported, not repaired: trusted publishing (OIDC)
- * authenticates `npm publish` alone, not `npm dist-tag add` (npm/cli#8547); the next green push's publish moves
- * next forward, and a rerun of the reporting run publishes nothing and passes, so a blocked release can go on.
+ * authenticates `npm publish` alone, not `npm dist-tag add` (npm/cli#8547); the next green push that changes the
+ * shipped surface publishes and moves next forward, and a rerun of the reporting run publishes nothing and passes, so
+ * a blocked release can go on.
  */
 export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVerdict> {
   const { cwd, sourceSha, registry, attempts, delayMs } = options;
@@ -1173,7 +1384,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
       continue;
     }
     if (packument !== null && version in packument.versions) {
-      const { descendants, newest } = descendantsOf(cwd, sourceSha, packument);
+      const { descendants, newest } = placePublished(cwd, sourceSha, packument);
       const next = packument["dist-tags"].next;
       if (newest !== null && !descendants.some((descendant) => descendant.version === next)) {
         return {
@@ -1182,7 +1393,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
           reason:
             `the registry's next is ${next ?? "unset"} while it holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} ` +
             `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next green push ` +
-            `moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
+            `that changes the shipped surface moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
         };
       }
       return { outcome: "settled", version, reads: read };
