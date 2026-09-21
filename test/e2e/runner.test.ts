@@ -17,6 +17,7 @@ import {
   forbiddenPresent,
   indentedStdout,
   isSubsequence,
+  KILL_AFTER_MS,
   markReportTitle,
   parseGithubOutput,
   parseSummaryOutcomes,
@@ -174,7 +175,7 @@ describe("roundTripFailures (the snapshot round trip's verdict)", () => {
       [],
       [],
       [
-        "snapshot round trip[s.yml]: the check exited 143, expected 0 (the harness killed the child after 300000ms)",
+        `snapshot round trip[s.yml]: the check exited 143, expected 0 (the harness killed the child after ${KILL_AFTER_MS}ms)`,
       ],
     ],
   ])("%s", (_label, check, requests, violations, want) => {

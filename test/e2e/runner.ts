@@ -100,7 +100,7 @@ const SKIPPED_SECTIONS_OUTPUT = "skipped-sections" satisfies OutputName;
  * injected latencies, applied twice), which a 120s cap killed. killNote() marks the kill in every
  * exit-code failure, so a wrongly killed child never reads as the action exiting on its own.
  */
-const KILL_AFTER_MS = 300_000;
+export const KILL_AFTER_MS = 300_000;
 
 /** Monotonic per-process counter so repeated same-name failures never collide. */
 let artifactCounter = 0;
