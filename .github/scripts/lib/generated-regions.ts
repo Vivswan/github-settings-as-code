@@ -16,7 +16,7 @@ export function escapeRe(text: string): string {
 /** Character offsets of one marker: `[start, end)`. */
 export type MarkerSpan = readonly [start: number, end: number];
 
-const SYNTAX_BY_EXTENSION: Readonly<Record<string, MarkerSyntax>> = {
+export const SYNTAX_BY_EXTENSION: Readonly<Record<string, MarkerSyntax>> = {
   ".md": "html",
   ".yml": "yaml",
   ".yaml": "yaml",

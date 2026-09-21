@@ -12,6 +12,7 @@ import {
   anchorCheck,
   anchorReleasePr,
   boundaryCheck,
+  FROZEN,
   type MainPosition,
   mainPosition,
   type NextVerdict,
@@ -141,8 +142,6 @@ describe("the fixture repositories", () => {
 
 const TAG = "refs/tags/v2.1.0";
 const V2 = "refs/tags/v2";
-const FROZEN =
-  "the release-tags ruleset freezes version tags, so no rerun can replace it - inspect it by hand.";
 
 describe("packageRelease", () => {
   test("a fresh release mints the merge commit's package under its build tag, tags it, and creates latest; a rerun verifies it and pushes nothing", () => {
@@ -408,23 +407,46 @@ describe("packageRelease", () => {
     expect(remoteRef(fx, LATEST)).toBe("");
   });
 
-  test("a well-shaped tag for a version this source did not release mints nothing", () => {
+  test.each<[tag: string, error: RegExp]>([
+    ["v2.1-rc.0", /not a vX\.Y\.Z release tag/],
+    // Well-shaped, but not the version this source's manifest released.
+    ["v2.2.0", /did not release/],
+  ])("the tag %s mints nothing", (tag, error) => {
     const fx = seedFixture();
-    expect(() => packageRelease({ cwd: fx.work, tag: "v2.2.0", sourceSha: fx.mergeSha })).toThrow(
-      /did not release/,
-    );
-    expect(remoteRef(fx, "refs/tags/v2.2.0")).toBe("");
+    expect(() => packageRelease({ cwd: fx.work, tag, sourceSha: fx.mergeSha })).toThrow(error);
+    expect(remoteRef(fx, `refs/tags/${tag}`)).toBe("");
     expect(buildTags(fx)).toEqual([]);
   });
 
-  test.each(["lib/index.js", "lib/pkg/index.js"])("a missing %s refuses to package", (file) => {
-    const fx = seedFixture();
-    rmSync(join(fx.work, file));
-    expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      `does not carry a non-empty regular-file ${file} (no entry); refusing to point a consumable ref at an unpackaged commit; run the build before packaging.`,
-    );
-    expect(buildTags(fx)).toEqual([]);
-  });
+  // The build the packaged commit must carry, spoiled two ways; the shared check refuses both entry points before
+  // any push. The entry shown for the empty file is git's empty blob at ls-tree's size column.
+  const unbuilt = ["lib/index.js", "lib/pkg/index.js"].flatMap(
+    (file): [state: string, file: string, spoil: (dir: string) => void, entry: string][] => [
+      [
+        "an empty",
+        file,
+        (dir) => write(dir, file, ""),
+        "entry 100644 blob e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 +0",
+      ],
+      ["a missing", file, (dir) => rmSync(join(dir, file)), "no entry"],
+    ],
+  );
+  test.each(unbuilt)(
+    "%s %s refuses to package and never reaches origin",
+    (_state, file, spoil, entry) => {
+      const fx = seedFixture();
+      spoil(fx.work);
+      const message = new RegExp(
+        `does not carry a non-empty regular-file ${escapeRe(file)} \\(${entry}\\); refusing to point a consumable ref at an unpackaged commit; run the build before packaging\\.$`,
+      );
+      expect(() => packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(message);
+      expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
+        message,
+      );
+      expect(buildTags(fx)).toEqual([]);
+      expect(remoteRef(fx, LATEST)).toBe("");
+    },
+  );
 
   test("a worktree dirty beyond the build outputs refuses to package", () => {
     const fx = seedFixture();
@@ -1047,17 +1069,6 @@ describe("release configuration contract", () => {
   });
 });
 
-describe("release tag shape", () => {
-  test("a non-vX.Y.Z tag mints nothing", () => {
-    const fx = seedFixture();
-    expect(() =>
-      packageRelease({ cwd: fx.work, tag: "v2.1-rc.0", sourceSha: fx.mergeSha }),
-    ).toThrow(/not a vX\.Y\.Z release tag/);
-    expect(remoteRef(fx, "refs/tags/v2.1-rc.0")).toBe("");
-    expect(buildTags(fx)).toEqual([]);
-  });
-});
-
 /** The version grammar as semver.org states it: what npm holds a version to
  * before it normalizes one (a bare all-digit identifier loses its leading zero). */
 const SEMVER =
@@ -1434,59 +1445,67 @@ describe("prereleaseVersion", () => {
     return body(`http://127.0.0.1:${server.port}`, requests).finally(() => server.stop(true));
   }
 
-  test("the verdict reads the registry's record of the package named in package.json past the CDN cache, and 404 is an unpublished package", async () => {
-    const fx = seedFixture();
-    const verdict = await withRegistry({ status: 404 }, async (registry, requests) => {
-      const result = await npmVerdict({
-        cwd: fx.work,
-        channel: "next",
-        sourceSha: fx.mergeSha,
-        registry,
-      });
-      return { result, requests };
-    });
-    expect(verdict.result).toEqual({
-      publish: true,
-      version: versionOf(fx.work, fx.mergeSha, 2),
-      notices: [],
-    });
-    // A query string no earlier request carried: the CDN caches a packument by URL for up to 300 s and misses on it.
-    expect(verdict.requests).toEqual([
-      expect.stringMatching(/^\/@scope%2Fpkg\?fresh=\d+-[0-9a-z]+$/),
-    ]);
-  });
-
-  test("the verdict skips what the registry already holds on both channels", async () => {
-    const fx = seedFixture();
-    const own = versionOf(fx.work, fx.mergeSha, 2);
-    const held = {
+  /** The fixture's registry record holding both channels' versions, the run's own next version included. */
+  const holding = (own: string): Answer => ({
+    status: 200,
+    body: {
       versions: { "2.1.0": {}, "2.2.0": {}, [own]: {} },
       "dist-tags": { latest: "2.2.0", next: own },
-    };
-    await withRegistry({ status: 200, body: held }, async (registry) => {
-      expect(
-        await npmVerdict({
-          cwd: fx.work,
-          channel: "stable",
-          sourceSha: fx.mergeSha,
-          tag: "v2.1.0",
-          registry,
-        }),
-      ).toEqual({
-        publish: false,
-        version: "2.1.0",
-        reason: "2.1.0 is already on the registry",
-      });
-      expect(
-        await npmVerdict({ cwd: fx.work, channel: "next", sourceSha: fx.mergeSha, registry }),
-      ).toEqual({
+    },
+  });
+
+  test.each<
+    [
+      label: string,
+      options: { channel: "next" } | { channel: "stable"; tag: string },
+      answer: (own: string) => Answer,
+      expected: (own: string) => NextVerdict | PublishVerdict,
+    ]
+  >([
+    [
+      "404 is an unpublished package",
+      { channel: "next" },
+      () => ({ status: 404 }),
+      (own) => ({ publish: true, version: own, notices: [] }),
+    ],
+    [
+      "a stable version the record holds is skipped",
+      { channel: "stable", tag: "v2.1.0" },
+      holding,
+      () => ({ publish: false, version: "2.1.0", reason: "2.1.0 is already on the registry" }),
+    ],
+    [
+      "a next version the record holds is skipped",
+      { channel: "next" },
+      holding,
+      (own) => ({
         publish: false,
         version: own,
         reason: `${own} is already on the registry`,
         notices: [],
+      }),
+    ],
+  ])(
+    "the verdict reads the registry's record of the package named in package.json past the CDN cache: %s",
+    async (_label, options, answer, expected) => {
+      const fx = seedFixture();
+      const own = versionOf(fx.work, fx.mergeSha, 2);
+      const verdict = await withRegistry(answer(own), async (registry, requests) => {
+        const result = await npmVerdict({
+          cwd: fx.work,
+          sourceSha: fx.mergeSha,
+          registry,
+          ...options,
+        });
+        return { result, requests };
       });
-    });
-  });
+      expect(verdict.result).toEqual(expected(own));
+      // A query string no earlier request carried: the CDN caches a packument by URL for up to 300 s and misses on it.
+      expect(verdict.requests).toEqual([
+        expect.stringMatching(/^\/@scope%2Fpkg\?fresh=\d+-[0-9a-z]+$/),
+      ]);
+    },
+  );
 
   const malformed: [string, unknown, RegExp | string][] = [
     ["an empty object", {}, "is not a packument (an object with versions and dist-tags records)"],

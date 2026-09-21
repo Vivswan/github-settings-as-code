@@ -17,6 +17,7 @@ const ROUTES = [
   },
   { kind: "rest", key: "teams.org", method: "GET", path: "/orgs/{org}" },
   { kind: "graphql", key: "repository.gToggles", opName: "RepoToggles" },
+  { kind: "graphql", key: "environments.gPin", opName: "PinEnvironment" },
 ] satisfies Parameters<typeof recordHits>[1];
 
 function req(method: string, pathname: string): LoggedRequest {
@@ -53,6 +54,7 @@ describe("recordHits", () => {
   });
 
   test("a GraphQL request attributes by the logged operationName, never the path", () => {
+    // Two GraphQL routes share the one path, so a match on the path would attribute both.
     const hit = new Set<string>();
     recordHits(
       [
@@ -69,8 +71,13 @@ describe("recordHits", () => {
 
 describe("coldRoutes", () => {
   test("names every route no request reached, sorted by key", () => {
-    // The cold routes sit in ROUTES as labels.create, teams.org, repository.gToggles: not key order.
+    // The cold routes sit in ROUTES as labels.create, teams.org, repository.gToggles, environments.gPin: not key order.
     const hit = new Set(["labels.list", "labels.update"]);
-    expect(coldRoutes(hit, ROUTES)).toEqual(["labels.create", "repository.gToggles", "teams.org"]);
+    expect(coldRoutes(hit, ROUTES)).toEqual([
+      "environments.gPin",
+      "labels.create",
+      "repository.gToggles",
+      "teams.org",
+    ]);
   });
 });

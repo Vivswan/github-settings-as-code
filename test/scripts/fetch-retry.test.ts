@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { fetchTextWithRetry } from "../../.github/scripts/lib/fetch-retry.js";
+import { BACKOFF_BASE_MS, fetchTextWithRetry } from "../../.github/scripts/lib/fetch-retry.js";
 
 const URL_UNDER_TEST = "https://raw.githubusercontent.com/owner/repo/ref/artifact.json";
 
@@ -61,9 +61,9 @@ describe("fetchTextWithRetry", () => {
     const script = fetchScript([new Error("ECONNRESET"), new Response("payload")]);
     const fetched = await fetchTextWithRetry("artifact", URL_UNDER_TEST, 1000, deps(script));
     expect(fetched.text).toBe("payload");
-    expect(script.sleeps).toEqual([2000]);
+    expect(script.sleeps).toEqual([BACKOFF_BASE_MS]);
     expect(script.warnings).toEqual([
-      `fetching the artifact: attempt 1/3 for ${URL_UNDER_TEST} failed (ECONNRESET); retrying in 2000ms`,
+      `fetching the artifact: attempt 1/3 for ${URL_UNDER_TEST} failed (ECONNRESET); retrying in ${BACKOFF_BASE_MS}ms`,
     ]);
   });
 
@@ -75,7 +75,7 @@ describe("fetchTextWithRetry", () => {
       ]);
       const fetched = await fetchTextWithRetry("artifact", URL_UNDER_TEST, 1000, deps(script));
       expect(fetched.text).toBe("payload");
-      expect(script.sleeps).toEqual([2000]);
+      expect(script.sleeps).toEqual([BACKOFF_BASE_MS]);
     });
   }
 
@@ -105,6 +105,7 @@ describe("fetchTextWithRetry", () => {
       /fetching the OpenAPI descriptor failed after 3 attempts .*socket hang up.*raw\.githubusercontent\.com/,
     );
     expect(script.calls()).toBe(3);
-    expect(script.sleeps).toEqual([2000, 4000]);
+    // Doubling per attempt; with three attempts the two sleeps are also what a linear ramp would give.
+    expect(script.sleeps).toEqual([BACKOFF_BASE_MS, BACKOFF_BASE_MS * 2]);
   });
 });

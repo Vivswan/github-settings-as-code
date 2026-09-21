@@ -313,11 +313,6 @@ describe("permissions renderers", () => {
 });
 
 describe("generated files", () => {
-  test.each(Object.keys(GENERATED_REGIONS))("regenerating %s is a no-op", (path) => {
-    const text = readFileSync(join(ROOT, path), "utf8");
-    expect(regenerateText(path, text)).toBe(text);
-  });
-
   test.each(
     Object.entries(GENERATED_REGIONS).flatMap(([path, regions]) =>
       regions.map((region): [name: string, path: string, region: RegionSpec] => [

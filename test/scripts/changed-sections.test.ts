@@ -201,42 +201,42 @@ describe("changed-sections derived fan-out", () => {
       });
     }));
 
-  test("a shared file no section imports throws", () =>
-    withTempDir("changed-sections-", (dir) => {
-      const root = syntheticRepo(dir, {
+  test.each<[label: string, files: Record<string, string>, error: RegExp]>([
+    [
+      "a shared file no section imports",
+      {
         "src/sections/shared/live.ts": "export const live = 1;\n",
         "src/sections/shared/dead.ts": "export const dead = 1;\n",
         "src/sections/labels/index.ts":
           'import { live } from "../shared/live.js";\nexport default live;\n',
-      });
-      expect(() => deriveSharedFanOut(root)).toThrow(
-        /no section imports src\/sections\/shared\/dead\.ts/,
-      );
-    }));
-
-  test("a dangling relative import anywhere under src throws", () =>
-    withTempDir("changed-sections-", (dir) => {
-      const root = syntheticRepo(dir, {
+      },
+      /no section imports src\/sections\/shared\/dead\.ts/,
+    ],
+    [
+      "a dangling relative import anywhere under src",
+      {
         "src/sections/shared/engine.ts": "export const engine = 1;\n",
         "src/sections/labels/index.ts":
           'import { gone } from "../shared/gone.js";\nexport default gone;\n',
-      });
-      expect(() => deriveSharedFanOut(root)).toThrow(/resolves to no file/);
-    }));
-
-  test("a computed import anywhere under src fails the whole derivation, naming the file", () =>
-    withTempDir("changed-sections-", (dir) => {
+      },
+      /resolves to no file/,
+    ],
+    [
       // The graph must read every file through the computed-specifier check, not the transpiler alone, which
       // silently drops such an edge and under-selects.
-      const root = syntheticRepo(dir, {
+      "a computed import anywhere under src, naming the file",
+      {
         ...GRAPH_FIXTURE,
         "src/sections/webhooks/index.ts":
           'const which = "../shared/engine.js";\nexport const engine = await import(which);\n',
-      });
-      expect(() => deriveSharedFanOut(root)).toThrow(
-        /src\/sections\/webhooks\/index\.ts:2 loads a module through a computed specifier/,
-      );
-    }));
+      },
+      /src\/sections\/webhooks\/index\.ts:2 loads a module through a computed specifier/,
+    ],
+  ])("%s fails the whole derivation", (_label, files, error) =>
+    withTempDir("changed-sections-", (dir) => {
+      expect(() => deriveSharedFanOut(syntheticRepo(dir, files))).toThrow(error);
+    }),
+  );
 });
 
 describe("changed-sections file map", () => {
@@ -266,31 +266,69 @@ describe("changed-sections file map", () => {
 });
 
 describe("changed-sections selection", () => {
-  test("a docs-only change selects none", () => {
-    const selection = sectionsForFiles(
-      changed("README.md", "COVERAGE.md", ".github/workflows/ci.yml"),
-    );
-    expect(selection.kind).toBe("none");
-    expect(renderSelection(selection)).toBe("none");
-  });
-
-  test("a section directory selects its key for every file under it", () => {
-    expect(renderSelection(sectionsForFiles(changed("src/sections/labels/index.ts")))).toBe(
+  // Every rule that reads a path list to a rendered selection: "none", "all", or the keys in SECTION_KEYS order.
+  test.each<[label: string, rendered: string, files: string[]]>([
+    ["a docs-only change", "none", ["README.md", "COVERAGE.md", ".github/workflows/ci.yml"]],
+    ["a section's entry", "labels", ["src/sections/labels/index.ts"]],
+    ["a section's mock", "labels", ["src/sections/labels/mock.ts"]],
+    [
+      "a section's scenario",
+      "environments",
+      ["src/sections/environments/scenarios/environments-apply.yml"],
+    ],
+    [
+      "a section whose key carries underscores",
+      "secret_scanning_custom_patterns",
+      ["src/sections/secret_scanning_custom_patterns/schema.ts"],
+    ],
+    [
+      "multiple section directories, which union in SECTION_KEYS order",
+      "labels,milestones",
+      ["src/sections/milestones/index.ts", "src/sections/labels/index.ts"],
+    ],
+    ["registry.ts", "all", ["src/sections/registry.ts"]],
+    [
+      "the shared docs prose, like the docs registry",
+      "none",
+      ["src/sections/shared/shared.docs.yml"],
+    ],
+    [
+      "the shared docs prose beside a section",
       "labels",
-    );
-    expect(renderSelection(sectionsForFiles(changed("src/sections/labels/mock.ts")))).toBe(
+      ["src/sections/shared/shared.docs.yml", "src/sections/labels/index.ts"],
+    ],
+    // The docs-only aggregator is never in the bundle and build:check gates docs drift, so it behaves like lib/.
+    ["docs-registry.ts", "none", ["src/sections/docs-registry.ts"]],
+    [
+      "docs-registry.ts beside a section, which it never masks",
       "labels",
-    );
-    expect(
-      renderSelection(
-        sectionsForFiles(changed("src/sections/environments/scenarios/environments-apply.yml")),
-      ),
-    ).toBe("environments");
-    expect(
-      renderSelection(
-        sectionsForFiles(changed("src/sections/secret_scanning_custom_patterns/schema.ts")),
-      ),
-    ).toBe("secret_scanning_custom_patterns");
+      ["src/sections/docs-registry.ts", "src/sections/labels/index.ts"],
+    ],
+    [
+      "docs-registry.ts beside a core path",
+      "all",
+      ["src/sections/docs-registry.ts", "src/schema.ts"],
+    ],
+    // The src/ entries are held to ALL_SELECTING_PREFIXES by the file-map test; these cross-cutting prefixes outside
+    // src's top level have no such reading.
+    ["the request layer", "all", ["src/sections/contract/requests.ts"]],
+    ["the e2e runner", "all", ["test/e2e/runner.ts"]],
+    ["the selector itself", "all", [".github/scripts/changed-sections.ts"]],
+    ["a workflow", "all", [".github/workflows/checks.yml"]],
+    ["a composite action", "all", [".github/actions/fetch-test-artifacts/action.yml"]],
+    // lib/settings.schema.json regenerates alongside schema-affecting src changes; forcing "all" would kill diff-awareness.
+    [
+      "a section change plus a regenerated schema, which scopes to the section",
+      "labels",
+      ["src/sections/labels/index.ts", "lib/settings.schema.json"],
+    ],
+    [
+      "a core-path change beside a section change, which wins",
+      "all",
+      ["src/sections/labels/index.ts", "src/engine/diff.ts"],
+    ],
+  ])("%s selects %s", (_label, rendered, files) => {
+    expect(renderSelection(sectionsForFiles(changed(...files)))).toBe(rendered);
   });
 
   test("a shared file selects its derived fan-out", () => {
@@ -382,6 +420,7 @@ describe("changed-sections selection", () => {
       "src/sections/labels.ts",
       "src/sections/not_a_key/index.ts",
       "src/sections/shared/unmapped.ts",
+      "src/sections/shared/notes.yml",
     ]) {
       expect(() => sectionsForFiles(changed(stray)), `${stray} must throw`).toThrow(
         /matches no selector rule/,
@@ -392,71 +431,5 @@ describe("changed-sections selection", () => {
         `${stray} beside a core path`,
       ).toThrow(/matches no selector rule/);
     }
-  });
-
-  test("multiple section directories union in SECTION_KEYS order", () => {
-    const selection = sectionsForFiles(
-      changed("src/sections/milestones/index.ts", "src/sections/labels/index.ts"),
-    );
-    expect(renderSelection(selection)).toBe("labels,milestones");
-  });
-
-  test("registry.ts selects all", () => {
-    expect(sectionsForFiles(changed("src/sections/registry.ts"))).toEqual({ kind: "all" });
-    expect(renderSelection(sectionsForFiles(changed("src/sections/registry.ts")))).toBe("all");
-  });
-
-  test("the shared docs prose selects none, like the docs registry", () => {
-    const prose = "src/sections/shared/shared.docs.yml";
-    expect(sectionsForFiles(changed(prose)).kind).toBe("none");
-    expect(renderSelection(sectionsForFiles(changed(prose, "src/sections/labels/index.ts")))).toBe(
-      "labels",
-    );
-    expect(() => sectionsForFiles(changed("src/sections/shared/notes.yml"))).toThrow(
-      /matches no selector rule/,
-    );
-  });
-
-  test("docs-registry.ts selects none and never masks or widens the rest of the diff", () => {
-    // The docs-only aggregator is never in the bundle and build:check gates docs drift, so it behaves like lib/.
-    expect(sectionsForFiles(changed("src/sections/docs-registry.ts")).kind).toBe("none");
-    expect(
-      renderSelection(
-        sectionsForFiles(changed("src/sections/docs-registry.ts", "src/sections/labels/index.ts")),
-      ),
-    ).toBe("labels");
-    expect(sectionsForFiles(changed("src/sections/docs-registry.ts", "src/schema.ts")).kind).toBe(
-      "all",
-    );
-  });
-
-  test("the cross-cutting paths outside src's top level select all", () => {
-    // The src/ entries are held to ALL_SELECTING_PREFIXES by the file-map test; these prefixes have no such reading.
-    for (const file of [
-      "src/sections/contract/requests.ts",
-      "test/e2e/runner.ts",
-      ".github/scripts/changed-sections.ts",
-      ".github/workflows/checks.yml",
-      ".github/actions/fetch-test-artifacts/action.yml",
-    ]) {
-      expect(sectionsForFiles(changed(file)), `${file} should select all`).toEqual({
-        kind: "all",
-      });
-    }
-  });
-
-  test("a section change plus a regenerated schema scopes to the section, not all", () => {
-    // lib/settings.schema.json regenerates alongside schema-affecting src changes; forcing "all" would kill diff-awareness.
-    const selection = sectionsForFiles(
-      changed("src/sections/labels/index.ts", "lib/settings.schema.json"),
-    );
-    expect(renderSelection(selection)).toBe("labels");
-  });
-
-  test("a core-path change wins over a section change", () => {
-    const selection = sectionsForFiles(
-      changed("src/sections/labels/index.ts", "src/engine/diff.ts"),
-    );
-    expect(selection.kind).toBe("all");
   });
 });

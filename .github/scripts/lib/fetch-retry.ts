@@ -5,7 +5,7 @@
  */
 
 const FETCH_ATTEMPTS = 3;
-const BACKOFF_BASE_MS = 2_000;
+export const BACKOFF_BASE_MS = 2_000;
 
 /** Statuses below 500 that are still transient, not deterministic. */
 const TRANSIENT_STATUSES = new Set([408, 429]);
