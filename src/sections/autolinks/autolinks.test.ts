@@ -36,6 +36,15 @@ describe("autolinks", () => {
       ops: [
         {
           role: "remove",
+          params: { autolink_id: "2" },
+          describe: 'deleting undeclared autolink "OLD-"',
+          drift: [
+            "autolinks[OLD-]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+          ],
+          change: 'DELETED undeclared autolink "OLD-"',
+        },
+        {
+          role: "remove",
           params: { autolink_id: "1" },
           describe: 'deleting autolink "JIRA-" before recreating it',
           drift: [
@@ -65,15 +74,6 @@ describe("autolinks", () => {
             "autolinks[NEW-]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
           change: 'created autolink "NEW-"',
-        },
-        {
-          role: "remove",
-          params: { autolink_id: "2" },
-          describe: 'deleting undeclared autolink "OLD-"',
-          drift: [
-            "autolinks[OLD-]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
-          ],
-          change: 'DELETED undeclared autolink "OLD-"',
         },
       ],
       notes: [],
@@ -259,15 +259,15 @@ describe("autolinks", () => {
       },
     ]);
     expect(changes).toEqual([
+      'DELETED undeclared autolink "JIRA-"',
       'deleted autolink "TICKET-" to recreate it with the declared settings',
       'recreated autolink "TICKET-"',
-      'DELETED undeclared autolink "JIRA-"',
     ]);
     expect(notes).toEqual([]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/autolinks/20",
       "DELETE /repos/o/r/autolinks/10",
       "POST /repos/o/r/autolinks",
-      "DELETE /repos/o/r/autolinks/20",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
     expect(

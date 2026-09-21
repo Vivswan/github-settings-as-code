@@ -33,6 +33,15 @@ describe("labels", () => {
     expect(result).toEqual({
       ops: [
         {
+          role: "remove",
+          params: { name: "stale" },
+          describe: 'deleting undeclared label "stale"',
+          drift: [
+            "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+          ],
+          change: 'DELETED undeclared label "stale"',
+        },
+        {
           role: "update",
           params: { name: "bug" },
           payload: { new_name: "Bug", color: "000000", description: "Something isn't working" },
@@ -51,15 +60,6 @@ describe("labels", () => {
             "labels[enhancement]: missing - declared in the settings file but not on the repo; apply will create it",
           ],
           change: 'created label "enhancement"',
-        },
-        {
-          role: "remove",
-          params: { name: "stale" },
-          describe: 'deleting undeclared label "stale"',
-          drift: [
-            "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
-          ],
-          change: 'DELETED undeclared label "stale"',
         },
       ],
       notes: [],
@@ -86,6 +86,15 @@ describe("labels", () => {
     expect(result).toEqual({
       ops: [
         {
+          role: "remove",
+          params: { name: "stale" },
+          describe: 'deleting undeclared label "stale"',
+          drift: [
+            "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+          ],
+          change: 'DELETED undeclared label "stale"',
+        },
+        {
           role: "update",
           params: { name: "bug" },
           payload: { new_name: "bug", description: "", colr: "000000" },
@@ -95,15 +104,6 @@ describe("labels", () => {
             'labels[bug].colr: declared "000000" but the API response has no such field (new or write-only field?)',
           ],
           change: 'updated label "bug"',
-        },
-        {
-          role: "remove",
-          params: { name: "stale" },
-          describe: 'deleting undeclared label "stale"',
-          drift: [
-            "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
-          ],
-          change: 'DELETED undeclared label "stale"',
         },
       ],
       notes: [
@@ -192,15 +192,15 @@ describe("labels", () => {
       { name: "enhancement", color: "a2eeef", description: "New feature or request" },
     ]);
     expect(changes).toEqual([
+      'DELETED undeclared label "wontfix"',
       'updated label "defect"',
       'created label "enhancement"',
-      'DELETED undeclared label "wontfix"',
     ]);
     expect(notes).toEqual([]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/labels/wontfix",
       "PATCH /repos/o/r/labels/bug",
       "POST /repos/o/r/labels",
-      "DELETE /repos/o/r/labels/wontfix",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
     expect(api.state.labels.map((label) => [label.name, label.color, label.description])).toEqual([

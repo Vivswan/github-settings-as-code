@@ -263,7 +263,7 @@ describe("deploy_keys conflicts", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 
-  test("the live holder conflict also fails under wrapped _undeclared:delete: the create would run before the holder's delete", async () => {
+  test("the live holder conflict also fails under wrapped _undeclared:delete: the refusal runs before any operation is planned, so the delete-first order does not excuse it", async () => {
     const api = new MockApi({ [LIST]: { data: [liveKey(7, "old-name", BOT_KEY)] } });
     await expect(
       plan(api, { _undeclared: "delete", entries: [{ title: "new-name", key: BOT_KEY }] }),
@@ -537,7 +537,7 @@ describe("deploy_keys undeclared policy", () => {
 });
 
 describe("deploy_keys convergence", () => {
-  test("executing the plan against the derived mock converges: create, DELETE-then-POST replace, undeclared delete, and an empty re-plan", async () => {
+  test("executing the plan against the derived mock converges: undeclared delete, create, DELETE-then-POST replace, and an empty re-plan", async () => {
     const api = fragmentFake(deployKeysSection, deployKeysMockHandlers, {
       deploy_keys: [
         liveKey(10, "mirror-pull", STALE_KEY, false),
@@ -552,17 +552,17 @@ describe("deploy_keys convergence", () => {
       ],
     });
     expect(changes).toEqual([
+      'DELETED undeclared deploy key "retired-service"',
       'created deploy key "deploy-bot"',
       'deleted deploy key "mirror-pull" to recreate it with the declared settings',
       'recreated deploy key "mirror-pull"',
-      'DELETED undeclared deploy key "retired-service"',
     ]);
     expect(notes).toEqual([]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/keys/20",
       "POST /repos/o/r/keys",
       "DELETE /repos/o/r/keys/10",
       "POST /repos/o/r/keys",
-      "DELETE /repos/o/r/keys/20",
     ]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });
     // The mock stores comment-free material the way GitHub does; the rotated key kept its live read_only through the recreate.

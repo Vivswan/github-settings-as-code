@@ -3,6 +3,11 @@
  * (slice, roles, identity, address, lens, prose) from which plan(), snapshot(), the loose shape, the
  * mock's transformers, and the fuzz witness derive. Prose enters through the two undeclared hooks and
  * the reasons `concealed` and `foreign` return; a section needing more stays bespoke.
+ *
+ * The plan's operations are ordered: the undeclared deletes first, in live order, then one group per
+ * declared entry in file order (a recreate is its delete then its create; a mapping's updateConfig
+ * precedes the general update). Execution follows the plan, so a delete has freed a name or prefix
+ * before the create that needs it is sent.
  */
 
 import { err, ok, type Result, safeTry } from "neverthrow";
@@ -319,7 +324,10 @@ interface ListSectionDeclFields<
   /** The path params addressing one live item for every item role; unrepresentable when the routes disagree. */
   readonly address: [Address<Ends>] extends [never] ? never : (live: Live) => Address<Ends>;
   readonly lens: {
-    /** The entry in wire terms: the create body, and what a converged live item reads back as. */
+    /**
+     * The entry in the terms the comparison runs in: what a converged live item reads back as, and the
+     * request body itself unless `wire` renders it.
+     */
     readonly toWrite: (entry: Entry<K>) => ListWrite<F>;
     /**
      * A live item in the same terms as toWrite, so the two compare field by field.
@@ -329,6 +337,12 @@ interface ListSectionDeclFields<
      *   every other live field  -> kept, so declared passthrough keys compare against what the API echoed
      */
     readonly fromLive: (live: Live) => ListComparable<F>;
+    /**
+     * The write as the request body spells it, when that differs from the compared form (a milestone's due
+     * day sent as noon UTC): applied to every body the planner sends (create, recreate, update, and the
+     * updateConfig slice) and to nothing the comparison or the snapshot reads. Omitted, the write is the body.
+     */
+    readonly wire?: (write: ListWrite<F>) => ListWrite<F>;
     /** Per entry field holding a list, the item key to pair by (see DeltaOptions.matchBy); `{}` when none does. */
     readonly matchBy: Readonly<Partial<Record<keyof Entry<K> & string, MatchKey>>>;
   };
@@ -445,6 +459,7 @@ interface ErasedDecl<Key extends string> {
   readonly lens: {
     readonly toWrite: (entry: object) => ListWrite<string>;
     readonly fromLive: (live: object) => ListComparable<string>;
+    readonly wire?: (write: ListWrite<string>) => ListWrite<string>;
     readonly matchBy: Readonly<Record<string, MatchKey>>;
   };
   readonly replaces: boolean;
@@ -805,6 +820,7 @@ async function planList<Key extends string>(
   return safeTry(async function* () {
     const { key, noun, identity, lens, prose, endpoints, mapping } = decl;
     const { fold } = identity;
+    const wire = lens.wire ?? ((write: ListWrite<string>) => write);
     const update = updateRole(endpoints);
     const remedies = update === undefined ? RECREATE_REMEDIES : UPDATE_REMEDIES;
     const sweep = decl.replaces ? replaceSweep(decl.entry) : undefined;
@@ -852,8 +868,28 @@ async function planList<Key extends string>(
       );
     }
     const claimed = new Set<Key>(writes.flatMap((w) => w.claims));
+    const undeclared = liveItems.filter((live) => !claimed.has(live.key));
 
     const plan: SectionPlan = { ops: [], notes: [], drift: [] };
+    // The undeclared deletes come first, in live order: a delete frees what a create below would collide
+    // with (an autolink prefix that begins a declared one); the declared entries follow in file order.
+    if (policy === "delete") {
+      for (const { item, name } of undeclared) {
+        plan.ops.push({
+          role: "remove",
+          params: decl.address(item),
+          describe: `deleting undeclared ${noun} "${name}"`,
+          drift: [
+            undeclaredDrift(defaultPolicy, {
+              label: `${key}[${name}]`,
+              action: prose.undeclaredAction,
+              ...prose.undeclaredDrift,
+            }),
+          ],
+          change: `DELETED undeclared ${noun} "${name}"`,
+        });
+      }
+    }
     for (const { write, name, claims } of writes) {
       const matches = claims.flatMap((claim) => {
         const match = liveByKey.get(claim);
@@ -870,13 +906,14 @@ async function planList<Key extends string>(
       const existing = matches[0];
       const label = `${key}[${name}]`;
       const secrets = declaredSecrets(decl, write);
+      const wired = wire(write);
       if (existing === undefined) {
         plan.ops.push({
           role: "create",
           payload:
             secrets.length === 0
-              ? plainData(write)
-              : (exec: ExecTools) => resolvedWrite(exec, write, secrets),
+              ? plainData(wired)
+              : (exec: ExecTools) => resolvedWrite(exec, wired, secrets),
           describe: `creating ${noun} "${name}"`,
           drift: facetOr(secrets.length === 0 ? null : secretFacet(decl, label, secrets), [
             missingDrift(label),
@@ -921,7 +958,7 @@ async function planList<Key extends string>(
           },
           {
             role: "create",
-            payload: plainData(decl.recreate?.(existing.item, write) ?? write),
+            payload: plainData(wire(decl.recreate?.(existing.item, write) ?? write)),
             describe: `recreating ${noun} "${name}"`,
             drift,
             change: `recreated ${noun} "${name}"`,
@@ -938,7 +975,7 @@ async function planList<Key extends string>(
         .map(render);
       const mappingSecrets = secrets.filter(inMapping);
       if (mapping !== undefined && (hasDrift(mappingDrift) || mappingSecrets.length > 0)) {
-        const config = write[mapping] as ListWrite<string>;
+        const config = wired[mapping] as ListWrite<string>;
         plan.ops.push({
           role: "updateConfig",
           params,
@@ -970,7 +1007,7 @@ async function planList<Key extends string>(
         continue;
       }
       const general =
-        mapping === undefined ? (write as Fields) : withoutPaths(write as Fields, [mapping]);
+        mapping === undefined ? (wired as Fields) : withoutPaths(wired as Fields, [mapping]);
       plan.ops.push({
         role: "update",
         params,
@@ -992,11 +1029,8 @@ async function planList<Key extends string>(
       });
     }
 
-    for (const { item, name, key: liveKey } of liveItems) {
-      if (claimed.has(liveKey)) {
-        continue;
-      }
-      if (policy === "keep") {
+    if (policy === "keep") {
+      for (const { name } of undeclared) {
         plan.notes.push(
           undeclaredNote({
             subject: `${noun} "${name}"`,
@@ -1004,21 +1038,7 @@ async function planList<Key extends string>(
             ...prose.undeclaredNote,
           }),
         );
-        continue;
       }
-      plan.ops.push({
-        role: "remove",
-        params: decl.address(item),
-        describe: `deleting undeclared ${noun} "${name}"`,
-        drift: [
-          undeclaredDrift(defaultPolicy, {
-            label: `${key}[${name}]`,
-            action: prose.undeclaredAction,
-            ...prose.undeclaredDrift,
-          }),
-        ],
-        change: `DELETED undeclared ${noun} "${name}"`,
-      });
     }
     return ok(plan);
   });

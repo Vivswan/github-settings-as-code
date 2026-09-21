@@ -24,8 +24,8 @@ expect:
   outcomes:
     milestones: applied
   mutations:
-    - "POST /repos/{repo}/milestones"
     - "DELETE /repos/{repo}/milestones/1"
+    - "POST /repos/{repo}/milestones"
   stdout_contains:
     - "DELETED undeclared milestone \"v0.9\""
   summary_contains:

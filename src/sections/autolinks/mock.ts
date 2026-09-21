@@ -13,6 +13,18 @@ export const AUTOLINKS_MOCK: ListMockSpec = {
   defaults: { is_alphanumeric: true },
   owned: (id) => ({ id }),
   unique: "identity",
+  // GitHub refuses a prefix that begins, or is begun by, a stored one; the planner deletes an
+  // undeclared one before the create that would collide with it.
+  rejects: (item, siblings) => {
+    const prefix = String(item.key_prefix);
+    const overlapping = siblings.find((live) => {
+      const stored = String(live.key_prefix);
+      return stored.startsWith(prefix) || prefix.startsWith(stored);
+    });
+    return overlapping === undefined
+      ? undefined
+      : `Validation Failed: key_prefix "${prefix}" overlaps the existing autolink "${String(overlapping.key_prefix)}"`;
+  },
 };
 
 export const autolinksMockHandlers: SectionRestHandlers<"autolinks"> = mockFragmentFor(

@@ -3,8 +3,8 @@
 import { z } from "zod";
 
 /**
- * A due date is a calendar day; the fold to the day GitHub keeps is DueOnWire in index.ts. A timestamp is
- * taken for its date part, so the noon-UTC form a snapshot emits (YYYY-MM-DDT12:00:00Z) parses again.
+ * A due date is a calendar day; the lens compares and snapshots the day, and the wire hook in index.ts sends it
+ * as the instant GitHub keeps on that day. A timestamp is taken for its date part, so a file spelling one parses.
  */
 const DueOn = z.union([z.iso.date(), z.iso.datetime()], {
   error:

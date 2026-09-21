@@ -594,7 +594,7 @@ describe("rulesets", () => {
     expect(api.mutations()).toEqual([]);
   });
 
-  test("wrapped _undeclared:delete plans the DELETE after the declared upserts", async () => {
+  test("wrapped _undeclared:delete plans the DELETE before the declared upserts", async () => {
     const api = writable({
       [listRoute]: {
         data: [
@@ -615,6 +615,15 @@ describe("rulesets", () => {
     expect(result).toEqual({
       ops: [
         {
+          role: "remove",
+          params: { ruleset_id: "7" },
+          describe: 'deleting undeclared ruleset "legacy"',
+          drift: [
+            'rulesets[legacy]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
+          ],
+          change: 'DELETED undeclared ruleset "legacy"',
+        },
+        {
           role: "update",
           params: { ruleset_id: "9" },
           payload: {
@@ -629,15 +638,6 @@ describe("rulesets", () => {
             "rulesets[main].rules[deletion]: missing live",
           ],
           change: 'updated ruleset "main"',
-        },
-        {
-          role: "remove",
-          params: { ruleset_id: "7" },
-          describe: 'deleting undeclared ruleset "legacy"',
-          drift: [
-            'rulesets[legacy]: undeclared - not in the settings file and "_undeclared: delete" is set, so apply will DELETE it; add it to the settings file to keep it',
-          ],
-          change: 'DELETED undeclared ruleset "legacy"',
         },
       ],
       notes: [],
@@ -706,14 +706,14 @@ describe("rulesets", () => {
       ],
     });
     expect(changes).toEqual([
+      'DELETED undeclared ruleset "legacy"',
       'updated ruleset "main"',
       'created ruleset "tags"',
-      'DELETED undeclared ruleset "legacy"',
     ]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/rulesets/7",
       "PUT /repos/o/r/rulesets/9",
       "POST /repos/o/r/rulesets",
-      "DELETE /repos/o/r/rulesets/7",
     ]);
     expect(first.drift).toEqual([]);
     expect(second).toEqual({ ops: [], notes: [], drift: [] });

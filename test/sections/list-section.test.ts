@@ -79,7 +79,7 @@ describe("listSection", () => {
       { name: "bug", color: "d73a4a" },
     ]);
     // "Bug" is a different label under exact matching: deleted as undeclared, not renamed.
-    expect(changes).toEqual(['updated label "bug"', 'DELETED undeclared label "Bug"']);
+    expect(changes).toEqual(['DELETED undeclared label "Bug"', 'updated label "bug"']);
     expect(second.ops).toEqual([]);
     expect(api.state.labels.map((label) => [label.name, label.color])).toEqual([["bug", "d73a4a"]]);
   });
@@ -208,6 +208,101 @@ describe("listSection", () => {
     expect(labelsSection.validate(entries)).toEqual([issue]);
     expect(labelsSection.validate({ _undeclared: "keep", entries })).toEqual([
       { ...issue, path: ".entries[1].name" },
+    ]);
+  });
+
+  test("the undeclared deletes are planned before the declared entries' updates and creates, whatever order the file and the live list have", async () => {
+    const live = [
+      { name: "bug", color: "000000", description: null },
+      { name: "stray", color: "ffffff", description: null },
+    ];
+    const plan = unwrap(
+      await labelsSection.plan(
+        planContext(labelsSection, new MockApi({ [LIST]: { data: live } }), REPO),
+        validatedInput("labels", [
+          { name: "new", color: "d73a4a" },
+          { name: "bug", color: "d73a4a" },
+        ]),
+      ),
+    );
+    expect(plan.ops.map((op) => op.describe)).toEqual([
+      'deleting undeclared label "stray"',
+      'creating label "new"',
+      'updating label "bug"',
+    ]);
+  });
+
+  test("the wire hook shapes every body the planner sends (create, update, recreate, the updateConfig slice) and nothing the comparison reads", async () => {
+    const wired = listSection({
+      ...base,
+      lens: { ...base.lens, wire: (write) => ({ ...write, via: "wire" }) },
+    });
+    const live = [{ name: "bug", color: "000000", description: null }];
+    const { first, second } = await provePlanIdempotent(wired, fakeFor(wired, live), [
+      { name: "bug", color: "d73a4a" },
+      { name: "new", color: "ffffff" },
+    ]);
+    expect(first.ops.map((op) => [op.role, op.payload, op.drift])).toEqual([
+      [
+        "update",
+        { new_name: "bug", color: "d73a4a", via: "wire" },
+        [
+          'labels[bug].color: declared "d73a4a" != live "000000"; apply will set the declared value',
+        ],
+      ],
+      [
+        "create",
+        { name: "new", color: "ffffff", via: "wire" },
+        [
+          "labels[new]: missing - declared in the settings file but not on the repo; apply will create it",
+        ],
+      ],
+    ]);
+    expect(second.ops).toEqual([]);
+
+    const recreating = listSection({
+      ...base,
+      endpoints: IMMUTABLE_ENDPOINTS,
+      lens: { ...base.lens, wire: (write) => ({ ...write, via: "wire" }) },
+    });
+    const replaced = await provePlanIdempotent(recreating, fakeFor(recreating, live), [
+      { name: "bug", color: "d73a4a" },
+    ]);
+    expect(replaced.first.ops.map((op) => [op.role, op.payload])).toEqual([
+      ["remove", undefined],
+      ["create", { name: "bug", color: "d73a4a", via: "wire" }],
+    ]);
+
+    const hooks = listSection({
+      ...webhooksSection.decl,
+      lens: {
+        ...webhooksSection.decl.lens,
+        wire: (write) => ({ ...write, config: { ...write.config, via: "wire" } }),
+      },
+    });
+    const api = new MockApi({
+      "GET /repos/o/r/hooks?per_page=100&page=1": {
+        data: [
+          {
+            id: 8,
+            name: "web",
+            active: true,
+            events: ["push"],
+            config: { url: "https://h.test/hook", content_type: "json" },
+          },
+        ],
+      },
+    });
+    const planned = unwrap(
+      await hooks.plan(
+        planContext(hooks, api, REPO),
+        validatedInput("webhooks", [
+          { config: { url: "https://h.test/hook", content_type: "form" } },
+        ]),
+      ),
+    );
+    expect(planned.ops.map((op) => [op.role, op.payload])).toEqual([
+      ["updateConfig", { url: "https://h.test/hook", content_type: "form", via: "wire" }],
     ]);
   });
 
@@ -347,27 +442,27 @@ describe("listSection without an update role", () => {
       [
         "remove",
         [
+          "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
+        ],
+      ],
+      [
+        "remove",
+        [
           "labels[bug]: live settings differ from the settings file, and labels cannot be edited; apply will delete and recreate it",
         ],
       ],
       // The field line carries no remedy of its own: the generic line above named it.
       ["create", ['labels[bug].color: declared "d73a4a" != live "000000"']],
-      [
-        "remove",
-        [
-          "labels[stale]: undeclared - not in the settings file, so apply will DELETE it; add it to the settings file to keep it",
-        ],
-      ],
     ]);
     expect(changes).toEqual([
+      'DELETED undeclared label "stale"',
       'deleted label "bug" to recreate it with the declared settings',
       'recreated label "bug"',
-      'DELETED undeclared label "stale"',
     ]);
     expect(api.writes).toEqual([
+      "DELETE /repos/o/r/labels/stale",
       "DELETE /repos/o/r/labels/bug",
       "POST /repos/o/r/labels",
-      "DELETE /repos/o/r/labels/stale",
     ]);
     expect(second.ops).toEqual([]);
     // Without a recreate seam the create body is the write: the undeclared description is gone.
@@ -557,7 +652,7 @@ describe("listSection conflicts", () => {
         validatedInput("labels", [{ name: "defect", color: "000000" }]),
       ),
     );
-    expect(planned.ops.map((op) => op.role)).toEqual(["create", "remove", "remove"]);
+    expect(planned.ops.map((op) => op.role)).toEqual(["remove", "remove", "create"]);
   });
 });
 

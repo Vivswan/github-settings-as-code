@@ -16,20 +16,29 @@ import { MilestoneConfig } from "./schema.js";
 /**
  * GitHub keeps only the day of a due_on, read off the sent instant in US Pacific, and echoes it as that
  * day's Pacific midnight (07:00Z or 08:00Z): a UTC midnight lands on the previous day, and only a
- * Pacific-midnight timestamp reads back verbatim. Both lens sides spell the day as noon UTC, which
- * GitHub stores on the same day in either DST state, so the write is what a converged milestone reads back as.
+ * Pacific-midnight timestamp reads back verbatim. Both lens sides spell the day alone, which is what the
+ * file declares and the snapshot writes; the wire hook sends it as noon UTC, which GitHub stores on the
+ * same day in either DST state, so the write converges on the compared day.
  */
+declare const milestoneDueDay: unique symbol;
+type DueDay = string & { readonly [milestoneDueDay]: true };
+
 declare const milestoneDueOn: unique symbol;
 type DueOnWire = string & { readonly [milestoneDueOn]: true };
 
 /** `dueOn` is a day or an ISO 8601 UTC timestamp (the schema and LiveMilestone admit nothing else). */
-export function dueOnWire(dueOn: string): DueOnWire {
-  return `${dueOn.slice(0, 10)}T12:00:00Z` as DueOnWire;
+function dueDay(dueOn: string): DueDay {
+  return dueOn.slice(0, 10) as DueDay;
 }
 
-type MilestoneWrite = ListWrite<"title"> & { readonly due_on?: DueOnWire };
+/** The day as the request body carries it. */
+export function dueOnWire(dueOn: string): DueOnWire {
+  return `${dueDay(dueOn)}T12:00:00Z` as DueOnWire;
+}
 
-type MilestoneComparable = ListComparable<"title"> & { readonly due_on: DueOnWire | null };
+type MilestoneWrite = ListWrite<"title"> & { readonly due_on?: DueDay };
+
+type MilestoneComparable = ListComparable<"title"> & { readonly due_on: DueDay | null };
 
 const LiveMilestone = z.looseObject({
   number: z.number(),
@@ -74,11 +83,13 @@ export const milestonesSection = listSection({
   address: (live) => ({ milestone_number: String(live.number) }),
   lens: {
     toWrite: ({ due_on, ...rest }): MilestoneWrite =>
-      due_on === undefined ? rest : { ...rest, due_on: dueOnWire(due_on) },
+      due_on === undefined ? rest : { ...rest, due_on: dueDay(due_on) },
     fromLive: (live): MilestoneComparable => ({
       ...live,
-      due_on: live.due_on === null ? null : dueOnWire(live.due_on),
+      due_on: live.due_on === null ? null : dueDay(live.due_on),
     }),
+    wire: ({ due_on, ...rest }) =>
+      typeof due_on === "string" ? { ...rest, due_on: dueOnWire(due_on) } : rest,
     matchBy: {},
   },
   replaces: false,

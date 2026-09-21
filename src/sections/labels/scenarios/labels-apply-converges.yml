@@ -27,9 +27,9 @@ expect:
   outcomes:
     labels: applied
   mutations:
+    - DELETE /repos/{repo}/labels/wontfix
     - PATCH /repos/{repo}/labels/bug
     - POST /repos/{repo}/labels
-    - DELETE /repos/{repo}/labels/wontfix
   requests_contain:
     - GET /repos/e2e-owner/e2e-repo/labels
   fixpoint: converges

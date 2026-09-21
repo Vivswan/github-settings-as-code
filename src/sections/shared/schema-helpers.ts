@@ -188,26 +188,36 @@ export function variableConfig(id: string) {
 }
 
 /**
- * GitHub measures a value in bytes, so the refinement encodes the string as UTF-8 and compares that size. JSON Schema's
- * maxLength counts code points and cannot say bytes; a code point is at least one byte, so the same number is the
- * tightest bound an editor can check without refusing a value GitHub accepts.
+ * A string GitHub caps by size, refused past the cap with the measured size in the message. The check runs on
+ * strings alone: zod's own `.max()` runs on any value with a `length`, so a YAML mapping `{length: 101}` reached the
+ * comparison and threw, while a refinement is skipped once the type check has failed. JSON Schema's maxLength counts
+ * code points, so the published bound is exact for a code-point cap and, for a byte cap, the loosest bound an editor
+ * can check without refusing a value GitHub accepts (a code point is at least one byte).
  */
-function utf8BoundedString(maximumBytes: number, message: (bytes: number) => string) {
+export function boundedString(
+  maximum: number,
+  measure: "code points" | "utf8 bytes",
+  message: (size: number) => string,
+) {
   const utf8 = new TextEncoder();
-  const byteLength = (value: string) => utf8.encode(value).byteLength;
+  const sizeOf =
+    measure === "utf8 bytes"
+      ? (value: string) => utf8.encode(value).byteLength
+      : (value: string) => [...value].length;
   return z
     .string()
-    .refine((value) => byteLength(value) <= maximumBytes, {
-      error: (issue: z.core.$ZodRawIssue) => message(byteLength(issue.input as string)),
+    .refine((value) => sizeOf(value) <= maximum, {
+      error: (issue: z.core.$ZodRawIssue) => message(sizeOf(issue.input as string)),
     })
-    .meta({ maxLength: maximumBytes });
+    .meta({ maxLength: maximum });
 }
 
 /** GitHub's documented cap on one variable's value, 48 KB, counted in UTF-8 bytes as GitHub does. */
 export const MAX_VARIABLE_VALUE_BYTES = 48 * 1024;
 
-const variableValue = utf8BoundedString(
+const variableValue = boundedString(
   MAX_VARIABLE_VALUE_BYTES,
+  "utf8 bytes",
   (bytes) =>
     `the variable value is ${bytes} bytes of UTF-8; GitHub caps a variable at 48 KB (${MAX_VARIABLE_VALUE_BYTES} bytes). Shorten it, or move the content into a file the workflow reads`,
 );
