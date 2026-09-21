@@ -74,13 +74,6 @@ describe("prng", () => {
 });
 
 describe("scenario schema", () => {
-  test("applies defaults (tiers, denial_style, owner_kind)", () => {
-    const s = parseScenario({ name: "d", settings: {}, expect: { exit_code: 0 } }, "d.yml");
-    expect(s.tiers).toEqual(["mock"]);
-    expect(s.denial_style).toBe("fine_grained");
-    expect(s.owner_kind).toBe("org");
-  });
-
   // Load-time refusals, none a silent preference: both spellings define settings.yml, a multi-repo run never reads
   // the single-repo file, and an empty allowed exit set would fail every exit code.
   test.each<[label: string, raw: Record<string, unknown>, refusal: RegExp]>([

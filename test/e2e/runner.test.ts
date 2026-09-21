@@ -27,7 +27,6 @@ import {
   setReplay,
   snapshotCheckInputs,
   stripDebugLines,
-  stripMaskLines,
   writtenSnapshotLeaks,
   writtenSnapshotPaths,
   yamlStrings,
@@ -404,28 +403,14 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
   });
 });
 
-describe("stripMaskLines", () => {
-  test("drops ::add-mask:: lines and keeps everything else", () => {
-    const stdout = [
-      "::add-mask::acme/secret-repo",
-      "::error::private repository #1: failed",
-      "result: failed",
-    ].join("\n");
-    const stripped = stripMaskLines(stdout);
-    expect(stripped).not.toContain("acme/secret-repo");
-    expect(stripped).toContain("private repository #1: failed");
-    expect(stripped).toContain("result: failed");
-  });
-});
-
 describe("indentedStdout (what --print-stdout echoes)", () => {
   // The Actions runner registers a mask only from a column-zero command, so the indented echo gets
   // no masking from it: every value a mask line named must already read `***` in the echo.
   test.each([
     [
-      "mask lines dropped, the rest indented",
-      "::add-mask::abc\nresult: clean\n::add-mask::acme/secret-repo\nrepository: 1 op\n",
-      "        result: clean\n        repository: 1 op",
+      "mask lines dropped, every value they named redacted, the rest indented",
+      "::add-mask::abc\nresult: abc\n::add-mask::acme/secret-repo\nrepository: acme/secret-repo\n",
+      "        result: ***\n        repository: ***",
     ],
     [
       "a masked value on a later line prints as ***",
@@ -463,9 +448,9 @@ describe("indentedStdout (what --print-stdout echoes)", () => {
       "        value: ***",
     ],
     [
-      "CRLF stdout: the line's CR is not part of the value",
-      "::add-mask::secret\r\nvalue: secret\r\n",
-      "        value: ***",
+      "CRLF stdout: the line's CR is not part of the value, so the value is found mid-line",
+      "::add-mask::secret\r\nvalue: secret here\r\n",
+      "        value: *** here",
     ],
     [
       "a value's regex-special characters match literally only",
