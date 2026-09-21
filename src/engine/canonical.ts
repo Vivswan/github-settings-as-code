@@ -77,6 +77,8 @@ export const LISTS_AS_WRITTEN: Readonly<Record<string, string>> = {
   "rulesets[].rules[].parameters.dismissal_restriction.allowed_actors":
     "an actor is a type and an id, with no one identity field",
   "environments[].reviewers": "a reviewer is a type and an id, with no one identity field",
+  "repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers":
+    "a reviewer is a type and an id, with no one identity field",
 };
 
 /** The list whose leading entries carry a rank: `pinned: true` environments lead, in their written order. */

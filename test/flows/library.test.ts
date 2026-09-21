@@ -319,19 +319,19 @@ describe("mergeSettings", () => {
         labels: { _undeclared: "delete", entries: [{ name: "bug", color: "d73a4a" }] },
       }),
     );
-    // The settings are the validated parse (declared keys first, as the schema orders them, unknown keys as the
-    // layers spelled them); the yaml is the fold in the canonical order, its unknown keys by code point.
+    // The settings are the validated parse (declared keys in the schema's order, unknown keys as the layers
+    // spelled them); the yaml is the fold in the canonical order, its unknown keys by code point.
     expect(Object.keys(report.settings.repository ?? {})).toEqual([
-      "enable_vulnerability_alerts",
-      "has_wiki",
       "has_issues",
+      "has_wiki",
+      "enable_vulnerability_alerts",
     ]);
     expect(report.yaml).toBe(
       [
         "repository:",
-        "  enable_vulnerability_alerts: true",
         "  has_issues: true",
         "  has_wiki: false",
+        "  enable_vulnerability_alerts: true",
         "labels:",
         "  _undeclared: delete",
         "  entries:",

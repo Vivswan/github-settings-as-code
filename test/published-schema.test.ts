@@ -205,6 +205,62 @@ describe("the published schema and the runtime agree on the shapes the corpus ne
   });
 });
 
+describe("the published schema carries the repository topic grammar and commit-message pair rules", () => {
+  // The topic pattern and the pair conditionals are read from the runtime's own tables (src/sections/repository/schema.ts), so a document
+  // the refinement refuses is refused by editors too; the rows pin the verdicts on both sides.
+  test.each<[string, Record<string, unknown>, boolean]>([
+    ["a topic with a space", { topics: ["bad topic"] }, false],
+    ["a topic with a leading hyphen, in the comma form", { topics: "ci, -lead" }, false],
+    ["an empty topic entry", { topics: ["ci", ""] }, false],
+    ["a 51-character topic", { topics: ["a".repeat(51)] }, false],
+    // The runtime lowercases on the wire, so the published grammar accepts uppercase too: a lowercase-only pattern would be stricter.
+    ["uppercase and a 50-character topic", { topics: ["Copier", "a".repeat(50), "9lives"] }, true],
+    ["the comma form with spaces around the entries", { topics: " CI , GitHub-Actions " }, true],
+    ["the wholesale clear", { topics: [] }, true],
+    ["a squash message without its title", { squash_merge_commit_message: "PR_BODY" }, false],
+    [
+      "a squash pair GitHub answers 422 to",
+      { squash_merge_commit_title: "COMMIT_OR_PR_TITLE", squash_merge_commit_message: "PR_BODY" },
+      false,
+    ],
+    [
+      "a legal squash pair",
+      {
+        squash_merge_commit_title: "COMMIT_OR_PR_TITLE",
+        squash_merge_commit_message: "COMMIT_MESSAGES",
+      },
+      true,
+    ],
+    ["a squash title alone", { squash_merge_commit_title: "PR_TITLE" }, true],
+    ["a merge message without its title", { merge_commit_message: "PR_BODY" }, false],
+    // GitHub documents no matrix for the merge family, so any title/message pair of the vocabularies is legal.
+    [
+      "a merge pair, any title with any message",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
+      true,
+    ],
+  ])("%s", (_shape, repository, accepted) => {
+    const doc = { repository };
+    expect(validate(doc), "published schema").toBe(accepted);
+    expect(runtimeAccepts(doc), "runtime validateSectionShapes").toBe(accepted);
+  });
+
+  test("the 20-topic cap is the stated place where the runtime is the stricter side", () => {
+    // The cap counts distinct topics after the lowercase fold, which JSON Schema cannot count: a maxItems would refuse the
+    // duplicate-laden list below, which the runtime accepts. Recorded, allowed: the runtime may refuse what the schema accepts.
+    const duplicates = {
+      repository: { topics: [...Array.from({ length: 20 }, () => "CI"), "ci", "tooling"] },
+    };
+    expect(validate(duplicates)).toBe(true);
+    expect(runtimeAccepts(duplicates)).toBe(true);
+    const distinct = {
+      repository: { topics: Array.from({ length: 21 }, (_, index) => `topic-${index}`) },
+    };
+    expect(validate(distinct)).toBe(true);
+    expect(runtimeAccepts(distinct)).toBe(false);
+  });
+});
+
 describe("format keywords stay out of the published schema", () => {
   // ajv-formats judges a format keyword by its own grammar, and two of zod's differ from the runtime's: format: "uri" refuses the
   // non-ASCII hosts, paths, and spaces the runtime's new URL() takes, and format: "date-time" rounds a long fractional second into

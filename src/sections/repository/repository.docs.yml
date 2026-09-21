@@ -15,30 +15,28 @@ coverage:
       allow_update_branch, allow_auto_merge, web_commit_signoff_required, is_template, archived,
       default_branch)
     notes: >-
-      PATCH /repos/{owner}/{repo} verbatim passthrough (src/sections/repository/index.ts). Any field
-      GitHub adds to the repo PATCH body, now or in any release to come, works day one with no
-      action update, the forward-compatibility tenet's strongest case. Check mode = subsetDiff of
-      declared keys against GET /repos. Snapshot reads back the documented PATCH fields the GET
-      reports, the topics, each readable toggle, and the two GraphQL keys; the server-only fields
-      (ids, urls, counts, has_downloads) fall away. The fields it leaves out or notes are listed in
-      docs/operate/snapshot.md.
+      PATCH /repos/{owner}/{repo} passthrough: documented fields are typed (toggles true or false;
+      description and homepage also null, the API's clear); a field GitHub adds later works day one.
+      GET-only fields, a commit message without its title, and illegal squash pairs are refused at
+      parse: each would drift or 422 every run. Check diffs the declared keys against GET /repos;
+      snapshot reads back the PATCH fields, topics, toggles, and GraphQL keys (docs/operate/snapshot.md).
   - area: >-
       [security_and_analysis](https://docs.github.com/en/rest/repos/repos) (GitHub Advanced
-      Security, secret scanning, push protection, and any nested toggle GitHub adds)
+      Security, secret scanning, push protection, delegated bypass, validity checks)
     notes: >-
-      Nested object inside the same PATCH /repos passthrough; flows through untouched. New
-      sub-toggles GitHub adds (e.g. secret_scanning_ai_detection) work automatically. That includes
-      the delegated-bypass surface: secret_scanning_delegated_bypass and
-      secret_scanning_delegated_bypass_options (reviewers as {reviewer_id, reviewer_type, mode})
-      nest here per the OpenAPI spec, covering the "who can bypass push protection" UI including
-      per-actor Exempt mode, and the GET echoes them so check mode verifies them.
-      secret_scanning_validity_checks likewise nests here (the dotcom docs omit it, but the GHEC
-      flavor documents it and GitHub's validity-checks page points at this endpoint).
+      Nested in the same PATCH, closed to the sub-keys the PATCH accepts (GitHub 422s any other):
+      each feature is {status: enabled/disabled}, delegated-bypass reviewers are {reviewer_id,
+      reviewer_type: TEAM/ROLE, mode: ALWAYS/EXEMPT}, and the GET-only dependabot_security_updates
+      points at enable_automated_security_fixes. secret_scanning_validity_checks nests here too
+      (documented in the GHEC flavor of the spec). The GET echoes all of it, so check verifies it.
   - area: "[Topics](https://docs.github.com/en/rest/repos/repos)"
     keys: topics key
     notes: >-
-      PUT /repos/{owner}/{repo}/topics. Only normalization: string-to-list splitting
-      (normalizeTopics) and order-insensitive compare in check mode.
+      PUT /repos/{owner}/{repo}/topics, with string-to-list splitting (normalizeTopics), lowercasing,
+      and order-insensitive compare in check mode. GitHub's topic rule (1 to 50 letters, digits, and
+      hyphens, starting with a letter or digit; at most 20 distinct topics) is checked at parse on
+      every entry, empty ones included, and the grammar is published in the settings schema while the
+      cap is the runtime's alone. `topics: []` is the one spelling of the wholesale clear.
   - area: >-
       [Dependabot alerts](https://docs.github.com/en/rest/repos/repos) (vulnerability alerts)
     keys: enable_vulnerability_alerts
@@ -113,12 +111,91 @@ schema:
   SettingsFile.repository: >-
     Repo fields sent verbatim to PATCH /repos/{r}, plus the special keys RepositoryConfig documents.
   RepositoryConfig: >-
-    The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r}
-    (Probot parity), so current and future repo fields work unchanged; the keys below route to their
-    own endpoints instead. Only declared keys are ever applied or compared.
+    The `repository:` section, where only declared keys are ever applied or compared. A field not
+    documented here is sent verbatim to PATCH /repos/{r}, so a field GitHub adds later works
+    unchanged; the keys below carry GitHub's types (a toggle is true or false, never null or quoted)
+    or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads, has_pages,
+    custom_properties) are refused, since they would drift on every run.
   RepositoryConfig.topics: >-
     Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a
-    list, lowercased and deduped.
+    list, lowercased and deduped. Each topic is 1 to 50 letters, digits, and hyphens, starting with a
+    letter or digit (uppercase is lowercased on the wire); at most 20 distinct topics. An empty entry
+    is refused; an empty list removes every topic.
+  RepositoryConfig.description: >-
+    A short description of the repository; null clears it.
+  RepositoryConfig.homepage: >-
+    A URL with more information about the repository; null clears it.
+  RepositoryConfig.visibility: >-
+    public, private, or internal (Enterprise); a free string, since the spec omits internal.
+  RepositoryConfig.default_branch: The default branch; an existing branch name.
+  RepositoryConfig.pull_request_creation_policy: >-
+    Who may create pull requests: "all" (everyone) or "collaborators_only".
+  RepositoryConfig.private: Make the repository private (true) or public (false).
+  RepositoryConfig.has_issues: Enable issues (true) or disable them (false).
+  RepositoryConfig.has_projects: >-
+    Enable projects (true) or disable them (false); an organization that disabled repository projects rejects true.
+  RepositoryConfig.has_wiki: Enable the wiki (true) or disable it (false).
+  RepositoryConfig.has_discussions: >-
+    Enable discussions (true) or disable them (false); accepted by the PATCH though the descriptor omits it.
+  RepositoryConfig.has_pull_requests: Allow pull requests (true) or prevent them (false).
+  RepositoryConfig.is_template: Offer the repository as a template (true) or not (false).
+  RepositoryConfig.allow_squash_merge: Allow squash-merging pull requests (true) or not (false).
+  RepositoryConfig.allow_merge_commit: Allow merge commits on pull requests (true) or not (false).
+  RepositoryConfig.allow_rebase_merge: Allow rebase-merging pull requests (true) or not (false).
+  RepositoryConfig.allow_auto_merge: Allow auto-merge on pull requests (true) or not (false).
+  RepositoryConfig.delete_branch_on_merge: Delete head branches when pull requests merge (true) or keep them (false).
+  RepositoryConfig.allow_update_branch: Offer to update a pull request branch behind its base (true) or not (false).
+  RepositoryConfig.use_squash_pr_title_as_default: >-
+    Deprecated by GitHub in favor of squash_merge_commit_title: use the PR title as the squash commit title (true) or not (false).
+  RepositoryConfig.archived: Archive the repository (true) or unarchive it (false).
+  RepositoryConfig.allow_forking: Allow private forks (true) or not (false).
+  RepositoryConfig.web_commit_signoff_required: Require contributors to sign off on web-based commits (true) or not (false).
+  RepositoryConfig.security_and_analysis: >-
+    The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning,
+    push protection, and the other nested feature toggles.
+  RepositoryConfig.squash_merge_commit_title: >-
+    The default title of a squash merge commit: PR_TITLE or COMMIT_OR_PR_TITLE. Required beside
+    squash_merge_commit_message; legal pairs are PR_TITLE with PR_BODY, BLANK, or COMMIT_MESSAGES,
+    and COMMIT_OR_PR_TITLE with COMMIT_MESSAGES.
+  RepositoryConfig.squash_merge_commit_message: >-
+    The default message of a squash merge commit: PR_BODY, BLANK, or COMMIT_MESSAGES. Needs
+    squash_merge_commit_title declared beside it, in one of the legal pairs.
+  RepositoryConfig.merge_commit_title: >-
+    The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside
+    merge_commit_message.
+  RepositoryConfig.merge_commit_message: >-
+    The default message of a merge commit: PR_BODY, PR_TITLE, or BLANK. Needs merge_commit_title
+    declared beside it.
+  SecurityAndAnalysisConfig: >-
+    The nested security_and_analysis object, closed to the sub-keys the PATCH accepts (GitHub rejects
+    any other with a 422). Each feature is {status: enabled/disabled}. dependabot_security_updates
+    is not one of them: declare enable_automated_security_fixes instead.
+  SecurityAndAnalysisConfig.advanced_security: GitHub Advanced Security.
+  SecurityAndAnalysisConfig.code_security: GitHub Code Security.
+  SecurityAndAnalysisConfig.secret_scanning: Secret scanning.
+  SecurityAndAnalysisConfig.secret_scanning_push_protection: Secret scanning push protection.
+  SecurityAndAnalysisConfig.secret_scanning_ai_detection: AI detection of generic secrets.
+  SecurityAndAnalysisConfig.secret_scanning_non_provider_patterns: Non-provider secret patterns.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_alert_dismissal: >-
+    Delegated dismissal of secret scanning alerts.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass: >-
+    Delegated bypass of push protection; the reviewers live in
+    secret_scanning_delegated_bypass_options.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass_options: >-
+    Who reviews push protection bypass requests; honored only while
+    secret_scanning_delegated_bypass is enabled.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass_options.reviewers: >-
+    The bypass reviewers; left out, the existing set is unchanged.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass_options.reviewers[].reviewer_id: >-
+    The id of the team or role selected as a reviewer.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass_options.reviewers[].reviewer_type: >-
+    TEAM or ROLE.
+  SecurityAndAnalysisConfig.secret_scanning_delegated_bypass_options.reviewers[].mode: >-
+    ALWAYS (the default: every bypass needs review) or EXEMPT (this reviewer's own pushes skip it).
+  SecurityAndAnalysisConfig.secret_scanning_validity_checks: >-
+    Validity checks for detected secrets (documented in the GHEC flavor of the spec).
+  SecurityFeatureToggle: One security_and_analysis feature.
+  SecurityFeatureToggle.status: '"enabled" or "disabled".'
   RepositoryConfig.enable_vulnerability_alerts: >-
     Dependabot alerts, via PUT/DELETE /repos/{r}/vulnerability-alerts. On read, 404 means off.
   RepositoryConfig.enable_automated_security_fixes: >-

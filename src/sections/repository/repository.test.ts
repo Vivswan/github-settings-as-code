@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import {
@@ -14,7 +15,8 @@ import { validateSectionShapes } from "../../engine/validate.js";
 import { describeProblem } from "../../problem.js";
 import { PermissionDenied } from "../contract/errors.js";
 import { sectionGrant } from "../contract/module.js";
-import { FEATURE_TOGGLES, normalizeTopics, repositorySection } from "./index.js";
+import { FEATURE_TOGGLES, repositorySection } from "./index.js";
+import { normalizeTopics, PATCH_FIELDS, RepositoryConfig } from "./schema.js";
 
 function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
   return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
@@ -134,7 +136,7 @@ describe("normalizeTopics", () => {
   test.each([
     [
       "a comma string",
-      "Copier, template , ,GitHub-Actions",
+      "Copier, template ,GitHub-Actions",
       ["copier", "template", "github-actions"],
     ],
     ["an array, deduped", ["A", "a", "b"], ["a", "b"]],
@@ -998,5 +1000,294 @@ describe("repository snapshot", () => {
         `repository.enable_sponsorships and repository.issue_creation_policy: left out of the snapshot - the token was denied GRAPHQL RepositoryFeatures: 403 Forbidden. To fix, ${sectionGrant(repositorySection)}`,
       ],
     });
+  });
+});
+
+describe("repository parse refusals", () => {
+  /** The section's own issue lines, without the document-level wrapper prose around them. */
+  const refusals = (repository: Record<string, unknown>): readonly string[] =>
+    validateSectionShapes({ repository }, "f.yml").match(
+      () => [],
+      (problem) => problem.issues,
+    );
+
+  const SQUASH_PAIRS =
+    "PR_TITLE with PR_BODY or BLANK or COMMIT_MESSAGES; COMMIT_OR_PR_TITLE with COMMIT_MESSAGES";
+
+  test.each([
+    [
+      "has_downloads",
+      { has_downloads: false },
+      "repository.has_downloads: has_downloads is reported by GitHub but cannot be set through the API; remove it",
+    ],
+    [
+      "custom_properties",
+      { custom_properties: { team: "docs" } },
+      "repository.custom_properties: custom_properties is reported by GitHub but cannot be set through the repository PATCH; declare it in the custom_properties section instead",
+    ],
+    [
+      "has_pages",
+      { has_pages: true },
+      "repository.has_pages: has_pages is reported by GitHub but cannot be set through the repository PATCH; declare it in the pages section instead",
+    ],
+  ])(
+    "a GET-only key (%s) is refused at parse: the PATCH ignores it, so check would report the same drift on every run",
+    (_key, declared, message) => {
+      expect(refusals({ has_issues: true, ...declared })).toEqual([message]);
+    },
+  );
+
+  test("a key in neither the GET nor the PATCH still passes through, so a field GitHub adds tomorrow works day one", () => {
+    const declared = { name: "renamed", future_field: 1, has_issues: true };
+    expect(
+      validateSectionShapes({ repository: declared }, "f.yml").match(
+        (parsed) => parsed.repository,
+        (problem) => problem.issues,
+      ),
+    ).toEqual(declared);
+  });
+
+  test.each([
+    [
+      "the GET-only dependabot_security_updates",
+      { dependabot_security_updates: { status: "enabled" } },
+      'repository.security_and_analysis: "dependabot_security_updates" is reported by GitHub here but the PATCH rejects it; declare enable_automated_security_fixes instead',
+    ],
+    [
+      "an unknown sub-key",
+      { not_a_security_feature: { status: "enabled" } },
+      'repository.security_and_analysis: "not_a_security_feature" is not a key security_and_analysis accepts ' +
+        '(GitHub rejects it with a 422); remove it. Known keys: "advanced_security", "code_security", ' +
+        '"secret_scanning", "secret_scanning_push_protection", "secret_scanning_ai_detection", ' +
+        '"secret_scanning_non_provider_patterns", "secret_scanning_delegated_alert_dismissal", ' +
+        '"secret_scanning_delegated_bypass", "secret_scanning_delegated_bypass_options", ' +
+        '"secret_scanning_validity_checks"',
+    ],
+    [
+      "a status outside enabled/disabled",
+      { secret_scanning: { status: "on" } },
+      'repository.security_and_analysis.secret_scanning.status: "on" is not a feature status; use "enabled" or "disabled"',
+    ],
+    [
+      "a key beside status",
+      { secret_scanning: { status: "enabled", enabled: true } },
+      'repository.security_and_analysis.secret_scanning: "enabled" is not a key a security_and_analysis feature accepts (GitHub rejects it with a 422); remove it. Known keys: "status"',
+    ],
+    [
+      "an unknown reviewer key",
+      {
+        secret_scanning_delegated_bypass_options: {
+          reviewers: [{ reviewer_id: 7, reviewer_type: "TEAM", exempt: true }],
+        },
+      },
+      'repository.security_and_analysis.secret_scanning_delegated_bypass_options.reviewers[0]: "exempt" is not a key a bypass reviewer accepts (GitHub rejects it with a 422); remove it. Known keys: "reviewer_id", "reviewer_type", "mode"',
+    ],
+  ])(
+    "security_and_analysis refuses %s at parse instead of surfacing GitHub's 422 at apply",
+    (_what, declared, message) => {
+      expect(refusals({ security_and_analysis: declared })).toEqual([message]);
+    },
+  );
+
+  test("security_and_analysis accepts the null the PATCH body documents, and the validity-checks sub-key the descriptor omits", () => {
+    expect(refusals({ security_and_analysis: null })).toEqual([]);
+    expect(
+      refusals({
+        security_and_analysis: { secret_scanning_validity_checks: { status: "enabled" } },
+      }),
+    ).toEqual([]);
+  });
+
+  test.each([
+    [
+      "a squash message without its title",
+      { squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_message: squash_merge_commit_message needs squash_merge_commit_title declared beside it (GitHub requires the pair). Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "COMMIT_OR_PR_TITLE with PR_BODY",
+      { squash_merge_commit_title: "COMMIT_OR_PR_TITLE", squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_message: squash_merge_commit_title COMMIT_OR_PR_TITLE cannot pair with squash_merge_commit_message PR_BODY (GitHub answers 422). Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "a squash title outside the vocabulary",
+      { squash_merge_commit_title: "COMMIT_TITLE", squash_merge_commit_message: "PR_BODY" },
+      `repository.squash_merge_commit_title: "COMMIT_TITLE" is not a squash_merge_commit_title value; use "PR_TITLE", "COMMIT_OR_PR_TITLE". Legal pairs: ${SQUASH_PAIRS}`,
+    ],
+    [
+      "a merge message without its title",
+      { merge_commit_message: "PR_TITLE" },
+      "repository.merge_commit_message: merge_commit_message needs merge_commit_title declared beside it (GitHub requires the pair)",
+    ],
+    [
+      "a merge message outside the vocabulary",
+      { merge_commit_title: "PR_TITLE", merge_commit_message: "COMMIT_MESSAGES" },
+      'repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "BLANK", "PR_TITLE"',
+    ],
+  ])(
+    "commit message defaults: %s is refused at parse instead of as GitHub's 422 at apply",
+    (_what, declared, message) => {
+      expect(refusals(declared)).toEqual([message]);
+    },
+  );
+
+  test.each([
+    ["PR_TITLE", "PR_BODY"],
+    ["PR_TITLE", "BLANK"],
+    ["PR_TITLE", "COMMIT_MESSAGES"],
+    ["COMMIT_OR_PR_TITLE", "COMMIT_MESSAGES"],
+  ])("commit message defaults: the legal squash pair %s with %s parses", (title, message) => {
+    expect(
+      refusals({ squash_merge_commit_title: title, squash_merge_commit_message: message }),
+    ).toEqual([]);
+  });
+
+  test.each([
+    [
+      "the default merge pair",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_TITLE" },
+    ],
+    [
+      "a merge pair GitHub documents no refusal for",
+      { merge_commit_title: "MERGE_MESSAGE", merge_commit_message: "PR_BODY" },
+    ],
+    [
+      "a lone title, whose pair is only decidable against the live message",
+      { squash_merge_commit_title: "PR_TITLE", merge_commit_title: "PR_TITLE" },
+    ],
+  ])("commit message defaults: %s parses", (_what, declared) => {
+    expect(refusals(declared)).toEqual([]);
+  });
+
+  const TOPIC_RULE =
+    "is not a topic GitHub accepts: a topic is 1 to 50 characters, each a letter, digit, or hyphen, starting with a letter or digit (uppercase is lowercased on the wire)";
+
+  test.each([
+    [
+      "a space inside a topic",
+      ["GitHub Actions"],
+      `repository.topics[0]: "GitHub Actions" ${TOPIC_RULE}`,
+    ],
+    [
+      "a leading hyphen, in the comma-string form",
+      "ci, -lead",
+      `repository.topics: "-lead" (entry 2 of the comma list) ${TOPIC_RULE}`,
+    ],
+    [
+      "a 51-character topic",
+      ["a".repeat(51)],
+      `repository.topics[0]: "${"a".repeat(51)}" ${TOPIC_RULE}`,
+    ],
+    [
+      "21 topics",
+      Array.from({ length: 21 }, (_, index) => `topic-${index}`),
+      "repository.topics: 21 topics declared; GitHub allows at most 20",
+    ],
+  ])(
+    "topics: %s is refused at parse instead of as a 422 from PUT /topics",
+    (_what, topics, message) => {
+      expect(refusals({ topics })).toEqual([message]);
+    },
+  );
+
+  const EMPTY_TOPIC =
+    "is not one GitHub accepts; drop the entry, or declare topics: [] to remove every topic";
+
+  test.each([
+    [
+      "an empty list item, once dropped silently",
+      ["ci", ""],
+      `repository.topics[1]: an empty topic ${EMPTY_TOPIC}`,
+    ],
+    [
+      "an empty comma-string segment, once dropped silently",
+      "ci,,tooling",
+      `repository.topics: an empty topic (entry 2 of the comma list) ${EMPTY_TOPIC}`,
+    ],
+    [
+      "an empty string, once the wholesale clear",
+      "",
+      `repository.topics: an empty topic ${EMPTY_TOPIC}`,
+    ],
+  ])("topics: %s is refused at parse, the refusal naming the entry", (_what, topics, message) => {
+    expect(refusals({ topics })).toEqual([message]);
+  });
+
+  test("topics: the cap counts distinct topics after the fold, so 22 entries naming 2 topics parse", () => {
+    expect(
+      refusals({ topics: [...Array.from({ length: 20 }, () => "CI"), "ci", "tooling"] }),
+    ).toEqual([]);
+  });
+
+  test("topics: 20 well-formed topics, a 50-character one and uppercase input among them, parse", () => {
+    const topics = [
+      "Copier",
+      "a".repeat(50),
+      "9lives",
+      ...Array.from({ length: 17 }, (_, index) => `topic-${index}`),
+    ];
+    expect(refusals({ topics })).toEqual([]);
+    expect(refusals({ topics: topics.join(", ") })).toEqual([]);
+  });
+
+  test("topics: [] parses; it is the one spelling of the wholesale clear", () => {
+    expect(refusals({ topics: [] })).toEqual([]);
+  });
+
+  const TOGGLE_NULL = "null is not a boolean, and a toggle has no empty state; write true or false";
+  const TOGGLE_QUOTED =
+    " is not a boolean, so the toggle direction is ambiguous. Use unquoted true or false " +
+    '(YAML parses "no"/"off"/"yes" as strings, not booleans)';
+
+  /** The PATCH fields the schema types as booleans, read off the shape so the rows follow the table. */
+  const PATCH_TOGGLES = PATCH_FIELDS.filter(
+    (key) => RepositoryConfig.shape[key].unwrap() instanceof z.ZodBoolean,
+  );
+
+  test("every PATCH toggle takes true and false, and refuses null and a quoted boolean naming the two values", () => {
+    // The control: an empty list would pass the loop below without pinning anything.
+    expect(PATCH_TOGGLES).toContain("has_wiki");
+    for (const key of PATCH_TOGGLES) {
+      expect(refusals({ [key]: true })).toEqual([]);
+      expect(refusals({ [key]: false })).toEqual([]);
+      expect(refusals({ [key]: null })).toEqual([`repository.${key}: ${TOGGLE_NULL}`]);
+      expect(refusals({ [key]: "true" })).toEqual([`repository.${key}: "true"${TOGGLE_QUOTED}`]);
+    }
+  });
+
+  test.each([
+    [
+      "default_branch: null",
+      { default_branch: null },
+      "repository.default_branch: null is not a string; quote the value",
+    ],
+    [
+      "description: 7",
+      { description: 7 },
+      "repository.description: 7 is not a string; quote the value, or write null to clear the field",
+    ],
+    [
+      "pull_request_creation_policy: everyone",
+      { pull_request_creation_policy: "everyone" },
+      'repository.pull_request_creation_policy: "everyone" is not a recognized policy. Use "all" (everyone) or "collaborators_only"',
+    ],
+  ])(
+    "a PATCH field outside its type (%s) is refused at parse instead of as GitHub's 422",
+    (_what, declared, message) => {
+      expect(refusals({ has_issues: true, ...declared })).toEqual([message]);
+    },
+  );
+
+  test("the PATCH strings take what GitHub does: null clears description and homepage, and default_branch and visibility are plain strings", () => {
+    expect(
+      refusals({
+        description: null,
+        homepage: null,
+        default_branch: "trunk",
+        visibility: "internal",
+        pull_request_creation_policy: "collaborators_only",
+      }),
+    ).toEqual([]);
+    expect(refusals({ description: "docs", homepage: "https://example.com" })).toEqual([]);
   });
 });

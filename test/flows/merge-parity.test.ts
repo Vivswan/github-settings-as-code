@@ -17,8 +17,8 @@ import { withTempDir } from "../temp-dir.js";
 type Stack = readonly string[];
 
 /**
- * A stack in no schema order: `labels` before `repository` (SECTION_KEYS lists them the other way), `has_issues` before
- * `enable_vulnerability_alerts` (the schema declares the toggle; has_issues is a passthrough key), a wrapper opening
+ * A stack in no schema order: `labels` before `repository` (SECTION_KEYS lists them the other way),
+ * `enable_vulnerability_alerts` before `has_wiki` (the schema declares the PATCH fields first), a wrapper opening
  * with its entries, and a higher layer opening with the section the schema lists last. The bytes pinned here are the
  * canonical rendering of the fold; no layer's order survives into them.
  */
@@ -42,9 +42,9 @@ const UNORDERED: Stack = [
 
 const UNORDERED_MERGED = [
   "repository:",
-  "  enable_vulnerability_alerts: true",
   "  has_issues: false",
   "  has_wiki: false",
+  "  enable_vulnerability_alerts: true",
   "labels:",
   "  _undeclared: keep",
   "  entries:",

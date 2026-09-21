@@ -11,6 +11,24 @@ import { renamedKeyError } from "./renamed-key.js";
 const UndeclaredPolicySchema = z.enum(["keep", "delete"]).meta({ id: "UndeclaredPolicy" });
 
 /**
+ * A JSON Schema conditional for the published schema, the one place the keyword pair is spelled. zod refinements
+ * do not reach z.toJSONSchema, so a cross-field refinement gets a twin built here and attached through .meta(),
+ * and test/published-schema.test.ts holds the two sides to the same verdicts.
+ */
+export function conditional(
+  condition: Record<string, unknown>,
+  consequence: Record<string, unknown>,
+  otherwise?: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    if: condition,
+    // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON Schema keyword paired with `if`, not a thenable
+    then: consequence,
+    ...(otherwise === undefined ? {} : { else: otherwise }),
+  };
+}
+
+/**
  * The one value set of the `_layering` directive and the `layering` run input; engine/layers.ts acts on it and
  * re-exports it to the flows. Described in shared.docs.yml and src/schema.docs.yml.
  *

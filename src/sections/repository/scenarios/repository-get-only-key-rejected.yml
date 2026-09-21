@@ -1,0 +1,19 @@
+name: repository-get-only-key-rejected
+description: >
+  A repository key the GET reports but no write accepts (has_downloads) is refused
+  when the file is parsed, before any API contact: the PATCH would ignore it, so
+  check mode would report the same drift on every run and apply would re-PATCH
+  forever. The message names the key and the fix.
+settings:
+  repository:
+    has_issues: true
+    has_downloads: false
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - repository.has_downloads
+    - cannot be set through the API; remove it

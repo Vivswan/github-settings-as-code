@@ -8,7 +8,12 @@
  */
 
 import { z } from "zod";
-import { nestedKnobbed, secretName, variableConfig } from "../shared/schema-helpers.js";
+import {
+  conditional,
+  nestedKnobbed,
+  secretName,
+  variableConfig,
+} from "../shared/schema-helpers.js";
 
 /** GitHub's cap on wait_timer, in minutes (30 days). */
 const MAX_WAIT_TIMER_MINUTES = 43_200;
@@ -18,24 +23,6 @@ const MAX_REVIEWERS = 6;
 
 /** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;
-
-/**
- * A JSON Schema conditional for the published schema, the one place the keyword pair is spelled.
- * zod refinements do not reach z.toJSONSchema, so each refinement below has a twin here and
- * test/published-schema.test.ts holds the two sides to the same verdicts.
- */
-function conditional(
-  condition: Record<string, unknown>,
-  consequence: Record<string, unknown>,
-  otherwise?: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    if: condition,
-    // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON Schema keyword paired with `if`, not a thenable
-    then: consequence,
-    ...(otherwise === undefined ? {} : { else: otherwise }),
-  };
-}
 
 export const DeploymentBranchPolicyConfig = z
   .object({

@@ -1480,19 +1480,164 @@
       "additionalProperties": {}
     },
     "RepositoryConfig": {
-      "description": "The `repository:` section. Every field not documented here is sent verbatim to PATCH /repos/{r} (Probot parity), so current and future repo fields work unchanged; the keys below route to their own endpoints instead. Only declared keys are ever applied or compared.",
+      "description": "The `repository:` section, where only declared keys are ever applied or compared. A field not documented here is sent verbatim to PATCH /repos/{r}, so a field GitHub adds later works unchanged; the keys below carry GitHub's types (a toggle is true or false, never null or quoted) or route to their own endpoints. GET-only fields (ids, urls, counts, has_downloads, has_pages, custom_properties) are refused, since they would drift on every run.",
       "type": "object",
       "properties": {
-        "topics": {
-          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped.",
+        "description": {
+          "description": "A short description of the repository; null clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "homepage": {
+          "description": "A URL with more information about the repository; null clears it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "private": {
+          "description": "Make the repository private (true) or public (false).",
+          "type": "boolean"
+        },
+        "visibility": {
+          "description": "public, private, or internal (Enterprise); a free string, since the spec omits internal.",
+          "type": "string"
+        },
+        "security_and_analysis": {
+          "description": "The security_and_analysis object of PATCH /repos/{r}: GitHub Advanced Security, secret scanning, push protection, and the other nested feature toggles.",
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/definitions/SecurityAndAnalysisConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_issues": {
+          "description": "Enable issues (true) or disable them (false).",
+          "type": "boolean"
+        },
+        "has_projects": {
+          "description": "Enable projects (true) or disable them (false); an organization that disabled repository projects rejects true.",
+          "type": "boolean"
+        },
+        "has_wiki": {
+          "description": "Enable the wiki (true) or disable it (false).",
+          "type": "boolean"
+        },
+        "has_discussions": {
+          "description": "Enable discussions (true) or disable them (false); accepted by the PATCH though the descriptor omits it.",
+          "type": "boolean"
+        },
+        "has_pull_requests": {
+          "description": "Allow pull requests (true) or prevent them (false).",
+          "type": "boolean"
+        },
+        "pull_request_creation_policy": {
+          "description": "Who may create pull requests: \"all\" (everyone) or \"collaborators_only\".",
+          "type": "string",
+          "enum": [
+            "all",
+            "collaborators_only"
+          ]
+        },
+        "is_template": {
+          "description": "Offer the repository as a template (true) or not (false).",
+          "type": "boolean"
+        },
+        "default_branch": {
+          "description": "The default branch; an existing branch name.",
+          "type": "string"
+        },
+        "allow_squash_merge": {
+          "description": "Allow squash-merging pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_merge_commit": {
+          "description": "Allow merge commits on pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_rebase_merge": {
+          "description": "Allow rebase-merging pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "allow_auto_merge": {
+          "description": "Allow auto-merge on pull requests (true) or not (false).",
+          "type": "boolean"
+        },
+        "delete_branch_on_merge": {
+          "description": "Delete head branches when pull requests merge (true) or keep them (false).",
+          "type": "boolean"
+        },
+        "allow_update_branch": {
+          "description": "Offer to update a pull request branch behind its base (true) or not (false).",
+          "type": "boolean"
+        },
+        "use_squash_pr_title_as_default": {
+          "description": "Deprecated by GitHub in favor of squash_merge_commit_title: use the PR title as the squash commit title (true) or not (false).",
+          "type": "boolean"
+        },
+        "squash_merge_commit_title": {
+          "description": "The default title of a squash merge commit: PR_TITLE or COMMIT_OR_PR_TITLE. Required beside squash_merge_commit_message; legal pairs are PR_TITLE with PR_BODY, BLANK, or COMMIT_MESSAGES, and COMMIT_OR_PR_TITLE with COMMIT_MESSAGES.",
+          "type": "string",
+          "enum": [
+            "PR_TITLE",
+            "COMMIT_OR_PR_TITLE"
+          ]
+        },
+        "squash_merge_commit_message": {
+          "description": "The default message of a squash merge commit: PR_BODY, BLANK, or COMMIT_MESSAGES. Needs squash_merge_commit_title declared beside it, in one of the legal pairs.",
+          "type": "string",
+          "enum": [
+            "PR_BODY",
+            "BLANK",
+            "COMMIT_MESSAGES"
+          ]
+        },
+        "merge_commit_title": {
+          "description": "The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside merge_commit_message.",
+          "type": "string",
+          "enum": [
+            "PR_TITLE",
+            "MERGE_MESSAGE"
+          ]
+        },
+        "merge_commit_message": {
+          "description": "The default message of a merge commit: PR_BODY, PR_TITLE, or BLANK. Needs merge_commit_title declared beside it.",
+          "type": "string",
+          "enum": [
+            "PR_BODY",
+            "BLANK",
+            "PR_TITLE"
+          ]
+        },
+        "archived": {
+          "description": "Archive the repository (true) or unarchive it (false).",
+          "type": "boolean"
+        },
+        "allow_forking": {
+          "description": "Allow private forks (true) or not (false).",
+          "type": "boolean"
+        },
+        "web_commit_signoff_required": {
+          "description": "Require contributors to sign off on web-based commits (true) or not (false).",
+          "type": "boolean"
+        },
+        "topics": {
+          "description": "Repository topics, replaced wholesale via PUT /repos/{r}/topics; a comma-separated string or a list, lowercased and deduped. Each topic is 1 to 50 letters, digits, and hyphens, starting with a letter or digit (uppercase is lowercased on the wire); at most 20 distinct topics. An empty entry is refused; an empty list removes every topic.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\s*[A-Za-z0-9][A-Za-z0-9-]{0,49}\\s*(,\\s*[A-Za-z0-9][A-Za-z0-9-]{0,49}\\s*)*$"
             },
             {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,49}$"
               }
             }
           ]
@@ -1532,7 +1677,77 @@
       },
       "additionalProperties": {
         "description": "Everything else passes through to PATCH /repos/{r} verbatim."
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_message"
+            ]
+          },
+          "then": {
+            "required": [
+              "squash_merge_commit_title"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_title"
+            ],
+            "properties": {
+              "squash_merge_commit_title": {
+                "const": "PR_TITLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "squash_merge_commit_message": {
+                "enum": [
+                  "PR_BODY",
+                  "BLANK",
+                  "COMMIT_MESSAGES"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "squash_merge_commit_title"
+            ],
+            "properties": {
+              "squash_merge_commit_title": {
+                "const": "COMMIT_OR_PR_TITLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "squash_merge_commit_message": {
+                "enum": [
+                  "COMMIT_MESSAGES"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "merge_commit_message"
+            ]
+          },
+          "then": {
+            "required": [
+              "merge_commit_title"
+            ]
+          }
+        }
+      ]
     },
     "RequiredReviewerConfig": {
       "description": "A team and the file patterns whose changes it must approve.",
@@ -2500,6 +2715,141 @@
         "name",
         "pattern"
       ]
+    },
+    "SecurityAndAnalysisConfig": {
+      "description": "The nested security_and_analysis object, closed to the sub-keys the PATCH accepts (GitHub rejects any other with a 422). Each feature is {status: enabled/disabled}. dependabot_security_updates is not one of them: declare enable_automated_security_fixes instead.",
+      "type": "object",
+      "properties": {
+        "advanced_security": {
+          "description": "GitHub Advanced Security.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "code_security": {
+          "description": "GitHub Code Security.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning": {
+          "description": "Secret scanning.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_push_protection": {
+          "description": "Secret scanning push protection.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_ai_detection": {
+          "description": "AI detection of generic secrets.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_non_provider_patterns": {
+          "description": "Non-provider secret patterns.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_delegated_alert_dismissal": {
+          "description": "Delegated dismissal of secret scanning alerts.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_delegated_bypass": {
+          "description": "Delegated bypass of push protection; the reviewers live in secret_scanning_delegated_bypass_options.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        },
+        "secret_scanning_delegated_bypass_options": {
+          "description": "Who reviews push protection bypass requests; honored only while secret_scanning_delegated_bypass is enabled.",
+          "type": "object",
+          "properties": {
+            "reviewers": {
+              "description": "The bypass reviewers; left out, the existing set is unchanged.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "reviewer_id": {
+                    "description": "The id of the team or role selected as a reviewer.",
+                    "type": "integer"
+                  },
+                  "reviewer_type": {
+                    "description": "TEAM or ROLE.",
+                    "type": "string",
+                    "enum": [
+                      "TEAM",
+                      "ROLE"
+                    ]
+                  },
+                  "mode": {
+                    "description": "ALWAYS (the default: every bypass needs review) or EXEMPT (this reviewer's own pushes skip it).",
+                    "type": "string",
+                    "enum": [
+                      "ALWAYS",
+                      "EXEMPT"
+                    ]
+                  }
+                },
+                "required": [
+                  "reviewer_id",
+                  "reviewer_type"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "secret_scanning_validity_checks": {
+          "description": "Validity checks for detected secrets (documented in the GHEC flavor of the spec).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SecurityFeatureToggle"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "SecurityFeatureToggle": {
+      "description": "One security_and_analysis feature.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "description": "\"enabled\" or \"disabled\".",
+          "type": "string",
+          "enum": [
+            "enabled",
+            "disabled"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "SettingsFile": {
       "description": "One settings.yml document: every top-level section is optional.",
