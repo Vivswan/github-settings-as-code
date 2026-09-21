@@ -101,6 +101,13 @@ function repeatable(previous: Token | undefined): boolean {
 
 const NOT_REPEATABLE = "quantifier does not follow a repeatable item";
 
+/**
+ * Hyperscan's control verbs, accepted only as a run at the very start of the pattern and read by
+ * neither PCRE nor Hyperscan as a group; dropped before the tokens are read, so the `(` and `*` do
+ * not lex as a literal and a dangling quantifier. A `(*` anywhere else stays that refusal.
+ */
+const START_VERBS = /^(?:\(\*(?:UTF8|UTF|UCP)\))+/;
+
 /** The `{m}`, `{m,}`, `{m,n}` quantifier at a `{`; any other brace is a literal to Hyperscan and to a flagless RegExp alike. */
 const BRACE_QUANTIFIER = /^\{\d+(?:,\d*)?\}/;
 
@@ -195,7 +202,7 @@ function tokenize(source: string): Token[] {
     }
     return advance;
   };
-  let i = 0;
+  let i = START_VERBS.exec(source)?.[0].length ?? 0;
   while (i < source.length) {
     const rest = source.slice(i);
     const ch = rest[0] as string;

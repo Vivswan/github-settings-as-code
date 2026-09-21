@@ -53,6 +53,11 @@ describe("compilableForm", () => {
     // The comment breaks the quantifier, so PCRE reads the braces as text; dropping it must not let the RegExp read `{2,1}`.
     ["a brace quantifier split by a comment, which makes it text", "a{2(?#c),1}", "a\\{2,1\\}"],
     ["a brace opened by a comment, which makes it text", "{(?#c)2}", "\\{2\\}"],
+    // Hyperscan reads its control verbs at the start of the pattern; a flagless RegExp reads a group opening and a dangling star.
+    ["the UTF8 control verb", "(*UTF8)key_[0-9]+", "key_[0-9]+"],
+    ["the UTF control verb", "(*UTF)key_[0-9]+", "key_[0-9]+"],
+    ["the UCP control verb", "(*UCP)\\w+", "\\w+"],
+    ["a run of control verbs", "(*UTF8)(*UCP)key", "key"],
   ])("%s: the raw form fails, the translated form compiles", (_form, raw, translated) => {
     expect(compiles(raw)).toBe(false);
     expect(compilableForm(raw)).toBe(translated);
@@ -154,6 +159,10 @@ describe("compilableForm", () => {
     ["a quantifier on a quantifier", "a+++"],
     ["a lazy quantifier made possessive", "a??+"],
     ["an unterminated inline comment", "(?#vendor"],
+    // A control verb is read at the start of the pattern only; past it, `(*` is a group opening and a dangling star.
+    ["a control verb after the start", "key(*UTF8)"],
+    ["a control verb after a comment, which is not the start", "(?#c)(*UTF8)key"],
+    ["a control verb Hyperscan does not know", "(*CRLF)key"],
     ["a named group left unbalanced after translation", "(?P<t>key_[0-9"],
     // The forms a rewrite could repair: each is a PCRE error the translated spelling must keep.
     ["a lazy modifier on a possessive quantifier", "a++?"],

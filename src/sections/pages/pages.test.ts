@@ -168,6 +168,32 @@ describe("pages", () => {
     expect(matching).toEqual({ ops: [], notes: [], drift: [] });
   });
 
+  test("a declared key the site GET never echoes is drift with the never-converges note naming it", async () => {
+    // The site mapping is open so a field GitHub ships tomorrow is declarable, but a key the GET lacks
+    // (a typo of https_enforced here) would re-PUT on every apply; the note says so beside the drift.
+    const api = new MockApi({
+      [GET]: { data: { build_type: "workflow", cname: "docs.example.com", https_enforced: false } },
+    });
+    const result = await plan(api, {
+      cname: "docs.example.com",
+      https_enforce: true,
+    } as Parameters<typeof pagesSection.plan>[1]);
+    expect(result.notes).toEqual([
+      'pages: declared key "https_enforce" does not exist on the live Pages site, so if GitHub ignores it this PUT will re-run on every apply without converging. Fix the key name, or remove it from the settings file',
+    ]);
+    expect(result.ops.map((op) => [op.role, op.drift])).toEqual([
+      [
+        "update",
+        [
+          "pages.https_enforce: declared true but the API response has no such field (new or write-only field?)",
+        ],
+      ],
+    ]);
+    // Only a key the GET lacks earns the note: an ordinary value mismatch stays plain drift.
+    const mismatch = await plan(api, { https_enforced: true });
+    expect(mismatch.notes).toEqual([]);
+  });
+
   test("a source without a path gets the default path everywhere", async () => {
     const api = new MockApi({ [GET]: { data: {} } });
     const result = await plan(api, { source: { branch: "main" } });
