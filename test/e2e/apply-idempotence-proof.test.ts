@@ -96,12 +96,85 @@ describe("secondApplyWriteFailures (apply-idempotence zero-write rule)", () => {
 
 describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)", () => {
   const secretPut = write("PUT", "/repos/e2e-owner/e2e-repo/actions/secrets/DEPLOY_TOKEN");
+  const preferencesPatch = write("PATCH", "/repos/e2e-owner/e2e-repo/check-suites/preferences");
 
-  test("a first-apply secret PUT the second apply skipped fires the assertion", () => {
-    const failures = missingSecondApplyRewrites([secretPut], []);
-    expect(failures).toHaveLength(1);
-    expect(failures[0]).toContain("actions/secrets/DEPLOY_TOKEN");
-    expect(failures[0]).toContain("re-issued on EVERY apply");
+  // The obligation is the alwaysRewrite flag, whatever the method: a sealed PUT of every secret family and the
+  // read-less preferences PATCH bind; the purge direction is one-shot (the second apply sees no live secret to
+  // delete), and unflagged writes never bind, the unverifiable webhook one included.
+  test.each<
+    [
+      label: string,
+      first: LoggedRequest[],
+      second: LoggedRequest[],
+      count: number,
+      mentions: string[],
+      omits: string[],
+    ]
+  >([
+    [
+      "a first-apply secret PUT the second apply skipped fires",
+      [secretPut],
+      [],
+      1,
+      ["actions/secrets/DEPLOY_TOKEN", "re-issued on EVERY apply"],
+      [],
+    ],
+    [
+      "a re-issued secret PUT passes; unflagged writes never bind",
+      [
+        secretPut,
+        write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
+        write("PATCH", "/repos/e2e-owner/e2e-repo/hooks/601/config"),
+      ],
+      [secretPut],
+      0,
+      [],
+      [],
+    ],
+    [
+      "the read-less check suite preferences PATCH binds like a sealed PUT",
+      [preferencesPatch],
+      [],
+      1,
+      ["PATCH /repos/e2e-owner/e2e-repo/check-suites/preferences"],
+      [],
+    ],
+    ["a re-issued preferences PATCH passes", [preferencesPatch], [preferencesPatch], 0, [], []],
+    [
+      "a first-apply secret DELETE creates no re-write obligation",
+      [write("DELETE", "/repos/e2e-owner/e2e-repo/actions/secrets/STALE")],
+      [],
+      0,
+      [],
+      [],
+    ],
+    [
+      "every family's sealed PUT binds: dependabot, codespaces, environment secrets",
+      [
+        write("PUT", "/repos/e2e-owner/e2e-repo/dependabot/secrets/REGISTRY_TOKEN"),
+        write("PUT", "/repos/e2e-owner/e2e-repo/codespaces/secrets/DOTFILES_PAT"),
+        write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod"),
+        write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod/secrets/DEPLOY_KEY"),
+      ],
+      [],
+      3,
+      [
+        "dependabot/secrets/REGISTRY_TOKEN",
+        "codespaces/secrets/DOTFILES_PAT",
+        "environments/prod/secrets/DEPLOY_KEY",
+      ],
+      ["environments/prod 1 time(s)"],
+    ],
+  ])("%s", (_label, first, second, count, mentions, omits) => {
+    const failures = missingSecondApplyRewrites(first, second);
+    expect(failures).toHaveLength(count);
+    const joined = failures.join("\n");
+    for (const text of mentions) {
+      expect(joined).toContain(text);
+    }
+    for (const text of omits) {
+      expect(joined).not.toContain(text);
+    }
   });
 
   test("a same-path write in the other direction is not a re-issue", () => {
@@ -121,74 +194,19 @@ describe("missingSecondApplyRewrites (apply-idempotence always-rewrite subset)",
     expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=2")])).toHaveLength(2);
     expect(missingSecondApplyRewrites([withQuery("a=1")], [withQuery("a=1")])).toEqual([]);
   });
-
-  test("a re-issued secret PUT passes; unflagged writes never bind, an unverifiable one included", () => {
-    expect(
-      missingSecondApplyRewrites(
-        [
-          secretPut,
-          write("PUT", "/repos/e2e-owner/e2e-repo/rulesets/90000000"),
-          write("PATCH", "/repos/e2e-owner/e2e-repo/hooks/601/config"),
-        ],
-        [secretPut],
-      ),
-    ).toEqual([]);
-  });
-
-  test("the read-less check suite preferences PATCH binds like a sealed PUT", () => {
-    // Not a secret and not a PUT: the obligation is the alwaysRewrite flag,
-    // whatever the method, so a second apply that skips it fires.
-    const patch = write("PATCH", "/repos/e2e-owner/e2e-repo/check-suites/preferences");
-    const failures = missingSecondApplyRewrites([patch], []);
-    expect(failures).toHaveLength(1);
-    expect(failures[0]).toContain("PATCH /repos/e2e-owner/e2e-repo/check-suites/preferences");
-    expect(missingSecondApplyRewrites([patch], [patch])).toEqual([]);
-  });
-
-  test("a first-apply secret DELETE creates no re-write obligation", () => {
-    // The purge direction is one-shot: the second apply sees no live secret
-    // to delete, so only PUTs bind.
-    expect(
-      missingSecondApplyRewrites(
-        [write("DELETE", "/repos/e2e-owner/e2e-repo/actions/secrets/STALE")],
-        [],
-      ),
-    ).toEqual([]);
-  });
-
-  test("every family's sealed PUT binds: dependabot, codespaces, environment secrets", () => {
-    const firstWrites = [
-      write("PUT", "/repos/e2e-owner/e2e-repo/dependabot/secrets/REGISTRY_TOKEN"),
-      write("PUT", "/repos/e2e-owner/e2e-repo/codespaces/secrets/DOTFILES_PAT"),
-      write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod"),
-      write("PUT", "/repos/e2e-owner/e2e-repo/environments/prod/secrets/DEPLOY_KEY"),
-    ];
-    const failures = missingSecondApplyRewrites(firstWrites, []);
-    expect(failures).toHaveLength(3);
-    expect(failures.join("\n")).toContain("dependabot/secrets/REGISTRY_TOKEN");
-    expect(failures.join("\n")).toContain("codespaces/secrets/DOTFILES_PAT");
-    expect(failures.join("\n")).toContain("environments/prod/secrets/DEPLOY_KEY");
-    expect(failures.join("\n")).not.toContain("environments/prod but");
-  });
 });
 
 describe("unwitnessedExemptEndpoints (apply-idempotence corpus witness)", () => {
+  const exemptKeys = [...recurringEndpointKeys("always"), ...recurringEndpointKeys("may")];
   const coveredWitness = (): ExemptWriteWitness =>
-    new Map(
-      [...recurringEndpointKeys("always"), ...recurringEndpointKeys("may")].map((key) => [
-        key,
-        { first: 1, second: 1 },
-      ]),
-    );
+    new Map(exemptKeys.map((key) => [key, { first: 1, second: 1 }]));
 
-  test("a fully covered corpus produces no failures", () => {
-    expect(unwitnessedExemptEndpoints(coveredWitness())).toEqual([]);
-  });
-
-  test("an empty corpus flags EVERY exempt endpoint as unwitnessed, once each", () => {
-    const failures = unwitnessedExemptEndpoints(new Map());
-    const exempt = recurringEndpointKeys("always").length + recurringEndpointKeys("may").length;
-    expect(failures).toHaveLength(exempt);
+  test.each<[label: string, witness: ExemptWriteWitness, unwitnessed: number]>([
+    ["a fully covered corpus produces no failures", coveredWitness(), 0],
+    ["an empty corpus flags EVERY exempt endpoint, once each", new Map(), exemptKeys.length],
+  ])("%s", (_label, witness, unwitnessed) => {
+    const failures = unwitnessedExemptEndpoints(witness);
+    expect(failures).toHaveLength(unwitnessed);
     for (const failure of failures) {
       expect(failure).toContain("NO apply_idempotent scenario");
     }
@@ -228,25 +246,31 @@ describe("unwitnessedExemptEndpoints (apply-idempotence corpus witness)", () => 
 });
 
 describe("changedFamilies (apply-idempotence state stability)", () => {
-  test("names exactly the families whose serialized state moved", () => {
-    const before = new Map([
-      ["state.labels", '[{"name":"bug"}]'],
-      ["state.rulesets", "[]"],
-    ]);
-    const after = new Map([
-      ["state.labels", "[]"],
-      ["state.rulesets", "[]"],
-    ]);
-    expect(changedFamilies(before, after)).toEqual(["state.labels"]);
-  });
-
-  test("identical snapshots report no change", () => {
-    const snap = new Map([["state.repo", '{"name":"x"}']]);
-    expect(changedFamilies(snap, new Map(snap))).toEqual([]);
-  });
-
-  test("a family present on only one side counts as changed", () => {
-    expect(changedFamilies(new Map(), new Map([["a/b.issues", "[]"]]))).toEqual(["a/b.issues"]);
-    expect(changedFamilies(new Map([["a/b.issues", "[]"]]), new Map())).toEqual(["a/b.issues"]);
+  const issues = new Map([["a/b.issues", "[]"]]);
+  test.each<
+    [label: string, before: Map<string, string>, after: Map<string, string>, changed: string[]]
+  >([
+    [
+      "names exactly the families whose serialized state moved",
+      new Map([
+        ["state.labels", '[{"name":"bug"}]'],
+        ["state.rulesets", "[]"],
+      ]),
+      new Map([
+        ["state.labels", "[]"],
+        ["state.rulesets", "[]"],
+      ]),
+      ["state.labels"],
+    ],
+    [
+      "identical snapshots report no change",
+      new Map([["state.repo", '{"name":"x"}']]),
+      new Map([["state.repo", '{"name":"x"}']]),
+      [],
+    ],
+    ["a family present only after counts as changed", new Map(), issues, ["a/b.issues"]],
+    ["a family present only before counts as changed", issues, new Map(), ["a/b.issues"]],
+  ])("%s", (_label, before, after, changed) => {
+    expect(changedFamilies(before, after)).toEqual(changed);
   });
 });

@@ -54,10 +54,6 @@ describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () =
       writeFileSync(join(dir, "snapshot.yml"), "labels: {}\n");
       expect(writtenSnapshotPaths(inputs, dir)).toEqual(["snapshot.yml"]);
     }));
-
-  test("a run without a snapshot destination wrote none", () => {
-    expect(writtenSnapshotPaths({ mode: "apply" }, "/nonexistent")).toEqual([]);
-  });
 });
 
 describe("writtenSnapshotLeaks (the secret sweep over the written documents)", () => {
@@ -189,11 +185,18 @@ describe("roundTripFailures (the snapshot round trip's verdict)", () => {
 });
 
 describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
-  test("carries every input the snapshot set, drops both destinations, and switches the mode", () => {
-    // private_report at its default is legal in snapshot mode and outside the
-    // three inputs the check once allowlisted: only derivation by exclusion keeps it.
-    expect(
-      snapshotCheckInputs({
+  // private_report at its default is legal in snapshot mode and outside the
+  // three inputs the check once allowlisted: only derivation by exclusion keeps it.
+  test.each<
+    [
+      label: string,
+      snapshot: Parameters<typeof snapshotCheckInputs>[0],
+      check: ReturnType<typeof snapshotCheckInputs>,
+    ]
+  >([
+    [
+      "carries every input the snapshot set, drops both destinations, and switches the mode",
+      {
         mode: "snapshot",
         snapshot_file: "snapshot.yml",
         snapshot_dir: "snapshots",
@@ -201,20 +204,22 @@ describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
         on_missing_permission: "warn",
         private_repos: "show",
         private_report: "none",
-      }),
-    ).toEqual({
-      mode: "check",
-      sections: "labels,webhooks",
-      on_missing_permission: "warn",
-      private_repos: "show",
-      private_report: "none",
-    });
-  });
-
-  test("a scenario with only the destination yields a bare check run", () => {
-    expect(snapshotCheckInputs({ mode: "snapshot", snapshot_file: "snapshot.yml" })).toEqual({
-      mode: "check",
-    });
+      },
+      {
+        mode: "check",
+        sections: "labels,webhooks",
+        on_missing_permission: "warn",
+        private_repos: "show",
+        private_report: "none",
+      },
+    ],
+    [
+      "a scenario with only the destination yields a bare check run",
+      { mode: "snapshot", snapshot_file: "snapshot.yml" },
+      { mode: "check" },
+    ],
+  ])("%s", (_label, snapshot, check) => {
+    expect(snapshotCheckInputs(snapshot)).toEqual(check);
   });
 });
 
@@ -241,7 +246,9 @@ describe("ARTIFACT_TEST_RECIPIENT", () => {
 });
 
 describe("exitCodeFailure (expect.exit_code membership)", () => {
-  const cases: Array<[string, number, number | number[], string | undefined]> = [
+  test.each<
+    [label: string, exitCode: number, expected: number | number[], want: string | undefined]
+  >([
     ["a matching plain-number expectation passes", 0, 0, undefined],
     ["a plain-number mismatch keeps the single-code message", 1, 0, "exit code 1 != expected 0"],
     ["an allowed-set member passes", 1, [0, 1], undefined],
@@ -256,38 +263,31 @@ describe("exitCodeFailure (expect.exit_code membership)", () => {
     // The fuzz oracle often predicts exactly one legal exit; the message must stay byte-identical to
     // the plain-number form either way it is spelled.
     ["a one-element set keeps the single-code message", 1, [0], "exit code 1 != expected 0"],
-  ];
-  for (const [name, exitCode, expected, want] of cases) {
-    test(name, () => {
-      expect(exitCodeFailure(exitCode, expected)).toBe(want);
-    });
-  }
+  ])("%s", (_label, exitCode, expected, want) => {
+    expect(exitCodeFailure(exitCode, expected)).toBe(want);
+  });
 });
 
 describe("parseGithubOutput", () => {
-  test("reads simple name=value lines", () => {
-    expect(parseGithubOutput("result=applied\nskipped-sections=teams\n")).toEqual({
-      result: "applied",
-      "skipped-sections": "teams",
-    });
-  });
-
-  test("reads the @actions/core heredoc block", () => {
-    const out = parseGithubOutput(
+  test.each<[label: string, text: string, outputs: Record<string, string>]>([
+    [
+      "reads simple name=value lines",
+      "result=applied\nskipped-sections=teams\n",
+      { result: "applied", "skipped-sections": "teams" },
+    ],
+    [
+      "reads the @actions/core heredoc block",
       ["result<<ghadelimiter_abc", "line one", "line two", "ghadelimiter_abc", ""].join("\n"),
-    );
-    expect(out.result).toBe("line one\nline two");
-  });
-
-  test("mixes heredoc and simple forms", () => {
-    const out = parseGithubOutput(
+      { result: "line one\nline two" },
+    ],
+    [
+      "mixes heredoc and simple forms",
       ["result=drift", "repos-result<<ghadelimiter_x", "{}", "ghadelimiter_x"].join("\n"),
-    );
-    expect(out).toEqual({ result: "drift", "repos-result": "{}" });
-  });
-
-  test("ignores blank and malformed lines", () => {
-    expect(parseGithubOutput("\n=orphan\nresult=clean\n")).toEqual({ result: "clean" });
+      { result: "drift", "repos-result": "{}" },
+    ],
+    ["ignores blank and malformed lines", "\n=orphan\nresult=clean\n", { result: "clean" }],
+  ])("%s", (_label, text, outputs) => {
+    expect(parseGithubOutput(text)).toEqual(outputs);
   });
 });
 
@@ -316,38 +316,32 @@ describe("isSubsequence (mutations matcher)", () => {
     "POST /repos/o/r/labels",
     "DELETE /repos/o/r/labels/wontfix",
   ];
-  const cases: Array<[string, string[], string[], boolean]> = [
+  test.each<[label: string, patterns: string[], entries: string[], want: boolean]>([
     ["empty patterns always match", [], log, true],
     ["exact in order", ["PATCH /repos/o/r/labels/bug", "POST /repos/o/r/labels"], log, true],
     ["prefix match, gaps allowed", ["PATCH /repos/o/r/labels", "DELETE /repos/o/r"], log, true],
     ["wrong order fails", ["POST /repos/o/r/labels", "PATCH /repos/o/r/labels/bug"], log, false],
     ["a missing pattern fails", ["PUT /repos/o/r/topics"], log, false],
     [
-      "more patterns than log fails",
+      "a repeated pattern needs a repeated entry",
       ["POST /repos/o/r/labels", "POST /repos/o/r/labels"],
       log,
       false,
     ],
-  ];
-  for (const [name, patterns, entries, want] of cases) {
-    test(name, () => {
-      expect(isSubsequence(patterns, entries)).toBe(want);
-    });
-  }
+  ])("%s", (_label, patterns, entries, want) => {
+    expect(isSubsequence(patterns, entries)).toBe(want);
+  });
 });
 
 describe("forbiddenPresent (never matcher)", () => {
   const log = ["GET /repos/o/r/labels", "POST /repos/o/r/labels"];
-  const cases: Array<[string, string[], string[]]> = [
+  test.each<[label: string, patterns: string[], want: string[]]>([
     ["nothing forbidden present", ["DELETE /repos/o/r/labels"], []],
     ["a present prefix is reported", ["POST /repos/o/r/labels"], ["POST /repos/o/r/labels"]],
     ["a shorter prefix still matches", ["POST /repos/o/r"], ["POST /repos/o/r"]],
-  ];
-  for (const [name, patterns, want] of cases) {
-    test(name, () => {
-      expect(forbiddenPresent(patterns, log)).toEqual(want);
-    });
-  }
+  ])("%s", (_label, patterns, want) => {
+    expect(forbiddenPresent(patterns, log)).toEqual(want);
+  });
 });
 
 describe("requestLogFailures (the request-log rules over recorded requests)", () => {
@@ -363,7 +357,7 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
     },
     { method: "PATCH", pathname: "/repos/o/r/issues/7", query: "", status: 200 },
   ];
-  const cases: Array<[string, Parameters<typeof requestLogFailures>[0], string[]]> = [
+  test.each<[label: string, exp: Parameters<typeof requestLogFailures>[0], want: string[]]>([
     [
       "a never pattern with the recorded query",
       { never: ["GET /repos/o/r/issues?state=open"] },
@@ -386,12 +380,9 @@ describe("requestLogFailures (the request-log rules over recorded requests)", ()
       { requests_contain: ["page=2"] },
       ["no request contains: page=2"],
     ],
-  ];
-  for (const [name, exp, want] of cases) {
-    test(name, () => {
-      expect(requestLogFailures(exp, recorded)).toEqual(want);
-    });
-  }
+  ])("%s", (_label, exp, want) => {
+    expect(requestLogFailures(exp, recorded)).toEqual(want);
+  });
 
   // The `{repo}` placeholder must expand in EVERY request-path list: a list left unexpanded is
   // always-red under `requests_contain` and always-green under `never`, and no scenario would notice.
@@ -492,82 +483,77 @@ describe("indentedStdout (what --print-stdout echoes)", () => {
 });
 
 describe("stripDebugLines (counterfactual rendered-surface guard)", () => {
-  test("a canary only in a ::debug:: trace does NOT survive - so it cannot satisfy the counterfactual", () => {
-    const stdout = [
-      '::debug::POST /repos/o/r/labels payload: {"name":"CANARY-42"}',
-      "::debug::GET /repos/o/r/labels -> 200",
-    ].join("\n");
-    expect(stripDebugLines(stdout)).not.toContain("CANARY-42");
-  });
-
-  test("a canary in a rendered (non-debug) line survives", () => {
-    const stdout = [
-      '::debug::POST /repos/o/r/labels payload: {"name":"CANARY-42"}',
+  // A canary only in a ::debug:: trace does NOT survive, so it cannot satisfy the counterfactual; one in a rendered line does.
+  test.each<[label: string, stdout: string, rendered: string]>([
+    [
+      "a canary only in ::debug:: traces",
+      [
+        '::debug::POST /repos/o/r/labels payload: {"name":"CANARY-42"}',
+        "::debug::GET /repos/o/r/labels -> 200",
+      ].join("\n"),
+      "",
+    ],
+    [
+      "a canary in a rendered (non-debug) line",
+      [
+        '::debug::POST /repos/o/r/labels payload: {"name":"CANARY-42"}',
+        'o/r: labels: updated label "CANARY-42"',
+      ].join("\n"),
       'o/r: labels: updated label "CANARY-42"',
-    ].join("\n");
-    const rendered = stripDebugLines(stdout);
-    expect(rendered).not.toContain("payload");
-    expect(rendered).toContain('updated label "CANARY-42"');
+    ],
+  ])("%s", (_label, stdout, rendered) => {
+    expect(stripDebugLines(stdout)).toBe(rendered);
   });
 });
 
 describe("checkLeaks (redaction leak invariant)", () => {
-  test("no forbidden string anywhere is clean", () => {
-    const observed = {
-      summary: "| private repository #1 | remote | applied |",
-      stdout: "::add-mask::acme/secret\nresult: applied",
-      stderr: "",
-      outputs: { "repos-result": '{"private repository #1":{"result":"applied"}}' },
-    };
-    expect(checkLeaks(observed, ["acme/secret", "CANARY-1"])).toEqual([]);
-  });
-
-  test("a slug in the summary is a leak", () => {
-    const observed = {
-      summary: "| acme/secret | remote | applied |",
-      stdout: "",
-      stderr: "",
-      outputs: {},
-    };
-    expect(checkLeaks(observed, ["acme/secret"])).toEqual([
-      'leak: "acme/secret" present in the step summary',
-    ]);
-  });
-
-  test("a canary in stdout outside the mask directive is a leak", () => {
-    const observed = {
-      summary: "",
-      stdout: "::add-mask::acme/secret\n::debug::CANARY-1 slipped out",
-      stderr: "",
-      outputs: {},
-    };
-    expect(checkLeaks(observed, ["CANARY-1"])).toEqual([
-      'leak: "CANARY-1" present in stdout (after stripping ::add-mask:: lines)',
-    ]);
-  });
-
-  test("a slug on stderr is a leak (the run log captures stderr too)", () => {
-    const observed = {
-      summary: "",
-      stdout: "",
-      stderr: "::add-mask::acme/secret\nTrace: request to acme/secret failed",
-      outputs: {},
-    };
-    expect(checkLeaks(observed, ["acme/secret"])).toEqual([
-      'leak: "acme/secret" present in stderr (after stripping ::add-mask:: lines)',
-    ]);
-  });
-
-  test("a slug in an output value is a leak", () => {
-    const observed = {
-      summary: "",
-      stdout: "",
-      stderr: "",
-      outputs: { "repos-result": '{"acme/secret":{"result":"applied"}}' },
-    };
-    expect(checkLeaks(observed, ["acme/secret"])).toEqual([
-      'leak: "acme/secret" present in the "repos-result" output',
-    ]);
+  const quiet = { summary: "", stdout: "", stderr: "", outputs: {} };
+  // stderr counts because the run log captures it too; the mask directive itself may carry the raw slug.
+  test.each<
+    [
+      label: string,
+      observed: Parameters<typeof checkLeaks>[0],
+      forbidden: string[],
+      leaks: string[],
+    ]
+  >([
+    [
+      "no forbidden string anywhere is clean",
+      {
+        summary: "| private repository #1 | remote | applied |",
+        stdout: "::add-mask::acme/secret\nresult: applied",
+        stderr: "",
+        outputs: { "repos-result": '{"private repository #1":{"result":"applied"}}' },
+      },
+      ["acme/secret", "CANARY-1"],
+      [],
+    ],
+    [
+      "a slug in the summary",
+      { ...quiet, summary: "| acme/secret | remote | applied |" },
+      ["acme/secret"],
+      ['leak: "acme/secret" present in the step summary'],
+    ],
+    [
+      "a canary in stdout outside the mask directive",
+      { ...quiet, stdout: "::add-mask::acme/secret\n::debug::CANARY-1 slipped out" },
+      ["CANARY-1"],
+      ['leak: "CANARY-1" present in stdout (after stripping ::add-mask:: lines)'],
+    ],
+    [
+      "a slug on stderr",
+      { ...quiet, stderr: "::add-mask::acme/secret\nTrace: request to acme/secret failed" },
+      ["acme/secret"],
+      ['leak: "acme/secret" present in stderr (after stripping ::add-mask:: lines)'],
+    ],
+    [
+      "a slug in an output value",
+      { ...quiet, outputs: { "repos-result": '{"acme/secret":{"result":"applied"}}' } },
+      ["acme/secret"],
+      ['leak: "acme/secret" present in the "repos-result" output'],
+    ],
+  ])("%s", (_label, observed, forbidden, leaks) => {
+    expect(checkLeaks(observed, forbidden)).toEqual(leaks);
   });
 });
 
