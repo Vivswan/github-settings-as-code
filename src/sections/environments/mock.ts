@@ -1,6 +1,5 @@
 /**
- * This fragment imports test-tree seams on purpose: the bundle entry is src/main.ts, so it never
- * reaches lib/index.js. The pin handlers follow verified live GitHub position semantics:
+ * The pin handlers follow verified live GitHub position semantics:
  *   new pin  -> appends at a monotonic counter
  *   unpin    -> leaves a hole, nothing renumbers
  *   reorder  -> the one mutation that renumbers, to contiguous 1..N

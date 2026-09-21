@@ -1,6 +1,5 @@
 /**
- * The autolinks fuzz generator fragment. It imports test-tree seams on purpose: the bundle entry is
- * src/main.ts, so this file never reaches lib/index.js.
+ * The autolinks fuzz generator fragment.
  */
 
 import {

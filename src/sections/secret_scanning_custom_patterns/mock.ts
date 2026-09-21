@@ -1,7 +1,6 @@
 /**
- * This fragment imports test-tree seams on purpose: the bundle entry is src/main.ts, so it never
- * reaches lib/index.js. custom_pattern_version is real optimistic concurrency here, so a section that
- * reuses a version across writes fails a single-threaded e2e run instead of only failing against real GitHub.
+ * custom_pattern_version is real optimistic concurrency here, so a section that reuses a version
+ * across writes fails a single-threaded e2e run instead of only failing against real GitHub.
  *
  * create or update               -> mints a fresh version
  * stale version on a write       -> 412

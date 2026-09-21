@@ -1,6 +1,5 @@
 /**
- * The collaborators fuzz generator fragment and the pending-invitation live-state seeder. It imports
- * test-tree seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * The collaborators fuzz generator fragment and the pending-invitation live-state seeder.
  */
 
 import {

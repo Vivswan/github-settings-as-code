@@ -1,6 +1,5 @@
 /**
- * The teams fuzz generator fragment. It imports test-tree seams on purpose: the bundle entry is
- * src/main.ts, so this file never reaches lib/index.js.
+ * The teams fuzz generator fragment.
  */
 
 import { generatorFromSlice, type Json, uniqueBy } from "../../../test/e2e/gen-support.js";

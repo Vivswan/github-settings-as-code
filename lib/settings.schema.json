@@ -210,7 +210,7 @@
       ]
     },
     "ActionsVariableConfig": {
-      "description": "One GitHub Actions repository variable, matched by case-insensitive name.",
+      "description": "One GitHub Actions repository variable, matched by case-insensitive name; workflows read it through the `vars` context.",
       "type": "object",
       "properties": {
         "name": {
@@ -219,7 +219,7 @@
           "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value workflows read through the vars context. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "description": "The plain-text value. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
           "type": "string",
           "maxLength": 49152
         }
@@ -258,7 +258,7 @@
           "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value Copilot coding agents read. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "description": "The plain-text value. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
           "type": "string",
           "maxLength": 49152
         }
@@ -1151,7 +1151,7 @@
           "pattern": "^(?![Gg][Ii][Tt][Hh][Uu][Bb]_)[A-Za-z_][A-Za-z0-9_]*$"
         },
         "value": {
-          "description": "The plain-text value; environment secrets are the place for secrets. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
+          "description": "The plain-text value. GitHub caps one variable at 48 KB; a value over 49152 bytes of UTF-8 is refused when the file is parsed, before any API call.",
           "type": "string",
           "maxLength": 49152
         }

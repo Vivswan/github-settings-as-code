@@ -1,7 +1,6 @@
 /**
  * The autolinks e2e mock fragment, derived from the section's declaration by
- * test/e2e/mock/list-fragment.ts; only the server-owned facts live here. It imports the test-tree
- * seams on purpose: the bundle entry is src/main.ts, so this file never reaches lib/index.js.
+ * test/e2e/mock/list-fragment.ts; only the server-owned facts live here.
  */
 
 import { type ListMockSpec, mockFragmentFor } from "../../../test/e2e/mock/list-fragment.js";
