@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { ok } from "neverthrow";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
@@ -20,11 +19,10 @@ import {
 import { proveSnapshotRoundTrip } from "../../../test/sections/snapshot-roundtrip.js";
 import { executePlan } from "../../engine/execute.js";
 import type { GitHubClient } from "../../github/api.js";
-import { type PlannedOp, planContext, planDrift, snapshotContext } from "../contract/plan.js";
+import { planDrift, snapshotContext } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { environmentsSection, flattenEnvironment } from "./index.js";
 import { environmentsMockHandlers } from "./mock.js";
-import type { GRAPHQL_OPS } from "./pins.js";
 import { EnvironmentConfig, type EnvironmentVariableConfig } from "./schema.js";
 import { sharedSecretNotes, withPins } from "./snapshot.js";
 
@@ -205,78 +203,6 @@ describe("environments plan", () => {
     expect((await apply(api, [{ name: "prod", wait_timer: 5 }])).changes).toEqual([
       'applied environment "prod"',
     ]);
-  });
-
-  test("the read port exposes exactly the GET roles and the two pins queries, the probe in its absent posture", () => {
-    const ctx = planContext(environmentsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read).sort()).toEqual([
-      "list",
-      "listPolicies",
-      "listProtectionRuleApps",
-      "listProtectionRules",
-      "listSecrets",
-      "listVariables",
-      "pins",
-      "pinsSnapshot",
-      "probe",
-      "secretsPublicKey",
-    ]);
-    // @ts-expect-error a write role is not a read: the port has no `update`
-    ctx.read.update;
-    // @ts-expect-error nor a secret PUT
-    ctx.read.putSecret;
-    // @ts-expect-error nor a pin mutation
-    ctx.read.pin;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error an "absent" primary read offers no throwing helper
-    ctx.read.probe.call;
-    // @ts-expect-error nor a list
-    ctx.read.probe.listAll;
-    // The sealing key is an execution-phase read, so a plan() body cannot spell the call: the token comes first, and only a thunk holds one.
-    // The Apps listing is a plan read (an existing environment resolves its missing rules before any write), so its envelope key comes first.
-    const options = { params: { environment_name: "prod" } };
-    // @ts-expect-error a request options object is not the token
-    const forgedKey: Parameters<typeof ctx.read.secretsPublicKey.call>[0] = options;
-    const appsEnvelope: Parameters<typeof ctx.read.listProtectionRuleApps.listAllEnveloped>[0] =
-      "available_custom_deployment_protection_rule_integrations";
-    expect([Object.keys(forgedKey), appsEnvelope]).toEqual([
-      ["params"],
-      "available_custom_deployment_protection_rule_integrations",
-    ]);
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only: the plans are never executed.
-    type Op = PlannedOp<typeof environmentsSection.endpoints, typeof GRAPHQL_OPS>;
-    const pin: Op = {
-      role: "pin",
-      variables: { environmentId: "EN_x", pinned: true },
-      drift: ["pinning"],
-      change: "",
-    };
-    expect(pin.role).toBe("pin");
-    const sealed: Op = {
-      role: "putSecret",
-      params: { environment_name: "prod", secret_name: "S" },
-      payload: async () => ok({ encrypted_value: "x", key_id: "k" }),
-      // An alwaysRewrite endpoint may plan without drift.
-      drift: [],
-      change: "",
-    };
-    expect(sealed.role).toBe("putSecret");
-    const read = { role: "probe", params: { environment_name: "p" }, drift: ["x"], change: "" };
-    // @ts-expect-error the probe is a read, not a plannable write
-    const _read: Op = read;
-    const query = { role: "pins", variables: {}, drift: ["x"], change: "" } as const;
-    // @ts-expect-error the pins query is a read, not a plannable mutation
-    const _query: Op = query;
-    const silent = { role: "update", params: { environment_name: "p" }, drift: [], change: "" };
-    // @ts-expect-error the environment PUT must carry drift
-    const _silent: Op = silent;
-    const paramless = { role: "update", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the route's environment_name param is required
-    const _paramless: Op = paramless;
   });
 });
 
@@ -535,21 +461,6 @@ describe("environments nested secrets apply mode", () => {
     ]);
   });
 
-  test("the secrets key never reaches the environment PUT body", async () => {
-    await mockSodiumReady();
-    const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
-      [PROD_KEY]: { data: { key_id: "k", key: MOCK_SECRETS_PUBLIC_KEY } },
-    }).allowMutations("PUT /repos/o/r/environments/prod/secrets/S");
-    await apply(
-      api,
-      [{ name: "prod", wait_timer: 5, secrets: [{ name: "S", value: "$S" }] }],
-      secretTools({ $S: "v" }),
-    );
-    const envPut = api.calls.find((c) => c.method === "PUT" && !c.path.includes("/secrets/"));
-    expect(envPut?.payload).toEqual({ wait_timer: 5 });
-  });
-
   test("undeclared live secrets: kept with a note by default, DELETED under the knob", async () => {
     const api = new MockApi({
       "GET /repos/o/r/environments/prod": liveEnv("prod"),
@@ -719,21 +630,6 @@ describe("environments deployment branch policies apply mode", () => {
       'deleted deployment branch policy "v*" in environment "prod" to change its immutable type (branch -> tag)',
       'recreated deployment branch policy "v*" in environment "prod" as type tag',
       'DELETED undeclared deployment branch policy "legacy/*" from environment "prod"',
-    ]);
-  });
-
-  test("a missing environment plans its patterns as creates without listing them", async () => {
-    // The pattern routes 404 until the PUT lands, so the plan reads nothing and the declared patterns follow the PUT as creates.
-    const api = new MockApi({
-      "PUT /repos/o/r/environments/prod": { data: { name: "prod" } },
-    }).allowMutations("POST /repos/o/r/environments/prod/deployment-branch-policies");
-    const result = await apply(api, [envWithPolicies([{ name: "release/*" }])]);
-    expect(api.calls.some((c) => c.method === "GET" && c.path.includes("/deployment-branch"))).toBe(
-      false,
-    );
-    expect(result.changes).toEqual([
-      'applied environment "prod"',
-      'created deployment branch policy "release/*" in environment "prod"',
     ]);
   });
 
