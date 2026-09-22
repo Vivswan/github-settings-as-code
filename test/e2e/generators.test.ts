@@ -1036,115 +1036,136 @@ describe("dead-corner knobs", () => {
 
 describe("genMergeScenario", () => {
   const SEEDS = Array.from({ length: 300 }, (_, i) => i);
+  // Each battery below runs hundreds of generator draws, the heaviest probing the validator per layer: near bun's 5 s default on a loaded runner.
+  const MERGE_TIMEOUT = 20_000;
 
-  test("produces schema-valid mode: render scenarios whose layers the runner files in meta order", () => {
-    for (const seed of SEEDS) {
-      const { scenario, meta } = genMergeScenario(new Rng(seed));
-      expect(() => parseScenario(scenario, `seed-${seed}`)).not.toThrow();
-      expect(scenario.inputs?.mode).toBe("render");
-      expect(meta.layers.length).toBeGreaterThanOrEqual(2);
-      expect(meta.layers.length).toBeLessThanOrEqual(5);
-      // The runner writes settings_layers[i] as layer-i.yml and settings as settings.yml, the names the action's refusals and notices carry.
-      const below = scenario.settings_layers ?? [];
-      expect(below.length).toBe(meta.layers.length - 1);
-      below.forEach((doc, i) => {
-        expect(meta.layers[i]).toEqual({ name: `layer-${i}.yml`, doc });
-      });
-      expect(meta.layers[meta.layers.length - 1]).toEqual({
-        name: "settings.yml",
-        doc: scenario.settings as Record<string, unknown>,
-      });
-      expect(meta.layering).toBe(scenario.inputs?.layering ?? "deep");
-    }
-  });
-
-  test("the oracle's boundary read agrees with the generator's refusal intent, layer by layer", () => {
-    let refused = 0;
-    for (const seed of SEEDS) {
-      const { meta } = genMergeScenario(new Rng(seed));
-      const prediction = predictMerge(meta);
-      if (meta.refusal === undefined) {
-        expect(prediction.kind, `seed ${seed}: an admitted stack read as refused`).not.toBe(
-          "refused",
-        );
-        continue;
-      }
-      refused++;
-      expect(prediction, `seed ${seed}: ${meta.refusal.kind}`).toEqual({
-        kind: "refused",
-        layer: meta.refusal.layer,
-      });
-    }
-    expect(refused).toBeGreaterThan(20);
-  });
-
-  test("a predicted merged document is valid and survives the YAML round trip the runner compares through", () => {
-    let merged = 0;
-    for (const seed of SEEDS) {
-      const { meta } = genMergeScenario(new Rng(seed));
-      const prediction = predictMerge(meta);
-      if (prediction.kind !== "merged") {
-        continue;
-      }
-      merged++;
-      const verdict = validateSettingsDoc(
-        prediction.merged,
-        "merged",
-        SectionSelection.ALL,
-        silentIo(),
-      );
-      expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
-      expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
-      // The directives address the fold; none may reach the written document.
-      expect(prediction.merged._layering).toBeUndefined();
-      for (const value of Object.values(prediction.merged)) {
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-          expect((value as Record<string, unknown>)._layering).toBeUndefined();
-        }
-      }
-    }
-    expect(merged).toBeGreaterThan(150);
-  });
-
-  test("every merge feature and every refusal kind surfaces across seeds", () => {
-    const features = new Set<string>();
-    const refusals = new Set<string>();
-    for (const seed of SEEDS) {
-      const { meta } = genMergeScenario(new Rng(seed));
-      for (const feature of meta.features) {
-        features.add(feature);
-      }
-      if (meta.refusal !== undefined) {
-        refusals.add(meta.refusal.kind);
-        expect(meta.features).toEqual(["refused"]);
-      }
-    }
-    expect(MERGE_FEATURES.filter((feature) => !features.has(feature))).toEqual([]);
-    expect(MERGE_REFUSAL_KINDS.filter((kind) => !refusals.has(kind))).toEqual([]);
-  });
-
-  // 720 forced generator runs, each probing the validator per layer: ~1.4 s alone, near bun's 5 s default on a loaded runner.
-  test("forces construct their eligibility: a pinned run layering, or the named refusal", () => {
-    for (let seed = 0; seed < 60; seed++) {
-      for (const layering of LAYERING_DIRECTIVES) {
-        const { scenario, meta } = genMergeScenario(new Rng(seed), {
-          force: { kind: "valid", layering },
+  test(
+    "produces schema-valid mode: render scenarios whose layers the runner files in meta order",
+    () => {
+      for (const seed of SEEDS) {
+        const { scenario, meta } = genMergeScenario(new Rng(seed));
+        expect(() => parseScenario(scenario, `seed-${seed}`)).not.toThrow();
+        expect(scenario.inputs?.mode).toBe("render");
+        expect(meta.layers.length).toBeGreaterThanOrEqual(2);
+        expect(meta.layers.length).toBeLessThanOrEqual(5);
+        // The runner writes settings_layers[i] as layer-i.yml and settings as settings.yml, the names the action's refusals and notices carry.
+        const below = scenario.settings_layers ?? [];
+        expect(below.length).toBe(meta.layers.length - 1);
+        below.forEach((doc, i) => {
+          expect(meta.layers[i]).toEqual({ name: `layer-${i}.yml`, doc });
         });
-        expect(scenario.inputs?.layering).toBe(layering);
-        expect(meta.refusal).toBeUndefined();
-        // The whole point of the force: the battery compares a document.
-        expect(predictMerge(meta).kind, `seed ${seed} ${layering}`).toBe("merged");
+        expect(meta.layers[meta.layers.length - 1]).toEqual({
+          name: "settings.yml",
+          doc: scenario.settings as Record<string, unknown>,
+        });
+        expect(meta.layering).toBe(scenario.inputs?.layering ?? "deep");
       }
-      for (const refusal of MERGE_REFUSAL_KINDS) {
-        const { meta } = genMergeScenario(new Rng(seed), { force: { kind: "refused", refusal } });
+    },
+    MERGE_TIMEOUT,
+  );
+
+  test(
+    "the oracle's boundary read agrees with the generator's refusal intent, layer by layer",
+    () => {
+      let refused = 0;
+      for (const seed of SEEDS) {
+        const { meta } = genMergeScenario(new Rng(seed));
+        const prediction = predictMerge(meta);
         if (meta.refusal === undefined) {
-          throw new Error(`seed ${seed}: the ${refusal} force produced no refused layer`);
+          expect(prediction.kind, `seed ${seed}: an admitted stack read as refused`).not.toBe(
+            "refused",
+          );
+          continue;
         }
-        expect(meta.refusal.kind).toBe(refusal);
-        expect(predictMerge(meta)).toEqual({ kind: "refused", layer: meta.refusal.layer });
+        refused++;
+        expect(prediction, `seed ${seed}: ${meta.refusal.kind}`).toEqual({
+          kind: "refused",
+          layer: meta.refusal.layer,
+        });
       }
-    }
-  }, 20_000);
+      expect(refused).toBeGreaterThan(20);
+    },
+    MERGE_TIMEOUT,
+  );
+
+  test(
+    "a predicted merged document is valid and survives the YAML round trip the runner compares through",
+    () => {
+      let merged = 0;
+      for (const seed of SEEDS) {
+        const { meta } = genMergeScenario(new Rng(seed));
+        const prediction = predictMerge(meta);
+        if (prediction.kind !== "merged") {
+          continue;
+        }
+        merged++;
+        const verdict = validateSettingsDoc(
+          prediction.merged,
+          "merged",
+          SectionSelection.ALL,
+          silentIo(),
+        );
+        expect("error" in verdict ? verdict.error : undefined, `seed ${seed}`).toBeUndefined();
+        expect(parseYaml(stringifyYaml(prediction.merged))).toEqual(prediction.merged);
+        // The directives address the fold; none may reach the written document.
+        expect(prediction.merged._layering).toBeUndefined();
+        for (const value of Object.values(prediction.merged)) {
+          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            expect((value as Record<string, unknown>)._layering).toBeUndefined();
+          }
+        }
+      }
+      expect(merged).toBeGreaterThan(150);
+    },
+    MERGE_TIMEOUT,
+  );
+
+  test(
+    "every merge feature and every refusal kind surfaces across seeds",
+    () => {
+      const features = new Set<string>();
+      const refusals = new Set<string>();
+      for (const seed of SEEDS) {
+        const { meta } = genMergeScenario(new Rng(seed));
+        for (const feature of meta.features) {
+          features.add(feature);
+        }
+        if (meta.refusal !== undefined) {
+          refusals.add(meta.refusal.kind);
+          expect(meta.features).toEqual(["refused"]);
+        }
+      }
+      expect(MERGE_FEATURES.filter((feature) => !features.has(feature))).toEqual([]);
+      expect(MERGE_REFUSAL_KINDS.filter((kind) => !refusals.has(kind))).toEqual([]);
+    },
+    MERGE_TIMEOUT,
+  );
+
+  test(
+    "forces construct their eligibility: a pinned run layering, or the named refusal",
+    () => {
+      for (let seed = 0; seed < 60; seed++) {
+        for (const layering of LAYERING_DIRECTIVES) {
+          const { scenario, meta } = genMergeScenario(new Rng(seed), {
+            force: { kind: "valid", layering },
+          });
+          expect(scenario.inputs?.layering).toBe(layering);
+          expect(meta.refusal).toBeUndefined();
+          // The whole point of the force: the battery compares a document.
+          expect(predictMerge(meta).kind, `seed ${seed} ${layering}`).toBe("merged");
+        }
+        for (const refusal of MERGE_REFUSAL_KINDS) {
+          const { meta } = genMergeScenario(new Rng(seed), { force: { kind: "refused", refusal } });
+          if (meta.refusal === undefined) {
+            throw new Error(`seed ${seed}: the ${refusal} force produced no refused layer`);
+          }
+          expect(meta.refusal.kind).toBe(refusal);
+          expect(predictMerge(meta)).toEqual({ kind: "refused", layer: meta.refusal.layer });
+        }
+      }
+    },
+    MERGE_TIMEOUT,
+  );
 
   test("honors the sections option", () => {
     const pool: SectionKey[] = ["labels", "rulesets", "milestones", "pages"];
