@@ -4,10 +4,12 @@
 #
 # Each job fails a night instead of surprising a later PR: checks runs the
 # schema lockstep tests and the typecheck against the latest Octokit
-# packages, float-canary re-resolves the lockfile from scratch like the
-# Dependabot lockfile workflow, and e2e runs the curated corpus with the
-# endpoint-coverage tripwire. The report job files one tracking issue on a
-# red night and closes it on a green one (the platform's docs/nightly.md).
+# packages, float-canary deletes bun.lock and re-resolves from scratch so a
+# breaking transitive release fails a night instead of the next from-scratch
+# install, and e2e runs the curated corpus with the endpoint-coverage
+# tripwire.
+# The report job files one tracking issue on a red night and closes it on a
+# green one (the platform's docs/nightly.md).
 name: Nightly
 
 on:
@@ -86,12 +88,11 @@ jobs:
             exit 1
           fi
 
-  # Predicts what the dependabot-bun-lockfile workflow's from-scratch resolve
-  # will hand the next Dependabot PR: package.json is pinned exactly (the
-  # package-pins test guards that), so only transitive ranges can float, and
-  # a float that breaks the gate fails here first. Its own job because the
-  # checks job's @octokit/types probe leaves node_modules upgraded, and this
-  # probe needs a clean tree to re-resolve from.
+  # The only from-scratch resolve in this repository: package.json is pinned
+  # exactly (the package-pins test guards that), so only transitive ranges
+  # can float, and a float that breaks the gate fails here first. Its own
+  # job because the checks job's @octokit/types probe leaves node_modules
+  # upgraded, and this probe needs a clean tree to re-resolve from.
   float-canary:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -101,9 +102,9 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           install: "false"
-      # Delete before resolving, exactly like the Dependabot workflow: bun
-      # keeps a stale lockfile as a valid resolution, and only a
-      # from-scratch resolve floats what that workflow would float.
+      # Delete before resolving: bun keeps a stale lockfile as a valid
+      # resolution, and only a from-scratch resolve floats every transitive
+      # range.
       - name: Re-resolve from scratch
         run: |
           rm bun.lock
