@@ -57,12 +57,6 @@ jobs:
         with:
           node-version: 24
 
-      # The trimmed OpenAPI spec is a fetched, gitignored artifact the mock
-      # validates responses against. Always fetched fresh (no cache), same as
-      # nightly.yml's e2e job: the fetch doubles as an upstream-drift tripwire.
-      - name: Fetch the trimmed OpenAPI spec
-        run: bun .github/scripts/trim-openapi.ts
-
       - name: Fuzz
         env:
           SEED: ${{ inputs.seed }}

@@ -1,12 +1,13 @@
 /**
  * Validates the mock's traffic against GitHub's published OpenAPI contract: the mock stands in for
- * GitHub, so drift between what it serves and what GitHub documents is a mock bug (or a stale spec).
- * The trimmed spec is a fetched, gitignored artifact read from disk, never the network, so the runner
- * keeps validation always on; a missing spec fails with the fetch command (see readSpecText()).
+ * GitHub, so drift between what it serves and what GitHub documents is a mock bug (or a stale descriptor).
+ * The descriptor is @octokit/openapi's dereferenced api.github.com document, cut in memory to USED_PATHS
+ * by loadSpec(); a Dependabot bump that stops documenting a used path, or starts documenting an upstream
+ * gap, fails the load by name.
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import {
@@ -20,29 +21,18 @@ import { allGraphqlOps } from "../../../src/sections/registry.js";
 import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/contract.js";
+import { UNDOCUMENTED_PATHS, USED_PATHS } from "./paths.js";
 
 type Json = Record<string, unknown>;
 
-const SPEC_PATH = join(import.meta.dir, "github-openapi.trimmed.json");
-
 /**
- * The trimmed spec's text from disk: the one read every consumer goes through, so a missing file fails once,
- * naming the command that fetches it, instead of as a bare ENOENT from whichever test read it first.
+ * The dereferenced (no $ref) api.github.com descriptor, resolved by file so the package's index, which loads every
+ * GHES and GHEC variant too, never runs. Dereferenced, so a kept path carries its inlined schemas and no
+ * components graph has to come along.
  */
-export function readSpecText(specPath = SPEC_PATH): string {
-  try {
-    return readFileSync(specPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(
-        `the trimmed OpenAPI spec is missing at ${specPath}. It is a fetched, gitignored artifact: ` +
-          "bun run test:artifacts fetches it (bun .github/scripts/trim-openapi.ts --when-stale), and the test, " +
-          "test:e2e, and fuzz scripts run it first; the docs generator (bun run build:docs) reads it too.",
-      );
-    }
-    throw error;
-  }
-}
+const DESCRIPTOR_PATH = fileURLToPath(
+  import.meta.resolve("@octokit/openapi/generated/api.github.com.deref.json"),
+);
 
 function segments(path: string): string[] {
   return path.split("/").filter((s) => s.length > 0);
@@ -137,19 +127,78 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
   return out;
 }
 
-/** The subset of an OpenAPI operation the validator reads. */
+/** The subset of an OpenAPI operation the validator and the docs generator read. */
 interface Operation {
   requestBody?: {
     required?: boolean;
     content?: Record<string, { schema?: unknown }>;
   };
   responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
+  externalDocs?: { url: string };
+  [key: string]: unknown;
 }
 
 type PathItem = Record<string, Operation>;
 
-interface OpenApiSpec {
+export interface OpenApiSpec {
   paths: Record<string, PathItem>;
+}
+
+/**
+ * `doc` cut to exactly `usedPaths`, the slice the validator and the docs generator read. USED_PATHS spells
+ * templates as OpenAPI keys them ("/repos/{owner}/{repo}/labels"), so the match is exact string equality.
+ * Three descriptor states fail here, at load, by name, instead of as a wrong verdict downstream:
+ *   a used path the descriptor lacks       -> the action calls a path GitHub does not document at this version
+ *   an undocumented path it now documents  -> the owning gap in src/upstream-gaps/ is due for retirement
+ *   a $ref left in the kept slice          -> a partial deref ajv would compile wrong or skip silently
+ */
+export function trimDescriptor(
+  doc: { paths: Record<string, unknown> },
+  usedPaths: readonly string[],
+  undocumentedPaths: readonly string[],
+): OpenApiSpec {
+  const missing = usedPaths.filter((path) => doc.paths[path] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `these USED_PATHS are not in the @octokit/openapi descriptor:\n  ${missing.join("\n  ")}\n` +
+        "Either the path is wrong in test/e2e/openapi/paths.ts, or GitHub stopped documenting it",
+    );
+  }
+  // An UNDOCUMENTED_PATHS entry exists precisely BECAUSE the descriptor lacks it, so the moment a bump documents
+  // one, the carve-out must go (and validation switch on).
+  const nowDocumented = undocumentedPaths.filter((path) => doc.paths[path] !== undefined);
+  if (nowDocumented.length > 0) {
+    throw new Error(
+      `the @octokit/openapi descriptor now documents: ${nowDocumented.join(", ")}. Retire the owning gap in ` +
+        "src/upstream-gaps/ (delete the spec-only file, or flip documentedInSpec to true on an octokit-kind one) " +
+        "and regenerate the index (bun .github/scripts/gen-gaps-index.ts), so the validator covers them",
+    );
+  }
+  const paths: Record<string, PathItem> = {};
+  for (const path of usedPaths) {
+    paths[path] = doc.paths[path] as PathItem;
+  }
+  const serialized = JSON.stringify(paths);
+  if (serialized.includes('"$ref"')) {
+    const sample = [...serialized.matchAll(/"\$ref":\s*"([^"]+)"/g)].slice(0, 5).map((m) => m[1]);
+    throw new Error(
+      `the descriptor slice still contains $ref pointers (e.g. ${sample.join(", ")}); ` +
+        "@octokit/openapi's .deref.json is no longer fully dereferenced",
+    );
+  }
+  return { paths };
+}
+
+/** Parsed and cut once per process: the runner, the mock's body pipeline, the docs generator, and the tests all read it. */
+let sharedSpec: OpenApiSpec | undefined;
+export function loadSpec(): OpenApiSpec {
+  if (!sharedSpec) {
+    const doc = JSON.parse(readFileSync(DESCRIPTOR_PATH, "utf8")) as {
+      paths: Record<string, unknown>;
+    };
+    sharedSpec = trimDescriptor(doc, USED_PATHS, UNDOCUMENTED_PATHS);
+  }
+  return sharedSpec;
 }
 
 /**
@@ -203,7 +252,7 @@ export class OpenApiValidator {
     // Injectable so tests can check the known-name rule with fixture names.
     graphqlOpNames?: ReadonlySet<string>,
   ) {
-    // strict: false because the trimmed doc still carries vocabulary ajv treats as unknown;
+    // strict: false because the descriptor carries vocabulary ajv treats as unknown;
     // validateFormats: false because structure is checked, not string formats.
     this.ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true });
     addFormats(this.ajv);
@@ -212,14 +261,9 @@ export class OpenApiValidator {
       graphqlOpNames ?? new Set(Object.values(allGraphqlOps()).map((op) => op.name));
   }
 
-  /** A fresh clone lacks the fetched spec; a missing file fails naming the fetch command, never skips. */
+  /** Over the shared descriptor slice; a descriptor the action outgrew fails in loadSpec() by name, never skips. */
   static load(): OpenApiValidator {
-    return OpenApiValidator.loadFrom(SPEC_PATH);
-  }
-
-  /** load() against an explicit path; the missing-file branch is testable this way. */
-  static loadFrom(specPath: string): OpenApiValidator {
-    return new OpenApiValidator(JSON.parse(readSpecText(specPath)) as OpenApiSpec);
+    return new OpenApiValidator(loadSpec());
   }
 
   private matchTemplate(pathname: string): string | null {
@@ -231,7 +275,7 @@ export class OpenApiValidator {
     return null;
   }
 
-  /** The path templates the loaded spec documents; validate.test.ts pins them equal to USED_PATHS. */
+  /** The path templates the loaded slice documents; validate.test.ts pins them equal to USED_PATHS. */
   paths(): readonly string[] {
     return this.templates;
   }
@@ -319,7 +363,7 @@ export class OpenApiValidator {
         {
           request: label,
           kind: "unknown-route",
-          detail: "path matches no template in the trimmed spec",
+          detail: "path matches no template in the descriptor slice",
         },
       ];
     }

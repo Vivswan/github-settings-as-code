@@ -1,6 +1,6 @@
 /**
  * The docs.github.com page behind every REST route and GraphQL operation the sections declare, for the coverage
- * page's Endpoints cells (gen-docs.ts). REST pages are the trimmed OpenAPI descriptor's own externalDocs links;
+ * page's Endpoints cells (gen-docs.ts). REST pages are the OpenAPI descriptor's own externalDocs links;
  * endpoint-docs.yml beside this file holds only what the descriptor lacks: the routes GitHub does not document and
  * every GraphQL operation. resolveAnchors() fails the docs build by name on a declared call with no page, a hand
  * entry the descriptor already covers, and a hand entry no section declares.
@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { readDocsYaml } from "../../src/sections/contract/docs.js";
 import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
-import { readSpecText } from "../../test/e2e/openapi/validate.js";
+import { loadSpec } from "../../test/e2e/openapi/validate.js";
 
 const DOCS_URL = z.string().url().startsWith("https://docs.github.com/en/");
 
@@ -118,10 +118,6 @@ export function resolveAnchors(
   return { rest, graphql };
 }
 
-function specOperations(): SpecOperations {
-  return (JSON.parse(readSpecText()) as { paths: SpecOperations }).paths;
-}
-
 /** The distinct routes and operation names the sections declare, in registry order. */
 export function declaredCalls(): { routes: string[]; operations: string[] } {
   return {
@@ -132,5 +128,5 @@ export function declaredCalls(): { routes: string[]; operations: string[] } {
 
 export const ENDPOINT_ANCHORS: EndpointAnchors = (() => {
   const { routes, operations } = declaredCalls();
-  return resolveAnchors(specOperations(), ENDPOINT_DOCS, routes, operations);
+  return resolveAnchors(loadSpec().paths, ENDPOINT_DOCS, routes, operations);
 })();

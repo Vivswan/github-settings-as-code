@@ -1,34 +1,55 @@
 /**
- * Structural checks need only the query TEXT and run always; full schema validation runs when the fetched, gitignored schema artifact is present.
- * Locally its absence skips with the fetch command; in CI the artifact is cache-restored or re-fetched before `bun test`, so absence there is a
- * broken pipeline and FAILS.
+ * Structural checks need only the query TEXT; full validation runs against GitHub's published schema as the
+ * @octokit/graphql-schema package ships it, extended by the SDL of the upstream gaps the package lags. A
+ * Dependabot bump that retires a field a query selects fails here, and one that ships a gap's field fails the
+ * extension, naming the gap file to retire.
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildSchema, type OperationDefinitionNode, parse, validate, visit } from "graphql";
+import { schema as published } from "@octokit/graphql-schema";
+import {
+  buildSchema,
+  extendSchema,
+  GraphQLSchema,
+  type OperationDefinitionNode,
+  parse,
+  validate,
+  visit,
+} from "graphql";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../src/sections/branches/graphql-rules.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
-import { ROOT } from "../root.js";
+import type { UnshippedGraphqlSdl } from "../../src/upstream-gaps/gap.js";
+import { UNSHIPPED_GRAPHQL_SDL } from "../../src/upstream-gaps/index.js";
 
-const SCHEMA_PATH = join(ROOT, "test", "e2e", "graphql", "schema.docs.graphql");
-const FETCH_COMMAND = "bun .github/scripts/fetch-graphql-schema.ts";
-
-const schemaAvailable = existsSync(SCHEMA_PATH);
-if (!schemaAvailable) {
-  if (process.env.CI) {
-    throw new Error(
-      `the GraphQL schema is missing at ${SCHEMA_PATH} in CI. The checks workflow must restore it from cache or fetch it (${FETCH_COMMAND}) before running tests`,
-    );
+/**
+ * The published schema plus every graphql-schema gap's SDL. assumeValid skips graphql-js's schema-level validation,
+ * which rejects GitHub's SDL as-is (it deprecates implementation fields whose interface fields are not deprecated).
+ * Each extension is validated without the flag, so a type or field the package now ships is refused (the gap's
+ * tripwire); the result is rebuilt as assumeValid for the query validation.
+ */
+function schemaWithGaps(
+  gaps: readonly UnshippedGraphqlSdl[] = UNSHIPPED_GRAPHQL_SDL,
+): GraphQLSchema {
+  let schema = buildSchema(published.idl, { assumeValid: true });
+  for (const { file, sdl } of gaps) {
+    try {
+      schema = new GraphQLSchema({
+        ...extendSchema(schema, parse(sdl)).toConfig(),
+        assumeValid: true,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `the pinned @octokit/graphql-schema refuses the SDL of ${file}, so it now ships what that gap declares: ` +
+          `delete the file and regenerate the index (bun .github/scripts/gen-gaps-index.ts). ${reason}`,
+      );
+    }
   }
-  console.warn(
-    `graphql-queries: schema validation skipped - the fetched artifact is missing at ${SCHEMA_PATH}. Generate it with: ${FETCH_COMMAND}`,
-  );
+  return schema;
 }
 
 /** The single operation definition of a declared query, asserted to exist. */
@@ -63,10 +84,8 @@ describe("declared GraphQL queries", () => {
     }
   });
 
-  test.skipIf(!schemaAvailable)("every query validates against GitHub's published schema", () => {
-    // assumeValid skips graphql-js's SCHEMA-level validation, which rejects GitHub's published SDL as-is (it deprecates implementation fields whose
-    // interface fields are not deprecated); each QUERY is still validated.
-    const schema = buildSchema(readFileSync(SCHEMA_PATH, "utf8"), { assumeValid: true });
+  test("every query validates against GitHub's published schema, extended by the upstream gaps", () => {
+    const schema = schemaWithGaps();
     for (const [key, op] of Object.entries(allGraphqlOps())) {
       const errors = validate(schema, parse(op.query));
       expect(
@@ -74,6 +93,16 @@ describe("declared GraphQL queries", () => {
         `${key}: the query must validate against the schema`,
       ).toEqual([]);
     }
+  });
+
+  test("a gap whose SDL the package already ships fails the extension naming the gap file (negative control)", () => {
+    const shipped = {
+      file: "src/upstream-gaps/example.ts",
+      sdl: "extend type Repository { id: ID! }",
+    };
+    expect(() => schemaWithGaps([shipped])).toThrow(
+      /refuses the SDL of src\/upstream-gaps\/example\.ts[\s\S]*Field "Repository\.id" already exists/,
+    );
   });
 
   test.each(["branches.rulesQuery", "branches.rulesSnapshot"] as const)(

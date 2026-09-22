@@ -4,17 +4,27 @@ import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
 import { excludeUndocumented, USED_PATHS } from "./paths.js";
 import {
+  loadSpec,
   OpenApiValidator,
   type OpenApiViolation,
   pathMatches,
-  readSpecText,
   sharedValidator,
   toJsonSchema,
+  trimDescriptor,
   validateExchange,
 } from "./validate.js";
 
 function req(overrides: Partial<LoggedRequest>): LoggedRequest {
   return { method: "GET", pathname: "/", query: "", status: 200, ...overrides };
+}
+
+/** The descriptor node at `keys`, for the lockstep tests, which walk into schemas the validator does not type. */
+function at(root: unknown, ...keys: string[]): Record<string, unknown> {
+  let node: unknown = root;
+  for (const key of keys) {
+    node = (node as Record<string, unknown>)[key];
+  }
+  return node as Record<string, unknown>;
 }
 
 const line = (violation: OpenApiViolation): string => `${violation.kind}: ${violation.detail}`;
@@ -325,13 +335,13 @@ describe("OpenApiValidator against the fetched spec", () => {
     // The per_page cap is not machine-readable: it lives in the description prose. GitHub CLAMPS an
     // oversized per_page and the page loop stops on a short page, so an undeclared sub-100 cap
     // silently truncates after page one (the variables family is capped at 30).
-    const spec = JSON.parse(readSpecText()) as {
+    const spec = loadSpec() as {
       paths?: Record<
         string,
         Record<string, { parameters?: unknown[] }> & { parameters?: unknown[] }
       >;
     };
-    // trim-openapi.ts rejects any surviving $ref, so parameters are inline objects.
+    // loadSpec() rejects any surviving $ref, so parameters are inline objects.
     const asParam = (param: unknown): { name?: string; description?: string } =>
       param as { name?: string; description?: string };
     let cappedEndpoints = 0;
@@ -577,18 +587,51 @@ describe("OpenApiValidator against the fetched spec", () => {
   });
 });
 
-describe("the fetched trimmed spec", () => {
+describe("the descriptor slice", () => {
   test("contains exactly the USED_PATHS paths (no more, no fewer)", () => {
-    // Read through the loaded validator, not a static JSON import, so a missing spec surfaces the
-    // actionable fetch error from load() rather than a module-resolution failure.
+    // Read through the loaded validator, so the pinned @octokit/openapi descriptor is what is cut.
     const specPaths = [...sharedValidator().paths()].sort();
     expect(specPaths).toEqual([...USED_PATHS].sort());
   });
 
-  test("a missing spec throws a loud, actionable fetch error naming the script", () => {
-    expect(() => OpenApiValidator.loadFrom("/nonexistent/github-openapi.trimmed.json")).toThrow(
-      /bun \.github\/scripts\/trim-openapi\.ts/,
+  const doc = {
+    paths: {
+      "/repos/{owner}/{repo}": { get: {} },
+      "/repos/{owner}/{repo}/labels": { get: {}, post: {} },
+      "/repos/{owner}/{repo}/lfs": { put: {} },
+    },
+  };
+
+  test.each<[string, string[], string[], RegExp]>([
+    [
+      "a used path the descriptor lacks",
+      ["/repos/{owner}/{repo}", "/repos/{owner}/{repo}/topics"],
+      [],
+      /not in the @octokit\/openapi descriptor:\n {2}\/repos\/\{owner\}\/\{repo\}\/topics\n/,
+    ],
+    [
+      "an undocumented path the descriptor now documents",
+      ["/repos/{owner}/{repo}"],
+      ["/repos/{owner}/{repo}/lfs"],
+      /now documents: \/repos\/\{owner\}\/\{repo\}\/lfs\. Retire the owning gap/,
+    ],
+  ])("%s fails the load by name", (_, used, undocumented, message) => {
+    expect(() => trimDescriptor(doc, used, undocumented)).toThrow(message);
+  });
+
+  test("a $ref left in the kept slice fails the load; one on a path outside the slice is cut away with it", () => {
+    const withRef = {
+      paths: {
+        ...doc.paths,
+        "/user/repos": { get: { parameters: [{ $ref: "#/components/parameters/per-page" }] } },
+      },
+    };
+    expect(() => trimDescriptor(withRef, ["/user/repos"], [])).toThrow(
+      /still contains \$ref pointers \(e\.g\. #\/components\/parameters\/per-page\)/,
     );
+    expect(Object.keys(trimDescriptor(withRef, ["/repos/{owner}/{repo}"], []).paths)).toEqual([
+      "/repos/{owner}/{repo}",
+    ]);
   });
 });
 
@@ -654,18 +697,17 @@ describe("mock rule-type catalog lockstep", () => {
     // accepted bodies against the SPEC's enums. Drift either falsely 422s a real new type or lets
     // the mock accept a type the validator flags; pinned equal, a spec refresh is the one update point.
     const { RULESET_RULE_TYPES } = await import("../mock/support.js");
-    const spec = JSON.parse(readSpecText());
+    const { paths } = loadSpec();
     const operations = [
-      spec.paths["/repos/{owner}/{repo}/rulesets"].post,
-      spec.paths["/repos/{owner}/{repo}/rulesets/{ruleset_id}"].put,
+      at(paths, "/repos/{owner}/{repo}/rulesets", "post"),
+      at(paths, "/repos/{owner}/{repo}/rulesets/{ruleset_id}", "put"),
     ];
     for (const operation of operations) {
-      const rules = operation.requestBody.content["application/json"].schema.properties.rules;
+      const body = at(operation, "requestBody", "content", "application/json", "schema");
+      const items = at(body, "properties", "rules", "items");
       // Only TOP-LEVEL variants count: rule parameters nest their own `type` enums (actor kinds and
       // the like) that a deep walk would wrongly collect.
-      const variants = (rules.items.oneOf ?? rules.items.anyOf ?? []) as Array<
-        Record<string, unknown>
-      >;
+      const variants = (items.oneOf ?? items.anyOf ?? []) as Array<Record<string, unknown>>;
       const specTypes = new Set<string>();
       for (const variant of variants) {
         const type = (variant.properties as Record<string, unknown> | undefined)?.type as
@@ -688,13 +730,20 @@ describe("invitation role vocabulary lockstep", () => {
     // The collaborators handler gates PATCH-vs-note on this set and the mock clamps stored invitation
     // permissions into it, so a spec refresh that moves the enum must land here too.
     const { INVITATION_ROLES } = await import("../../../src/sections/shared/roles.js");
-    const spec = JSON.parse(readSpecText());
-    const getEnum = spec.paths["/repos/{owner}/{repo}/invitations"].get.responses["200"].content[
-      "application/json"
-    ].schema.items.properties.permissions.enum as string[];
-    const patchEnum = spec.paths["/repos/{owner}/{repo}/invitations/{invitation_id}"].patch
-      .requestBody.content["application/json"].schema.properties.permissions.enum as string[];
-    for (const specEnum of [getEnum, patchEnum]) {
+    const { paths } = loadSpec();
+    const listed = at(paths, "/repos/{owner}/{repo}/invitations", "get", "responses", "200");
+    const getEnum = at(listed, "content", "application/json", "schema", "items", "properties")
+      .permissions as { enum: string[] };
+    const patch = at(paths, "/repos/{owner}/{repo}/invitations/{invitation_id}", "patch");
+    const patchEnum = at(
+      patch,
+      "requestBody",
+      "content",
+      "application/json",
+      "schema",
+      "properties",
+    ).permissions as { enum: string[] };
+    for (const specEnum of [getEnum.enum, patchEnum.enum]) {
       expect(specEnum.length).toBeGreaterThan(0);
       expect([...INVITATION_ROLES].sort()).toEqual([...specEnum].sort());
     }

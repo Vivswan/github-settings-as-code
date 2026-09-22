@@ -5,7 +5,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 ## Toolchain
 
 - `src/` is TypeScript built with [bun](https://bun.com). The scripts in `package.json` are the commands; `bun run check` is the whole local gate.
-- `bun run test`, `bun run test:e2e`, and `bun run fuzz` start with `bun run test:artifacts`, which fetches the two gitignored test artifacts (the trimmed OpenAPI spec, the GraphQL schema) when one is absent or was fetched from a URL other than the one its script builds (the pinned ref, and the API version for the spec). A fresh checkout fetches once (a few seconds); a current file costs no network. CI restores the same files from cache and then runs the same command.
+- GitHub's OpenAPI descriptor and GraphQL schema come from the `@octokit/openapi` and `@octokit/graphql-schema` devDependencies, so no test or generator touches the network. Dependabot moves the pins; a bump that stops documenting a path the action calls, starts documenting an upstream gap, or retires a field a query selects fails the schema tests on that PR by name.
 - Committed generated output is the table in `.github/scripts/generated.ts`: `lib/settings.schema.json`, `src/upstream-gaps/index.ts`, and the generated regions of `action.yml` and the docs pages.
 - `bun run build:check` regenerates every table entry and fails on drift.
 - `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into them.

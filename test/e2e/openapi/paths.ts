@@ -1,7 +1,7 @@
 /**
- * Every REST path template the action can reach, derived from the endpoint declarations. The trim
- * script (.github/scripts/trim-openapi.ts) imports USED_PATHS to slice the published spec down to
- * what the mock must model, so this file stays dependency-light and re-derives nothing.
+ * Every REST path template the action can reach, derived from the endpoint declarations. The
+ * validator (validate.ts) cuts the published descriptor down to USED_PATHS, what the mock must model,
+ * so this file stays dependency-light and re-derives nothing.
  */
 
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
@@ -27,9 +27,9 @@ const CORE_PATHS: readonly string[] = [
 
 /**
  * Real endpoints GitHub's descriptor does not document (src/upstream-gaps/ holds them), kept out of USED_PATHS so
- * trim-openapi does not hard-error while the e2e validator exempts the exact METHOD+path pairs. Staleness fails in both directions:
+ * the validator's load does not hard-error while it exempts the exact METHOD+path pairs. Staleness fails in both directions:
  *   an entry is no longer a declared endpoint path  -> excludeUndocumented() throws
- *   upstream starts documenting one                 -> trim-openapi.ts errors; retire the gap file
+ *   a package bump documents one                    -> loadSpec() errors; retire the gap file
  */
 export const UNDOCUMENTED_PATHS: readonly string[] = [
   ...new Set(UNDOCUMENTED_ROUTES.map(endpointPath)),

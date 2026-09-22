@@ -1,6 +1,6 @@
 /**
  * What GitHub keeps of a request body, decided once for every section route before its handler runs:
- * the fields the trimmed spec documents. api.github.com ignores an unknown key on an open body (the
+ * the fields the descriptor documents. api.github.com ignores an unknown key on an open body (the
  * GET never echoes it, so a misspelled setting never converges) and answers a 422 on a closed one; a
  * handler that stored the body verbatim would hide both from every scenario.
  */

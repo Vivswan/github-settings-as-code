@@ -1,6 +1,5 @@
 /**
- * One reader for the workflow and composite-action YAML the docs tests pin: the parsed shapes and the setup composite
- * every repo-owned job goes through.
+ * One reader for the workflow YAML the docs tests pin, and the parsed shapes.
  */
 
 import { readFileSync } from "node:fs";
@@ -52,19 +51,10 @@ export interface Workflow {
   env?: Record<string, string>;
   jobs: Record<string, Job>;
 }
-interface CompositeAction {
-  runs: { using?: string; steps?: Step[] };
-}
-
 export function workflowText(file: string): string {
   return readFileSync(join(WORKFLOWS_DIR, file), "utf8");
 }
 
 export function readWorkflow(file: string): Workflow {
   return parseYaml(workflowText(file)) as Workflow;
-}
-
-/** `dir` is relative to the repository root, e.g. `.github/actions/setup`. */
-export function readAction(dir: string): CompositeAction {
-  return parseYaml(readFileSync(join(ROOT, dir, "action.yml"), "utf8")) as CompositeAction;
 }

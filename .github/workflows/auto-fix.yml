@@ -77,8 +77,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
       - uses: ./.github/actions/setup
-      # build:docs reads the fetched OpenAPI spec for the coverage page's endpoint links.
-      - uses: ./.github/actions/fetch-test-artifacts
       - name: Graduate upstream gaps octokit now ships
         shell: bash
         run: bun .github/scripts/graduate-upstream-gaps.ts
