@@ -1,7 +1,15 @@
 # The release-PR hook of the release pipeline: repo-owned (a generated-once starter, never overwritten by sync),
 # called by the managed ci.yml whenever release-please creates or refreshes the release PR, independently of any
-# release cut. Its one job is the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline.ts): called
-# in the run that refreshed the PR, GITHUB_SHA is exactly the main head the refresh was built on.
+# release cut. Inside a called workflow github.sha is the caller's: the push to main that release-please judged, the
+# head the refresh was built on. Two independent jobs share that sha and nothing else:
+#
+#   anchor        -> the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline.ts) inside the PR branch
+#   publish-next  -> the library pre-release to npm under the `next` dist-tag
+#
+# The publish lives here because release-please's refresh IS the releasable signal: release-please-config.json leaves
+# always-update off, so the PR is refreshed only when the release notes change, i.e. when a commit of a type its
+# changelog shows lands (feat, fix, perf, revert, or a breaking marker). A push of hidden types alone (test, docs, chore,
+# build, ci, refactor) refreshes nothing and publishes nothing; no check of this repository's own decides a publish.
 #
 # The anchor is pushed with the default github.token, which starts no workflows, so the PR's checks do not re-run
 # on the anchored head; anchor-check's failure message says to close and reopen the PR.
@@ -33,3 +41,126 @@ jobs:
           install: "false"
       - name: Anchor the boundary inside the release PR branch
         run: bun .github/scripts/release-pipeline.ts anchor
+
+  # The npm-publish lane exists because the registry has no compare-and-set: the pre-publish guard's read still holds
+  # when its publish lands, whichever publisher (this job, update-release.yml's) took the lane before it.
+  #   no ACTIONS_ID_TOKEN_REQUEST_URL -> the caller granted none (a fork, a ceiling change); step one skips the rest
+  #   shared lane                     -> update-release.yml's publish takes the same lane; no caller holds it
+  #   queue: max                      -> a lane keeps ONE pending job by default; a dropped job fails the call
+  #   guard reads the record          -> the lane serializes but does not order; GitHub promises no queue order
+  #   confirm holds the lane          -> a job ends once the registry shows its publish, so the next holder's guard sees it
+  # No permissions key: a job asking above the caller's ceiling fails the whole call, anchor included, so the OIDC
+  # grant arrives by inheritance from the id-token: write the managed ci.yml gives this call, and a ceiling without
+  # it reaches step one's warn-and-skip instead of a validation failure.
+  publish-next:
+    if: github.repository == 'Vivswan/github-settings-as-code'
+    concurrency:
+      group: npm-publish
+      queue: max
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the caller grants an OIDC token
+        id: oidc
+        run: |
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::this run has no OIDC token (the update-release-pr call in the managed ci.yml grants no id-token: write);" \
+              "the library pre-release was not published to npm." \
+              "Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every release-PR refresh to @next."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.oidc.outputs.proceed == 'true'
+        with:
+          ref: ${{ github.sha }}
+          # The version counts main's commits under this one and the guard places published sources by ancestry; a shallow checkout can do neither.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        if: steps.oidc.outputs.proceed == 'true'
+      # registry-url writes the .npmrc npm publishes through; with no
+      # NODE_AUTH_TOKEN the action leaves a placeholder there, which npm's
+      # OIDC exchange replaces.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.oidc.outputs.proceed == 'true'
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (and its provenance) exists from npm 11.5.1 on; an
+      # older bundled npm is upgraded once, then held to the floor.
+      - name: Require an npm that publishes through OIDC
+        if: steps.oidc.outputs.proceed == 'true'
+        run: |
+          floor=11.5.1
+          below_floor() { [ "$(printf '%s\n' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }
+          if below_floor; then
+            npm install -g npm@latest
+          fi
+          if below_floor; then
+            echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."
+            exit 1
+          fi
+      - name: Build the library
+        if: steps.oidc.outputs.proceed == 'true'
+        run: bun run build:lib
+      # scripts.prepare is dropped from the published manifest: it installs
+      # lefthook, a devDependency the tarball does not carry, and npm blocks
+      # install scripts from a provenance-attested package anyway.
+      # The guard is a safety on npm state, not a decision about whether to
+      # publish (the refresh that called this workflow decided that): it reads
+      # the registry's origin record (the CDN's copy lags a publish by up to
+      # 300 s) and places every published pre-release by the ancestry of the
+      # source sha it names. A version already there (a rerun of this run) or
+      # a pre-release of a descendant of this commit (a stale retry after
+      # newer runs published) publishes nothing, so next never moves back on
+      # what the run can see; a source the checkout cannot place is ignored
+      # with a notice. A registry error stops the job instead of publishing
+      # blind. npm's provenance names the commit in GITHUB_SHA, so the source
+      # is passed in.
+      - name: Publish the pre-release under the next dist-tag
+        id: publish
+        if: steps.oidc.outputs.proceed == 'true'
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict next)"
+          case "$verdict" in
+            publish\ *)
+              npm version "${verdict#publish }" --no-git-tag-version
+              npm pkg delete scripts.prepare
+              GITHUB_SHA="$SOURCE_SHA" npm publish --tag next
+              echo "published=true" >> "$GITHUB_OUTPUT" ;;
+            skip\ *) echo "::notice::${verdict#skip }" ;;
+            *)
+              echo "unexpected npm-verdict output: $verdict"
+              echo "::error::npm-verdict printed neither publish nor skip; see the line above."
+              exit 1 ;;
+          esac
+      # npm makes a publish readable asynchronously. This step holds the lane
+      # until the record shows the version (15 reads, 20 s apart), so the next
+      # holder's guard sees it; a record that never shows it warns. It then
+      # fails the job if the record holds a descendant's pre-release and next
+      # names none: OIDC authenticates npm publish alone, not npm dist-tag add,
+      # so no tag is moved here and the next release-PR refresh moves next
+      # forward instead. A rerun of the failed run publishes nothing, skips this step,
+      # and passes.
+      - name: Confirm the registry shows the publish and next moved forward
+        if: steps.publish.outputs.published == 'true'
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          confirmed="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-confirm next)"
+          case "$confirmed" in
+            settled\ *) echo "::notice::${confirmed#settled }" ;;
+            unsettled\ *) echo "::warning::${confirmed#unsettled }" ;;
+            behind\ *)
+              echo "::error::${confirmed#behind }"
+              exit 1 ;;
+            *)
+              echo "unexpected npm-confirm output: $confirmed"
+              echo "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above."
+              exit 1 ;;
+          esac

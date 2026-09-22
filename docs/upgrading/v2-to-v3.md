@@ -4,7 +4,9 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-eight breaks. Nine are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, 56, and 58), one is for anyone pinning a sha (section 21), and eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Section 53 is silent: YAML merge keys resolve. Section 57 respells one validation message.
+Fifty-nine breaks. Nine are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, 56, and 58), and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
+
+Eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Sections 53 and 57 are silent: YAML merge keys resolve, and one validation message is respelled.
 
 The library sections describe the public entry, `@vivswan/github-settings-as-code`. The internal entry, `@vivswan/github-settings-as-code/internal`, carries no contract ([the two entries](../reference/library.md#the-two-entries)), so a change to a name that lives only there is not a break and this guide does not list it as a break. A name leaving the public entry for the internal one is a break, listed in [section 9](#9-library-the-public-entry-and-the-v3-names).
 
@@ -72,6 +74,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | Library: `plan()` and `snapshot()` resolve to a `Result` | `await labels.plan(ctx, declared)` resolved to the plan and rejected on a denied read, a duplicated live pair, or a live body the section could not reconcile | Both resolve to a neverthrow `Result`: the plan or snapshot on `Ok`, a `SectionFailure` on `Err`; a rejection is left for the wrong-context refusal, a client that throws instead of answering, and `BUG:` invariants | Reading `.ops` or `.value` off the awaited value fails to compile (`TS2339`); `rejects.toThrow` assertions on a section call pass a resolved promise through; [section 56](#56-library-plan-and-snapshot-resolve-to-a-result) |
 | A closed section's unrecognized key names the entry by index | `collaborators[octocat]: declares "permision", which this section does not recognize ...` | `collaborators[0] (username "octocat"): declares "permision", which this section does not recognize ...`; under a wrapper, `collaborators.entries[0] (username "octocat")` | Anything that greps the bracket for the entry's identity needs the new spelling; [section 57](#57-a-closed-sections-unrecognized-key-names-the-entry-by-index) |
 | Library: `GitHubClient` and `ArtifactUploader` answer, never reject | `tryRequest()` and `tryGraphql()` rejected for a request with no HTTP answer (not sent, the transport failed, a GraphQL body off the wire contract); `upload()` rejected to report a failed upload | Both port methods resolve to a `ClientAnswer` whose third arm is `{ failed }`, the whole line; `upload()` resolves to `{ uploaded: true }` or `{ failed }`. A test double that still throws is read as a broken contract: the failure is reported, never classified | A double returning `void` from `upload()`, or a caller reading `.data` off a `ClientAnswer` without narrowing `failed`, fails to compile; [section 58](#58-library-githubclient-and-artifactuploader-answer-never-reject) |
+| `next` publishes on a release-PR refresh | The pre-release v3 builds published a `next` pre-release from every green push to `main` that changed the shipped surface | The pre-release publishes when release-please creates or refreshes the release PR, which a releasable commit (feat, fix, perf, revert, or a breaking marker) does; a merge of hidden types alone publishes nothing | No error: `@next` keeps resolving, to the last releasable commit's pre-release; a build of one exact commit is the packaged commit under its `build/*` tag; [section 59](#59-next-publishes-on-a-release-pr-refresh) |
 
 ## 1. The defaults-file fallback
 
@@ -1245,6 +1248,22 @@ v3            const answer = await client.tryRequest("GET", path);      // resol
 `ArtifactUploader.upload()` resolves to `{ uploaded: true }` or `{ failed }`; `deliverArtifactReport` renders `failed` into its warning as it rendered the throw. A client or uploader that still throws is not classified: a section reports it under kind `thrown`, the report channels warn with their slug-free line.
 
 Fix: add the `failed` arm to every `GitHubClient` double and read it before `error`; return `{ uploaded: true }` from every `ArtifactUploader` double.
+
+## 59. `next` publishes on a release-PR refresh
+
+For anyone installing `@vivswan/github-settings-as-code@next`. The pre-release v3 builds published a `next` pre-release from every green push to `main` that changed what the tarball ships or builds it; v3 publishes one when release-please creates or refreshes the release PR, and nowhere else.
+
+A releasable commit publishes in the run that lands it; a merge of hidden types alone (a `build(deps)` bump, a test, a doc) publishes nothing. [Versioning](../reference/library.md#versioning) owns the rule, the guard that keeps `next` from moving back, and its residual window.
+
+```text
+pre-release   merge build(deps): bump yaml   -> green -> bun.lock changed        -> publish 3.0.1-main.447.20260922.gabc1234 under next
+              merge fix(x): ...              -> green -> src/ changed             -> publish 3.0.1-main.448.20260922.gdef5678 under next
+
+v3            merge build(deps): bump yaml   -> green -> no release-PR refresh    -> nothing published
+              merge fix(x): ...              -> green -> release PR refreshed     -> publish 3.0.1-main.448.20260922.gdef5678 under next
+```
+
+Fix: nothing for a consumer of `@next`. For a build of one exact commit, install the packaged commit (`github:Vivswan/github-settings-as-code#<packaged sha>`, from a `build/<position>.<sha7>` tag, the ten newest kept, or a release tag).
 
 ## Order of operations
 

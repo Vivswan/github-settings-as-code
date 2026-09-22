@@ -123,7 +123,7 @@ jobs:
   # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before the draft's
   # assets check out. Until the owner's one-time npm setup exists this job fails and holds the draft; a rerun converges.
   # package-release sits in needs for its output alone (a job reads outputs only from its direct dependencies).
-  # The lane is the one post-green.yml's publish-next takes: the registry has no compare-and-set, so the two
+  # The lane is the one update-release-pr.yml's publish-next takes: the registry has no compare-and-set, so the two
   # publishers never overlap and a verdict still holds when its publish lands; queue: max keeps every queued
   # publish (a lane drops all but one pending job by default).
   publish-npm:
@@ -167,7 +167,7 @@ jobs:
       - name: Build the library
         run: bun run build:lib
       # scripts.prepare is dropped from the published manifest, as in
-      # post-green.yml's publish-next.
+      # update-release-pr.yml's publish-next.
       # The verdict holds the built package.json to the tag and reads the
       # registry: a version already there (a rerun) or a latest that is a
       # newer release (an older release's job rerun after a newer release)
