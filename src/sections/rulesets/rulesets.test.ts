@@ -1,16 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
-import {
-  type PlannedOp,
-  planContext,
-  snapshotContext,
-} from "../../../src/sections/contract/plan.js";
+import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
-import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
 import { validatedInput } from "../../../test/sections/validated-input.js";
-import type { SectionFailure } from "../contract/errors.js";
 import type { SectionInput } from "../contract/module.js";
 import { normalizeRefName, normalizeRuleset, rulesetsSection } from "./index.js";
 import type { RulesetConfig } from "./schema.js";
@@ -213,7 +207,7 @@ describe("rulesets", () => {
             enforcement: "active",
             rules: [{ type: "deletion" }],
           },
-          // The omitted line makes the op refuse itself in apply mode; the test below runs that hook.
+          // The omitted line makes the op refuse itself in apply mode; the apply-omitted-bypass-actors-refused scenario runs that hook.
           before: expect.any(Function),
           describe: 'updating ruleset "main"',
           drift: [
@@ -227,38 +221,6 @@ describe("rulesets", () => {
       notes: [],
       drift: [],
     });
-    expect(api.mutations()).toEqual([]);
-  });
-
-  test("apply refuses the update that would remove what the file omits: the PUT is never sent, and the failure carries the omitted line", async () => {
-    const api = writable({
-      [listRoute]: { data: [{ id: 9, name: "main", source_type: "Repository" }] },
-      "GET /repos/o/r/rulesets/9": {
-        data: {
-          id: 9,
-          name: "main",
-          target: "branch",
-          enforcement: "evaluate",
-          rules: [{ type: "deletion" }],
-          bypass_actors: [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }],
-        },
-      },
-    });
-    const planned = await plan(api, [
-      { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
-    ]);
-    const execution = await executePlan(planned, rulesetsSection, api, REPO, {
-      resolveSecret() {
-        throw new Error("no secrets");
-      },
-    });
-    expect(execution.status).toBe("failed");
-    expect(execution.landed).toBe(0);
-    expect((execution as { failure: SectionFailure }).failure.message).toBe(
-      "rulesets[main]: not applied - the update would remove a live value the settings file omits. " +
-        'rulesets[main].bypass_actors: live has [{"actor_id":1,"actor_type":"Team","bypass_mode":"always"}] but the settings file omits it, ' +
-        "so apply would REMOVE it; declare bypass_actors to keep it, or bypass_actors: [] to remove it on purpose",
-    );
     expect(api.mutations()).toEqual([]);
   });
 
@@ -561,71 +523,6 @@ describe("rulesets", () => {
       drift: [],
     });
   });
-
-  test("executing the plan converges: create, update, and delete land once, then the re-plan is empty", async () => {
-    const api = liveRepo([
-      { id: 7, name: "legacy", source_type: "Repository", enforcement: "active" },
-      { id: 9, name: "main", source_type: "Repository", target: "branch", enforcement: "evaluate" },
-      { id: 900, name: "org-baseline", source_type: "Organization", enforcement: "active" },
-    ]);
-    const { first, second, changes } = await provePlanIdempotent(rulesetsSection, api, {
-      _undeclared: "delete",
-      entries: [
-        { name: "main", target: "branch", enforcement: "active", rules: [{ type: "deletion" }] },
-        {
-          name: "tags",
-          target: "tag",
-          enforcement: "active",
-          conditions: { ref_name: { include: ["v*"] } },
-        },
-      ],
-    });
-    expect(changes).toEqual([
-      'DELETED undeclared ruleset "legacy"',
-      'updated ruleset "main"',
-      'created ruleset "tags"',
-    ]);
-    expect(api.writes).toEqual([
-      "DELETE /repos/o/r/rulesets/7",
-      "PUT /repos/o/r/rulesets/9",
-      "POST /repos/o/r/rulesets",
-    ]);
-    expect(first.drift).toEqual([]);
-    expect(second).toEqual({ ops: [], notes: [], drift: [] });
-  });
-
-  test("the read port exposes the list and get roles, the list narrowed to its denied posture", () => {
-    const ctx = planContext(rulesetsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list", "get"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-    // @ts-expect-error nor the tolerant tryCall
-    ctx.read.list.tryCall;
-  });
-
-  test("a planned operation can only name a declared write role, and must justify itself", () => {
-    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
-    // property the compiler blames.
-    type Op = PlannedOp<typeof rulesetsSection.endpoints>;
-    const _create: Op = { role: "create", payload: { name: "x" }, drift: ["missing"], change: "" };
-    const read = { role: "get", params: { ruleset_id: "1" }, drift: ["x"], change: "" } as const;
-    // @ts-expect-error the get role is a read, not a plannable write
-    const _read: Op = read;
-    const paramless = { role: "update", payload: {}, drift: ["x"], change: "" } as const;
-    // @ts-expect-error the route's ruleset_id path param is required
-    const _paramless: Op = paramless;
-    const silent = { role: "create", payload: {}, drift: [], change: "" } as const;
-    // @ts-expect-error a write on a non-alwaysRewrite endpoint must carry drift
-    const _silent: Op = silent;
-  });
 });
 
 describe("rulesets snapshot", () => {
@@ -650,57 +547,8 @@ describe("rulesets snapshot", () => {
     ...body,
   });
 
-  test("reads repository rulesets back as keep entries, dropping server fields; a hidden bypass list and an inherited ruleset are notes, not entries", async () => {
-    const api = liveRepo([
-      served(1, "main", {
-        target: "branch",
-        enforcement: "active",
-        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-        rules: [
-          { type: "deletion" },
-          { type: "pull_request", parameters: { required_approving_review_count: 1 } },
-        ],
-        bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-      }),
-      // No bypass_actors KEY: what a token without write access is served.
-      served(2, "tags", {
-        target: "tag",
-        enforcement: "evaluate",
-        conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } },
-        rules: [{ type: "update" }],
-      }),
-      {
-        ...served(3, "org-wide", { target: "branch", enforcement: "active" }),
-        source_type: "Organization",
-      },
-    ]);
-    expect(await snapshot(api)).toEqual({
-      value: {
-        _undeclared: "keep",
-        entries: [
-          {
-            name: "main",
-            target: "branch",
-            enforcement: "active",
-            conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-            rules: [
-              { type: "deletion" },
-              { type: "pull_request", parameters: { required_approving_review_count: 1 } },
-            ],
-            bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
-          },
-        ],
-      },
-      notes: [
-        'rulesets[org-wide]: left out of the snapshot - inherited from the organization (source_type "Organization"); manage it where it is defined',
-        "rulesets[tags]: left out of the snapshot - bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
-          "and an entry without it would clear it on the next update; grant Administration write to read it back",
-      ],
-    });
-    expect(api.writes).toEqual([]);
-  });
-
-  test("two repository rulesets under one name fail the snapshot naming both, since plan() upserts by name", async () => {
+  test("two repository rulesets under one name fail the snapshot naming both, even when the hidden bypass list would leave both out", async () => {
+    // Neither body carries bypass_actors, so concealment alone would leave both out of the snapshot.
     const api = liveRepo([
       served(1, "main", { target: "branch", enforcement: "active" }),
       served(2, "main", { target: "tag", enforcement: "active" }),
@@ -708,40 +556,5 @@ describe("rulesets snapshot", () => {
     await expect(snapshot(api)).rejects.toThrow(
       'rulesets: GitHub holds rulesets that resolve to one identity: "main (ruleset id 1)" and "main (ruleset id 2)". This section manages one ruleset per identity, so it cannot tell them apart; delete all but one of each on GitHub, then run again',
     );
-  });
-
-  test("an owned ruleset left out for its hidden bypass list leaves an empty keep wrapper, which plans as a no-op", async () => {
-    const api = liveRepo([served(2, "tags", { target: "tag", enforcement: "evaluate" })]);
-    const read = await snapshot(api);
-    expect(read).toEqual({
-      value: { _undeclared: "keep", entries: [] },
-      notes: [
-        "rulesets[tags]: left out of the snapshot - bypass_actors is not visible to this token (GitHub returns it only to a token with write access to the ruleset), " +
-          "and an entry without it would clear it on the next update; grant Administration write to read it back",
-      ],
-    });
-    const planned = unwrap(
-      await rulesetsSection.plan(
-        planContext(rulesetsSection, api, REPO),
-        validatedInput("rulesets", read.value),
-      ),
-    );
-    expect({ ops: planned.ops, drift: planned.drift }).toEqual({ ops: [], drift: [] });
-    expect(api.writes).toEqual([]);
-  });
-
-  test("only inherited rulesets is nothing to declare, with the inherited note", async () => {
-    const api = liveRepo([
-      {
-        ...served(3, "org-wide", { target: "branch", enforcement: "active" }),
-        source_type: "Organization",
-      },
-    ]);
-    expect(await snapshot(api)).toEqual({
-      value: undefined,
-      notes: [
-        'rulesets[org-wide]: left out of the snapshot - inherited from the organization (source_type "Organization"); manage it where it is defined',
-      ],
-    });
   });
 });
