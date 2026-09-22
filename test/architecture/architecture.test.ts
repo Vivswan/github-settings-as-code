@@ -71,6 +71,30 @@ describe("importSpecifiers", () => {
     ["a star re-export", 'export * from "./a.js";', ["./a.js"]],
     ["a require call", 'const a = require("./a.js");', ["./a.js"]],
     ["a literal dynamic import", 'const a = await import("./a.js");', ["./a.js"]],
+    [
+      "a template dynamic import with no expression",
+      "const a = await import(`./a.js`);",
+      ["./a.js"],
+    ],
+    [
+      "a file opening with a shebang, as the bin entry does",
+      '#!/usr/bin/env node\nimport { a } from "./a.js";',
+      ["./a.js"],
+    ],
+    ["an inline type-only specifier", 'import { type A } from "./a.js";', ["./a.js"]],
+    ["a runtime import-equals", 'import A = require("./a.js");', ["./a.js"]],
+    [
+      "a require or its argument behind parentheses, a non-null assertion, a cast, or a type argument",
+      [
+        'const a = (require)("./a.js");',
+        'const b = require!("./b.js");',
+        'const c = (require as any)("./c.js");',
+        'const d = ((require as <T>(id: string) => T)<number>)("./d.js");',
+        'const e = require(("./e.js"));',
+        'const f = require("./f.js" as string);',
+      ].join("\n"),
+      ["./a.js", "./b.js", "./c.js", "./d.js", "./e.js", "./f.js"],
+    ],
     ["an import in a type position", 'export type A = import("./a.js").A;', ["./a.js"]],
     ["a type-only import-equals", 'import type A = require("./a.js");', ["./a.js"]],
     ["a package import, which is not an edge", 'import { z } from "zod";', []],
@@ -84,12 +108,24 @@ describe("importSpecifiers", () => {
   });
 
   test("a computed dynamic import throws rather than dropping the edge", () => {
-    // The whole message: the scanner is shared with changed-sections, so under lint:arch it must not blame that tool.
-    expect(() => importSpecifiers('const m = "./a.js"; await import(m);', "x.ts")).toThrow(
-      new Error(
-        "x.ts:1 loads a module through a computed specifier, which the import graph cannot follow - use a string literal",
-      ),
-    );
+    // The whole message, with the file and line: the fix is in that file, not in the lint.
+    for (const [text, form] of [
+      ['const m = "./a.js";\nawait import(m);', "import(m)"],
+      ['const m = "./a.js";\nconst a = require(m);', "require(m)"],
+      [`const m = "a";\nawait import(\`./\${m}.js\`);`, "a template with an expression"],
+    ] as const) {
+      expect(() => importSpecifiers(text, "x.ts"), form).toThrow(
+        new Error(
+          "x.ts:2 loads a module through a computed specifier, which the import graph cannot follow - use a string literal",
+        ),
+      );
+    }
+  });
+
+  test("a file that does not parse throws naming the line rather than reading a partial graph", () => {
+    expect(() =>
+      importSpecifiers('import { a } from "./a.js";\nexport function broken(: never {', "x.ts"),
+    ).toThrow(/^x\.ts:2 does not parse: /);
   });
 });
 

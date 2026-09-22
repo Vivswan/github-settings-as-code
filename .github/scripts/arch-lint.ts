@@ -2,22 +2,22 @@
  * The architecture lint (bun run lint:arch): src/ imports between layers must be exactly the edges architecture.yml
  * declares; an undeclared edge and a stale allowance both fail. dependency-cruiser was the intended tool, but it
  * needs the TypeScript compiler API, which the pinned typescript 7 no longer ships, so it resolves nothing here.
- *   runtime loads (what the changed-sections scanner reads)                   -> edges
- *   type-only imports, re-exports                                            -> edges too
+ *   runtime loads: imports, re-exports, literal `import()` and `require()`   -> edges
+ *   type-only imports and re-exports                                         -> edges too
  *   `import("./x.js").T`, `import X = require("./x.js")` in type positions   -> edges too
+ *   a computed `import(x)` or `require(x)`                                   -> fails: the graph cannot follow it
  *
  * The same walk carries the never-throw rule the `throws` block of architecture.yml states beside its lists.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, normalize, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, normalize, relative, resolve } from "node:path";
 import { inspect } from "node:util";
 import { err, ok, Result } from "neverthrow";
 import { type Node, parseSync } from "oxc-parser";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 import { countNoun } from "../../src/text.js";
-import { resolveImport, scanImports } from "./changed-sections.js";
 
 export const ARCHITECTURE_PATH = "architecture.yml";
 
@@ -170,26 +170,106 @@ function* nodesOf<S>(
 
 const stateless = (): undefined => undefined;
 
-export function importSpecifiers(text: string, file: string): string[] {
-  const { program, module } = parseSync(file, text);
-  const typeLevel = [...nodesOf(program, undefined, stateless)].flatMap(({ node }) => {
-    const source =
-      node.type === "TSImportType"
-        ? node.source
-        : node.type === "TSExternalModuleReference"
-          ? node.expression
+/** The expression under the wrappers parentheses and TypeScript add: `(require)(x)`, `require!(x)`,
+ * `(require as any)(x)`, `require<T>(x)`. */
+function unwrapped(expression: Node): Node {
+  switch (expression.type) {
+    case "ParenthesizedExpression":
+    case "TSNonNullExpression":
+    case "TSAsExpression":
+    case "TSSatisfiesExpression":
+    case "TSTypeAssertion":
+    case "TSInstantiationExpression":
+      return unwrapped(expression.expression);
+    default:
+      return expression;
+  }
+}
+
+/** Whether the node loads a module: a static import or re-export, `import()`, `require()`, `import("./x.js").T`,
+ * or `import X = require("./x.js")`. */
+function isModuleLoad(node: Node): boolean {
+  switch (node.type) {
+    case "ImportDeclaration":
+    case "ExportAllDeclaration":
+    case "ImportExpression":
+    case "TSImportType":
+    case "TSExternalModuleReference":
+      return true;
+    case "ExportNamedDeclaration":
+      return node.source !== null;
+    case "CallExpression": {
+      const callee = unwrapped(node.callee);
+      return callee.type === "Identifier" && callee.name === "require";
+    }
+    default:
+      return false;
+  }
+}
+
+/** The module a load names, or undefined when the specifier is computed (`import(x)`, `require(x)`, a template
+ * with expressions), which the graph cannot follow. */
+function literalModuleRequest(node: Node): string | undefined {
+  const raw =
+    node.type === "TSExternalModuleReference"
+      ? node.expression
+      : node.type === "CallExpression"
+        ? node.arguments[0]
+        : "source" in node
+          ? node.source
           : undefined;
-    return source?.type === "Literal" && typeof source.value === "string" ? [source.value] : [];
-  });
-  const all = new Set([
-    ...scanImports(text, file),
-    ...module.staticImports.map((entry) => entry.moduleRequest.value),
-    ...module.staticExports.flatMap((entry) =>
-      entry.entries.flatMap((item) => (item.moduleRequest ? [item.moduleRequest.value] : [])),
-    ),
-    ...typeLevel,
-  ]);
-  return [...all].filter((specifier) => /^\.\.?\//.test(specifier));
+  const request = raw === undefined || raw === null ? undefined : unwrapped(raw);
+  if (request?.type === "Literal" && typeof request.value === "string") {
+    return request.value;
+  }
+  if (request?.type === "TemplateLiteral" && request.expressions.length === 0) {
+    return request.quasis[0]?.value.cooked ?? undefined;
+  }
+  return undefined;
+}
+
+/** Every relative specifier `text` loads, each once. A file that does not parse or loads a module through a
+ * computed specifier throws naming the line: a dropped edge would let a forbidden import pass. */
+export function importSpecifiers(text: string, file: string): string[] {
+  const { program, errors } = parseSync(file, text);
+  const lineOf = (offset: number): number => text.slice(0, offset).split("\n").length;
+  const [error] = errors;
+  if (error) {
+    throw new Error(
+      `${file}:${lineOf(error.labels[0]?.start ?? 0)} does not parse: ${error.message}`,
+    );
+  }
+  const specifiers = new Set<string>();
+  for (const { node } of nodesOf(program, undefined, stateless)) {
+    if (!isModuleLoad(node)) {
+      continue;
+    }
+    const specifier = literalModuleRequest(node);
+    if (specifier === undefined) {
+      throw new Error(
+        `${file}:${lineOf(node.start)} loads a module through a computed specifier, which the import graph cannot follow - use a string literal`,
+      );
+    }
+    specifiers.add(specifier);
+  }
+  return [...specifiers].filter((specifier) => /^\.\.?\//.test(specifier));
+}
+
+/** Source spells the emitted `.js`, hence the `.ts` and `/index.ts` candidates. Nothing found throws: a dangling
+ * specifier would silently drop an edge. */
+function resolveImport(importer: string, specifier: string): string {
+  const target = resolve(dirname(importer), specifier);
+  const candidates = specifier.endsWith(".json")
+    ? [target]
+    : [`${target.replace(/\.[jt]s$/, "")}.ts`, join(target.replace(/\.[jt]s$/, ""), "index.ts")];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    `${importer} imports "${specifier}", which resolves to no file (tried ${candidates.join(" and ")})`,
+  );
 }
 
 /** The src/ files under the lint, root-relative. */

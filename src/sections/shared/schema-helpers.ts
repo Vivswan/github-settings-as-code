@@ -1,7 +1,6 @@
 /**
  * Imports only zod, renamed-key.ts, and the text leaf: a section schema importing src/schema.ts back would be a cycle
  * whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
- * The smoke selector (.github/scripts/changed-sections.ts) derives this file's section fan-out from the import graph.
  */
 
 import { z } from "zod";
