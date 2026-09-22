@@ -6,15 +6,11 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": [
-      "**",
-      "!lib",
-      "!src/upstream-gaps/index.ts",
-      "!.github/repo-platform-manifest.json"
-    ]
+    "includes": ["**", "!lib", "!.github/repo-platform-manifest.json"]
   },
   "formatter": {
     "enabled": true,
+    "includes": ["**", "!src/upstream-gaps/index.ts"],
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100
@@ -52,6 +48,20 @@
     }
   },
   "overrides": [
+    {
+      "includes": ["src/upstream-gaps/index.ts"],
+      "assist": {
+        "actions": {
+          "source": {
+            "organizeImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**", "!src/cli/inputs.ts"],
+      "plugins": ["./lint/never-throw.grit"]
+    },
     {
       "includes": ["src/action/**"],
       "linter": {

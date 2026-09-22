@@ -1,0 +1,55 @@
+// The never-throw rule of AGENTS.md as a Biome linter plugin: a `throw` under src/ is a BUG: invariant (a
+// programming error no user can cause) or a bare rethrow of the catch binding; anything else is a failure the
+// caller should receive as a Result.
+//
+// Reach and exemptions are the plugin's `overrides` entry in biome.json, with `includes` relative to the repository
+// root; a top-level `plugins[].includes` matches the absolute path (biomejs/biome#11082), so the checkout's parent
+// directories would decide the reach. The one exemption:
+//   src/cli/inputs.ts  -> commander's argParser reports a refused value by throwing InvalidArgumentError; it has no value form
+//
+// GritQL has no scopes, so a second binding of the caught name anywhere in the catch body (a declaration, a
+// destructuring, a nested function's parameter) flags every rethrow in that body, not only the shadowed one; the
+// fix is to rename. A namespace or an `import x = require()` counts as a binding too. A name inside a type alias, an
+// interface, or a type annotation does not, since nothing there holds a value; a function-type parameter anywhere else
+// (a cast, a return type, a declare signature) still counts, and the fix is the same rename. The regex reads the literal's source text, so BUG: must open the string or template itself.
+
+`throw $arg` as $throw where {
+  not or {
+    and {
+      $arg <: JsNewExpression(arguments=JsCallArguments(args=[$first, ...])),
+      or { $first <: JsStringLiteralExpression(), $first <: JsTemplateExpression() },
+      $first <: r"^[\"'`]BUG:[\s\S]*"
+    },
+    and {
+      $arg <: JsIdentifierExpression(),
+      // A throw from a function nested in the catch body may run after the clause has ended, and one from a try
+      // nested there is caught or rethrown by that try, so the walk up from the throw to its clause stops at both.
+      $throw <: within JsCatchClause(declaration=JsCatchDeclaration(binding=$arg), body=$body) until or {
+        JsTryStatement(),
+        JsTryFinallyStatement(),
+        JsArrowFunctionExpression(),
+        JsFunctionExpression(),
+        JsFunctionDeclaration(),
+        JsMethodObjectMember(),
+        JsMethodClassMember(),
+        JsGetterObjectMember(),
+        JsSetterObjectMember(),
+        JsGetterClassMember(),
+        JsSetterClassMember(),
+        JsConstructorClassMember()
+      },
+      not $body <: contains or {
+        JsIdentifierBinding() as $binding where {
+          not $binding <: within or {
+            TsTypeAnnotation(),
+            TsTypeAliasDeclaration(),
+            TsInterfaceDeclaration()
+          }
+        },
+        TsModuleDeclaration(name=$binding),
+        TsImportEqualsDeclaration(id=$binding)
+      } where { $binding <: $arg }
+    }
+  },
+  register_diagnostic(span=$throw, message="throw outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead")
+}

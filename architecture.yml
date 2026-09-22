@@ -46,14 +46,3 @@ edges:
   problem: [plain-data, schema, text]
   schema: [sections, types]
   upstream-gaps: [types]
-
-# The never-throw rule: errors are values, so a `throw` in src/ is a `BUG:` invariant (a programming error no user
-# can cause), a bare rethrow sitting directly inside its catch clause, or spared here. `contracts` lists the files
-# whose throw IS a third party's contract, each with its reason. `ratchet` lists every other throw by file with its
-# exact count: the lint fails when this list and the tree disagree in either direction, and refuses a count it cannot
-# compare. That a count only ever goes down is the review rule in AGENTS.md, not the lint's.
-throws:
-  contracts:
-    # commander's argParser reports a refused value by throwing InvalidArgumentError; it has no value form.
-    - src/cli/inputs.ts
-  ratchet: {}
