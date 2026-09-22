@@ -1,6 +1,6 @@
 /**
- * The two npm publishers (post-green.yml's publish-next, update-release.yml's publish-npm) share one contract, trusted publishing
- * through the runner's OIDC token and nothing else, and one was copied from the other. The relations here: both are guarded to the
+ * The two npm publishers (update-release-pr.yml's publish-next, update-release.yml's publish-npm) share one contract, trusted
+ * publishing through the runner's OIDC token and nothing else, and one was copied from the other. The relations here: both are guarded to the
  * repository package.json names; both take one lane; the stable one runs after every other job of its workflow; neither hands npm a
  * token, as the library page promises; the steps they share are the same text; both publish to one registry. The probe, the floor
  * guard, and the publish blocks also run under bash against stubs, since no pin shows what a branch does.
@@ -66,7 +66,7 @@ const setupNode = (job: RunJob): Step =>
 
 const STABLE_FILE = "update-release.yml";
 const STABLE_JOB = "publish-npm";
-const NEXT_FILE = "post-green.yml";
+const NEXT_FILE = "update-release-pr.yml";
 const NEXT_JOB = "publish-next";
 const publishers = () => {
   const nextWorkflow = readWorkflow(NEXT_FILE);

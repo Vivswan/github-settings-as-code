@@ -53,7 +53,7 @@ describe("package.json as the npm manifest", () => {
   });
 
   test("publishes a public scoped package from the repository the schema names", () => {
-    // post-green.yml (publish-next) and update-release.yml (publish-npm) run a bare `npm publish` under trusted publishing: a scoped package
+    // update-release-pr.yml (publish-next) and update-release.yml (publish-npm) run a bare `npm publish` under trusted publishing: a scoped package
     // publishes restricted without publishConfig.access, and provenance verifies repository.url against the workflow's repository.
     expect("private" in pkg).toBe(false);
     expect(pkg.publishConfig).toEqual({ access: "public" });

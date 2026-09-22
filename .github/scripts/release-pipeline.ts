@@ -18,13 +18,17 @@
  * per workflow step:
  *
  *   package-commit                 post-green.yml          GITHUB_SHA, RUN_URL (optional)
- *   prerelease-version             post-green.yml          GITHUB_SHA
- *   npm-verdict next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional)
- *   npm-confirm next               post-green.yml          GITHUB_SHA, NPM_REGISTRY_URL (optional), NPM_CONFIRM_PAUSE_MS (optional)
+ *   anchor                         update-release-pr.yml   GITHUB_SHA
+ *   npm-verdict next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional)
+ *   npm-confirm next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional), NPM_CONFIRM_PAUSE_MS (optional)
  *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
- *   anchor                         update-release-pr.yml   GITHUB_SHA
  *   boundary-check, anchor-check   checks.yml              (the checkout alone)
+ *   prerelease-version             by hand                 GITHUB_SHA (the version a commit's next publish carries)
+ *
+ * The `next` pre-release publishes when release-please creates or refreshes the release PR, which it does only when a
+ * releasable commit lands (release-please-config.json leaves always-update off); npm-verdict next is the guard on
+ * npm state that follows, never the decision to publish.
  *
  * Node builtins only: bun runs this before `bun install`. Tests: test/scripts/release-pipeline*.test.ts over release-pipeline-fixture.ts.
  */
@@ -42,34 +46,6 @@ const PACKAGED_PATHS = ["lib/index.js", "lib/pkg/"] as const;
 /** What every packaged commit must carry as non-empty regular files. */
 const REQUIRED_BUILT_FILES = ["lib/index.js", "lib/pkg/index.js"] as const;
 const PACKAGED = "lib/index.js and lib/pkg/";
-/**
- * What a `next` publish ships beyond package.json and the entries of its `files` list (read at the source: lib/pkg/,
- * lib/settings.schema.json, LICENSE.md, README.md today): lib/pkg/ is tsdown's build of src/ under tsdown.config.ts
- * and tsconfig.json with the versions bun.lock pins; the version is minted from the release manifest by this script;
- * the publish job rewrites the manifest (npm version, npm pkg delete) before npm reads it; and .gitattributes shapes
- * the bytes the checkout writes for every packed file. lib/index.js and action.yml ride the packaged commit, never
- * the tarball, and src/ covers the bundle's inputs anyway. A commit that changes none of these since the source of
- * the pre-release `next` names publishes nothing.
- */
-export const NEXT_BUILD_INPUTS = [
-  "src/",
-  "tsdown.config.ts",
-  "tsconfig.json",
-  "bun.lock",
-  MANIFEST_FILE,
-  ".gitattributes",
-  ".github/scripts/release-pipeline.ts",
-  ".github/workflows/post-green.yml",
-] as const;
-/** What under src/ the build never packs, so a change to it alone publishes nothing: tests, e2e scenarios and their
- * generators, mock handlers, and the docs prose (a trailing "/" names a directory, a leading "*" a file-name suffix). */
-export const NEXT_BUILD_UNPACKED = [
-  "*.test.ts",
-  "scenarios/",
-  "*.docs.yml",
-  "mock.ts",
-  "generators.ts",
-] as const;
 const LATEST_REF = "refs/tags/latest";
 const BUILD_TAG_PREFIX = "refs/tags/build/";
 const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;
@@ -857,7 +833,7 @@ export function mainPosition(cwd: string, sourceSha: string): MainPosition {
 }
 
 /**
- * The npm version a green main commit's library build publishes under the `next` dist-tag: the manifest version's
+ * The npm version a main commit's library build publishes under the `next` dist-tag: the manifest version's
  * next patch, then `main`, the source's position on main, and its short sha. That sorts above the last release,
  * below the next one whatever its bump, and along main: npm compares the count first, and it grows by one with
  * each merge (the date is for the reader; two merges on one day share it). The sha carries a `g` prefix, as git
@@ -892,7 +868,7 @@ export function prereleaseVersion(
 
 export interface PrereleaseVersionOptions {
   cwd: string;
-  /** The green main commit this run judged; the checkout must be at it. */
+  /** The commit whose build is published; the checkout must be at it. */
   sourceSha: string;
 }
 
@@ -963,7 +939,7 @@ export interface Packument {
 export type PublishVerdict =
   | { publish: true; version: string }
   | { publish: false; version: string; reason: string };
-/** The next channel's verdict also carries, one line each, the published pre-releases it set aside: a source the checkout cannot place. */
+/** The next channel's guard also carries, one line each, the published pre-releases it set aside: a source the checkout cannot place. */
 export type NextVerdict = PublishVerdict & { notices: string[] };
 
 /** A published pre-release whose source is a strict descendant of this run's: newer on main, whatever its numbers say. */
@@ -974,20 +950,14 @@ interface Descendant {
 }
 
 /**
- * Where a pre-release's source stands to this run's, once its sha resolves: the run's own commit, an ancestor on the
- * source's first-parent chain (a main commit), an ancestor off that chain (inside a merged branch), a strict
+ * Where a pre-release's source stands to this run's, once its sha resolves: the run's own commit, an ancestor, a strict
  * descendant, or one on neither side of the source (off its line of main).
  */
-type Placement = "own" | "ancestor" | "merged" | "descendant" | "unrelated";
+type Placement = "own" | "ancestor" | "descendant" | "unrelated";
 /** A source placed, or one the checkout lacks (a sha it never fetched, or a short one naming several objects). */
 type Placed = { sha: string; placement: Placement } | { sha: null; placement: "unresolved" };
 
-function placeSource(
-  cwd: string,
-  sourceSha: string,
-  sha7: string,
-  onMain: (sha: string) => boolean,
-): Placed {
+function placeSource(cwd: string, sourceSha: string, sha7: string): Placed {
   const sha = resolveCommit(cwd, sha7);
   if (sha === null) {
     return { sha, placement: "unresolved" };
@@ -1000,74 +970,36 @@ function placeSource(
   if (descends(sourceSha, sha)) {
     return { sha, placement: "descendant" };
   }
-  if (!descends(sha, sourceSha)) {
-    return { sha, placement: "unrelated" };
-  }
-  return { sha, placement: onMain(sha) ? "ancestor" : "merged" };
-}
-
-/** Whether a sha is on the source's first-parent chain, main's own history: an ancestor off it came in with a merged
- * branch. The chain is listed once, on the first ancestor asked about. */
-function mainChainOf(cwd: string, sourceSha: string): (sha: string) => boolean {
-  let chain: Set<string> | null = null;
-  return (sha) => {
-    chain ??= new Set(git(cwd, "rev-list", "--first-parent", sourceSha).split("\n"));
-    return chain.has(sha);
-  };
-}
-
-/** The build `next` names, placed: the base the shipped-surface comparison starts from. */
-interface NextBase {
-  version: string;
-  sha: string;
-  placement: Placement;
+  return { sha, placement: descends(sha, sourceSha) ? "ancestor" : "unrelated" };
 }
 
 /**
  * The published pre-releases placed against this run's source by ancestry: the descendants, the one furthest along
  * main, and a notice for each the checkout cannot place. The version `next` names is placed with them, whether or not
- * the record lists it; null when it names none, carries no sha, or the checkout lacks its commit.
+ * the record lists it.
  */
 function placePublished(
   cwd: string,
   sourceSha: string,
   packument: Packument,
-): {
-  descendants: Descendant[];
-  newest: Descendant | null;
-  notices: string[];
-  next: NextBase | null;
-} {
+): { descendants: Descendant[]; newest: Descendant | null; notices: string[] } {
   const descendants: Descendant[] = [];
   const notices: string[] = [];
   let newest: Descendant | null = null;
   const nextVersion = packument["dist-tags"].next;
-  let next: NextBase | null = null;
   const versions = new Set(Object.keys(packument.versions));
   if (nextVersion !== undefined) {
     versions.add(nextVersion);
   }
-  const onMain = mainChainOf(cwd, sourceSha);
   for (const version of versions) {
     const sha7 = sha7Of(version);
     if (sha7 === null) {
       continue;
     }
-    const placed = placeSource(cwd, sourceSha, sha7, onMain);
-    const isNext = version === nextVersion;
-    const noBase = isNext
-      ? ", and next names it, so there is no build to compare the shipped surface against: every change counts as shipped"
-      : "";
+    const placed = placeSource(cwd, sourceSha, sha7);
     if (placed.sha === null) {
-      notices.push(
-        `${version} names ${sha7}, which is no commit in this checkout; ignored${noBase}`,
-      );
-      continue;
-    }
-    if (isNext) {
-      next = { version, sha: placed.sha, placement: placed.placement };
-    }
-    if (placed.placement === "descendant") {
+      notices.push(`${version} names ${sha7}, which is no commit in this checkout; ignored`);
+    } else if (placed.placement === "descendant") {
       descendants.push({ version, sha: placed.sha });
       if (
         newest === null ||
@@ -1077,110 +1009,19 @@ function placePublished(
       }
     } else if (placed.placement === "unrelated") {
       notices.push(
-        `${version} names ${sha7}, which is neither an ancestor nor a descendant of ${sourceSha.slice(0, 7)} on main; ignored${noBase}`,
+        `${version} names ${sha7}, which is neither an ancestor nor a descendant of ${sourceSha.slice(0, 7)} on main; ignored`,
       );
     }
   }
-  return { descendants, newest, notices, next };
-}
-
-/** A `files` entry names a file, or a directory with or without the trailing slash; a glob would need npm's packlist. */
-const FILES_GLOB = /[*?[\]{}!]/;
-
-/**
- * The tree paths a `next` publish ships, read at the source: package.json itself (npm always packs the manifest), the
- * entries of its `files` list, and the build's inputs. Null, with the reason, when the list is not plain paths: a
- * manifest without one packs the whole tree, and a glob is not matched here; either way every change counts as shipped.
- */
-function shippedPaths(
-  cwd: string,
-  sourceSha: string,
-): { paths: string[]; unreadable: null } | { paths: null; unreadable: string } {
-  const pkg = JSON.parse(git(cwd, "show", `${sourceSha}:${MANIFEST}`)) as { files?: unknown };
-  const files = pkg.files;
-  if (!Array.isArray(files) || !files.every((entry) => typeof entry === "string")) {
-    return {
-      paths: null,
-      unreadable: `${MANIFEST} at ${sourceSha.slice(0, 7)} has no files list, so npm packs the whole tree`,
-    };
-  }
-  const glob = files.find((entry) => FILES_GLOB.test(entry));
-  if (glob !== undefined) {
-    return {
-      paths: null,
-      unreadable: `${MANIFEST} at ${sourceSha.slice(0, 7)} lists ${JSON.stringify(glob)} in files, a pattern this comparison does not match`,
-    };
-  }
-  return { paths: [MANIFEST, ...files, ...NEXT_BUILD_INPUTS], unreadable: null };
-}
-
-/** The root files npm packs whatever `files` says, as npm-packlist spells them: `/readme{,.*[^~$]}`, `/copying{,.*[^~$]}`,
- * `/licen[cs]e{,.*[^~$]}`, any case; a glob star crosses no separator, and an editor backup suffix is left out. */
-const ALWAYS_PACKED = /^(?:readme|copying|licen[cs]e)(?:\.[^/]*[^~$/])?$/i;
-const ALWAYS_PACKED_TEXT = "or a root README, COPYING, or LICENSE";
-const UNPACKED_TEXT = `(under src/, ${NEXT_BUILD_UNPACKED.join(", ")} are never packed and do not count)`;
-
-/** Whether a path under src/ is one the build never packs. */
-function unpacked(path: string): boolean {
-  const segments = path.split("/");
-  if (segments[0] !== "src") {
-    return false;
-  }
-  const name = segments[segments.length - 1] ?? "";
-  return NEXT_BUILD_UNPACKED.some((entry) =>
-    entry.endsWith("/")
-      ? segments.slice(1, -1).includes(entry.slice(0, -1))
-      : entry.startsWith("*")
-        ? name.endsWith(entry.slice(1))
-        : name === entry,
-  );
-}
-
-/** Whether `path` is one of `shipped`, lies under one of its directories, or is a root file npm always packs; a path
- * under src/ the build never packs is not, whatever it lies under. */
-function ships(shipped: string[], path: string): boolean {
-  if (unpacked(path)) {
-    return false;
-  }
-  return (
-    ALWAYS_PACKED.test(path) ||
-    shipped.some((entry) => {
-      const dir = entry.replace(/\/$/, "");
-      return path === dir || path.startsWith(`${dir}/`);
-    })
-  );
+  return { descendants, newest, notices };
 }
 
 /**
- * The shipped paths some merge to main after `base`, up to the source, touches: each first-parent step's own diff, not
- * the two trees'. A change one merge makes and the next reverts leaves the trees equal, and the runs for the two can
- * take the lane in either order: judged by trees, the revert's run would skip and the change's run would then publish
- * what main no longer holds. `--no-renames` lists a moved file under both names, so one moved out of the surface still
- * counts as a change to it.
- */
-function shippedChanges(cwd: string, base: string, sourceSha: string, shipped: string[]): string[] {
-  const touched = git(
-    cwd,
-    "log",
-    "--first-parent",
-    "--diff-merges=first-parent",
-    "--format=",
-    "--name-only",
-    "--no-renames",
-    `${base}..${sourceSha}`,
-  )
-    .split("\n")
-    .filter((path) => path !== "" && ships(shipped, path));
-  return [...new Set(touched)].sort();
-}
-
-/**
- * Every published pre-release is placed by its source's ancestry, so a run for an older commit publishes nothing
- * once a newer commit's pre-release is on the registry, whatever order the two runs finished in (`npm publish --tag
- * next` moves next to whatever it publishes). Then the build `next` names is the base: when no merge to main after it,
- * up to this source, touched a shipped path, the run publishes nothing, so a docs-only merge mints no version. A
- * base the checkout cannot place, or a files list it cannot read as paths, is no reason to hold a build back: the run
- * publishes, saying why in a notice. Null is a package the registry has never seen: the first publish goes.
+ * The pre-publish guard on npm state, not a decision about whether to publish (the release-PR refresh that runs the
+ * publish job made that): every published pre-release is placed by its source's ancestry, so a rerun of a run that
+ * already published, or a stale retry once a newer commit's pre-release is on the registry, publishes nothing,
+ * whatever order the runs finished in (`npm publish --tag next` moves next to whatever it publishes). A source the
+ * checkout cannot place is set aside with a notice. Null is a package the registry has never seen: the first publish goes.
  */
 export function nextPublishVerdict(
   cwd: string,
@@ -1189,15 +1030,10 @@ export function nextPublishVerdict(
   packument: Packument | null,
 ): NextVerdict {
   if (packument === null) {
-    return {
-      publish: true,
-      version,
-      notices: [
-        "the registry holds no record of this package yet, so there is no build to compare the shipped surface against; publishing",
-      ],
-    };
+    return { publish: true, version, notices: [] };
   }
-  if (version in packument.versions) {
+  // A dist-tag names a version the registry holds, so next naming this one is the same rerun as the record listing it.
+  if (version in packument.versions || packument["dist-tags"].next === version) {
     return {
       publish: false,
       version,
@@ -1205,57 +1041,22 @@ export function nextPublishVerdict(
       notices: [],
     };
   }
-  const { newest: newer, notices, next } = placePublished(cwd, sourceSha, packument);
-  if (newer !== null) {
+  const { newest, notices } = placePublished(cwd, sourceSha, packument);
+  if (newest !== null) {
     return {
       publish: false,
       version,
-      reason: `the registry already holds ${newer.version}, whose source ${newer.sha.slice(0, 7)} is a descendant of ${sourceSha.slice(0, 7)} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
+      reason: `the registry already holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} is a descendant of ${sourceSha.slice(0, 7)} on main, so this stale run publishes nothing (npm publish --tag next would move next back)`,
       notices,
     };
-  }
-  const nextVersion = packument["dist-tags"].next;
-  if (nextVersion === undefined) {
-    notices.push(
-      "the registry's next names no version, so there is no build to compare the shipped surface against; publishing",
-    );
-  } else if (sha7Of(nextVersion) === null) {
-    notices.push(
-      `the registry's next is ${nextVersion}, which names no source sha, so there is no build to compare the shipped surface against; publishing`,
-    );
-  } else if (next !== null && next.placement === "merged") {
-    notices.push(
-      `the registry's next is ${next.version}, whose source ${next.sha.slice(0, 7)} is inside a branch merged to main, not a main commit, so the merges since it cannot be walked; publishing`,
-    );
-  } else if (next !== null && (next.placement === "ancestor" || next.placement === "own")) {
-    const shipped = shippedPaths(cwd, sourceSha);
-    if (shipped.paths === null) {
-      notices.push(
-        `${shipped.unreadable}; every change since ${next.version} counts as shipped, publishing`,
-      );
-    } else {
-      const changed = shippedChanges(cwd, next.sha, sourceSha, shipped.paths);
-      if (changed.length === 0) {
-        return {
-          publish: false,
-          version,
-          reason: `no shipped file changed since ${next.version} (source ${next.sha.slice(0, 7)}): no merge to main in ${next.sha.slice(0, 7)}..${sourceSha.slice(0, 7)} touches ${shipped.paths.join(", ")}, ${ALWAYS_PACKED_TEXT} ${UNPACKED_TEXT}`,
-          notices,
-        };
-      }
-      notices.push(
-        `${changed.length} shipped ${changed.length === 1 ? "file" : "files"} changed since ${next.version} (source ${next.sha.slice(0, 7)}): ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", ..." : ""}`,
-      );
-    }
   }
   return { publish: true, version, notices };
 }
 
 /**
  * Only `latest` is consulted: a plain `npm publish` moves latest and leaves
- * next alone, and a release is meant to sort below the pre-releases that
- * followed its merge (the merge commit's own run publishes the next patch's
- * pre-release before this job runs).
+ * next alone. A release sorts above the pre-releases published before its
+ * merge; the next release PR's first refresh publishes the one above it.
  */
 export function stablePublishVerdict(version: string, packument: Packument | null): PublishVerdict {
   if (packument === null) {
@@ -1389,9 +1190,8 @@ export interface NpmConfirmOptions {
  * lane until the next holder's verdict can see this publish (npm makes a publish readable asynchronously; a verdict
  * read in that gap would move next back). Once it shows, and a descendant's pre-release is on the record, next
  * must name a descendant's, or this stale run moved it back. A drift is reported, not repaired: trusted publishing (OIDC)
- * authenticates `npm publish` alone, not `npm dist-tag add` (npm/cli#8547); the next green push that changes the
- * shipped surface publishes and moves next forward, and a rerun of the reporting run publishes nothing and passes, so
- * a blocked release can go on.
+ * authenticates `npm publish` alone, not `npm dist-tag add` (npm/cli#8547); the next release-PR refresh publishes and
+ * moves next forward, and a rerun of the reporting run publishes nothing and passes.
  */
 export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVerdict> {
   const { cwd, sourceSha, registry, attempts, delayMs } = options;
@@ -1422,8 +1222,8 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
           version,
           reason:
             `the registry's next is ${next ?? "unset"} while it holds ${newest.version}, whose source ${newest.sha.slice(0, 7)} ` +
-            `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next green push ` +
-            `that changes the shipped surface moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
+            `is a descendant of ${sourceSha.slice(0, 7)} on main; this stale run moved next back, and the next release-PR ` +
+            `refresh moves it forward (npm dist-tag add ${name}@${newest.version} next repairs it by hand)`,
         };
       }
       return { outcome: "settled", version, reads: read };
@@ -1432,7 +1232,7 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
       return {
         outcome: "unsettled",
         version,
-        reason: `the registry's record still lacks ${version} after ${attempts} reads over ${Math.round(((attempts - 1) * delayMs) / 1000)} s; a run judged before it shows may move next back, and the green push after it moves next forward`,
+        reason: `the registry's record still lacks ${version} after ${attempts} reads over ${Math.round(((attempts - 1) * delayMs) / 1000)} s; a run judged before it shows may move next back, and the release-PR refresh after it moves next forward`,
       };
     }
     await sleep(delayMs);

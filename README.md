@@ -64,7 +64,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 The same engine is the npm package `@vivswan/github-settings-as-code` (ESM, Node 22.14 or newer): validate, merge, check, and apply from your own code.
 
-- `npm install @vivswan/github-settings-as-code` installs the released version; `@next` installs the newest green `main` commit as a pre-release. The [library reference](docs/reference/library.md) has the API by group and the versioning rules.
+- `npm install @vivswan/github-settings-as-code` installs the released version; `@next` installs the pre-release of the `main` commit release-please last refreshed the release PR on ([Versioning](docs/reference/library.md#versioning)). The [library reference](docs/reference/library.md) has the API by group and the versioning rules.
 - `npx @vivswan/github-settings-as-code@next check --repository o/r --settings-file .github/settings.yml` runs the action's check from a terminal. The [command line guide](docs/start/cli.md) has every command.
 
 ## Docs

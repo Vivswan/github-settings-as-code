@@ -12,7 +12,7 @@ Three ways in, one package:
 
 ```bash
 npm install @vivswan/github-settings-as-code          # the released version (npm dist-tag latest)
-npm install @vivswan/github-settings-as-code@next     # the newest green main commit that changed the library, a pre-release
+npm install @vivswan/github-settings-as-code@next     # the pre-release of the main commit the release PR was last refreshed on
 npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packaged commit: a build tag's or a release tag's
 ```
 
@@ -385,7 +385,7 @@ The package and the action share one version, the one in `.release-please-manife
 
 | npm dist-tag | Publishes on | Version | Install |
 |---|---|---|---|
-| `next` | Every green push to `main` that changes what the tarball ships or builds it | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next` |
+| `next` | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next` |
 | `latest` | Every release cut | The released version: `2.1.0`. Until the first release it names a `next` pre-release: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it whatever `--tag` asked for, and the first stable release moves it | `npm install @vivswan/github-settings-as-code` |
 | none | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
@@ -397,23 +397,21 @@ The npm dist-tag `latest` is not the git tag `latest`: the git tag names the pac
   - `g95d081d`: its short sha; the `g` marks a git object id, as `git describe` writes it (a bare all-digit sha such as `0123456` would be read by npm as the number 123456).
   - Two runs for one commit mint the same string, whenever they run.
 - A pre-release sorts above the last release and below the next one whatever its bump, and later commits on main sort later: npm compares the count first, and it grows by one with each merge (the date is for the reader; two merges on one day share it).
-  - The one pre-release that sorts above a release is the release merge commit's own: its manifest already carries the new version.
-  - So `next` moves to `2.1.1-main.<count>.<date>.g<sha7>` in the same run that publishes `2.1.0`, the order the two channels are meant to keep (next above latest).
-- `next` moves only to a descendant. The publish verdict resolves the sha in every published `-main.` version in its full checkout and places it against this run's commit:
+  - A release merge refreshes no release PR, so it publishes no pre-release: after `2.1.0` publishes, `next` names the last pre-release below it (`2.0.1-main...`) until the first releasable commit of the next cycle opens the next release PR, whose refresh publishes `2.1.1-main.<count>.<date>.g<sha7>`. `npm install ...@next` resolves the dist-tag whatever the ordering.
+- `next` moves only to a descendant. The pre-publish guard resolves the sha in every published `-main.` version in its full checkout and places it against this run's commit:
   - a pre-release whose source is a strict descendant: this run is stale and publishes nothing, whatever order the two runs finished in;
   - a sha the checkout cannot resolve, or one that is neither ancestor nor descendant (off main): ignored, with a notice in the log;
   - the run's own version already on the registry (a rerun of that commit): publishes nothing.
-- A `next` build appears when the shipped surface changed, not on every merge: the verdict walks the merges to main after the source of the build `next` names, up to this commit, and skips when none touched a shipped path. A docs-only merge publishes nothing, with a notice naming the base version and its source.
-  - The shipped surface: `package.json`, its `files` list, `src/`, the build config, `bun.lock`, the release manifest, and the publish recipe (`NEXT_BUILD_INPUTS` in the pipeline script derives it).
-  - Under `src/`, what the build never packs does not count: `*.test.ts`, `scenarios/`, `*.docs.yml`, `mock.ts`, and `generators.ts` (`NEXT_BUILD_UNPACKED` lists them). A merge that touches only those publishes nothing.
-  - A base the checkout cannot place (no `next` yet, a release under it, a sha the checkout lacks, off main, or inside a merged branch), or a `files` list that is not plain paths, publishes and says why: nothing to compare against is no reason to hold a build back.
+- A `next` build appears when release-please creates or refreshes the release PR, and nowhere else: the release hook `update-release-pr.yml` publishes in the run that refreshed it, from the commit the refresh was built on.
+  - release-please refreshes the PR only when the release notes change (`always-update` is off in `release-please-config.json`), which a releasable commit does: feat, fix, perf, revert, or a breaking marker. A merge of hidden types alone (chore, build, ci, test, docs, refactor) refreshes nothing and publishes nothing, a dependency bump under `build(deps)` included.
+  - No check of the repository's own decides a publish. The guard above is a safety on registry state: a rerun of the run, or a stale retry after a newer commit published, publishes nothing, so `next` never moves backward; a published source the checkout cannot place is ignored with a notice.
 - `latest` publishes nothing when the version is already there or when the dist-tag `latest` names a newer release (a rerun of an older release's job); it does not look at `next`.
 - Every registry read misses the CDN cache (a cached packument lags a publish by up to 300 s), and a `next` publish job holds the npm-publish lane until the registry's record shows its version (up to 15 reads, 20 s apart: three of the first five publishes were still unreadable after 80 s, so the hold covers that lag with margin).
   - So the run after it judges against a record that carries it. Neither dist-tag moves backward on what its run could see.
 - The residual window: a publish the registry has not made readable within that bound is invisible to the run after it, which then moves `next` back to its older version.
   - That run fails with an error naming the drift once the record shows both versions; it warns if its own never shows within the bound.
   - It passes without naming the drift if its own shows while the overtaken one still does not.
-  - A rerun of it publishes nothing and passes, and the next green push that changes the shipped surface moves `next` forward again (its commit descends from every published one).
+  - A rerun of it publishes nothing and passes, and the next release-PR refresh moves `next` forward again (its commit descends from every published one).
   - No run moves a dist-tag by hand: trusted publishing authenticates `npm publish` alone, not `npm dist-tag add`.
 - Both channels publish through npm trusted publishing (OIDC) from this repository's CI workflow: no registry token exists anywhere.
   - npm attaches a provenance attestation to every version CI publishes, which `npm audit signatures` checks in a project that installs it.
