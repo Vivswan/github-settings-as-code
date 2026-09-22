@@ -135,17 +135,12 @@ describe("section docs completeness", () => {
     "  LabelConfig: One label.",
   ];
 
-  test("every section has a <key>.docs.yml and every docs file belongs to a section", () => {
-    // Loading DOCS proves each SectionKey's file exists; the reverse pin catches a stray leftover file. shared/shared.docs.yml is the factories'
+  test("every section has a docs/sections/<key>.docs.yml and every docs file there belongs to a section", () => {
+    // Loading DOCS proves each SectionKey's file exists; the reverse pin catches a stray leftover file. shared.docs.yml is the factories'
     // schema prose (see docs-registry.ts).
-    const onDisk = readdirSync(join(ROOT, "src", "sections"), { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() &&
-          entry.name !== "shared" &&
-          existsSync(join(entry.parentPath, entry.name, `${entry.name}.docs.yml`)),
-      )
-      .map((entry) => entry.name)
+    const onDisk = readdirSync(join(ROOT, "docs", "sections"))
+      .filter((name) => name !== "shared.docs.yml")
+      .map((name) => name.replace(/\.docs\.yml$/, ""))
       .sort();
     expect(onDisk).toEqual([...SECTION_KEYS].sort());
     expect(Object.keys(DOCS).sort()).toEqual([...SECTION_KEYS].sort());

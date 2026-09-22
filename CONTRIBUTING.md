@@ -22,7 +22,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - Line caps: code wraps at biome's `lineWidth` of 100. The fleet's check-file-size caps source, test, workflow, and shell lines at 256 characters; markdown prose has no width cap. A comment block is at most 10 lines.
 - Markdown keeps one source line per paragraph or list item, so a long item is split into items, never wrapped.
 - A source file under `src/` or `.github/scripts/` opens with a one-paragraph header comment saying what the file owns; test files need none.
-- Tests live in two places: a section's unit tests sit beside it in `src/sections/<key>/`; everything else is under `test/`, mirroring `src/`.
+- Tests live under `test/`, mirroring `src/`: a section's unit tests, `mock.ts`, `generators.ts`, and `scenarios/` sit in `test/src/sections/<key>/`; `src/` holds code only.
 
 ## Tests
 
@@ -36,7 +36,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 The end-to-end tests build the bundle to a temp path and run it as a subprocess against a mock GitHub API, so they exercise the same single-file bundle a release ships.
 
 - `bun run test:e2e` runs the curated scenario corpus.
-- Every section ships the standard scenario set under `src/sections/<key>/scenarios/`, named after the section's dashed key: `<slug>-apply-converges`, `<slug>-check-drift` (a section with a planning read), `<slug>-snapshot-roundtrip` (a section with snapshot()), and for a section under the undeclared policy `<slug>-undeclared-delete` and `<slug>-undeclared-keep-note`; `test/sections/scenario-set.test.ts` derives the set from the registry.
+- Every section ships the standard scenario set under `test/src/sections/<key>/scenarios/`, named after the section's dashed key: `<slug>-apply-converges`, `<slug>-check-drift` (a section with a planning read), `<slug>-snapshot-roundtrip` (a section with snapshot()), and for a section under the undeclared policy `<slug>-undeclared-delete` and `<slug>-undeclared-keep-note`; `test/sections/scenario-set.test.ts` derives the set from the registry.
 - `bun run fuzz` runs seeded property fuzzing: random scenarios, each checked against an oracle that predicts the outcome class from the token mask, policy, and mode.
 - The mock serves the section endpoints plus the core routes the action calls outside the sections. A request that matches no registered route fails loudly; the mock never invents a response.
 - PR CI runs the sections a pull request changed. The nightly workflow's `e2e` job runs the full corpus and files a red night under the `nightly-failure` issue; the fuzz nightly runs the full fuzz and files under `fuzz-nightly` with a replay command.

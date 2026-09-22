@@ -465,7 +465,7 @@ describe("GraphQL response guard and chaos", () => {
 describe("assertGraphqlHandlerCompleteness", () => {
   test("both drift directions fail loudly", () => {
     expect(() => assertGraphqlHandlerCompleteness(OPS, {})).toThrow(
-      /GraphQL operations with no mock handler: \[repository\.gNodeId \(add it in src\/sections\/repository\/mock\.ts/,
+      /GraphQL operations with no mock handler: \[repository\.gNodeId \(add it in test\/src\/sections\/repository\/mock\.ts/,
     );
     expect(() => assertGraphqlHandlerCompleteness({}, HANDLERS)).toThrow(
       /GraphQL handlers naming no declared operation/,

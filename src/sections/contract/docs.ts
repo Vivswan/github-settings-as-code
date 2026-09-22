@@ -1,5 +1,5 @@
 /**
- * Declared beside each section as src/sections/<key>/<key>.docs.yml and loaded by the docs registry.
+ * Authored at docs/sections/<key>.docs.yml, one file per section, and loaded by the docs registry.
  * Documentation only: nothing bundled from src/main.ts may import this file or the registry (a unit test walks the import graph).
  */
 

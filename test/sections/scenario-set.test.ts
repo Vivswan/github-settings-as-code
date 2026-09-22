@@ -80,7 +80,7 @@ describe("the standard scenario set", () => {
   test.each(SECTIONS.map((section) => [section.key, section] as const))(
     "%s ships every scenario its contract implies, and its convergence proof declares the re-run",
     (key, section) => {
-      const dir = join(ROOT, "src", "sections", key, "scenarios");
+      const dir = join(ROOT, "test", "src", "sections", key, "scenarios");
       expect(missingScenarios(section, dir), `missing under ${dir}`).toEqual([]);
       expect(convergenceDefects(section, dir)).toEqual([]);
     },

@@ -6,7 +6,7 @@ order: 110
 
 Every top-level key a settings file can declare, one row per section: the endpoints it drives, the fine-grained PAT permission it needs, what happens to the live resources the file does not declare, and the notes that matter when declaring it.
 
-<!-- BEGIN GENERATED: sections-table (bun run build:docs; edit src/sections/<key>/<key>.docs.yml) -->
+<!-- BEGIN GENERATED: sections-table (bun run build:docs; edit docs/sections/<key>.docs.yml) -->
 | Section | Endpoints | PAT permission | Undeclared default | Notes |
 |---|---|---|---|---|
 | `repository` | PATCH repo, PUT topics, vulnerability-alerts, automated-security-fixes, private-vulnerability-reporting, lfs, immutable-releases, GraphQL RepositoryFeatures + UpdateRepositoryFeatures | Administration: write | untouched | Probot repository payload plus `enable_*` feature toggles; `topics` as string or list; `enable_sponsorships` and `issue_creation_policy` (`all`/`collaborators_only`) route through GraphQL - REST has no surface for them; declared fields only, undeclared siblings untouched |

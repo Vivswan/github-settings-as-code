@@ -8,7 +8,7 @@ export type UndeclaredPolicy = "keep" | "delete";
 
 /**
  * The wrapper knobbed() and nestedKnobbed() build. The underscored keys are this action's DIRECTIVES, never GitHub
- * settings; each key's meaning is published from src/sections/shared/shared.docs.yml, the one source the JSON Schema and the docs render from.
+ * settings; each key's meaning is published from docs/sections/shared.docs.yml, the one source the JSON Schema and the docs render from.
  */
 export interface UndeclaredPolicyList<E> {
   _undeclared?: UndeclaredPolicy;

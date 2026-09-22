@@ -1,8 +1,8 @@
 /**
  * The single loading point for authored documentation, mirroring registry.ts: every SectionKey's
- * <key>.docs.yml is read and validated here, so a section without one fails the docs build, and
- * the schema descriptions of every docs file (each section's, the shared factories', the document
- * root's) are collected for the schema generator. Documentation only: nothing bundled from
+ * docs/sections/<key>.docs.yml is read and validated here, so a section without one fails the docs
+ * build, and the schema descriptions of every docs file (each section's, the shared factories', the
+ * document root's) are collected for the schema generator. Documentation only: nothing bundled from
  * src/main.ts may import this file (a unit test walks the import graph).
  */
 
@@ -11,18 +11,22 @@ import type { z } from "zod";
 import { SECTION_KEYS, type SectionKey } from "../schema.js";
 import { readDocsYaml, SchemaOnlyDocs, SectionDocs } from "./contract/docs.js";
 
-const SECTIONS_DIR = import.meta.dir;
-const ROOT = join(SECTIONS_DIR, "..", "..");
+const ROOT = join(import.meta.dir, "..", "..");
+const SECTION_DOCS_DIR = join(ROOT, "docs", "sections");
+
+function sectionDocsPath(key: SectionKey): string {
+  return join(SECTION_DOCS_DIR, `${key}.docs.yml`);
+}
 
 /** The docs files that carry schema descriptions but belong to no section. */
 const SCHEMA_ONLY_DOCS = [
-  join(SECTIONS_DIR, "shared", "shared.docs.yml"),
-  join(SECTIONS_DIR, "..", "schema.docs.yml"),
+  join(SECTION_DOCS_DIR, "shared.docs.yml"),
+  join(ROOT, "docs", "schema.docs.yml"),
 ];
 
 /**
- * A docs file is checked in beside its section and validated by test/sections/docs-registry.test.ts, so one that does
- * not load here is a defect of this checkout, not a user's input.
+ * A docs file is checked in under docs/ and validated by test/sections/docs-registry.test.ts, so one that does not
+ * load here is a defect of this checkout, not a user's input.
  */
 function loadedDocs<T>(path: string, schema: z.ZodType<T>): T {
   return readDocsYaml(path, schema).match(
@@ -33,10 +37,10 @@ function loadedDocs<T>(path: string, schema: z.ZodType<T>): T {
   );
 }
 
-/** Every section's <key>.docs.yml, validated; a missing or malformed one fails the docs build naming it. */
+/** Every section's docs/sections/<key>.docs.yml, validated; a missing or malformed one fails the docs build naming it. */
 function loadSectionDocs(): Readonly<Record<SectionKey, SectionDocs>> {
   const entries = SECTION_KEYS.map(
-    (key) => [key, loadedDocs(join(SECTIONS_DIR, key, `${key}.docs.yml`), SectionDocs)] as const,
+    (key) => [key, loadedDocs(sectionDocsPath(key), SectionDocs)] as const,
   );
   return Object.fromEntries(entries) as Record<SectionKey, SectionDocs>;
 }
@@ -60,7 +64,7 @@ function collectSchemaDescriptions(): readonly SchemaDescriptionEntry[] {
     }
   };
   for (const key of SECTION_KEYS) {
-    collect(join(SECTIONS_DIR, key, `${key}.docs.yml`), DOCS[key].schema);
+    collect(sectionDocsPath(key), DOCS[key].schema);
   }
   for (const path of SCHEMA_ONLY_DOCS) {
     collect(path, loadedDocs(path, SchemaOnlyDocs).schema);

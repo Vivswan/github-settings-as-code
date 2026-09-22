@@ -9,7 +9,6 @@ import { z } from "zod";
 import type { SectionInput } from "../../src/sections/contract/module.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
-import { LABELS_MOCK } from "../../src/sections/labels/mock.js";
 import {
   exactName,
   type ListEndpoints,
@@ -22,6 +21,7 @@ import { generatorFromSlice, uniqueBy } from "../e2e/gen-support.js";
 import { mockFragmentFor } from "../e2e/mock/list-fragment.js";
 import { Rng } from "../e2e/prng.js";
 import { MockApi } from "../mock-api.js";
+import { LABELS_MOCK } from "../src/sections/labels/mock.js";
 import { fragmentFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
 import { failureOf, REPO, unwrap } from "./section-run.js";

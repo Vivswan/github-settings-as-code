@@ -65,11 +65,10 @@ const GRAPH_FIXTURE: Record<string, string> = {
   "src/sections/labels/index.ts":
     'import {\n  factory,\n} from "../shared/factory.js";\nexport default factory;\n',
   "src/sections/teams/index.ts": 'export { engine } from "../shared/engine";\n',
-  "src/sections/milestones/mock.ts": 'export const util = await import("../shared/util");\n',
-  "src/sections/pages/mock.ts": "export const util = await import(`../shared/util`);\n",
+  "src/sections/milestones/index.ts": 'export const util = await import("../shared/util");\n',
+  "src/sections/pages/index.ts": "export const util = await import(`../shared/util`);\n",
   "src/sections/pages/schema.ts":
     'import type { engine } from "../shared/engine.js";\nexport type Engine = typeof engine;\n',
-  "src/sections/labels/labels.test.ts": 'import { util } from "../shared/util/index.js";\nutil;\n',
   "src/schema.ts":
     'import { engine } from "./sections/shared/engine.js";\nexport default engine;\n',
   "src/sections/registry.ts": 'import "./labels/index.js";\nimport "./teams/index.js";\n',
@@ -83,7 +82,7 @@ describe("changed-sections derived fan-out", () => {
     const spelled = new Map<string, Set<string>>();
     for (const path of sectionsPathsOnDisk()) {
       const dir = path.split("/")[2] ?? "";
-      if (!SECTION_KEY_SET.has(dir) || !path.endsWith(".ts") || path.endsWith(".test.ts")) {
+      if (!SECTION_KEY_SET.has(dir) || !path.endsWith(".ts")) {
         continue;
       }
       const text = readFileSync(join(ROOT, path), "utf8");
@@ -196,7 +195,6 @@ describe("changed-sections derived fan-out", () => {
         // src/schema.ts imports engine directly and registry.ts reaches it through teams; neither adds a key, and pages' type-only import is no edge.
         "engine.ts": inKeyOrder("labels", "teams"),
         "factory.ts": inKeyOrder("labels"),
-        // labels' unit test imports util too and is not an edge.
         "util/index.ts": inKeyOrder("pages", "milestones"),
       });
     }));
@@ -240,10 +238,30 @@ describe("changed-sections derived fan-out", () => {
 });
 
 describe("changed-sections file map", () => {
-  test("every path on disk under src/sections resolves through some selector rule", () => {
-    for (const path of sectionsPathsOnDisk()) {
+  test("every path on disk under src/sections, test/src/sections, and docs/sections resolves through some selector rule", () => {
+    const paths = [
+      ...sectionsPathsOnDisk(),
+      ...sectionsPathsOnDisk(join(ROOT, "test", "src", "sections"), "test/src/sections"),
+      ...sectionsPathsOnDisk(join(ROOT, "docs", "sections"), "docs/sections"),
+      "docs/schema.docs.yml",
+    ];
+    expect(paths.filter((path) => path.startsWith("test/")).length).toBeGreaterThan(300);
+    expect(paths.filter((path) => path.startsWith("docs/")).length).toBeGreaterThan(20);
+    for (const path of paths) {
       expect(() => sectionsForFiles(changed(path)), `${path} does not resolve`).not.toThrow();
     }
+  });
+
+  test("src/ holds code only: no test, mock, generator, scenario, or docs prose lives under it", () => {
+    const strays = readdirSync(SRC_DIR, { recursive: true, encoding: "utf8" }).filter(
+      (entry) =>
+        entry.endsWith(".test.ts") ||
+        entry.endsWith("/mock.ts") ||
+        entry.endsWith("/generators.ts") ||
+        entry.endsWith(".docs.yml") ||
+        entry.split("/").includes("scenarios"),
+    );
+    expect(strays).toEqual([]);
   });
 
   test("every top-level src entry is either sections/ or all-selecting", () => {
@@ -270,32 +288,37 @@ describe("changed-sections selection", () => {
   test.each<[label: string, rendered: string, files: string[]]>([
     ["a docs-only change", "none", ["README.md", "COVERAGE.md", ".github/workflows/ci.yml"]],
     ["a section's entry", "labels", ["src/sections/labels/index.ts"]],
-    ["a section's mock", "labels", ["src/sections/labels/mock.ts"]],
+    ["a section's mock", "labels", ["test/src/sections/labels/mock.ts"]],
+    ["a section's generators", "labels", ["test/src/sections/labels/generators.ts"]],
+    ["a section's unit test", "labels", ["test/src/sections/labels/labels.test.ts"]],
     [
       "a section's scenario",
       "environments",
-      ["src/sections/environments/scenarios/environments-apply.yml"],
+      ["test/src/sections/environments/scenarios/environments-apply.yml"],
     ],
+    ["a section's docs prose", "labels", ["docs/sections/labels.docs.yml"]],
     [
       "a section whose key carries underscores",
       "secret_scanning_custom_patterns",
       ["src/sections/secret_scanning_custom_patterns/schema.ts"],
     ],
     [
+      "a mirrored key carrying underscores",
+      "secret_scanning_custom_patterns",
+      ["test/src/sections/secret_scanning_custom_patterns/mock.ts"],
+    ],
+    [
       "multiple section directories, which union in SECTION_KEYS order",
       "labels,milestones",
-      ["src/sections/milestones/index.ts", "src/sections/labels/index.ts"],
+      ["src/sections/milestones/index.ts", "test/src/sections/labels/labels.test.ts"],
     ],
     ["registry.ts", "all", ["src/sections/registry.ts"]],
-    [
-      "the shared docs prose, like the docs registry",
-      "none",
-      ["src/sections/shared/shared.docs.yml"],
-    ],
+    ["the shared docs prose, like the docs registry", "none", ["docs/sections/shared.docs.yml"]],
+    ["the document root's docs prose", "none", ["docs/schema.docs.yml"]],
     [
       "the shared docs prose beside a section",
       "labels",
-      ["src/sections/shared/shared.docs.yml", "src/sections/labels/index.ts"],
+      ["docs/sections/shared.docs.yml", "docs/schema.docs.yml", "src/sections/labels/index.ts"],
     ],
     // The docs-only aggregator is never in the bundle and build:check gates docs drift, so it behaves like lib/.
     ["docs-registry.ts", "none", ["src/sections/docs-registry.ts"]],
@@ -352,7 +375,9 @@ describe("changed-sections selection", () => {
     ).toBe("collaborators,teams");
     // A deleted scenario can leave a route cold, so its section still runs.
     expect(
-      renderSelection(sectionsForFiles(removed("src/sections/labels/scenarios/labels-apply.yml"))),
+      renderSelection(
+        sectionsForFiles(removed("test/src/sections/labels/scenarios/labels-apply.yml")),
+      ),
     ).toBe("labels");
     expect(sectionsForFiles(removed("src/sections/registry.ts")).kind).toBe("all");
     expect(() => sectionsForFiles(removed("src/sections/labels.ts"))).toThrow(
@@ -377,16 +402,19 @@ describe("changed-sections selection", () => {
       expect(select(removed("src/sections/shared/a.ts"))).toBe("labels");
       expect(select(removed("src/sections/shared/b/index.ts"))).toBe("teams");
       expect(select(removed("src/sections/shared/c.ts"))).toBe("none");
-      // Only .ts files are selector inputs, so "a.js" cannot borrow a/index.ts.
-      expect(() => select(removed("src/sections/shared/a.js"))).toThrow(/matches no selector rule/);
-      expect(() => select(removed("src/sections/shared/notes.md"))).toThrow(
+      // Only .ts files borrow a sibling spelling, so a deleted "a.js" cannot borrow a/index.ts; a deleted file of
+      // any other kind under shared/ has nothing left to smoke and adds nothing, while the same path changed in
+      // place still throws.
+      expect(select(removed("src/sections/shared/a.js"))).toBe("none");
+      expect(select(removed("src/sections/shared/notes.md"))).toBe("none");
+      expect(() => select(changed("src/sections/shared/notes.md"))).toThrow(
         /matches no selector rule/,
       );
     }));
 
   test("parseNameStatus reads NUL-delimited records raw and throws on any other shape", () => {
-    // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the src/sections/ prefix would go unmatched.
-    const odd = 'src/sections/labels/scenarios/tab\there "quoted" back\\slash.yml';
+    // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the test/src/sections/ prefix would go unmatched.
+    const odd = 'test/src/sections/labels/scenarios/tab\there "quoted" back\\slash.yml';
     expect(
       parseNameStatus(
         `A\0src/sections/labels/index.ts\0M\0README.md\0D\0src/sections/shared/roles.ts\0T\0lib/settings.schema.json\0M\0${odd}\0`,
@@ -413,14 +441,22 @@ describe("changed-sections selection", () => {
     expect(() => parseNameStatus("M\0README.md")).toThrow(/not NUL-terminated/);
   });
 
-  test("an unrecognized src/sections path throws instead of silently selecting nothing, even beside a cross-cutting path", () => {
+  test("an unrecognized section-shaped path throws instead of silently selecting nothing, even beside a cross-cutting path", () => {
     // registry.ts and docs-registry.ts are the only flat files the layout allows; a section directory must spell its
-    // key; under shared/ only mapped .ts files and the docs prose are known.
+    // key under src/sections/ and test/src/sections/ alike; under shared/ only mapped .ts files are known; docs/sections/
+    // holds <key>.docs.yml and shared.docs.yml and nothing else.
     for (const stray of [
       "src/sections/labels.ts",
       "src/sections/not_a_key/index.ts",
       "src/sections/shared/unmapped.ts",
       "src/sections/shared/notes.yml",
+      "src/sections/shared/shared.docs.yml",
+      "test/src/sections/labels.test.ts",
+      "test/src/sections/not_a_key/mock.ts",
+      "test/src/sections/shared/helper.ts",
+      "docs/sections/labels.md",
+      "docs/sections/not_a_key.docs.yml",
+      "docs/sections/labels/labels.docs.yml",
     ]) {
       expect(() => sectionsForFiles(changed(stray)), `${stray} must throw`).toThrow(
         /matches no selector rule/,

@@ -1,7 +1,7 @@
 /**
  * The authored half of the coverage page, docs/reference/coverage.md (rendered by gen-docs.ts): the prose no
  * declaration can derive, because it enumerates what does NOT exist. The data is coverage-data.yml beside this
- * file; the Supported table and its notes render from each section's <key>.docs.yml.
+ * file; the Supported table and its notes render from each section's docs/sections/<key>.docs.yml.
  */
 
 import { join } from "node:path";

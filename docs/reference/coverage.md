@@ -4,7 +4,7 @@ order: 115
 
 # Coverage
 
-<!-- BEGIN GENERATED: coverage (bun run build:docs; edit src/sections/<key>/<key>.docs.yml and .github/scripts/coverage-data.yml; REST pages come from the OpenAPI descriptor, the rest from .github/scripts/endpoint-docs.yml) -->
+<!-- BEGIN GENERATED: coverage (bun run build:docs; edit docs/sections/<key>.docs.yml and .github/scripts/coverage-data.yml; REST pages come from the OpenAPI descriptor, the rest from .github/scripts/endpoint-docs.yml) -->
 The tenet: this action can control everything about a repository and nothing about the user.
 
 This page is the honest inventory: what works today, what is repo-scoped but not built yet, and what is out of scope because it belongs to a user or organization account.

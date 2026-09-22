@@ -1,9 +1,12 @@
 /**
  * The diff-aware section selector for the PR e2e smoke job: a PR touching one section runs that section's scenarios
- * and fuzz rather than the whole corpus, and a PR touching nothing settings-related skips the smoke steps. A
- * src/sections/ path no rule recognizes throws, so a new file cannot silently skip them.
+ * and fuzz rather than the whole corpus, and a PR touching nothing settings-related skips the smoke steps. A path
+ * under src/sections/, test/src/sections/, or docs/sections/ that no rule recognizes throws, so a new file cannot
+ * silently skip them.
  *
  *   src/sections/<key>/...                                   -> <key>, whatever the file
+ *   test/src/sections/<key>/...                              -> <key> (the section's tests, mock, generators, scenarios)
+ *   docs/sections/<key>.docs.yml                             -> <key>; shared.docs.yml and docs/schema.docs.yml select none
  *   src/sections/shared/<file>.ts                            -> the sections that transitively import it (deriveSharedFanOut)
  *   contract/, registry.ts, the engine, the schema, the e2e harness  -> every section
  *
@@ -165,11 +168,10 @@ export function resolveImport(importer: string, specifier: string): string {
   );
 }
 
-/** Unit tests are not smoke inputs, and the section tests that import the engine would pull the registry, and
- * through it every section, into every shared file's fan-out. */
+/** Every .ts file under `root`; src/ holds code only, so nothing here is a test. */
 export function sourceFilesUnder(root: string): string[] {
   return readdirSync(root, { recursive: true, encoding: "utf8" })
-    .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
+    .filter((entry) => entry.endsWith(".ts"))
     .map((entry) => join(root, entry));
 }
 
@@ -273,21 +275,20 @@ function sectionsForSectionsPath(
   }
   if (dir === "shared") {
     const sharedPath = rest.slice(slash + 1);
-    if (sharedPath.endsWith(".docs.yml")) {
-      // The factories' schema prose never reaches the bundle; build:check gates it, as with the docs registry.
-      return [];
-    }
-    if (deleted && sharedPath.endsWith(".ts")) {
-      // Its importers either changed in the same diff (typecheck fails otherwise) and select their sections, or
-      // now resolve to the sibling spelling, whose fan-out is then theirs.
-      return sharedFanOut()[siblingResolution(sharedPath)] ?? [];
+    if (deleted) {
+      // A deleted shared file adds nothing itself: its importers either changed in the same diff (typecheck fails
+      // otherwise) and select their sections, or, for a .ts, now resolve to the sibling spelling, whose fan-out is
+      // then theirs. A deleted file of any other kind has nothing left to smoke.
+      return sharedPath.endsWith(".ts")
+        ? (sharedFanOut()[siblingResolution(sharedPath)] ?? [])
+        : [];
     }
     const keys = sharedFanOut()[sharedPath];
     if (keys) {
       return keys;
     }
     throw new Error(
-      `changed-sections: ${path} matches no selector rule; under src/sections/shared/ only .ts files (fanning out through the import graph) and the .docs.yml prose are recognized`,
+      `changed-sections: ${path} matches no selector rule; under src/sections/shared/ only .ts files (fanning out through the import graph) are recognized`,
     );
   }
   throw new Error(
@@ -295,7 +296,64 @@ function sectionsForSectionsPath(
   );
 }
 
-/** Every src/sections/ path is resolved even when a cross-cutting path already forces "all", so a stale flat path
+const TEST_MIRROR_PREFIX = "test/src/sections/";
+const SECTION_DOCS_PREFIX = "docs/sections/";
+/** The document root's schema prose, gated by build:check like the docs registry. */
+const ROOT_DOCS_FILE = "docs/schema.docs.yml";
+/** The shared factories' schema prose: it belongs to no one section, and build:check gates it too. */
+const SHARED_DOCS_FILE = `${SECTION_DOCS_PREFIX}shared.docs.yml`;
+
+/** A section's tests, mock, generators, and scenarios mirror it under test/src/sections/<key>/; a deleted scenario can
+ * leave a route cold, so the section still runs. Anything else under the mirror root throws, as under src/sections/. */
+function sectionsForTestMirrorPath(path: string): SectionKey[] {
+  const rest = path.slice(TEST_MIRROR_PREFIX.length);
+  const slash = rest.indexOf("/");
+  const dir = slash < 0 ? "" : rest.slice(0, slash);
+  if (SECTION_KEY_SET.has(dir)) {
+    return [dir as SectionKey];
+  }
+  throw new Error(
+    `changed-sections: ${path} matches no selector rule; ${TEST_MIRROR_PREFIX} holds only the per-section <key>/ directories, each spelling its SectionKey verbatim`,
+  );
+}
+
+/** docs/sections/<key>.docs.yml is the section's authored prose and selects it; the shared file selects none. */
+function sectionsForSectionDocsPath(path: string): SectionKey[] {
+  if (path === SHARED_DOCS_FILE) {
+    return [];
+  }
+  const rest = path.slice(SECTION_DOCS_PREFIX.length);
+  const key = rest.endsWith(".docs.yml") ? rest.slice(0, -".docs.yml".length) : "";
+  if (!key.includes("/") && SECTION_KEY_SET.has(key)) {
+    return [key as SectionKey];
+  }
+  throw new Error(
+    `changed-sections: ${path} matches no selector rule; ${SECTION_DOCS_PREFIX} holds only <key>.docs.yml (the SectionKey verbatim) and shared.docs.yml`,
+  );
+}
+
+/** The section keys a non-cross-cutting path selects, or undefined for a path that is no selector input at all. */
+function sectionsForPath(
+  file: ChangedFile,
+  sharedFanOut: () => SharedFanOut,
+): SectionKey[] | "all" | undefined {
+  const { path } = file;
+  if (path.startsWith("src/sections/")) {
+    return sectionsForSectionsPath(file, sharedFanOut);
+  }
+  if (path.startsWith(TEST_MIRROR_PREFIX)) {
+    return sectionsForTestMirrorPath(path);
+  }
+  if (path.startsWith(SECTION_DOCS_PREFIX)) {
+    return sectionsForSectionDocsPath(path);
+  }
+  if (path === ROOT_DOCS_FILE) {
+    return [];
+  }
+  return undefined;
+}
+
+/** Every section-shaped path is resolved even when a cross-cutting path already forces "all", so a stale flat path
  * cannot ride along unnoticed. */
 export function sectionsForFiles(
   files: readonly ChangedFile[],
@@ -308,26 +366,17 @@ export function sectionsForFiles(
       all = true;
       continue;
     }
-    if (!file.path.startsWith("src/sections/")) {
-      continue;
-    }
-    if (sectionsForSectionsPath(file, sharedFanOut) === "all") {
+    const keys = sectionsForPath(file, sharedFanOut);
+    if (keys === "all") {
       all = true;
-    }
-  }
-  if (all) {
-    return { kind: "all" };
-  }
-  for (const file of files) {
-    if (!file.path.startsWith("src/sections/")) {
-      continue;
-    }
-    const keys = sectionsForSectionsPath(file, sharedFanOut);
-    if (keys !== "all") {
+    } else if (keys !== undefined) {
       for (const key of keys) {
         selected.add(key);
       }
     }
+  }
+  if (all) {
+    return { kind: "all" };
   }
   if (selected.size === 0) {
     return { kind: "none" };

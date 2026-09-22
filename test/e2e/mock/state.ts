@@ -9,25 +9,25 @@
  *   collaboratorFromPut  -> role_name via roleForPermission, the same map the section runs on its declaration
  */
 
-import { AUTOLINKS_MOCK } from "../../../src/sections/autolinks/mock.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../../src/sections/branches/graphql-rules.js";
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
-import { DEPLOY_KEYS_MOCK } from "../../../src/sections/deploy_keys/mock.js";
-import { LABELS_MOCK } from "../../../src/sections/labels/mock.js";
-import { MILESTONES_MOCK } from "../../../src/sections/milestones/mock.js";
-import { RULESETS_MOCK } from "../../../src/sections/rulesets/mock.js";
 import type { ListSectionKey } from "../../../src/sections/shared/list-section.js";
 import {
   INVITATION_ROLES,
   permissionForRole,
   roleForPermission,
 } from "../../../src/sections/shared/roles.js";
-import { WEBHOOKS_MOCK } from "../../../src/sections/webhooks/mock.js";
 import type { MustBeNever } from "../../../src/types.js";
+import { AUTOLINKS_MOCK } from "../../src/sections/autolinks/mock.js";
+import { DEPLOY_KEYS_MOCK } from "../../src/sections/deploy_keys/mock.js";
+import { LABELS_MOCK } from "../../src/sections/labels/mock.js";
+import { MILESTONES_MOCK } from "../../src/sections/milestones/mock.js";
+import { RULESETS_MOCK } from "../../src/sections/rulesets/mock.js";
+import { WEBHOOKS_MOCK } from "../../src/sections/webhooks/mock.js";
 import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
