@@ -226,7 +226,7 @@ describe("packageCommit", () => {
     expect(String((error as Error).message)).toMatch(
       new RegExp(
         `^${ref} \\(${packaged}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} ` +
-          "this checkout's build packages, so the two differ under lib/index\\.js and lib/pkg/.*Diff the two trees by hand; " +
+          "this checkout's build packages, so the two differ under lib/index\\.js, lib/settings\\.schema\\.json, and lib/pkg/.*Diff the two trees by hand; " +
           "no run replaces a packaged commit it did not mint; if the build is wrong, delete the tag by hand and rerun\\.$",
       ),
     );
@@ -395,7 +395,7 @@ describe("packageCommit", () => {
     const pushes = withPushPlans(fx, [], () => {
       expect(() => packageCommit({ cwd: stale, sourceSha: fx.mergeSha })).toThrow(
         new RegExp(
-          `^${LATEST} \\(${bare}\\) is not ${b.sha} plus lib/index\\.js and lib/pkg/, minus package\\.json's preparation scripts, alone: .*; inspect it by hand\\.$`,
+          `^${LATEST} \\(${bare}\\) is not ${b.sha} plus lib/index\\.js, lib/settings\\.schema\\.json, and lib/pkg/, minus package\\.json's preparation scripts, alone: .*; inspect it by hand\\.$`,
         ),
       );
     });
@@ -766,7 +766,7 @@ describe("movePointer", () => {
     const seedPackage = packageCommit({ cwd: seedRun, sourceSha: fx.seedSha });
     expect(() => movePointer(fx.work, V2, seedPackage)).toThrow(
       new RegExp(
-        `^${V2} \\(${fx.mergeSha}\\) is not ${fx.seedSha} plus lib/index\\.js and lib/pkg/, minus package\\.json's preparation scripts, alone: .*; inspect it by hand\\.$`,
+        `^${V2} \\(${fx.mergeSha}\\) is not ${fx.seedSha} plus lib/index\\.js, lib/settings\\.schema\\.json, and lib/pkg/, minus package\\.json's preparation scripts, alone: .*; inspect it by hand\\.$`,
       ),
     );
   });

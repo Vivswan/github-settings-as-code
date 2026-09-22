@@ -9,10 +9,12 @@ import { dirname, join, resolve } from "node:path";
 import { parseSync } from "oxc-parser";
 import { parse as parseYaml } from "yaml";
 import manifest from "../.release-please-manifest.json";
-import schema from "../lib/settings.schema.json" with { type: "json" };
 import pkg from "../package.json";
 import tsdown from "../tsdown.config.js";
 import { ROOT } from "./root.js";
+import { readSettingsSchema } from "./settings-schema.js";
+
+const schema = readSettingsSchema();
 
 /** tsdown types its options loosely (a glob, a list, or a map); this config is the map form. */
 const build = tsdown as { entry: Record<string, string>; outDir: string };

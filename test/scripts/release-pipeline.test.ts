@@ -419,7 +419,7 @@ describe("packageRelease", () => {
 
   // The build the packaged commit must carry, spoiled two ways; the shared check refuses both entry points before
   // any push. The entry shown for the empty file is git's empty blob at ls-tree's size column.
-  const unbuilt = ["lib/index.js", "lib/pkg/index.js"].flatMap(
+  const unbuilt = ["lib/index.js", "lib/settings.schema.json", "lib/pkg/index.js"].flatMap(
     (file): [state: string, file: string, spoil: (dir: string) => void, entry: string][] => [
       [
         "an empty",
@@ -451,7 +451,7 @@ describe("packageRelease", () => {
     const fx = seedFixture();
     write(fx.work, "src/marker.ts", "export const marker = 999;\n");
     expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /pending changes beyond lib\/index\.js and lib\/pkg\//,
+      /pending changes beyond lib\/index\.js, lib\/settings\.schema\.json, and lib\/pkg\//,
     );
     expect(remoteRef(fx, TAG)).toBe("");
     expect(buildTags(fx)).toEqual([]);
@@ -559,7 +559,7 @@ describe("retagMajor", () => {
     git(planter, "push", "--quiet", "origin", TAG);
     const mover = clone(fx.root, fx.origin, "mover-empty");
     expect(() => retagMajor({ cwd: mover, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
-      /is not [0-9a-f]{40} plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, alone/,
+      /is not [0-9a-f]{40} plus lib\/index\.js, lib\/settings\.schema\.json, and lib\/pkg\/, minus package\.json's preparation scripts, alone/,
     );
     expect(remoteRef(fx, V2)).toBe("");
   });

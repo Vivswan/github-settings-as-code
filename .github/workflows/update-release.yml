@@ -4,7 +4,7 @@
 # (the topology is in .github/scripts/release-pipeline.ts; release-please-config.json sets `draft` and pins
 # `force-tag-creation` off).
 #
-#   resolve the merge commit from the draft's target commitish -> rebuild the bundle, verify the committed schema byte-for-byte
+#   resolve the merge commit from the draft's target commitish -> build the bundle, the schema, and the library
 #   package      -> find or mint the merge commit's packaged commit under its build tag, mint vX.Y.Z there ONCE, move latest forward
 #   retag-major  -> move vX there (forward only), then upload bundle and schema to the draft (a published release freezes its assets)
 #   verify-release -> confirm the draft's assets; the managed publish stage then attests and flips the release live
@@ -68,12 +68,8 @@ jobs:
           # new version tag names the build tag by the commit's position; a shallow checkout can do none of that.
           fetch-depth: 0
       - uses: ./.github/actions/setup
-      - name: Build the bundle and the schema
-        run: |
-          bun run build
-          # The schema asset and the raw URLs at the tags must serve the bytes committed at the merge commit; a
-          # divergent regeneration (generator drift, or a compromised generator) stops the release here.
-          git diff --exit-code lib/settings.schema.json
+      - name: Build the bundle, the schema, and the library
+        run: bun run build
       # Both paths (mint, or byte-verify on a rerun) leave the worktree bundle equal to the tagged one, which the
       # upload below relies on.
       - name: Create or verify the version tag on the build commit
@@ -162,8 +158,9 @@ jobs:
             echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."
             exit 1
           fi
+      # The tarball's files list names the schema beside lib/pkg/.
       - name: Build the library
-        run: bun run build:lib
+        run: bun run build:schema && bun run build:lib
       # scripts.prepare is dropped from the published manifest, as in
       # update-release-pr.yml's publish-next.
       # The verdict holds the built package.json to the tag and reads the

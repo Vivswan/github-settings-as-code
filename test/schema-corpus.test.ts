@@ -4,13 +4,13 @@ import { basename, join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { parse } from "yaml";
-import settingsSchema from "../lib/settings.schema.json" with { type: "json" };
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SECTION_KEYS } from "../src/schema.js";
 import { genSettings } from "./e2e/generators.js";
 import { Rng } from "./e2e/prng.js";
 import { collectYmlFiles, scenarioRoots } from "./e2e/schema.js";
 import { ROOT } from "./root.js";
+import { readSettingsSchema } from "./settings-schema.js";
 
 interface CorpusDoc {
   /** Where the fragment came from ("labels-apply-converges.yml settings"). */
@@ -207,7 +207,7 @@ describe("published schema agrees with the runtime over the corpus", () => {
   const ajv = new Ajv({ strict: false, allErrors: true });
   const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
   (add as typeof addFormats)(ajv);
-  const validate: ValidateFunction = ajv.compile(settingsSchema);
+  const validate: ValidateFunction = ajv.compile(readSettingsSchema());
 
   test("every scenario fragment and generated document gets one verdict", () => {
     const disagreements: string[] = [];

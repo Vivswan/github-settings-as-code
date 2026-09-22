@@ -15,6 +15,7 @@ import { grantFor } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
+import { readSettingsSchema } from "../settings-schema.js";
 import { defaultClaimProblems, deleteEnumerationProblems } from "./claims.js";
 import { fencedBlocks, sectionLines } from "./markdown.js";
 import { assertValidSettingsExample } from "./settings-examples.js";
@@ -108,8 +109,7 @@ describe("delete-by-default enumeration", () => {
 });
 
 describe("schema $schema hints", () => {
-  const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8"));
-  const id = schema.$id as string;
+  const id = readSettingsSchema().$id;
 
   /** Every markdown page that may carry a yaml-language-server hint. */
   const hintPages = (): Array<{ label: string; path: string }> => [

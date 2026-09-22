@@ -2,7 +2,8 @@
  * The release pipeline's git topology. main stays source-only, no version tag ever lands on it, and every ref a
  * consumer names points at a packaged commit: the child of one main commit, carrying that commit's build.
  *
- *   packaged commit                = parent: the main commit; tree: its tree + lib/index.js + lib/pkg/, package.json minus its preparation scripts
+ *   packaged commit                = parent: the main commit; tree: its tree + lib/index.js + lib/settings.schema.json + lib/pkg/,
+ *                                     package.json minus its preparation scripts
  *   refs/tags/build/<pos>.<sha7>   -> the packaged commit of the main commit at first-parent position <pos>; created once, never moved; the ten newest kept
  *   refs/tags/latest               -> the packaged commit of the newest main commit
  *   refs/tags/vX.Y.Z               -> the packaged commit of the release's merge commit; never moved
@@ -42,10 +43,14 @@ const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
 const MANIFEST = "package.json";
 /** What a packaged commit carries beyond its source (a directory entry stages every file under it). */
-const PACKAGED_PATHS = ["lib/index.js", "lib/pkg/"] as const;
+const PACKAGED_PATHS = ["lib/index.js", "lib/settings.schema.json", "lib/pkg/"] as const;
 /** What every packaged commit must carry as non-empty regular files. */
-const REQUIRED_BUILT_FILES = ["lib/index.js", "lib/pkg/index.js"] as const;
-const PACKAGED = "lib/index.js and lib/pkg/";
+const REQUIRED_BUILT_FILES = [
+  "lib/index.js",
+  "lib/settings.schema.json",
+  "lib/pkg/index.js",
+] as const;
+const PACKAGED = "lib/index.js, lib/settings.schema.json, and lib/pkg/";
 const LATEST_REF = "refs/tags/latest";
 const BUILD_TAG_PREFIX = "refs/tags/build/";
 const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;

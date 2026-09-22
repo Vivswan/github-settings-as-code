@@ -12,10 +12,10 @@
  *   defaulted keys         -> OPTIONAL: io: "input" describes the file, not the parsed output, so a key the slice
  *                             fills at parse (a ruleset's target) stays out of required and keeps its default keyword
  *   root layout            -> zod's own, passed through verbatim
- *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the committed file diffs deterministically
+ *   $id                    -> stamped (SCHEMA_ID); definitions sorted so the built file is deterministic
  */
 
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { SettingsFile } from "../../src/schema.js";
@@ -93,13 +93,15 @@ function encodeRefs(node: unknown): void {
 }
 encodeRefs(generated);
 
-// No layout assumption is guarded here: a future zod's shape change surfaces as schema-check drift, and a broken
-// emission fails the published-schema tests (ajv compile plus fixture round-trips).
+// No layout assumption is guarded here: a future zod's shape change or a broken emission fails the
+// published-schema tests (ajv compile plus fixture round-trips), which load the file this script writes.
 const { definitions, ...rest } = generated;
 const sortedDefinitions = Object.fromEntries(
   Object.entries(definitions ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)),
 );
 
+// A fresh checkout has no lib/: nothing under it is committed.
+mkdirSync(join(ROOT, "lib"), { recursive: true });
 const schemaPath = join(ROOT, "lib", "settings.schema.json");
 writeFileSync(
   schemaPath,

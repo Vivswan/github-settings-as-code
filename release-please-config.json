@@ -13,6 +13,7 @@
       "extra-files": [
         "README.md",
         "docs/start/getting-started.md",
+        "docs/start/examples.md",
         "docs/operate/check-mode.md",
         "docs/operate/snapshot.md",
         "docs/operate/multi-repo.md",

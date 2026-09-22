@@ -6,9 +6,10 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 
 - `src/` is TypeScript built with [bun](https://bun.com). The scripts in `package.json` are the commands; `bun run check` is the whole local gate.
 - GitHub's OpenAPI descriptor and GraphQL schema come from the `@octokit/openapi` and `@octokit/graphql-schema` devDependencies, so no test or generator touches the network. Dependabot moves the pins; a bump that stops documenting a path the action calls, starts documenting an upstream gap, or retires a field a query selects fails the schema tests on that PR by name.
-- Committed generated output is the table in `.github/scripts/generated.ts`: `lib/settings.schema.json`, `src/upstream-gaps/index.ts`, and the generated regions of `action.yml` and the docs pages.
+- `bun run test` and `bun run fuzz` run `bun run build:schema` first: the tests and the fuzzer load the built, gitignored `lib/settings.schema.json`.
+- Committed generated output is the table in `.github/scripts/generated.ts`: `src/upstream-gaps/index.ts` and the generated regions of `action.yml` and the docs pages.
 - `bun run build:check` regenerates every table entry and fails on drift.
-- `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into them.
+- `lib/index.js` (the action bundle), `lib/settings.schema.json` (the published schema), and `lib/pkg/` (the npm library) are built where they are needed and never committed on `main`. Every runtime dependency is compiled into the bundle and the library.
 - [docs/reference/coverage.md](docs/reference/coverage.md) is the inventory of the supported API surface, one link per call. A change that adds or extends a section keeps its `<key>.docs.yml` rows and `.github/scripts/endpoint-docs.yml` in step.
 
 ## Backward compatibility
@@ -44,13 +45,13 @@ The end-to-end tests build the bundle to a temp path and run it as a subprocess 
 The fuzzer is deterministic. It prints a master seed and a per-iteration seed:
 
 ```sh
-FUZZ_SEED=<masterSeed> bun run fuzz                          # replay a whole run
-bun test/e2e/fuzz.ts --seed <iterationSeed> --iterations 1  # replay one failing iteration
+FUZZ_SEED=<masterSeed> bun run fuzz                    # replay a whole run
+bun run fuzz --seed <iterationSeed> --iterations 1    # replay one failing iteration
 ```
 
 ## Releases
 
 - Releases run downstream of the `all-green` gate: ci.yml calls the fleet's release workflow, so a release or a release-PR refresh only happens from a green `main`.
 - release-please does the version math, the changelog, the version pins, and the release PR; merging that PR cuts the release.
-- Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
+- Every ref a `uses:` pin can name (`vX.Y.Z`, the moving major, `latest`) points at a packaged commit: the child of one `main` commit, carrying its tree plus the built bundle, schema, and library; every green push mints one under a `build/<position>.<sha7>` tag, the ten newest kept. The tags up to v2.0.0 point at `main` commits from when `main` committed the bundle.
 - The repo-owned hooks `update-release.yml` and `update-release-pr.yml` mint the tags and keep release-please's boundary (`last-release-sha`) fresh. The git topology lives in `.github/scripts/release-pipeline.ts` and its test.

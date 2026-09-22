@@ -26,7 +26,7 @@ const scripts = (
   }
 ).scripts;
 /** The outputs the marker scan cannot see: whole generated files. */
-const WHOLE_FILES = ["lib/settings.schema.json", "src/upstream-gaps/index.ts"];
+const WHOLE_FILES = ["src/upstream-gaps/index.ts"];
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
   .split("\0")

@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ROOT } from "../root.js";
+import { SETTINGS_SCHEMA_PATH } from "../settings-schema.js";
 import { withTempDir } from "../temp-dir.js";
 
 const PAGE = "docs/reference/library.md";
@@ -18,7 +19,6 @@ const PACKAGE = "@vivswan/github-settings-as-code";
 
 /** Where the package's two import paths land when the fences compile against this checkout. */
 const ENTRY = join(ROOT, "src", "index.js");
-const SCHEMA = join(ROOT, "lib", "settings.schema.json");
 
 /** One `ts` fence: its body and the page line (1-based) of the body's first line. */
 interface Fence {
@@ -67,7 +67,7 @@ export function examplesProgram(fences: readonly Fence[]): {
   for (const fence of fences) {
     starts.push(line);
     const body = fence.body
-      .replaceAll(`"${PACKAGE}/settings.schema.json"`, JSON.stringify(SCHEMA))
+      .replaceAll(`"${PACKAGE}/settings.schema.json"`, JSON.stringify(SETTINGS_SCHEMA_PATH))
       .replaceAll(`"${PACKAGE}"`, JSON.stringify(ENTRY));
     parts.push(body);
     line += body.split("\n").length;

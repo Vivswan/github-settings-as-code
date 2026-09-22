@@ -5,8 +5,6 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { ok } from "neverthrow";
@@ -14,11 +12,9 @@ import { validateSectionShapes } from "../src/engine/validate.js";
 import { SettingsFile, UNDECLARED_POLICY_SECTIONS } from "../src/schema.js";
 import { NESTED_KEYS } from "../src/sections/environments/nested.js";
 import { ENVIRONMENT_PARSE_FIXTURES } from "./fixtures/environment-parse-rules.js";
-import { ROOT } from "./root.js";
+import { readSettingsSchema } from "./settings-schema.js";
 
-const schema = JSON.parse(readFileSync(join(ROOT, "lib", "settings.schema.json"), "utf8")) as {
-  definitions: Record<string, Record<string, unknown>>;
-};
+const schema = readSettingsSchema();
 
 // strict: false because the generated schema carries draft-07 idioms AJV's strict mode complains about; validation semantics are unchanged.
 // The format plugin is loaded so a format keyword, should one ever be emitted, is judged here the way editors and CI linters judge it.

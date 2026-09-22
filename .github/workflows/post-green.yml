@@ -64,10 +64,11 @@ jobs:
           rm -f probe.err
       - uses: ./.github/actions/setup
         if: steps.token.outputs.proceed == 'true'
-      - name: Build the bundle and the library
+      - name: Build the bundle, the schema, and the library
         if: steps.token.outputs.proceed == 'true'
         run: |
           bun run build:bundle
+          bun run build:schema
           bun run build:lib
       - name: Package this commit under its build tag, prune the window, and point latest at the newest main source
         if: steps.token.outputs.proceed == 'true'
