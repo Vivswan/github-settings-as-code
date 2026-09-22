@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { GENERATED_OUTPUTS, generatedPaths } from "../../.github/scripts/generated.js";
+import {
+  generatedPaths,
+  generatorEntryPoint,
+  generatorScripts,
+} from "../../.github/scripts/generated.js";
 import { ROOT } from "../root.js";
 
 /**
@@ -83,7 +87,11 @@ function admitted(pattern: string, path: string): boolean {
 }
 
 const paths = generatedPaths();
-const generators = [...new Set(GENERATED_OUTPUTS.map((output) => output.generator))];
+const generators = generatorScripts();
+/** Each generator script with the repository file it runs; null for a shape the census cannot read. */
+const generatorFiles = generators.map(
+  (name) => [name, generatorEntryPoint(scripts[name] ?? "")] as const,
+);
 
 describe("auto-fix.yml tracks the generated-output table", () => {
   test("the parser sees both allowlists, and they name the same paths", () => {
@@ -159,7 +167,10 @@ describe("auto-fix.yml tracks the generated-output table", () => {
   });
 
   test("a hand edit to a generated output or its generator triggers the fix", () => {
-    for (const path of [...paths, ...generators]) {
+    for (const [name, file] of generatorFiles) {
+      expect(file, `${name} is a package.json script of the shape bun <file>.ts`).not.toBeNull();
+    }
+    for (const path of [...paths, ...generatorFiles.map(([, file]) => file ?? "")]) {
       expect(
         triggerPaths.some((pattern) => new Bun.Glob(pattern).match(path)),
         `on.paths: ${path}`,
@@ -169,10 +180,10 @@ describe("auto-fix.yml tracks the generated-output table", () => {
 
   test("the rebuild step runs exactly the generators, in table order", () => {
     // The graduation step regenerates the gaps index only when a gap graduates, so the index generator runs here
-    // too. `bun run build:x` resolves through package.json to the one generator it runs; any other shape
-    // resolves to nothing and fails the comparison.
-    const run = [...rebuildRun.matchAll(/^\s*bun (run )?(\S+)$/gm)].map(([, viaScript, name]) =>
-      viaScript === undefined ? name : /^bun (\S+)$/.exec(scripts[name ?? ""] ?? "")?.[1],
+    // too. Every generator is a package.json script, so a bare `bun <file>` line here is a generator the table
+    // does not know and fails the comparison.
+    const run = [...rebuildRun.matchAll(/^\s*bun (\S+)(?: (\S+))?$/gm)].map(([, word, name]) =>
+      word === "run" ? name : `${word}${name === undefined ? "" : ` ${name}`}`,
     );
     expect(run).toEqual(generators);
   });

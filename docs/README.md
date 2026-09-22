@@ -69,9 +69,10 @@ The [playbooks](playbooks/README.md) compose the pieces above into end-to-end se
 
 ## Where the facts live
 
-Generated regions carry the load-bearing facts. Each is rendered from its declarations or generator data by `bun run build:docs` and `bun run build:action-docs`, and `build:check` fails when a committed page drifts:
+Generated regions carry the load-bearing facts. Each is rendered from its declarations or generator data by `bun run build:docs`, `bun run build:action-docs`, and `bun run build:inputs-table`, and `build:check` fails when a committed page drifts:
 
-- the [Sections](reference/sections.md) and [Inputs](reference/inputs.md) tables, and the `result` values on the inputs page;
+- the [Sections](reference/sections.md) table and the `result` values on the inputs page;
+- the [Inputs](reference/inputs.md) table, which [action-docs](https://github.com/npalm/action-docs) renders from `action.yml`;
 - the [Coverage](reference/coverage.md) tables and notes, the per-section detail behind the Sections table;
 - the defaults table and count in [undeclared policy](reference/undeclared-policy.md);
 - the grant sentence and gated-read bullets in [permissions](reference/permissions.md) and [check mode](operate/check-mode.md);

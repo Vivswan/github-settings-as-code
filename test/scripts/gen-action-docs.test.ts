@@ -10,7 +10,6 @@ import {
   renderCheckModeGatedReads,
   renderGatedReads,
   renderGrantSentence,
-  renderInputsTable,
   renderPolicyCountSentence,
   renderPolicyDefaultsTable,
 } from "../../.github/scripts/gen-action-docs.js";
@@ -99,66 +98,6 @@ describe("action.yml renderers", () => {
     expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
       /single-spaced prose/,
     );
-  });
-});
-
-describe("Inputs table renderer", () => {
-  test("shows the declared default backticked, an empty one as (empty), and a shown default verbatim", () => {
-    expect(
-      renderInputsTable(
-        {
-          token: {
-            default: "an expression the runner resolves",
-            shownDefault: "`github.token`",
-            summary: "Token for the API calls",
-          },
-          mode: { default: "apply", summary: "`apply` mutates; `check` reports" },
-          repos: { default: "", summary: "Multi-repo remote mode" },
-          visibility: { default: "", shownDefault: "`all`", summary: "Discovery-only: a | b" },
-          archived: { default: "", summary: "kept \\| as is, but \\\\| gets escaped" },
-        },
-        ".",
-      ),
-    ).toBe(
-      [
-        "| Input | Default | Meaning |",
-        "|---|---|---|",
-        "| `token` | `github.token` | Token for the API calls |",
-        "| `mode` | `apply` | `apply` mutates; `check` reports |",
-        "| `repos` | (empty) | Multi-repo remote mode |",
-        "| `visibility` | `all` | Discovery-only: a \\| b |",
-        "| `archived` | (empty) | kept \\| as is, but \\\\\\| gets escaped |",
-      ].join("\n"),
-    );
-    for (const summary of ["two\nlines", "carriage\rreturn"]) {
-      expect(() => renderInputsTable({ x: { default: "", summary } }, ".")).toThrow(
-        /cannot contain a line break/,
-      );
-    }
-  });
-
-  test("rebases a summary's root-relative links onto the page's directory, leaving URLs and fragments alone", () => {
-    const decls = {
-      token: {
-        default: "",
-        summary:
-          "see [permissions](docs/reference/permissions.md#what-to-grant), [the guide](docs/start/getting-started.md), and [GitHub](https://docs.github.com/x)",
-      },
-      mode: {
-        default: "",
-        summary:
-          "[a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](docs/x.md#top), [f](#top)",
-      },
-    };
-    const rows = (table: string): string[] => table.split("\n").slice(2);
-    expect(rows(renderInputsTable(decls, "."))).toEqual([
-      "| `token` | (empty) | see [permissions](docs/reference/permissions.md#what-to-grant), [the guide](docs/start/getting-started.md), and [GitHub](https://docs.github.com/x) |",
-      "| `mode` | (empty) | [a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](docs/x.md#top), [f](#top) |",
-    ]);
-    expect(rows(renderInputsTable(decls, "docs/reference"))).toEqual([
-      "| `token` | (empty) | see [permissions](permissions.md#what-to-grant), [the guide](../start/getting-started.md), and [GitHub](https://docs.github.com/x) |",
-      "| `mode` | (empty) | [a](//docs.example/x), [b](HTTPS://x), [c](mailto:a@b), [d](/site/x.md), [e](../x.md#top), [f](#top) |",
-    ]);
   });
 });
 
@@ -369,10 +308,6 @@ describe("generated files", () => {
       expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
     }
     accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
-    accepts(
-      "inputs-table",
-      renderInputsTable({ x: { default: "", shownDefault: "a", summary: "b | c" } }, "."),
-    );
     const knobbed = [
       { key: "labels", undeclaredDefault: "delete" },
       { key: "rulesets", undeclaredDefault: "keep" },

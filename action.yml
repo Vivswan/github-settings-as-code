@@ -77,13 +77,13 @@ inputs:
     description: >-
       mode: snapshot only, and exactly one of snapshot-file and snapshot-dir
       is required there: the directory the multi-repo targets' live settings
-      are written under, one <owner>/<name>.yml per target (the repos-dir
-      layout, so the directory can later serve as a repos-dir). The targets
-      come from repos and repos-dir exactly as in a multi-repo apply,
-      discovery filters included; defaults-file does not apply. Must be
-      disjoint from the repos-dir (not the same directory, not above it, not
-      below it): the snapshots would overwrite the central files or be read
-      back as central files. Fails when set in apply, check, or render.
+      are written under, one owner/name.yml per target (the repos-dir layout,
+      so the directory can later serve as a repos-dir). The targets come from
+      repos and repos-dir exactly as in a multi-repo apply, discovery filters
+      included; defaults-file does not apply. Must be disjoint from the
+      repos-dir (not the same directory, not above it, not below it): the
+      snapshots would overwrite the central files or be read back as central
+      files. Fails when set in apply, check, or render.
     required: false
     default: ""
   on-missing-permission:
@@ -103,10 +103,11 @@ inputs:
     default: ""
   sections:
     description: >-
-      Optional comma-separated allowlist of sections to process. apply, check,
-      and snapshot only: mode: render writes every section its layers declare,
-      so the allowlist belongs on the step that runs the rendered document and
-      fails the render when set.
+      Optional comma-separated allowlist of sections to process; unset, every
+      declared section is processed. apply, check, and snapshot only: mode:
+      render writes every section its layers declare, so the allowlist belongs
+      on the step that runs the rendered document and fails the render when
+      set.
     required: false
     default: ""
   api-version:
@@ -128,8 +129,8 @@ inputs:
   repos-dir:
     description: >-
       Multi-repo central mode: a directory in the checked-out admin repository
-      holding per-repo settings files - <name>.yml (same owner as this
-      repository) or <owner>/<name>.yml. Requires actions/checkout.
+      holding per-repo settings files - name.yml (same owner as this
+      repository) or owner/name.yml. Requires actions/checkout.
     required: false
     default: ""
   defaults-file:
@@ -148,10 +149,10 @@ inputs:
       mode: render only: replace, shallow, or deep (default), the run-wide
       default for how every list section's entries combine with the layers
       below them, each section by its own key (a label's name, a ruleset's
-      name, a secret's name, ...). replace lets the higher list win wholesale;
-      shallow unions the entries by key and swaps a same-key entry for the
-      higher one; deep unions by key and merges a same-key pair field by
-      field, a nested keyed list (a ruleset's rules, by type) unioning the
+      name, a secret's name, and so on). replace lets the higher list win
+      wholesale; shallow unions the entries by key and swaps a same-key entry
+      for the higher one; deep unions by key and merges a same-key pair field
+      by field, a nested keyed list (a ruleset's rules, by type) unioning the
       same way. A layer's own _layering directive, at its top level or on a
       section's {entries} wrapper, overrides it per file or per section. Lists
       outside the list sections are replaced by the higher layer's. Fails when
@@ -211,7 +212,7 @@ inputs:
     default: "none"
   report-public-key:
     description: >-
-      The age recipient (an "age1..." public key) the artifact channel
+      The age recipient (a public key starting with age1) the artifact channel
       encrypts every report to; safe to commit in the workflow. Generate a
       keypair with "age-keygen -o key.txt", keep key.txt secret, and decrypt a
       downloaded artifact with "age -d -i key.txt private-report.md.age".
@@ -222,44 +223,45 @@ inputs:
     description: >-
       Keeps only repositories of this visibility in repos: "*" discovery. One
       of all (default), public, private, or internal; internal is matched
-      client-side (Enterprise only). Fails if set without repos: "*".
+      client-side (Enterprise only). Fails if set outside that discovery.
     required: false
     default: ""
   archived:
     description: >-
       Archived-repository policy for repos: "*" discovery. One of skip
       (default; settings writes fail on archived repositories), include, or
-      only (mostly useful with mode: check). Fails if set without repos: "*".
+      only (mostly useful with mode: check). Fails if set outside that
+      discovery.
     required: false
     default: ""
   forks:
     description: >-
       Fork policy for repos: "*" discovery. One of include (default), exclude,
-      or only. Fails if set without repos: "*".
+      or only. Fails if set outside that discovery.
     required: false
     default: ""
   exclude:
     description: >-
       Comma- or newline-separated wildcard patterns removing repositories from
-      repos: "*" discovery. "*" matches any characters; a pattern containing
-      "/" matches the full owner/name, any other the name alone.
-      Case-insensitive. Fails if set without repos: "*".
+      repos: "*" discovery. An asterisk matches any characters; a pattern
+      containing "/" matches the full owner/name, any other the name alone.
+      Case-insensitive. Fails if set outside that discovery.
     required: false
     default: ""
   topics:
     description: >-
       Comma- or newline-separated topics; repos: "*" discovery keeps only
       repositories carrying at least one of them. Unrelated to the topics
-      settings section. Fails if set without repos: "*".
+      settings section. Fails if set outside that discovery.
     required: false
     default: ""
   affiliation:
     description: >-
       Comma-separated affiliations for repos: "*" discovery, passed to the
-      GitHub /user/repos listing. Any of owner, collaborator,
-      organization_member; the list replaces the default (owner), so use
+      GitHub /user/repos listing. Any of owner (default), collaborator,
+      organization_member; the list replaces the default, so use
       owner,collaborator to widen rather than move discovery. Fails if set
-      without repos: "*".
+      outside that discovery.
     required: false
     default: ""
 # END GENERATED: action-inputs

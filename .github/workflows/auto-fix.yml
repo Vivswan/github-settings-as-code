@@ -1,7 +1,8 @@
 # The commit-back fixes a same-repo PR can need, pushed to its branch; an already-clean tree gets no commit. A PR
 # with unrelated type errors fails the build job by design: the graduation script refuses to half-fix a red build.
 #   lib/settings.schema.json                     -> build:schema (a Dependabot generator bump changes its bytes on a branch nobody builds)
-#   README, action.yml, docs/ regions           -> build:docs, build:action-docs
+#   README, action.yml, docs/ regions           -> build:docs, build:action-docs, build:inputs-table (action-docs renders
+#                                                   the inputs table from action.yml)
 #   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with;
 #                                                   gen-gaps-index.ts re-renders index.ts
 #   lib/index.js                                 -> never: main carries no bundle
@@ -36,6 +37,7 @@ on:
       - "docs/operate/check-mode.md"
       - "docs/start/getting-started.md"
       - ".github/scripts/gen-action-docs.ts"
+      - ".github/scripts/gen-inputs-table.ts"
       - "docs/reference/coverage.md"
       - "package.json"
       - "bun.lock"
@@ -80,16 +82,18 @@ jobs:
       - name: Graduate upstream gaps octokit now ships
         shell: bash
         run: bun .github/scripts/graduate-upstream-gaps.ts
-      - name: Regenerate the schema, docs, and gaps index and stage the fix patch
+      - name: Regenerate the gaps index, schema, docs, and inputs table and stage the fix patch
         id: rebuild
         shell: bash
         run: |
-          # One line per generator, in .github/scripts/generated.ts table order; test/scripts/auto-fix-allowlist.test.ts
-          # pins the list and the order.
+          # One line per generator, in .github/scripts/generated.ts table order: the later generators import the
+          # gaps index through src/, and the inputs table reads action.yml, so each source renders first.
+          # test/scripts/auto-fix-allowlist.test.ts pins the list and the order.
+          bun run build:gaps-index
           bun run build:schema
           bun run build:docs
           bun run build:action-docs
-          bun .github/scripts/gen-gaps-index.ts
+          bun run build:inputs-table
           # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
           # patch holds exactly the allowed paths.
           git reset -q

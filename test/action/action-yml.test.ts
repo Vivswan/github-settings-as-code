@@ -28,8 +28,9 @@ describe("action.yml <-> README", () => {
 });
 
 describe("input declarations <-> discovery defaults", () => {
-  test("each discovery filter declares an empty default and shows its effective one", () => {
-    // A filter is "explicitly set" when its raw input is not "", so a non-empty declared default would defeat that detection.
+  test("each discovery filter declares an empty default and names its effective one", () => {
+    // A filter is "explicitly set" when its raw input is not "", so a non-empty declared default would defeat that
+    // detection; the description is then the only place the reader learns the effective default.
     const effective: Partial<Record<(typeof FILTER_INPUTS)[number], string>> = {
       visibility: DEFAULT_DISCOVERY_FILTERS.visibility,
       archived: DEFAULT_DISCOVERY_FILTERS.archived,
@@ -40,17 +41,12 @@ describe("input declarations <-> discovery defaults", () => {
       const decl: InputDecl = INPUT_DECLS[name];
       expect(decl.default, `the "${name}" declaration must default to ""`).toBe("");
       const value = effective[name];
-      if (value === undefined) {
-        expect(decl.shownDefault, `"${name}" has no effective default to show`).toBeUndefined();
-        continue;
+      if (value !== undefined) {
+        expect(
+          decl.description,
+          `the "${name}" description does not name "${value}" as its default`,
+        ).toContain(`${value} (default`);
       }
-      expect(
-        decl.description.includes(value),
-        `the "${name}" description does not mention its default "${value}"`,
-      ).toBe(true);
-      expect(decl.shownDefault, `the Inputs table must show "${name}" defaulting to ${value}`).toBe(
-        `\`${value}\``,
-      );
     }
   });
 });
