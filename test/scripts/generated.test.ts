@@ -14,11 +14,7 @@ import { withTempDir } from "../temp-dir.js";
 /** Only a file type with a marker syntax carries a region; a marker string anywhere else is test or script text. */
 const regionFile = (path: string): boolean => extname(path) in SYNTAX_BY_EXTENSION;
 /** The outputs the marker scan cannot see: whole generated files. */
-const WHOLE_FILES = [
-  "lib/settings.schema.json",
-  "src/sections/webhooks/events.ts",
-  "src/upstream-gaps/index.ts",
-];
+const WHOLE_FILES = ["lib/settings.schema.json", "src/upstream-gaps/index.ts"];
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
   .split("\0")
