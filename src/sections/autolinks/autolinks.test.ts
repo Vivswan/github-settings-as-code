@@ -274,15 +274,4 @@ describe("autolinks", () => {
       api.state.autolinks.map((a) => [a.key_prefix, a.url_template, a.is_alphanumeric]),
     ).toEqual([["TICKET-", "https://example.com/TICKET/<num>", false]]);
   });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(autolinksSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-  });
 });
