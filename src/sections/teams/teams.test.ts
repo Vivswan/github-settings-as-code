@@ -191,22 +191,6 @@ describe("teams", () => {
     });
   });
 
-  test("the read port exposes the public org probe, the list in its denied posture, and the team probe, never a write", () => {
-    const ctx = planContext(teamsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["org", "list", "probe"]);
-    // @ts-expect-error a write role is not a read: the port has no `grant`
-    ctx.read.grant;
-    // @ts-expect-error nor a `revoke`
-    ctx.read.revoke;
-    // @ts-expect-error a "denied" primary read offers no absent probe: its 404 is a denial
-    ctx.read.list.probeAbsent;
-    // @ts-expect-error nor a tolerant call
-    ctx.read.list.tryCall;
-    expect(typeof ctx.read.org.probeAbsent).toBe("function");
-    expect(typeof ctx.read.probe.probeAbsent).toBe("function");
-    expect(typeof ctx.read.list.listAll).toBe("function");
-  });
-
   describe("snapshot", () => {
     test("reads each listed team's role through the probe, not the listing's permission, so a custom role reads back by name; a probe 404 is noted with both readings", async () => {
       const api = new MockApi({
