@@ -50,7 +50,6 @@
     "test": "bun test",
     "test:e2e": "bun test/e2e/run.ts",
     "fuzz": "bun test/e2e/fuzz.ts",
-    "build": "bun run build:gaps-index && bun run build:bundle && bun run build:lib && bun run build:schema && bun run build:docs && bun run build:action-docs && bun run build:inputs-table",
     "build:bundle": "bun build src/main.ts --target=node --outfile lib/index.js",
     "build:lib": "bun x tsdown",
     "build:schema": "bun .github/scripts/gen-settings-schema.ts",
@@ -58,8 +57,7 @@
     "build:action-docs": "bun .github/scripts/gen-action-docs.ts",
     "build:inputs-table": "bun .github/scripts/gen-inputs-table.ts",
     "build:gaps-index": "bun .github/scripts/gen-gaps-index.ts",
-    "build:check": "bun .github/scripts/generated.ts",
-    "prepare": "lefthook install || true"
+    "build:check": "bun .github/scripts/generated.ts"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",
