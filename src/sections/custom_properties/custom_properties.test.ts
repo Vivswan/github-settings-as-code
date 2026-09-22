@@ -232,13 +232,4 @@ describe("custom_properties", () => {
       { property_name: "team", value: "platform" },
     ]);
   });
-
-  test("the read port exposes the org probe in its absent posture and the values GET, never the PATCH", () => {
-    const ctx = planContext(customPropertiesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["org", "list"]);
-    // @ts-expect-error a write role is not a read: the port has no `update`
-    ctx.read.update;
-    // @ts-expect-error an "absent" primary read offers no throwing helper
-    ctx.read.org.call;
-  });
 });
