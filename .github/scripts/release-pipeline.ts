@@ -61,6 +61,15 @@ export const NEXT_BUILD_INPUTS = [
   ".github/scripts/release-pipeline.ts",
   ".github/workflows/post-green.yml",
 ] as const;
+/** What under src/ the build never packs, so a change to it alone publishes nothing: tests, e2e scenarios and their
+ * generators, mock handlers, and the docs prose (a trailing "/" names a directory, a leading "*" a file-name suffix). */
+export const NEXT_BUILD_UNPACKED = [
+  "*.test.ts",
+  "scenarios/",
+  "*.docs.yml",
+  "mock.ts",
+  "generators.ts",
+] as const;
 const LATEST_REF = "refs/tags/latest";
 const BUILD_TAG_PREFIX = "refs/tags/build/";
 const BUILD_TAG = /^refs\/tags\/build\/([1-9]\d*)\.[0-9a-f]{7}$/;
@@ -1109,9 +1118,30 @@ function shippedPaths(
  * `/licen[cs]e{,.*[^~$]}`, any case; a glob star crosses no separator, and an editor backup suffix is left out. */
 const ALWAYS_PACKED = /^(?:readme|copying|licen[cs]e)(?:\.[^/]*[^~$/])?$/i;
 const ALWAYS_PACKED_TEXT = "or a root README, COPYING, or LICENSE";
+const UNPACKED_TEXT = `(under src/, ${NEXT_BUILD_UNPACKED.join(", ")} are never packed and do not count)`;
 
-/** Whether `path` is one of `shipped`, lies under one of its directories, or is a root file npm always packs. */
+/** Whether a path under src/ is one the build never packs. */
+function unpacked(path: string): boolean {
+  const segments = path.split("/");
+  if (segments[0] !== "src") {
+    return false;
+  }
+  const name = segments[segments.length - 1] ?? "";
+  return NEXT_BUILD_UNPACKED.some((entry) =>
+    entry.endsWith("/")
+      ? segments.slice(1, -1).includes(entry.slice(0, -1))
+      : entry.startsWith("*")
+        ? name.endsWith(entry.slice(1))
+        : name === entry,
+  );
+}
+
+/** Whether `path` is one of `shipped`, lies under one of its directories, or is a root file npm always packs; a path
+ * under src/ the build never packs is not, whatever it lies under. */
 function ships(shipped: string[], path: string): boolean {
+  if (unpacked(path)) {
+    return false;
+  }
   return (
     ALWAYS_PACKED.test(path) ||
     shipped.some((entry) => {
@@ -1209,7 +1239,7 @@ export function nextPublishVerdict(
         return {
           publish: false,
           version,
-          reason: `no shipped file changed since ${next.version} (source ${next.sha.slice(0, 7)}): no merge to main in ${next.sha.slice(0, 7)}..${sourceSha.slice(0, 7)} touches ${shipped.paths.join(", ")}, ${ALWAYS_PACKED_TEXT}`,
+          reason: `no shipped file changed since ${next.version} (source ${next.sha.slice(0, 7)}): no merge to main in ${next.sha.slice(0, 7)}..${sourceSha.slice(0, 7)} touches ${shipped.paths.join(", ")}, ${ALWAYS_PACKED_TEXT} ${UNPACKED_TEXT}`,
           notices,
         };
       }
