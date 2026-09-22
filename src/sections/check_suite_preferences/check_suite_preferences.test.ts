@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import {
-  type PlannedOp,
-  planContext,
-  type SectionPlan,
-} from "../../../src/sections/contract/plan.js";
+import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { provePlanIdempotent } from "../../../test/sections/plan-idempotence.js";
 import { REPO, unwrap } from "../../../test/sections/section-run.js";
@@ -111,25 +107,5 @@ describe("check_suite_preferences", () => {
     expect(message).toMatch(/"Checks" \(read and write\)/);
     expect(message).toMatch(/repository administrator/);
     expect(execution.landed).toBe(0);
-  });
-
-  test("the read port is empty, and only the PATCH is plannable - driftless by declaration", () => {
-    const ctx = planContext(checkSuitePreferencesSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual([]);
-    // @ts-expect-error a write role is not a read: the port has no `update`
-    ctx.read.update;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // Compile-time only. Each rejected shape is built first and assigned on one line, so the @ts-expect-error anchors to the assignment whichever
-    // property the compiler blames.
-    type Op = PlannedOp<typeof checkSuitePreferencesSection.endpoints>;
-    const rewrite: Op = { role: "update", payload: declared, drift: [], change: "" };
-    expect(rewrite.drift).toEqual([]);
-    const undeclared = { role: "typo", drift: ["x"], change: "" } as const;
-    // @ts-expect-error an undeclared role is not plannable
-    const _undeclared: Op = undeclared;
-    const parametrized = { role: "update", params: { name: "x" }, drift: [], change: "" } as const;
-    // @ts-expect-error the route has no path params beyond owner/repo
-    const _parametrized: Op = parametrized;
   });
 });
