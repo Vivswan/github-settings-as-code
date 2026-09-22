@@ -480,9 +480,9 @@ export class GitHubApi implements GitHubClient {
     // cannot be normalized is never sent; sending what the scan could not inspect would let a stateful object show the
     // scan one thing and the wire another.
     const secretScan = redactSecretPayloadSafe(payload);
-    if (!secretScan.ok) {
+    if (secretScan.isErr()) {
       const reason =
-        secretScan.reason ??
+        secretScan.error ??
         "its payload is not plain JSON data (a value carrying a function or exotic prototype)";
       return {
         failed: `${method} ${path} was not sent: ${reason}, so it could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
@@ -490,7 +490,7 @@ export class GitHubApi implements GitHubClient {
     }
     // Either signal withholds: the caller's mark knows the value's origin, the scan knows the wire's field names.
     const marked = options?.carriesSecret === true;
-    const carriesSecret = marked || secretScan.carriesSecret;
+    const carriesSecret = marked || secretScan.value.carriesSecret;
     const trace = (status: number): void => {
       const safe = this.trace.path(path);
       this.trace.debug(
@@ -499,7 +499,7 @@ export class GitHubApi implements GitHubClient {
             ? ""
             : marked
               ? ` payload: ${MARKED_PAYLOAD_TRACE}`
-              : ` payload: ${JSON.stringify(secretScan.traced)}`),
+              : ` payload: ${JSON.stringify(secretScan.value.traced)}`),
       );
     };
     try {
@@ -511,7 +511,7 @@ export class GitHubApi implements GitHubClient {
           "x-github-api-version": this.apiVersion,
         },
         // The body is the tree the scan inspected, so octokit never reshapes the payload and the wire carries exactly what was scanned.
-        ...(payload === undefined ? {} : { data: secretScan.payload }),
+        ...(payload === undefined ? {} : { data: secretScan.value.payload }),
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0]);
       trace(response.status);
       const data = response.data as unknown;
@@ -552,21 +552,21 @@ export class GitHubApi implements GitHubClient {
     const started = Date.now();
     // The same one-serialization contract as tryRequest, so a future secret-bearing variable is masked and withheld like a REST payload field.
     const scan = redactSecretPayloadSafe(variables);
-    if (!scan.ok) {
+    if (scan.isErr()) {
       const reason =
-        scan.reason ??
+        scan.error ??
         "its variables are not plain JSON data (a value carrying a function or exotic prototype)";
       return {
         failed: `GRAPHQL ${op.name} was not sent: ${reason}, so they could not be safely inspected for secret fields. Replace that value with a plain string in the settings file`,
       };
     }
     const marked = options?.carriesSecret === true;
-    const carriesSecret = marked || scan.carriesSecret;
+    const carriesSecret = marked || scan.value.carriesSecret;
     // Read live at every emission, never snapshotted at request start: a mask registered mid-flight must redact what follows.
     const redacted = (): boolean => this.trace.isRedacted(slug);
     // The operation addresses its repository in the BODY, which the path redactor never sees: a redacted slug collapses
     // the ENTIRE line, since the variables carry the repository's live state.
-    const tracedVariables = marked ? MARKED_PAYLOAD_TRACE : JSON.stringify(scan.traced);
+    const tracedVariables = marked ? MARKED_PAYLOAD_TRACE : JSON.stringify(scan.value.traced);
     const trace = (status: number, suffix = ""): void => {
       this.trace.debug(
         redacted()
@@ -591,7 +591,7 @@ export class GitHubApi implements GitHubClient {
           "x-github-api-version": this.apiVersion,
         },
         // operationName makes the request self-describing on the wire (the mock dispatches on it).
-        data: { query: op.query, operationName: op.name, variables: scan.payload },
+        data: { query: op.query, operationName: op.name, variables: scan.value.payload },
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0])) as {
         status: number;
         data: unknown;

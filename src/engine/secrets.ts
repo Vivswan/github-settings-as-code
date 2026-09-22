@@ -50,7 +50,7 @@ export interface MintedSecretReference {
 function mintSecretReference(variable: string, label: string): MintedSecretReference {
   const reference = `$${variable}`;
   const checked = validateSecretRef(reference, "operator", label);
-  if (!checked.ok) {
+  if (checked.isErr()) {
     throw new Error(
       `BUG: the snapshot minted a reference the settings file refuses: ${checked.error}`,
     );

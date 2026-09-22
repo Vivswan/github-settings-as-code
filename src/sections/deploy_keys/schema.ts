@@ -1,5 +1,6 @@
 /** The `deploy_keys:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
+import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 
 /**
@@ -73,10 +74,11 @@ const BLOB_NOT_BASE64 =
  */
 const PRIVATE_KEY_FRAMING = ["PRIVATE", "KEY-----"].join(" ");
 
-export type PublicKeyParse =
-  /** `material` is the comparable form, algorithm + blob: GitHub may strip or rewrite the comment on storage. */
-  | { readonly ok: true; readonly algorithm: string; readonly material: string }
-  | { readonly ok: false; readonly reason: string };
+/** `material` is the comparable form, algorithm + blob: GitHub may strip or rewrite the comment on storage. */
+export interface PublicKeyMaterial {
+  readonly algorithm: string;
+  readonly material: string;
+}
 
 /**
  * Names what PUBLIC_KEY_PATTERN refused. The reason never quotes the input: it may be a pasted PRIVATE key, and a
@@ -133,20 +135,20 @@ function parseMaterial(
   pattern: RegExp,
   raw: string,
   rejection: (raw: string) => string,
-): PublicKeyParse {
+): Result<PublicKeyMaterial, string> {
   const match = pattern.exec(raw);
   return match === null
-    ? { ok: false, reason: rejection(raw) }
-    : { ok: true, algorithm: match[1] ?? "", material: `${match[1]} ${match[2]}` };
+    ? err(rejection(raw))
+    : ok({ algorithm: match[1] ?? "", material: `${match[1]} ${match[2]}` });
 }
 
 /** The one reading of DECLARED deploy key material, shared by the schema and the planner so the two cannot disagree. */
-export function parsePublicKey(raw: string): PublicKeyParse {
+export function parsePublicKey(raw: string): Result<PublicKeyMaterial, string> {
   return parseMaterial(PUBLIC_KEY_PATTERN, raw, declaredRejection);
 }
 
 /** The reading of material GitHub returned: the same comparable form, with GitHub the authority on the algorithm. */
-export function parseStoredKey(raw: string): PublicKeyParse {
+export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
   return parseMaterial(STORED_KEY_PATTERN, raw, storedRejection);
 }
 
@@ -165,12 +167,12 @@ export const DeployKeyConfig = z
       return;
     }
     const parsed = parsePublicKey(key);
-    if (!parsed.ok) {
+    if (parsed.isErr()) {
       const who = typeof entry.title === "string" ? `entry "${entry.title}"` : "this entry";
       refineCtx.addIssue({
         code: "custom",
         path: ["key"],
-        message: `${who}: ${parsed.reason}`,
+        message: `${who}: ${parsed.error}`,
       });
     }
   })

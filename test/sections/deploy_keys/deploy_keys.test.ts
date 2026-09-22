@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { deployKeysSection } from "../../../src/sections/deploy_keys/index.js";
@@ -49,13 +50,11 @@ const plan = async (api: MockApi, desired: SectionInput<"deploy_keys">) =>
 
 describe("parsePublicKey", () => {
   test("the comparable material is algorithm + blob: GitHub strips the comment on storage, so a raw compare would recreate on every apply", () => {
-    const bot = { ok: true, algorithm: "ssh-ed25519", material: BOT_KEY } as const;
+    const bot = ok({ algorithm: "ssh-ed25519", material: BOT_KEY });
     expect(parsePublicKey(`${BOT_KEY} deploy@host`)).toEqual(bot);
-    expect(parsePublicKey(`  ${RETIRED_KEY} a b c  `)).toEqual({
-      ok: true,
-      algorithm: "ssh-rsa",
-      material: RETIRED_KEY,
-    });
+    expect(parsePublicKey(`  ${RETIRED_KEY} a b c  `)).toEqual(
+      ok({ algorithm: "ssh-rsa", material: RETIRED_KEY }),
+    );
     expect(parsePublicKey(BOT_KEY)).toEqual(bot);
   });
 
@@ -70,7 +69,7 @@ describe("parsePublicKey", () => {
       `ssh-ed25519\tAAAAC3NzaC1lZDI1NTE5AAAAIBotBotBotBotBotBotBotBotBotBotBotBotBotBotB\tdeploy@host`,
     ],
   ])("%s is a public key GitHub accepts, so the parse keeps it", (_label, raw) => {
-    expect(parsePublicKey(raw).ok).toBe(true);
+    expect(parsePublicKey(raw).isOk()).toBe(true);
   });
 
   // Every refusal is checked for the ABSENCE of the input: a pasted private key must not surface in a log.
@@ -148,34 +147,27 @@ describe("parsePublicKey", () => {
     ],
   ])("%s is refused with a reason that never quotes the input", (_label, raw, reason) => {
     const parsed = parsePublicKey(raw);
-    expect(parsed.ok).toBe(false);
-    if (parsed.ok) {
-      return;
+    if (parsed.isOk()) {
+      throw new Error("expected a refusal");
     }
-    expect(parsed.reason).toMatch(reason);
+    expect(parsed.error).toMatch(reason);
     // The reason may name the accepted algorithms; every other field of the input stays out of it.
     const algorithms = new Set<string>(PUBLIC_KEY_ALGORITHMS);
     for (const field of raw
       .split(/\s+/)
       .filter((field) => field !== "" && !algorithms.has(field))) {
-      expect(parsed.reason).not.toContain(field);
+      expect(parsed.error).not.toContain(field);
     }
   });
 });
 
 describe("parseStoredKey", () => {
   test("material GitHub stored is read as algorithm + blob under ANY algorithm: GitHub is the authority on what it accepted", () => {
-    expect(parseStoredKey(ED448_KEY)).toEqual({
-      ok: true,
-      algorithm: "ssh-ed448",
-      material: ED448_KEY,
-    });
-    expect(parseStoredKey(`${BOT_KEY} deploy@host`)).toEqual({
-      ok: true,
-      algorithm: "ssh-ed25519",
-      material: BOT_KEY,
-    });
-    expect(parsePublicKey(ED448_KEY).ok).toBe(false);
+    expect(parseStoredKey(ED448_KEY)).toEqual(ok({ algorithm: "ssh-ed448", material: ED448_KEY }));
+    expect(parseStoredKey(`${BOT_KEY} deploy@host`)).toEqual(
+      ok({ algorithm: "ssh-ed25519", material: BOT_KEY }),
+    );
+    expect(parsePublicKey(ED448_KEY).isErr()).toBe(true);
   });
 
   test.each<[label: string, raw: string, reason: RegExp]>([
@@ -194,11 +186,11 @@ describe("parseStoredKey", () => {
     ],
   ])("%s is refused as a shape violation, never over the algorithm", (_label, raw, reason) => {
     const parsed = parseStoredKey(raw);
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) {
-      expect(parsed.reason).toMatch(reason);
-      expect(parsed.reason).not.toContain("algorithm GitHub accepts");
+    if (parsed.isOk()) {
+      throw new Error("expected a refusal");
     }
+    expect(parsed.error).toMatch(reason);
+    expect(parsed.error).not.toContain("algorithm GitHub accepts");
   });
 });
 
