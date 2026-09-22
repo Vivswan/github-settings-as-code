@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   camelCaseGapName,
@@ -16,6 +24,7 @@ import {
   planGraduation,
   toSpecOnlyGapSource,
 } from "../../.github/scripts/graduate-upstream-gaps.js";
+import type { UnshippedGraphqlSdl } from "../../src/upstream-gaps/gap.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 
@@ -195,54 +204,62 @@ describe("gapFileBases", () => {
 });
 
 describe("generateIndex", () => {
-  test("one import and one GAPS entry per gap file, keyed by base name and sorted; an empty directory keeps the template", () => {
-    // The varying parts of the file: the gap imports (gap.js's is the template's) and the GAPS record, whole.
-    const gapImports = (text: string): string[] => text.match(/^import \{ GAP as .*$/gm) ?? [];
-    const gapsArray = (text: string): string =>
-      text.match(/const GAPS = [\s\S]*?\} as const;/)?.[0] ?? "";
-    const two = generateIndex(["pages-https", "lfs"]);
-    expect(gapImports(two)).toEqual([
-      'import { GAP as lfs } from "./lfs.js";',
-      'import { GAP as pagesHttps } from "./pages-https.js";',
-    ]);
-    // A key that is its own alias is shorthand; a hyphenated one is quoted, so the file base name survives as the key.
-    expect(gapsArray(two)).toBe(
-      'const GAPS = {\n  lfs,\n  "pages-https": pagesHttps,\n} as const;',
-    );
-    const none = generateIndex([]);
-    expect(gapImports(none)).toEqual([]);
-    expect(gapsArray(none)).toBe("const GAPS = {} as const;");
-    // Everything but the imports and the GAPS elements is one template, so the derivations the consumers import
-    // (SupplementalRoute, UNDOCUMENTED_ROUTES) are the same text whatever the directory holds.
-    const template = (text: string): string =>
-      text.replace(/^import \{ GAP as .*\n/gm, "").replace(gapsArray(text), "");
-    expect(template(none)).toBe(template(two));
-    expect(none).toContain("export type SupplementalRoute");
-    expect(none).toContain("export const UNDOCUMENTED_ROUTES");
-  });
+  const GAPS_DIR = join(ROOT, "src", "upstream-gaps");
+  const realBases = gapFileBases(readdirSync(GAPS_DIR));
 
-  test("the empty index type-checks beside gap.ts: the derivations must not index into an empty tuple", () =>
-    withTempDir("gaps-index-empty-", (dir) => {
-      // The committed index compiles under the project typecheck only while a gap file exists; a derivation
-      // written for a populated GAPS (say `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
-      symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
-      copyFileSync(join(ROOT, "src", "upstream-gaps", "gap.ts"), join(dir, "gap.ts"));
-      writeFileSync(join(dir, "index.ts"), generateIndex([]));
-      writeFileSync(
-        join(dir, "tsconfig.json"),
-        JSON.stringify({ extends: join(ROOT, "tsconfig.json"), include: [], files: ["index.ts"] }),
-      );
-      const tsc = spawnSync(
-        join(ROOT, "node_modules", ".bin", "tsc"),
-        ["-p", dir, "--pretty", "false"],
-        { cwd: dir, encoding: "utf8" },
-      );
-      if (tsc.error) {
-        throw tsc.error;
-      }
-      expect(tsc.stdout + tsc.stderr).toBe("");
-      expect(tsc.status).toBe(0);
-    }));
+  test.each<[label: string, bases: string[]]>([
+    ["an empty directory", []],
+    ["the real gap directory", realBases],
+  ])(
+    "the index generated for %s type-checks beside its gap files, loads, and its SDL entries name them",
+    (_label, bases) =>
+      withTempDir("gaps-index-", async (dir) => {
+        // A src/ mirror: every sibling of upstream-gaps/ symlinked (a gap may import ../types.js), the gap files
+        // copied beside the generated index. The empty row matters on its own: the committed index compiles under
+        // the project typecheck only while a gap file exists, so a derivation written for a populated GAPS (say
+        // `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
+        const gapsDir = join(dir, "src", "upstream-gaps");
+        mkdirSync(gapsDir, { recursive: true });
+        symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+        for (const entry of readdirSync(join(ROOT, "src"))) {
+          if (entry !== "upstream-gaps") {
+            symlinkSync(join(ROOT, "src", entry), join(dir, "src", entry));
+          }
+        }
+        for (const file of ["gap", ...bases]) {
+          copyFileSync(join(GAPS_DIR, `${file}.ts`), join(gapsDir, `${file}.ts`));
+        }
+        writeFileSync(join(gapsDir, "index.ts"), generateIndex(bases));
+        writeFileSync(
+          join(dir, "tsconfig.json"),
+          JSON.stringify({
+            extends: join(ROOT, "tsconfig.json"),
+            include: [],
+            files: ["src/upstream-gaps/index.ts"],
+          }),
+        );
+        const tsc = spawnSync(
+          join(ROOT, "node_modules", ".bin", "tsc"),
+          ["-p", dir, "--pretty", "false"],
+          { cwd: dir, encoding: "utf8" },
+        );
+        if (tsc.error) {
+          throw tsc.error;
+        }
+        expect(tsc.stdout + tsc.stderr).toBe("");
+        expect(tsc.status).toBe(0);
+        // Loading resolves every import. The GAPS key, not the import, is what names a gap file downstream:
+        // unshippedGraphqlSdl() renders it as the file to retire, and a camelCase key would compile yet name a
+        // file that does not exist.
+        const { UNSHIPPED_GRAPHQL_SDL } = (await import(join(gapsDir, "index.ts"))) as {
+          UNSHIPPED_GRAPHQL_SDL: readonly UnshippedGraphqlSdl[];
+        };
+        const unresolved = UNSHIPPED_GRAPHQL_SDL.map((entry) => entry.file).filter(
+          (file) => !existsSync(join(ROOT, file)),
+        );
+        expect(unresolved).toEqual([]);
+      }),
+  );
 });
 
 describe("isSpecPinned", () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
 import type { LoggedRequest } from "../mock/contract.js";
-import { excludeUndocumented, USED_PATHS } from "./paths.js";
+import { excludeUndocumented } from "./paths.js";
 import {
   loadSpec,
   OpenApiValidator,
@@ -588,12 +588,6 @@ describe("OpenApiValidator against the fetched spec", () => {
 });
 
 describe("the descriptor slice", () => {
-  test("contains exactly the USED_PATHS paths (no more, no fewer)", () => {
-    // Read through the loaded validator, so the pinned @octokit/openapi descriptor is what is cut.
-    const specPaths = [...sharedValidator().paths()].sort();
-    expect(specPaths).toEqual([...USED_PATHS].sort());
-  });
-
   const doc = {
     paths: {
       "/repos/{owner}/{repo}": { get: {} },

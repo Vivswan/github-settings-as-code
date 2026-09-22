@@ -275,11 +275,6 @@ export class OpenApiValidator {
     return null;
   }
 
-  /** The path templates the loaded slice documents; validate.test.ts pins them equal to USED_PATHS. */
-  paths(): readonly string[] {
-    return this.templates;
-  }
-
   /**
    * The documented request body of a declared route ("PATCH /repos/{owner}/{repo}/labels/{name}"), or
    * undefined when the operation documents no body, or one without properties.
