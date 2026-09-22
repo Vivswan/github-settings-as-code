@@ -78,7 +78,7 @@ describe("the build:check runner", () => {
   }
 
   test(
-    "a clean clone passes; a staged stale byte in a region file and in a whole file fails naming both",
+    "a clean clone passes; a staged stale byte in a page, in action.yml, and in a whole file fails naming each",
     () =>
       withTempDir("build-check-", (dir) => {
         // HEAD's tree with its own index, sharing the object store and node_modules; the runner and the
@@ -98,19 +98,24 @@ describe("the build:check runner", () => {
         expect(clean.printed).not.toContain("drifted");
         expect(git(dir, "status", "--porcelain", "--", ...untouched)).toBe("");
 
-        // A stale cell the generator repairs (the row shape holds), and a stale byte in a wholesale file.
+        // A stale byte each region generator repairs (the region shapes hold), and one in a wholesale file.
         const table = join(dir, "docs/reference/sections.md");
         const page = readFileSync(table, "utf8");
         expect(page).toContain("| `labels` |");
         writeFileSync(table, page.replace("| `labels` |", "| `labelz` |"));
+        const manifest = join(dir, "action.yml");
+        const yml = readFileSync(manifest, "utf8");
+        expect(yml).toContain('    default: ""\n');
+        writeFileSync(manifest, yml.replace('    default: ""\n', '    default: "stale"\n'));
         const index = join(dir, "src/upstream-gaps/index.ts");
         writeFileSync(index, `${readFileSync(index, "utf8")}\n`);
-        git(dir, "add", "docs/reference/sections.md", "src/upstream-gaps/index.ts");
+        git(dir, "add", "docs/reference/sections.md", "action.yml", "src/upstream-gaps/index.ts");
 
         const stale = runner(dir);
         expect(stale.status).toBe(1);
-        // git's own --stat lists the two staged stale paths.
+        // git's own --stat lists the three staged stale paths.
         expect(stale.printed).toContain("docs/reference/sections.md");
+        expect(stale.printed).toContain("action.yml");
         expect(stale.printed).toContain("src/upstream-gaps/index.ts");
         // The generators repaired the working tree; only the staged stale copies differ.
         expect(
@@ -118,7 +123,7 @@ describe("the build:check runner", () => {
             .trim()
             .split("\n")
             .sort(),
-        ).toEqual(["docs/reference/sections.md", "src/upstream-gaps/index.ts"]);
+        ).toEqual(["action.yml", "docs/reference/sections.md", "src/upstream-gaps/index.ts"]);
       }),
     120_000,
   );

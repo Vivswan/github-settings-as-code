@@ -16,7 +16,6 @@ import {
 } from "../../.github/scripts/gen-docs.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
-import { relocatedRegion } from "./relocated-region.js";
 
 describe("renderSectionsTable", () => {
   test("renders one row per section, derived cells around the authored ones", () => {
@@ -521,35 +520,16 @@ describe("the committed pages", () => {
       "at most once; found 1 and 0",
     ],
     [
-      "prose after the link definition",
-      "README.md",
-      (page) => `${page}\ntrailing prose\n`,
-      "the readme-pat-url region must close README.md",
-    ],
-    [
       "the link markers around another definition",
       "README.md",
       (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
       "the readme-pat-url region in README.md encloses content the generator would not write",
     ],
     [
-      "prose after the link definition",
-      "docs/start/getting-started.md",
-      (page) => `${page}\ntrailing prose\n`,
-      "the pat-url region must close docs/start/getting-started.md",
-    ],
-    [
       "the link markers around another definition",
       "docs/start/getting-started.md",
       (page) => page.replace(/^\[pat-form\]: /m, "[other]: "),
       "the pat-url region in docs/start/getting-started.md encloses content the generator would not write",
-    ],
-    [
-      "the Sections table moved under the column explanation",
-      "docs/reference/sections.md",
-      (page) =>
-        relocatedRegion(page, "sections-table", "html", "\n## The Undeclared default column\n\n"),
-      'the sections-table region must sit under "# Sections" in docs/reference/sections.md; "## The Undeclared default column" is the heading above its BEGIN marker',
     ],
     [
       "the Sections table markers around the column table",
@@ -563,12 +543,6 @@ describe("the committed pages", () => {
         );
       },
       "the sections-table region in docs/reference/sections.md encloses content the generator would not write",
-    ],
-    [
-      "the outputs list moved under Inputs",
-      "docs/reference/inputs.md",
-      (page) => relocatedRegion(page, "outputs-list", "html", "\n## Inputs\n\n"),
-      'the outputs-list region must sit under "## Outputs" in docs/reference/inputs.md; "## Inputs" is the heading above its BEGIN marker',
     ],
     [
       "the outputs list markers around the bullet's prose",
@@ -585,7 +559,8 @@ describe("the committed pages", () => {
       "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
     ],
   ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
-    // Each page reads wrong yet regenerates as a no-op; the relocation rows lean on the placement check, whose mechanics are in generated-regions.test.ts.
+    // Each page reads wrong while its markers still pair up: the enclosed text is not the generator's, or a token-form reference
+    // has no tail definition. A region moved away from its home is refused by the placement checks generated-regions.test.ts pins.
     const page = readFileSync(join(ROOT, path), "utf8");
     expect(() => renderPage(path, mutate(page))).toThrow(error);
   });
