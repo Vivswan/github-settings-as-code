@@ -11,8 +11,8 @@ The engine behind the action is also an npm package, `@vivswan/github-settings-a
 Three ways in, one package:
 
 ```bash
-npm install @vivswan/github-settings-as-code          # the released version (npm dist-tag latest)
-npm install @vivswan/github-settings-as-code@next     # the pre-release of the main commit the release PR was last refreshed on
+npm install @vivswan/github-settings-as-code@next     # the pre-release of the main commit the release PR was last refreshed on; ask for it until the first stable release
+npm install @vivswan/github-settings-as-code          # the released version (npm dist-tag latest), a 0.0.0 placeholder until the first stable release
 npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packaged commit: a build tag's or a release tag's
 ```
 
@@ -386,7 +386,7 @@ The package and the action share one version, the one in `.release-please-manife
 | npm dist-tag | Publishes on | Version | Install |
 |---|---|---|---|
 | `next` | Every refresh of the release PR: release-please creates or refreshes it when a releasable commit (feat, fix, perf, revert, or a breaking marker) lands on `main` | The manifest's next patch, then `-main.<count>.<date>.g<sha7>`: `2.0.1-main.446.20260913.g95d081d` | `npm install @vivswan/github-settings-as-code@next` |
-| `latest` | Every release cut | The released version: `2.1.0`. Until the first release it names a `next` pre-release: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it whatever `--tag` asked for, and the first stable release moves it | `npm install @vivswan/github-settings-as-code` |
+| `latest` | Every release cut | The released version: `2.1.0`. Until the first stable release it names the `0.0.0` placeholder that reserved the package name: a packument always carries `latest` (npm/registry REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it, and the first stable release moves it; ask for `@next` until then | `npm install @vivswan/github-settings-as-code` |
 | none | Every green push to `main` (`build/<position>.<sha7>`, the ten newest kept) and every release tag | The commit itself | `npm install github:Vivswan/github-settings-as-code#<packaged sha>` |
 
 The npm dist-tag `latest` is not the git tag `latest`: the git tag names the packaged commit of the newest `main` commit (every green push moves it forward, never back), the dist-tag names the newest release on the registry.

@@ -1070,9 +1070,9 @@ export function stablePublishVerdict(version: string, packument: Packument | nul
     };
   }
   const latest = packument["dist-tags"].latest;
-  // Until the first release, latest names a pre-release: a packument always carries that key (npm/registry
-  // REGISTRY-API.md, "dist-tags: an object with at least one key, latest"), so the first publish took it whatever
-  // --tag asked for. A release must take latest over from it, so only a newer RELEASE holds one back.
+  // Until the first stable release, latest names whatever the first publish was (the 0.0.0 placeholder, or a
+  // pre-release): a packument always carries that key (npm/registry REGISTRY-API.md, "dist-tags: an object with at
+  // least one key, latest"), whatever --tag asked for. A release must take latest over, so only a newer RELEASE holds one back.
   const held = latest === undefined ? null : parseMinted(latest);
   if (held?.sha7 === null && newerRelease(held.release, parseMinted(version).release)) {
     return {
