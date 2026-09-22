@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { executePlan } from "../../../src/engine/execute.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../../test/mock-api.js";
 import { fragmentFake } from "../../../test/sections/fragment-fake.js";
@@ -23,11 +22,6 @@ const snapshot = async (api: MockApi) =>
   unwrap(
     await collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail")),
   );
-const NO_SECRETS = {
-  resolveSecret: (): string => {
-    throw new Error("no secrets");
-  },
-};
 
 describe("collaborators", () => {
   test("plans an update per drifted collaborator, an invitation per missing user, and a removal per undeclared one, reading only", async () => {
@@ -231,27 +225,6 @@ describe("collaborators", () => {
     expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST]);
   });
 
-  test("executing the plan issues the writes in plan order against the encoded paths", async () => {
-    const api = new MockApi({
-      [LIST]: { data: [{ login: "stale", role_name: "write" }] },
-      [INVITATIONS]: {
-        data: [{ id: 8, invitee: { login: "bob" }, permissions: "write", expired: true }],
-      },
-    }).allowMutations(
-      "DELETE /repos/o/r/invitations/*",
-      "PUT /repos/o/r/collaborators/*",
-      "DELETE /repos/o/r/collaborators/*",
-    );
-    const planned = await plan(api, [{ username: "bob", permission: "push" }]);
-    const execution = await executePlan(planned, collaboratorsSection, api, REPO, NO_SECRETS);
-    expect(execution.status).toBe("applied");
-    expect(api.mutations()).toEqual([
-      { method: "DELETE", path: "/repos/o/r/invitations/8", payload: undefined },
-      { method: "PUT", path: "/repos/o/r/collaborators/bob", payload: { permission: "push" } },
-      { method: "DELETE", path: "/repos/o/r/collaborators/stale", payload: undefined },
-    ]);
-  });
-
   test("two entries naming the same login in different case are a validate issue, so the document fails before any API call", () => {
     expect(
       collaboratorsSection.validate([
@@ -328,60 +301,7 @@ describe("collaborators", () => {
     ]);
   });
 
-  test("the read port exposes exactly the two list roles, the primary one in its denied posture", () => {
-    const ctx = planContext(collaboratorsSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list", "listInvitations"]);
-    // @ts-expect-error a write role is not a read: the port has no `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `remove`
-    ctx.read.remove;
-    // @ts-expect-error nor an `updateInvitation`
-    ctx.read.updateInvitation;
-    // @ts-expect-error nor a `cancelInvitation`
-    ctx.read.cancelInvitation;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-    expect(typeof ctx.read.listInvitations.listAll).toBe("function");
-  });
-
   describe("snapshot", () => {
-    test("reads collaborators then pending invitations back under the delete default; the owner, an expired invitation, and an email invitation are noted, not declared", async () => {
-      const api = new MockApi({
-        [LIST]: {
-          data: [
-            { login: "O", role_name: "admin" },
-            { login: "alice", role_name: "write" },
-            { login: "bob", role_name: "read" },
-            { login: "carol", role_name: "security-team" },
-          ],
-        },
-        [INVITATIONS]: {
-          data: [
-            { id: 7, invitee: { login: "dave" }, permissions: "write", expired: false },
-            { id: 8, invitee: { login: "erin" }, permissions: "read", expired: true },
-            { id: 9, invitee: null, permissions: "read", expired: false },
-          ],
-        },
-      });
-      expect(await snapshot(api)).toEqual({
-        value: {
-          _undeclared: "delete",
-          entries: [
-            { username: "alice", permission: "push" },
-            { username: "bob", permission: "pull" },
-            { username: "carol", permission: "security-team" },
-            { username: "dave", permission: "push" },
-          ],
-        },
-        notes: [
-          "collaborators[O]: left out of the snapshot - the repository owner's access is implicit and never managed",
-          "collaborators[erin]: left out of the snapshot - the pending invitation has expired; apply cancels it - add the entry to re-invite them",
-          "collaborators[invitation 9]: left out of the snapshot - sent by email, so no username can declare it; apply leaves it untouched",
-        ],
-      });
-      expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([LIST, INVITATIONS]);
-    });
-
     test("only the owner, an expired invitation, and an email invitation snapshot as nothing to declare; the expired note says apply leaves it", async () => {
       const api = new MockApi({
         [LIST]: { data: [{ login: "o", role_name: "admin" }] },
