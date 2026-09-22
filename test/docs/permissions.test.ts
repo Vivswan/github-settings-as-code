@@ -23,7 +23,7 @@ describe("branches Contents advice", () => {
     const notes = DOCS.branches.sections_table.notes;
     expect(
       notes.includes(`add ${advice}`),
-      `the branches Notes cell (src/sections/branches/branches.docs.yml) must advise "add ${advice}" for the probe`,
+      `the branches Notes cell (docs/sections/branches.docs.yml) must advise "add ${advice}" for the probe`,
     ).toBe(true);
   });
 });

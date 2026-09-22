@@ -8,9 +8,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../src/engine/validate.js";
-import { PULL_REQUEST_PARAMETERS } from "../../src/sections/rulesets/generators.js";
 import { KNOWN_RULE_TYPES } from "../../src/sections/rulesets/schema.js";
 import { RULESET_RULE_TYPES } from "../e2e/mock/support.js";
+import { PULL_REQUEST_PARAMETERS } from "../src/sections/rulesets/generators.js";
 
 type Verdict = { ok: true; parsed: unknown } | { issues: readonly string[] };
 

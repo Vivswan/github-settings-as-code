@@ -593,7 +593,9 @@ export function collectYmlFiles(dir: string): string[] {
  *   test/e2e/scenarios/             -> multi-section flows; a scenario exercising ONE section lives with that section
  *   <sectionsDir>/<key>/scenarios/  -> every registered section, so a new section's first scenario needs no list edit
  */
-export function scenarioRoots(sectionsDir: string = join(ROOT, "src", "sections")): string[] {
+export function scenarioRoots(
+  sectionsDir: string = join(ROOT, "test", "src", "sections"),
+): string[] {
   return [
     join(import.meta.dir, "scenarios"),
     ...SECTION_KEYS.map((key) => join(sectionsDir, key, "scenarios")),

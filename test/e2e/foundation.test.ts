@@ -398,10 +398,10 @@ describe("harness identity constants", () => {
     // class is banned at the import boundary: a fragment always has the owning state in scope.
     const offenders: string[] = [];
     let fragments = 0;
-    for await (const file of new Bun.Glob("src/sections/*/mock.ts").scan(ROOT)) {
+    for await (const file of new Bun.Glob("test/src/sections/*/mock.ts").scan(ROOT)) {
       fragments++;
       const text = await Bun.file(join(ROOT, file)).text();
-      if (/from "[^"]*\/test\/e2e\/constants\.js"/.test(text)) {
+      if (/from "[^"]*\/e2e\/constants\.js"/.test(text)) {
         offenders.push(file);
       }
     }

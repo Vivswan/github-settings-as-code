@@ -10,7 +10,7 @@ import { renamedKeyError } from "./renamed-key.js";
 
 /**
  * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
- * engine/layers.ts resolves it and re-exports it to the flows. Described in shared.docs.yml and src/schema.docs.yml.
+ * engine/layers.ts resolves it and re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
  */
 export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
 
@@ -36,7 +36,7 @@ export function conditional(
 
 /**
  * The one value set of the `_layering` directive and the `layering` run input; engine/layers.ts acts on it and
- * re-exports it to the flows. Described in shared.docs.yml and src/schema.docs.yml.
+ * re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
  *
  *   replace  -> the higher list replaces the whole lower list
  *   shallow  -> union by key; a same-key entry is swapped for the higher one

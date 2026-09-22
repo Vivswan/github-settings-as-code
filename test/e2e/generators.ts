@@ -18,38 +18,32 @@ import {
   type SettingsFile,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../src/schema.js";
-import { genActions } from "../../src/sections/actions/generators.js";
-import { autolinksWitness, genAutolinks } from "../../src/sections/autolinks/generators.js";
-import {
-  FUZZ_DEPLOYMENT_ENVIRONMENTS,
-  genBranches,
-} from "../../src/sections/branches/generators.js";
 import { isWildcardPattern } from "../../src/sections/branches/index.js";
-import { genCheckSuitePreferences } from "../../src/sections/check_suite_preferences/generators.js";
-import { genCodeQuality } from "../../src/sections/code_quality_setup/generators.js";
-import { genCodeScanning } from "../../src/sections/code_scanning_default_setup/generators.js";
-import {
-  genCollaborators,
-  genInvitationsState,
-} from "../../src/sections/collaborators/generators.js";
 import { endpointMethod } from "../../src/sections/contract/endpoints.js";
-import { genCustomProperties } from "../../src/sections/custom_properties/generators.js";
-import { deployKeysWitness, genDeployKeys } from "../../src/sections/deploy_keys/generators.js";
-import { genEnvironments } from "../../src/sections/environments/generators.js";
-import { genInteractionLimits } from "../../src/sections/interaction_limits/generators.js";
-import { genLabels, labelsWitness } from "../../src/sections/labels/generators.js";
-import { genMilestones, milestonesWitness } from "../../src/sections/milestones/generators.js";
-import { genPages } from "../../src/sections/pages/generators.js";
 import { allEndpoints, allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";
-import { genRepository } from "../../src/sections/repository/generators.js";
-import { genRulesets, PULL_REQUEST_PARAMETERS } from "../../src/sections/rulesets/generators.js";
 import { compileFailure } from "../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
-import { genSecretScanningPatterns } from "../../src/sections/secret_scanning_custom_patterns/generators.js";
 import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
-import { genTeams } from "../../src/sections/teams/generators.js";
-import { genWebhooks } from "../../src/sections/webhooks/generators.js";
-import { genWorkflows } from "../../src/sections/workflows/generators.js";
 import type { MustBeNever } from "../../src/types.js";
+import { genActions } from "../src/sections/actions/generators.js";
+import { autolinksWitness, genAutolinks } from "../src/sections/autolinks/generators.js";
+import { FUZZ_DEPLOYMENT_ENVIRONMENTS, genBranches } from "../src/sections/branches/generators.js";
+import { genCheckSuitePreferences } from "../src/sections/check_suite_preferences/generators.js";
+import { genCodeQuality } from "../src/sections/code_quality_setup/generators.js";
+import { genCodeScanning } from "../src/sections/code_scanning_default_setup/generators.js";
+import { genCollaborators, genInvitationsState } from "../src/sections/collaborators/generators.js";
+import { genCustomProperties } from "../src/sections/custom_properties/generators.js";
+import { deployKeysWitness, genDeployKeys } from "../src/sections/deploy_keys/generators.js";
+import { genEnvironments } from "../src/sections/environments/generators.js";
+import { genInteractionLimits } from "../src/sections/interaction_limits/generators.js";
+import { genLabels, labelsWitness } from "../src/sections/labels/generators.js";
+import { genMilestones, milestonesWitness } from "../src/sections/milestones/generators.js";
+import { genPages } from "../src/sections/pages/generators.js";
+import { genRepository } from "../src/sections/repository/generators.js";
+import { genRulesets, PULL_REQUEST_PARAMETERS } from "../src/sections/rulesets/generators.js";
+import { genSecretScanningPatterns } from "../src/sections/secret_scanning_custom_patterns/generators.js";
+import { genTeams } from "../src/sections/teams/generators.js";
+import { genWebhooks } from "../src/sections/webhooks/generators.js";
+import { genWorkflows } from "../src/sections/workflows/generators.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
   DEFAULT_LAYERING_DIRECTIVE,
