@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import { join } from "node:path";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { InputDecl } from "../../src/flows/inputs.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
@@ -100,39 +100,6 @@ function cell(text: string): string {
 
 function row(cells: readonly string[]): string {
   return `| ${cells.map(cell).join(" | ")} |`;
-}
-
-function shownDefault(decl: Pick<InputDecl, "default" | "shownDefault">): string {
-  if (decl.shownDefault !== undefined) {
-    return decl.shownDefault;
-  }
-  return decl.default === "" ? "(empty)" : `\`${decl.default}\``;
-}
-
-const INPUTS_TABLE_HEADER = "| Input | Default | Meaning |\n|---|---|---|";
-
-/** A link target that is not a repository path: a URI scheme (any case), protocol-relative, or site-absolute. */
-const ABSOLUTE_TARGET = /^(?:[a-z][a-z0-9+.-]*:|\/)/i;
-
-/** Link targets are written root-relative in the declarations and rebased onto `pageDir`, so one summary reads right
- * from every page the table renders on. */
-function rebaseLinks(text: string, pageDir: string): string {
-  return text.replace(/\]\(([^)#]+)(#[^)]*)?\)/g, (match, target: string, fragment: string = "") =>
-    ABSOLUTE_TARGET.test(target) ? match : `](${posix.relative(pageDir, target)}${fragment})`,
-  );
-}
-
-/** `pageDir` is "." for the repository root. */
-export function renderInputsTable(
-  decls: Readonly<Record<string, Pick<InputDecl, "default" | "shownDefault" | "summary">>>,
-  pageDir: string,
-): string {
-  return [
-    INPUTS_TABLE_HEADER,
-    ...Object.entries(decls).map(([name, decl]) =>
-      row([`\`${name}\``, shownDefault(decl), rebaseLinks(decl.summary, pageDir)]),
-    ),
-  ].join("\n");
 }
 
 function proseList(items: readonly string[]): string {
@@ -363,17 +330,6 @@ function block(render: () => string): () => string {
   return () => `\n${render()}\n`;
 }
 
-function inputsTableRegion(name: string, heading: string, path: string): GeneratedRegion {
-  return {
-    name,
-    placement: { kind: "under-heading", heading },
-    body: tableShape(INPUTS_TABLE_HEADER, String.raw`\x60[^\x60\n]+\x60 \| [^\n]* \| [^\n]*`),
-    render: block(() => renderInputsTable(INPUT_DECLS, dirname(path))),
-  };
-}
-
-const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
-
 /** Each region's `body` matches every body this generator could have written for it, so a marker moved elsewhere
  * fails instead of regenerating in the wrong place or erasing authored text. */
 export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
@@ -393,7 +349,6 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
       render: block(() => renderActionOutputs(OUTPUT_DECLS)),
     },
   ],
-  [INPUTS_PAGE_PATH]: [inputsTableRegion("inputs-table", "## Inputs", INPUTS_PAGE_PATH)],
   "docs/reference/undeclared-policy.md": [
     {
       name: "policy-count-sentence",

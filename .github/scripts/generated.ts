@@ -1,21 +1,22 @@
 /**
  * The one table of committed generated output, derived from the generators' own registries, and the drift check
- * behind `bun run build:check`: every generator runs, then every registered path must be tracked and unchanged.
+ * behind `bun run build:check`: every generator script runs, then every registered path must be tracked and unchanged.
  */
 
 import { join } from "node:path";
 import { GENERATED_REGIONS } from "./gen-action-docs.js";
 import { COVERAGE_PATH, PAGE_REGIONS } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
+import { INPUTS_PAGE_PATH } from "./gen-inputs-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
 export interface GeneratedOutput {
   /** The committed output, repo-relative. */
   readonly path: string;
-  /** The script that writes it, repo-relative; `bun <generator>` regenerates it in place. */
+  /** The package.json script that writes it; `bun run <generator>` regenerates it in place. */
   readonly generator: string;
-  /** Marker-delimited regions inside an authored file (lib/generated-regions.ts), or the whole file. */
+  /** Marker-delimited regions inside an authored file (lib/generated-regions.ts, or action-docs's own markers), or the whole file. */
   readonly kind: "regions" | "file";
 }
 
@@ -23,21 +24,30 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
   return paths.map((path) => ({ path, generator, kind: "regions" }));
 }
 
-/** A page two generators write into (docs/reference/inputs.md) has one row per generator. Table order is run order. */
+/** A page two generators write into (docs/reference/inputs.md) has one row per generator. Table order is run order:
+ * the schema, docs, and action.yml generators import the gaps index through src/, and action.yml feeds the inputs table, so each renders first, or a new gap file or a bump would leave a run stale. */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
-  {
-    path: "lib/settings.schema.json",
-    generator: ".github/scripts/gen-settings-schema.ts",
-    kind: "file",
-  },
-  ...regions(".github/scripts/gen-docs.ts", [COVERAGE_PATH, ...Object.keys(PAGE_REGIONS)]),
-  ...regions(".github/scripts/gen-action-docs.ts", Object.keys(GENERATED_REGIONS)),
-  { path: INDEX_PATH, generator: ".github/scripts/gen-gaps-index.ts", kind: "file" },
+  { path: INDEX_PATH, generator: "build:gaps-index", kind: "file" },
+  { path: "lib/settings.schema.json", generator: "build:schema", kind: "file" },
+  ...regions("build:docs", [COVERAGE_PATH, ...Object.keys(PAGE_REGIONS)]),
+  ...regions("build:action-docs", Object.keys(GENERATED_REGIONS)),
+  { path: INPUTS_PAGE_PATH, generator: "build:inputs-table", kind: "regions" },
 ];
 
 /** The distinct paths, in table order. */
 export function generatedPaths(): string[] {
   return [...new Set(GENERATED_OUTPUTS.map((output) => output.path))];
+}
+
+/** The distinct generator scripts, in run order. */
+export function generatorScripts(): string[] {
+  return [...new Set(GENERATED_OUTPUTS.map((output) => output.generator))];
+}
+
+/** The repository file a generator script runs (`bun <file>.ts`), or null for any other shape, which the tests
+ * refuse rather than drop from their census. */
+export function generatorEntryPoint(script: string): string | null {
+  return /^bun (\S+\.ts)$/.exec(script)?.[1] ?? null;
 }
 
 /** Runs `argv` at the repository root on the terminal's stdio; the exit code is the verdict. */
@@ -46,9 +56,9 @@ function run(argv: string[]): number {
 }
 
 if (import.meta.main) {
-  for (const generator of new Set(GENERATED_OUTPUTS.map((output) => output.generator))) {
-    if (run([process.execPath, generator]) !== 0) {
-      console.error(`build:check: ${generator} failed`);
+  for (const generator of generatorScripts()) {
+    if (run([process.execPath, "run", generator]) !== 0) {
+      console.error(`build:check: bun run ${generator} failed`);
       process.exit(1);
     }
   }
@@ -67,7 +77,7 @@ if (import.meta.main) {
   if (drifted || untracked.stdout.length > 0) {
     process.stdout.write(untracked.stdout);
     console.error(
-      "build:check: generated output drifted from the committed tree; commit the files listed above",
+      "build:check: the generated output listed above drifted from the committed tree; run bun run build and commit it",
     );
     process.exit(1);
   }

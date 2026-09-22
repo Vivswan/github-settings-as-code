@@ -40,21 +40,18 @@ const DEFAULT_PRIVATE_REPORT = "none" satisfies PrivateReportChannel;
 const DEFAULT_LAYERING = "deep" satisfies Layering;
 
 /**
- * One input's action.yml entry and its row in the generated Inputs table on docs/reference/inputs.md. The runner
- * applies the defaults; parseConfig() falls back to them outside the runner.
+ * One input's action.yml entry. The runner applies the defaults; parseConfig() falls back to them outside the
+ * runner.
  */
 export interface InputDecl {
-  /** The action.yml description; the generator folds it to width. */
+  /**
+   * The action.yml description; the generator folds it to width. Plain prose: action-docs runs it through a
+   * markdown renderer for the docs table, so a paired "*" or "_" would italicize, "..." would become an
+   * ellipsis, a "|" would split the cell, and a "<" would open a tag (test/docs/inputs.test.ts pins the rendering).
+   */
   readonly description: string;
   /** The action.yml default, verbatim (an empty string means "unset"). */
   readonly default: string;
-  /** The Inputs table's Meaning cell: the one-line gist. */
-  readonly summary: string;
-  /**
-   * The Inputs table's Default cell when the raw default is not what a reader should see: an expression, a prose
-   * fallback, or the effective value for an empty raw default.
-   */
-  readonly shownDefault?: string;
   /**
    * A comma- or newline-separated list. parseConfig reads such an input only
    * through its list() port (repos is split by the target resolver instead),
@@ -64,8 +61,9 @@ export interface InputDecl {
 }
 
 /**
- * The single source the inputs reference page and action.yml are generated from (bun run build:action-docs), in their
- * listing order; adding an input here is the whole declaration. A new mode's inputs go beside their mode's.
+ * The single source action.yml is generated from (bun run build:action-docs), in its listing order; the inputs
+ * reference page's table is action-docs's rendering of that action.yml (bun run build:inputs-table). Adding an
+ * input here is the whole declaration. A new mode's inputs go beside their mode's.
  */
 export const INPUT_DECLS = {
   token: {
@@ -73,15 +71,11 @@ export const INPUT_DECLS = {
       "Token used for the API calls. Most sections need a fine-grained PAT with Administration read/write on the repository - the default GITHUB_TOKEN can never hold that permission.",
     // biome-ignore lint/suspicious/noTemplateCurlyInString: a workflow expression the runner resolves, not a JS template
     default: "${{ github.token }}",
-    summary: "Token for the API calls (see [Token permissions](docs/reference/permissions.md))",
-    shownDefault: "`github.token`",
   },
   repository: {
     description:
       "Target repository (owner/name). Defaults to the current repository. Single-repo mode only; cannot be combined with repos or repos-dir.",
     default: "",
-    summary: "Target `owner/name` (single-repo mode only)",
-    shownDefault: "current repo",
   },
   "settings-file": {
     description:
@@ -92,8 +86,6 @@ export const INPUT_DECLS = {
       "or each repository's own .github/settings.yml, so overriding it alongside repos or " +
       "repos-dir fails the run.",
     default: DEFAULT_SETTINGS_FILE,
-    summary:
-      "Settings file path (single-repo mode); in `mode: render`, the ordered list of layers to fold, low to high",
     list: true,
   },
   mode: {
@@ -107,11 +99,6 @@ export const INPUT_DECLS = {
       "the file, and every input that controls an apply, a check, or a render is rejected). check " +
       "makes no settings changes, though a private report may still be delivered.",
     default: "apply",
-    summary:
-      "`apply` mutates; `check` reports drift and exits 1 on any, making no settings changes (a " +
-      "private report may still be delivered); `render` folds the settings-file layers into " +
-      "rendered-file without touching GitHub; `snapshot` writes the live settings to snapshot-file " +
-      "or snapshot-dir",
   },
   "rendered-file": {
     description:
@@ -123,8 +110,6 @@ export const INPUT_DECLS = {
       "step as its settings-file. Must not name one of the settings-file layers (the render would " +
       "overwrite it). Fails when set in apply or check.",
     default: "",
-    summary:
-      "`mode: render` only (required there): where the rendered document is written, exactly what `apply` would run",
   },
   "snapshot-file": {
     description:
@@ -138,28 +123,23 @@ export const INPUT_DECLS = {
       "document you author, so write it beside that file and copy it over deliberately. Fails " +
       "when set in apply, check, or render.",
     default: "",
-    summary:
-      "`mode: snapshot` only (one of the two required there): where one repository's live settings are written as a settings document",
   },
   "snapshot-dir": {
     description:
       "mode: snapshot only, and exactly one of snapshot-file and snapshot-dir is required there: " +
       "the directory the multi-repo targets' live settings are written under, one " +
-      "<owner>/<name>.yml per target (the repos-dir layout, so the directory can later serve as a " +
+      "owner/name.yml per target (the repos-dir layout, so the directory can later serve as a " +
       "repos-dir). The targets come from repos and repos-dir exactly as in a multi-repo apply, " +
       "discovery filters included; defaults-file does not apply. Must be disjoint from the " +
       "repos-dir (not the same directory, not above it, not below it): the snapshots would " +
       "overwrite the central files or be read back as central files. Fails when set in apply, " +
       "check, or render.",
     default: "",
-    summary:
-      "`mode: snapshot` only (one of the two required there): directory receiving one `<owner>/<name>.yml` per multi-repo target",
   },
   "on-missing-permission": {
     description:
       "fail (default) or warn. Under warn, sections the token cannot access are skipped with a warning and the run stays green (partial success).",
     default: "fail",
-    summary: "`warn` skips sections the token cannot access (partial success)",
   },
   "required-sections": {
     description:
@@ -168,23 +148,21 @@ export const INPUT_DECLS = {
       "when that allowlist is set; a required section the allowlist excludes is rejected up " +
       "front, because the run could never attempt it.",
     default: "",
-    summary: "Sections that must fully apply even under `warn`",
     list: true,
   },
   sections: {
     description:
-      "Optional comma-separated allowlist of sections to process. apply, check, and snapshot only: mode: render writes every section its layers declare, so the allowlist belongs on the step that runs the rendered document and fails the render when set.",
+      "Optional comma-separated allowlist of sections to process; unset, every declared section is " +
+      "processed. apply, check, and snapshot only: mode: render writes every section its layers " +
+      "declare, so the allowlist belongs on the step that runs the rendered document and fails the " +
+      "render when set.",
     default: "",
-    summary:
-      "Comma-separated allowlist of sections to process (apply, check, and snapshot; rejected in `mode: render`)",
-    shownDefault: "(all declared)",
     list: true,
   },
   "api-version": {
     description:
       "X-GitHub-Api-Version header value. Override to opt into a newer REST API version before this action defaults to it.",
     default: DEFAULT_API_VERSION,
-    summary: "`X-GitHub-Api-Version` header; override to opt into a newer REST API version",
   },
   repos: {
     description:
@@ -194,15 +172,12 @@ export const INPUT_DECLS = {
       "exclude, topics, and affiliation inputs. Combinable with repos-dir; a repos-dir file " +
       "for the same repository wins.",
     default: "",
-    summary:
-      "Multi-repo remote mode: `owner/name` list (comma/newline), or `*` to discover owned repos",
     list: true,
   },
   "repos-dir": {
     description:
-      "Multi-repo central mode: a directory in the checked-out admin repository holding per-repo settings files - <name>.yml (same owner as this repository) or <owner>/<name>.yml. Requires actions/checkout.",
+      "Multi-repo central mode: a directory in the checked-out admin repository holding per-repo settings files - name.yml (same owner as this repository) or owner/name.yml. Requires actions/checkout.",
     default: "",
-    summary: "Multi-repo central mode: directory of per-repo settings files in this repo",
   },
   "defaults-file": {
     description:
@@ -213,25 +188,18 @@ export const INPUT_DECLS = {
       "defaults; run mode: check first. Multi-repo mode only; fails when set without repos or " +
       "repos-dir.",
     default: "",
-    summary:
-      "YAML applied to every multi-repo target without a settings file (multi-repo mode only)",
   },
   layering: {
     description:
       "mode: render only: replace, shallow, or deep (default), the run-wide default for how every " +
       "list section's entries combine with the layers below them, each section by its own key (a " +
-      "label's name, a ruleset's name, a secret's name, ...). replace lets the higher list win " +
+      "label's name, a ruleset's name, a secret's name, and so on). replace lets the higher list win " +
       "wholesale; shallow unions the entries by key and swaps a same-key entry for the higher one; " +
       "deep unions by key and merges a same-key pair field by field, a nested keyed list (a " +
       "ruleset's rules, by type) unioning the same way. A layer's own _layering directive, at its " +
       "top level or on a section's {entries} wrapper, overrides it per file or per section. Lists " +
       "outside the list sections are replaced by the higher layer's. Fails when set in apply or check.",
     default: "",
-    summary:
-      "`mode: render` only: how every list section's entries combine across layers, by the section's key; " +
-      "`replace` lets the higher list win, `shallow` unions and swaps a same-key entry, `deep` unions and " +
-      "merges a same-key pair field by field; a layer's `_layering` overrides it",
-    shownDefault: "`deep`",
   },
   undeclared: {
     description:
@@ -243,10 +211,6 @@ export const INPUT_DECLS = {
       "resolved policy is written into every list of the rendered document, so a later apply of " +
       "that document needs no undeclared input of its own. Rejected in mode: snapshot.",
     default: "",
-    summary:
-      "`keep` or `delete`: the fallback policy for every list that takes `_undeclared`, below a wrapper's " +
-      "and the file's own; unset, each list's default applies ([the undeclared policy](docs/reference/undeclared-policy.md))",
-    shownDefault: "(each list's default)",
   },
   "private-repos": {
     description:
@@ -257,8 +221,6 @@ export const INPUT_DECLS = {
       "equal to GITHUB_REPOSITORY is never redacted. show reveals everything (today's " +
       "behavior); only use it when the run's logs are not publicly readable.",
     default: DEFAULT_PRIVATE_REPOS,
-    summary:
-      "`redact` hides private and internal targets from public logs, summary, and outputs; `show` reveals them",
   },
   "private-report": {
     description:
@@ -281,69 +243,51 @@ export const INPUT_DECLS = {
       "targets, so it is rejected alongside private-repos: show. Report delivery writes even " +
       "in mode: check, and its failure never changes the run's result.",
     default: DEFAULT_PRIVATE_REPORT,
-    summary:
-      "`issue` delivers each redacted target's full report to a reused issue on that target " +
-      "repository; `issue-on-failure` writes that issue only when the target fails or drifts, " +
-      "closing it once healthy; `artifact` uploads all reports as one age-encrypted workflow " +
-      "artifact; rejected with `private-repos: show`",
   },
   "report-public-key": {
     description:
-      'The age recipient (an "age1..." public key) the artifact channel encrypts every report ' +
+      "The age recipient (a public key starting with age1) the artifact channel encrypts every report " +
       'to; safe to commit in the workflow. Generate a keypair with "age-keygen -o key.txt", ' +
       'keep key.txt secret, and decrypt a downloaded artifact with "age -d -i key.txt ' +
       'private-report.md.age". Required when private-report is artifact and rejected otherwise.',
     default: "",
-    summary:
-      "The `age1...` recipient the `artifact` channel encrypts reports to; required with `private-report: artifact`, rejected otherwise",
   },
   visibility: {
     description:
-      'Keeps only repositories of this visibility in repos: "*" discovery. One of all (default), public, private, or internal; internal is matched client-side (Enterprise only). Fails if set without repos: "*".',
+      'Keeps only repositories of this visibility in repos: "*" discovery. One of all (default), public, private, or internal; internal is matched client-side (Enterprise only). Fails if set outside that discovery.',
     default: "",
-    summary: "Discovery-only: keep `public`, `private`, or `internal` repositories",
-    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.visibility}\``,
   },
   archived: {
     description:
-      'Archived-repository policy for repos: "*" discovery. One of skip (default; settings writes fail on archived repositories), include, or only (mostly useful with mode: check). Fails if set without repos: "*".',
+      'Archived-repository policy for repos: "*" discovery. One of skip (default; settings writes fail on archived repositories), include, or only (mostly useful with mode: check). Fails if set outside that discovery.',
     default: "",
-    summary: "Discovery-only: `skip`, `include`, or `only` archived repositories",
-    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.archived}\``,
   },
   forks: {
     description:
-      'Fork policy for repos: "*" discovery. One of include (default), exclude, or only. Fails if set without repos: "*".',
+      'Fork policy for repos: "*" discovery. One of include (default), exclude, or only. Fails if set outside that discovery.',
     default: "",
-    summary: "Discovery-only: `include`, `exclude`, or `only` forks",
-    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.forks}\``,
   },
   exclude: {
     description:
       'Comma- or newline-separated wildcard patterns removing repositories from repos: "*" ' +
-      'discovery. "*" matches any characters; a pattern containing "/" matches the full ' +
-      'owner/name, any other the name alone. Case-insensitive. Fails if set without repos: "*".',
+      'discovery. An asterisk matches any characters; a pattern containing "/" matches the full ' +
+      "owner/name, any other the name alone. Case-insensitive. Fails if set outside that discovery.",
     default: "",
-    summary:
-      "Discovery-only: `*` wildcard patterns (name, or `owner/name` if the pattern has a `/`) to drop",
     list: true,
   },
   topics: {
     description:
-      'Comma- or newline-separated topics; repos: "*" discovery keeps only repositories carrying at least one of them. Unrelated to the topics settings section. Fails if set without repos: "*".',
+      'Comma- or newline-separated topics; repos: "*" discovery keeps only repositories carrying at least one of them. Unrelated to the topics settings section. Fails if set outside that discovery.',
     default: "",
-    summary: "Discovery-only: keep repositories carrying at least one listed topic",
     list: true,
   },
   affiliation: {
     description:
       'Comma-separated affiliations for repos: "*" discovery, passed to the GitHub /user/repos ' +
-      "listing. Any of owner, collaborator, organization_member; the list replaces the default " +
-      "(owner), so use owner,collaborator to widen rather than move discovery. Fails if set " +
-      'without repos: "*".',
+      "listing. Any of owner (default), collaborator, organization_member; the list replaces the " +
+      "default, so use owner,collaborator to widen rather than move discovery. Fails if set " +
+      "outside that discovery.",
     default: "",
-    summary: "Discovery-only: `owner`, `collaborator`, `organization_member` (comma list)",
-    shownDefault: `\`${DEFAULT_DISCOVERY_FILTERS.affiliation.join(",")}\``,
     list: true,
   },
 } as const satisfies Record<string, InputDecl>;
