@@ -586,6 +586,10 @@ export function collectYmlFiles(dir: string): string[] {
   return out;
 }
 
+/** The section test mirror: <key>/ under it holds the section's tests, mock.ts, generators.ts, and scenarios/.
+ * The layout census (test/layout.test.ts) reads the root from here, so a move edits this one line. */
+export const SECTIONS_TEST_ROOT = join(ROOT, "test", "sections");
+
 /**
  * The curated corpus; run.ts and .github/scripts/check-endpoint-coverage.ts both read it, so they
  * cannot disagree. The roots are not filtered by existence: an existsSync filter would silently drop
@@ -593,7 +597,7 @@ export function collectYmlFiles(dir: string): string[] {
  *   test/e2e/scenarios/             -> multi-section flows; a scenario exercising ONE section lives with that section
  *   <sectionsDir>/<key>/scenarios/  -> every registered section, so a new section's first scenario needs no list edit
  */
-export function scenarioRoots(sectionsDir: string = join(ROOT, "test", "sections")): string[] {
+export function scenarioRoots(sectionsDir: string = SECTIONS_TEST_ROOT): string[] {
   return [
     join(import.meta.dir, "scenarios"),
     ...SECTION_KEYS.map((key) => join(sectionsDir, key, "scenarios")),

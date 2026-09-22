@@ -3,8 +3,7 @@
  * a different path segment and differ only in PAT resource and noun, so each section module is ONE
  * repoVariablesSection() call.
  *
- *   environments section                    -> plans its nested variables through ./variables-engine.ts too, one scope per environment
- *   .github/scripts/changed-sections.ts     -> derives this file's smoke fan-out from the import graph
+ *   environments section -> plans its nested variables through ./variables-engine.ts too, one scope per environment
  */
 
 import { ok, type Result } from "neverthrow";

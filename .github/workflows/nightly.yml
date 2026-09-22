@@ -113,7 +113,7 @@ jobs:
       - name: Run the gate on the floated resolution
         run: bun run check
 
-  # The whole curated corpus (PR CI runs only the sections a PR changed) plus the endpoint-coverage tripwire.
+  # The whole curated corpus plus the endpoint-coverage tripwire.
   # The bundle runs under node24, so node is installed beside bun.
   e2e:
     runs-on: ubuntu-latest

@@ -121,71 +121,32 @@ jobs:
             *) echo "::error::action crashed (no result output)"; exit 1 ;;
           esac
 
-  # The action bundle runs under node24, so node is installed beside bun. A non-PR event (push, dispatch) has no base
-  # to diff against, so it runs the full corpus.
+  # The action bundle runs under node24, so node is installed beside bun. The whole corpus runs on every event:
+  # scenarios, then fuzz.
   e2e-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Select sections from the diff
-        id: select
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [ -n "$BASE_SHA" ]; then
-            SECTIONS="$(bun .github/scripts/changed-sections.ts "$BASE_SHA")"
-          else
-            SECTIONS="all"
-          fi
-          echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
-          echo "selected sections: $SECTIONS"
       - name: Run scenarios and fuzz
-        if: steps.select.outputs.sections != 'none'
-        env:
-          SECTIONS: ${{ steps.select.outputs.sections }}
         run: |
-          if [ "$SECTIONS" = "all" ]; then
-            bun test/e2e/run.ts
-            bun test/e2e/fuzz.ts --iterations 25
-          else
-            bun test/e2e/run.ts --sections "$SECTIONS"
-            bun test/e2e/fuzz.ts --iterations 25 --sections "$SECTIONS"
-          fi
+          bun test/e2e/run.ts
+          bun test/e2e/fuzz.ts --iterations 25
 
   # A PR that adds an endpoint without a scenario reaching it must fail on that PR, not the next night. Coldness is a
-  # whole-corpus property (deleting one scenario can chill any route), so the full corpus runs (~10 minutes) unless
-  # the selector finds nothing settings-related in the diff.
+  # whole-corpus property (deleting one scenario can chill any route), so the full corpus runs.
   endpoint-coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - uses: ./.github/actions/setup
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # Only the selector's "none" answer matters here.
-      - name: Check whether the diff can affect route coverage
-        id: select
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [ -n "$BASE_SHA" ]; then
-            SECTIONS="$(bun .github/scripts/changed-sections.ts "$BASE_SHA")"
-          else
-            SECTIONS="all"
-          fi
-          echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
-          echo "selected sections: $SECTIONS"
       - name: Endpoint-coverage tripwire
-        if: steps.select.outputs.sections != 'none'
         run: bun .github/scripts/check-endpoint-coverage.ts
