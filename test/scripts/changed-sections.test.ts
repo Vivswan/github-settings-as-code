@@ -348,7 +348,7 @@ describe("changed-sections selection", () => {
     ["the e2e runner", "all", ["test/e2e/runner.ts"]],
     ["the selector itself", "all", [".github/scripts/changed-sections.ts"]],
     ["a workflow", "all", [".github/workflows/checks.yml"]],
-    ["a composite action", "all", [".github/actions/fetch-test-artifacts/action.yml"]],
+    ["a composite action", "all", [".github/actions/setup/action.yml"]],
     // lib/settings.schema.json regenerates alongside schema-affecting src changes; forcing "all" would kill diff-awareness.
     [
       "a section change plus a regenerated schema, which scopes to the section",

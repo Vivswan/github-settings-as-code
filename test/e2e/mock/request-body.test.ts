@@ -1,5 +1,5 @@
 /**
- * The pipeline hands a handler only what GitHub keeps of a body: the fields the trimmed spec documents.
+ * The pipeline hands a handler only what GitHub keeps of a body: the fields the descriptor documents.
  * An undocumented key on an open body is dropped (GitHub ignores it; the GET never echoes it), on a
  * closed body it is GitHub's 422. Pinned over the wire, since a handler unit test bypasses the pipeline.
  */

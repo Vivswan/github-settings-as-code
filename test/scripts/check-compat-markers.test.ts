@@ -160,14 +160,13 @@ describe("checkCompatMarkers", () => {
     }),
   );
 
-  test("skips built output, dependencies, the fetched spec, the changelog, ignored files, symlinks, deleted tracked files, and its own two files", () =>
+  test("skips built output, dependencies, the changelog, ignored files, symlinks, deleted tracked files, and its own two files", () =>
     withTempDir("compat-markers-", (dir) => {
       const marker = "// COMPAT(v3): kept; delete it\n";
       const cwd = repo(dir, "2.0.0", {
         ".gitignore": "scratch/\n",
         "lib/index.js": marker,
         "node_modules/dep/index.js": marker,
-        "test/e2e/openapi/github-openapi.trimmed.json": marker,
         "CHANGELOG.md": "* remove the COMPAT(v3) legacy reader (#12)\n",
         "scratch/out.ts": marker,
         "gone.ts": marker,

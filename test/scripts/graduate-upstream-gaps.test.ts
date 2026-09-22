@@ -195,20 +195,23 @@ describe("gapFileBases", () => {
 });
 
 describe("generateIndex", () => {
-  test("one import and one GAPS element per gap file, aliased and sorted; an empty directory keeps the same template around an empty GAPS", () => {
-    // The varying parts of the file: the gap imports (gap.js's is the template's) and the GAPS array, whole.
+  test("one import and one GAPS entry per gap file, keyed by base name and sorted; an empty directory keeps the template", () => {
+    // The varying parts of the file: the gap imports (gap.js's is the template's) and the GAPS record, whole.
     const gapImports = (text: string): string[] => text.match(/^import \{ GAP as .*$/gm) ?? [];
     const gapsArray = (text: string): string =>
-      text.match(/const GAPS = [\s\S]*?\] as const;/)?.[0] ?? "";
-    const two = generateIndex(["pages-https", "merge-queue"]);
+      text.match(/const GAPS = [\s\S]*?\} as const;/)?.[0] ?? "";
+    const two = generateIndex(["pages-https", "lfs"]);
     expect(gapImports(two)).toEqual([
-      'import { GAP as mergeQueue } from "./merge-queue.js";',
+      'import { GAP as lfs } from "./lfs.js";',
       'import { GAP as pagesHttps } from "./pages-https.js";',
     ]);
-    expect(gapsArray(two)).toBe("const GAPS = [\n  mergeQueue,\n  pagesHttps,\n] as const;");
+    // A key that is its own alias is shorthand; a hyphenated one is quoted, so the file base name survives as the key.
+    expect(gapsArray(two)).toBe(
+      'const GAPS = {\n  lfs,\n  "pages-https": pagesHttps,\n} as const;',
+    );
     const none = generateIndex([]);
     expect(gapImports(none)).toEqual([]);
-    expect(gapsArray(none)).toBe("const GAPS = [] as const;");
+    expect(gapsArray(none)).toBe("const GAPS = {} as const;");
     // Everything but the imports and the GAPS elements is one template, so the derivations the consumers import
     // (SupplementalRoute, UNDOCUMENTED_ROUTES) are the same text whatever the directory holds.
     const template = (text: string): string =>
@@ -221,7 +224,7 @@ describe("generateIndex", () => {
   test("the empty index type-checks beside gap.ts: the derivations must not index into an empty tuple", () =>
     withTempDir("gaps-index-empty-", (dir) => {
       // The committed index compiles under the project typecheck only while a gap file exists; a derivation
-      // written for a populated GAPS (say `(typeof GAPS)[0]`) would first break the day the last gap graduates.
+      // written for a populated GAPS (say `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
       symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
       copyFileSync(join(ROOT, "src", "upstream-gaps", "gap.ts"), join(dir, "gap.ts"));
       writeFileSync(join(dir, "index.ts"), generateIndex([]));

@@ -1,14 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  buildSchema,
-  type ConstDirectiveNode,
-  type GraphQLObjectType,
-  getNamedType,
-  isObjectType,
-  Kind,
-} from "graphql";
+import { schema as published } from "@octokit/graphql-schema";
+import { buildSchema, type GraphQLObjectType, isObjectType } from "graphql";
 import {
   ENDPOINT_DOCS,
   ENDPOINT_DOCS_PATH,
@@ -17,9 +9,6 @@ import {
   type SpecOperations,
 } from "../../.github/scripts/endpoint-docs.js";
 import { UNDOCUMENTED_ROUTES } from "../../src/upstream-gaps/index.js";
-import { ROOT } from "../root.js";
-
-const SCHEMA_PATH = join(ROOT, "test", "e2e", "graphql", "schema.docs.graphql");
 
 describe("resolveAnchors", () => {
   const spec: SpecOperations = {
@@ -130,66 +119,40 @@ describe("endpoint-docs.yml against the registry and the descriptor", () => {
     );
   });
 
-  test("a GraphQL page is the category page the schema assigns, anchored on an entry it declares", () => {
-    // docs.github.com groups the GraphQL reference by the schema's own @docsCategory and anchors each entry as
-    // <kind>-<lowercased name>. A mutation or query field carries the directive itself or inherits its return type's;
-    // an object type carries its own. A name the schema does not declare, or a category it does not assign, is a
-    // link that 404s or lands on the wrong page.
-    const schema = buildSchema(readFileSync(SCHEMA_PATH, "utf8"), { assumeValid: true });
-    const categoryOf = (node: {
-      astNode?: { directives?: readonly ConstDirectiveNode[] } | null;
-    }): string | undefined => {
-      const directive = node.astNode?.directives?.find((d) => d.name.value === "docsCategory");
-      const value = directive?.arguments?.[0]?.value;
-      return value?.kind === Kind.STRING ? value.value : undefined;
-    };
-    const objects = new Map(
-      Object.values(schema.getTypeMap())
-        .filter(isObjectType)
-        .map((type) => [type.name.toLowerCase(), categoryOf(type)] as const),
-    );
+  test("a GraphQL page is a category-page anchor on an entry the schema declares", () => {
+    // docs.github.com anchors each reference entry as <kind>-<lowercased name> on a category page. A name the schema
+    // does not declare is a link that 404s. The category itself comes from a @docsCategory directive the introspected
+    // schema @octokit/graphql-schema ships cannot carry, so a wrong category page is not caught here.
+    const schema = buildSchema(published.idl, { assumeValid: true });
     const fields = (type: GraphQLObjectType | null | undefined) =>
-      new Map(
-        Object.values(type?.getFields() ?? {}).map((field) => {
-          const returned = getNamedType(field.type);
-          const inherited = isObjectType(returned) ? categoryOf(returned) : undefined;
-          return [field.name.toLowerCase(), categoryOf(field) ?? inherited] as const;
-        }),
-      );
-    const declared: Record<string, Map<string, string | undefined>> = {
+      new Set(Object.keys(type?.getFields() ?? {}).map((name) => name.toLowerCase()));
+    const declared: Record<string, ReadonlySet<string>> = {
       mutation: fields(schema.getMutationType()),
       query: fields(schema.getQueryType()),
-      object: objects,
+      object: new Set(
+        Object.values(schema.getTypeMap())
+          .filter(isObjectType)
+          .map((type) => type.name.toLowerCase()),
+      ),
     };
     const anchor =
-      /^https:\/\/docs\.github\.com\/en\/graphql\/reference\/([a-z-]+)#(mutation|query|object)-([a-z0-9]+)$/;
+      /^https:\/\/docs\.github\.com\/en\/graphql\/reference\/[a-z-]+#(mutation|query|object)-([a-z0-9]+)$/;
     /** "ok", or why the URL is wrong. */
     const verdict = (url: string): string => {
       const match = anchor.exec(url);
       if (match === null) {
         return "not a category-page anchor";
       }
-      const [, category, kind, name] = match;
-      const entries = declared[kind ?? ""];
-      if (!entries?.has(name ?? "")) {
-        return `the schema declares no ${kind} named "${name}"`;
-      }
-      const assigned = entries.get(name ?? "");
-      if (assigned === undefined) {
-        return `the schema assigns "${name}" no category`;
-      }
-      return assigned === category
+      const [, kind, name] = match;
+      return declared[kind ?? ""]?.has(name ?? "")
         ? "ok"
-        : `the schema files "${name}" under ${assigned}, not ${category}`;
+        : `the schema declares no ${kind} named "${name}"`;
     };
-    // Controls: the right page passes; the wrong category, an undeclared name, and the retired flat page each fail.
+    // Controls: the right page passes; an undeclared name and the retired flat page each fail.
     const base = "https://docs.github.com/en/graphql/reference/";
     expect(verdict(`${base}deployments#mutation-pinenvironment`)).toBe("ok");
     expect(verdict(`${base}users#query-user`)).toBe("ok");
     expect(verdict(`${base}repos#object-repository`)).toBe("ok");
-    expect(verdict(`${base}does-not-exist#mutation-pinenvironment`)).toBe(
-      'the schema files "pinenvironment" under deployments, not does-not-exist',
-    );
     expect(verdict(`${base}deployments#mutation-pinenvironments`)).toBe(
       'the schema declares no mutation named "pinenvironments"',
     );

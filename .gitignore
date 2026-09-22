@@ -1,12 +1,4 @@
 test/e2e/.artifacts/
-# The trimmed GitHub OpenAPI spec is a FETCHED artifact, not committed: it is a
-# ~2MB generated blob that would bloat history on every ref bump. Generate it
-# with `bun .github/scripts/trim-openapi.ts` (reproducible at the pinned sha);
-# CI restores it from actions/cache or re-fetches on a miss.
-test/e2e/openapi/github-openapi.trimmed.json
-# GitHub's public GraphQL schema, the same fetched-artifact arrangement:
-# generate it with `bun .github/scripts/fetch-graphql-schema.ts`.
-test/e2e/graphql/schema.docs.graphql
 # Agent session state, the whole directory (the managed region below ignores
 # only named paths inside it); stray biome.json copies inside its worktrees
 # otherwise abort `biome ci .` as nested roots.

@@ -1,4 +1,4 @@
-# The docs.github.com page for every call the trimmed OpenAPI descriptor cannot supply: the routes GitHub does not
+# The docs.github.com page for every call the OpenAPI descriptor cannot supply: the routes GitHub does not
 # document (src/upstream-gaps/) and every GraphQL operation, keyed as the declaration spells them. Every other REST
 # route takes its page from the descriptor's own externalDocs link (endpoint-docs.ts). The lockstep test in
 # test/scripts/endpoint-docs.test.ts fails on a declared call without a page, an entry the descriptor already

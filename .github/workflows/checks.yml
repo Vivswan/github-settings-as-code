@@ -16,9 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      # bun test loads the fetched, gitignored OpenAPI spec and GraphQL
-      # schema; the composite restores each from cache or fetches on a miss.
-      - uses: ./.github/actions/fetch-test-artifacts
       - name: Lint (biome)
         run: bun run lint
       - name: Lint (architecture)
@@ -70,8 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      # The docs generator reads the fetched OpenAPI spec for the coverage page's endpoint links.
-      - uses: ./.github/actions/fetch-test-artifacts
       - name: Regenerate the schema and compare
         run: bun run build:check
 
@@ -151,10 +146,6 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
-      # The harness validates mock responses against the fetched, gitignored spec; the composite restores or fetches
-      # it, skipped with the run when the selector picks nothing.
-      - uses: ./.github/actions/fetch-test-artifacts
-        if: steps.select.outputs.sections != 'none'
       - name: Run scenarios and fuzz
         if: steps.select.outputs.sections != 'none'
         env:
@@ -182,8 +173,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # Only the selector's "none" answer matters here. It runs BEFORE the spec cache/fetch so a PR that selects
-      # nothing skips the download too.
+      # Only the selector's "none" answer matters here.
       - name: Check whether the diff can affect route coverage
         id: select
         env:
@@ -196,8 +186,6 @@ jobs:
           fi
           echo "sections=$SECTIONS" >> "$GITHUB_OUTPUT"
           echo "selected sections: $SECTIONS"
-      - uses: ./.github/actions/fetch-test-artifacts
-        if: steps.select.outputs.sections != 'none'
       - name: Endpoint-coverage tripwire
         if: steps.select.outputs.sections != 'none'
         run: bun .github/scripts/check-endpoint-coverage.ts

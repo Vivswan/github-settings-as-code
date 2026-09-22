@@ -92,7 +92,7 @@ export const PermissionSchema = z.string().regex(PERMISSION_PATTERN, {
 /**
  * The GET reports this enum and the PATCH accepts nothing else, so a declared custom org role can never be
  * verified on (or set on) a pending invitation; the PUT applies it once accepted. The e2e mock's stored
- * invitations must stay inside it; a lockstep test pins it to the trimmed OpenAPI spec.
+ * invitations must stay inside it; a lockstep test pins it to GitHub's OpenAPI descriptor.
  */
 export const INVITATION_ROLES: ReadonlySet<string> = new Set([
   "read",

@@ -16,13 +16,12 @@ import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Built output, dependencies, the fetched spec, release-please's changelog (it quotes PR titles, so a removal PR's
- * title would outlive the marker it deleted), and the two files that spell the syntax to define and test it.
+/** Built output, dependencies, release-please's changelog (it quotes PR titles, so a removal PR's title would
+ * outlive the marker it deleted), and the two files that spell the syntax to define and test it.
  * A trailing slash skips a directory; anything else is one exact path. */
 const SKIPPED_PATHS = [
   "lib/",
   "node_modules/",
-  "test/e2e/openapi/github-openapi.trimmed.json",
   "CHANGELOG.md",
   ".github/scripts/check-compat-markers.ts",
   "test/scripts/check-compat-markers.test.ts",

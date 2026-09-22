@@ -1,15 +1,13 @@
 # Nightly upstream-freshness probes and the whole-corpus e2e run. Generated
 # from the fleet sync's nightly starter and never overwritten by a later
-# sync. The checks job re-cuts the trimmed OpenAPI spec from upstream HEAD
-# (a path-level staleness check) and typechecks against the latest
-# @octokit/types, so pinned-dependency staleness fails a night instead of
-# surprising the next manual bump; the float-canary job re-resolves the
-# lockfile from scratch the way the Dependabot lockfile workflow does, so a
-# breaking upstream release fails a night instead of reddening every open
-# Dependabot PR; the e2e job runs the curated corpus and the endpoint-coverage
-# tripwire against a freshly fetched spec; the report job below files or
-# updates one label-deduplicated tracking issue on a red night and closes it
-# on a green one (see the platform repository's docs/nightly.md).
+# sync.
+#
+# Each job fails a night instead of surprising a later PR: checks runs the
+# schema lockstep tests and the typecheck against the latest Octokit
+# packages, float-canary re-resolves the lockfile from scratch like the
+# Dependabot lockfile workflow, and e2e runs the curated corpus with the
+# endpoint-coverage tripwire. The report job files one tracking issue on a
+# red night and closes it on a green one (the platform's docs/nightly.md).
 name: Nightly
 
 on:
@@ -38,44 +36,31 @@ jobs:
       - uses: ./.github/actions/setup
         id: setup
 
-      # PR CI proves USED_PATHS against the pinned descriptor; this probe
-      # re-cuts against upstream HEAD (deliberately bypassing the cached
-      # spec), so trim-openapi's own errors become the freshness signal: a
-      # newly documented UNDOCUMENTED_PATHS entry or a removed/renamed used
-      # path fails the night.
-      - name: Probe the latest OpenAPI descriptor
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # The lockstep tests PR CI runs against the pinned @octokit/openapi and
+      # @octokit/graphql-schema, here against each package's latest release:
+      # a used path removed, an upstream gap now documented, or a selected
+      # field retired fails the night before Dependabot's bump PR does.
+      # --no-save leaves package.json and the lockfile untouched; the upgraded
+      # node_modules stays ambient for the rest of this job.
+      - name: Probe the latest OpenAPI descriptor and GraphQL schema
         run: |
-          # Assign and export separately: `export X="$(cmd)"` takes export's
-          # exit status, so a failed gh would run the trim with an empty ref.
-          TRIM_UPSTREAM_REF="$(gh api repos/github/rest-api-description/commits/main --jq .sha)"
-          export TRIM_UPSTREAM_REF
-          if ! printf '%s' "$TRIM_UPSTREAM_REF" | grep -Eq '^[0-9a-f]{40}$'; then
-            echo "::error::could not resolve the latest rest-api-description commit; got '$TRIM_UPSTREAM_REF'"
-            exit 1
-          fi
-          log="$(mktemp)"
-          if ! bun .github/scripts/trim-openapi.ts >"$log" 2>&1; then
-            cat "$log"
-            exit 1
-          fi
-          cat "$log"
-          # The script's "fetching <URL>" line embeds the ref it actually
-          # used; anything else in the log (like the override note) also
-          # naming the sha must not satisfy this. A pinned ref here means
-          # the override was ignored - which would make this probe pass
-          # green forever without probing anything.
-          if ! grep "^fetching " "$log" | grep -qF "$TRIM_UPSTREAM_REF"; then
-            echo "::error::trim-openapi.ts did not fetch $TRIM_UPSTREAM_REF; its TRIM_UPSTREAM_REF override is gone and this probe is testing nothing"
-            exit 1
-          fi
+          bun add --no-save --ignore-scripts @octokit/openapi@latest @octokit/graphql-schema@latest
+          # A pinned version left in place would make this probe pass green
+          # forever without probing anything.
+          for pkg in @octokit/openapi @octokit/graphql-schema; do
+            installed="$(bun -e "console.log(require('$pkg/package.json').version)")"
+            latest="$(bun info "$pkg" version)"
+            if [ "$installed" != "$latest" ]; then
+              echo "::error::$pkg@$installed is installed but $latest is the latest; the probe is testing the pin"
+              exit 1
+            fi
+            echo "$pkg@$installed"
+          done
+          bun test test/e2e/openapi/validate.test.ts test/sections/graphql-queries.test.ts
 
-      # always() so a red spec probe cannot mask this one (the job still
+      # always() so a red schema probe cannot mask this one (the job still
       # fails if either step failed); gated on the setup step because there
-      # is nothing to probe when setup itself broke. --no-save keeps the
-      # lockfile and package.json untouched; the upgraded node_modules stays
-      # ambient for the rest of this job, so keep later steps out of it.
+      # is nothing to probe when setup itself broke.
       - name: Probe the latest @octokit/types
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
@@ -125,15 +110,11 @@ jobs:
           bun install --ignore-scripts
           git --no-pager diff --stat -- bun.lock
           git checkout -- bun.lock
-      # The gate's suite loads two fetched artifacts; the composite restores or fetches
-      # each. It runs AFTER the floated install so a miss runs the fetch on the floated graph.
-      - uses: ./.github/actions/fetch-test-artifacts
       - name: Run the gate on the floated resolution
         run: bun run check
 
-  # The whole curated corpus (PR CI runs only the sections a PR changed) plus the endpoint-coverage tripwire,
-  # against the pinned spec fetched fresh: PR CI restores a cached spec for speed, so this fetch is where a used
-  # path GitHub stopped documenting surfaces. The bundle runs under node24, so node is installed beside bun.
+  # The whole curated corpus (PR CI runs only the sections a PR changed) plus the endpoint-coverage tripwire.
+  # The bundle runs under node24, so node is installed beside bun.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -143,8 +124,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Fetch the trimmed OpenAPI spec (drift tripwire)
-        run: bun .github/scripts/trim-openapi.ts
       - name: Curated corpus
         run: bun test/e2e/run.ts
       - name: Endpoint-coverage tripwire

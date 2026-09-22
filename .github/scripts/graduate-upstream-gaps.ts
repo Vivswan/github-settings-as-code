@@ -98,7 +98,7 @@ export function isSpecOnly(gapSource: string): boolean {
 }
 
 /** A documentedInSpec: false gap whose tripwire fired means octokit caught up but the pinned descriptor did not: it
- * is rewritten rather than deleted, so its UNDOCUMENTED_ROUTES exemption survives until a bumped UPSTREAM_REF documents the paths. */
+ * is rewritten rather than deleted, so its UNDOCUMENTED_ROUTES exemption survives until an @octokit/openapi bump documents the paths. */
 export function isSpecPinned(gapSource: string): boolean {
   return /documentedInSpec:\s*false/.test(gapSource);
 }
