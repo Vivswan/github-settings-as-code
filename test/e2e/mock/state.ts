@@ -22,12 +22,12 @@ import {
   roleForPermission,
 } from "../../../src/sections/shared/roles.js";
 import type { MustBeNever } from "../../../src/types.js";
-import { AUTOLINKS_MOCK } from "../../src/sections/autolinks/mock.js";
-import { DEPLOY_KEYS_MOCK } from "../../src/sections/deploy_keys/mock.js";
-import { LABELS_MOCK } from "../../src/sections/labels/mock.js";
-import { MILESTONES_MOCK } from "../../src/sections/milestones/mock.js";
-import { RULESETS_MOCK } from "../../src/sections/rulesets/mock.js";
-import { WEBHOOKS_MOCK } from "../../src/sections/webhooks/mock.js";
+import { AUTOLINKS_MOCK } from "../../sections/autolinks/mock.js";
+import { DEPLOY_KEYS_MOCK } from "../../sections/deploy_keys/mock.js";
+import { LABELS_MOCK } from "../../sections/labels/mock.js";
+import { MILESTONES_MOCK } from "../../sections/milestones/mock.js";
+import { RULESETS_MOCK } from "../../sections/rulesets/mock.js";
+import { WEBHOOKS_MOCK } from "../../sections/webhooks/mock.js";
 import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };

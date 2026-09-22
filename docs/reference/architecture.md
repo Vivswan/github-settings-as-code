@@ -80,7 +80,7 @@ flowchart LR
 - The one live-axis knob is `_undeclared`: what happens to a live resource the file does not declare. A knobbed list section's wrapper sets it; a file's top-level `_undeclared` sets it for every knobbed list section of that file, and the run input `undeclared` for every file; the section's default applies where none is set. `environments`, `branches`, and `workflows` apply no policy and refuse the knob ([Undeclared policy](undeclared-policy.md)).
 - Re-running an apply rewrites nothing the engine can read back, and a check right after it reads clean. Writes whose value GitHub does not read back recur by design: `interaction_limits` re-arms its expiry, every declared secret is re-sealed, and the Git LFS toggle and `check_suite_preferences` are re-sent on every apply.
 
-Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [test/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/src/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml), [test/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/src/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
+Demonstrated by: [test/e2e/scenarios/apply-idempotent-unconditional.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/e2e/scenarios/apply-idempotent-unconditional.yml), [test/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/actions_variables/scenarios/actions-variables-undeclared-keep-note.yml), [test/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/actions_secrets/scenarios/actions-secrets-undeclared-delete.yml).
 
 ## The mode ladder
 
@@ -140,7 +140,7 @@ The success path mints the input a planner accepts: a section's `plan()` takes t
 
 Secret references are the exception. The `$NAME` syntax is judged per section when the run starts, because the verdict needs the document's provenance ([Trust and provenance](#trust-and-provenance)).
 
-Demonstrated by: [test/engine/validate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/validate.test.ts), [test/engine/orchestrate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/orchestrate.test.ts), [test/src/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/src/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml).
+Demonstrated by: [test/engine/validate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/validate.test.ts), [test/engine/orchestrate.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/engine/orchestrate.test.ts), [test/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/interaction_limits/scenarios/interaction-limits-invalid-values-and-unknown-key-rejected.yml).
 
 ## The layering fold
 
@@ -402,4 +402,4 @@ graph TD
 ```
 <!-- END GENERATED: architecture-map -->
 
-Each section's e2e harness fragments (`mock.ts`, `generators.ts`) are test code under `test/src/sections/<key>/`, outside the map.
+Each section's e2e harness fragments (`mock.ts`, `generators.ts`) are test code under `test/sections/<key>/`, outside the map.
