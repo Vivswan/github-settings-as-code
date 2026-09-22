@@ -1023,7 +1023,7 @@ v3   webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the 
      webhooks[0].events[1]: "pushes" is not an event GitHub delivers to repository webhooks ("*" means every event); the accepted names are GitHub's list at https://docs.github.com/webhooks/webhook-events-and-payloads, read from @octokit/openapi-webhooks, so an event GitHub added since arrives in the release that bumps that package
 ```
 
-Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. The list is generated from `@octokit/openapi-webhooks`, so an event GitHub adds later is refused until the release that bumps that package.
+Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. The list is pinned to `@octokit/openapi-webhooks`, so an event GitHub adds later is refused until the release that bumps that package.
 
 ## 48. Secret scanning patterns must compile
 
