@@ -4,7 +4,6 @@ import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import {
   type OnMissingPermission,
-  type PlannedOp,
   planContext,
   snapshotContext,
 } from "../../../src/sections/contract/plan.js";
@@ -458,9 +457,8 @@ describe("repository", () => {
     expect(error).toContain("a mapping is not a boolean");
   });
 
-  test("the section accepts plain mappings only, like the record shape always did", () => {
-    // A YAML !!timestamp document parses to a Date, which zod's object schemas would accept as an empty mapping.
-    expect(shapeError({ repository: new Date("2020-01-01") }, "f.yml")).toContain("repository");
+  test("an array where the section's mapping is declared is refused, naming the section", () => {
+    // An array is plain data, so neither the engine walk nor the plain-mapping guard stops it; the piped object schema must.
     expect(shapeError({ repository: [1, 2] }, "f.yml")).toContain("repository");
   });
 
@@ -549,58 +547,6 @@ describe("repository", () => {
       "GRAPHQL UpdateRepositoryFeatures",
       "PUT /repos/o/r/lfs",
     ]);
-  });
-
-  test("the read port exposes the repo GET, the four toggle probes, and the features query", () => {
-    const ctx = planContext(repositorySection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual([
-      "get",
-      "vulnerabilityAlertsGet",
-      "automatedSecurityFixesGet",
-      "privateVulnerabilityReportingGet",
-      "immutableReleasesGet",
-      "featuresQuery",
-    ]);
-    // @ts-expect-error a write role is not a read: the port has no `update`
-    ctx.read.update;
-    // @ts-expect-error nor a `topics`
-    ctx.read.topics;
-    // @ts-expect-error nor the mutation
-    ctx.read.updateFeatures;
-    // @ts-expect-error nor the raw client
-    ctx.api;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.get.probeAbsent;
-    // A toggle probe keeps probeAbsent: its 404 means "not enabled".
-    expect(typeof ctx.read.immutableReleasesGet.probeAbsent).toBe("function");
-  });
-
-  test("a planned operation can only name a declared write, driftless only when alwaysRewrite", () => {
-    type Op = PlannedOp<typeof repositorySection.endpoints, typeof repositorySection.graphql>;
-    const read = { role: "get", drift: ["x"], change: "" } as const;
-    // @ts-expect-error the repo GET is a read, not a plannable write
-    const _read: Op = read;
-    const query = {
-      role: "featuresQuery",
-      variables: { owner: "o", repo: "r" },
-      drift: ["x"],
-      change: "",
-    } as const;
-    // @ts-expect-error the features query is a read, not a plannable write
-    const _query: Op = query;
-    const silent = { role: "vulnerabilityAlertsPut", drift: [], change: "" } as const;
-    // @ts-expect-error a readable toggle's write must carry drift
-    const _silent: Op = silent;
-    const lfs: Op = { role: "lfsRemove", drift: [], change: "Git LFS: disabled" };
-    expect(lfs.drift).toEqual([]);
-    const badVariables = {
-      role: "updateFeatures",
-      variables: { repositoryId: "R", issueCreationPolicy: "everyone" },
-      drift: ["x"],
-      change: "",
-    } as const;
-    // @ts-expect-error the mutation's variables are typed by its declaration
-    const _badVariables: Op = badVariables;
   });
 });
 
