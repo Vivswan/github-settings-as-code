@@ -1,10 +1,13 @@
 # Envelope pagination plus enable/disable behavior. The workflows list is
 # returned in a {total_count, workflows} envelope and paginated at 100 per
-# page, so a 101-entry live list forces a second page (page=2). One active
-# workflow is disabled and one disabled workflow is enabled; after apply both
-# match their declared state, so a check rerun converges. (The deleted-state
-# 'treated as absent' case lives in workflows-check-drift, because a declared
-# workflow with no file is persistent drift and cannot converge.)
+# page, so a 101-entry live list forces a second page (page=2). The declared
+# release.yml is the last live entry, so it reaches the planner only through
+# page two: a walk that drops the second page finds it absent and never
+# enables it. One active workflow is disabled and one disabled workflow is
+# enabled; after apply both match their declared state, so a check rerun
+# converges. (The deleted-state 'treated as absent' case lives in
+# workflows-check-drift, because a declared workflow with no file is
+# persistent drift and cannot converge.)
 name: workflows-apply-converges
 settings:
   workflows:
@@ -15,7 +18,6 @@ settings:
 live_state:
   workflows:
     - {id: 1, name: CI, path: .github/workflows/ci.yml, state: active}
-    - {id: 2, name: Release, path: .github/workflows/release.yml, state: disabled_manually}
     - {id: 100, name: Filler100, path: .github/workflows/filler-100.yml, state: active}
     - {id: 101, name: Filler101, path: .github/workflows/filler-101.yml, state: active}
     - {id: 102, name: Filler102, path: .github/workflows/filler-102.yml, state: active}
@@ -115,6 +117,7 @@ live_state:
     - {id: 196, name: Filler196, path: .github/workflows/filler-196.yml, state: active}
     - {id: 197, name: Filler197, path: .github/workflows/filler-197.yml, state: active}
     - {id: 198, name: Filler198, path: .github/workflows/filler-198.yml, state: active}
+    - {id: 2, name: Release, path: .github/workflows/release.yml, state: disabled_manually}
 token_permissions:
   actions: write
 expect:
