@@ -7,7 +7,7 @@ import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
-import { type SectionFailure, sectionFailure } from "../contract/errors.js";
+import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   type DeclaredIssue,
@@ -18,7 +18,11 @@ import {
   undeclaredNote,
 } from "../contract/module.js";
 import { hasDrift, plainData, type Read } from "../contract/plan.js";
-import type { EnvironmentRestOp, EnvironmentsRestContext } from "./endpoints.js";
+import {
+  type EnvironmentRestOp,
+  type EnvironmentsRestContext,
+  unreconcilable,
+} from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentBranchPolicyConfig } from "./schema.js";
@@ -46,23 +50,18 @@ function livePolicyType(policy: LiveBranchPolicy): string {
   return typeof policy.type === "string" ? policy.type : "branch";
 }
 
-function unreconcilable(envName: string, what: string): SectionFailure {
-  return sectionFailure(
-    "live-shape",
-    `environments: the deployment branch-policy list for environment "${envName}" returned a policy without ${what}, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-  );
-}
+const POLICY = { list: "deployment branch-policy", entry: "policy" };
 
 function livePolicyId(policy: LiveBranchPolicy, envName: string): Result<string, SectionFailure> {
   if (policy.id === undefined) {
-    return err(unreconcilable(envName, "an id"));
+    return err(unreconcilable(POLICY, envName, "an id"));
   }
   return ok(String(policy.id));
 }
 
 function livePolicyName(policy: LiveBranchPolicy, envName: string): Result<string, SectionFailure> {
   if (typeof policy.name !== "string") {
-    return err(unreconcilable(envName, "a name"));
+    return err(unreconcilable(POLICY, envName, "a name"));
   }
   return ok(policy.name);
 }

@@ -35,11 +35,7 @@ export function samePermission(
   }
   const resources = new Set(a.repo);
   const others = new Set(b.repo);
-  return (
-    a.org === b.org &&
-    resources.size === others.size &&
-    [...resources].every((resource) => others.has(resource))
-  );
+  return a.org === b.org && resources.size === others.size && resources.isSubsetOf(others);
 }
 
 /** Human-facing label for each PAT resource, as shown in the token UI. */

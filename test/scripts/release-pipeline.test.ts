@@ -7,7 +7,6 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import {
   anchorCheck,
   anchorReleasePr,
@@ -343,7 +342,7 @@ describe("packageRelease", () => {
     drift(rerun);
     expect(() => packageRelease({ cwd: rerun, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(
       new RegExp(
-        `^${TAG} \\(${before}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build packages, .*Diff the two trees by hand; ${escapeRe(FROZEN)}$`,
+        `^${TAG} \\(${before}\\) packages ${fx.mergeSha}, but its tree [0-9a-f]{40} is not the tree [0-9a-f]{40} this checkout's build packages, .*Diff the two trees by hand; ${RegExp.escape(FROZEN)}$`,
       ),
     );
     expect(git(fx.origin, "rev-parse", `${TAG}^{}`)).toBe(before);
@@ -355,7 +354,7 @@ describe("packageRelease", () => {
       const fx = seedFixture();
       const { from, sha, error } = plant(fx);
       git(from, "push", "--quiet", "origin", `${sha}:${TAG}`);
-      const frozen = new RegExp(`${escapeRe(FROZEN)}$`);
+      const frozen = new RegExp(`${RegExp.escape(FROZEN)}$`);
       const pushes = withPushPlans(fx, [], () => {
         for (const path of [
           () => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha }),
@@ -437,7 +436,7 @@ describe("packageRelease", () => {
       const fx = seedFixture();
       spoil(fx.work);
       const message = new RegExp(
-        `does not carry a non-empty regular-file ${escapeRe(file)} \\(${entry}\\); refusing to point a consumable ref at an unpackaged commit; run the build before packaging\\.$`,
+        `does not carry a non-empty regular-file ${RegExp.escape(file)} \\(${entry}\\); refusing to point a consumable ref at an unpackaged commit; run the build before packaging\\.$`,
       );
       expect(() => packageCommit({ cwd: fx.work, sourceSha: fx.mergeSha })).toThrow(message);
       expect(() => packageRelease({ cwd: fx.work, tag: "v2.1.0", sourceSha: fx.mergeSha })).toThrow(

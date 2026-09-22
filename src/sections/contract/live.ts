@@ -5,7 +5,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import type { z } from "zod";
+import { z } from "zod";
 import { countNoun } from "../../text.js";
 import { endpointMethod, endpointPath } from "./endpoints.js";
 import type { SectionFailure } from "./errors.js";
@@ -85,10 +85,7 @@ export function parseLive<T>(
   }
   const issues = parsed.error.issues;
   const shown = issues.slice(0, 3).map((issue) => {
-    const path = issue.path
-      .map((part) => (typeof part === "number" ? `[${part}]` : `.${String(part)}`))
-      .join("");
-    return `${path.replace(/^\./, "") || "(body)"}: ${issue.message}`;
+    return `${z.core.toDotPath(issue.path) || "(body)"}: ${issue.message}`;
   });
   const more =
     issues.length > 3 ? `; and ${countNoun(issues.length - 3, "more issue", "more issues")}` : "";

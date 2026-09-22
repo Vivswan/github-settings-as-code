@@ -276,14 +276,6 @@ const UnknownRule = z
   })
   .meta({ id: "UnknownRule" });
 
-function renderPath(path: readonly PropertyKey[]): string {
-  return path
-    .map((step, i) =>
-      typeof step === "number" ? `[${step}]` : `${i === 0 ? "" : "."}${String(step)}`,
-    )
-    .join("");
-}
-
 /**
  * zod reports a failed union as "Invalid input" unless exactly one branch failed on non-aborting checks alone, and
  * here every branch aborts, so the report is built from the branch the rule's type selects.
@@ -296,7 +288,9 @@ function ruleUnionError(issue: z.core.$ZodRawIssue): string | undefined {
   const type = (issue.input as { type?: unknown } | null)?.type;
   const own = typeof type === "string" && KNOWN_RULE_TYPES.includes(type) ? known : unknown;
   return own
-    .map((sub) => (sub.path.length === 0 ? sub.message : `${renderPath(sub.path)}: ${sub.message}`))
+    .map((sub) =>
+      sub.path.length === 0 ? sub.message : `${z.core.toDotPath(sub.path)}: ${sub.message}`,
+    )
     .join("; ");
 }
 

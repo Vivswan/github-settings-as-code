@@ -517,13 +517,14 @@ function pathOf(field: string): string[] {
   return field.split(".");
 }
 
-function valueAt(record: unknown, path: readonly string[]): unknown {
+/** The own value at `path`; undefined once a step is missing, so a null the author wrote reads as null, not as absent. */
+export function valueAt(record: unknown, path: readonly PropertyKey[]): unknown {
   let node: unknown = record;
   for (const step of path) {
     if (typeof node !== "object" || node === null || !Object.hasOwn(node, step)) {
       return undefined;
     }
-    node = (node as Fields)[step];
+    node = (node as Record<PropertyKey, unknown>)[step];
   }
   return node;
 }

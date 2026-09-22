@@ -15,12 +15,7 @@ import type { UndeclaredPolicy } from "../../src/types.js";
 import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
-import {
-  escapeRe,
-  type GeneratedRegion,
-  regenerateRegions,
-  regionBounds,
-} from "./lib/generated-regions.js";
+import { type GeneratedRegion, regenerateRegions, regionBounds } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 export const COVERAGE_PATH = "docs/reference/coverage.md";
@@ -428,7 +423,7 @@ function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^\n(?:${escapeRe(TABLE_HEADER)}\n(?:\| \x60[a-z_]+\x60 \| [^\n]* \|\n)*)?$`,
+      String.raw`^\n(?:${RegExp.escape(TABLE_HEADER)}\n(?:\| \x60[a-z_]+\x60 \| [^\n]* \|\n)*)?$`,
     ),
     render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
   };
@@ -439,7 +434,7 @@ function outputsListRegion(name: string, heading: string): GeneratedRegion {
     name,
     placement: { kind: "under-heading", heading },
     body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${escapeRe(RESULT_TAIL)})?$`,
+      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${RegExp.escape(RESULT_TAIL)})?$`,
     ),
     render: () => renderOutputsList(RUN_RESULTS),
   };
@@ -450,7 +445,7 @@ function patUrlRegion(name: string): GeneratedRegion {
   return {
     name,
     placement: { kind: "tail" },
-    body: new RegExp(String.raw`^\n(?:\[${escapeRe(PAT_FORM_LABEL)}\]: \S+\n)?$`),
+    body: new RegExp(String.raw`^\n(?:\[${RegExp.escape(PAT_FORM_LABEL)}\]: \S+\n)?$`),
     render: () => `\n[${PAT_FORM_LABEL}]: ${patFormUrl()}\n`,
   };
 }
@@ -505,10 +500,10 @@ const nonBlank = (excluded: string): string =>
   String.raw`[ \t]*[^${excluded}\s][^${excluded}\r\n]*`;
 const PROSE_LINE = `${nonBlank("")}\n`;
 const CELL = nonBlank("|");
-const KEY_CELL = String.raw`\[\x60[a-z_]+\x60\]\(${escapeRe(SECTIONS_PAGE)}\)(?: \(\x60${nonBlank("|\x60")}\x60\))?`;
+const KEY_CELL = String.raw`\[\x60[a-z_]+\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60${nonBlank("|\x60")}\x60\))?`;
 const SUPPORTED_ROWS = String.raw`(?:\| ${CELL} \| ${KEY_CELL} \| ${CELL} \|\n)+`;
 const GAP_ROWS = String.raw`(?:\| ${CELL} \| ${CELL} \| ${CELL} \|\n)+`;
-const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${escapeRe(GAPS_HEADER)}\n|${escapeRe(GAPS_HEADER)}\n${GAP_ROWS})`;
+const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${RegExp.escape(GAPS_HEADER)}\n|${RegExp.escape(GAPS_HEADER)}\n${GAP_ROWS})`;
 const BULLETS = `(?:- ${PROSE_LINE})+`;
 const NOTE_GROUPS = String.raw`(?:\*\*${nonBlank("*")}\*\* \(\x60[a-z_]+\x60\)\n\n${BULLETS}\n)+`;
 
@@ -519,10 +514,10 @@ const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
     name: "coverage",
     placement: { kind: "tail" },
     body: new RegExp(
-      String.raw`^\n(?:(?:${PROSE_LINE}\n)+${escapeRe(SUPPORTED_HEADING)}\n\n${escapeRe(SUPPORTED_HEADER)}\n` +
-        String.raw`${SUPPORTED_ROWS}\n${escapeRe(NOTES_HEADING)}\n\n${NOTE_GROUPS}` +
-        String.raw`${escapeRe(GAPS_HEADING)}\n\n${GAPS_BODY}\n${escapeRe(NO_API_HEADING)}\n\n` +
-        String.raw`${PROSE_LINE}\n${BULLETS}\n${escapeRe(OUT_OF_SCOPE_HEADING)}\n\n${BULLETS})?$`,
+      String.raw`^\n(?:(?:${PROSE_LINE}\n)+${RegExp.escape(SUPPORTED_HEADING)}\n\n${RegExp.escape(SUPPORTED_HEADER)}\n` +
+        String.raw`${SUPPORTED_ROWS}\n${RegExp.escape(NOTES_HEADING)}\n\n${NOTE_GROUPS}` +
+        String.raw`${RegExp.escape(GAPS_HEADING)}\n\n${GAPS_BODY}\n${RegExp.escape(NO_API_HEADING)}\n\n` +
+        String.raw`${PROSE_LINE}\n${BULLETS}\n${RegExp.escape(OUT_OF_SCOPE_HEADING)}\n\n${BULLETS})?$`,
     ),
     render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS)}\n`,
   },

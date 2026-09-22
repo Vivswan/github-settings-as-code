@@ -22,7 +22,6 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import { parseRepoSlug } from "../../src/discovery/targets.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { failRun } from "../../src/flows/deliver.js";
@@ -370,13 +369,13 @@ describe("runSnapshot writes through a staging file", () => {
       );
       // The staging name carries the pid and random bytes, so the line is matched with that piece wild.
       const [head = "", tail = ""] = line.split("<staging>");
-      const stagingRe = `${escapeRe(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
+      const stagingRe = `${RegExp.escape(join(cfg.snapshotDir, "o"))}/\\.gsac-\\d+-[0-9a-f]{8}\\.tmp`;
       expect(collected.lines).toEqual([
         TAKEN,
         {
           level,
           line: expect.stringMatching(
-            new RegExp(`^o/a: ${escapeRe(head)}${stagingRe}${escapeRe(tail)}$`),
+            new RegExp(`^o/a: ${RegExp.escape(head)}${stagingRe}${RegExp.escape(tail)}$`),
           ),
         },
         { line: `o/b: snapshot written to ${fileB}` },
@@ -907,7 +906,7 @@ describe("runSnapshot, dir form", () => {
             level: "error",
             line: expect.stringMatching(
               new RegExp(
-                `^${escapeRe(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${escapeRe(first)}\\. `,
+                `^${RegExp.escape(second)}: cannot write the snapshot to .*: the filesystem carries it to the file this run already claimed for ${RegExp.escape(first)}\\. `,
               ),
             ),
           });
