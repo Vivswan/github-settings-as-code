@@ -119,3 +119,13 @@ describe("variable values", () => {
     },
   );
 });
+
+describe("secret entry keys", () => {
+  test("a key outside name and value is refused naming the entry, since the sealed PUT body carries nothing else", () => {
+    expect(
+      issuesOf({ actions_secrets: [{ name: "TOKEN", value: "$TOKEN", values: "x" }] }),
+    ).toEqual([
+      'actions_secrets[0] (name "TOKEN"): declares "values", which this section does not recognize (known keys: name, value) - the API body carries only the sealed value, so the key would silently do nothing. Fix the key name, or remove it',
+    ]);
+  });
+});

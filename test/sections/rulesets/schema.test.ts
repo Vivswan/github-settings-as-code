@@ -129,7 +129,7 @@ describe("a ruleset the API would reject never reaches it", () => {
     expect([...KNOWN_RULE_TYPES].sort()).toEqual([...RULESET_RULE_TYPES].sort());
   });
 
-  test.each<[what: string, ruleset: Record<string, unknown>, issues: RegExp[]]>([
+  test.each<[what: string, ruleset: Record<string, unknown>, issues: (string | RegExp)[]]>([
     [
       "an enforcement level spelled the way branch protection spells it",
       { name: "main", enforcement: "enabled" },
@@ -147,8 +147,8 @@ describe("a ruleset the API would reject never reaches it", () => {
         bypass_actors: [{ actor_type: "Team" }, { actor_type: "User", actor_id: null }],
       },
       [
-        /^rulesets\[0\]\.bypass_actors\[0\]\.actor_id: a Team bypass actor needs its numeric actor_id/,
-        /^rulesets\[0\]\.bypass_actors\[1\]\.actor_id: a User bypass actor needs its numeric actor_id/,
+        "rulesets[0].bypass_actors[0].actor_id: a Team bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it",
+        "rulesets[0].bypass_actors[1].actor_id: a User bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it",
       ],
     ],
     [
@@ -158,8 +158,8 @@ describe("a ruleset the API would reject never reaches it", () => {
         bypass_actors: [{ actor_type: "DeployKey", actor_id: 7, bypass_mode: "pull_request" }],
       },
       [
-        /^rulesets\[0\]\.bypass_actors\[0\]\.actor_id: a DeployKey bypass actor takes no actor_id/,
-        /^rulesets\[0\]\.bypass_actors\[0\]\.bypass_mode: bypass_mode "pull_request" does not apply to a DeployKey/,
+        "rulesets[0].bypass_actors[0].actor_id: a DeployKey bypass actor takes no actor_id (GitHub documents it as null); remove the key or write null",
+        'rulesets[0].bypass_actors[0].bypass_mode: bypass_mode "pull_request" does not apply to a DeployKey actor; use "always" or "exempt"',
       ],
     ],
     [
@@ -178,15 +178,15 @@ describe("a ruleset the API would reject never reaches it", () => {
         bypass_actors: [{ actor_type: "Team", actor_id: 1, bypass_mode: "pull_request" }],
       },
       [
-        /^rulesets\[0\]\.bypass_actors\[0\]\.bypass_mode: .*branch rulesets only, and this ruleset targets tag/,
+        'rulesets[0].bypass_actors[0].bypass_mode: bypass_mode "pull_request" applies to branch rulesets only, and this ruleset targets tag; use "always" or "exempt"',
       ],
     ],
     [
       "a mis-cased token in include and a made-up one in exclude",
       { name: "main", conditions: { ref_name: { include: ["~all"], exclude: ["main", "~MAIN"] } } },
       [
-        /^rulesets\[0\]\.conditions\.ref_name\.include\[0\]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH/,
-        /^rulesets\[0\]\.conditions\.ref_name\.exclude\[1\]: "~MAIN" is not a ref-name token/,
+        'rulesets[0].conditions.ref_name.include[0]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"',
+        'rulesets[0].conditions.ref_name.exclude[1]: "~MAIN" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"',
       ],
     ],
     [
@@ -209,7 +209,7 @@ describe("a ruleset the API would reject never reaches it", () => {
         },
       },
       [
-        /^rulesets\[0\]\.conditions\.ref_name\.include\[0\]: "release\^2" contains "\^": git refuses "~", "\^", ":", "\\", space, "\.\.", "@\{", and control characters in a ref name, and a ruleset pattern has no use for them$/,
+        'rulesets[0].conditions.ref_name.include[0]: "release^2" contains "^": git refuses "~", "^", ":", "\\", space, "..", "@{", and control characters in a ref name, and a ruleset pattern has no use for them',
         /^rulesets\[0\]\.conditions\.ref_name\.include\[1\]: "refs\/heads\/a:b" contains ":"/,
         /^rulesets\[0\]\.conditions\.ref_name\.include\[2\]: "back\\\\slash" contains "\\\\"/,
         /^rulesets\[0\]\.conditions\.ref_name\.include\[3\]: "hot fix" contains " "/,
@@ -282,7 +282,7 @@ describe("a ruleset the API would reject never reaches it", () => {
         ],
       },
       [
-        /^rulesets\[0\]\.rules\[0\]: parameters\.allowed_merge_methods: allowed_merge_methods needs at least one of "merge", "squash", "rebase"; omit the key to allow all three$/,
+        'rulesets[0].rules[0]: parameters.allowed_merge_methods: allowed_merge_methods needs at least one of "merge", "squash", "rebase"; omit the key to allow all three',
       ],
     ],
     [
@@ -376,7 +376,9 @@ describe("a ruleset the API would reject never reaches it", () => {
     "what would 422 at apply fails at parse naming the key and the fix: %s",
     (_what, ruleset, issues) => {
       expect(verdict(ruleset)).toEqual({
-        issues: issues.map((issue) => expect.stringMatching(issue)),
+        issues: issues.map((issue) =>
+          typeof issue === "string" ? issue : expect.stringMatching(issue),
+        ),
       });
     },
   );

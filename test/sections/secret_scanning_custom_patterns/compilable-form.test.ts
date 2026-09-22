@@ -240,3 +240,19 @@ describe("compilableForm", () => {
     expect(compileFailure(source)).toBeDefined();
   });
 });
+
+describe("the check's own reasons, as the pattern refusal renders them", () => {
+  // PCRE's wording for what it refuses; the RegExp engine's own message passes through for the rest and is not pinned.
+  test.each<[source: string, reason: string]>([
+    ["*a", "quantifier does not follow a repeatable item"],
+    ["\\x{ZZ}", "non-hex character or missing } in \\x{}"],
+    ["\\o{8}", "non-octal character or missing braces in \\o{}"],
+    ["\\c", "\\c needs a printable ASCII character after it"],
+    ["\\x{110000}", "\\x{110000} is above U+10FFFF"],
+    ["(?#x", "missing ) after (?# comment"],
+    ["(?$a)", "unrecognized character after (?"],
+    ["(?<a>x)(?<a>y)", "two named groups have the same name (a)"],
+  ])("%s is refused as %s", (source, reason) => {
+    expect(compileFailure(source)).toBe(reason);
+  });
+});

@@ -2,8 +2,8 @@
  * GitHub's interaction-limit rules the platform does not enforce for us before the wire: limit and expiry are closed
  * enums (a typo 422s the PUT, and since the PUT re-arms on every apply the typo can never surface earlier), the PUT
  * body is exactly limit and expiry (a declared origin or expires_at is GitHub's read-back and diffs unequal forever),
- * and max_open_pull_requests is a whole number in GitHub's 1 to 1000 range. Parsed through the loosened document
- * shape, so a rule that survives here reaches the run.
+ * and max_open_pull_requests is a whole number in GitHub's 1 to 1000 range. Each refusal is pinned as the problem
+ * line a user reads. Parsed through the loosened document shape, so a rule that survives here reaches the run.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -18,20 +18,13 @@ function verdict(interactionLimits: unknown): { ok: true } | { issues: readonly 
 }
 
 const LIMIT_RULE =
-  /^interaction_limits\.limit: limit is one of existing_users, contributors_only, collaborators_only/;
+  "interaction_limits.limit: limit is one of existing_users, contributors_only, collaborators_only (GitHub's interaction groups)";
 const EXPIRY_RULE =
-  /^interaction_limits\.expiry: expiry is one of one_day, three_days, one_week, one_month, six_months/;
+  "interaction_limits.expiry: expiry is one of one_day, three_days, one_week, one_month, six_months (GitHub's interaction durations)";
 const CAP_RULE =
-  /^interaction_limits\.pull_request_creation_cap\.max_open_pull_requests: max_open_pull_requests is a whole number from 1 to 1000/;
+  "interaction_limits.pull_request_creation_cap.max_open_pull_requests: max_open_pull_requests is a whole number from 1 to 1000 (GitHub's range)";
 const KNOWN_KEYS =
-  "interaction_limits takes limit, expiry, pull_request_creation_cap, and pull_request_creation_bypass " +
-  "\\(origin and expires_at are what GitHub reports, not what it accepts\\); remove the key, or fix its spelling$";
-const unrecognized = (keys: string) =>
-  new RegExp(`^interaction_limits: Unrecognized ${keys}; ${KNOWN_KEYS}`);
-const NEEDS_LIMIT =
-  /^interaction_limits\.limit: expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry$/;
-const NEEDS_ONE_GROUP =
-  /^interaction_limits: declare at least one of limit, pull_request_creation_cap, or pull_request_creation_bypass/;
+  "interaction_limits takes limit, expiry, pull_request_creation_cap, and pull_request_creation_bypass (origin and expires_at are what GitHub reports, not what it accepts); remove the key, or fix its spelling";
 
 describe("an interaction limit GitHub would 422, or could never converge on, never reaches it", () => {
   test.each<[what: string, doc: unknown]>([
@@ -52,7 +45,7 @@ describe("an interaction limit GitHub would 422, or could never converge on, nev
     expect(verdict(doc)).toEqual({ ok: true });
   });
 
-  test.each<[what: string, doc: unknown, issues: RegExp[]]>([
+  test.each<[what: string, doc: unknown, issues: string[]]>([
     [
       "a limit GitHub has no group for (422 on the re-arming PUT)",
       { limit: "collaborators" },
@@ -67,24 +60,34 @@ describe("an interaction limit GitHub would 422, or could never converge on, nev
     [
       "GitHub's computed expires_at, which moves on every re-arm and would drift forever",
       { limit: "existing_users", expires_at: "2027-01-01T00:00:00Z" },
-      [unrecognized('key: "expires_at"')],
+      [`interaction_limits: Unrecognized key: "expires_at"; ${KNOWN_KEYS}`],
     ],
     [
       "GitHub's origin, which the PUT never accepts",
       { limit: "existing_users", origin: "repository" },
-      [unrecognized('key: "origin"')],
+      [`interaction_limits: Unrecognized key: "origin"; ${KNOWN_KEYS}`],
     ],
     [
       "two misspelled keys, both named in one issue",
       { limit: "existing_users", expiry_days: 7, pull_request_creation_caps: { enabled: true } },
-      [unrecognized('keys: "expiry_days", "pull_request_creation_caps"')],
+      [
+        `interaction_limits: Unrecognized keys: "expiry_days", "pull_request_creation_caps"; ${KNOWN_KEYS}`,
+      ],
     ],
     [
       "an expiry without a limit, which would ride a PUT that never fires",
       { expiry: "one_week", pull_request_creation_cap: { enabled: true } },
-      [NEEDS_LIMIT],
+      [
+        "interaction_limits.limit: expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry",
+      ],
     ],
-    ["an object declaring none of the three groups", {}, [NEEDS_ONE_GROUP]],
+    [
+      "an object declaring none of the three groups",
+      {},
+      [
+        "interaction_limits: declare at least one of limit, pull_request_creation_cap, or pull_request_creation_bypass (or declare interaction_limits: null to clear the base limit)",
+      ],
+    ],
     [
       "a cap of zero",
       { pull_request_creation_cap: { enabled: true, max_open_pull_requests: 0 } },
@@ -114,27 +117,27 @@ describe("an interaction limit GitHub would 422, or could never converge on, nev
       'a YAML-quoted "true" cap flag',
       { pull_request_creation_cap: { enabled: "true" } },
       [
-        /^interaction_limits\.pull_request_creation_cap\.enabled: enabled must be an unquoted true or false/,
+        'interaction_limits.pull_request_creation_cap.enabled: enabled must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the cap direction is unambiguous',
       ],
     ],
     [
       "a bypass list over GitHub's 100-user cap",
       { pull_request_creation_bypass: Array.from({ length: 101 }, (_, i) => `user-${i}`) },
       [
-        /^interaction_limits\.pull_request_creation_bypass: GitHub caps the bypass list at 100 users, but 101 logins are declared/,
+        "interaction_limits.pull_request_creation_bypass: GitHub caps the bypass list at 100 users, but 101 logins are declared; trim the list",
       ],
     ],
     [
       "two case-variant spellings of one login",
       { pull_request_creation_bypass: ["octocat", "Octocat"] },
       [
-        /^interaction_limits\.pull_request_creation_bypass: "octocat" and "Octocat" name the same login/,
+        'interaction_limits.pull_request_creation_bypass: "octocat" and "Octocat" name the same login (logins are case-insensitive); keep exactly one',
       ],
     ],
   ])(
     "what GitHub rejects fails at parse, naming the key and the rule: %s",
     (_what, doc, issues) => {
-      expect(verdict(doc)).toEqual({ issues: issues.map((issue) => expect.stringMatching(issue)) });
+      expect(verdict(doc)).toEqual({ issues });
     },
   );
 

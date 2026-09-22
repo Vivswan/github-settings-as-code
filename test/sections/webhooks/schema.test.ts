@@ -64,6 +64,13 @@ describe("webhooks values GitHub would refuse with 422 at apply time are refused
       ],
     ],
     [
+      "a secret at the entry level, which would create an unauthenticated hook",
+      { config: { url: HOOK_URL }, secret: "$HOOK_SECRET" },
+      [
+        "webhooks[0].secret: a webhook secret belongs under config.secret, not at the entry level; here it would pass through verbatim and the hook would be created without a working secret",
+      ],
+    ],
+    [
       "every refused field of one entry, reported together so the fix takes one run",
       {
         config: { url: "hooks.example.com/ci", content_type: "JSON", insecure_ssl: true },
