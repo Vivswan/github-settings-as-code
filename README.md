@@ -1,5 +1,7 @@
 # GitHub Settings as Code
 
+[![Socket](https://badge.socket.dev/npm/package/@vivswan/github-settings-as-code)](https://socket.dev/npm/package/@vivswan/github-settings-as-code) [![CI](https://img.shields.io/github/actions/workflow/status/Vivswan/github-settings-as-code/ci.yml?branch=main&label=CI)](https://github.com/Vivswan/github-settings-as-code/actions/workflows/ci.yml?query=branch%3Amain) [![Release](https://img.shields.io/github/v/release/Vivswan/github-settings-as-code?label=release)](https://github.com/Vivswan/github-settings-as-code/releases/latest) [![npm](https://img.shields.io/npm/v/@vivswan/github-settings-as-code?label=npm)](https://www.npmjs.com/package/@vivswan/github-settings-as-code) [![npm next](https://img.shields.io/npm/v/@vivswan/github-settings-as-code/next?label=next)](https://www.npmjs.com/package/@vivswan/github-settings-as-code?activeTab=versions)
+
 Apply declarative repository settings from `.github/settings.yml`: a loud, stateless replacement for the [Probot Settings app](https://github.com/repository-settings/app) that also manages [rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets) (branch, tag, and push). Every apply is a visible workflow run that fails with the API's error message; nothing happens silently. The full documentation lives in [docs/](docs/README.md).
 
 ## Quick start
