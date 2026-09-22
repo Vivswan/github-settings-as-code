@@ -41,7 +41,7 @@ interface ScenarioFragment extends CorpusDoc {
  * directory, plus the cross-section root) so a root that scenarioRoots() drops is caught.
  */
 function independentScenarioRoots(): string[] {
-  const sectionsDir = join(ROOT, "test", "src", "sections");
+  const sectionsDir = join(ROOT, "test", "sections");
   const sectionRoots = readdirSync(sectionsDir, { withFileTypes: true })
     .filter(
       (entry) => entry.isDirectory() && existsSync(join(sectionsDir, entry.name, "scenarios")),

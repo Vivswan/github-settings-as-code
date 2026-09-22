@@ -1,11 +1,13 @@
 /**
  * The diff-aware section selector for the PR e2e smoke job: a PR touching one section runs that section's scenarios
  * and fuzz rather than the whole corpus, and a PR touching nothing settings-related skips the smoke steps. A path
- * under src/sections/, test/src/sections/, or docs/sections/ that no rule recognizes throws, so a new file cannot
- * silently skip them.
+ * under src/sections/ or docs/sections/, or in a directory under test/sections/, that no rule recognizes throws, so a
+ * new file cannot silently skip them.
  *
  *   src/sections/<key>/...                                   -> <key>, whatever the file
- *   test/src/sections/<key>/...                              -> <key> (the section's tests, mock, generators, scenarios)
+ *   test/sections/<key>/...                                  -> <key> (the section's tests, mock, generators, scenarios)
+ *   test/sections/<file>, test/sections/snapshot-rows/       -> none (the cross-section suites and their fixtures; a flat
+ *                                                               file named after a section is misplaced and throws)
  *   docs/sections/<key>.docs.yml                             -> <key>; shared.docs.yml and docs/schema.docs.yml select none
  *   src/sections/shared/<file>.ts                            -> the sections that transitively import it (deriveSharedFanOut)
  *   contract/, registry.ts, the engine, the schema, the e2e harness  -> every section
@@ -296,24 +298,57 @@ function sectionsForSectionsPath(
   );
 }
 
-const TEST_MIRROR_PREFIX = "test/src/sections/";
+const TEST_SECTIONS_PREFIX = "test/sections/";
+/** The fixture directories beside the section mirrors under test/sections/: cross-section, like the flat suites. */
+const CROSS_SECTION_TEST_DIRS: ReadonlySet<string> = new Set(["snapshot-rows"]);
 const SECTION_DOCS_PREFIX = "docs/sections/";
 /** The document root's schema prose, gated by build:check like the docs registry. */
 const ROOT_DOCS_FILE = "docs/schema.docs.yml";
 /** The shared factories' schema prose: it belongs to no one section, and build:check gates it too. */
 const SHARED_DOCS_FILE = `${SECTION_DOCS_PREFIX}shared.docs.yml`;
 
-/** A section's tests, mock, generators, and scenarios mirror it under test/src/sections/<key>/; a deleted scenario can
- * leave a route cold, so the section still runs. Anything else under the mirror root throws, as under src/sections/. */
-function sectionsForTestMirrorPath(path: string): SectionKey[] {
-  const rest = path.slice(TEST_MIRROR_PREFIX.length);
+/** labels.test.ts and labels-schema.test.ts, but not list-section.test.ts: the stem is a key or its dashed slug,
+ * alone or before a dash or underscore. */
+function isSectionNamedFile(name: string): boolean {
+  const stem = name.split(".")[0] ?? "";
+  return SECTION_KEYS.some((key) => {
+    const slug = key.replaceAll("_", "-");
+    return (
+      stem === key ||
+      stem === slug ||
+      stem.startsWith(`${key}-`) ||
+      stem.startsWith(`${key}_`) ||
+      stem.startsWith(`${slug}-`) ||
+      stem.startsWith(`${slug}_`)
+    );
+  });
+}
+
+/** A section's tests, mock, generators, and scenarios mirror it under test/sections/<key>/; a deleted scenario can
+ * leave a route cold, so the section still runs. The flat files beside those directories are the cross-section suites
+ * and select none, as does a fixture directory in CROSS_SECTION_TEST_DIRS. A flat file named after a section belongs
+ * in its directory, so it throws unless deleted (the fold of a flat suite into its directory is such a deletion, and
+ * the added file selects the section). */
+function sectionsForTestSectionsPath({ path, deleted }: ChangedFile): SectionKey[] {
+  const rest = path.slice(TEST_SECTIONS_PREFIX.length);
   const slash = rest.indexOf("/");
-  const dir = slash < 0 ? "" : rest.slice(0, slash);
+  if (slash < 0) {
+    if (!deleted && isSectionNamedFile(rest)) {
+      throw new Error(
+        `changed-sections: ${path} matches no selector rule; a file named after a section lives in ${TEST_SECTIONS_PREFIX}<key>/, not beside the cross-section suites`,
+      );
+    }
+    return [];
+  }
+  const dir = rest.slice(0, slash);
   if (SECTION_KEY_SET.has(dir)) {
     return [dir as SectionKey];
   }
+  if (CROSS_SECTION_TEST_DIRS.has(dir)) {
+    return [];
+  }
   throw new Error(
-    `changed-sections: ${path} matches no selector rule; ${TEST_MIRROR_PREFIX} holds only the per-section <key>/ directories, each spelling its SectionKey verbatim`,
+    `changed-sections: ${path} matches no selector rule; a directory under ${TEST_SECTIONS_PREFIX} spells its SectionKey verbatim (or is named in CROSS_SECTION_TEST_DIRS if it holds cross-section fixtures)`,
   );
 }
 
@@ -341,8 +376,8 @@ function sectionsForPath(
   if (path.startsWith("src/sections/")) {
     return sectionsForSectionsPath(file, sharedFanOut);
   }
-  if (path.startsWith(TEST_MIRROR_PREFIX)) {
-    return sectionsForTestMirrorPath(path);
+  if (path.startsWith(TEST_SECTIONS_PREFIX)) {
+    return sectionsForTestSectionsPath(file);
   }
   if (path.startsWith(SECTION_DOCS_PREFIX)) {
     return sectionsForSectionDocsPath(path);

@@ -1,7 +1,7 @@
 /**
  * Shared building blocks for the mock's per-endpoint handlers. This module sits at the BOTTOM of the
  * mock's layering: the pipeline, the core-path and merged handler tables, and every section fragment
- * (test/src/sections/<key>/mock.ts) import it and it imports none of them, so a fragment can depend on it
+ * (test/sections/<key>/mock.ts) import it and it imports none of them, so a fragment can depend on it
  * without pulling the whole pipeline in.
  */
 

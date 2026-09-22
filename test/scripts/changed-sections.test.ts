@@ -238,10 +238,10 @@ describe("changed-sections derived fan-out", () => {
 });
 
 describe("changed-sections file map", () => {
-  test("every path on disk under src/sections, test/src/sections, and docs/sections resolves through some selector rule", () => {
+  test("every path on disk under src/sections, test/sections, and docs/sections resolves through some selector rule", () => {
     const paths = [
       ...sectionsPathsOnDisk(),
-      ...sectionsPathsOnDisk(join(ROOT, "test", "src", "sections"), "test/src/sections"),
+      ...sectionsPathsOnDisk(join(ROOT, "test", "sections"), "test/sections"),
       ...sectionsPathsOnDisk(join(ROOT, "docs", "sections"), "docs/sections"),
       "docs/schema.docs.yml",
     ];
@@ -288,13 +288,13 @@ describe("changed-sections selection", () => {
   test.each<[label: string, rendered: string, files: string[]]>([
     ["a docs-only change", "none", ["README.md", "COVERAGE.md", ".github/workflows/ci.yml"]],
     ["a section's entry", "labels", ["src/sections/labels/index.ts"]],
-    ["a section's mock", "labels", ["test/src/sections/labels/mock.ts"]],
-    ["a section's generators", "labels", ["test/src/sections/labels/generators.ts"]],
-    ["a section's unit test", "labels", ["test/src/sections/labels/labels.test.ts"]],
+    ["a section's mock", "labels", ["test/sections/labels/mock.ts"]],
+    ["a section's generators", "labels", ["test/sections/labels/generators.ts"]],
+    ["a section's unit test", "labels", ["test/sections/labels/labels.test.ts"]],
     [
       "a section's scenario",
       "environments",
-      ["test/src/sections/environments/scenarios/environments-apply.yml"],
+      ["test/sections/environments/scenarios/environments-apply.yml"],
     ],
     ["a section's docs prose", "labels", ["docs/sections/labels.docs.yml"]],
     [
@@ -305,12 +305,22 @@ describe("changed-sections selection", () => {
     [
       "a mirrored key carrying underscores",
       "secret_scanning_custom_patterns",
-      ["test/src/sections/secret_scanning_custom_patterns/mock.ts"],
+      ["test/sections/secret_scanning_custom_patterns/mock.ts"],
     ],
     [
       "multiple section directories, which union in SECTION_KEYS order",
       "labels,milestones",
-      ["src/sections/milestones/index.ts", "test/src/sections/labels/labels.test.ts"],
+      ["src/sections/milestones/index.ts", "test/sections/labels/labels.test.ts"],
+    ],
+    // The suites and fixtures beside the mirrors are cross-section: they select none, as they did before the mirrors joined them.
+    [
+      "a cross-section suite, helper, and fixture beside the mirrors",
+      "none",
+      [
+        "test/sections/contract.test.ts",
+        "test/sections/section-run.ts",
+        "test/sections/snapshot-rows/labels.ts",
+      ],
     ],
     ["registry.ts", "all", ["src/sections/registry.ts"]],
     ["the shared docs prose, like the docs registry", "none", ["docs/sections/shared.docs.yml"]],
@@ -375,10 +385,19 @@ describe("changed-sections selection", () => {
     ).toBe("collaborators,teams");
     // A deleted scenario can leave a route cold, so its section still runs.
     expect(
+      renderSelection(sectionsForFiles(removed("test/sections/labels/scenarios/labels-apply.yml"))),
+    ).toBe("labels");
+    // The CLI diffs with --no-renames, so folding a flat suite into its directory is a D plus an A: the deletion is
+    // no misplaced file and the added file carries the section.
+    expect(
       renderSelection(
-        sectionsForFiles(removed("test/src/sections/labels/scenarios/labels-apply.yml")),
+        sectionsForFiles([
+          ...removed("test/sections/labels-schema.test.ts"),
+          ...changed("test/sections/labels/schema.test.ts"),
+        ]),
       ),
     ).toBe("labels");
+    expect(renderSelection(sectionsForFiles(removed("test/sections/labels.test.ts")))).toBe("none");
     expect(sectionsForFiles(removed("src/sections/registry.ts")).kind).toBe("all");
     expect(() => sectionsForFiles(removed("src/sections/labels.ts"))).toThrow(
       /matches no selector rule/,
@@ -413,8 +432,8 @@ describe("changed-sections selection", () => {
     }));
 
   test("parseNameStatus reads NUL-delimited records raw and throws on any other shape", () => {
-    // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the test/src/sections/ prefix would go unmatched.
-    const odd = 'test/src/sections/labels/scenarios/tab\there "quoted" back\\slash.yml';
+    // -z keeps a path with a tab, a quote, and a backslash verbatim; git would C-quote it otherwise and the test/sections/ prefix would go unmatched.
+    const odd = 'test/sections/labels/scenarios/tab\there "quoted" back\\slash.yml';
     expect(
       parseNameStatus(
         `A\0src/sections/labels/index.ts\0M\0README.md\0D\0src/sections/shared/roles.ts\0T\0lib/settings.schema.json\0M\0${odd}\0`,
@@ -442,18 +461,25 @@ describe("changed-sections selection", () => {
   });
 
   test("an unrecognized section-shaped path throws instead of silently selecting nothing, even beside a cross-cutting path", () => {
-    // registry.ts and docs-registry.ts are the only flat files the layout allows; a section directory must spell its
-    // key under src/sections/ and test/src/sections/ alike; under shared/ only mapped .ts files are known; docs/sections/
-    // holds <key>.docs.yml and shared.docs.yml and nothing else.
+    // registry.ts and docs-registry.ts are the only flat files src/sections/ allows; a section directory must spell its
+    // key under src/sections/ and test/sections/ alike; a flat file under test/sections/ named after a section is
+    // misplaced; under shared/ only mapped .ts files are known; docs/sections/ holds <key>.docs.yml and
+    // shared.docs.yml and nothing else.
     for (const stray of [
       "src/sections/labels.ts",
       "src/sections/not_a_key/index.ts",
       "src/sections/shared/unmapped.ts",
       "src/sections/shared/notes.yml",
       "src/sections/shared/shared.docs.yml",
-      "test/src/sections/labels.test.ts",
-      "test/src/sections/not_a_key/mock.ts",
-      "test/src/sections/shared/helper.ts",
+      "test/sections/label/mock.ts",
+      "test/sections/not_a_key/scenarios/x.yml",
+      "test/sections/shared/helper.ts",
+      "test/sections/labels.test.ts",
+      "test/sections/labels-schema.test.ts",
+      "test/sections/secret-scanning-custom-patterns-schema.test.ts",
+      "test/sections/actions_secrets.ts",
+      "test/sections/interaction_limits_schema.test.ts",
+      "test/sections/interaction-limits_schema.test.ts",
       "docs/sections/labels.md",
       "docs/sections/not_a_key.docs.yml",
       "docs/sections/labels/labels.docs.yml",

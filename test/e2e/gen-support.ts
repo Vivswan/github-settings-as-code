@@ -1,5 +1,5 @@
 /**
- * The leaf seam shared by the per-section generator fragments (test/src/sections/<key>/generators.ts) and their aggregator
+ * The leaf seam shared by the per-section generator fragments (test/sections/<key>/generators.ts) and their aggregator
  * (test/e2e/generators.ts). Like mock/support.ts, it imports no fragment and no aggregator, so the fragments depend on it without a cycle.
  */
 

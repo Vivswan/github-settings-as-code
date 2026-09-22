@@ -6,41 +6,38 @@
 
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
 import type { SectionGraphqlKey } from "../../../src/sections/registry.js";
-import { actionsMockHandlers } from "../../src/sections/actions/mock.js";
-import { actionsSecretsMockHandlers } from "../../src/sections/actions_secrets/mock.js";
-import { actionsVariablesMockHandlers } from "../../src/sections/actions_variables/mock.js";
-import { agentsSecretsMockHandlers } from "../../src/sections/agents_secrets/mock.js";
-import { agentsVariablesMockHandlers } from "../../src/sections/agents_variables/mock.js";
-import { autolinksMockHandlers } from "../../src/sections/autolinks/mock.js";
-import {
-  branchesMockGraphqlHandlers,
-  branchesMockHandlers,
-} from "../../src/sections/branches/mock.js";
-import { checkSuitePreferencesMockHandlers } from "../../src/sections/check_suite_preferences/mock.js";
-import { codeQualitySetupMockHandlers } from "../../src/sections/code_quality_setup/mock.js";
-import { codeScanningDefaultSetupMockHandlers } from "../../src/sections/code_scanning_default_setup/mock.js";
-import { codespacesSecretsMockHandlers } from "../../src/sections/codespaces_secrets/mock.js";
-import { collaboratorsMockHandlers } from "../../src/sections/collaborators/mock.js";
-import { customPropertiesMockHandlers } from "../../src/sections/custom_properties/mock.js";
-import { dependabotSecretsMockHandlers } from "../../src/sections/dependabot_secrets/mock.js";
-import { deployKeysMockHandlers } from "../../src/sections/deploy_keys/mock.js";
+import { actionsMockHandlers } from "../../sections/actions/mock.js";
+import { actionsSecretsMockHandlers } from "../../sections/actions_secrets/mock.js";
+import { actionsVariablesMockHandlers } from "../../sections/actions_variables/mock.js";
+import { agentsSecretsMockHandlers } from "../../sections/agents_secrets/mock.js";
+import { agentsVariablesMockHandlers } from "../../sections/agents_variables/mock.js";
+import { autolinksMockHandlers } from "../../sections/autolinks/mock.js";
+import { branchesMockGraphqlHandlers, branchesMockHandlers } from "../../sections/branches/mock.js";
+import { checkSuitePreferencesMockHandlers } from "../../sections/check_suite_preferences/mock.js";
+import { codeQualitySetupMockHandlers } from "../../sections/code_quality_setup/mock.js";
+import { codeScanningDefaultSetupMockHandlers } from "../../sections/code_scanning_default_setup/mock.js";
+import { codespacesSecretsMockHandlers } from "../../sections/codespaces_secrets/mock.js";
+import { collaboratorsMockHandlers } from "../../sections/collaborators/mock.js";
+import { customPropertiesMockHandlers } from "../../sections/custom_properties/mock.js";
+import { dependabotSecretsMockHandlers } from "../../sections/dependabot_secrets/mock.js";
+import { deployKeysMockHandlers } from "../../sections/deploy_keys/mock.js";
 import {
   environmentsMockGraphqlHandlers,
   environmentsMockHandlers,
-} from "../../src/sections/environments/mock.js";
-import { interactionLimitsMockHandlers } from "../../src/sections/interaction_limits/mock.js";
-import { labelsMockHandlers } from "../../src/sections/labels/mock.js";
-import { milestonesMockHandlers } from "../../src/sections/milestones/mock.js";
-import { pagesMockHandlers } from "../../src/sections/pages/mock.js";
+} from "../../sections/environments/mock.js";
+import { interactionLimitsMockHandlers } from "../../sections/interaction_limits/mock.js";
+import { labelsMockHandlers } from "../../sections/labels/mock.js";
+import { milestonesMockHandlers } from "../../sections/milestones/mock.js";
+import { pagesMockHandlers } from "../../sections/pages/mock.js";
 import {
   repositoryMockGraphqlHandlers,
   repositoryMockHandlers,
-} from "../../src/sections/repository/mock.js";
-import { rulesetsMockHandlers } from "../../src/sections/rulesets/mock.js";
-import { secretScanningCustomPatternsMockHandlers } from "../../src/sections/secret_scanning_custom_patterns/mock.js";
-import { teamsMockHandlers } from "../../src/sections/teams/mock.js";
-import { webhooksMockHandlers } from "../../src/sections/webhooks/mock.js";
-import { workflowsMockHandlers } from "../../src/sections/workflows/mock.js";
+} from "../../sections/repository/mock.js";
+import { rulesetsMockHandlers } from "../../sections/rulesets/mock.js";
+import { secretScanningCustomPatternsMockHandlers } from "../../sections/secret_scanning_custom_patterns/mock.js";
+import { teamsMockHandlers } from "../../sections/teams/mock.js";
+import { webhooksMockHandlers } from "../../sections/webhooks/mock.js";
+import { workflowsMockHandlers } from "../../sections/workflows/mock.js";
 import type {
   GraphqlHandler,
   Handler,
