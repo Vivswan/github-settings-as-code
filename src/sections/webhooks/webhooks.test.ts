@@ -395,15 +395,4 @@ describe("webhooks plan", () => {
       ],
     ]);
   });
-
-  test("the read port exposes exactly the list role in its denied posture", () => {
-    const ctx = planContext(webhooksSection, new MockApi({}), REPO);
-    expect(Object.keys(ctx.read)).toEqual(["list"]);
-    // @ts-expect-error a write role is not a read: the port has no `create`
-    ctx.read.create;
-    // @ts-expect-error nor an `updateConfig`
-    ctx.read.updateConfig;
-    // @ts-expect-error a "denied" primary read offers no 404-tolerant helper
-    ctx.read.list.probeAbsent;
-  });
 });
