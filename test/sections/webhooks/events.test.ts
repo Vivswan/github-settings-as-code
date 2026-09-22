@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   REPOSITORY_WEBHOOK_EVENTS,
   WEBHOOK_EVENTS_REFERENCE,
-} from "../../src/sections/webhooks/events.js";
+} from "../../../src/sections/webhooks/events.js";
 
 /**
  * Pins the committed event list to GitHub's webhooks OpenAPI description as @octokit/openapi-webhooks ships it. The
