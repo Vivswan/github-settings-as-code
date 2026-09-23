@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { type SettingsSource, validateSecretRef } from "../../src/engine/secret-refs.js";
 import { collectSecretReferences, snapshotSecretReference } from "../../src/engine/secrets.js";
@@ -127,10 +128,9 @@ describe("snapshotSecretReference", () => {
     );
     // Every minted reference passes the grammar the settings file enforces.
     for (const { reference } of inStore) {
-      expect(validateSecretRef(reference, "operator", "x")).toEqual({
-        ok: true,
-        ref: { name: reference.slice(1) },
-      });
+      expect(validateSecretRef(reference, "operator", "x")).toEqual(
+        ok({ name: reference.slice(1) }),
+      );
     }
   });
 });

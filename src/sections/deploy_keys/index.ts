@@ -29,15 +29,15 @@ const LiveDeployKey = z
   })
   .transform((live, refineCtx) => {
     const parsed = parseStoredKey(live.key);
-    if (!parsed.ok) {
+    if (parsed.isErr()) {
       refineCtx.addIssue({
         code: "custom",
         path: ["key"],
-        message: `key id ${String(live.id)} ("${live.title}") holds material that is not "<algorithm> <base64>": ${parsed.reason}`,
+        message: `key id ${String(live.id)} ("${live.title}") holds material that is not "<algorithm> <base64>": ${parsed.error}`,
       });
       return z.NEVER;
     }
-    return { ...live, key: parsed.material, algorithm: parsed.algorithm };
+    return { ...live, key: parsed.value.material, algorithm: parsed.value.algorithm };
   });
 
 const ENDPOINTS = {
@@ -62,12 +62,12 @@ const ENDPOINTS = {
 /** The shape refused malformed material through the same parsePublicKey before plan() ran, so reaching one here is a bug. */
 function declaredMaterial(title: string, key: string): string {
   const parsed = parsePublicKey(key);
-  if (!parsed.ok) {
+  if (parsed.isErr()) {
     throw new Error(
-      `BUG: deploy_keys[${title}] reached plan() with material the shape refuses (${parsed.reason}); the shape refuses it first`,
+      `BUG: deploy_keys[${title}] reached plan() with material the shape refuses (${parsed.error}); the shape refuses it first`,
     );
   }
-  return parsed.material;
+  return parsed.value.material;
 }
 
 export const deployKeysSection = listSection({

@@ -281,7 +281,7 @@ function secretReferenceProblems(
   const problems: string[] = [];
   for (const { label, value } of module.secretValues?.(parsed) ?? []) {
     const checked = validateSecretRef(value, source, label);
-    if (!checked.ok) {
+    if (checked.isErr()) {
       problems.push(`${key}: ${checked.error}`);
     }
   }

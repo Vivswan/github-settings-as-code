@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ok } from "neverthrow";
 import {
   RESERVED_REF_PREFIXES,
   resolveSecretRefs,
@@ -86,11 +87,10 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   ])("%s", (_what, value, source, verdict) => {
     const result = validateSecretRef(value, source, LABEL);
     if ("name" in verdict) {
-      expect(result).toEqual({ ok: true, ref: { name: verdict.name } });
+      expect(result).toEqual(ok({ name: verdict.name }));
       return;
     }
-    expect(result.ok).toBe(false);
-    if (result.ok) {
+    if (result.isOk()) {
       throw new Error("expected rejection");
     }
     for (const word of verdict.says) {
@@ -104,8 +104,7 @@ describe("validateSecretRef (syntax phase, never reads the environment)", () => 
   test("every reserved prefix is refused, naming the prefix", () => {
     for (const prefix of RESERVED_REF_PREFIXES) {
       const result = validateSecretRef(`$${prefix}SOMETHING`, "operator", LABEL);
-      expect(result.ok).toBe(false);
-      if (result.ok) {
+      if (result.isOk()) {
         throw new Error("expected rejection");
       }
       expect(result.error).toContain(`${prefix}*`);
@@ -118,12 +117,9 @@ describe("resolveSecretRefs (resolution phase over validated names, injected env
     const result = resolveSecretRefs(["WEBHOOK_SECRET"], {
       WEBHOOK_SECRET: "s3cret-value",
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error(result.errors.join("; "));
-    }
-    expect(result.values.WEBHOOK_SECRET).toBe("s3cret-value");
-    expect(result.mask).toEqual(["s3cret-value"]);
+    expect(result).toEqual(
+      ok({ values: { WEBHOOK_SECRET: "s3cret-value" }, mask: ["s3cret-value"] }),
+    );
   });
 
   test("two variables holding the same plaintext mask it once", () => {
@@ -131,12 +127,9 @@ describe("resolveSecretRefs (resolution phase over validated names, injected env
       FIRST_NAME: "identical",
       SECOND_NAME: "identical",
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error(result.errors.join("; "));
-    }
-    expect(result.values).toEqual({ FIRST_NAME: "identical", SECOND_NAME: "identical" });
-    expect(result.mask).toEqual(["identical"]);
+    expect(result).toEqual(
+      ok({ values: { FIRST_NAME: "identical", SECOND_NAME: "identical" }, mask: ["identical"] }),
+    );
   });
 
   // Each row: the names to resolve, the environment, and per failed reference the words its error must say.
@@ -164,14 +157,13 @@ describe("resolveSecretRefs (resolution phase over validated names, injected env
     ],
   ])("%s", (_what, names, env, errors) => {
     const result = resolveSecretRefs(names, env);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
+    if (result.isOk()) {
       throw new Error("expected failure");
     }
-    expect(result.errors).toHaveLength(errors.length);
+    expect(result.error).toHaveLength(errors.length);
     errors.forEach((words, index) => {
       for (const word of words) {
-        expect(result.errors[index]).toContain(word);
+        expect(result.error[index]).toContain(word);
       }
     });
   });

@@ -1,9 +1,10 @@
 /**
- * Plain-data normalization and secret-field scanning for outgoing payloads, dependency-free on purpose: the guarantees
+ * Plain-data normalization and secret-field scanning for outgoing payloads, transport-free on purpose: the guarantees
  * (no payload-supplied method or accessor is ever invoked, the scanned tree IS the sent tree, secret fields are masked
  * in traces) must hold independent of any transport.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import { isPlainObject, nonPlainKind } from "../plain-data.js";
 
 const SECRET_FIELD_PLACEHOLDER = "***";
@@ -128,21 +129,26 @@ function normalizePlainData(
   return out;
 }
 
+/** The normalized tree the request sends, the masked copy the trace prints, and whether a secret field was seen. */
+export interface SafePayload {
+  payload: unknown;
+  traced: unknown;
+  carriesSecret: boolean;
+}
+
 /**
  * One read, one truth: normalizePlainData reads the input once into a plain-data tree; the scan walks it, the trace
  * prints it masked, and the request SENDS it, so no exotic object can make the scan, the trace, and the wire disagree.
  *
  * undefined (no body), or a JSON primitive  -> passes through: no named fields, and a bare-value secret is unsupported by design
  * plain objects and arrays throughout       -> normalized, scanned, sent
- * a non-plain value, at any depth           -> `ok: false`, never sent: normalizing a non-plain container would change what reaches fetch
+ * a non-plain value, at any depth           -> an error, never sent: normalizing a non-plain container would change what reaches fetch
+ *
+ * The error is the rejection's prose, or undefined where no safe prose exists (a non-JSON primitive, a hostile throw).
  */
-export function redactSecretPayloadSafe(
-  payload: unknown,
-):
-  | { ok: true; payload: unknown; traced: unknown; carriesSecret: boolean }
-  | { ok: false; reason?: string } {
+export function redactSecretPayloadSafe(payload: unknown): Result<SafePayload, string | undefined> {
   if (payload === undefined) {
-    return { ok: true, payload: undefined, traced: undefined, carriesSecret: false };
+    return ok({ payload: undefined, traced: undefined, carriesSecret: false });
   }
   // Everything reflective happens INSIDE the try: even Array.isArray can throw on a hostile proxy, and an error thrown
   // before the guard could carry a secret in its message.
@@ -155,22 +161,22 @@ export function redactSecretPayloadSafe(
         typeof payload === "boolean" ||
         (typeof payload === "number" && Number.isFinite(payload));
       return jsonPrimitive
-        ? { ok: true, payload, traced: payload, carriesSecret: false }
-        : { ok: false };
+        ? ok({ payload, traced: payload, carriesSecret: false })
+        : err(undefined);
     }
     if (!isPlainJsonContainer(payload)) {
-      return { ok: false, reason: describeNotPlain(new NotPlainData([], nonPlainKind(payload))) };
+      return err(describeNotPlain(new NotPlainData([], nonPlainKind(payload))));
     }
     const normalized = normalizePlainData(payload);
     if (normalized instanceof NotPlainData) {
       // Only our own rejection contributes prose: it carries key PATHS and a value-class word, never a value.
-      return { ok: false, reason: describeNotPlain(normalized) };
+      return err(describeNotPlain(normalized));
     }
     const scanned = redactSecretPayload(normalized);
-    return { ok: true, payload: normalized, ...scanned };
+    return ok({ payload: normalized, ...scanned });
   } catch {
     // A hostile object threw from a reflective read; its message never leaks.
-    return { ok: false };
+    return err(undefined);
   }
 }
 

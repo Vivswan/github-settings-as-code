@@ -9,15 +9,15 @@
  * a reference in a target's file  -> refused: a target must not route the operator's environment into itself
  */
 
+import { err, ok, type Result } from "neverthrow";
+
 /** Who authored the source: a `target` document (fetched from the target repository) has its references refused; flows/multi.ts decides. */
 export type SettingsSource = "operator" | "target";
 
 /** A syntactically valid reference: the env var name, without the `$`. */
-interface SecretRef {
+export interface SecretRef {
   readonly name: string;
 }
-
-export type SecretRefCheck = { ok: true; ref: SecretRef } | { ok: false; error: string };
 
 const REFERENCE_RE = /^\$[A-Z_][A-Z0-9_]*$/;
 
@@ -38,46 +38,39 @@ export function validateSecretRef(
   value: string,
   source: SettingsSource,
   label: string,
-): SecretRefCheck {
+): Result<SecretRef, string> {
   if (REFERENCE_RE.test(value)) {
     const name = value.slice(1);
     if (source === "target") {
-      return {
-        ok: false,
-        error: `${label} uses the secret reference ${value} in a target-fetched settings file; references are honored only in operator-owned settings sources, so a target repository cannot read the operator's environment`,
-      };
+      return err(
+        `${label} uses the secret reference ${value} in a target-fetched settings file; references are honored only in operator-owned settings sources, so a target repository cannot read the operator's environment`,
+      );
     }
     const reserved = RESERVED_REF_PREFIXES.find((prefix) => name.startsWith(prefix));
     if (reserved !== undefined) {
-      return {
-        ok: false,
-        error: `${label} references the reserved runner variable ${value} (${reserved}* is refused): workflow inputs and GitHub/runner context cannot be routed into settings values`,
-      };
+      return err(
+        `${label} references the reserved runner variable ${value} (${reserved}* is refused): workflow inputs and GitHub/runner context cannot be routed into settings values`,
+      );
     }
-    return { ok: true, ref: { name } };
+    return ok({ name });
   }
   const embedded = value.match(EMBEDDED_REFERENCE_RE)?.[0];
   if (embedded !== undefined) {
-    return {
-      ok: false,
-      error: `${label} embeds ${embedded} without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
-    };
+    return err(
+      `${label} embeds ${embedded} without being a whole-value reference; it would otherwise ship verbatim as the secret. Make the entire value a single $NAME reference`,
+    );
   }
-  return {
-    ok: false,
-    error: `${label} carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step's env block`,
-  };
+  return err(
+    `${label} carries a literal value, but settings files are committed plaintext - exactly what secret references exist to prevent. Set it to a whole-value $NAME reference and define NAME in the step's env block`,
+  );
 }
 
-export type SecretRefsResolution =
-  | {
-      ok: true;
-      /** Resolved plaintext, keyed by env var name (two fields may share one). */
-      values: Record<string, string>;
-      /** Every distinct plaintext value, for the caller to register with masking. */
-      mask: string[];
-    }
-  | { ok: false; errors: string[] };
+export interface ResolvedSecretRefs {
+  /** Resolved plaintext, keyed by env var name (two fields may share one). */
+  values: Record<string, string>;
+  /** Every distinct plaintext value, for the caller to register with masking. */
+  mask: string[];
+}
 
 /** The variable a validated whole-value reference names: REFERENCE_RE admits `$NAME`, so the name follows the `$`. */
 export function referenceName(reference: string): string {
@@ -94,7 +87,7 @@ export function referenceName(reference: string): string {
 export function resolveSecretRefs(
   names: readonly string[],
   env: Record<string, string | undefined> = process.env,
-): SecretRefsResolution {
+): Result<ResolvedSecretRefs, string[]> {
   const errors: string[] = [];
   const resolved: Record<string, string> = {};
   const mask = new Set<string>();
@@ -116,7 +109,7 @@ export function resolveSecretRefs(
     mask.add(plaintext);
   }
   if (errors.length > 0) {
-    return { ok: false, errors };
+    return err(errors);
   }
-  return { ok: true, values: resolved, mask: [...mask] };
+  return ok({ values: resolved, mask: [...mask] });
 }

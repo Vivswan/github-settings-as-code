@@ -308,12 +308,12 @@ export async function runForRepo(
       const mask = new Set<string>();
       for (const [key, names] of bySection) {
         const resolution = resolveSecretRefs(names, env);
-        if (!resolution.ok) {
-          resolutionErrors.set(key, resolution.errors);
+        if (resolution.isErr()) {
+          resolutionErrors.set(key, resolution.error);
           continue;
         }
-        Object.assign(resolved, resolution.values);
-        for (const plaintext of resolution.mask) {
+        Object.assign(resolved, resolution.value.values);
+        for (const plaintext of resolution.value.mask) {
           mask.add(plaintext);
         }
       }
