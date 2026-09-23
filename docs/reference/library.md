@@ -18,13 +18,13 @@ npm install github:Vivswan/github-settings-as-code#<packaged sha>   # one packag
 
 `bun add` takes the same three forms. A pre-release version looks like `2.0.1-main.446.20260913.g95d081d`; the [Versioning](#versioning) section says how the three relate.
 
-The `github:` form installs a packaged commit: the child of one `main` commit, carrying that commit's tree plus `lib/pkg/` (the library build) beside `lib/index.js` (the action bundle), both built from that commit; a package CI minted names its workflow run in its message, one minted by hand in the release recovery does not.
+The `github:` form installs a packaged commit: the child of one `main` commit, carrying that commit's tree plus `lib/pkg/` (the library build), `lib/settings.schema.json` (the published schema), and `lib/index.js` (the action bundle), all built from that commit; a package CI minted names its workflow run in its message, one minted by hand in the release recovery does not.
 
 - Its `package.json` carries none of the scripts npm's git fetcher takes as a reason to install devDependencies and run a prepare step (`prepare`, `prepack`, `build`, the install hooks), so nothing is built or installed on your side.
 - Every green push to `main` mints one under the tag `build/<position>.<sha7>` and then prunes the tags to the ten newest: once ten newer commits have been packaged, a tag is deleted and GitHub may collect its commit, so a pin taken from an old tag can go on the next merge. A durable pin names a release tag's commit (`git rev-parse v2.1.0`) or an npm version.
 - The tags up to v2.0.0 point at release commits on `main` from when main still committed the bundle, not at packaged commits; the packaged commits minted before the per-commit tags lived on the `build` branch, deleted on 2026-09-13.
 
-To build the package from a checkout instead, `bun install && bun run build:lib` writes `lib/pkg/`: the entry and the internal entry with their declarations, and the CLI, the files the manifest's `exports` and `bin` point at.
+To build the package from a checkout instead, `bun install && bun run build:schema && bun run build:lib` writes `lib/settings.schema.json` and `lib/pkg/`: the entry and the internal entry with their declarations, and the CLI, the files the manifest's `exports` and `bin` point at.
 
 ## The two entries
 
@@ -33,7 +33,7 @@ To build the package from a checkout instead, `bun install && bun run build:lib`
 | `@vivswan/github-settings-as-code` | The documented library: every name in [the API by group](#the-api-by-group), and nothing else | Semver: a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md) |
 | `@vivswan/github-settings-as-code/internal` | What the action, the CLI, and this repository's tests import beyond the library (the input declarations, the engine's per-repository run, the redaction helpers, ...) | None: a name here may move or go in any release. Nothing outside this repository should import it |
 
-Two more paths ride along: the committed settings.yml JSON Schema (`./settings.schema.json`) and the package's own manifest (`./package.json`).
+Two more paths ride along: the built settings.yml JSON Schema (`./settings.schema.json`) and the package's own manifest (`./package.json`).
 
 The entries are [src/index.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/index.ts) and [src/internal.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/src/internal.ts), each a list of re-exports. The tables below are the public entry's contract: a test derives the list of names from this page and fails when `src/index.ts` exports a name no table names, or names one it does not export.
 
@@ -110,7 +110,7 @@ console.log(merged.value.yaml, merged.value.notices.length);
 | `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared` beside `_layering`; `environments`, `branches`, and `workflows` layer by key too, through a `{_layering, entries}` wrapper of their own (`LIST_SECTIONS` in the schema module) |
 | `UndeclaredPolicySection` | type | One of them |
 
-The schema subpath serves the committed JSON Schema.
+The schema subpath serves the built JSON Schema.
 
 ```ts
 import { SECTION_KEYS, SettingsFile } from "@vivswan/github-settings-as-code";

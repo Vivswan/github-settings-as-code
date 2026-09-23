@@ -6,11 +6,13 @@ test/e2e/.artifacts/
 # Review tooling scratch directory.
 .rubber-duck-tmp/
 # The bundled entrypoint is built, not committed: CI jobs and release tags
-# build it with `bun run build:bundle`; only lib/settings.schema.json is
-# committed under lib/. A release job that commits the bundle onto a tag
-# must stage it with `git add -f` - a plain `git add lib/` silently skips
-# the ignored file.
+# build it with `bun run build:bundle`; nothing under lib/ is committed on
+# main. A release job that commits the bundle onto a tag must stage it with
+# `git add -f` - a plain `git add lib/` silently skips the ignored file.
 lib/index.js
+# The published JSON Schema is built the same way (`bun run build:schema`,
+# which the test scripts run first); the packaged commits carry it.
+lib/settings.schema.json
 
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore - do not edit between the BEGIN/END

@@ -1,12 +1,12 @@
 /**
  * Everything here is a pure function of an Rng, so a failing fuzz iteration replays from its seed. Every settings
- * document a section generator draws is also validated against lib/settings.schema.json, so a generator drifting from
- * the published schema fails the run instead of fuzzing a shape the schema rejects.
+ * document a section generator draws is also validated against the built lib/settings.schema.json (`bun run fuzz`
+ * builds it first), so a generator drifting from the published schema fails the run instead of fuzzing a shape the
+ * schema rejects.
  */
 
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
-import settingsSchema from "../../lib/settings.schema.json" with { type: "json" };
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
@@ -44,6 +44,7 @@ import { genSecretScanningPatterns } from "../sections/secret_scanning_custom_pa
 import { genTeams } from "../sections/teams/generators.js";
 import { genWebhooks } from "../sections/webhooks/generators.js";
 import { genWorkflows } from "../sections/workflows/generators.js";
+import { readSettingsSchema } from "../settings-schema.js";
 import { ADMIN_SLUG } from "./constants.js";
 import {
   DEFAULT_LAYERING_DIRECTIVE,
@@ -993,7 +994,7 @@ function settingsValidator(): ValidateFunction {
     const ajv = new Ajv({ strict: false, allErrors: true });
     const add = (addFormats as unknown as { default?: typeof addFormats }).default ?? addFormats;
     (add as typeof addFormats)(ajv);
-    validator = ajv.compile(settingsSchema);
+    validator = ajv.compile(readSettingsSchema());
   }
   return validator;
 }

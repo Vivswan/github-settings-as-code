@@ -143,11 +143,12 @@ export function commitAll(cwd: string, subject: string): string {
   return git(cwd, "rev-parse", "HEAD");
 }
 
-/** The files a build of `bundle` leaves in a checkout: the action bundle and
- * the library build (its module and its declarations), all gitignored on main. */
+/** The files a build of `bundle` leaves in a checkout: the action bundle, the
+ * schema, and the library build (its module and its declarations), all gitignored on main. */
 export function builtFiles(bundle: string): Record<string, string> {
   return {
     "lib/index.js": bundle,
+    "lib/settings.schema.json": `schema-${bundle}`,
     "lib/pkg/index.js": `library-${bundle}`,
     "lib/pkg/index.d.ts": `types-${bundle}`,
   };
@@ -194,7 +195,8 @@ function treePaths(cwd: string, sha: string): string[] {
 }
 
 /** The paths a packaged commit's diff against its source lists: the build outputs and the stripped manifest. */
-const PACKAGED_DIFF = "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\npackage.json";
+const PACKAGED_DIFF =
+  "lib/index.js\nlib/pkg/index.d.ts\nlib/pkg/index.js\nlib/settings.schema.json\npackage.json";
 
 export const CHANGELOG_21 = `# Changelog
 
@@ -245,6 +247,7 @@ export function expectPackage(
     "lib/index.js",
     "lib/pkg/index.d.ts",
     "lib/pkg/index.js",
+    "lib/settings.schema.json",
     "package.json",
     "release-please-config.json",
     "src/marker.ts",
@@ -278,7 +281,7 @@ export function seedFixture(): Fixture {
   execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin]);
   disableBackgroundMaintenance(origin);
   const work = clone(root, origin, "work");
-  write(work, ".gitignore", "lib/index.js\nlib/pkg/\n");
+  write(work, ".gitignore", "lib/index.js\nlib/settings.schema.json\nlib/pkg/\n");
   write(work, ".release-please-manifest.json", `${JSON.stringify({ ".": "2.0.0" }, null, 2)}\n`);
   write(
     work,
@@ -425,8 +428,13 @@ export function plantCommitIn(
 }
 
 /** The refusal of a child that is not its source plus the build outputs alone, whatever deviates. */
-const NOT_A_PACKAGE =
-  /is not [0-9a-f]{40} plus lib\/index\.js and lib\/pkg\/, minus package\.json's preparation scripts, alone: its tree is [0-9a-f]{40}, the rebuilt one is [0-9a-f]{40} \(git diff [0-9a-f]{40} [0-9a-f]{40} lists what deviates\); /;
+const NOT_A_PACKAGE = new RegExp(
+  [
+    "is not [0-9a-f]{40} plus lib/index\\.js, lib/settings\\.schema\\.json, and lib/pkg/, ",
+    "minus package\\.json's preparation scripts, alone: its tree is [0-9a-f]{40}, the rebuilt one is ",
+    "[0-9a-f]{40} \\(git diff [0-9a-f]{40} [0-9a-f]{40} lists what deviates\\); ",
+  ].join(""),
+);
 
 /** A hand-planted commit under a packaged commit's name, and the refusal every path (a rerun, the major) answers
  * with; the remedy tail differs per ref and is the caller's to check. */
@@ -510,6 +518,7 @@ export const PLANTED_PACKAGES: [string, PlantedPackage][] = [
     (fx) => ({
       ...plantCommit(fx, "planter", fx.mergeSha, fx.mergeSha, {
         "lib/index.js": "packaged-bundle-bytes-1\n",
+        "lib/settings.schema.json": "schema-packaged-bundle-bytes-1\n",
       }),
       error:
         /is not the tree [0-9a-f]{40} this checkout's build packages|does not carry a non-empty regular-file lib\/pkg\/index\.js \(no entry\)/,

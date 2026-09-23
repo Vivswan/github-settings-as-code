@@ -57,6 +57,10 @@ jobs:
         with:
           node-version: 24
 
+      # The fuzzer validates every drawn document against the built, gitignored schema.
+      - name: Build the schema
+        run: bun run build:schema
+
       - name: Fuzz
         env:
           SEED: ${{ inputs.seed }}

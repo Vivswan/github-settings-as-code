@@ -1694,7 +1694,7 @@ async function main(): Promise<number> {
         (mode === "standard" || mode === "render") && flags.sections
           ? ` --sections ${flags.sections.join(",")}`
           : "";
-      const replay = `bun test/e2e/fuzz.ts --seed ${seed} --iterations 1${sectionsFlag}`;
+      const replay = `bun run fuzz --seed ${seed} --iterations 1${sectionsFlag}`;
       console.log(`  iter ${i} [${mode}] seed ${seed} FAIL: ${result.failure}`);
       console.log(`    replay: ${replay}`);
       reportArtifacts(result, replay);
@@ -1709,7 +1709,7 @@ async function main(): Promise<number> {
 
   let batteryFailures = 0;
   if (!replayOne) {
-    const batteryReplay = `bun test/e2e/fuzz.ts --seed ${master} --iterations 0`;
+    const batteryReplay = `bun run fuzz --seed ${master} --iterations 0`;
     type BatteryEntry = [string, (seed: number) => Promise<IterationResult>];
     const runBattery = async (
       header: string,

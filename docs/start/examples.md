@@ -296,7 +296,7 @@ A `mode: render` fold keeps all three meanings: a higher `pages: null` or `inter
 
 A multi-repo `defaults-file` never merges into a target's file, so a `null` there keeps the meanings above.
 
-A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/main/lib/settings.schema.json) marks those.
+A few individual fields accept `null` as a value of their own too, such as `pages.cname` to remove a custom domain; the [published schema](https://github.com/Vivswan/github-settings-as-code/blob/v2/lib/settings.schema.json) <!-- x-release-please-major --> marks those.
 
 ## Notes in the file
 

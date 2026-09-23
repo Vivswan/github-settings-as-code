@@ -1,6 +1,6 @@
 /**
- * The package smoke, the gate behind the npm library build: build lib/pkg/,
- * judge the package shape (publint, attw), pack a tarball, install it into a
+ * The package smoke, the gate behind the npm library build: build lib/pkg/
+ * and the schema, judge the package shape (publint, attw), pack a tarball, install it into a
  * fresh consumer project, import it under Node (both entries and the schema
  * subpath), and compile a TypeScript consumer against the bundled index.d.ts
  * and internal.d.ts with skipLibCheck off - a declaration that leaks a devDependency type, or a
@@ -168,6 +168,7 @@ export function packedTarball(packJson: string, destination: string): string {
 }
 
 async function main(): Promise<void> {
+  run("bun", ["run", "build:schema"], REPO_ROOT);
   run("bun", ["run", "build:lib"], REPO_ROOT);
   run("bun", ["run", "lint:package"], REPO_ROOT);
   await withSmokeDirs("gsac-smoke-", ({ pack, consumer }) => {
