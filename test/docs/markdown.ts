@@ -1,9 +1,7 @@
-import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
-
 /** The contents of every fenced code block whose info string is exactly `info`. */
 export function fencedBlocks(markdown: string, info: string): string[] {
   const blocks: string[] = [];
-  const escaped = escapeRe(info);
+  const escaped = RegExp.escape(info);
   // Leading whitespace is stripped (the README nests fences inside list items) and longer fences close per CommonMark; the guides additionally pin
   // column-zero triple backticks, so this extractor cannot miss a docs/ block.
   const re = new RegExp(

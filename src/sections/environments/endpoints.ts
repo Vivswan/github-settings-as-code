@@ -4,6 +4,7 @@
  */
 
 import type { EndpointDecl } from "../contract/endpoints.js";
+import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import type { PlanContext, PlannedOp } from "../contract/plan.js";
 
 const BRANCH_POLICIES_DENIAL_HINT =
@@ -133,3 +134,15 @@ export const ENDPOINTS = {
 export type EnvironmentsRestContext = PlanContext<typeof ENDPOINTS>;
 
 export type EnvironmentRestOp = PlannedOp<typeof ENDPOINTS>;
+
+/** A live entry missing the field its reconcile keys on has no identity to match; `noun` names the list and one entry. */
+export function unreconcilable(
+  noun: { list: string; entry: string },
+  envName: string,
+  what: string,
+): SectionFailure {
+  return sectionFailure(
+    "live-shape",
+    `environments: the ${noun.list} list for environment "${envName}" returned a ${noun.entry} without ${what}, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+  );
+}

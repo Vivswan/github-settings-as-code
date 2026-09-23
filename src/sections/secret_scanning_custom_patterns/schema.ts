@@ -48,8 +48,7 @@ export function unverifiableRegexFields(entry: unknown): string[] {
     if (reason === undefined) {
       return [];
     }
-    const path = issue.path.map((step) => (typeof step === "number" ? `[${step}]` : step)).join("");
-    labels.push(`${path} (${reason})`);
+    labels.push(`${z.core.toDotPath(issue.path)} (${reason})`);
   }
   return labels;
 }

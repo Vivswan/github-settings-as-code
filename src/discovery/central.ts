@@ -4,13 +4,13 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join, parse } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 import { type SlugKey, slugKey } from "../github/slug.js";
 import type { CentralFileProblem, ProblemOf } from "../problem.js";
 import { type CentralTarget, SLUG_RE } from "./targets.js";
 
-const YAML_EXT = /\.ya?ml$/;
+const YAML_EXTENSIONS = new Set([".yml", ".yaml"]);
 
 export function resolveCentralTargets(
   reposDir: string,
@@ -52,13 +52,13 @@ export function resolveCentralTargets(
         );
         continue;
       }
-      if (!YAML_EXT.test(inner)) {
+      if (!YAML_EXTENSIONS.has(extname(inner))) {
         warnings.push(
           `ignoring ${innerPath}: not a .yml/.yaml file, so it defines no target repository`,
         );
         continue;
       }
-      addTarget(`${owner}/${inner.replace(YAML_EXT, "")}`, innerPath);
+      addTarget(`${owner}/${parse(inner).name}`, innerPath);
     }
   };
 
@@ -71,7 +71,7 @@ export function resolveCentralTargets(
         scanOwnerDir(entryPath, entry);
         continue;
       }
-      if (!YAML_EXT.test(entry)) {
+      if (!YAML_EXTENSIONS.has(extname(entry))) {
         warnings.push(
           `ignoring ${entryPath}: not a .yml/.yaml file, so it defines no target repository`,
         );
@@ -81,7 +81,7 @@ export function resolveCentralTargets(
         ownerlessFiles.push(entryPath);
         continue;
       }
-      addTarget(`${adminOwner}/${entry.replace(YAML_EXT, "")}`, entryPath);
+      addTarget(`${adminOwner}/${parse(entry).name}`, entryPath);
     }
     if (ownerlessFiles.length > 0) {
       errors.push({ kind: "ownerless", files: ownerlessFiles });

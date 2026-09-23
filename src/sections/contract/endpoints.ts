@@ -243,10 +243,7 @@ export function expand(
     );
   }
   if (query && Object.keys(query).length > 0) {
-    const qs = Object.entries(query)
-      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
-      .join("&");
-    return `${path}?${qs}`;
+    return `${path}?${new URLSearchParams(query)}`;
   }
   return path;
 }

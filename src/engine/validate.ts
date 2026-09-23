@@ -1,6 +1,7 @@
 /** Shape validation against each section's loose zod shape; the parsed output, not the input, is what the engine applies. */
 
 import { err, ok, type Result } from "neverthrow";
+import { z } from "zod";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
@@ -10,6 +11,7 @@ import {
   type DeclaredSecretValue,
 } from "../sections/contract/module.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
+import { valueAt } from "../sections/shared/list-section.js";
 import { agree, countNoun } from "../text.js";
 import { type SettingsSource, validateSecretRef } from "./secret-refs.js";
 
@@ -17,18 +19,6 @@ const LIST_KEYS: ReadonlySet<string> = new Set(LIST_SECTIONS);
 
 function isListSection(key: string): key is ListSection {
   return LIST_KEYS.has(key);
-}
-
-/** The value at an issue's path, so a null the author wrote can be told from a type the author got wrong. */
-function valueAt(root: unknown, path: readonly PropertyKey[]): unknown {
-  let node: unknown = root;
-  for (const step of path) {
-    if (typeof node !== "object" || node === null) {
-      return undefined;
-    }
-    node = (node as Record<PropertyKey, unknown>)[step];
-  }
-  return node;
 }
 
 /** zod's issue fields this module reads; `legal` is this action's own, set where a shape refuses null itself. */
@@ -230,18 +220,14 @@ export function validateSectionShapes(
     if (!parsed.success) {
       const issues = parsed.error.issues;
       for (const issue of issues.slice(0, 5)) {
-        const path = issue.path
-          .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
-          .join("");
+        const path = z.core.toDotPath([key, ...issue.path]);
         // A null the shape refused is the author saying "empty" where GitHub has no empty state: name the values that
         // exist. A shape's own diagnostic (a custom issue) already names the fix, unless it supplies the legal values itself.
         if (valueAt(declared, issue.path) === null && rewritesForNull(issue as NullIssue)) {
-          problems.push(
-            `${key}${path} has no empty state; write ${legalValues(issue as NullIssue)}`,
-          );
+          problems.push(`${path} has no empty state; write ${legalValues(issue as NullIssue)}`);
           continue;
         }
-        problems.push(`${key}${path}: ${issue.message}`);
+        problems.push(`${path}: ${issue.message}`);
       }
       if (issues.length > 5) {
         // A silently truncated list costs one fix-and-rerun cycle per hidden offender.

@@ -8,6 +8,7 @@
  * PATCH and DELETE    -> carry custom_pattern_version when GitHub supplies one; a pattern edited between read and write answers 412
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { agree } from "../../text.js";
@@ -141,7 +142,7 @@ function matches(declaredValue: string | string[], liveValue: unknown): boolean 
     Array.isArray(declaredValue) && (liveValue === undefined || liveValue === null)
       ? []
       : liveValue;
-  return JSON.stringify(liveComparable) === JSON.stringify(declaredValue);
+  return isDeepStrictEqual(liveComparable, declaredValue);
 }
 
 function patternsByName<T extends { id: number; name: string }>(

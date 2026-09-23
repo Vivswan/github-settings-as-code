@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { ok } from "neverthrow";
-import { escapeRe } from "../../.github/scripts/lib/generated-regions.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { readDocsYaml, SectionDocs } from "../../src/sections/contract/docs.js";
 import { endpointPath, type Route } from "../../src/sections/contract/endpoints.js";
@@ -14,7 +13,7 @@ import { withTempDir } from "../temp-dir.js";
 
 // Whole-identifier, case-insensitive: "the pinEnvironment mutation" names PinEnvironment, "DocumentPinEnvironmentAudit" does not.
 function namesOperation(prose: string, name: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_])${escapeRe(name)}(?![A-Za-z0-9_])`, "i").test(prose);
+  return new RegExp(`(?<![A-Za-z0-9_])${RegExp.escape(name)}(?![A-Za-z0-9_])`, "i").test(prose);
 }
 
 /** A section's coverage notes joined, since a section may span several rows and each row several bullets. */
@@ -169,18 +168,18 @@ describe("section docs completeness", () => {
         "at coverage[0]",
       ]) {
         expect(readDocsYaml(malformed, SectionDocs)._unsafeUnwrapErr()).toMatch(
-          new RegExp(escapeRe(issue)),
+          new RegExp(RegExp.escape(issue)),
         );
       }
       // The tail of a missing-file error is the runtime's ENOENT prose, so only our prefix is pinned.
       const absent = join(dir, "absent.yml");
       expect(readDocsYaml(absent, SectionDocs)._unsafeUnwrapErr()).toMatch(
-        new RegExp(`^${escapeRe(`${absent} is not valid YAML: `)}`),
+        new RegExp(`^${RegExp.escape(`${absent} is not valid YAML: `)}`),
       );
       // YAML that does not even parse (a duplicated key, which the loader refuses) names the file too.
       writeFileSync(malformed, ["sections_table:", "  endpoints: a", "  endpoints: b"].join("\n"));
       expect(readDocsYaml(malformed, SectionDocs)._unsafeUnwrapErr()).toMatch(
-        new RegExp(`${escapeRe(malformed)} is not valid YAML: .*unique`),
+        new RegExp(`${RegExp.escape(malformed)} is not valid YAML: .*unique`),
       );
       // Control: the same reader accepts a well-formed document.
       writeFileSync(malformed, WELL_FORMED_DOCS.join("\n"));
@@ -264,7 +263,7 @@ describe("Endpoints cells vs declared operations", () => {
       ];
       const cell = normalize(DOCS[endpoint.section].sections_table.endpoints);
       expect(
-        variants.some((variant) => new RegExp(`\\b${escapeRe(variant)}\\b`).test(cell)),
+        variants.some((variant) => new RegExp(`\\b${RegExp.escape(variant)}\\b`).test(cell)),
         `the ${endpoint.section} Endpoints cell never mentions "${needle}" from endpoint ${endpoint.route}`,
       ).toBe(true);
     }

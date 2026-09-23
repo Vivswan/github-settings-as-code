@@ -12,7 +12,7 @@ import {
   undeclaredNote,
 } from "../contract/module.js";
 import type { Read } from "../contract/plan.js";
-import type { EnvironmentsRestContext } from "./endpoints.js";
+import { type EnvironmentsRestContext, unreconcilable } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
 import type { DeploymentProtectionRuleConfig } from "./schema.js";
 
@@ -32,17 +32,12 @@ const LiveProtectionRule = z.looseObject({
 });
 type LiveProtectionRule = z.infer<typeof LiveProtectionRule>;
 
-function unreconcilable(envName: string, what: string): SectionFailure {
-  return sectionFailure(
-    "live-shape",
-    `environments: the deployment protection rule list for environment "${envName}" returned a rule without ${what}, so it cannot be reconciled. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-  );
-}
+const RULE = { list: "deployment protection rule", entry: "rule" };
 
 function liveRuleSlug(rule: LiveProtectionRule, envName: string): Result<string, SectionFailure> {
   const slug = rule.app?.slug;
   if (typeof slug !== "string") {
-    return err(unreconcilable(envName, "an app slug"));
+    return err(unreconcilable(RULE, envName, "an app slug"));
   }
   return ok(slug);
 }
@@ -50,7 +45,7 @@ function liveRuleSlug(rule: LiveProtectionRule, envName: string): Result<string,
 function liveRuleId(rule: LiveProtectionRule, envName: string): Result<string, SectionFailure> {
   // A null or string id would serialize into the DELETE path (".../deployment_protection_rules/null").
   if (typeof rule.id !== "number") {
-    return err(unreconcilable(envName, "a numeric id"));
+    return err(unreconcilable(RULE, envName, "a numeric id"));
   }
   return ok(String(rule.id));
 }

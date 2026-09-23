@@ -8,11 +8,6 @@ import { Parser } from "yaml";
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
 export type MarkerSyntax = "html" | "yaml";
 
-/** `text` as a regex source matching itself literally; body shapes splice renderer constants through it. */
-export function escapeRe(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** Character offsets of one marker: `[start, end)`. */
 export type MarkerSpan = readonly [start: number, end: number];
 

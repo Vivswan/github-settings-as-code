@@ -20,7 +20,7 @@ import {
 import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import { countWord } from "./lib/count-word.js";
-import { escapeRe, type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
+import { type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -305,7 +305,7 @@ function blockShape(lines: string): RegExp {
 }
 
 function tableShape(header: string, cells: string): RegExp {
-  return blockShape(String.raw`${escapeRe(header)}\n(?:\| ${cells} \|\n)*`);
+  return blockShape(String.raw`${RegExp.escape(header)}\n(?:\| ${cells} \|\n)*`);
 }
 
 /** A JSON string literal as JSON.stringify() emits it: its own escapes only, bare quotes never. */
@@ -353,7 +353,7 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "policy-count-sentence",
       placement: { kind: "under-heading", heading: "# The undeclared policy" },
-      body: blockShape(String.raw`[A-Z][a-z-]*${escapeRe(COUNT_SENTENCE_LEAD)}[^\n]+\.\n`),
+      body: blockShape(String.raw`[A-Z][a-z-]*${RegExp.escape(COUNT_SENTENCE_LEAD)}[^\n]+\.\n`),
       render: block(() => renderPolicyCountSentence(knobbedSections())),
     },
     {
@@ -370,7 +370,7 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "permissions-grant-sentence",
       placement: { kind: "under-heading", heading: "## What to grant" },
-      body: blockShape(String.raw`${escapeRe(GRANT_SENTENCE_LEAD)}[^\n]+\.\n`),
+      body: blockShape(String.raw`${RegExp.escape(GRANT_SENTENCE_LEAD)}[^\n]+\.\n`),
       render: block(() => renderGrantSentence(SECTIONS)),
     },
     {
@@ -388,7 +388,7 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
         heading: "## Checking settings changes on pull requests",
       },
       body: blockShape(
-        String.raw`${escapeRe(NO_GATED_READS)}\n|${escapeRe(GATED_READS_LEAD_IN)}\n\n(?:${GATED_READ_BULLET})+`,
+        String.raw`${RegExp.escape(NO_GATED_READS)}\n|${RegExp.escape(GATED_READS_LEAD_IN)}\n\n(?:${GATED_READ_BULLET})+`,
       ),
       render: block(() => renderCheckModeGatedReads(SECTIONS)),
     },

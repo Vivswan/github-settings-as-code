@@ -54,7 +54,7 @@ function sameValue(a: WireValue, b: WireValue): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     const setA = new Set(a);
     const setB = new Set(b);
-    return setA.size === setB.size && [...setA].every((element) => setB.has(element));
+    return setA.size === setB.size && setA.isSubsetOf(setB);
   }
   return a === b;
 }
