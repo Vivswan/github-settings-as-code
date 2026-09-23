@@ -38,7 +38,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "bun run lint && bun run lint:arch && bun run check:compat && bun run typecheck && bun run test && bun run build:check",
+    "check": "bun run lint && bun run knip && bun run lint:arch && bun run check:compat && bun run typecheck && bun run test && bun run build:check",
     "check:compat": "bun .github/scripts/check-compat-markers.ts",
     "lint": "bun x biome ci --error-on-warnings .",
     "lint:yaml": "git ls-files -z '*.yml' '*.yaml' | xargs -0 yamllint -s",
