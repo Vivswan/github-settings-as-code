@@ -1,0 +1,18 @@
+# A milestone state outside GitHub's two (open, closed) is refused when the
+# settings file is parsed, naming the entry and the accepted values, before
+# any API contact: the create would 422 at apply time with every other
+# milestone unwritten.
+name: milestones-invalid-state-rejected
+settings:
+  milestones:
+    - title: v1.0
+      state: paused
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "milestones[0].state"
+    - '"open"|"closed"'

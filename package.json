@@ -94,6 +94,7 @@
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "entities": "8.1.0",
+    "estree-walker": "3.0.3",
     "graphql": "17.0.2",
     "knip": "6.34.0",
     "lefthook": "2.1.12",

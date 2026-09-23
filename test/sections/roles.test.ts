@@ -52,11 +52,13 @@ describe("a permission the grant PUT would 422 never reaches it", () => {
     });
   });
 
-  test.each<[what: string, permission: unknown, message: RegExp]>([
+  const OPTIONS = '"pull", "triage", "push", "maintain", "admin", or a custom org role name';
+
+  test.each<[what: string, permission: unknown, message: string | RegExp]>([
     [
       "the read vocabulary of the write role",
       "write",
-      /"write" is the vocabulary GitHub reports.*declare "push"/,
+      `"write" is the vocabulary GitHub reports a role in (role_name), not one a grant accepts; declare "push" (${OPTIONS})`,
     ],
     [
       "the read vocabulary of the read role",
@@ -71,7 +73,7 @@ describe("a permission the grant PUT would 422 never reaches it", () => {
     [
       "a mis-cased standard permission",
       "Push",
-      /"Push" is not a permission GitHub accepts.*declare "push"$/,
+      '"Push" is not a permission GitHub accepts; the standard permissions are lowercase: declare "push"',
     ],
     [
       "an upper-cased standard permission",
@@ -81,12 +83,12 @@ describe("a permission the grant PUT would 422 never reaches it", () => {
     [
       "an empty permission",
       "",
-      /an empty permission grants nothing.*omit the key for the default "push"$/,
+      `an empty permission grants nothing; declare ${OPTIONS}, or omit the key for the default "push"`,
     ],
     [
       "a block scalar: the newline is named and the fix is the trimmed standard form",
       "Push\n",
-      /"Push\\n" carries whitespace at an end \(a YAML block scalar ends in a newline\); declare "push"$/,
+      '"Push\\n" carries whitespace at an end (a YAML block scalar ends in a newline); declare "push"',
     ],
     [
       "a quoted scalar with a leading space, which GitHub would not match",
@@ -106,9 +108,13 @@ describe("a permission the grant PUT would 422 never reaches it", () => {
     [
       "a custom role spanning two lines: no fix is suggested, since none would parse",
       "Security\nTeam\n",
-      /"Security\\nTeam\\n" spans several lines; a permission is one line: "pull".*custom org role name$/,
+      `"Security\\nTeam\\n" spans several lines; a permission is one line: ${OPTIONS}`,
     ],
-    ["a whitespace-only permission", " ", /" " \(whitespace only\) grants nothing.*omit the key/],
+    [
+      "a whitespace-only permission",
+      " ",
+      `" " (whitespace only) grants nothing; declare ${OPTIONS}, or omit the key for the default "push"`,
+    ],
     [
       "a mapping: the pattern check must not run on a non-string, so the type error is the only issue",
       { length: 4 },
@@ -118,7 +124,9 @@ describe("a permission the grant PUT would 422 never reaches it", () => {
     "fails at parse naming the entry and the form to declare: %s",
     (_what, permission, message) => {
       const issue = (key: string) => [
-        expect.stringMatching(new RegExp(`^${key}\\[0\\]\\.permission: .*${message.source}`)),
+        typeof message === "string"
+          ? `${key}[0].permission: ${message}`
+          : expect.stringMatching(new RegExp(`^${key}\\[0\\]\\.permission: .*${message.source}`)),
       ];
       expect({
         collaborators: verdict("collaborators", permission),

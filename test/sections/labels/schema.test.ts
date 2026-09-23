@@ -28,12 +28,12 @@ describe("a label the API would reject never reaches it", () => {
   ])("a color GitHub 422s fails at parse naming the entry and the rule: %s", (_what, color) => {
     expect(verdict({ name: "bug", color })).toEqual({
       issues: [
-        expect.stringMatching(/^labels\[0\]\.color: .*six hex digits.*leading "#" optional/),
+        'labels[0].color: a label color is six hex digits, the leading "#" optional ("#d73a4a" or "d73a4a"); color names and three-digit shorthand are not accepted',
       ],
     });
   });
 
-  test.each<[what: string, description: unknown, issues: RegExp[] | null]>([
+  test.each<[what: string, description: unknown, issues: (string | RegExp)[] | null]>([
     ["100 ASCII characters, at the cap", "x".repeat(100), null],
     [
       "100 emoji: the cap counts code points, as JSON Schema maxLength does",
@@ -43,12 +43,16 @@ describe("a label the API would reject never reaches it", () => {
     [
       "101 ASCII characters",
       "x".repeat(101),
-      [/^labels\[0\]\.description: .*100 characters.*this one has 101$/],
+      [
+        "labels[0].description: a label description is at most 100 characters (GitHub's cap); this one has 101",
+      ],
     ],
     [
       "101 emoji, the count shown in code points too",
       "\u{1F600}".repeat(101),
-      [/^labels\[0\]\.description: .*100 characters.*this one has 101$/],
+      [
+        "labels[0].description: a label description is at most 100 characters (GitHub's cap); this one has 101",
+      ],
     ],
     [
       "a mapping with a length key: zod would run the cap check on it, so only the type error may report it",
@@ -66,7 +70,11 @@ describe("a label the API would reject never reaches it", () => {
       expect(verdict({ name: "bug", description })).toEqual(
         issues === null
           ? { ok: true }
-          : { issues: issues.map((issue) => expect.stringMatching(issue)) },
+          : {
+              issues: issues.map((issue) =>
+                typeof issue === "string" ? issue : expect.stringMatching(issue),
+              ),
+            },
       );
     },
   );

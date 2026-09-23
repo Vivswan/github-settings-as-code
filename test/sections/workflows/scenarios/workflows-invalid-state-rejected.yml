@@ -1,0 +1,18 @@
+# A workflow state outside the two this section sets (active, disabled) is
+# refused when the settings file is parsed, naming the entry and the accepted
+# values, before any API contact: no enable or disable call exists for it, so
+# apply could only fail late with every other workflow untouched.
+name: workflows-invalid-state-rejected
+settings:
+  workflows:
+    - path: .github/workflows/ci.yml
+      state: paused
+inputs:
+  mode: apply
+expect:
+  exit_code: 1
+  result: failed
+  zero_requests: true
+  stdout_contains:
+    - "workflows[0].state"
+    - '"active"|"disabled"'

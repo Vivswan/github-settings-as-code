@@ -9,43 +9,49 @@ function issues(entries: unknown[]): string[] {
     : parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
 }
 
+const WILDCARD_KEYS =
+  "enforce_admins, required_linear_history, allow_force_pushes, allow_deletions, " +
+  "block_creations, required_conversation_resolution, lock_branch, allow_fork_syncing, " +
+  "required_signatures, required_status_checks, required_pull_request_reviews, " +
+  "force_push_bypassers, required_deployments";
+
 const cases: Array<{
   refused: string;
   protection: Record<string, unknown>;
   name?: string;
   paths: string[];
-  /** Substrings every issue's message must carry (the path never stands in for them). */
+  /** The message of every issue in full (one per path when they differ): the path never stands in for it. */
   fix: string | string[];
 }> = [
   {
     refused: "a status-check requirement without strict (the PUT 422s on it)",
     protection: { required_status_checks: { contexts: ["ci"] } },
     paths: ["0.protection.required_status_checks.strict"],
-    fix: "up to date with its base",
+    fix: "required_status_checks.strict must be an unquoted true or false (GitHub's protection PUT rejects the requirement without it): true also requires the branch to be up to date with its base before merging, false only requires the checks to pass",
   },
   {
     refused: "a status-check requirement without a check list (the PUT 422s on it)",
     protection: { required_status_checks: { strict: true } },
     paths: ["0.protection.required_status_checks"],
-    fix: "contexts: [] requires none",
+    fix: "required_status_checks must list the required checks as contexts: [names] or checks: [{context, app_id}] (GitHub's protection PUT rejects the requirement without them); contexts: [] requires none",
   },
   {
     refused: "a restrictions holder without its users and teams lists (the PUT 422s on it)",
     protection: { restrictions: {} },
     paths: ["0.protection.restrictions.users", "0.protection.restrictions.teams"],
-    fix: "restrictions: null lifts the push restriction",
+    fix: "protection.restrictions must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; restrictions: null lifts the push restriction",
   },
   {
     refused: "a restrictions holder naming only apps (the PUT 422s without users and teams)",
     protection: { restrictions: { apps: ["deploy-gate"] } },
     paths: ["0.protection.restrictions.users", "0.protection.restrictions.teams"],
-    fix: "must carry both users and teams",
+    fix: "protection.restrictions must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; restrictions: null lifts the push restriction",
   },
   {
     refused: "a restrictions holder naming users but no teams",
     protection: { restrictions: { users: ["octocat"] } },
     paths: ["0.protection.restrictions.teams"],
-    fix: "[] when none",
+    fix: "protection.restrictions must carry both users and teams ([] when none; apps is optional), since GitHub's protection PUT requires the two lists; restrictions: null lifts the push restriction",
   },
   {
     refused: "a check item carrying a key the PUT has no word for",
@@ -53,13 +59,13 @@ const cases: Array<{
       required_status_checks: { strict: true, checks: [{ context: "ci", app: "ci-bot" }] },
     },
     paths: ["0.protection.required_status_checks.checks.0"],
-    fix: 'remove "app"',
+    fix: 'a required_status_checks.checks item takes only context and app_id (GitHub\'s protection PUT has no other field there); remove "app"',
   },
   {
     refused: "a check item without its context",
     protection: { required_status_checks: { strict: true, checks: [{ app_id: 15368 }] } },
     paths: ["0.protection.required_status_checks.checks.0.context"],
-    fix: "the check's name",
+    fix: "required_status_checks.checks[].context must be the check's name, as a string",
   },
   {
     refused: "a fractional app_id on a check item",
@@ -67,26 +73,26 @@ const cases: Array<{
       required_status_checks: { strict: true, checks: [{ context: "ci", app_id: 1.5 }] },
     },
     paths: ["0.protection.required_status_checks.checks.0.app_id"],
-    fix: "-1",
+    fix: "required_status_checks.checks[].app_id must be a whole number: the id of the GitHub App that must report the check, or -1 to let any App report it; omit it to pin whichever App reported it last",
   },
   {
     refused: "a bare name where a check item goes",
     protection: { required_status_checks: { strict: true, checks: ["ci"] } },
     paths: ["0.protection.required_status_checks.checks.0"],
-    fix: "contexts: [names]",
+    fix: "each required_status_checks.checks item is a {context, app_id} mapping naming one required check; a bare name goes under contexts: [names]",
   },
   {
     refused: "a scalar where the status-check mapping goes, on a literal branch",
     protection: { required_status_checks: true },
     paths: ["0.protection.required_status_checks"],
-    fix: "or null to turn the requirement off",
+    fix: "required_status_checks must be a mapping of its keys (strict, then contexts or checks), or null to turn the requirement off",
   },
   {
     refused: "a scalar where the review mapping goes, on a wildcard rule",
     name: "release/*",
     protection: { required_pull_request_reviews: 5 },
     paths: ["0.protection.required_pull_request_reviews"],
-    fix: "or null to turn the requirement off",
+    fix: "required_pull_request_reviews must be a mapping of its keys (required_approving_review_count and the other review settings), or null to turn the requirement off",
   },
   {
     refused:
@@ -99,25 +105,28 @@ const cases: Array<{
       "0.protection.required_status_checks.enabled",
       "0.protection.required_pull_request_reviews.enabled",
     ],
-    fix: "remove it (the control's own key carries the toggle)",
+    fix: ["required_status_checks", "required_pull_request_reviews"].map(
+      (control) =>
+        `protection.${control}.enabled is GitHub's GET-only echo, which the protection PUT has no word for; remove it (the control's own key carries the toggle)`,
+    ),
   },
   {
     refused: "a review count of 7 (GitHub 422s above 6)",
     protection: { required_pull_request_reviews: { required_approving_review_count: 7 } },
     paths: ["0.protection.required_pull_request_reviews.required_approving_review_count"],
-    fix: "from 0 to 6",
+    fix: "required_pull_request_reviews.required_approving_review_count must be a whole number from 0 to 6 (GitHub accepts 1 to 6, or 0 to require no approvals)",
   },
   {
     refused: "a fractional review count",
     protection: { required_pull_request_reviews: { required_approving_review_count: 1.5 } },
     paths: ["0.protection.required_pull_request_reviews.required_approving_review_count"],
-    fix: "from 0 to 6",
+    fix: "required_pull_request_reviews.required_approving_review_count must be a whole number from 0 to 6 (GitHub accepts 1 to 6, or 0 to require no approvals)",
   },
   {
     refused: "a negative review count",
     protection: { required_pull_request_reviews: { required_approving_review_count: -1 } },
     paths: ["0.protection.required_pull_request_reviews.required_approving_review_count"],
-    fix: "from 0 to 6",
+    fix: "required_pull_request_reviews.required_approving_review_count must be a whole number from 0 to 6 (GitHub accepts 1 to 6, or 0 to require no approvals)",
   },
   {
     // Typed in the zod shape so document validation rejects it before any section writes, not as a
@@ -125,7 +134,7 @@ const cases: Array<{
     refused: 'a quoted "true" for the signatures toggle, with the YAML gotcha named',
     protection: { enforce_admins: true, required_signatures: "true" },
     paths: ["0.protection.required_signatures"],
-    fix: "unquoted true or false",
+    fix: 'required_signatures must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the toggle direction is unambiguous',
   },
   {
     // The same key on a LITERAL entry stays a passthrough (the parses-clean case below).
@@ -133,32 +142,44 @@ const cases: Array<{
     name: "release/*",
     protection: { enforce_admins: true, restrictions: { users: [], teams: [] } },
     paths: ["0.protection.restrictions"],
-    fix: ["protection.restrictions", "rulesets section"],
+    fix:
+      'the wildcard entry "release/*" declares protection.restrictions, which this section does ' +
+      "not manage on wildcard rules; only the keys it can round-trip through the GraphQL rule " +
+      "mutations apply here: [" +
+      String(WILDCARD_KEYS) +
+      "]. For actor lists and richer controls, prefer the rulesets section (the modern successor " +
+      "of classic protection)",
   },
   {
     refused: "a wildcard sub-key the rule mutation has no word for",
     name: "release/*",
     protection: { required_status_checks: { strict: true, checks: [] } },
     paths: ["0.protection.required_status_checks.checks"],
-    fix: "does not manage on wildcard rules",
+    fix:
+      'the wildcard entry "release/*" declares protection.required_status_checks.checks, which ' +
+      "this section does not manage on wildcard rules; only the keys it can round-trip through " +
+      "the GraphQL rule mutations apply here: [" +
+      String(WILDCARD_KEYS) +
+      "]. For actor lists and richer controls, prefer the rulesets section (the modern successor " +
+      "of classic protection)",
   },
   {
     refused: "a malformed actor in a routed list",
     protection: { force_push_bypassers: ["a/b/c"] },
     paths: ["0.protection.force_push_bypassers.0"],
-    fix: "bare user login",
+    fix: 'each force_push_bypassers actor must be a bare user login ("octocat"), "org/team-slug" for a team, or "app/slug" for a GitHub App',
   },
   {
     refused: "case-insensitive duplicates in a routed actor list",
     protection: { force_push_bypassers: ["octocat", "OctoCat"] },
     paths: ["0.protection.force_push_bypassers"],
-    fix: "more than once",
+    fix: 'force_push_bypassers lists "OctoCat" more than once (actor names are case-insensitive); keep one entry per actor',
   },
   {
     refused: "case-insensitive duplicates in the required environments",
     protection: { required_deployments: { environments: ["prod", "Prod"] } },
     paths: ["0.protection.required_deployments.environments"],
-    fix: "more than once",
+    fix: 'required_deployments.environments lists "Prod" more than once (environment names are case-insensitive); keep one entry per environment',
   },
 ];
 
@@ -169,11 +190,9 @@ describe("branches protection parse rules", () => {
       return { path: issue.slice(0, colon), message: issue.slice(colon + 2) };
     });
     expect(found.map((issue) => issue.path)).toEqual(paths);
-    for (const issue of found) {
-      for (const wording of [fix].flat()) {
-        expect(issue.message).toContain(wording);
-      }
-    }
+    expect(found.map((issue) => issue.message)).toEqual(
+      Array.isArray(fix) ? fix : paths.map(() => fix),
+    );
   });
 
   // The GET expands each actor into an object; the PUT takes the login/slug string, so a copied

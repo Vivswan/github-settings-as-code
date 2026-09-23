@@ -8,11 +8,15 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  badDirectiveIssue,
   describeProblem,
   type Problem,
   type ProblemOf,
   quoteList,
   type SettingsProblem,
+  singleDocumentRemovalIssue,
+  unknownDirectivesIssue,
+  unknownSectionsIssue,
 } from "../src/problem.js";
 import { SECTION_KEYS } from "../src/schema.js";
 
@@ -493,5 +497,63 @@ describe("quoteList", () => {
   test("quotes each name and joins with commas", () => {
     expect(quoteList(["a", "b c"])).toBe('"a", "b c"');
     expect(quoteList([])).toBe("");
+  });
+});
+
+describe("the document-level issue builders render the lines a user reads", () => {
+  const DIRECTIVES =
+    "The underscore marks this action's directives, \"_layering\" (a file's top level or a list " +
+    "section's {entries} wrapper) and \"_undeclared\" (a file's top level or a wrapper), and " +
+    "nothing else; there are no private-note keys. Remove the key, or keep the note as a YAML " +
+    "comment";
+
+  test.each<[what: string, line: string, expected: string]>([
+    [
+      "one unknown underscore key",
+      unknownDirectivesIssue(["_notes"]),
+      `unknown underscore key: _notes. ${DIRECTIVES}`,
+    ],
+    [
+      "two unknown underscore keys",
+      unknownDirectivesIssue(["_notes", "_owner"]),
+      `unknown underscore keys: _notes, _owner. ${DIRECTIVES}`,
+    ],
+    [
+      "a file-wide policy outside the two values",
+      badDirectiveIssue("sometimes", ["keep", "delete"]),
+      '_undeclared must be one of "keep", "delete"; got a string that is none of them. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list\'s own policy applies',
+    ],
+    [
+      "a file-wide policy that is a list",
+      badDirectiveIssue(["keep"], ["keep", "delete"]),
+      '_undeclared must be one of "keep", "delete"; got a list. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list\'s own policy applies',
+    ],
+    [
+      "a file-wide policy that is a mapping",
+      badDirectiveIssue({ keep: true }, ["keep", "delete"]),
+      '_undeclared must be one of "keep", "delete"; got a mapping. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list\'s own policy applies',
+    ],
+    [
+      "a file-wide policy that is not a string",
+      badDirectiveIssue(null, ["keep", "delete"]),
+      '_undeclared must be one of "keep", "delete"; got null. Write _undeclared: keep or _undeclared: delete at the top of the file, or remove the key so each list\'s own policy applies',
+    ],
+    [
+      "a removal marker in a document that is not a layer",
+      singleDocumentRemovalIssue("labels[2]"),
+      "labels[2]: a single document has no lower layer to remove from; _remove: true belongs in a higher layer of a fold (mode: render)",
+    ],
+    [
+      "one unknown section",
+      unknownSectionsIssue(["tags"], ["labels", "teams"]),
+      'unknown top-level section: tags (known: labels, teams). Fix the typo, or set the "sections" input to limit processing',
+    ],
+    [
+      "two unknown sections",
+      unknownSectionsIssue(["tags", "issues"], ["labels", "teams"]),
+      'unknown top-level sections: tags, issues (known: labels, teams). Fix the typo, or set the "sections" input to limit processing',
+    ],
+  ])("%s", (_what, line, expected) => {
+    expect(line).toBe(expected);
   });
 });

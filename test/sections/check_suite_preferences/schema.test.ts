@@ -82,10 +82,8 @@ describe("a check suite preference GitHub would reject or silently overwrite nev
       ]),
     ).toEqual({
       issues: [
-        expect.stringMatching(APP_ID_RULE),
-        expect.stringMatching(
-          /auto_trigger_checks\[2\]\.app_id: repeats app_id 15368 from auto_trigger_checks\[0\]/,
-        ),
+        "check_suite_preferences.auto_trigger_checks[1].app_id: a GitHub App id is a positive integer (the App's settings page shows it); GitHub has no app 0 and rejects fractions",
+        "check_suite_preferences.auto_trigger_checks[2].app_id: repeats app_id 15368 from auto_trigger_checks[0]; GitHub would keep whichever entry it reads last and nothing reads the result back, so declare one entry per app",
       ],
     });
   });

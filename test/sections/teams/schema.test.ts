@@ -23,17 +23,17 @@ describe("a team name that is not a slug never reaches the API path", () => {
     expect(verdict(name)).toEqual({ ok: true });
   });
 
-  test.each<[what: string, name: unknown, message: RegExp]>([
+  test.each<[what: string, name: unknown, message: string | RegExp]>([
     [
       "a display name with a space: the slug it usually has is named",
       "Core Team",
-      /letters, digits.*; a team named "Core Team" usually has the slug "core-team"$/,
+      'teams[0].name: a team is declared by its slug (the name in its URL, /orgs/<org>/teams/<slug>): letters, digits, ".", "_", and "-" only, at least one letter or digit; a team named "Core Team" usually has the slug "core-team"',
     ],
     ["a leading space folded away by the guess", " core", /usually has the slug "core"$/],
     [
       "a path separator, for which no slug can be guessed",
       "core/team",
-      /letters, digits.*, and "core\/team" is not one$/,
+      'teams[0].name: a team is declared by its slug (the name in its URL, /orgs/<org>/teams/<slug>): letters, digits, ".", "_", and "-" only, at least one letter or digit, and "core/team" is not one',
     ],
     ["an @-prefixed mention", "@core", /and "@core" is not one$/],
     ["an empty name", "", /and "" is not one$/],
@@ -55,7 +55,32 @@ describe("a team name that is not a slug never reaches the API path", () => {
     ],
   ])("fails at parse naming the entry and the slug rule: %s", (_what, name, message) => {
     expect(verdict(name)).toEqual({
-      issues: [expect.stringMatching(new RegExp(`^teams\\[0\\]\\.name: .*${message.source}`))],
+      issues: [
+        typeof message === "string"
+          ? message
+          : expect.stringMatching(new RegExp(`^teams\\[0\\]\\.name: .*${message.source}`)),
+      ],
     });
+  });
+});
+
+describe("every teams refusal, as the user reads it", () => {
+  test.each<[what: string, entry: Record<string, unknown>, expected: string[]]>([
+    [
+      "a misspelled permission key, which would grant the default role instead",
+      { name: "core", permissions: "admin" },
+      [
+        'teams[0] (name "core"): declares "permissions", which this section does not recognize ' +
+          '(known keys: name, permission) - a misspelled "permission" key would silently grant the ' +
+          'default "push" role instead of the intended one. Fix the key name, or remove it',
+      ],
+    ],
+  ])("%s", (_what, entry, expected) => {
+    expect(
+      validateSectionShapes({ teams: [entry] }, "settings.yml").match(
+        () => null,
+        (p) => p.issues,
+      ),
+    ).toEqual(expected);
   });
 });
