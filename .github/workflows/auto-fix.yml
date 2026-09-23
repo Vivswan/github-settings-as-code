@@ -16,8 +16,8 @@
 # Dependabot-triggered runs read the Dependabot secrets store, not the Actions one, so REPO_PLATFORM_TOKEN goes in
 # both. A push made with github.token starts no workflows.
 #   no token, install succeeds   -> the fix lands but CI does not re-run; the job posts a PR comment and a warning (close/reopen the PR)
-#   no token, Dependabot bun PR  -> the stale lockfile fails the frozen install here until dependabot-bun-lockfile.yml's
-#                                   dedupe push retriggers this workflow, which only a real token does
+#   no token, Dependabot bun PR  -> a bun.lock the Bun updater left stale fails the frozen install here; a close/reopen
+#                                   re-runs it against the same stale lockfile; only a push made with a real token brings a fresh one
 
 name: Auto Fix
 
@@ -153,9 +153,8 @@ jobs:
           PRUNED: ${{ needs.build.outputs.pruned }}
         shell: bash
         run: |
-          # The branch can move between the build and this push (a Dependabot rebase, or dependabot-bun-lockfile.yml's
-          # dedupe commit, which also invalidates the fix): the patch belongs to HEAD_SHA only, and the newer head's
-          # own run owns the rebuild.
+          # The branch can move between the build and this push (a Dependabot rebase): the patch belongs to
+          # HEAD_SHA only, and the newer head's own run owns the rebuild.
           superseded() {
             git fetch --quiet origin "$HEAD_REF"
             [ "$(git rev-parse "origin/$HEAD_REF")" != "$HEAD_SHA" ]

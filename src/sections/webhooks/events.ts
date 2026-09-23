@@ -2,7 +2,7 @@
  * The events GitHub delivers to repository webhooks, spelled as the wire event name: every webhook in GitHub's
  * webhooks OpenAPI description, as @octokit/openapi-webhooks ships it (generated/api.github.com.json), whose
  * supported-webhook-types names "repository". The list is committed, not imported: bundling the descriptor would
- * double lib/index.js. test/sections/webhooks-events.test.ts recomputes it from the package and fails with the
+ * double lib/index.js. test/sections/webhooks/events.test.ts recomputes it from the package and fails with the
  * names added and dropped when a bump moves the list; the fix is to edit this file to match.
  */
 

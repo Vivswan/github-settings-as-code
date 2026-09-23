@@ -52,8 +52,8 @@ import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "./
 const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/index.js";
 
 /**
- * Exported so a UNIT test asserts the parity on every PR: builtBundle() runs only when a scenario
- * runs, and the e2e smoke job skips on a package.json-only diff, the very PR that changes this script.
+ * Exported so a UNIT test asserts the parity by name on every PR. builtBundle() checks it too, but
+ * as a fast local signal that aborts the whole e2e run; the unit test is the binding assertion.
  */
 export function bundleBuildParityFailure(script: string | undefined): string | undefined {
   return script === BUILD_BUNDLE_SCRIPT

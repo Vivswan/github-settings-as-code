@@ -225,8 +225,8 @@ describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
 
 describe("bundle build parity (harness vs production)", () => {
   test("the declared build:bundle script matches what the harness builds", () => {
-    // A unit test on purpose: a package.json-only diff selects no sections and skips the e2e smoke
-    // job, so this is the only place the pin can fire on the PR that trips it.
+    // A unit test on purpose: builtBundle() checks the same pin as a fast local signal that aborts
+    // the whole e2e run; this test is the binding assertion, failing by name on the PR that drifts.
     expect(bundleBuildParityFailure(declaredBuildBundleScript())).toBeUndefined();
   });
 

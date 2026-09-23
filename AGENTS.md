@@ -32,29 +32,29 @@ GitHub Settings as Code: GitHub Action applying declarative repository settings:
 <!-- Add project-specific instructions below the END marker; they are this repository's own and survive every sync. -->
 <!-- END REPO-PLATFORM MANAGED -->
 
-Code is the source of truth: this section holds only the rules and the decisions a reader could not recover from the code.
+Code is the source of truth: this section holds only the rules and the decisions a reader could not recover from the code. The mechanics (toolchain, generated output, tests, releases) are in CONTRIBUTING.md.
 
 ### Hard rules
 
-- Generated artifacts (`lib/settings.schema.json`, `src/upstream-gaps/index.ts`, the generated docs and `action.yml` regions) are regenerated, never hand-edited; `.github/scripts/generated.ts` lists them and `bun run build:check` fails on drift.
-- `lib/index.js` (the action bundle) and `lib/pkg/` (the npm library) are built, never committed on main; the packaged commits off main carry them.
+- Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them.
+- `lib/index.js` and `lib/pkg/` are built, never committed on main.
 - Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`failureFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
 - What can be known wrong from the settings file alone is refused when the file is parsed, naming the key and the fix, never discovered at apply time: GET-only fields, enum violations, contradictory key pairs, unknown keys in a closed GitHub shape. Open passthrough shapes keep unknown keys and note them at check time when GitHub does not echo them back.
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
-- New sections and endpoints ship with e2e scenarios, and `bun run test:e2e` runs green before they land.
+- New sections and endpoints ship with e2e scenarios.
 - Errors are values: `throw` only for `BUG:` invariants (programming errors no user can cause), a bare rethrow in its `catch`, and where a third party's contract demands it. The Biome plugin `lint/never-throw.grit` enforces it.
-- No backward-compatibility shims: a change that breaks an input, key, format, or behavior ships the break behind a major with a loud error naming the fix; a one-shot migration only when many files must move at once. A shim that stays anyway carries a `COMPAT(vN)` marker naming the major that deletes it.
+- No backward-compatibility shims: a change that breaks an input, key, format, or behavior ships the break behind a major with a loud error naming the fix; a one-shot migration only when many files must move at once.
 
 ### Decisions a reader would otherwise reverse
 
 - A flat `src/sections/<key>/` directory means repository scope, permanently; org/user scopes arrive as sibling scope directories with their own document, keys, and registry (the ":" reservation in `src/sections/registry.ts`).
-- The section directory is the unit of work: the compiler flags every forgotten registration step, its tests and e2e fragments mirror it under `test/sections/<key>/`, and its prose is `docs/sections/<key>.docs.yml`.
+- The section directory is the unit of work; its prose is `docs/sections/<key>.docs.yml`.
 - `src/upstream-gaps/` holds one file per GitHub feature an upstream artifact lags; `gap.ts` states how each kind graduates.
-- The layered fold is a CSS-like cascade in which `null` is a value: GitHub's EMPTY or OFF state, not CSS `unset`. docs/operate/layering.md owns the rules, including the two CSS has no analogue for (an undeclared key keeps GitHub's current value; `_remove: true` drops a keyed entry).
+- The layered fold is a CSS-like cascade in which `null` is a value: GitHub's EMPTY or OFF state, not CSS `unset`. docs/operate/layering.md owns the rules, including the two CSS has no analogue for.
 
 ### Releases
 
-- The `release` job in ci.yml stays out of all-green's `needs`: it runs downstream of the gate so releases only happen on a green main.
-- Every consumable ref points at a packaged commit off main, and a pointer only ever moves forward along main; main stays source-only and no tag ever lands on it. Topology and the rule: `.github/scripts/release-pipeline.ts`.
+- The `release` job in ci.yml stays out of all-green's `needs`, so a release only happens from a green main.
+- Every consumable ref points at a packaged commit off main, and a pointer only ever moves forward along main; no tag ever lands on main.
 - The npm package publishes from the release hooks through trusted publishing; docs/reference/library.md states the versioning rules.

@@ -1027,7 +1027,7 @@ export function validateAgainstPublishedSchema(doc: unknown): void {
 }
 
 export interface GenScenarioOptions {
-  /** Restrict generation to these sections (a smoke or PR-diff subset). */
+  /** Restrict generation to these sections (the `--sections` flag); the default is every registered section. */
   sections?: SectionKey[];
 }
 

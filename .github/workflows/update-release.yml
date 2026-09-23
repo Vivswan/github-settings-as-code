@@ -170,7 +170,7 @@ jobs:
       # registry: a version already there (a rerun) or a latest that is a
       # newer release (an older release's job rerun after a newer release)
       # publishes nothing, so no release ever displaces a newer one from
-      # latest (a pre-release there, the bootstrap's, is taken over). GITHUB_SHA on the
+      # latest (the first publish's placeholder or pre-release there is taken over). GITHUB_SHA on the
       # publish line sets only the SLSA predicate's source digest; the
       # sigstore certificate still carries this run's own head, so a release
       # recovered by a newer push's run has provenance naming two commits.
