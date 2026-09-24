@@ -44,7 +44,7 @@ import { snapshotTakenLine, writeSnapshotDirSummary, writeSummary } from "./summ
  * this file); test/docs/readme.test.ts pins it to the README's hint.
  */
 export const SNAPSHOT_SCHEMA_URL =
-  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json"; // x-release-please-major
+  "https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json"; // x-release-please-major
 
 interface SnapshotConfigBase {
   onMissingPermission: "fail" | "warn";

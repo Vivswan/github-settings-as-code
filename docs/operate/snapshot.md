@@ -25,7 +25,7 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: snapshot
@@ -41,7 +41,7 @@ The token needs the same read grants a check run needs for the sections you want
 ## What the file looks like
 
 ```yaml settings
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json # x-release-please-major
 # actions_secrets[DEPLOY_TOKEN]: value of DEPLOY_TOKEN is not readable; export it into the environment as SECRET_ACTIONS_DEPLOY_TOKEN before apply
 # check_suite_preferences: GitHub exposes no read endpoint for this section, so there is nothing to snapshot; apply re-asserts the declared value on every run
 # milestones: nothing exists on the repository, so the section is omitted
@@ -94,12 +94,12 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.ADMIN_TOKEN }}
           mode: snapshot
           snapshot-file: backup/settings.yml
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         env:
           SECRET_ACTIONS_DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         with:
@@ -161,7 +161,7 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_TOKEN }}
           mode: snapshot
