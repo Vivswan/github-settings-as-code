@@ -11,7 +11,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 2. Add `.github/settings.yml` (or start from a [snapshot](docs/operate/snapshot.md) of the live settings). The first line gives editor autocomplete and hover docs:
 
    ```yaml
-   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v2/lib/settings.schema.json # x-release-please-major
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/Vivswan/github-settings-as-code/v3/lib/settings.schema.json # x-release-please-major
 
    repository:
      description: My project
@@ -44,7 +44,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v7
-         - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+         - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
            with:
              token: ${{ secrets.ADMIN_TOKEN }}
              mode: check
@@ -54,7 +54,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 | Pin | Points at | Use it for |
 |---|---|---|
-| `@v2` <!-- x-release-please-major --> | The newest release in the major line, so fixes arrive without changing your pin | Production |
+| `@v3` <!-- x-release-please-major --> | The newest release in the major line, so fixes arrive without changing your pin | Production |
 | `@vX.Y.Z` or a commit SHA | One release, frozen by a ruleset | Byte-stable behavior |
 | `@latest` | The newest green `main` commit, packaged; breaking changes arrive here unannounced, ahead of any release | Trying unreleased fixes |
 
