@@ -18,6 +18,8 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Lint (biome)
         run: bun run lint
+      - name: Unused exports (knip)
+        run: bun run knip
       - name: Lint (architecture)
         run: bun run lint:arch
       - name: Typecheck
@@ -116,7 +118,7 @@ jobs:
 
   # The action bundle runs under node24, so node is installed beside bun. The whole corpus runs on every event:
   # scenarios, then fuzz.
-  e2e-smoke:
+  e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
