@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { ARTIFACTS_DIR } from "../e2e/constants.js";
 import { ROOT } from "../root.js";
 import { readWorkflow, type Step, type Workflow, workflowFiles } from "./workflow-loader.js";
@@ -203,12 +203,13 @@ const uploadSteps = (workflows: Workflows) =>
     ),
   );
 
-/** A path block is one pattern per line; a trailing slash names the same directory. */
+/** A path block is one pattern per line, read in its normalized spelling: the guards match on prefixes, so ./test/e2e/x would slip past test/e2e/ otherwise. */
 const patternsOf = (path: unknown) =>
   String(path ?? "")
     .split("\n")
-    .map((pattern) => pattern.trim().replace(/\/$/, ""))
-    .filter((pattern) => pattern !== "");
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern !== "")
+    .map((pattern) => normalize(pattern).replace(/\/$/, ""));
 
 /** upload-artifact skips every item whose basename starts with a dot, the search root included. */
 const hasHiddenSegment = (path: unknown) =>
@@ -268,6 +269,14 @@ describe("upload-artifact steps", () => {
       "a multiline path whose second pattern drifts under test/e2e",
       (step) => {
         if (step.with) step.with.path = "dist/\ntest/e2e/wrong/";
+        return true;
+      },
+      driftedE2eUploads,
+    ],
+    [
+      "a drifted path spelled with a leading ./",
+      (step) => {
+        if (step.with) step.with.path = "./test/e2e/wrong/";
         return true;
       },
       driftedE2eUploads,
