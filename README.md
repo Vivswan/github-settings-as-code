@@ -22,10 +22,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
        color: "d73a4a"
    ```
 
-3. Add the workflow and run it from the Actions tab.
-   - Keep `mode: check` for the first run: the drift report lists everything an apply would change or delete, and nothing is written.
-   - Read the report. An apply deletes undeclared labels, autolinks, collaborators, Actions variables, and Copilot agents variables.
-   - Drop the `mode: check` line once the report says what you expect. [Run check mode first](docs/start/getting-started.md#4-run-check-mode-first) explains the drift output.
+3. Add the workflow and run it from the Actions tab. Keep `mode: check` for the first run: the drift report lists everything an apply would change or delete, and nothing is written. Read the report: an apply deletes undeclared labels, autolinks, collaborators, Actions variables, and Copilot agents variables. Drop the `mode: check` line once the report says what you expect; [Run check mode first](docs/start/getting-started.md#4-run-check-mode-first) explains the drift output.
 
    ```yaml
    # .github/workflows/settings.yml
