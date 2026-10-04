@@ -13,8 +13,8 @@ live_state:
     prod:
       name: prod
       protection_rules:
-        - id: 3736
-          node_id: MDQ6R2F0ZTM3MzY=
+        - id: 8101
+          node_id: MDQ6R2F0ZTgxMDE=
           type: wait_timer
           wait_timer: 15
       deployment_branch_policy: null

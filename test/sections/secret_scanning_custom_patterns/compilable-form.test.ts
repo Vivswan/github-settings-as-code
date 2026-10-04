@@ -150,109 +150,266 @@ describe("compilableForm", () => {
     ["an extended-mode flag inside a class", "[(?x)]foo # )\n"],
     ["an extended-mode flag inside a comment", "(?#(?x))foo # )\n"],
   ])("%s is refused: the pattern is not in extended mode", (_form, source) => {
-    expect(compileFailure(source)).toBeDefined();
+    // Refused for the `)` the hash did not comment out, never for the flag group itself.
+    expect(compileFailure(source)).toBe("Invalid regular expression: unmatched parentheses");
   });
 
-  test.each<[form: string, source: string]>([
-    ["an unbalanced group", "(key_[A-Z0-9]{32}"],
-    ["an unterminated character class", "[0-9"],
-    ["a dangling quantifier", "*token"],
-    ["a trailing backslash", "key\\"],
-    ["a range out of order", "[z-a]"],
-    ["a quantifier on a quantifier", "a+++"],
-    ["a lazy quantifier made possessive", "a??+"],
-    ["an unterminated inline comment", "(?#vendor"],
+  // The reason each row is refused for: the check's own wording for what PCRE refuses, or the flagless RegExp's message
+  // for what the translated form still fails to compile as; a row refused for another reason fails.
+  test.each<[form: string, source: string, reason: string]>([
+    ["an unbalanced group", "(key_[A-Z0-9]{32}", "Invalid regular expression: missing )"],
+    [
+      "an unterminated character class",
+      "[0-9",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
+    ["a dangling quantifier", "*token", "quantifier does not follow a repeatable item"],
+    ["a trailing backslash", "key\\", "Invalid regular expression: \\ at end of pattern"],
+    [
+      "a range out of order",
+      "[z-a]",
+      "Invalid regular expression: range out of order in character class",
+    ],
+    ["a quantifier on a quantifier", "a+++", "quantifier does not follow a repeatable item"],
+    ["a lazy quantifier made possessive", "a??+", "quantifier does not follow a repeatable item"],
+    ["an unterminated inline comment", "(?#vendor", "missing ) after (?# comment"],
     // A control verb is read at the start of the pattern only; past it, `(*` is a group opening and a dangling star.
-    ["a control verb after the start", "key(*UTF8)"],
-    ["a control verb after a comment, which is not the start", "(?#c)(*UTF8)key"],
-    ["a control verb Hyperscan does not know", "(*CRLF)key"],
-    ["a named group left unbalanced after translation", "(?P<t>key_[0-9"],
+    [
+      "a control verb after the start",
+      "key(*UTF8)",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a control verb after a comment, which is not the start",
+      "(?#c)(*UTF8)key",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a control verb Hyperscan does not know",
+      "(*CRLF)key",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a named group left unbalanced after translation",
+      "(?P<t>key_[0-9",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
     // The forms a rewrite could repair: each is a PCRE error the translated spelling must keep.
-    ["a lazy modifier on a possessive quantifier", "a++?"],
-    ["a possessive star made lazy", "a*+?"],
-    ["a brace quantifier after a possessive plus", "a++{2}"],
-    ["a quantifier on an option group", "a(?i)*"],
-    ["an option group quantified at the start", "(?i)*a"],
-    ["a Python-style group name PCRE refuses", "(?P<$>a)"],
-    ["a lazy modifier split from its possessive by an empty quote", "a++\\Q\\E?"],
-    ["a quantifier split from its option group by an empty quote", "a(?i)\\Q\\E*"],
+    [
+      "a lazy modifier on a possessive quantifier",
+      "a++?",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a possessive star made lazy", "a*+?", "quantifier does not follow a repeatable item"],
+    [
+      "a brace quantifier after a possessive plus",
+      "a++{2}",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a quantifier on an option group", "a(?i)*", "quantifier does not follow a repeatable item"],
+    [
+      "an option group quantified at the start",
+      "(?i)*a",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a Python-style group name PCRE refuses", "(?P<$>a)", "unrecognized character after (?"],
+    [
+      "a lazy modifier split from its possessive by an empty quote",
+      "a++\\Q\\E?",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a quantifier split from its option group by an empty quote",
+      "a(?i)\\Q\\E*",
+      "quantifier does not follow a repeatable item",
+    ],
     // PCRE refuses a duplicate group name in either spelling; a rewrite of the second `(?P<` would let the RegExp take it.
-    ["a Python-style group name used twice", "(?P<a>x)|(?P<a>y)"],
-    ["a Python-style group name a JavaScript-style group already took", "(?<a>x)(?P<a>y)"],
-    ["a Python-style group name a JavaScript-style group takes later", "(?P<a>x)|(?<a>y)"],
+    [
+      "a Python-style group name used twice",
+      "(?P<a>x)|(?P<a>y)",
+      "two named groups have the same name (a)",
+    ],
+    [
+      "a Python-style group name a JavaScript-style group already took",
+      "(?<a>x)(?P<a>y)",
+      "two named groups have the same name (a)",
+    ],
+    [
+      "a Python-style group name a JavaScript-style group takes later",
+      "(?P<a>x)|(?<a>y)",
+      "two named groups have the same name (a)",
+    ],
     // PCRE ignores a `\E` with no `\Q`, so the quantifier after it still follows the possessive or the option group.
-    ["a lazy modifier split from its possessive by a stray quote end", "a++\\E?"],
-    ["a quantifier split from its option group by a stray quote end", "a(?i)\\E*"],
+    [
+      "a lazy modifier split from its possessive by a stray quote end",
+      "a++\\E?",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a quantifier split from its option group by a stray quote end",
+      "a(?i)\\E*",
+      "quantifier does not follow a repeatable item",
+    ],
     // PCRE cannot repeat an anchor; a flagless RegExp reads `\A` as a literal A, so dropping the `+` would let `\A+` through.
-    ["a possessive quantifier on the start anchor", "\\A++"],
-    ["a possessive quantifier on the end anchor", "\\z*+"],
-    ["a plus on the start anchor", "\\A+"],
-    ["a question mark on the start anchor", "\\A?"],
-    ["a lazy plus on the start anchor", "\\A+?"],
-    ["a brace quantifier on the end anchor", "\\z{2}"],
-    ["a star on the end-or-newline anchor", "\\Z*"],
-    ["a plus on the match reset", "\\K+"],
-    ["a plus on the previous-match anchor", "\\G+"],
+    [
+      "a possessive quantifier on the start anchor",
+      "\\A++",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a possessive quantifier on the end anchor",
+      "\\z*+",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a plus on the start anchor", "\\A+", "quantifier does not follow a repeatable item"],
+    ["a question mark on the start anchor", "\\A?", "quantifier does not follow a repeatable item"],
+    ["a lazy plus on the start anchor", "\\A+?", "quantifier does not follow a repeatable item"],
+    [
+      "a brace quantifier on the end anchor",
+      "\\z{2}",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a star on the end-or-newline anchor", "\\Z*", "quantifier does not follow a repeatable item"],
+    ["a plus on the match reset", "\\K+", "quantifier does not follow a repeatable item"],
+    ["a plus on the previous-match anchor", "\\G+", "quantifier does not follow a repeatable item"],
     // PCRE reads a quantifier after `(`, `|`, `^`, `$` or a group opening as an error; a dropped token must not re-fuse `(` and `?` into a group.
-    ["a quantifier after a group opening split by a comment", "((?#c)?:a)"],
-    ["a quantifier after a group opening split by an empty quote", "(\\Q\\E?:a)"],
-    ["a named group opening split by a comment", "(?<(?#c)n>a)"],
-    ["a quantifier after an alternation bar", "a|*b"],
-    ["a quantifier on the caret anchor", "^+"],
-    ["a quantifier on a word boundary", "\\b+"],
-    ["a brace quantifier on a brace quantifier", "a{2}{3}"],
+    [
+      "a quantifier after a group opening split by a comment",
+      "((?#c)?:a)",
+      "quantifier does not follow a repeatable item",
+    ],
+    [
+      "a quantifier after a group opening split by an empty quote",
+      "(\\Q\\E?:a)",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a named group opening split by a comment", "(?<(?#c)n>a)", "unrecognized character after (?"],
+    [
+      "a quantifier after an alternation bar",
+      "a|*b",
+      "quantifier does not follow a repeatable item",
+    ],
+    ["a quantifier on the caret anchor", "^+", "quantifier does not follow a repeatable item"],
+    ["a quantifier on a word boundary", "\\b+", "quantifier does not follow a repeatable item"],
+    [
+      "a brace quantifier on a brace quantifier",
+      "a{2}{3}",
+      "quantifier does not follow a repeatable item",
+    ],
     // The `(?` openings PCRE may accept and Hyperscan refuses (branch reset, recursion, a Python-style backreference).
-    ["a branch reset group", "(?|a|b)"],
-    ["a recursion", "a(?R)?"],
-    ["a Python-style backreference", "(?P<n>a)(?P=n)"],
+    ["a branch reset group", "(?|a|b)", "unrecognized character after (?"],
+    ["a recursion", "a(?R)?", "unrecognized character after (?"],
+    ["a Python-style backreference", "(?P<n>a)(?P=n)", "unrecognized character after (?"],
     // PCRE refuses a group name declared twice in any spelling; V8 takes it across alternatives since Node 24.
-    ["a JavaScript-style group name used twice across alternatives", "(?<a>x)|(?<a>y)"],
+    [
+      "a JavaScript-style group name used twice across alternatives",
+      "(?<a>x)|(?<a>y)",
+      "two named groups have the same name (a)",
+    ],
     // PCRE reads `\\c` with the printable ASCII character after it, and refuses it at the end or before any other.
-    ["a control escape at the end of the pattern", "\\c"],
-    ["a control escape at the end of the pattern, after text", "a\\c"],
-    ["a control escape before a tab", "\\c\t"],
+    [
+      "a control escape at the end of the pattern",
+      "\\c",
+      "\\c needs a printable ASCII character after it",
+    ],
+    [
+      "a control escape at the end of the pattern, after text",
+      "a\\c",
+      "\\c needs a printable ASCII character after it",
+    ],
+    ["a control escape before a tab", "\\c\t", "\\c needs a printable ASCII character after it"],
     // PCRE refuses a code point above U+10FFFF; the fixed BMP literal stands in only up to there.
-    ["a braced hex escape above the last code point", "\\x{110000}"],
-    ["a braced octal escape above the last code point", "\\o{77777777}"],
-    ["a braced hex escape far above the last code point", "\\x{FFFFFFFFFFFF}"],
+    [
+      "a braced hex escape above the last code point",
+      "\\x{110000}",
+      "\\x{110000} is above U+10FFFF",
+    ],
+    [
+      "a braced octal escape above the last code point",
+      "\\o{77777777}",
+      "\\o{77777777} is above U+10FFFF",
+    ],
+    [
+      "a braced hex escape far above the last code point",
+      "\\x{FFFFFFFFFFFF}",
+      "\\x{FFFFFFFFFFFF} is above U+10FFFF",
+    ],
     // PCRE reads the `]` as a literal, so the class never closes; a flagless RegExp would read an empty class.
-    ["an empty class", "[]"],
-    ["a class whose literal bracket starts a range out of order, split by a comment", "[]z-(?#x)]"],
-    ["a class whose POSIX member is followed by a range out of order", "[[:alpha:]z-(?#x)]"],
-    ["a class whose only member is a stray quote end", "[\\E]"],
+    [
+      "an empty class",
+      "[]",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
+    [
+      "a class whose literal bracket starts a range out of order, split by a comment",
+      "[]z-(?#x)]",
+      "Invalid regular expression: range out of order in character class",
+    ],
+    [
+      "a class whose POSIX member is followed by a range out of order",
+      "[[:alpha:]z-(?#x)]",
+      "Invalid regular expression: range out of order in character class",
+    ],
+    [
+      "a class whose only member is a stray quote end",
+      "[\\E]",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
     // The digits after the drop are members of their own, so the range they start runs backwards.
-    ["an octal zero split from a reversed range by a stray quote end", "[\\0\\E40-!]"],
-    ["a hex escape with no digit split from a reversed range by a stray quote end", "[\\x\\E20-!]"],
-    ["a class octal split from a reversed range by a stray quote end", "[\\1\\E0-!]"],
+    [
+      "an octal zero split from a reversed range by a stray quote end",
+      "[\\0\\E40-!]",
+      "Invalid regular expression: range out of order in character class",
+    ],
+    [
+      "a hex escape with no digit split from a reversed range by a stray quote end",
+      "[\\x\\E20-!]",
+      "Invalid regular expression: range out of order in character class",
+    ],
+    [
+      "a class octal split from a reversed range by a stray quote end",
+      "[\\1\\E0-!]",
+      "Invalid regular expression: range out of order in character class",
+    ],
     // PCRE and Hyperscan both refuse a malformed code point escape; a flagless RegExp reads an x, an o, or a c.
-    ["a braced hex escape with non-hex digits", "\\x{ZZ}"],
-    ["a braced hex escape left open", "\\x{"],
-    ["a braced octal escape with a non-octal digit", "\\o{8}"],
-    ["an octal escape without its braces", "\\o"],
-    ["a JavaScript-style group name PCRE refuses", "(?<$>a)"],
+    [
+      "a braced hex escape with non-hex digits",
+      "\\x{ZZ}",
+      "non-hex character or missing } in \\x{}",
+    ],
+    ["a braced hex escape left open", "\\x{", "non-hex character or missing } in \\x{}"],
+    [
+      "a braced octal escape with a non-octal digit",
+      "\\o{8}",
+      "non-octal character or missing braces in \\o{}",
+    ],
+    ["an octal escape without its braces", "\\o", "non-octal character or missing braces in \\o{}"],
+    ["a JavaScript-style group name PCRE refuses", "(?<$>a)", "unrecognized character after (?"],
+    ["a group opening no spelling knows", "(?$a)", "unrecognized character after (?"],
+    [
+      "a JavaScript-style group name used twice in sequence",
+      "(?<a>x)(?<a>y)",
+      "two named groups have the same name (a)",
+    ],
     // The caret after the empty quote negates, so the `]` is the first member and the class never closes.
-    ["a class negated after an empty quote, never closed", "[\\Q\\E^]"],
+    [
+      "a class negated after an empty quote, never closed",
+      "[\\Q\\E^]",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
     // The quote closes before the `)`, so the comment opening is text and the parenthesis is unmatched.
-    ["a quote closed inside a comment opening", "\\Q(?#\\E)"],
+    [
+      "a quote closed inside a comment opening",
+      "\\Q(?#\\E)",
+      "Invalid regular expression: unmatched parentheses",
+    ],
     // The quote runs to the end of the pattern, swallowing the `]`, in PCRE as here.
-    ["a quote opened inside a class and never closed", "[\\Qx]"],
-  ])("%s is refused after translation", (_form, source) => {
-    expect(compileFailure(source)).toBeDefined();
-  });
-});
-
-describe("the check's own reasons, as the pattern refusal renders them", () => {
-  // PCRE's wording for what it refuses; the RegExp engine's own message passes through for the rest and is not pinned.
-  test.each<[source: string, reason: string]>([
-    ["*a", "quantifier does not follow a repeatable item"],
-    ["\\x{ZZ}", "non-hex character or missing } in \\x{}"],
-    ["\\o{8}", "non-octal character or missing braces in \\o{}"],
-    ["\\c", "\\c needs a printable ASCII character after it"],
-    ["\\x{110000}", "\\x{110000} is above U+10FFFF"],
-    ["(?#x", "missing ) after (?# comment"],
-    ["(?$a)", "unrecognized character after (?"],
-    ["(?<a>x)(?<a>y)", "two named groups have the same name (a)"],
-  ])("%s is refused as %s", (source, reason) => {
+    [
+      "a quote opened inside a class and never closed",
+      "[\\Qx]",
+      "Invalid regular expression: missing terminating ] for character class",
+    ],
+  ])("%s is refused after translation", (_form, source, reason) => {
     expect(compileFailure(source)).toBe(reason);
   });
 });

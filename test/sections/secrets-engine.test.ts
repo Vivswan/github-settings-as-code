@@ -217,11 +217,10 @@ describe("planSecrets and the execution-time resolver", () => {
       drift: [],
       change: deletion.change,
     });
-    const scope: Pick<SecretsPlanScope<Put, Remove>, "remove"> = {
+    ({
       // @ts-expect-error the remove builder must return the remove-role operation
       remove: swapped,
-    };
-    expect(typeof scope.remove).toBe("function");
+    }) satisfies Pick<SecretsPlanScope<Put, Remove>, "remove">;
   });
 
   test("a builder cannot demand a facet the engine never supplies", () => {
@@ -233,11 +232,10 @@ describe("planSecrets and the execution-time resolver", () => {
       drift: [],
       change: `${write.change} ${write.keyId}`,
     });
-    const scope: Pick<SecretsPlanScope<Put, Put>, "put"> = {
+    ({
       // @ts-expect-error the engine supplies no keyId facet
       put: demanding,
-    };
-    expect(typeof scope.put).toBe("function");
+    }) satisfies Pick<SecretsPlanScope<Put, Put>, "put">;
   });
 
   test("an empty declaration plans nothing and never reads the sealing key", async () => {
@@ -258,13 +256,12 @@ describe("the section context arms", () => {
   // Reference VALIDATION lives in the engine (src/engine/secrets.ts + secret-refs.ts) and runs before any section; the context ARMS are
   // compiler-enforced.
   test("a check-mode context carrying a resolver does not compile", () => {
-    // @ts-expect-error the check arm pins resolveSecret to never
-    const checkCtx: SectionContext = {
+    ({
       api: new MockApi({}),
       repo: { owner: "o", name: "r", slug: "o/r" },
       check: true,
       resolveSecret: (reference: string): string => reference,
-    };
-    expect(checkCtx.check).toBe(true);
+      // @ts-expect-error the check arm pins resolveSecret to never
+    }) satisfies SectionContext;
   });
 });

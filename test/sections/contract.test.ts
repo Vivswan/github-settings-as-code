@@ -925,7 +925,6 @@ describe("planContext read port", () => {
       ok({ error: { status: 500, message: "Internal Server Error", body: "" } }),
     );
     // The control: the same status on a plain read classifies through failureFor.
-    expect(typeof ctx.read.plain.call).toBe("function");
     expect(await ctx.read.plain.tryCall(z.unknown())).toEqual(
       err({
         kind: "server-error",
@@ -953,7 +952,6 @@ describe("planContext read port", () => {
     const ctx = planContext(both, new MockApi({}), REPO);
     // @ts-expect-error the denied posture's call is not offered under advisory
     ctx.read.probe.call;
-    expect(typeof ctx.read.probe.tryCall).toBe("function");
   });
 
   test("an execution-phase read demands the ExecTools token only a thunk holds, REST and GraphQL alike", async () => {

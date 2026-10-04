@@ -1298,10 +1298,10 @@ describe("environments convergence", () => {
         prod: [
           {
             name: "DEPLOY_TOKEN",
-            created_at: "2019-08-10T14:59:22Z",
-            updated_at: "2019-08-10T14:59:22Z",
+            created_at: "2001-02-03T04:05:06Z",
+            updated_at: "2001-02-03T04:05:06Z",
           },
-          { name: "KEPT", created_at: "2019-08-10T14:59:22Z", updated_at: "2019-08-10T14:59:22Z" },
+          { name: "KEPT", created_at: "2001-02-03T04:05:06Z", updated_at: "2001-02-03T04:05:06Z" },
         ],
       },
       environment_branch_policies: {

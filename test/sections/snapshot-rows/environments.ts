@@ -10,21 +10,21 @@ export const row: Row = {
   live: {
     environments: {
       production: {
-        id: 161088068,
+        id: 900000001,
         name: "production",
         url: "https://api.github.com/repos/o/r/environments/production",
         html_url: "https://github.com/o/r/deployments/activity_log?environments_filter=production",
         ...STAMPS,
         can_admins_bypass: true,
         protection_rules: [
-          { id: 3736, node_id: "MDQ6R2F0ZTM3MzY=", type: "wait_timer", wait_timer: 30 },
+          { id: 8101, node_id: "MDQ6R2F0ZTgxMDE=", type: "wait_timer", wait_timer: 30 },
           {
-            id: 3755,
-            node_id: "MDQ6R2F0ZTM3NTU=",
+            id: 8102,
+            node_id: "MDQ6R2F0ZTgxMDI=",
             type: "required_reviewers",
             prevent_self_review: true,
             reviewers: [
-              { type: "User", reviewer: { login: "octocat", id: 583231 } },
+              { type: "User", reviewer: { login: "octocat", id: 100001 } },
               { type: "Team", reviewer: { slug: "platform", id: 42 } },
             ],
           },
@@ -85,7 +85,7 @@ export const row: Row = {
         wait_timer: 30,
         prevent_self_review: true,
         reviewers: [
-          { type: "User", id: 583231 },
+          { type: "User", id: 100001 },
           { type: "Team", id: 42 },
         ],
         deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
