@@ -9,11 +9,11 @@ import { withTempDir } from "../temp-dir.js";
 describe("resolveCentralTargets", () => {
   test("reads owner-shorthand and owner/name files, warns on strays", () => {
     // The walk sorts directory entries, so the order is fixed: top-level files first, then each owner directory.
-    expect(resolveCentralTargets("test/fixtures/repos", "viv")).toEqual(
+    expect(resolveCentralTargets("test/fixtures/repos", "example-org")).toEqual(
       ok({
         targets: [
           {
-            slug: "viv/api",
+            slug: "example-org/api",
             source: "central",
             origin: "test/fixtures/repos/api.yml",
             filePath: "test/fixtures/repos/api.yml",
@@ -71,7 +71,7 @@ describe("resolveCentralTargets", () => {
   });
 
   test("a missing dir is its own problem", () => {
-    expect(resolveCentralTargets("test/fixtures/nope", "viv")).toEqual(
+    expect(resolveCentralTargets("test/fixtures/nope", "example-org")).toEqual(
       err({ code: "repos-dir-missing", reposDir: "test/fixtures/nope" }),
     );
   });

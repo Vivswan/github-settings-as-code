@@ -22,7 +22,7 @@ describe("excludeMatches", () => {
     ["regex metacharacters are literal", "a.b", "o/axb", false],
     ["matching is case-insensitive", "TMP-*", "o/tmp-x", true],
     ["a pattern with a slash matches the full slug", "octo/*", "octo/anything", true],
-    ["a pattern with a slash matches the full slug", "octo/*", "viv/anything", false],
+    ["a pattern with a slash matches the full slug", "octo/*", "example-org/anything", false],
     ["a pattern without a slash matches the name only", "web*", "weborg/api", false],
     ["a pattern without a slash matches the name only", "web*", "anyowner/web-x", true],
   ])("%s: %p against %p is %p", (_rule, pattern, slug, matches) => {
