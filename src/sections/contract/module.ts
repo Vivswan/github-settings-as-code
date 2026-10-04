@@ -130,7 +130,7 @@ export interface KeyedListLayering {
    */
   readonly removalPaths?: readonly string[];
   /**
-   * A NESTED list's `_undeclared` default (an environment's variables), the last fallback engine/layers.ts resolves a
+   * A NESTED list's `_undeclared` default (an environment's variables), the last fallback engine/undeclared.ts resolves a
    * nested wrapper without a policy to; absent on a nested list that takes no knob (a ruleset's rules, reviewers).
    * test/sections/registry.test.ts pins it to the nested wrappers the schema declares.
    */
@@ -1025,7 +1025,7 @@ export type EntryOf<T> = T extends readonly (infer E)[]
 
 /**
  * A validated document arrives with every knobbed list in wrapper form and its policy explicit
- * (resolveUndeclaredPolicies in engine/layers.ts runs at the fold and in the validator), so at run time the
+ * (resolveUndeclaredPolicies in engine/undeclared.ts runs at the fold and in the validator), so at run time the
  * wrapper's `_undeclared` is what a planner reads. `defaultPolicy` is REQUIRED all the same: it is the list's
  * own default, which the drift prose names and which a plan() called on a raw declaration (a test) falls back
  * to, and a nested list cannot derive it from its section's undeclaredDefault. Entries are returned by reference.

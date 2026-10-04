@@ -9,7 +9,7 @@ import { renamedKeyError } from "./renamed-key.js";
 
 /**
  * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
- * engine/layers.ts resolves it and re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
+ * engine/undeclared.ts resolves it and engine/layers.ts re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
  */
 export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
 

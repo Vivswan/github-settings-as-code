@@ -78,7 +78,7 @@ describe("section permissions", () => {
   });
 
   test("every nested list whose wrapper takes _undeclared declares the default the resolution fills, and no other does", () => {
-    // engine/layers.ts resolves a nested list only where its declaration carries undeclaredDefault: a knobbed nested
+    // engine/undeclared.ts resolves a nested list only where its declaration carries undeclaredDefault: a knobbed nested
     // list without one would reach the planner unresolved, and a default on a bare list would wrap what the schema refuses.
     // The one sibling a probe entry needs to validate: declared branch policies require the flag that enables them.
     const siblings: Partial<Record<(typeof LIST_SECTIONS)[number], Record<string, unknown>>> = {

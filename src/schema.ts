@@ -78,7 +78,7 @@ export const SettingsFile = z
     custom_properties: knobbed(CustomPropertyConfig).optional(),
     deploy_keys: knobbed(DeployKeyConfig).optional(),
     secret_scanning_custom_patterns: knobbed(SecretScanningPatternConfig).optional(),
-    // The non-section keys, the document's directives (engine/layers.ts): `_layering` steers the fold and never reaches
+    // The non-section keys, the document's directives (engine/directives.ts): `_layering` steers the fold and never reaches
     // the apply path; `_undeclared` is resolved into every list's wrapper, after the fold or by the validator.
     _layering: LayeringSchema.optional(),
     _undeclared: UndeclaredPolicySchema.optional(),
