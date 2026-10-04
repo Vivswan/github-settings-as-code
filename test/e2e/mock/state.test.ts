@@ -538,7 +538,17 @@ describe("bypassUser", () => {
       "a sparse seed keeps its login and takes the caller's id",
       { login: "dave" },
       42,
-      { id: 42, login: "dave", html_url: "https://github.com/dave" },
+      {
+        id: 42,
+        node_id: "MDQ6VXNlcj42",
+        avatar_url: "https://avatars.githubusercontent.com/u/42?v=4",
+        gravatar_id: "",
+        url: "https://api.github.com/users/dave",
+        html_url: "https://github.com/dave",
+        type: "User",
+        site_admin: false,
+        login: "dave",
+      },
     ],
     [
       "a seeded id wins over the caller's and drives the derived fields",
@@ -548,25 +558,53 @@ describe("bypassUser", () => {
         id: 5,
         node_id: "MDQ6VXNlcj5",
         avatar_url: "https://avatars.githubusercontent.com/u/5?v=4",
+        gravatar_id: "",
+        url: "https://api.github.com/users/x",
+        html_url: "https://github.com/x",
+        type: "User",
+        site_admin: false,
+        login: "x",
       },
     ],
     [
       "a seed's own scaffold fields win over the defaults",
       { login: "bot", type: "Bot", site_admin: true, url: "https://example.test/bot" },
       7,
-      { type: "Bot", site_admin: true, url: "https://example.test/bot" },
+      {
+        id: 7,
+        node_id: "MDQ6VXNlcj7",
+        avatar_url: "https://avatars.githubusercontent.com/u/7?v=4",
+        gravatar_id: "",
+        url: "https://example.test/bot",
+        html_url: "https://github.com/bot",
+        type: "Bot",
+        site_admin: true,
+        login: "bot",
+      },
     ],
   ])("%s", (_name, seed, id, expected) => {
-    expect(bypassUser(seed, id)).toMatchObject(expected);
+    expect(bypassUser(seed, id)).toEqual(expected);
   });
 
-  test("buildState completes pull_bypass_list seeds to the served shape", () => {
+  test("buildState completes pull_bypass_list seeds to the served shape under a minted id", () => {
     const state = buildState({ pull_bypass_list: [{ login: "dave" }] }, "org");
-    const user = state.pull_bypass_list[0] as Record<string, unknown>;
-    expect(user.login).toBe("dave");
-    expect(typeof user.id).toBe("number");
-    expect(user.type).toBe("User");
-    expect(user.url).toBe("https://api.github.com/users/dave");
+    const id = (state.pull_bypass_list[0] as { id?: unknown } | undefined)?.id;
+    if (typeof id !== "number") {
+      throw new Error(`the served bypass user carries no numeric id: ${JSON.stringify(id)}`);
+    }
+    expect(state.pull_bypass_list).toEqual([
+      {
+        id,
+        node_id: `MDQ6VXNlcj${id}`,
+        avatar_url: `https://avatars.githubusercontent.com/u/${id}?v=4`,
+        gravatar_id: "",
+        url: "https://api.github.com/users/dave",
+        html_url: "https://github.com/dave",
+        type: "User",
+        site_admin: false,
+        login: "dave",
+      },
+    ]);
   });
 });
 

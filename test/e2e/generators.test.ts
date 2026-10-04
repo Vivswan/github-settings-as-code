@@ -1329,10 +1329,12 @@ describe("merge oracle against the curated merge scenarios", () => {
   const files = collectYmlFiles(join(import.meta.dir, "scenarios")).filter((file) =>
     basename(file).startsWith("render-"),
   );
-
-  test("the corpus carries the three curated merge scenarios", () => {
-    expect(files.length).toBeGreaterThanOrEqual(3);
-  });
+  // A test.each over an emptied corpus runs nothing; the guard fails the file by name instead.
+  if (files.length < 3) {
+    throw new Error(
+      `the e2e scenario corpus carries ${files.length} render-* scenario(s); the three curated merge scenarios are the floor`,
+    );
+  }
 
   test.each(files.map((file) => [basename(file), file]))(
     "%s: the oracle's fold reproduces expect.rendered",
@@ -1353,7 +1355,7 @@ describe("merge oracle against the curated merge scenarios", () => {
         expect(prediction).toEqual({ kind: "refused", layer: "settings.yml" });
         return;
       }
-      // Without a pinned document this comparison is vacuous; the corpus count above cannot tell.
+      // Without a pinned document this comparison is vacuous; the corpus guard above cannot tell.
       if (scenario.expect.rendered === undefined) {
         throw new Error(`${file}: a curated render scenario must pin expect.rendered`);
       }

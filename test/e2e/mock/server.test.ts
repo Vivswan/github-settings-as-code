@@ -5,11 +5,12 @@ import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../sections/teams/mock.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
+import type { Scenario } from "../schema.js";
 import { assertFaultKeys } from "./chaos.js";
 import { RAW_CONTENTS_ACCEPT } from "./core-paths.js";
 import { declaredStatuses, statusAllowed } from "./dispatch.js";
 import { assertHandlerCompleteness } from "./handlers.js";
-import { startMockServer } from "./server.js";
+import { type ServerOptions, startMockServer } from "./server.js";
 import {
   AUTH,
   call,
@@ -238,263 +239,286 @@ describe("denial style bodies", () => {
 });
 
 describe("denial barrier", () => {
-  test("a read-grade mask + fail policy + denied write is NOT a violation (preflight only proves reads)", async () => {
-    // issues:read passes the list READ, so preflight (fail policy) succeeds: it proves only reads.
-    // The engine then legitimately sends the create, which the barrier must not read as broken sequencing.
-    const h = await start(scenario({ token_permissions: { issues: "read" } }));
-    const read = await call(h, "GET", labelsPath);
-    expect(read.status).toBe(200);
-    const write = await call(h, "POST", labelsPath, { body: { name: "x" } });
-    expect(write.status).toBe(403);
-    expect(h.violations).toHaveLength(0);
+  /** The violation the barrier raises for a write that follows a fatal denied read of the same target and section. */
+  const aborted = (
+    write: string,
+    section: string,
+    posture: "denied" | "absent",
+    style: 403 | 404 | "fine_grained",
+  ): string =>
+    `write to ${write} reached the server after a fatal denied read in the same target+section; the engine's section loop should have aborted at that read (section "${section}" has the "${posture}" 404 posture, style ${style})`;
+
+  const repoPath = `/repos/${OWNER}/${REPO}`;
+  const envPath = `/repos/${OWNER}/${REPO}/environments/prod`;
+  const describeRepo = { description: "x" };
+  /** One explicit multi-run target the token cannot administer, under the given private-repos input. */
+  const unreadable = (target: string, privateRepos: "redact" | "show"): Partial<Scenario> => ({
+    inputs: { on_missing_permission: "fail", private_repos: privateRepos },
+    repos: {
+      [target]: {
+        settings: { repository: { has_issues: true } },
+        permissions: { administration: "none" },
+      },
+    },
   });
 
-  test("a denied write to an 'absent'-semantics section under fine_grained is NOT a violation", async () => {
-    const h = await start(scenario({ token_permissions: { environments: "none" } }));
-    await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("a denied write to a 'denied'-semantics section under the WARN policy is NOT a violation", async () => {
-    // Under warn there is no preflight (orchestrate gates it on fail), so a "denied"-semantics
-    // section whose first apply op is a write legitimately sends it and takes the 403.
-    const h = await start(
-      scenario({
+  type Step = [method: string, path: string, body?: unknown];
+  /** Every response status and every logged deniedBy in request order, then the violations the run collected. */
+  type Outcome = { statuses: number[]; deniedBy: (string | undefined)[]; violations: string[] };
+  const CASES: Array<{
+    name: string;
+    scenario: Partial<Scenario>;
+    options?: ServerOptions;
+    steps: Step[];
+    expected: Outcome;
+  }> = [
+    {
+      // issues:read passes the list READ, so the fail-policy preflight succeeds: it proves only reads. The engine
+      // then legitimately sends the create, which the barrier must not read as broken sequencing.
+      name: "a read-grade mask under fail: the preflight proves reads only, so the denied create is not a violation",
+      scenario: { token_permissions: { issues: "read" } },
+      steps: [
+        ["GET", labelsPath],
+        ["POST", labelsPath, { name: "x" }],
+      ],
+      expected: { statuses: [200, 403], deniedBy: [undefined, "issues"], violations: [] },
+    },
+    {
+      name: "a denied write to an absent-posture section under fine_grained does not arm the barrier",
+      scenario: { token_permissions: { environments: "none" } },
+      steps: [["PUT", envPath, {}]],
+      expected: { statuses: [403], deniedBy: ["environments"], violations: [] },
+    },
+    {
+      // Under warn there is no preflight (orchestrate gates it on fail), so a denied-posture section whose first
+      // apply op is a write legitimately sends it and takes the 403.
+      name: "a denied-posture section under warn: no preflight, so the first-op denied write is not a violation",
+      scenario: {
         inputs: { on_missing_permission: "warn" },
         token_permissions: { administration: "none" },
-      }),
-    );
-    const res = await call(h, "PATCH", `/repos/${OWNER}/${REPO}`, { body: { description: "x" } });
-    expect(res.status).toBe(403); // fine_grained denied write
-    const log = h.requests.find((r) => r.method === "PATCH");
-    expect(log?.deniedBy).toBe("administration");
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("a denied write AFTER a denied read in the same section IS a violation (fail policy)", async () => {
-    // Under fail, preflight reads first; a none grade denies it (fatal), so an apply write afterwards proves broken sequencing.
-    const h = await start(
-      scenario({
+      },
+      steps: [["PATCH", repoPath, describeRepo]],
+      expected: { statuses: [403], deniedBy: ["administration"], violations: [] },
+    },
+    {
+      // Under fail, preflight reads first; a none grade denies it (fatal), so an apply write afterwards proves broken sequencing.
+      name: "a denied write after a fatal denied read of the same section under fail is a violation",
+      scenario: {
         inputs: { on_missing_permission: "fail" },
         token_permissions: { issues: "none" },
-      }),
-    );
-    await call(h, "GET", labelsPath); // labels.list denied, fatal
-    await call(h, "POST", labelsPath, { body: { name: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("a denied ADVISORY read (branches.branchProbe) does NOT arm the barrier", async () => {
-    // branches.ts treats the branch probe as advisory (only a definitive 404 matters) and PUTs
-    // regardless, so a denied probe must NOT arm: the PUT is the engine's legitimate write. Fuzz
-    // seed 610725843 false-flagged this. Under the fine_grained style the denied probe answers the
-    // 404 the probe declares as tolerated, which never arms on its own; the 403 style makes the
-    // advisory exemption the only thing holding the barrier.
-    const branch = "main-0";
-    const h = await start(
-      scenario({
+      },
+      steps: [
+        ["GET", labelsPath],
+        ["POST", labelsPath, { name: "x" }],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["issues", "issues"],
+        violations: [aborted(`POST ${labelsPath}`, "labels", "denied", "fine_grained")],
+      },
+    },
+    {
+      // branches.ts treats the branch probe as advisory (only a definitive 404 matters) and PUTs regardless, so a denied
+      // probe must NOT arm: the PUT is the engine's legitimate write. Fuzz seed 610725843 false-flagged this. Under the
+      // fine_grained style the denied probe answers the 404 the probe declares as tolerated, which never arms on its
+      // own; the 403 style makes the advisory exemption the only thing holding the barrier.
+      name: "a denied advisory read (the branch probe) does not arm the barrier",
+      scenario: {
         denial_style: 403,
         inputs: { on_missing_permission: "warn" },
         token_permissions: { contents: "none", administration: "read" },
-      }),
-    );
-    await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`);
-    const probe = await call(h, "GET", `/repos/${OWNER}/${REPO}/branches/${branch}`); // advisory, denied
-    const put = await call(h, "PUT", `/repos/${OWNER}/${REPO}/branches/${branch}/protection`, {
-      body: {},
-    });
-    // Controls: both denials were reached, so the barrier had a denied write to judge.
-    expect(probe.status).toBe(403);
-    expect(h.requests[1]?.deniedBy).toBe("contents");
-    expect(put.status).toBe(403);
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("the visibility probe (expected, first repository.get) does NOT arm the barrier", async () => {
-    // In a redact multi-repo run an EXPLICIT target's first repository.get is the visibility probe,
-    // issued before the target loop, so a denied probe is not a section read.
-    const target = "e2e-owner/svc-probe";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-    );
-    await call(h, "GET", `/repos/${target}`); // probe (expected), exempt
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("a LATER denied repository.get (the section's own read) DOES arm the barrier", async () => {
-    // The exemption is probe-only: once the probe is served, the next denied repository.get IS the
-    // repository section's check-mode read.
-    const target = "e2e-owner/svc-probe";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-    );
-    await call(h, "GET", `/repos/${target}`); // probe (expected), exempt
-    await call(h, "GET", `/repos/${target}`); // section read, arms
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("NO probe under private-repos: show - the first repository.get arms the barrier", async () => {
-    // show never probes, so a blanket first-repository.get exemption would hide this regression.
-    const target = "e2e-owner/svc-show";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "show" },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-    );
-    await call(h, "GET", `/repos/${target}`); // section read (no probe), arms
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("NO probe for the admin repo (self carve-out) - the first repository.get arms", async () => {
-    // The self carve-out never probes GITHUB_REPOSITORY, even in a redact multi-run.
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        repos: {
-          [`${OWNER}/${REPO}`]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-    );
-    await call(h, "GET", `/repos/${OWNER}/${REPO}`); // section read (self, no probe), arms
-    await call(h, "PATCH", `/repos/${OWNER}/${REPO}`, { body: { description: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("NO probe for a discovery-supplied slug - the first repository.get arms", async () => {
-    // A slug whose visibility came from /user/repos discovery is never probed, even in a redact run.
-    const target = "e2e-owner/disc-x";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        discovery: { pool: [{ slug: target, visibility: "private" }], inputs: {} },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-    );
-    await call(h, "GET", `/repos/${target}`); // section read (discovered, no probe), arms
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("a faulted probe retry is still the probe (exempt), not a section read", async () => {
-    // A faulted probe is not delivered, so the slug is not marked seen and the retry is still the
-    // probe; marking seen before the fault barrier would misread the retry as the section read.
-    const target = "e2e-owner/svc-fault";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-      { faults: [{ key: "repository.get", kind: "rate_limit_403", times: 1 }] },
-    );
-    await call(h, "GET", `/repos/${target}`); // faulted probe (throttle), not delivered
-    await call(h, "GET", `/repos/${target}`); // probe retry, still exempt
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("an ALL-faulting probe exhausts its budget; the section read then arms", async () => {
-    // The probe gives up after its retry budget (3 wire attempts), and the exemption must expire
-    // with it: the 4th repository.get is the section's own denied read.
-    const target = "e2e-owner/svc-allfault";
-    const h = await start(
-      scenario({
-        inputs: { on_missing_permission: "fail", private_repos: "redact" },
-        repos: {
-          [target]: {
-            settings: { repository: { has_issues: true } },
-            permissions: { administration: "none" },
-          },
-        },
-      }),
-      { faults: [{ key: "repository.get", kind: "rate_limit_403", times: 3 }] },
-    );
-    await call(h, "GET", `/repos/${target}`); // probe attempt 1 (faulted)
-    await call(h, "GET", `/repos/${target}`); // probe attempt 2 (faulted)
-    await call(h, "GET", `/repos/${target}`); // probe attempt 3 (faulted) - budget spent
-    await call(h, "GET", `/repos/${target}`); // section read, delivered + denied, ARMS
-    await call(h, "PATCH", `/repos/${target}`, { body: { description: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("a first-op denied write under WARN + uniform 403 style is NOT a violation", async () => {
-    // Under warn there is no preflight in EITHER denial style. Fuzz seed 2151064002 flagged this.
-    const h = await start(
-      scenario({
+      },
+      steps: [
+        ["GET", `${repoPath}/branches/main-0/protection`],
+        ["GET", `${repoPath}/branches/main-0`],
+        ["PUT", `${repoPath}/branches/main-0/protection`, {}],
+      ],
+      expected: {
+        statuses: [404, 403, 403],
+        deniedBy: [undefined, "contents", "administration"],
+        violations: [],
+      },
+    },
+    {
+      // In a redact multi-repo run an EXPLICIT target's first repository.get is the visibility probe, issued before
+      // the target loop, so a denied probe is not a section read.
+      name: "the visibility probe (an explicit redact target's first repository.get) does not arm the barrier",
+      scenario: unreadable("e2e-owner/svc-probe", "redact"),
+      steps: [
+        ["GET", "/repos/e2e-owner/svc-probe"],
+        ["PATCH", "/repos/e2e-owner/svc-probe", describeRepo],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["administration", "administration"],
+        violations: [],
+      },
+    },
+    {
+      // The exemption is probe-only: once the probe is served, the next denied repository.get IS the repository
+      // section's check-mode read.
+      name: "a later denied repository.get (the section's own read) arms the barrier",
+      scenario: unreadable("e2e-owner/svc-probe", "redact"),
+      steps: [
+        ["GET", "/repos/e2e-owner/svc-probe"],
+        ["GET", "/repos/e2e-owner/svc-probe"],
+        ["PATCH", "/repos/e2e-owner/svc-probe", describeRepo],
+      ],
+      expected: {
+        statuses: [404, 404, 403],
+        deniedBy: ["administration", "administration", "administration"],
+        violations: [
+          aborted("PATCH /repos/e2e-owner/svc-probe", "repository", "denied", "fine_grained"),
+        ],
+      },
+    },
+    {
+      // show never probes, so a blanket first-repository.get exemption would hide this regression.
+      name: "no probe under private_repos: show, so the first repository.get arms the barrier",
+      scenario: unreadable("e2e-owner/svc-show", "show"),
+      steps: [
+        ["GET", "/repos/e2e-owner/svc-show"],
+        ["PATCH", "/repos/e2e-owner/svc-show", describeRepo],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["administration", "administration"],
+        violations: [
+          aborted("PATCH /repos/e2e-owner/svc-show", "repository", "denied", "fine_grained"),
+        ],
+      },
+    },
+    {
+      // The self carve-out never probes GITHUB_REPOSITORY, even in a redact multi-run.
+      name: "no probe for the admin repository (self carve-out), so its first repository.get arms the barrier",
+      scenario: unreadable(`${OWNER}/${REPO}`, "redact"),
+      steps: [
+        ["GET", repoPath],
+        ["PATCH", repoPath, describeRepo],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["administration", "administration"],
+        violations: [aborted(`PATCH ${repoPath}`, "repository", "denied", "fine_grained")],
+      },
+    },
+    {
+      // A slug whose visibility came from /user/repos discovery is never probed, even in a redact run.
+      name: "no probe for a discovery-supplied slug, so its first repository.get arms the barrier",
+      scenario: {
+        ...unreadable("e2e-owner/disc-x", "redact"),
+        discovery: { pool: [{ slug: "e2e-owner/disc-x", visibility: "private" }], inputs: {} },
+      },
+      steps: [
+        ["GET", "/repos/e2e-owner/disc-x"],
+        ["PATCH", "/repos/e2e-owner/disc-x", describeRepo],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["administration", "administration"],
+        violations: [
+          aborted("PATCH /repos/e2e-owner/disc-x", "repository", "denied", "fine_grained"),
+        ],
+      },
+    },
+    {
+      // A faulted probe is not delivered, so the slug is not marked seen and the retry is still the probe; marking
+      // seen before the fault barrier would misread the retry as the section read.
+      name: "a faulted probe's retry is still the exempt probe, not a section read",
+      scenario: unreadable("e2e-owner/svc-fault", "redact"),
+      options: { faults: [{ key: "repository.get", kind: "rate_limit_403", times: 1 }] },
+      steps: [
+        ["GET", "/repos/e2e-owner/svc-fault"],
+        ["GET", "/repos/e2e-owner/svc-fault"],
+        ["PATCH", "/repos/e2e-owner/svc-fault", describeRepo],
+      ],
+      expected: {
+        statuses: [403, 404, 403],
+        deniedBy: [undefined, "administration", "administration"],
+        violations: [],
+      },
+    },
+    {
+      // The probe gives up after its retry budget (3 wire attempts), and the exemption must expire with it: the 4th
+      // repository.get is the section's own denied read.
+      name: "an all-faulting probe spends its retry budget, and the repository.get after it arms the barrier",
+      scenario: unreadable("e2e-owner/svc-allfault", "redact"),
+      options: { faults: [{ key: "repository.get", kind: "rate_limit_403", times: 3 }] },
+      steps: [
+        ["GET", "/repos/e2e-owner/svc-allfault"],
+        ["GET", "/repos/e2e-owner/svc-allfault"],
+        ["GET", "/repos/e2e-owner/svc-allfault"],
+        ["GET", "/repos/e2e-owner/svc-allfault"],
+        ["PATCH", "/repos/e2e-owner/svc-allfault", describeRepo],
+      ],
+      expected: {
+        statuses: [403, 403, 403, 404, 403],
+        deniedBy: [undefined, undefined, undefined, "administration", "administration"],
+        violations: [
+          aborted("PATCH /repos/e2e-owner/svc-allfault", "repository", "denied", "fine_grained"),
+        ],
+      },
+    },
+    {
+      // Under warn there is no preflight in EITHER denial style. Fuzz seed 2151064002 flagged this.
+      name: "a first-op denied write under warn and the uniform 403 style is not a violation",
+      scenario: {
         denial_style: 403,
         inputs: { on_missing_permission: "warn" },
         token_permissions: { administration: "none" },
-      }),
-    );
-    const res = await call(h, "PATCH", `/repos/${OWNER}/${REPO}`, { body: { description: "x" } });
-    expect(res.status).toBe(403);
-    expect(h.violations).toHaveLength(0);
-  });
-
-  test("a denied write AFTER a denied read in the same section is a violation (warn policy too)", async () => {
-    // The engine aborts a section at a hard-denied read, so a later write for
-    // that section proves broken sequencing even under warn.
-    const h = await start(
-      scenario({
+      },
+      steps: [["PATCH", repoPath, describeRepo]],
+      expected: { statuses: [403], deniedBy: ["administration"], violations: [] },
+    },
+    {
+      // The engine aborts a section at a hard-denied read, so a later write for that section proves broken
+      // sequencing even under warn.
+      name: "a denied write after a fatal denied read of the same section under warn is a violation",
+      scenario: {
         denial_style: 403,
         inputs: { on_missing_permission: "warn" },
         token_permissions: { issues: "none" },
-      }),
-    );
-    await call(h, "GET", labelsPath); // denied read, not tolerated (403)
-    await call(h, "POST", labelsPath, { body: { name: "x" } });
-    expect(h.violations.some((v) => v.includes("should have aborted"))).toBe(true);
-  });
-
-  test("a tolerated fine_grained 404 read does not arm the write barrier", async () => {
-    // environments' probe tolerates 404, so the engine reads the denial as
-    // "absent" and legitimately writes; the barrier must not fire.
-    const h = await start(
-      scenario({
+      },
+      steps: [
+        ["GET", labelsPath],
+        ["POST", labelsPath, { name: "x" }],
+      ],
+      expected: {
+        statuses: [403, 403],
+        deniedBy: ["issues", "issues"],
+        violations: [aborted(`POST ${labelsPath}`, "labels", "denied", 403)],
+      },
+    },
+    {
+      // environments' probe tolerates 404, so the engine reads the denial as "absent" and legitimately writes.
+      name: "a tolerated fine_grained 404 read does not arm the barrier",
+      scenario: {
         inputs: { on_missing_permission: "warn" },
         token_permissions: { environments: "none" },
-      }),
-    );
-    await call(h, "GET", `/repos/${OWNER}/${REPO}/environments/prod`); // 404, tolerated
-    await call(h, "PUT", `/repos/${OWNER}/${REPO}/environments/prod`, { body: {} });
-    expect(h.violations).toHaveLength(0);
+      },
+      steps: [
+        ["GET", envPath],
+        ["PUT", envPath, {}],
+      ],
+      expected: {
+        statuses: [404, 403],
+        deniedBy: ["environments", "environments"],
+        violations: [],
+      },
+    },
+  ];
+
+  test.each(CASES)("$name", async ({ scenario: overrides, options, steps, expected }) => {
+    const h = await start(scenario(overrides), options);
+    const statuses: number[] = [];
+    for (const [method, path, body] of steps) {
+      statuses.push((await call(h, method, path, body === undefined ? {} : { body })).status);
+    }
+    expect({
+      statuses,
+      deniedBy: h.requests.map((r) => r.deniedBy),
+      violations: h.violations,
+    }).toEqual(expected);
   });
 
   test("a denied write does not mutate state (invariant holds under warn too)", async () => {
@@ -505,7 +529,7 @@ describe("denial barrier", () => {
       }),
     );
     await call(h, "POST", labelsPath, { body: { name: "x" } });
-    expect(singleState(h).labels).toHaveLength(0);
+    expect(singleState(h).labels).toEqual([]);
   });
 });
 
