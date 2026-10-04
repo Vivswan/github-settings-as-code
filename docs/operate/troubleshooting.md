@@ -10,19 +10,30 @@ Errors from this action are written to carry their own fix: the failing request,
 
 What you see: an error annotation naming the section, the denied request with its HTTP status, and advice starting "To fix, grant" that names the exact fine-grained PAT permission the section needs.
 
-What it means: the token lacks that section's grant. Each section's permission is listed in the [Sections table](../reference/sections.md). The default `GITHUB_TOKEN` cannot hold most of them (Administration in particular), so a missing or under-scoped PAT is the usual cause.
+What it means: the token lacks that section's grant. Each section's permission is listed in the [Sections table](../reference/sections.md). A missing or under-scoped PAT is the usual cause; [what to grant](../reference/permissions.md#what-to-grant) says why the default `GITHUB_TOKEN` is not enough.
 
-What to do: edit the PAT's permissions as the message says (see [Token permissions](../reference/permissions.md)). If you would rather skip sections the token cannot reach, set `on-missing-permission: warn`: denied sections are skipped with a warning instead of failing the run, and when nothing else drifts or fails the result is `partial` and the run stays green. The `required-sections` input names sections that must still fully apply even under `warn`.
+What to do: edit the PAT's permissions as the message says (see [Token permissions](../reference/permissions.md)). To skip sections the token cannot reach instead, set `on-missing-permission: warn`, with `required-sections` naming the ones that must still fully apply; [the denial policy](../reference/permissions.md#the-denial-policy) owns both inputs.
 
-One related surprise: under the default `on-missing-permission: fail`, an apply run probes every active section (each declared section the `sections` input selects; all of them when that input is unset) read-only before writing anything. If any probe is denied you get error annotations prefixed `preflight:` and nothing at all is applied, by design; the API has no transactions, so the barrier prevents a half-applied repository. See [Semantics](../reference/semantics.md).
+One related surprise: under the default `on-missing-permission: fail`, an apply run probes every active section read-only before writing anything ([the denial policy](../reference/permissions.md#the-denial-policy) says which sections are active). If any probe is denied you get error annotations prefixed `preflight:` and nothing at all is applied, by design; the API has no transactions, so the barrier prevents a half-applied repository. See [the preflight barrier](../reference/semantics.md#the-preflight-barrier).
 
 ## A 404 for something that exists
 
-Fine-grained tokens surface a missing Administration permission as a 404, not a 403, on admin endpoints; GitHub hides the resource rather than admit it exists. The action treats both statuses as permission errors, and a 404 denial appends "(a 404 here can also mean the resource does not exist)". Check the grant first. If the grant is right, check the resource: the repository slug, a workflow file path.
+A 404 has three readings.
 
-Where GitHub's response body names the definite meaning, the action reads the body instead of the status: the branch protection PUT's 404 "Branch not found" fails the `branches` section with "create the branch, or remove it from the settings file". That is never a permission denial, so `on-missing-permission: warn` does not skip it, and the outcome is the same whether or not the token also holds Contents (with Contents the section reads the missing branch off its probe and fails before the PUT).
+**A missing grant.** Fine-grained tokens surface a missing Administration permission as a 404, not a 403, on admin endpoints, because GitHub hides the resource rather than admit it exists; [how a denial surfaces](../reference/permissions.md#how-a-denial-surfaces) owns the rule. A 404 denial appends "(a 404 here can also mean the resource does not exist)".
 
-On the `secret_scanning_custom_patterns` endpoints a 404 has a third reading, which the denial message carries: secret scanning is not enabled for the repository (it requires GitHub Advanced Security on private repositories). Enabling scanning and declaring patterns cannot land in ONE apply under the default `on-missing-permission: fail`: the preflight barrier probes every active section read-only before anything is written, so the patterns list 404s and aborts the run before the `repository` section could enable scanning via `security_and_analysis`. Either enable scanning first (a separate run, or by hand in the repository's security settings), or set `on-missing-permission: warn` for the bootstrap run - the first apply then enables scanning and skips the patterns section with a warning, and the next apply converges.
+Check the grant first; if the grant is right, check the resource: the repository slug, a workflow file path.
+
+**A resource that is really missing.** Where GitHub's response body names the definite meaning, the action reads the body instead of the status. The branch protection PUT's 404 "Branch not found" fails the `branches` section with "create the branch, or remove it from the settings file".
+
+That is never a permission denial, so `on-missing-permission: warn` does not skip it. The outcome is the same whether or not the token also holds Contents: with Contents the section reads the missing branch off its probe and fails before the PUT.
+
+**Secret scanning not enabled.** On the `secret_scanning_custom_patterns` endpoints a 404 has a third reading, which the denial message carries: secret scanning is not enabled for the repository (it requires GitHub Advanced Security on private repositories).
+
+Enabling scanning and declaring patterns cannot land in ONE apply under the default `on-missing-permission: fail`. The preflight barrier above probes every active section read-only before anything is written, so the patterns list 404s and aborts the run before the `repository` section could enable scanning via `security_and_analysis`. Two ways out:
+
+- Enable scanning first: a separate run, or by hand in the repository's security settings.
+- Set `on-missing-permission: warn` for the bootstrap run: the first apply then enables scanning and skips the patterns section with a warning, and the next apply converges.
 
 ## A 412 on secret scanning custom patterns
 
@@ -34,7 +45,10 @@ What to do: re-run the workflow. The fresh run reads the current versions and co
 
 ## A 403 that is not about a grant
 
-Two other things arrive as 403. First, rate limiting: both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions. Second, feature policies: on a few endpoints a 403 means something other than the token. An org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's notes on the [coverage page](../reference/coverage.md#supported).
+Two other things arrive as 403:
+
+- **Rate limiting.** Both the primary limit and secondary (abuse) limits can be delivered as 403. The action recognizes these by the API's own message and reports them as rate limits, never as missing permissions.
+- **Feature policies.** On a few endpoints a 403 means something other than the token: an org- or enterprise-managed policy can lock the Actions cache limits, code scanning default setup needs Advanced Security on private repositories, and Git LFS can be disabled account-wide. For Git LFS the denial message itself carries a note saying so; for the others the caveat lives in that section's notes on the [coverage page](../reference/coverage.md#supported).
 
 ## Rate limited
 
@@ -71,8 +85,25 @@ The message says "The token was rejected as invalid or expired". This is not a p
 
 ## Turning on debug logging
 
-Every API call the action makes is traced as a debug line: method, path, request payload, response status, and timing. Debug lines are hidden in normal runs; re-run the workflow with "[Enable debug logging](https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows/troubleshooting-workflows/enabling-debug-logging)" checked, or set the `ACTIONS_STEP_DEBUG` secret to `true`. The trace never prints the token: the authorization header is not part of the trace line, and a token stored as a repository secret is masked by the runner wherever it appears in output. For redacted private targets in multi-repo mode, the traced path collapses to `<redacted>` and the payload is dropped entirely. Failures do not need debug mode; every error already carries the API's message and the fix, so reach for the trace when you need to see the requests that succeeded.
+Every API call the action makes is traced as a debug line: method, path, request payload, response status, and timing. Debug lines are hidden in normal runs; re-run the workflow with "[Enable debug logging](https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows/troubleshooting-workflows/enabling-debug-logging)" checked, or set the `ACTIONS_STEP_DEBUG` secret to `true`.
+
+What the trace never shows:
+
+- **The token.** The authorization header is not part of the trace line, and a token stored as a repository secret is masked by the runner wherever it appears in output.
+- **A redacted private target's detail.** For redacted private targets in multi-repo mode, the traced path collapses to `<redacted>` and the payload is dropped entirely.
+
+Failures do not need debug mode; every error already carries the API's message and the fix, so reach for the trace when you need to see the requests that succeeded.
 
 ## Behavior does not match src/ (missing or stale bundle)
 
-When you run the action from a ref (`uses: your-fork/github-settings-as-code@your-branch`), what executes is `lib/index.js`, the bundle, not the TypeScript under `src/`. The release tags (`vX.Y.Z`) and the moving major tag carry a freshly built bundle; branches do not - the bundle is not committed on main. So on a fork or working branch, build it yourself: run `bun run build:bundle` and commit the result on your branch (`lib/index.js` is gitignored, so stage it with `git add -f`). A ref without the bundle fails to start; a branch where you rebuilt `src/` without rebuilding behaves like the old code and no error tells you so. The rebuild is on you.
+When you run the action from a ref (`uses: your-fork/github-settings-as-code@your-branch`), what executes is `lib/index.js`, the bundle, not the TypeScript under `src/`. The release tags (`vX.Y.Z`) and the moving major tag carry a freshly built bundle; branches do not, because the bundle is not committed on main.
+
+So on a fork or working branch, build it yourself:
+
+1. Run `bun run build:bundle`.
+2. Commit the result on your branch. `lib/index.js` is gitignored, so stage it with `git add -f`.
+
+What goes wrong without that:
+
+- **No bundle on the ref:** the action fails to start.
+- **A stale bundle:** a branch where you changed `src/` without rebuilding behaves like the old code, and no error tells you so. The rebuild is on you.

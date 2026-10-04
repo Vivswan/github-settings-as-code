@@ -62,8 +62,18 @@ Reading it top to bottom:
 
 - The first line pins the published schema, so an editor validates and autocompletes the file.
 - Then one comment line per note, in code-point order within each section: a secret whose value GitHub never reveals, a section the snapshot cannot read back, a section with nothing live to declare. The same notes appear as annotations on the run, exactly as a check run would print them, so a note names a secret or a webhook by its name or URL and never by a value.
-- The document follows in the one canonical order every rendered document has (`mode: render` writes the same one): the sections in the order the action applies them, each section's keys as the schema declares them, the entries of every keyed list sorted by their identity (a label's `name`, a webhook's `config.url`, a deploy key's `title`; `branches` keep their order, since GitHub applies overlapping wildcard rules in creation order, pinned environments keep theirs, since it is the pin rank, and the next paragraph names the lists with no identity), every knobbed list section (the sections [the undeclared policy](../reference/undeclared-policy.md) counts) in its `{_undeclared, entries}` wrapper form with the section's default policy spelled out, and `environments`, `branches`, and `workflows` as bare lists, since their wrapper takes no policy. An apply from the file does exactly what the header says, and two snapshots of one repository are the same bytes. The lists left as written keep the order GitHub lists them in: the mapping lists with no identity (`bypass_actors`, `reviewers`), the values inside a rule's `parameters` (`required_status_checks`), and every scalar list (`topics`, a webhook's `events`, a ruleset's `include` patterns). Byte-identical output holds for them while GitHub returns each in a stable order, as it does today; the one scalar list a section sorts itself is `force_push_bypassers`.
+- The document follows in the one canonical order every rendered document has (`mode: render` writes the same one), stated below. An apply from the file does exactly what the header says, and two snapshots of one repository are the same bytes.
 - Nothing in the file names the moment it was taken: the run's notice (`snapshot taken 2026-09-11T06:17:00.000Z`) and the step summary carry it, so a snapshot of an unchanged repository rewrites the file byte for byte and a diff between two snapshots shows only what changed on GitHub.
+
+The canonical order, outermost first:
+
+- **Sections:** in the order the action applies them.
+- **Each section's keys:** as the schema declares them.
+- **Every knobbed list section** (the sections [the undeclared policy](../reference/undeclared-policy.md) counts): in its `{_undeclared, entries}` wrapper form with the section's default policy spelled out. `environments`, `branches`, and `workflows` are bare lists, since their wrapper takes no policy.
+- **The entries of every keyed list:** sorted by their identity (a label's `name`, a webhook's `config.url`, a deploy key's `title`). Two lists keep their order instead: `branches`, since GitHub applies overlapping wildcard rules in creation order, and pinned environments, since it is the pin rank.
+- **The lists with no identity:** left as written, in the order GitHub lists them in. Those are the mapping lists with no identity (`bypass_actors`, `reviewers`), the values inside a rule's `parameters` (`required_status_checks`), and every scalar list (`topics`, a webhook's `events`, a ruleset's `include` patterns).
+
+Byte-identical output holds for the lists left as written while GitHub returns each in a stable order, as it does today; the one scalar list a section sorts itself is `force_push_bypassers`.
 
 ## The `$NAME` placeholders
 
@@ -176,7 +186,11 @@ jobs:
 
 Copy the directory in as your `repos-dir` to bring the fleet under management, one reviewable file per repository. The step summary lists every target with its result and file, then one section table per target, and the `repos-result` output carries the per-repository results as JSON.
 
-Private and internal targets are redacted by default, through the same seal a multi-repo apply closes its targets with (see [private repositories](private-repositories.md#one-seal-every-mode)): their file is written like the others, but the public surfaces know them only as `private repository #N`, with the file name, the notes, and every detail hidden; a private target that fails gets the same one-line annotation a fleet target gets. In the `snapshot-file` form a target other than the current repository is redacted the same way, as `private repository #1`. Their notes are in their file header; there is no report channel in snapshot mode. The uploaded `snapshots` artifact therefore holds those targets' full documents in the clear, and an artifact inherits the admin repository's visibility, so on a public admin repository encrypt it or skip the upload (see [what redaction does and does not protect](private-repositories.md#what-redaction-does-and-does-not-protect)).
+Private and internal targets are redacted by default, through the same seal a multi-repo apply closes its targets with (see [private repositories](private-repositories.md#one-seal-every-mode)). Their file is written like the others, but the public surfaces know them only as `private repository #N`, with the file name, the notes, and every detail hidden. A private target that fails gets the same one-line annotation a fleet target gets.
+
+In the `snapshot-file` form a target other than the current repository is redacted the same way, as `private repository #1`.
+
+Their notes are in their file header; there is no report channel in snapshot mode. The uploaded `snapshots` artifact therefore holds those targets' full documents in the clear, and an artifact inherits the admin repository's visibility, so on a public admin repository encrypt it or skip the upload (see [what redaction does and does not protect](private-repositories.md#what-redaction-does-and-does-not-protect)).
 
 ## What a denial does
 
