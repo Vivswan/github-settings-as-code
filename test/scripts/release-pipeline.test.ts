@@ -27,6 +27,7 @@ import {
   retagMajor,
   stablePublishVerdict,
 } from "../../.github/scripts/release-pipeline.js";
+import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import {
   ANCHOR_PUSH,
@@ -1045,6 +1046,27 @@ describe("anchorCheck", () => {
     const pr = clone(fx.root, fx.origin, "anchor-check-ok");
     git(pr, "checkout", "--quiet", "release-please--branches--main");
     expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
+  });
+});
+
+describe("release configuration contract", () => {
+  test("release-please cuts a tagless draft and leaves the release to the hook: no tag ever lands on main, and the release job runs from the hook", () => {
+    // An external tool's knobs the platform does not enforce: a tag release-please created would sit on main, and
+    // skip-github-release would leave release_created unfired, so the hook that packages and tags never runs.
+    // release-please resolves each knob per package first, then from the top level, then its default.
+    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
+      "skip-github-release"?: boolean;
+      packages: Record<
+        string,
+        { draft?: boolean; "force-tag-creation"?: boolean; "skip-github-release"?: boolean }
+      >;
+    };
+    const root = config.packages["."];
+    expect({
+      draft: root?.draft,
+      forceTagCreation: root?.["force-tag-creation"],
+      skipGithubRelease: root?.["skip-github-release"] ?? config["skip-github-release"] ?? false,
+    }).toEqual({ draft: true, forceTagCreation: false, skipGithubRelease: false });
   });
 });
 

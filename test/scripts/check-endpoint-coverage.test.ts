@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { coldRoutes, recordHits } from "../../.github/scripts/check-endpoint-coverage.js";
+import { err, ok } from "neverthrow";
+import {
+  coldRoutes,
+  type RouteRegistry,
+  recordHits,
+  registeredRoutes,
+} from "../../.github/scripts/check-endpoint-coverage.js";
 import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
 
 const ROUTES = [
@@ -19,6 +25,32 @@ const ROUTES = [
 function req(method: string, pathname: string): LoggedRequest {
   return { method, pathname, query: "", status: 200 };
 }
+
+describe("registeredRoutes", () => {
+  // The gate's one negative control: a registry that regressed to nothing would otherwise read "0/0 routes hit" and exit 0.
+  test.each<[name: string, registry: RouteRegistry, result: ReturnType<typeof registeredRoutes>]>([
+    [
+      "an empty registry is refused naming the fix",
+      { endpoints: {}, graphqlOps: {} },
+      err(
+        "no routes registered: allEndpoints() and allGraphqlOps() returned nothing, so the coverage gate would pass vacuously; fix the registry (src/sections/registry.ts) or the import in .github/scripts/check-endpoint-coverage.ts",
+      ),
+    ],
+    [
+      "a populated registry is split into key, method, and path template, REST before GraphQL",
+      {
+        endpoints: { "labels.list": { route: "GET /repos/{owner}/{repo}/labels" } },
+        graphqlOps: { "repository.gToggles": { name: "RepoToggles" } },
+      },
+      ok([
+        { kind: "rest", key: "labels.list", method: "GET", path: "/repos/{owner}/{repo}/labels" },
+        { kind: "graphql", key: "repository.gToggles", opName: "RepoToggles" },
+      ]),
+    ],
+  ])("%s", (_name, registry, result) => {
+    expect(registeredRoutes(registry)).toEqual(result);
+  });
+});
 
 describe("recordHits", () => {
   test("attributes each request to the route with its method and path template, accumulating across calls", () => {
