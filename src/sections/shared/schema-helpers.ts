@@ -166,6 +166,72 @@ export function layeredList<L extends z.ZodArray<z.ZodType>>(list: L) {
   }));
 }
 
+/** The paths of the issues that abort a parse (a wrong type, a refused option); a rule's own finding and an unrecognized key do not. */
+function failedPaths(issues: readonly z.core.$ZodRawIssue[]): PropertyKey[][] {
+  return issues.flatMap((issue) => (issue.continue === true ? [] : [issue.path ?? []]));
+}
+
+function isUnder(path: readonly PropertyKey[], failed: readonly PropertyKey[]): boolean {
+  return failed.length <= path.length && failed.every((step, index) => step === path[index]);
+}
+
+/**
+ * The gate under which a rule and a length bound run: zod skips a check once a nested value failed, and runs a
+ * length bound on any value with a length; gated, both run unless the node itself was refused (a pathless failure).
+ */
+function notRefusedItself(payload: z.core.ParsePayload): boolean {
+  return !failedPaths(payload.issues).some((path) => path.length === 0);
+}
+
+/**
+ * A schema's own rule, run beside a failed nested value, where `fn` meets the raw value at the failed property and
+ * asks for its type before reading it; lint/rule-gate.grit holds every refinement under src/ to this form.
+ *
+ *   finding under a failed path  -> dropped; the shape's issue stands there
+ *   finding anywhere else        -> kept beside the shape's issues
+ */
+export function rule<T>(
+  fn: (value: T, ctx: z.core.$RefinementCtx<T>) => void,
+  params: z.core.$ZodSuperRefineParams = {},
+): z.core.$ZodCheck<T> {
+  const { when } = params;
+  return z.superRefine<T>(
+    (value, ctx) => {
+      const failed = failedPaths(ctx.issues);
+      const before = ctx.issues.length;
+      fn(value, ctx);
+      if (failed.length === 0) {
+        return;
+      }
+      const findings = ctx.issues.splice(before);
+      ctx.issues.push(
+        ...findings.filter((finding) => !failed.some((path) => isUnder(finding.path ?? [], path))),
+      );
+    },
+    { ...params, when: (payload) => notRefusedItself(payload) && (when?.(payload) ?? true) },
+  );
+}
+
+/** zod's own .min() on a string or a list, gated: bare, it judges a raw `[]` an empty delimiter beside the leaf's own type issue. */
+export function minLength(minimum: number, message: string): z.core.$ZodCheckMinLength {
+  return new z.core.$ZodCheckMinLength({
+    check: "min_length",
+    minimum,
+    when: notRefusedItself,
+    error: () => message,
+  });
+}
+
+/** zod's own .max() on a string or a list, gated like minLength(). */
+export function maxLength(maximum: number, message: string): z.core.$ZodCheckMaxLength {
+  return new z.core.$ZodCheckMaxLength({
+    check: "max_length",
+    maximum,
+    when: notRefusedItself,
+    error: () => message,
+  });
+}
+
 /** A repository-scope sealed secret entry (name + `$NAME` reference value). */
 export function sealedSecretConfig(id: string) {
   return z
@@ -189,7 +255,7 @@ export function variableConfig(id: string) {
 /**
  * A string GitHub caps by size, refused past the cap with the measured size in the message. The check runs on
  * strings alone: zod's own `.max()` runs on any value with a `length`, so a YAML mapping `{length: 101}` reached the
- * comparison and threw, while a refinement is skipped once the type check has failed. JSON Schema's maxLength counts
+ * comparison and threw, while a rule is skipped once the type check has failed. JSON Schema's maxLength counts
  * code points, so the published bound is exact for a code-point cap and, for a byte cap, the loosest bound an editor
  * can check without refusing a value GitHub accepts (a code point is at least one byte).
  */
@@ -205,9 +271,14 @@ export function boundedString(
       : (value: string) => [...value].length;
   return z
     .string()
-    .refine((value) => sizeOf(value) <= maximum, {
-      error: (issue: z.core.$ZodRawIssue) => message(sizeOf(issue.input as string)),
-    })
+    .check(
+      rule((value, ctx) => {
+        const size = sizeOf(value);
+        if (size > maximum) {
+          ctx.addIssue({ code: "custom", message: message(size) });
+        }
+      }),
+    )
     .meta({ maxLength: maximum });
 }
 

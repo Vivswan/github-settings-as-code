@@ -24,7 +24,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData, type Read } from "../contract/plan.js";
-import { layeredList } from "../shared/schema-helpers.js";
+import { layeredList, rule } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
@@ -261,61 +261,63 @@ export const branchesSection = {
   graphql: GRAPHQL,
   // The wildcard key sweep composes HERE, not in schema.ts: it reads the GraphQL translation tables,
   // which are this section's own machinery, and nothing outside them can reach a wildcard rule.
-  shape: loosen(layeredList(BranchesConfig)).superRefine((declared, refineCtx) => {
-    // The routed shape parsed one of the two forms; under the wrapper an issue's path starts at `entries`.
-    const wrapped = !Array.isArray(declared);
-    const entries = listEntries(declared as BranchConfig[] | { entries: BranchConfig[] });
-    const at = (index: number, ...rest: string[]): (string | number)[] => [
-      ...(wrapped ? ["entries"] : []),
-      index,
-      ...rest,
-    ];
-    entries.forEach((entry: BranchConfig, index) => {
-      // The entry, its name, or its protection may be raw or missing beside its own shape issue; a regex would
-      // coerce the name (`[object Object]` wildcards), and a non-mapping protection holds no keys to sweep.
-      if (
-        !isPlainObject(entry) ||
-        typeof entry.name !== "string" ||
-        !isWildcardPattern(entry.name)
-      ) {
-        return;
-      }
-      const protection = entry.protection;
-      if (!isPlainObject(protection)) {
-        return;
-      }
-      for (const key of Object.keys(protection)) {
-        if (!WILDCARD_KEY_SET.has(key)) {
-          refineCtx.addIssue({
-            code: "custom",
-            path: at(index, "protection", key),
-            message: WILDCARD_KEY_ERROR(entry.name, key),
-          });
-        }
-      }
-      // The structured pairs translate NAMED sub-keys only, so an unknown sub-key would be silently
-      // lost; the schema already holds each pair to a mapping or null.
-      const nested: Array<[string, Record<string, string>]> = [
-        ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
-        ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
+  shape: loosen(layeredList(BranchesConfig)).check(
+    rule((declared, refineCtx) => {
+      // The routed shape parsed one of the two forms; under the wrapper an issue's path starts at `entries`.
+      const wrapped = !Array.isArray(declared);
+      const entries = listEntries(declared as BranchConfig[] | { entries: BranchConfig[] });
+      const at = (index: number, ...rest: string[]): (string | number)[] => [
+        ...(wrapped ? ["entries"] : []),
+        index,
+        ...rest,
       ];
-      for (const [key, twins] of nested) {
-        const value = protection[key];
-        if (!isPlainObject(value)) {
-          continue;
+      entries.forEach((entry: BranchConfig, index) => {
+        // The entry, its name, or its protection may be raw or missing beside its own shape issue; a regex would
+        // coerce the name (`[object Object]` wildcards), and a non-mapping protection holds no keys to sweep.
+        if (
+          !isPlainObject(entry) ||
+          typeof entry.name !== "string" ||
+          !isWildcardPattern(entry.name)
+        ) {
+          return;
         }
-        for (const subKey of Object.keys(value)) {
-          if (!(subKey in twins)) {
+        const protection = entry.protection;
+        if (!isPlainObject(protection)) {
+          return;
+        }
+        for (const key of Object.keys(protection)) {
+          if (!WILDCARD_KEY_SET.has(key)) {
             refineCtx.addIssue({
               code: "custom",
-              path: at(index, "protection", key, subKey),
-              message: WILDCARD_KEY_ERROR(entry.name, `${key}.${subKey}`),
+              path: at(index, "protection", key),
+              message: WILDCARD_KEY_ERROR(entry.name, key),
             });
           }
         }
-      }
-    });
-  }),
+        // The structured pairs translate NAMED sub-keys only, so an unknown sub-key would be silently
+        // lost; the schema already holds each pair to a mapping or null.
+        const nested: Array<[string, Record<string, string>]> = [
+          ["required_status_checks", GRAPHQL_STATUS_CHECK_TWINS],
+          ["required_pull_request_reviews", GRAPHQL_REVIEW_TWINS],
+        ];
+        for (const [key, twins] of nested) {
+          const value = protection[key];
+          if (!isPlainObject(value)) {
+            continue;
+          }
+          for (const subKey of Object.keys(value)) {
+            if (!(subKey in twins)) {
+              refineCtx.addIssue({
+                code: "custom",
+                path: at(index, "protection", key, subKey),
+                message: WILDCARD_KEY_ERROR(entry.name, `${key}.${subKey}`),
+              });
+            }
+          }
+        }
+      });
+    }),
+  ),
   async plan(ctx, desired): Promise<Result<BranchesPlan, SectionFailure>> {
     const section = this;
     return safeTry(async function* () {

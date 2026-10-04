@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { agree } from "../../text.js";
 import { stringItems } from "../shared/raw-values.js";
+import { rule } from "../shared/schema-helpers.js";
 
 const INTERACTION_GROUPS = ["existing_users", "contributors_only", "collaborators_only"] as const;
 const INTERACTION_EXPIRIES = [
@@ -59,58 +60,60 @@ const InteractionLimits = z
     },
     { error: unknownKeyError },
   )
-  .superRefine((declared, refineCtx) => {
-    // Checked in the shape so both modes fail before ANY section writes.
-    if (
-      declared.limit === undefined &&
-      declared.expiry === undefined &&
-      declared.pull_request_creation_cap === undefined &&
-      declared.pull_request_creation_bypass === undefined
-    ) {
-      refineCtx.addIssue({
-        code: "custom",
-        message:
-          "declare at least one of limit, pull_request_creation_cap, or pull_request_creation_bypass (or declare interaction_limits: null to clear the base limit)",
-      });
-    }
-    if (declared.expiry !== undefined && declared.limit === undefined) {
-      // GitHub rejects the base PUT body without a limit, and a run that never issues the PUT would
-      // silently drop the expiry.
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["limit"],
-        message:
-          "expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry",
-      });
-    }
-    // The list may be raw beside its own shape issue (see ../shared/raw-values.ts); a non-list holds no logins.
-    const bypass: unknown = declared.pull_request_creation_bypass;
-    if (!Array.isArray(bypass)) {
-      return;
-    }
-    if (bypass.length > BYPASS_MAX) {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["pull_request_creation_bypass"],
-        message: `GitHub caps the bypass list at ${BYPASS_MAX} users, but ${bypass.length} logins are declared; trim the list`,
-      });
-    }
-    const seen = new Map<string, string>();
-    // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts); the string items are judged.
-    for (const login of stringItems(bypass)) {
-      const key = login.toLowerCase();
-      const first = seen.get(key);
-      if (first === undefined) {
-        seen.set(key, login);
-      } else {
+  .check(
+    rule((declared, refineCtx) => {
+      // Checked in the shape so both modes fail before ANY section writes.
+      if (
+        declared.limit === undefined &&
+        declared.expiry === undefined &&
+        declared.pull_request_creation_cap === undefined &&
+        declared.pull_request_creation_bypass === undefined
+      ) {
+        refineCtx.addIssue({
+          code: "custom",
+          message:
+            "declare at least one of limit, pull_request_creation_cap, or pull_request_creation_bypass (or declare interaction_limits: null to clear the base limit)",
+        });
+      }
+      if (declared.expiry !== undefined && declared.limit === undefined) {
+        // GitHub rejects the base PUT body without a limit, and a run that never issues the PUT would
+        // silently drop the expiry.
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["limit"],
+          message:
+            "expiry rides the base interaction-limits PUT, which requires a limit; declare limit alongside it, or remove expiry",
+        });
+      }
+      // The list may be raw beside its own shape issue (see ../shared/raw-values.ts); a non-list holds no logins.
+      const bypass: unknown = declared.pull_request_creation_bypass;
+      if (!Array.isArray(bypass)) {
+        return;
+      }
+      if (bypass.length > BYPASS_MAX) {
         refineCtx.addIssue({
           code: "custom",
           path: ["pull_request_creation_bypass"],
-          message: `"${first}" and "${login}" name the same login (logins are case-insensitive); keep exactly one`,
+          message: `GitHub caps the bypass list at ${BYPASS_MAX} users, but ${bypass.length} logins are declared; trim the list`,
         });
       }
-    }
-  })
+      const seen = new Map<string, string>();
+      // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts); the string items are judged.
+      for (const login of stringItems(bypass)) {
+        const key = login.toLowerCase();
+        const first = seen.get(key);
+        if (first === undefined) {
+          seen.set(key, login);
+        } else {
+          refineCtx.addIssue({
+            code: "custom",
+            path: ["pull_request_creation_bypass"],
+            message: `"${first}" and "${login}" name the same login (logins are case-insensitive); keep exactly one`,
+          });
+        }
+      }
+    }),
+  )
   .meta({ id: "InteractionLimitsConfig" });
 
 export const InteractionLimitsConfig = InteractionLimits.nullable();

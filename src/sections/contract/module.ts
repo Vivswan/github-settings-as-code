@@ -14,7 +14,7 @@ import type {
   UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../../types.js";
-import type { Layering, UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
+import { type Layering, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -625,16 +625,12 @@ export interface SectionSnapshot<K extends SectionKey = SectionKey> {
 }
 
 /**
- * plan() only READS (through the port in PlanContext) and returns the operations that would converge the
- * repository, or the failure that ended it as a value (a denied read, a live state it cannot reconcile); the
- * engine renders the operations as drift in check mode and executes them in apply mode.
- * Modules register in ../registry.ts.
+ * plan() only READS (through the port in PlanContext) and returns the operations that would converge the repository,
+ * or the failure that ended it as a value; the engine renders them as drift in check mode and executes them in apply mode.
  *
- *   snapshot() required  -> the section declares a read (a GET or a GraphQL query), so the live state it
- *                           compares against can be read back; SnapshotFacet flags a module annotated over its
- *                           literal dictionaries without one, and ../registry.ts flags every registrant without one
- *   snapshot() absent    -> only a write-only section (no read at all), which snapshot reports unsupported
- *                           (snapshotUnsupportedNote)
+ *   snapshot() required  -> the section declares a read (a GET or a GraphQL query); SnapshotFacet and ../registry.ts
+ *                           flag a module without one
+ *   snapshot() absent    -> a write-only section (no read at all), which snapshot reports unsupported (snapshotUnsupportedNote)
  */
 export type SectionModule<
   K extends SectionKey = SectionKey,
@@ -783,18 +779,20 @@ export function secretValuesOf(
 export function requirePlainMapping(shape: z.ZodType): z.ZodType {
   return z
     .unknown()
-    .superRefine((value, ctx) => {
-      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-        const proto = Object.getPrototypeOf(value);
-        if (proto !== Object.prototype && proto !== null) {
-          ctx.addIssue({
-            code: "custom",
-            message:
-              "Invalid input: expected a plain mapping (a YAML-tagged value like !!timestamp parses to another type)",
-          });
+    .check(
+      rule((value, ctx) => {
+        if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+          const proto = Object.getPrototypeOf(value);
+          if (proto !== Object.prototype && proto !== null) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                "Invalid input: expected a plain mapping (a YAML-tagged value like !!timestamp parses to another type)",
+            });
+          }
         }
-      }
-    })
+      }),
+    )
     .pipe(shape);
 }
 
@@ -814,97 +812,21 @@ export function defOf(schema: z.ZodType): ZodDef {
   return (schema as unknown as { _zod: { def: ZodDef } })._zod.def;
 }
 
-/** Every clone's own checks are rewired to report beside a failed nested value (reportingBesideFailures). */
 function cloneWith(schema: z.ZodType, patch: Partial<ZodDef>): z.ZodType {
-  const def = (schema as unknown as { _zod: { def: Record<string, unknown> } })._zod.def;
-  const checks = (def.checks as readonly z.core.$ZodCheck[] | undefined)?.map(
-    reportingBesideFailures,
-  );
   return z.util.clone(
     schema as unknown as Parameters<typeof z.util.clone>[0],
-    { ...def, ...patch, checks } as never,
+    { ...defOf(schema), ...patch } as never,
   ) as unknown as z.ZodType;
 }
 
-/** The rewire for a check attached AFTER loosen(): a section composing a rule onto its loosened shape. */
-export function checksReportingBesideFailures(schema: z.ZodType): z.ZodType {
-  return cloneWith(schema, {});
-}
-
-const REPORTS_BESIDE_FAILURES = new WeakSet<z.core.$ZodCheck>();
-
-let swallowedThrowObserver: ((error: unknown) => void) | null = null;
-
-/** Test seam for the swallowed throws below (test/sections/raw-sibling.test.ts); production leaves it null. */
-export function observeSwallowedThrows(observer: ((error: unknown) => void) | null): void {
-  swallowedThrowObserver = observer;
-}
-
-/** The paths of the issues that abort a parse (a wrong type, a refused option); a rule's own finding and an unrecognized key do not. */
-function failedPaths(issues: readonly z.core.$ZodRawIssue[]): PropertyKey[][] {
-  return issues.flatMap((issue) => (issue.continue === true ? [] : [issue.path ?? []]));
-}
-
-function isUnder(path: readonly PropertyKey[], failed: readonly PropertyKey[]): boolean {
-  return failed.length <= path.length && failed.every((step, index) => step === path[index]);
-}
-
 /**
- * zod skips a node's own checks once a nested value failed; rewired, a check runs unless the node itself was refused
- * (a pathless failure). The contract for a rule, which then meets the raw value at a failed property: a finding under
- * a failed path is dropped (the shape's issue stands there), a throw ends the rule with its findings so far, and a
- * rule branching on a sibling's type guards that read itself, and a rule reading a property or the truth of a
- * sibling asks for the type first (an empty string's length is zero, a number is truthy). With no failure a throw
- * propagates.
- */
-function reportingBesideFailures(check: z.core.$ZodCheck): z.core.$ZodCheck {
-  if (REPORTS_BESIDE_FAILURES.has(check)) {
-    return check;
-  }
-  const { when, ...def } = check._zod.def;
-  const inner = check._zod.check;
-  const clone: z.core.$ZodCheck = {
-    _zod: {
-      def: {
-        ...def,
-        when: (payload) =>
-          (when?.(payload) ?? true) && !failedPaths(payload.issues).some((p) => p.length === 0),
-      },
-      onattach: check._zod.onattach,
-      check: (payload) => {
-        const failed = failedPaths(payload.issues);
-        if (failed.length === 0) {
-          return inner(payload);
-        }
-        const before = payload.issues.length;
-        try {
-          inner(payload);
-        } catch (error) {
-          // The rule tripped on a raw value whose own shape issue is already listed.
-          swallowedThrowObserver?.(error);
-        }
-        const findings = payload.issues.splice(before);
-        payload.issues.push(
-          ...findings.filter((f) => !failed.some((path) => isUnder(f.path ?? [], path))),
-        );
-      },
-    },
-  };
-  REPORTS_BESIDE_FAILURES.add(clone);
-  return clone;
-}
-
-/**
- * Every plain (strip) object becomes a passthrough looseObject, so unknown keys ride through to GitHub
- * and superRefine checks reading undeclared keys can see them. Preserved as authored:
+ * Every plain (strip) object becomes a passthrough looseObject, so unknown keys ride through to GitHub and the
+ * rules reading undeclared keys can see them. Preserved as authored:
  *
- *   strictObject             -> stays strict
- *   refine/superRefine       -> survives (clones carry the checks); one on the knobbed union itself throws instead
- *   a leaf's own checks      -> rewired like a rule (a min or max length runs, in zod, on any value with a length,
- *                               so it would judge a raw list beside the leaf's own type issue)
- *   knobbed-section union    -> rewrapped as a container-routed check, so a failing entry keeps its issue path
- *                               (`labels[2].name`) instead of a plain union's pathless "Invalid input"
- *   unrecognized CONTAINER   -> throws, rather than ship a shape that silently skipped loosening
+ *   strictObject           -> stays strict
+ *   a node's own checks    -> survive on the clone (rule() gates each beside a failed nested value); one on the knobbed union itself throws
+ *   knobbed-section union  -> rewrapped as a container-routed check, so a failing entry keeps its path (`labels[2].name`)
+ *   unrecognized CONTAINER -> throws, rather than ship a shape that silently skipped loosening
  */
 export function loosen(schema: z.ZodType): z.ZodType {
   const def = defOf(schema);
@@ -945,7 +867,7 @@ export function loosen(schema: z.ZodType): z.ZodType {
           `BUG: loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
         );
       }
-      return (def.checks?.length ?? 0) > 0 ? cloneWith(schema, {}) : schema;
+      return schema;
   }
 }
 
@@ -1010,7 +932,7 @@ function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
           ctx.addIssue({ ...issue });
         }
         // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
-        // entry (reportingBesideFailures) and must meet the entries, raw where they failed. The parse fails regardless.
+        // entry (rule() in ../shared/schema-helpers.ts) and must meet the entries, raw where they failed. The parse fails regardless.
         return value;
       }
       return parsed.data;

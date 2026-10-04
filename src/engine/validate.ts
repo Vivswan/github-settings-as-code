@@ -5,11 +5,7 @@ import { z } from "zod";
 import { nonPlainKind } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
-import {
-  checksReportingBesideFailures,
-  type DeclaredIssue,
-  type DeclaredSecretValue,
-} from "../sections/contract/module.js";
+import type { DeclaredIssue, DeclaredSecretValue } from "../sections/contract/module.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
 import { valueAt } from "../sections/shared/list-section.js";
 import { agree, countNoun } from "../text.js";
@@ -215,8 +211,7 @@ export function validateSectionShapes(
       problems.push(nonPlain);
       continue;
     }
-    // The section may compose a rule onto its loosened shape; loosen() itself covers every check beneath.
-    const parsed = checksReportingBesideFailures(shape).safeParse(declared);
+    const parsed = shape.safeParse(declared);
     if (!parsed.success) {
       const issues = parsed.error.issues;
       for (const issue of issues.slice(0, 5)) {

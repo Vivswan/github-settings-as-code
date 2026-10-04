@@ -1,17 +1,17 @@
 /**
- * A rule of a registered shape meets the raw value of a sibling that failed its type (reportingBesideFailures in
- * src/sections/contract/module.ts), and a throw there is swallowed with the findings the rule had not reached. The
- * walk takes the structure from the authored document schema (the loosened shape hides a knobbed list behind its
- * routed transform), builds one well-typed value per section plus a variant per other value a field admits (so a
- * rule gated on a flag or an option runs), then puts each raw value at every property and list item in turn and runs
- * document validation, which parses the registered shape; the seam reports every swallowed throw.
+ * A rule of a registered shape meets the raw value of a sibling that failed its type (rule() in
+ * src/sections/shared/schema-helpers.ts), and a throw there is a bug that ends the parse. The walk takes the
+ * structure from the authored document schema (the loosened shape hides a knobbed list behind its routed transform),
+ * builds one well-typed value per section plus a variant per other value a field admits (so a rule gated on a flag
+ * or an option runs), then puts each raw value at every property and list item in turn and runs document
+ * validation, which parses the registered shape; a throw anywhere is the finding.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 import { SECTION_KEYS, type SectionKey, SettingsFile } from "../../src/schema.js";
-import { loosen, observeSwallowedThrows } from "../../src/sections/contract/module.js";
+import { rule } from "../../src/sections/shared/schema-helpers.js";
 
 /** The zod internals the walk reads (the loosen() idiom). */
 interface DefView {
@@ -278,18 +278,40 @@ function basesOf(key: SectionKey): Base[] {
   ];
 }
 
-describe("every rule of a registered shape tolerates a raw sibling", () => {
-  const swallowed: unknown[] = [];
-  beforeAll(() => observeSwallowedThrows((error) => swallowed.push(error)));
-  afterAll(() => observeSwallowedThrows(null));
+/** One line per throw, under the first base that reached it: the variants repeat a throw at the same path. */
+function throwsAcross(key: SectionKey, parse: (document: unknown) => void): string[] {
+  const thrown = new Map<string, string>();
+  for (const base of basesOf(key)) {
+    for (const path of pathsBelow(base.value)) {
+      for (const [where, document] of placements(base.value, path)) {
+        try {
+          parse(document);
+        } catch (error) {
+          const site = `${key}${where}: ${String(error)}`;
+          thrown.set(site, thrown.get(site) ?? `${site}${base.label}`);
+        }
+      }
+    }
+  }
+  return [...thrown.values()];
+}
 
-  test("control: the seam reports a rule that throws on a raw item beside the item's own issue", () => {
-    const throwing = z.object({ list: z.array(z.string()) }).superRefine((value) => {
-      value.list.map((item) => item.toLowerCase());
+describe("every rule of a registered shape tolerates a raw sibling", () => {
+  test("control: a rule that throws on a raw item beside the item's own issue ends the parse with the throw", () => {
+    const throwing = z.object({ list: z.array(z.string()) }).check(
+      rule((value) => {
+        value.list.map((item) => item.toLowerCase());
+      }),
+    );
+    expect(() => throwing.safeParse({ list: [1] })).toThrow(TypeError);
+  });
+
+  test("control: the sweep records a throw from the parse it runs, naming the section and the site", () => {
+    const planted = throwsAcross("labels", () => {
+      throw new TypeError("planted");
     });
-    swallowed.length = 0;
-    expect(loosen(throwing).safeParse({ list: [1] }).success).toBe(false);
-    expect(swallowed.map((error) => (error as Error).constructor.name)).toEqual(["TypeError"]);
+    expect(planted.length).toBeGreaterThan(0);
+    expect(planted.every((line) => /^labels.*: TypeError: planted/.test(line))).toBe(true);
   });
 
   test("control: the walk reaches a rule gated on a flag and a property left out", () => {
@@ -307,20 +329,8 @@ describe("every rule of a registered shape tolerates a raw sibling", () => {
   });
 
   test.each([...SECTION_KEYS])("%s: no rule throws with a raw value at any path", (key) => {
-    // One line per throw, under the first base that reached it: the variants repeat a throw at the same path.
-    const thrown = new Map<string, string>();
-    for (const base of basesOf(key)) {
-      for (const path of pathsBelow(base.value)) {
-        for (const [where, document] of placements(base.value, path)) {
-          swallowed.length = 0;
-          validateSectionShapes({ [key]: document }, "test");
-          for (const error of swallowed) {
-            const site = `${key}${where}: ${String(error)}`;
-            thrown.set(site, thrown.get(site) ?? `${site}${base.label}`);
-          }
-        }
-      }
-    }
-    expect([...thrown.values()]).toEqual([]);
+    expect(
+      throwsAcross(key, (document) => validateSectionShapes({ [key]: document }, "test")),
+    ).toEqual([]);
   });
 });

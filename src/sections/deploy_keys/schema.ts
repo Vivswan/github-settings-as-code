@@ -2,6 +2,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
+import { rule } from "../shared/schema-helpers.js";
 
 /**
  * The key types GitHub accepts for a deploy key; the docs field note lists them for the reader. DSA (ssh-dss) is
@@ -159,22 +160,24 @@ export const DeployKeyConfig = z
     read_only: z.boolean().optional(),
   })
   // Entry-level so the refusal can name the entry by title; the field-level form would know only the index.
-  .superRefine((entry, refineCtx) => {
-    // The key or the title may be raw beside its own shape issue (see ../shared/raw-values.ts): a non-string key is
-    // no material to read, and a bare rendering of the title can throw on a mapping.
-    const key: unknown = entry.key;
-    if (typeof key !== "string") {
-      return;
-    }
-    const parsed = parsePublicKey(key);
-    if (parsed.isErr()) {
-      const who = typeof entry.title === "string" ? `entry "${entry.title}"` : "this entry";
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["key"],
-        message: `${who}: ${parsed.error}`,
-      });
-    }
-  })
+  .check(
+    rule((entry, refineCtx) => {
+      // The key or the title may be raw beside its own shape issue (see ../shared/raw-values.ts): a non-string key is
+      // no material to read, and a bare rendering of the title can throw on a mapping.
+      const key: unknown = entry.key;
+      if (typeof key !== "string") {
+        return;
+      }
+      const parsed = parsePublicKey(key);
+      if (parsed.isErr()) {
+        const who = typeof entry.title === "string" ? `entry "${entry.title}"` : "this entry";
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["key"],
+          message: `${who}: ${parsed.error}`,
+        });
+      }
+    }),
+  )
   .meta({ id: "DeployKeyConfig" });
 export type DeployKeyConfig = z.infer<typeof DeployKeyConfig>;
