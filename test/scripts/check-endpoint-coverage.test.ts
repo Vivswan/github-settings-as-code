@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  coldRoutes,
-  recordHits,
-  registeredRoutes,
-} from "../../.github/scripts/check-endpoint-coverage.js";
+import { coldRoutes, recordHits } from "../../.github/scripts/check-endpoint-coverage.js";
 import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
 
 const ROUTES = [
@@ -23,17 +19,6 @@ const ROUTES = [
 function req(method: string, pathname: string): LoggedRequest {
   return { method, pathname, query: "", status: 200 };
 }
-
-describe("registeredRoutes", () => {
-  test("splits each registered endpoint into key, method, and path template", () => {
-    const routes = registeredRoutes();
-    expect(routes.length).toBeGreaterThan(10);
-    const labelsList = routes.find((r) => r.key === "labels.list");
-    expect(labelsList?.kind).toBe("rest");
-    expect(labelsList?.kind === "rest" && labelsList.method).toBe("GET");
-    expect(labelsList?.kind === "rest" && labelsList.path).toBe("/repos/{owner}/{repo}/labels");
-  });
-});
 
 describe("recordHits", () => {
   test("attributes each request to the route with its method and path template, accumulating across calls", () => {

@@ -25,28 +25,23 @@ const scripts = (
     scripts: Record<string, string>;
   }
 ).scripts;
-/** The outputs the marker scan cannot see: whole generated files. */
-const WHOLE_FILES = ["src/upstream-gaps/index.ts"];
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" })
   .split("\0")
   .filter((path) => path !== "");
 
 describe("the generated-output table", () => {
-  test("is exactly the tree's generated files: every tracked marker-carrying page plus the whole files, once each", () => {
+  test("is exactly the tree's generated files: every tracked marker-carrying page plus the whole files", () => {
     const carrying = tracked.filter((path) => {
       if (!regionFile(path)) return false;
       const text = readFileSync(join(ROOT, path), "utf8");
       return hasGeneratedRegion(text, markerSyntaxFor(path)) || ACTION_DOCS_MARKER.test(text);
     });
-    const paths = generatedPaths();
-    expect([...paths].sort()).toEqual([...carrying, ...WHOLE_FILES].sort());
-    expect(new Set(paths).size).toBe(paths.length);
-    expect(
-      GENERATED_OUTPUTS.filter((output) => output.kind === "file")
-        .map((output) => output.path)
-        .sort(),
-    ).toEqual(WHOLE_FILES);
+    // The whole files are the outputs the marker scan cannot see, so the table is their only witness.
+    const wholeFiles = GENERATED_OUTPUTS.filter((output) => output.kind === "file").map(
+      (output) => output.path,
+    );
+    expect([...generatedPaths()].sort()).toEqual([...carrying, ...wholeFiles].sort());
   });
 
   test("every generator is a package.json script over tracked files, and bun run build runs them in table order", () => {

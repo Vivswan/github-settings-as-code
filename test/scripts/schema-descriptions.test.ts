@@ -152,11 +152,27 @@ describe("attachDescriptions", () => {
       },
     );
     attachDescriptions(definitions, braced);
-    expect(definitions["UndeclaredPolicyList<LabelConfig>"]?.description).toBe("W.");
-    expect(definitions["UndeclaredPolicyList<TeamConfig>"]?.description).toBe("W.");
-    expect(definitions["UndeclaredPolicyList<TeamConfig>"]?.properties?.entries?.description).toBe(
-      "E.",
-    );
+    const sites = describableSites(definitions);
+    expect(
+      Object.fromEntries([...sites].map(([key, site]) => [key, site.node.description])),
+    ).toEqual({
+      LabelConfig: "One label.",
+      "LabelConfig.name": "The name.",
+      "LabelConfig.color": "The color.",
+      "UndeclaredPolicyList<LabelConfig>": "W.",
+      "UndeclaredPolicyList<LabelConfig>.entries": "E.",
+      "UndeclaredPolicyList<TeamConfig>": "W.",
+      "UndeclaredPolicyList<TeamConfig>.entries": "E.",
+      EnvironmentConfig: "One environment.",
+      "EnvironmentConfig.policy": "The policy.",
+      "EnvironmentConfig.policy|0.protected": "Protected only.",
+      "EnvironmentConfig.reviewers": "Reviewers.",
+      "EnvironmentConfig.reviewers[].id": "The id.",
+      RepositoryConfig: "The repo.",
+      "RepositoryConfig.*": "Any other field.",
+      WebhookConfig: "One webhook.",
+      "WebhookConfig.config": "Delivery settings.",
+    });
   });
 
   test.each<[label: string, mutate: (d: typeof COMPLETE) => typeof COMPLETE, problem: RegExp]>([

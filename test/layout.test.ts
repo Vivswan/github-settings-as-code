@@ -39,14 +39,15 @@ describe("repository layout", () => {
   // readdirSync throws on a missing root, so a mirror that moved without moving the constant fails here by path.
   const entries = readdirSync(SECTIONS_TEST_ROOT, { withFileTypes: true });
 
-  test(`${MIRROR}/ holds at least one section directory`, () => {
+  test(`a file named after a section lives in ${MIRROR}/<key>/, never flat beside the directories`, () => {
+    // The guard against a vacuous pass: a mirror root with no section directory is not the mirror this test reads.
     const sectionDirs = entries.filter(
       (entry) => entry.isDirectory() && SECTION_KEYS.some((key) => key === entry.name),
     );
-    expect(sectionDirs.map((entry) => entry.name)).not.toEqual([]);
-  });
-
-  test(`a file named after a section lives in ${MIRROR}/<key>/, never flat beside the directories`, () => {
+    expect(
+      sectionDirs.map((entry) => entry.name),
+      `${MIRROR}/ holds no section directory`,
+    ).not.toEqual([]);
     const strays = entries
       .filter((entry) => entry.isFile() && isSectionNamedFile(entry.name))
       .map((entry) => `${MIRROR}/${entry.name}`);

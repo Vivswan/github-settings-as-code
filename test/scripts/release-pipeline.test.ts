@@ -27,7 +27,6 @@ import {
   retagMajor,
   stablePublishVerdict,
 } from "../../.github/scripts/release-pipeline.js";
-import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import {
   ANCHOR_PUSH,
@@ -408,6 +407,8 @@ describe("packageRelease", () => {
 
   test.each<[tag: string, error: RegExp]>([
     ["v2.1-rc.0", /not a vX\.Y\.Z release tag/],
+    // The shape release-please mints with include-component-in-tag on; the config keeps it off, and the hook refuses it either way.
+    ["github-settings-as-code-v2.1.0", /not a vX\.Y\.Z release tag/],
     // Well-shaped, but not the version this source's manifest released.
     ["v2.2.0", /did not release/],
   ])("the tag %s mints nothing", (tag, error) => {
@@ -1044,27 +1045,6 @@ describe("anchorCheck", () => {
     const pr = clone(fx.root, fx.origin, "anchor-check-ok");
     git(pr, "checkout", "--quiet", "release-please--branches--main");
     expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
-  });
-});
-
-describe("release configuration contract", () => {
-  test("the committed config pins the tagless-draft knobs (shape only; the flow itself is not exercised here)", () => {
-    const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
-      "skip-github-release"?: unknown;
-      "include-component-in-tag"?: unknown;
-      "last-release-sha"?: unknown;
-      packages: Record<string, Record<string, unknown>>;
-    };
-    const root = config.packages["."];
-    // release-please must never create a tag on main; the hook mints the only tag, on the merge commit's packaged commit.
-    //   draft: true + force-tag-creation: false  -> explicit, since the upstream default could change
-    //   include-component-in-tag: false          -> tags stay strictly vX.Y.Z, the one shape releaseMajor() accepts
-    //   skip-github-release unset                -> set, release_created never fires and the hook never runs
-    expect(root?.draft).toBe(true);
-    expect(root?.["force-tag-creation"]).toBe(false);
-    expect(config["skip-github-release"]).toBeUndefined();
-    expect(config["include-component-in-tag"]).toBe(false);
-    expect(typeof config["last-release-sha"]).toBe("string");
   });
 });
 

@@ -350,20 +350,32 @@ describe("the OIDC probe under bash", () => {
   const { next } = publishers();
   const run = must(must(next.steps[0], "probe step").run, "probe run");
 
-  test("a runner that minted a token URL proceeds silently", async () => {
-    const probe = await runStep(run, {
-      ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.invalid/oidc",
-    });
-    expect(probe).toEqual({ lines: [], status: 0, output: "proceed=true\n" });
-  });
-
-  test("a runner without one warns naming the missing grant and skips (control)", async () => {
-    const probe = await runStep(run, {});
-    expect(probe.status).toBe(0);
-    expect(probe.output).toBe("proceed=false\n");
-    expect(probe.lines).toHaveLength(1);
-    expect(probe.lines[0]).toMatch(/^::warning::/);
-    expect(probe.lines[0]).toContain("id-token: write");
+  // The warning names the grant the managed caller lacks and where it is added; the probe's whole stdout, exit, and output are pinned.
+  test.each<
+    [
+      name: string,
+      env: Record<string, string>,
+      expected: { lines: string[]; status: number; output: string },
+    ]
+  >([
+    [
+      "a runner that minted a token URL proceeds silently",
+      { ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.invalid/oidc" },
+      { lines: [], status: 0, output: "proceed=true\n" },
+    ],
+    [
+      "a runner without one warns naming the missing grant and skips (control)",
+      {},
+      {
+        lines: [
+          "::warning::this run has no OIDC token (the update-release-pr call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm. Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every release-PR refresh to @next.",
+        ],
+        status: 0,
+        output: "proceed=false\n",
+      },
+    ],
+  ])("%s", async (_name, env, expected) => {
+    expect(await runStep(run, env)).toEqual(expected);
   });
 });
 
@@ -467,25 +479,26 @@ describe("the confirmation block under bash", () => {
     expect(condition(confirm.if)).toBe("steps.publish.outputs.published == 'true'");
   });
 
-  const expected: Record<string, { status: number; command: RegExp }> = {
-    settled: { status: 0, command: /^::notice::/ },
-    unsettled: { status: 0, command: /^::warning::/ },
-    behind: { status: 1, command: /^::error::/ },
+  const LINE = "next 2.0.1-main.446 is placed";
+  // Each outcome word maps to one workflow command carrying the rest of the line, and only `behind` fails the job; an
+  // unrecognized word fails loudly, quoting what was printed.
+  const expected: Record<string, { lines: string[]; status: number; output: string }> = {
+    settled: { lines: [`::notice::${LINE}`], status: 0, output: "" },
+    unsettled: { lines: [`::warning::${LINE}`], status: 0, output: "" },
+    behind: { lines: [`::error::${LINE}`], status: 1, output: "" },
   };
   test.each([...outcomes, "nonsense"])("a %s line", async (outcome) => {
-    const step = await runStep(
-      run,
-      { SOURCE_SHA: "b8df084c" },
-      stubBun(`${outcome} next 2.0.1-main.446 is placed`),
+    const step = await runStep(run, { SOURCE_SHA: "b8df084c" }, stubBun(`${outcome} ${LINE}`));
+    expect(step).toEqual(
+      expected[outcome] ?? {
+        lines: [
+          `unexpected npm-confirm output: nonsense ${LINE}`,
+          "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above.",
+        ],
+        status: 1,
+        output: "",
+      },
     );
-    const want = expected[outcome] ?? {
-      status: 1,
-      command: /^::error::npm-confirm printed neither/,
-    };
-    expect(step.status, `a ${outcome} line must exit ${want.status}`).toBe(want.status);
-    const commands = step.lines.filter((line) => line.startsWith("::"));
-    expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatch(want.command);
   });
 
   test("every outcome of the union has an expected verdict here, so a new outcome fails until this table names it", () => {

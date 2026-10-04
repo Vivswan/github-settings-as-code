@@ -695,11 +695,12 @@ describe("docs/ guide pages", () => {
     }
     const layerName = prefix[1] ?? "";
     const rows = refusalRows(section, PAGE);
-
-    test("both tables are present and populated", () => {
-      expect(rows.filter((row) => row.gate === "validation").length).toBeGreaterThan(0);
-      expect(rows.filter((row) => row.gate === "fold").length).toBeGreaterThan(0);
-    });
+    // The rows drive test.each, which runs nothing over an empty table, so a table that lost its rows fails here instead.
+    for (const gate of ["validation", "fold"] as const) {
+      if (!rows.some((row) => row.gate === gate)) {
+        throw new Error(`${PAGE}'s Refusals section has no ${gate} table rows`);
+      }
+    }
 
     test.each(rows.map((row) => [row.has, row] as const))("%s", (_has, row) => {
       for (const input of row.inputs) {

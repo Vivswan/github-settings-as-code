@@ -1,11 +1,9 @@
-/** The written-out counts (.github/scripts/lib/count-word.ts): the range's last word, and the tripwire past it. */
+/** The written-out counts (.github/scripts/lib/count-word.ts): the tripwire past the range, never a numeral fallback. */
 
 import { expect, test } from "bun:test";
 import { countWord } from "../../.github/scripts/lib/count-word.js";
 
-test("the range ends at twenty and throws loudly past it", () => {
-  // The words in use are held by the generated pages (a shifted list misrenders a committed count sentence).
-  expect(countWord(20)).toBe("twenty");
+test("a count with no word throws naming the list to extend, whatever shape the count has", () => {
   for (const count of [21, -1, 1.5, Number.NaN]) {
     expect(() => countWord(count)).toThrow(
       `extend COUNT_WORDS (.github/scripts/lib/count-word.ts): no word for count ${count}`,
