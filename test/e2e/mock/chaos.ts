@@ -119,7 +119,7 @@ export function applyFault(
   fired: number,
 ): PipelineResult {
   if (kind === "rate_limit_403") {
-    // "rate limit" in the body is what makes the client's classifier (isRateLimitError) read this 403 as throttling,
+    // "rate limit" in the body is what makes the client's classifier (classifyApiError) read this 403 as throttling,
     // not a permission denial: the one place a 403 body may say it.
     const response: MockResponse = {
       status: 403,
