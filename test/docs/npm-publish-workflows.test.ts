@@ -368,7 +368,9 @@ describe("the OIDC probe under bash", () => {
       {},
       {
         lines: [
-          "::warning::this run has no OIDC token (the update-release-pr call in the managed ci.yml grants no id-token: write); the library pre-release was not published to npm. Add id-token: write to that call's permissions in Vivswan/repo-platform to publish every release-PR refresh to @next.",
+          "::warning::this run has no OIDC token (the update-release-pr call in the managed ci.yml grants no id-token: write); " +
+            "the library pre-release was not published to npm. Add id-token: write to that call's permissions in " +
+            "Vivswan/repo-platform to publish every release-PR refresh to @next.",
         ],
         status: 0,
         output: "proceed=false\n",

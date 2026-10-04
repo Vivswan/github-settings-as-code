@@ -707,7 +707,10 @@ describe("the push probe under bash", () => {
     "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
   /** The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from. */
   const NO_PAT =
-    "::warning::this run's token cannot push (the caller grants contents: read); this commit was not packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself). Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this repository, to publish every green push to @latest.";
+    "::warning::this run's token cannot push (the caller grants contents: read); this commit was not packaged and the " +
+    "latest tag was not moved here (the release hook packages each release and moves latest itself). Raise the caller's " +
+    "ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this " +
+    "repository, to publish every green push to @latest.";
 
   /** The fence token a run minted, from its opening line; undefined when no fence opened. */
   const fenceToken = (probe: ProbeRun): string | undefined =>
