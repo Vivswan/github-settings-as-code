@@ -85,14 +85,11 @@ function isWithin(path: string, dir: string): boolean {
 }
 
 /**
- * Whether one directory is or contains the other under either naming. As
- * spelled catches a symlink INSIDE one that leads into the other (repos-dir
- * "out/central" -> "../authored" under snapshot-dir "out"); as the filesystem
- * names them catches a case alias or a symlink TO the other. The dir form
- * writes join(snapshotDir, owner, name), and join collapses "link/.." before
- * the OS sees it, so the filesystem naming starts from the collapsed spelling
- * too: "link/../snapshots" lands beside link, never inside its target. The
- * file form writes its spelling raw and stays on OS semantics.
+ * Both namings of the written path, each starting from resolve(): the dir form writes join(snapshotDir, owner, name),
+ * and join collapses "link/.." before the OS sees it.
+ *
+ * as spelled                  -> a link inside one leading into the other: repos-dir "out/central" -> "../authored" under snapshot-dir "out"
+ * as the filesystem names it  -> a case alias, or a link to the other
  */
 function overlap(a: string, b: string): boolean {
   return [resolve, (p: string) => canonicalPath(resolve(p))].some(
@@ -187,17 +184,14 @@ async function snapshotTarget(ctx: {
 }
 
 /**
- * A target's file under the snapshot directory, in the repos-dir layout so the
- * directory can later serve as one, or why the target has none. SLUG_RE admits
- * "." and "..", which GitHub never issues but a repos entry can spell; either
- * would leave the directory. And the filesystem may carry the file onto
- * authored ground in a way the two inputs cannot show: a link under either
- * directory that leads into the other, or an owner spelled ".github". Two
- * targets can land on ONE file the same way (a link `out/bob -> out/alice`
- * with targets alice/r and bob/r), so every file this run writes is claimed
- * in `claimed` and a second target reaching it is refused. The refusal names
- * the earlier target through `display`, so a redacted one stays sealed, and
- * never the landing, whose spelling is the operator's.
+ * A target's file under the snapshot directory, in the repos-dir layout so the directory can later serve as one. The
+ * inputs are disjoint (overlap), yet the written path, followed by the filesystem, can still reach authored ground.
+ * A refusal names an earlier target through `display`, so a redacted one stays sealed.
+ *
+ * owner or name "." or ".."             -> not a GitHub owner/name, though SLUG_RE admits them; an owner ".." would leave the directory
+ * landing is an authored file           -> a link under either directory into the other, or an owner spelled ".github"
+ * landing inside the repos-dir          -> read back as a central file on the next run
+ * landing claimed by an earlier target  -> a link folding two owners: out/bob -> out/alice with alice/r and bob/r
  */
 function snapshotFilePath(
   cfg: Extract<SnapshotConfig, { form: "dir" }>,
