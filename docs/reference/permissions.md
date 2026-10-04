@@ -8,7 +8,12 @@ Every API call runs on the token you pass, so the grants on that token decide wh
 
 ## What to grant
 
-The PAT permission column in the [Sections table](sections.md) names the grant each section needs. Grant only the permissions for the sections your settings file declares, plus the two cross-cutting grants that belong to no section: Contents at read when the action must fetch a settings file it does not have checked out (remote multi-repo targets), and Issues at read and write only when a `private-report` issue channel (`issue` or `issue-on-failure`) is enabled (see [private repositories](../operate/private-repositories.md)). Contents at read also lets `branches` tell a missing branch from an unprotected one in check mode. Beyond those the action never needs more. In multi-repo mode the token needs the same permissions on every target repository.
+The PAT permission column in the [Sections table](sections.md) names the grant each section needs. Grant only the permissions for the sections your settings file declares, plus the two cross-cutting grants that belong to no section:
+
+- **Contents at read** when the action must fetch a settings file it does not have checked out (remote multi-repo targets). It also lets `branches` tell a missing branch from an unprotected one in check mode.
+- **Issues at read and write** only when a `private-report` issue channel (`issue` or `issue-on-failure`) is enabled (see [private repositories](../operate/private-repositories.md)).
+
+Beyond those the action never needs more. In multi-repo mode the token needs the same permissions on every target repository.
 
 <!-- BEGIN GENERATED: permissions-grant-sentence (bun run build:action-docs; derived from the section modules' permission declarations) -->
 To manage everything in one PAT, grant Administration, Issues, Environments, Actions, Secrets, Dependabot secrets, Codespaces secrets, Agent secrets, Checks, Pages, Variables, Agent variables, Webhooks, Custom properties, and Secret scanning alerts at write, plus Contents at read and (for org repos) the Members organization permission at read.
@@ -20,12 +25,12 @@ The default `GITHUB_TOKEN` can never hold most of these grants (Administration i
 
 ## How a denial surfaces
 
-A section whose token lacks its grant fails with an error naming the denied request and its HTTP status, plus advice starting "To fix, grant" that names the exact fine-grained permission. Three things worth knowing when a run fails on permissions:
+A section whose token lacks its grant fails with an error naming the denied request and its HTTP status, plus advice starting "To fix, grant" that names the exact fine-grained permission. Four things worth knowing when a run fails on permissions:
 
-- `mode: check` changes no settings, so the read half of each permission is enough for a drift-report-only workflow, with the exceptions listed below.
-- Fine-grained tokens surface a missing Administration permission as a 404, not a 403, on admin endpoints. The action treats both as permission errors and its messages name the exact permission to grant.
-- GitHub returns a ruleset's `bypass_actors` only to a token with write access to the ruleset: a token without Administration at write reads the ruleset fine but never sees that field, so check mode leaves a declared `bypass_actors` out of the comparison and says so in a notice instead of reporting drift.
-- `repos: "*"` discovery needs a user PAT; the workflow `GITHUB_TOKEN` and GitHub App installation tokens cannot enumerate a user's repositories. Remote multi-repo targets also need Contents: read on every target, because each repository's own settings.yml is fetched through the contents API.
+- **Check mode needs the read half.** `mode: check` changes no settings, so the read half of each permission is enough for a drift-report-only workflow, with the exceptions listed below.
+- **A 404 can be a denial.** Fine-grained tokens surface a missing Administration permission as a 404, not a 403, on admin endpoints. The action treats both as permission errors and its messages name the exact permission to grant.
+- **`bypass_actors` is hidden from read-only tokens.** GitHub returns a ruleset's `bypass_actors` only to a token with write access to the ruleset: a token without Administration at write reads the ruleset fine but never sees that field, so check mode leaves a declared `bypass_actors` out of the comparison and says so in a notice instead of reporting drift.
+- **Discovery and remote targets need more.** `repos: "*"` discovery needs a user PAT; the workflow `GITHUB_TOKEN` and GitHub App installation tokens cannot enumerate a user's repositories. Remote multi-repo targets also need Contents: read on every target, because each repository's own settings.yml is fetched through the contents API.
 
 The exceptions to check mode's read-only rule:
 
@@ -40,14 +45,25 @@ Not every 403 is a missing grant. Rate limits can arrive as 403, and the action 
 
 ## The denial policy
 
-Permission failures are the only errors the run can be told to tolerate; everything else always fails with the API message verbatim (see [Semantics](semantics.md)). Two inputs set the policy.
+Permission failures are the only errors the run can be told to tolerate; everything else always fails with the API message verbatim (see [Semantics](semantics.md)). Two inputs set the policy:
 
-Under the default `on-missing-permission: fail`, any denied section fails the run. In apply mode the [preflight barrier](semantics.md#the-preflight-barrier) probes every active section (each declared section the `sections` input selects; all of them when that input is unset) read-only before anything is written, so a read denial under `fail` stops the run before the first write. The probe cannot see the write half of a grant, though: a token that reads a section but cannot write it still fails mid-apply. The engine is idempotent, so fixing the token and re-running converges.
+| Input | A denied section is | The run |
+| --- | --- | --- |
+| `on-missing-permission: fail` (the default) | failed | fails |
+| `on-missing-permission: warn` | skipped with a warning annotation | continues; when nothing else drifts or fails the result is `partial` and the run stays green |
+| `required-sections` naming the section, even under `warn` | failed | fails regardless |
 
-`on-missing-permission: warn` turns a denial into a skip: the section is skipped with a warning annotation, the run continues, and when nothing else drifts or fails the result is `partial` and the run stays green. That is partial success as a policy, useful when one token manages a fleet whose repositories do not all grant the same permissions.
+Under `fail`, an apply run stops before its first write when a read is denied: the [preflight barrier](semantics.md#the-preflight-barrier) probes every active section (each declared section the `sections` input selects; all of them when that input is unset) read-only before anything is written.
 
-`required-sections` names the sections that must still fully apply even under `warn`: a denial on a required section fails the run regardless. It is a minimum-requirements floor - soften everything else, but never report success while, say, `rulesets` could not be applied. A required section must also be allowed by the `sections` input when that allowlist is set: an excluded section is never attempted, so requiring it would be a promise the run cannot check, and the pairing is rejected before any API call.
+The probe cannot see the write half of a grant, though: a token that reads a section but cannot write it still fails mid-apply. The engine is idempotent, so fixing the token and re-running converges.
+
+`warn` is partial success as a policy, useful when one token manages a fleet whose repositories do not all grant the same permissions.
+
+`required-sections` is a minimum-requirements floor: soften everything else, but never report success while, say, `rulesets` could not be applied. A required section must also be allowed by the `sections` input when that allowlist is set. An excluded section is never attempted, so requiring it would be a promise the run cannot check, and the pairing is rejected before any API call.
 
 ## Organization repositories
 
-Two caveats live on the organization rather than the repository. The `teams` section needs the Members organization permission at read, and the token form only offers organization permissions once an organization is selected as the resource owner - add it by hand when you use the pre-filled form. And a `custom_properties` write can be refused upstream regardless of the grant: a 403 on the values PATCH can mean the org restricts a property's values to org actors (`values_editable_by: org_actors`), and a 422 means the property is not defined at the organization level.
+Two caveats live on the organization rather than the repository:
+
+- **`teams` needs the Members organization permission at read.** The token form only offers organization permissions once an organization is selected as the resource owner, so add it by hand when you use the pre-filled form.
+- **A `custom_properties` write can be refused upstream regardless of the grant.** A 403 on the values PATCH can mean the org restricts a property's values to org actors (`values_editable_by: org_actors`), and a 422 means the property is not defined at the organization level.

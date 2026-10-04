@@ -6,7 +6,7 @@ order: 170
 
 Some settings are secrets. The first one this action manages is the webhook delivery secret (`webhooks[].config.secret`), and the problem it raises is general: `settings.yml` is a committed file, so a secret value can never be written into it, yet the API needs the real value at apply time.
 
-The answer is a reference. A designated secret field takes a whole-value `$NAME` token, and the action resolves it from the environment of the step that runs it - the same place a workflow already keeps secrets.
+The answer is a reference. A designated secret field takes a whole-value `$NAME` token, and the action resolves it from the environment of the step that runs it, the same place a workflow already keeps secrets.
 
 ```yaml settings
 webhooks:
@@ -86,20 +86,34 @@ Here the vault step exports `WEBHOOK_SECRET` into the job environment, and the s
 
 ## What happens at run time
 
-In apply mode, the action resolves every declared reference up front - after the read-only preflight, before the first write of any section. Resolution failures fail the repository cleanly with zero mutations:
+In apply mode, the action resolves every declared reference up front, after the read-only preflight and before the first write of any section. Resolution failures fail the repository cleanly with zero mutations:
 
 - An UNSET variable fails, naming the reference and pointing at the step's `env` block.
 - A SET-BUT-EMPTY variable also fails. An empty vault lookup must not write an empty secret, so a failed lookup cannot pass silently.
 
-Every resolved plaintext is registered with the runner's secret masker before it is used anywhere, on top of the protections the client always applies to secret-bearing requests: debug traces show `***` in place of the value, and the response body of a failed secret-carrying request is withheld wholesale (an error body can echo the rejected value). The value itself never appears in a drift line, a change line, a note, or a report.
+Every resolved plaintext is registered with the runner's secret masker before it is used anywhere. That is on top of the protections the client always applies to secret-bearing requests:
+
+- **Debug traces** show `***` in place of the value.
+- **The response body of a failed secret-carrying request** is withheld wholesale, since an error body can echo the rejected value.
+
+The value itself never appears in a drift line, a change line, a note, or a report.
 
 ## Check mode verifies syntax only
 
-`mode: check` never reads the environment. References are validated for shape and policy (whole-value, not reserved, right provenance), so a typo'd literal still fails a check run - but the variable does not need to exist where checks run, and the secret's VALUE is never verified. For webhooks specifically, GitHub echoes a stored secret as `********`, so no mode can compare it; apply re-sends the declared secret on every run, which is also how a rotated value propagates. Check mode says this out loud as a "cannot verify" note.
+`mode: check` never reads the environment. References are validated for shape and policy (whole-value, not reserved, right provenance), so a typo'd literal still fails a check run. The variable does not need to exist where checks run, and the secret's VALUE is never verified.
+
+For webhooks specifically, GitHub echoes a stored secret as `********`, so no mode can compare it. Apply re-sends the declared secret on every run, which is also how a rotated value propagates. Check mode says this out loud as a "cannot verify" note.
 
 ## Multi-repo: operator files only
 
-References are honored only in settings sources the OPERATOR authors: the single-repo settings file, every `settings-file` layer of a `mode: render` step, `repos-dir` files, and the `defaults-file` document. A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment - and its secrets - into itself. Declare secret-bearing sections centrally when you manage a fleet.
+References are honored only in settings sources the OPERATOR authors:
+
+- the single-repo settings file
+- every `settings-file` layer of a `mode: render` step
+- `repos-dir` files
+- the `defaults-file` document
+
+A settings.yml fetched from a target repository (the `repos` input) is target-authored, and a reference there is a hard error: a target repository must not be able to route the operator's environment, and its secrets, into itself. Declare secret-bearing sections centrally when you manage a fleet.
 
 ## Repository Actions secrets
 
@@ -113,13 +127,28 @@ actions_secrets:
     value: $PUBLISH_TOKEN
 ```
 
-GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note. Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates. Undeclared secrets are kept by default - a deleted secret's value is unrecoverable - and the wrapped `_undeclared: delete` form opts into deletion.
+GitHub never returns a secret's value, only names and timestamps, so check mode reconciles EXISTENCE: a declared-but-missing secret is drift, and the declared values get one cannot-verify note.
 
-Unlike the variables sections, a secret entry accepts ONLY `name` and `value` - an unknown key is rejected upfront rather than passed through. That is not an inconsistency: a variables entry's body goes to GitHub verbatim, so an extra key rides along and GitHub decides; a secret's PUT body is built from the sealed value alone, so an extra key has no destination and would "apply" successfully forever while doing nothing.
+Apply seals every declared value client-side against the repository's public key and re-writes it on every run, which is also how a rotated vault value propagates.
+
+Undeclared secrets are kept by default, since a deleted secret's value is unrecoverable; the wrapped `_undeclared: delete` form opts into deletion.
+
+Unlike the variables sections, a secret entry accepts ONLY `name` and `value`: an unknown key is rejected upfront rather than passed through. That is not an inconsistency:
+
+| Entry | Where an extra key goes | Outcome |
+| --- | --- | --- |
+| a variables entry | the body goes to GitHub verbatim, so the key rides along | GitHub decides |
+| a secret entry | the PUT body is built from the sealed value alone, so the key has no destination | the key would "apply" successfully forever while doing nothing |
 
 ## Dependabot, Codespaces, and Copilot agents secrets
 
-Three sibling sections manage the other repository-level secret stores with the exact same shape and semantics: `dependabot_secrets` (private-registry credentials Dependabot uses when it resolves dependencies), `codespaces_secrets` (secrets exposed to development environments), and `agents_secrets` (the Copilot agents secret store). Each seals against its own public key and needs its own PAT permission - "Dependabot secrets", "Codespaces secrets", and "Agent secrets" respectively; note GitHub gates even the Codespaces secret reads at write access.
+Three sibling sections manage the other repository-level secret stores with the exact same shape and semantics. Each seals against its own public key and needs its own PAT permission:
+
+| Section | Store | PAT permission |
+| --- | --- | --- |
+| `dependabot_secrets` | private-registry credentials Dependabot uses when it resolves dependencies | "Dependabot secrets" |
+| `codespaces_secrets` | secrets exposed to development environments | "Codespaces secrets", and GitHub gates even the Codespaces secret reads at write access |
+| `agents_secrets` | the Copilot agents secret store | "Agent secrets" |
 
 ```yaml settings
 dependabot_secrets:
@@ -137,7 +166,7 @@ Everything said about `actions_secrets` applies: existence-only checks, one cann
 
 ## Environment secrets
 
-Deployment environments carry their own secret store, managed as a nested `secrets` key on an `environments` entry - next to the `variables` key it mirrors:
+Deployment environments carry their own secret store, managed as a nested `secrets` key on an `environments` entry, next to the `variables` key it mirrors:
 
 ```yaml settings
 environments:
@@ -151,11 +180,18 @@ environments:
         value: $PROD_DEPLOY_TOKEN
 ```
 
-Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. The public key that seals a value is read at apply, by the first sealed write of its scope; check mode never requests it. Reconciliation runs after the environment itself is applied; in check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it. Within a declared `secrets` key, live secrets the entries do not declare are kept by default (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion. The endpoints ride the same "Environments" PAT permission as the rest of the section.
+Each environment is its own sealing scope with its own public key, so the same secret name can carry a different value per environment, as above. The rules of the nested store:
+
+- **The public key is read at apply,** by the first sealed write of its scope; check mode never requests it.
+- **Reconciliation runs after the environment itself is applied.** In check mode against an environment that does not exist yet, the declared secrets cannot be listed, so a note says they are unverifiable until apply creates it.
+- **Undeclared live secrets are kept by default.** Within a declared `secrets` key, live secrets the entries do not declare are kept (their values are unrecoverable); the wrapped `{_undeclared: delete, entries}` form opts into deletion.
+- **The endpoints ride the same "Environments" PAT permission** as the rest of the section.
 
 ## Multi-repo fan-out
 
-In multi-repo mode the defaults file is applied whole to every `repos` target that has no settings file of its own. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY fileless target the run discovers. Sometimes that is exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it).
+In multi-repo mode the defaults file is applied whole to every `repos` target that has no settings file of its own. A defaults file that declares a secret section (`actions_secrets`, `dependabot_secrets`, `codespaces_secrets`, `agents_secrets`, or environment secrets) therefore writes those secrets into EVERY fileless target the run discovers.
+
+Sometimes that is exactly the point (a fleet-wide deploy key), and sometimes a surprise (a token fanned out to repositories that should never hold it).
 
 Scope discovery deliberately before declaring secrets in a defaults file:
 
