@@ -29,8 +29,9 @@ describe("action.yml <-> README", () => {
 
 describe("input declarations <-> discovery defaults", () => {
   test("each discovery filter's description names its effective default", () => {
-    // The declared default is "" so an explicitly set filter is detectable (test/flows/inputs.test.ts pins that read),
-    // which leaves the description as the only place the reader learns the effective default.
+    // The declared default is "" so an explicitly set filter is detectable (test/flows/inputs.test.ts "every declared
+    // default passes" fails on a non-empty one), which leaves the description as the only place the reader learns the
+    // effective default.
     const effective: Partial<Record<(typeof FILTER_INPUTS)[number], string>> = {
       visibility: DEFAULT_DISCOVERY_FILTERS.visibility,
       archived: DEFAULT_DISCOVERY_FILTERS.archived,
