@@ -63,7 +63,7 @@ describe("rule() reports beside a failed nested value", () => {
     expect(ran).toBe(false);
   });
 
-  test("a rule's own when is ANDed with the gate: false keeps the body uncalled, true does not lift the gate", () => {
+  test("a rule's own when is combined with the gate by AND: false keeps the body uncalled, true does not lift the gate", () => {
     const calls: string[] = [];
     const shape = z
       .object({ name: z.string() })
