@@ -93,10 +93,13 @@ Token permissions the file needs:
 ```
 
 The file is the one [snapshot mode](../operate/snapshot.md) writes, schema hint first; commit it, and `gsac check` reads clean against the repository it came from.
-An existing settings file is refused (init never replaces the file you author) unless `--force` is passed; `--settings-file` writes elsewhere.
-`--sections` and `--on-missing-permission` narrow the snapshot as they do under `snapshot`; a section the token cannot read is skipped under `warn` and listed on stdout, and the file's header names every section the snapshot does not read back.
-A document that would declare no section is never written: the refusal names each selected section and why it declares nothing.
-The notes print in the clear, as the file holds the same names: init has no `--private-repos`.
+
+The write follows four rules:
+
+- **An existing settings file is refused** (init never replaces the file you author) unless `--force` is passed; `--settings-file` writes elsewhere.
+- **`--sections` and `--on-missing-permission`** narrow the snapshot as they do under `snapshot`: a section the token cannot read is skipped under `warn` and listed on stdout, and the file's header names every section the snapshot does not read back.
+- **A document that would declare no section is never written:** the refusal names each selected section and why it declares nothing.
+- **There is no `--private-repos`:** the notes print in the clear, as the file holds the same names.
 
 With `--json`, stdout is one object, the envelope every subcommand prints (`result` first, then the command's own fields). After a write:
 
@@ -129,9 +132,9 @@ With `--json`: `{"result":"valid","file":"<path>","grant":{"labels":"<grant line
 
 ## Flags
 
-The subcommand is the action's `mode` input. Every other input of that mode is a flag named `--<input>`, taking the value the action's `with:` key takes;
-the [inputs reference](../reference/inputs.md) lists each one with its default and meaning, and `gsac <command> --help` prints the same descriptions.
-A list input (`--settings-file` under render, `--repos`, `--exclude`, `--topics`, `--affiliation`, `--sections`, `--required-sections`) takes a comma-separated value or the flag repeated; repeating any other value flag, `--token` and `--summary` included, is an error naming it.
+The subcommand is the action's `mode` input. Every other input of that mode is a flag named `--<input>`, taking the value the action's `with:` key takes; the [inputs reference](../reference/inputs.md) lists each one with its default and meaning, and `gsac <command> --help` prints the same descriptions.
+
+A list input (`--settings-file` under render, `--repos`, `--exclude`, `--topics`, `--affiliation`, `--sections`, `--required-sections`) takes a comma-separated value or the flag repeated. Repeating any other value flag, `--token` and `--summary` included, is an error naming it.
 
 Two inputs have no command-line form: `--private-report artifact` is refused (the artifact upload needs the Actions runner; `issue`, `issue-on-failure`, and `none` work), and `report-public-key`, which only that channel reads, is not a flag.
 
@@ -155,7 +158,14 @@ skipped-sections=
 repos-result={}
 ```
 
-As a GitHub Actions step (`GITHUB_ACTIONS=true` in the environment, as the runner sets it) the command line reports as the action does, in addition: a masked value is a `::add-mask::` command, an annotation a `::notice::`, `::warning::`, or `::error::` command on stdout instead of the stderr line, the outputs land in the step outputs (`GITHUB_OUTPUT`), and the summary in the step summary (`GITHUB_STEP_SUMMARY`) unless `--summary` names a file. Those commands share stdout with the `--json` object, so a step reads the outputs from the step outputs, not by parsing stdout; the one-object rule below holds in a terminal.
+As a GitHub Actions step (`GITHUB_ACTIONS=true` in the environment, as the runner sets it) the command line reports as the action does, in addition:
+
+- **A masked value** is a `::add-mask::` command.
+- **An annotation** is a `::notice::`, `::warning::`, or `::error::` command on stdout instead of the stderr line.
+- **The outputs** land in the step outputs (`GITHUB_OUTPUT`).
+- **The summary** lands in the step summary (`GITHUB_STEP_SUMMARY`) unless `--summary` names a file.
+
+Those commands share stdout with the `--json` object, so a step reads the outputs from the step outputs, not by parsing stdout; the one-object rule below holds in a terminal.
 
 With `--json` the outputs are one object instead, and stdout carries nothing else; `skipped-sections` is a list there and `repos-result` a map, never a string to parse again:
 
@@ -175,6 +185,6 @@ The exit codes are the action's:
 | `validate` | the file is invalid |
 | `permissions` | never for a valid file |
 
-A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name;
-a value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
+A flag the mode does not read is unknown to that subcommand and exits 1 with the parser's message, where the action rejects the same input by name. A value the mode refuses (a filter without `--repos "*"`, a `--repository` that is not a slug) fails with the action's own message, reworded where the action's remedy names the workflow step.
+
 The token passed on the command line is masked as `***` wherever a line would echo it.

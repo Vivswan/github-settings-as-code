@@ -65,13 +65,19 @@ jobs:
           mode: check
 ```
 
-Each trigger earns its place. The push trigger runs the action on every reviewed change to the settings file: a check while `mode: check` is set, an apply once step 5 removes it. `workflow_dispatch` lets you run the action by hand from the Actions tab, which is how the first run happens. The schedule catches drift: in check mode a weekly run turns red when the live settings diverge from the file, and after the switch to apply it re-asserts the declared keys and reverts anything changed through the UI in the meantime (apply is convergent, see [Semantics](../reference/semantics.md)).
+Each trigger earns its place:
+
+- **`push`** runs the action on every reviewed change to the settings file: a check while `mode: check` is set, an apply once step 5 removes it.
+- **`workflow_dispatch`** lets you run the action by hand from the Actions tab, which is how the first run happens.
+- **`schedule`** catches drift. In check mode a weekly run turns red when the live settings diverge from the file, and after the switch to apply it re-asserts the declared keys and reverts anything changed through the UI in the meantime (apply is convergent, see [Semantics](../reference/semantics.md)).
 
 The `@v2` pin <!-- x-release-please-major --> is the moving major tag, stable within its line; `@latest` is a moving tag on the packaged commit of the newest `main` commit (`main` itself is source-only), where breaking changes arrive unannounced, so keep production on the major pin.
 
 ## 4. Run check mode first
 
-`mode: check` compares the declared settings against the live repository, makes no settings changes, and exits 1 when anything differs. Trigger the workflow from the Actions tab. On a repository with existing labels the run will fail with drift, and that is the point: the report lists exactly what an apply would change or delete. The log shows one line per difference:
+`mode: check` compares the declared settings against the live repository, makes no settings changes, and exits 1 when anything differs. Trigger the workflow from the Actions tab.
+
+On a repository with existing labels the run will fail with drift, and that is the point: the report lists exactly what an apply would change or delete. The log shows one line per difference:
 
 ```text
 drift: repository.description: "Payments service" != ""
@@ -83,7 +89,9 @@ Work through the deletions first: add the labels you want to keep to the setting
 
 ## 5. Switch to apply
 
-Remove the `mode: check` line (the default is `apply`) and push, then run the workflow once from the Actions tab: the push that edits only the workflow file does not match the `paths` filter, so the first apply is a manual dispatch. From then on every push that touches `.github/settings.yml` applies it, and the scheduled run keeps the repository converged. In apply mode the log shows what was written instead:
+Remove the `mode: check` line (the default is `apply`) and push, then run the workflow once from the Actions tab: the push that edits only the workflow file does not match the `paths` filter, so the first apply is a manual dispatch.
+
+From then on every push that touches `.github/settings.yml` applies it, and the scheduled run keeps the repository converged. In apply mode the log shows what was written instead:
 
 ```text
 labels: created label "bug"
@@ -95,7 +103,11 @@ To keep a permanent drift-report workflow alongside the applying one, see the [c
 
 ## 6. Reading the output
 
-Three surfaces carry the result. The log holds the per-drift and per-change lines shown above; a run that succeeds or finds drift ends in a `result:` line naming the outcome (`applied`, `clean`, `drift`, or `partial`), while a failing single-repo run stops at its error annotation instead (the `result` output still reads `failed`). The step summary renders a table with one row per declared section: its status plus the same detail lines, so you rarely need to open the log at all. Annotations surface problems on the run page: errors carry the GitHub API's message verbatim plus the fix, warnings mark sections skipped under `on-missing-permission: warn`, and notices carry advisory notes (for example that `enable_git_lfs` is write-only, so check mode cannot verify it).
+Three surfaces carry the result, the same three the [check mode guide](../operate/check-mode.md#where-the-output-lands) describes:
+
+- **The log** holds the per-drift and per-change lines shown above. A run that succeeds or finds drift ends in a `result:` line naming the outcome (`applied`, `clean`, `drift`, or `partial`), while a failing single-repo run stops at its error annotation instead (the `result` output still reads `failed`).
+- **The step summary** renders a table with one row per declared section: its status plus the same detail lines, so you rarely need to open the log at all.
+- **Annotations** surface problems on the run page: errors carry the GitHub API's message verbatim plus the fix, warnings mark sections skipped under `on-missing-permission: warn`, and notices carry advisory notes (for example that `enable_git_lfs` is write-only, so check mode cannot verify it).
 
 The action also sets a `result` output for downstream steps; the [Inputs and outputs](../reference/inputs.md) page documents it alongside every input.
 

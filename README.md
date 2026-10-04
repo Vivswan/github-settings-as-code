@@ -6,7 +6,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 
 ## Quick start
 
-1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form] and save it as the `ADMIN_TOKEN` repository secret. The form starts with every repository permission the action can need (an organization owner adds Members: read by hand); the default `GITHUB_TOKEN` can never hold them.
+1. Create a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) from the [pre-filled token form][pat-form] and save it as the `ADMIN_TOKEN` repository secret. The form starts with every repository permission the action can need; [Create the token](docs/start/getting-started.md#1-create-the-token) says why the default `GITHUB_TOKEN` is not enough and when an organization owner adds Members: read by hand.
 
 2. Add `.github/settings.yml` (or start from a [snapshot](docs/operate/snapshot.md) of the live settings). The first line gives editor autocomplete and hover docs:
 
@@ -25,7 +25,7 @@ Apply declarative repository settings from `.github/settings.yml`: a loud, state
 3. Add the workflow and run it from the Actions tab.
    - Keep `mode: check` for the first run: the drift report lists everything an apply would change or delete, and nothing is written.
    - Read the report. An apply deletes undeclared labels, autolinks, collaborators, Actions variables, and Copilot agents variables.
-   - Drop the `mode: check` line once the report says what you expect. The [getting started guide](docs/start/getting-started.md) explains the drift output.
+   - Drop the `mode: check` line once the report says what you expect. [Run check mode first](docs/start/getting-started.md#4-run-check-mode-first) explains the drift output.
 
    ```yaml
    # .github/workflows/settings.yml

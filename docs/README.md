@@ -80,4 +80,10 @@ Generated regions carry the load-bearing facts. Each is rendered from its declar
 
 Contract tests pin the remaining authored claims in [forward compatibility](reference/forward-compatibility.md), [private repositories](operate/private-repositories.md), and [troubleshooting](operate/troubleshooting.md): the commands and enumerations that must not drift. The rest is walkthrough prose. When a walkthrough disagrees with a generated or pinned claim, the claim wins, so guides link to the claims rather than duplicating their exact wording.
 
-The settings examples in these pages are validated in CI against the real schema (`test/docs/guides.test.ts`): every fenced block tagged `yaml settings` must be a valid settings document, every block tagged `yaml layer` must validate as one layer of a merge (nulls stripped first, as the render step does), and a settings-shaped block without a tag fails the build. Every `mermaid` diagram must name real files and exported symbols and link the test that demonstrates it (`test/docs/diagrams.test.ts`). If you edit a guide, tag your example blocks.
+The settings examples in these pages are validated in CI against the real schema (`test/docs/guides.test.ts`), so if you edit a guide, tag your example blocks:
+
+- **`yaml settings`:** must be a valid settings document.
+- **`yaml layer`:** must validate as one layer of a merge (nulls stripped first, as the render step does).
+- **A settings-shaped block without a tag:** fails the build.
+
+Every `mermaid` diagram must name real files and exported symbols and link the test that demonstrates it (`test/docs/diagrams.test.ts`).
