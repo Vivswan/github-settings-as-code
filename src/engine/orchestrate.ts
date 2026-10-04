@@ -34,11 +34,13 @@ import { SECTIONS } from "../sections/registry.js";
 import { agree, countNoun } from "../text.js";
 import type { MustBeNever, UndeclaredPolicy } from "../types.js";
 import { executePlan } from "./execute.js";
-import { resolveUndeclaredPolicies, separateRemovals, UNDECLARED_POLICIES } from "./layers.js";
+import { UNDECLARED_POLICIES } from "./layers.js";
 import type { RunOutcome } from "./outcome.js";
 import { resolveSecretRefs, type SettingsSource } from "./secret-refs.js";
 import { collectSecretReferences } from "./secrets.js";
 import type { SectionSelection } from "./section-selection.js";
+import { separateRemovals } from "./separate-removals.js";
+import { resolveUndeclaredPolicies } from "./undeclared.js";
 import { validateSectionShapes } from "./validate.js";
 
 /**

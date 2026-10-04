@@ -1,46 +1,31 @@
 /**
- * The layered merge, folded low to high; pure (no Io, no GitHub), and layers are trees: a document aliasing a node
- * inside itself is refused. Lists never combine except a list section's entries, unioned by the module's key
- * (and the nested lists that key declares) under the effective directive: the wrapper's `_layering`, else the file's,
- * else the run's. A list section is knobbed (`{_undeclared, entries}`, the policy resolved after the fold) or plain
- * (`{_layering, entries}`, unwrapped to the bare list after the fold: the directive was its only content).
- *
- * The undeclared policy resolves once, here after the fold and in the validator for a single document
- * (resolveUndeclaredPolicies), so a planner reads an explicit policy off every wrapper and never derives one:
- * the wrapper's `_undeclared`, else the file's top-level `_undeclared`, else the run's `undeclared` input, else the
- * list's own default. The file-wide key is a directive the boundary admits and the fold consumes: the highest layer
- * that sets it steers the whole fold, and it never reaches the rendered document.
- *
- * The cascade: the higher layer's value wins, and null is a value like any other, the EMPTY or OFF state on GitHub.
- * The fold never reads a null as a marker; whether a key admits null is the schema's question, asked of every layer
- * and of the fold (engine/validate.ts). What a higher layer cannot say with a value, it says with a directive.
- *
- * higher plain mapping                  -> merged key by key
- * higher scalar, list, null, tagged     -> replaces
- * knobbed entries under replace         -> the higher list wins
- * knobbed entries under shallow         -> union by key; a same-key entry is swapped for the higher one
- * knobbed entries under deep            -> union by key; a same-key pair merges field by field, nested keyed lists too
- * `_remove: true` on a keyed entry      -> drops the lower entry it claims, with a notice; the marker never reaches the
- *                                          rendered document, and one that has nothing to remove is refused
+ * The layered merge, folded low to high over the layers admit.ts let past, and the standalone view each layer is
+ * validated through on the way (the document minus what the fold consumes); pure (no Io, no GitHub). The cascade the
+ * merge applies is docs/operate/layering.md's.
  */
 
 import { err, ok, type Result } from "neverthrow";
 import { isPlainObject, own, put } from "../plain-data.js";
 import type { LayerProblem } from "../problem.js";
-import {
-  LIST_SECTIONS,
-  type ListSection,
-  UNDECLARED_POLICY_SECTIONS,
-  type UndeclaredPolicySection,
-} from "../schema.js";
-import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
-import { listLayering, sectionModule } from "../sections/registry.js";
+import { LIST_SECTIONS } from "../schema.js";
+import type { KeyedListLayering } from "../sections/contract/module.js";
 import {
   LAYERINGS,
   type Layering,
   UNDECLARED_POLICIES,
 } from "../sections/shared/schema-helpers.js";
-import type { DistributiveOmit, UndeclaredPolicy } from "../types.js";
+import type { UndeclaredPolicy } from "../types.js";
+import { type AdmittedLayer, type AdmittedSection, admit, type Refusal } from "./admit.js";
+import {
+  KNOBBED,
+  LAYERING_KEY,
+  type NestedForm,
+  nestedForm,
+  REMOVE_KEY,
+  UNDECLARED_KEY,
+} from "./directives.js";
+import { separateRemovals } from "./separate-removals.js";
+import { resolveUndeclaredPolicies } from "./undeclared.js";
 
 // The flows may not import src/sections (architecture.yml), so the value sets reach them through the engine.
 export { LAYERINGS, type Layering, UNDECLARED_POLICIES };
@@ -57,22 +42,6 @@ export interface RemovalNotice {
   readonly path: string;
 }
 
-const LAYERING_KEY = "_layering";
-
-/** The policy knob's key: on a knobbed wrapper (top-level or nested) a value, at a file's top level a directive. */
-const UNDECLARED_KEY = "_undeclared";
-
-/** The one entry-level directive: `_remove: true` names a lower entry by its key and drops it. */
-const REMOVE_KEY = "_remove";
-
-function isLayering(value: unknown): value is Layering {
-  return LAYERINGS.some((layering) => layering === value);
-}
-
-function isUndeclaredPolicy(value: unknown): value is UndeclaredPolicy {
-  return UNDECLARED_POLICIES.some((policy) => policy === value);
-}
-
 /** The knobs a fold or a single document is resolved under; `undeclared` is the run input, unset unless the workflow set it. */
 export interface FoldOptions {
   readonly layering: Layering;
@@ -81,99 +50,6 @@ export interface FoldOptions {
 
 /** The directives under which a knobbed list unions by key instead of being replaced. */
 type Uniting = Exclude<Layering, "replace">;
-
-const KNOBBED: ReadonlySet<string> = new Set(UNDECLARED_POLICY_SECTIONS);
-
-/**
- * A plain array becomes `{entries}` with NO `_undeclared`: that omission is what lets a merge inherit a lower layer's
- * policy. Resolved to the section default here, a higher layer's default would overwrite the lower's explicit policy.
- */
-function normalizeListSections(settings: unknown): unknown {
-  if (!isPlainObject(settings)) {
-    return settings;
-  }
-  const out: Record<string, unknown> = { ...settings };
-  for (const key of LIST_SECTIONS) {
-    const value = out[key];
-    if (Array.isArray(value)) {
-      out[key] = { entries: value };
-    }
-  }
-  return out;
-}
-
-function sectionDefaultPolicy(key: UndeclaredPolicySection): UndeclaredPolicy {
-  return defaultUndeclaredPolicy(sectionModule(key));
-}
-
-/**
- * A list in either form with its policy made explicit: the wrapper's own, else `fallback`, else `own` (the list's
- * default). A `_undeclared` that is present but not a policy (null) is left for the validator to refuse; the knob
- * leads the wrapper, where an author's own sits after the fold. A library caller's object can carry the key with an
- * explicit undefined, which is no policy: it is dropped before the resolved one is set, so it cannot overwrite it.
- */
-function resolvedWrapper(
-  value: unknown,
-  fallback: UndeclaredPolicy | undefined,
-  own: UndeclaredPolicy,
-): unknown {
-  const form = nestedForm(value);
-  if (form === null || form.knobs?.[UNDECLARED_KEY] !== undefined) {
-    return value;
-  }
-  const { [UNDECLARED_KEY]: _unset, ...knobs } = form.knobs ?? {};
-  return { [UNDECLARED_KEY]: fallback ?? own, ...knobs, entries: form.entries };
-}
-
-/** An entry with each nested list that takes the knob resolved; entries are shared with the layers, so a resolved one is a new object. */
-function resolveNestedPolicies(
-  entry: unknown,
-  keyed: KeyedListLayering,
-  fallback: UndeclaredPolicy | undefined,
-): unknown {
-  if (!isPlainObject(entry)) {
-    return entry;
-  }
-  let out: Record<string, unknown> | null = null;
-  for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-    if (nested.undeclaredDefault === undefined) {
-      continue;
-    }
-    const value = own(entry, field);
-    const resolved = resolvedWrapper(value, fallback, nested.undeclaredDefault);
-    if (resolved !== value) {
-      out ??= { ...entry };
-      put(out, field, resolved);
-    }
-  }
-  return out ?? entry;
-}
-
-/**
- * The ONE resolution of the undeclared policy, over a folded or a validated document: every knobbed section and every
- * nested list that takes the knob comes out in wrapper form with an explicit `_undeclared`: the wrapper's own, else
- * `fallback` (the file's top-level directive, else the run input, both admitted by the caller), else the list's default.
- */
-export function resolveUndeclaredPolicies(
-  doc: Record<string, unknown>,
-  fallback: UndeclaredPolicy | undefined,
-): void {
-  for (const key of UNDECLARED_POLICY_SECTIONS) {
-    const value = own(doc, key);
-    if (value !== undefined) {
-      put(doc, key, resolvedWrapper(value, fallback, sectionDefaultPolicy(key)));
-    }
-  }
-  for (const key of LIST_SECTIONS) {
-    const form = nestedForm(own(doc, key));
-    const keyed = listLayering(key);
-    if (form === null || keyed.nested === undefined) {
-      continue;
-    }
-    const entries = form.entries.map((entry) => resolveNestedPolicies(entry, keyed, fallback));
-    put(doc, key, form.knobs === null ? entries : { ...form.knobs, entries });
-  }
-}
 
 /**
  * A plain-list section's wrapper carried only the directive the fold consumed, so the rendered document holds the bare
@@ -191,25 +67,7 @@ function unwrapPlainLists(merged: Record<string, unknown>): void {
   }
 }
 
-/** A nested keyed list in either form: the bare list, or the nested `{_undeclared, entries}` wrapper; null when neither. */
-interface NestedForm {
-  readonly entries: readonly unknown[];
-  /** The wrapper's keys besides `entries`; null for the bare list, so the fold can tell the two forms apart. */
-  readonly knobs: Readonly<Record<string, unknown>> | null;
-}
-
-function nestedForm(value: unknown): NestedForm | null {
-  if (Array.isArray(value)) {
-    return { entries: value, knobs: null };
-  }
-  if (isPlainObject(value) && Array.isArray(value.entries)) {
-    const { entries, ...knobs } = value;
-    return { entries, knobs };
-  }
-  return null;
-}
-
-/** Whether a keyed entry is a removal: `_remove: true` beside its key. The boundary refused every other `_remove`. */
+/** Whether a keyed entry is a removal: `_remove: true` beside its key. admit.ts refused every other `_remove`. */
 function isRemoval(entry: unknown): entry is Readonly<Record<string, unknown>> {
   return isPlainObject(entry) && entry[REMOVE_KEY] === true;
 }
@@ -234,23 +92,7 @@ function nestedList(scope: EntryScope | undefined, key: string): KeyedListLayeri
     : own(scope.nested, key);
 }
 
-/** A layer refusal minus its position: the boundary adds the layer and site where it fires. */
-type Refusal = DistributiveOmit<LayerProblem, "layer" | "site">;
-
-/**
- * No document value ever enters a refusal's prose; the marker test in test/engine/layers.test.ts pins it. Of the
- * author's keys, only the paths riding beside a removal marker do (`extra`), so the author can find and drop them.
- *
- * `actual`    -> the only document value carried, and describeProblem describes it by shape
- * `keyField`  -> the module's declared key field; `keyPaths` the dotted paths a removal names its entry by
- * `extra`     -> the author's own dotted paths beside a removal marker, never their values
- * `site`      -> section keys, entry indices, module-declared field names, LAYERING_KEY, REMOVE_KEY, "the document"
- */
-function refuse(layer: string, site: string, refusal: Refusal): Result<never, LayerProblem> {
-  return err({ layer, site, ...refusal });
-}
-
-/** Value-free under the refusals' invariant: mode: render has no redaction context, so no document value may reach a log through the merge. */
+/** Value-free under the refusals' invariant (`Refusal` in admit.ts): mode: render has no redaction context, so no document value may reach a log through the merge. */
 export function describeRemoval(notice: RemovalNotice): string {
   return `${notice.layer}: ${notice.path} carries _remove: true and dropped the entry a lower layer declared under its key`;
 }
@@ -265,301 +107,6 @@ interface Step {
 /** Only the first refusal is kept: the fold stops at the layer that carries it. */
 function refuseStep(step: Step, site: string, refusal: Refusal): void {
   step.refusal ??= { layer: step.layer, site, ...refusal };
-}
-
-interface AdmittedSection {
-  /** The wrapper's keys besides `entries` and `_layering`: `_undeclared`, or a typo kept for validation to name. */
-  readonly knobs: Readonly<Record<string, unknown>>;
-  readonly entries: readonly Readonly<Record<string, unknown>>[];
-  readonly layering: Layering;
-  readonly keyed: KeyedListLayering;
-}
-
-interface AdmittedLayer {
-  readonly name: string;
-  readonly doc: Readonly<Record<string, unknown>>;
-  readonly sections: ReadonlyMap<string, AdmittedSection>;
-  /** The layer's file-wide `_undeclared`, when it sets one. */
-  readonly undeclared: UndeclaredPolicy | undefined;
-}
-
-function asMappings(list: readonly unknown[]): readonly Readonly<Record<string, unknown>>[] | null {
-  return list.every(isPlainObject) ? list : null;
-}
-
-function admitEntries(
-  layer: string,
-  path: string,
-  list: readonly unknown[],
-): Result<readonly Readonly<Record<string, unknown>>[], LayerProblem> {
-  const mappings = asMappings(list);
-  if (mappings !== null) {
-    return ok(mappings);
-  }
-  const index = list.findIndex((entry) => !isPlainObject(entry));
-  return refuse(layer, `${path}[${index}]`, {
-    code: "layer-wrong-shape",
-    expected: "a mapping",
-    actual: list[index],
-  });
-}
-
-/** The dotted paths a removal entry may carry beside `_remove`: the key field's own (`config.url`) unless the module names a composite. */
-function removalPaths(keyed: KeyedListLayering): readonly string[] {
-  return keyed.removalPaths ?? [keyed.keyField];
-}
-
-type Segments = readonly string[];
-
-function sameSegments(a: Segments, b: Segments): boolean {
-  return a.length === b.length && a.every((segment, index) => segment === b[index]);
-}
-
-function leadsTo(prefix: Segments, path: Segments): boolean {
-  return path.length > prefix.length && prefix.every((segment, index) => segment === path[index]);
-}
-
-/**
- * The paths of `entry` outside `allowed`, named in full (`config.secret`), compared segment by segment so a literal
- * key spelled `config.url` never passes for the nested one: a mapping on the way to an allowed path is walked, the
- * value at an allowed path is the key's own and stays unjudged here (keys() reads it).
- */
-function pathsOutside(
-  entry: Readonly<Record<string, unknown>>,
-  allowed: readonly Segments[],
-  prefix: Segments = [],
-): string[] {
-  const outside: string[] = [];
-  for (const [field, value] of Object.entries(entry)) {
-    const path = [...prefix, field];
-    if (
-      (prefix.length === 0 && field === REMOVE_KEY) ||
-      allowed.some((known) => sameSegments(known, path))
-    ) {
-      continue;
-    }
-    if (isPlainObject(value) && allowed.some((known) => leadsTo(path, known))) {
-      outside.push(...pathsOutside(value, allowed, path));
-      continue;
-    }
-    outside.push(path.join("."));
-  }
-  return outside;
-}
-
-/**
- * A removal entry names its key and nothing else: a field beside the marker, at any depth of the key's container,
- * would be silently lost, and a marker that is not `true` would be a value the schema never sees (the standalone view
- * drops removal entries before validation).
- */
-function checkRemoval(
-  layer: string,
-  entry: Readonly<Record<string, unknown>>,
-  keyed: KeyedListLayering,
-  site: string,
-  directive: Layering | undefined,
-): Result<void, LayerProblem> {
-  const marker = entry[REMOVE_KEY];
-  if (marker === undefined) {
-    return ok();
-  }
-  if (marker !== true) {
-    return refuse(layer, `${site}.${REMOVE_KEY}`, {
-      code: "layer-remove-not-true",
-      actual: marker,
-    });
-  }
-  const keyPaths = removalPaths(keyed);
-  const extra = pathsOutside(
-    entry,
-    keyPaths.map((path) => path.split(".")),
-  );
-  if (extra.length > 0) {
-    return refuse(layer, site, { code: "layer-remove-with-fields", keyPaths, extra });
-  }
-  if (directive === "replace") {
-    return refuse(layer, site, { code: "layer-remove-nothing", reason: "replace" });
-  }
-  return ok();
-}
-
-/**
- * Two entries of one layer claiming a key (a label renaming into a sibling's name) are refused here, so unionKeyed
- * never meets them; a removal entry is checked for its shape here and for something to remove at the fold. `directive`
- * is the section's at the top level and undefined inside a nested list, whose fate the parent pair decides.
- */
-function checkKeyed(
-  layer: string,
-  entries: readonly Readonly<Record<string, unknown>>[],
-  keyed: KeyedListLayering,
-  path: string,
-  directive: Layering | undefined,
-): Result<void, LayerProblem> {
-  const seen = new Map<string, number>();
-  for (const [index, entry] of entries.entries()) {
-    const site = `${path}[${index}]`;
-    const removal = checkRemoval(layer, entry, keyed, site, directive);
-    if (removal.isErr()) {
-      return removal;
-    }
-    const keys = keyed.keys(entry);
-    if (keys === null) {
-      const alongside = removalPaths(keyed).filter((path) => path !== keyed.keyField);
-      return refuse(layer, site, {
-        code: "layer-no-key",
-        keyField: keyed.keyField,
-        ...(keyed.keyKind === undefined ? {} : { keyKind: keyed.keyKind }),
-        ...(alongside.length === 0 ? {} : { alongside }),
-      });
-    }
-    for (const key of keys) {
-      const first = seen.get(key);
-      if (first !== undefined) {
-        return refuse(layer, path, {
-          code: "layer-duplicate-key",
-          keyField: keyed.keyField,
-          first,
-          second: index,
-        });
-      }
-      seen.set(key, index);
-    }
-    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-      const form = nestedForm(entry[field]);
-      if (form === null) {
-        continue;
-      }
-      // The wrapper is transparent to the path, as in the rendered order: `environments[0].variables[1]` under both forms.
-      const nestedPath = `${site}.${field}`;
-      const checked = admitEntries(layer, nestedPath, form.entries).andThen((mappings) =>
-        checkKeyed(layer, mappings, nested, nestedPath, undefined),
-      );
-      if (checked.isErr()) {
-        return checked;
-      }
-    }
-  }
-  return ok();
-}
-
-function fileLayering(
-  layer: string,
-  doc: Readonly<Record<string, unknown>>,
-): Result<Layering | undefined, LayerProblem> {
-  const value = doc[LAYERING_KEY];
-  if (value === undefined) {
-    return ok(undefined);
-  }
-  if (!isLayering(value)) {
-    return refuse(layer, LAYERING_KEY, {
-      code: "layer-bad-directive",
-      actual: value,
-      allowed: LAYERINGS,
-    });
-  }
-  return ok(value);
-}
-
-/** The file-wide policy, admitted here and carried as parsed, so the resolution after the fold never re-reads the key. */
-function fileUndeclared(
-  layer: string,
-  doc: Readonly<Record<string, unknown>>,
-): Result<UndeclaredPolicy | undefined, LayerProblem> {
-  const value = doc[UNDECLARED_KEY];
-  if (value === undefined || isUndeclaredPolicy(value)) {
-    return ok(value);
-  }
-  return refuse(layer, UNDECLARED_KEY, {
-    code: "layer-bad-directive",
-    actual: value,
-    allowed: UNDECLARED_POLICIES,
-  });
-}
-
-function admitSection(
-  layer: string,
-  key: ListSection,
-  value: unknown,
-  fallback: { readonly file: Layering | undefined; readonly run: Layering },
-): Result<AdmittedSection, LayerProblem> {
-  if (!isPlainObject(value) || !Array.isArray(value.entries)) {
-    return refuse(layer, key, {
-      code: "layer-wrong-shape",
-      expected: KNOBBED.has(key)
-        ? "a list of mappings or an {_undeclared, entries} wrapper"
-        : "a list of mappings or an {_layering, entries} wrapper",
-      actual: value,
-      detail: isPlainObject(value) ? " without an entries list" : undefined,
-    });
-  }
-  return admitEntries(layer, key, value.entries).andThen((entries) => {
-    const { entries: _entries, [LAYERING_KEY]: directive, ...knobs } = value;
-    if (directive !== undefined && !isLayering(directive)) {
-      return refuse(layer, `${key}.${LAYERING_KEY}`, {
-        code: "layer-bad-directive",
-        actual: directive,
-        allowed: LAYERINGS,
-      });
-    }
-    const keyed = listLayering(key);
-    const layering = directive ?? fallback.file ?? fallback.run;
-    const section: AdmittedSection = { knobs, entries, layering, keyed };
-    return checkKeyed(layer, entries, keyed, key, layering).map(() => section);
-  });
-}
-
-/**
- * Only a node on the current descent counts: a node aliased twice without enclosing itself is a tree to the merge, which
- * clones it per site. `walked` keeps a fully walked node from being entered again.
- */
-function hasCycle(value: unknown, descent: WeakSet<object>, walked: WeakSet<object>): boolean {
-  if (!Array.isArray(value) && !isPlainObject(value)) {
-    return false;
-  }
-  if (walked.has(value)) {
-    return false;
-  }
-  if (descent.has(value)) {
-    return true;
-  }
-  descent.add(value);
-  const children = Array.isArray(value) ? value : Object.values(value);
-  const cyclic = children.some((child) => hasCycle(child, descent, walked));
-  descent.delete(value);
-  walked.add(value);
-  return cyclic;
-}
-
-/**
- * The layer boundary: past it the fold never meets a cycle, an unkeyed entry, a duplicated key, or a malformed
- * removal. A non-mapping passes as written for the top-level validator to name; so does a null section (the
- * validator decides whether the section takes null).
- */
-function admit(layer: Layer, run: Layering): Result<AdmittedLayer | null, LayerProblem> {
-  if (hasCycle(layer.doc, new WeakSet(), new WeakSet())) {
-    return refuse(layer.name, "the document", { code: "layer-cycle" });
-  }
-  const doc = normalizeListSections(layer.doc);
-  if (!isPlainObject(doc)) {
-    return ok(null);
-  }
-  return fileUndeclared(layer.name, doc).andThen((undeclared) =>
-    fileLayering(layer.name, doc).andThen((file) => {
-      const sections = new Map<string, AdmittedSection>();
-      for (const key of LIST_SECTIONS) {
-        const value = doc[key];
-        if (value === undefined || value === null) {
-          continue;
-        }
-        const admitted = admitSection(layer.name, key, value, { file, run });
-        if (admitted.isErr()) {
-          return err(admitted.error);
-        }
-        sections.set(key, admitted.value);
-      }
-      return ok({ name: layer.name, doc, sections, undeclared });
-    }),
-  );
 }
 
 function childPath(path: string, key: string): string {
@@ -832,153 +379,6 @@ function mergeStep(acc: unknown, layer: AdmittedLayer, step: Step): unknown {
     );
   }
   return out;
-}
-
-/** Whether an entry carries the marker at all, whatever its value: what the standalone view drops and a single document refuses. */
-function carriesRemoval(entry: Readonly<Record<string, unknown>>): boolean {
-  return entry[REMOVE_KEY] !== undefined;
-}
-
-/**
- * Per list as validation spells it over the document minus its removals (`labels`, `labels.entries`,
- * `environments[0].variables`), the source index of each kept entry; only a list a removal shifted is recorded.
- */
-type SourceIndices = Map<string, readonly number[]>;
-
-/** A keyed list's removals set apart from it, its entries' nested lists likewise, in the form the layer wrote them. */
-interface Partition {
-  /** The entries minus the removals, each entry's declared nested lists partitioned in turn. */
-  readonly kept: unknown[];
-  /** Each removal by its marker's site (`labels[0]._remove`); a removal's own nested lists are not entered. */
-  readonly sites: string[];
-}
-
-/**
- * `path` names the list as the sites do, by the document's own indices; `viewPath` as validation spells the kept
- * entries (`labels.entries`, `environments[1].variables`), the key under which `sources` records their origins.
- */
-function partitionRemovals(
-  entries: readonly unknown[],
-  keyed: KeyedListLayering,
-  path: string,
-  viewPath: string,
-  sources: SourceIndices,
-): Partition {
-  const kept: unknown[] = [];
-  const sites: string[] = [];
-  const origins: number[] = [];
-  // Indexed, not a method of the list: the walk runs on the raw document, before the plainness check that refuses a
-  // list whose named property shadows one (test/engine/validate.test.ts).
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (!isPlainObject(entry)) {
-      origins.push(index);
-      kept.push(entry);
-      continue;
-    }
-    const site = `${path}[${index}]`;
-    if (carriesRemoval(entry)) {
-      sites.push(`${site}.${REMOVE_KEY}`);
-      continue;
-    }
-    const viewSite = `${viewPath}[${kept.length}]`;
-    origins.push(index);
-    const out: Record<string, unknown> = { ...entry };
-    for (const [field, nested] of Object.entries(keyed.nested ?? {})) {
-      const form = nestedForm(entry[field]);
-      if (form === null) {
-        continue;
-      }
-      const below = partitionRemovals(
-        form.entries,
-        nested,
-        `${site}.${field}`,
-        form.knobs === null ? `${viewSite}.${field}` : `${viewSite}.${field}.entries`,
-        sources,
-      );
-      sites.push(...below.sites);
-      out[field] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
-    }
-    kept.push(out);
-  }
-  if (origins.some((source, index) => source !== index)) {
-    sources.set(viewPath, origins);
-  }
-  return { kept, sites };
-}
-
-/** A path as validation spells one after the section key: `.field` or `[index]` steps (src/engine/validate.ts). */
-const PATH_STEP = /\.[A-Za-z_]\w*|\[\d+\]/g;
-
-/**
- * The way back from an issue over the document minus its removals to the document as written: the leading path's
- * list indices, list by list. An index in a list no removal shifted stays, and so does everything after the path,
- * where a message may quote a document value.
- */
-function renumbering(sources: SourceIndices): (issue: string) => string {
-  if (sources.size === 0) {
-    return (issue) => issue;
-  }
-  const sections = new Set([...sources.keys()].map((path) => path.split(/[.[]/, 1)[0]));
-  const leadingPath = new RegExp(`^(${[...sections].join("|")})((?:${PATH_STEP.source})*)`);
-  return (issue) =>
-    issue.replace(leadingPath, (_match, section: string, steps: string) => {
-      let viewed = section;
-      let written = section;
-      for (const step of steps.match(PATH_STEP) ?? []) {
-        if (step.startsWith("[")) {
-          const index = Number(step.slice(1, -1));
-          written += `[${sources.get(viewed)?.[index] ?? index}]`;
-        } else {
-          written += step;
-        }
-        viewed += step;
-      }
-      return written;
-    });
-}
-
-/** A document's removal entries set apart from it; `rest` is the document itself when it is not a mapping. */
-export interface SeparatedRemovals {
-  /** The document minus every entry carrying `_remove`, in either list form and at any depth; the wrappers' knobs stay. */
-  readonly rest: unknown;
-  /** Each removal's site (`labels[0]._remove`): list sections in LIST_SECTIONS order, each list as written, nested lists under their entry. */
-  readonly sites: readonly string[];
-  /**
-   * A validation issue over `rest`, its leading path renumbered to the document as written: a removal dropped from
-   * the list shifts every entry after it, so `labels[0].color` in `rest` is the reader's `labels[1].color`.
-   */
-  readonly asWritten: (issue: string) => string;
-}
-
-/**
- * Every list section partitioned by the walk the fold uses. A single document has no lower layer to remove from, so
- * validateSettingsDoc refuses the sites and judges `rest`; a layer of a fold reaches it as its standalone view,
- * `rest` minus the `_layering` directives. Either way what is said about `rest` is said of the document as written.
- */
-export function separateRemovals(doc: unknown): SeparatedRemovals {
-  if (!isPlainObject(doc)) {
-    return { rest: doc, sites: [], asWritten: (issue) => issue };
-  }
-  const rest: Record<string, unknown> = { ...doc };
-  const sites: string[] = [];
-  const sources: SourceIndices = new Map();
-  for (const key of LIST_SECTIONS) {
-    const form = nestedForm(doc[key]);
-    if (form === null) {
-      continue;
-    }
-    const below = partitionRemovals(
-      form.entries,
-      listLayering(key),
-      key,
-      form.knobs === null ? key : `${key}.entries`,
-      sources,
-    );
-    sites.push(...below.sites);
-    rest[key] = form.knobs === null ? below.kept : { ...form.knobs, entries: below.kept };
-  }
-  return { rest, sites, asWritten: renumbering(sources) };
 }
 
 /** The layer as its own validation sees it, and the way back from what that validation says to the layer as written. */
