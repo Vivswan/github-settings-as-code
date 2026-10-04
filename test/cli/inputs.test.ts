@@ -633,17 +633,13 @@ describe("the help text", () => {
   });
 
   test("the repository flag's help names the terminal's requirement, not the runner's default", () => {
-    const runnerDefault = "the current repository by default";
-    const escapeClause = "unless repos or repos-dir is set";
-    for (const subcommand of [modeSubcommand("check"), INIT_SUBCOMMAND]) {
-      const description = inputDescription("repository", subcommand);
-      expect(description).toStartWith(INPUT_DECLS.repository.description.split(",")[0] ?? "");
-      expect(description).not.toContain(runnerDefault);
-      expect(description).toContain("required");
-      expect(description).toContain("GITHUB_REPOSITORY supplies it");
-      // The escape clause holds only where the multi-repo flags exist: init has none.
-      expect(description.includes(escapeClause)).toBe(subcommand.flags.has("repos"));
-    }
+    // The escape clause holds only where the multi-repo flags exist: init has none.
+    expect(inputDescription("repository", modeSubcommand("check"))).toBe(
+      "The owner/name repository to run against, required unless repos or repos-dir is set (inside GitHub Actions, GITHUB_REPOSITORY supplies it).",
+    );
+    expect(inputDescription("repository", INIT_SUBCOMMAND)).toBe(
+      "The owner/name repository to run against, required (inside GitHub Actions, GITHUB_REPOSITORY supplies it).",
+    );
   });
 
   test("the private-report flag's help offers exactly the channels the CLI accepts", () => {

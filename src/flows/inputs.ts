@@ -117,13 +117,13 @@ export const INPUT_DECLS = {
   },
   "required-sections": {
     description:
-      "Comma-separated sections that must fully apply even under on-missing-permission: warn.",
+      "Comma- or newline-separated sections that must fully apply even under on-missing-permission: warn.",
     default: "",
     list: true,
   },
   sections: {
     description:
-      "Comma-separated allowlist of the sections to process, every declared section when unset.",
+      "Comma- or newline-separated allowlist of the sections to process, every declared section when unset.",
     default: "",
     list: true,
   },
@@ -213,8 +213,8 @@ export const INPUT_DECLS = {
   },
   affiliation: {
     description:
-      'Comma-separated affiliations for repos: "*" discovery: owner (default), collaborator, or ' +
-      "organization_member.",
+      'Comma- or newline-separated affiliations for repos: "*" discovery: owner (default), ' +
+      "collaborator, or organization_member.",
     default: "",
     list: true,
   },

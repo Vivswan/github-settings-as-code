@@ -24,8 +24,8 @@ A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `af
 | `snapshot-file` | <p>mode: snapshot only, for one repository: the path its live settings are written to as a settings document.</p> | `false` | `""` |
 | `snapshot-dir` | <p>mode: snapshot only, for a fleet: the directory receiving one owner/name.yml per repos or repos-dir target.</p> | `false` | `""` |
 | `on-missing-permission` | <p>fail (default) or warn: whether a section the token cannot access fails the run or is skipped with a warning.</p> | `false` | `fail` |
-| `required-sections` | <p>Comma-separated sections that must fully apply even under on-missing-permission: warn.</p> | `false` | `""` |
-| `sections` | <p>Comma-separated allowlist of the sections to process, every declared section when unset.</p> | `false` | `""` |
+| `required-sections` | <p>Comma- or newline-separated sections that must fully apply even under on-missing-permission: warn.</p> | `false` | `""` |
+| `sections` | <p>Comma- or newline-separated allowlist of the sections to process, every declared section when unset.</p> | `false` | `""` |
 | `api-version` | <p>The X-GitHub-Api-Version header value, to opt into a newer REST API version before this action defaults to it.</p> | `false` | `2022-11-28` |
 | `repos` | <p>Comma- or newline-separated owner/name targets, each applied from its own .github/settings.yml, or "*" alone to discover every repository the token's user owns.</p> | `false` | `""` |
 | `repos-dir` | <p>A directory in the checked-out admin repository holding one settings file per target, as name.yml or owner/name.yml.</p> | `false` | `""` |
@@ -40,12 +40,12 @@ A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `af
 | `forks` | <p>Fork policy for repos: "*" discovery: include (default), exclude, or only.</p> | `false` | `""` |
 | `exclude` | <p>Comma- or newline-separated wildcard patterns removing repositories from repos: "*" discovery.</p> | `false` | `""` |
 | `topics` | <p>Comma- or newline-separated topics, of which repos: "*" discovery keeps the repositories carrying at least one.</p> | `false` | `""` |
-| `affiliation` | <p>Comma-separated affiliations for repos: "*" discovery: owner (default), collaborator, or organization_member.</p> | `false` | `""` |
+| `affiliation` | <p>Comma- or newline-separated affiliations for repos: "*" discovery: owner (default), collaborator, or organization_member.</p> | `false` | `""` |
 <!-- action-docs-inputs source="action.yml" -->
 
 </div>
 
-An input set outside its scope fails the run before any API call, naming the input and the fix. Each description above names its scope. What `mode: render` and `mode: snapshot` refuse in turn is in the [render table](../operate/layering.md#inputs-in-mode-render) and the [snapshot table](../operate/snapshot.md#inputs-in-mode-snapshot).
+An input set outside its scope fails the run before any API call, naming the input and the fix. The mode-only inputs say so in their rows. Every other input `mode: render` or `mode: snapshot` refuses is listed in the [render table](../operate/layering.md#inputs-in-mode-render) and the [snapshot table](../operate/snapshot.md#inputs-in-mode-snapshot).
 
 `repository` is refused beside `repos` or `repos-dir`, as is a `settings-file` other than its default, and `defaults-file` is refused without them. The [multi-repo guide](../operate/multi-repo.md) covers the two sourcing modes and the [discovery filters](../operate/multi-repo.md#discovery-filters) that belong to `repos: "*"` alone.
 

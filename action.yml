@@ -58,14 +58,14 @@ inputs:
     default: "fail"
   required-sections:
     description: >-
-      Comma-separated sections that must fully apply even under
+      Comma- or newline-separated sections that must fully apply even under
       on-missing-permission: warn.
     required: false
     default: ""
   sections:
     description: >-
-      Comma-separated allowlist of the sections to process, every declared
-      section when unset.
+      Comma- or newline-separated allowlist of the sections to process, every
+      declared section when unset.
     required: false
     default: ""
   api-version:
@@ -158,8 +158,8 @@ inputs:
     default: ""
   affiliation:
     description: >-
-      Comma-separated affiliations for repos: "*" discovery: owner (default),
-      collaborator, or organization_member.
+      Comma- or newline-separated affiliations for repos: "*" discovery: owner
+      (default), collaborator, or organization_member.
     required: false
     default: ""
 # END GENERATED: action-inputs
