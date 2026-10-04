@@ -12,7 +12,9 @@ A repository secret is readable from any workflow that anyone with push access c
 | Preview | `mode: check` over the rendered documents on pull requests, as in [Preview the blast radius](preview-blast-radius.md) | A read-only PAT stored as a repository secret |
 | Apply | `mode: apply` over the same rendered documents on `main` | The write PAT stored as an environment secret, released only after a human approves the run |
 
-The apply workflow: `plan` lists the files in the flat `.github/repos/` directory, the render job runs outside the gated environment, and the apply job inside it, so the write token only materializes after approval and never sits in a job that also computes anything. The `plan` and `render` jobs are the ones from [Preview the blast radius](preview-blast-radius.md), with the same 256-job matrix cap: past 256 files, split the directory by cohort into copies of this workflow.
+The apply workflow: `plan` lists the files in the flat `.github/repos/` directory, the render job runs outside the gated environment, and the apply job inside it. The write token therefore only materializes after approval and never sits in a job that also computes anything.
+
+The `plan` and `render` jobs are the ones from [Preview the blast radius](preview-blast-radius.md), with the same 256-job matrix cap: past 256 files, split the directory by cohort into copies of this workflow.
 
 ```yaml
 name: Apply fleet settings
@@ -98,7 +100,10 @@ Bootstrapping, in order:
 1. Reviewers take database IDs, not slugs; `gh api /orgs/acme/teams/platform --jq .id` finds one.
 2. The admin repository only manages its own settings when it appears as a target, so give it its own file (`.github/repos/fleet-admin.yml`) declaring this environment; the `plan` job picks the file up on the next run.
 3. The environment must exist before a job can be gated by it, so the first apply that creates it runs ungated.
-4. `FLEET_WRITE_TOKEN` is declared as a `secrets` entry on the environment, and its `$FLEET_WRITE_TOKEN` reference resolves from the step's `env:` block; `with.token` alone does not expose it (see the [secrets guide](../reference/secrets-and-vaults.md)). That reads back the same secret the apply writes, so the FIRST apply must source it from a repository secret (or a vault step). Once the environment copy exists it overrides the same-named repository secret automatically, and the repository secret can be deleted.
-5. `protected_branches: true` only admits runs from branches that carry protection, so protect `main` before enabling the gate.
+4. `FLEET_WRITE_TOKEN` is declared as a `secrets` entry on the environment, and its `$FLEET_WRITE_TOKEN` reference resolves from the step's `env:` block; `with.token` alone does not expose it (see the [secrets guide](../reference/secrets-and-vaults.md#wiring-the-environment)).
+5. That entry reads back the same secret the apply writes, so the FIRST apply must source it from a repository secret (or a vault step). Once the environment copy exists it overrides the same-named repository secret automatically, and the repository secret can be deleted.
+6. `protected_branches: true` only admits runs from branches that carry protection, so protect `main` before enabling the gate.
 
-Where one write token is still too broad, the `sections` allowlist splits it further: one job with an Issues-only PAT and `sections: labels,milestones`, another with the Administration PAT and `sections: repository,rulesets,collaborators`. Under the default `on-missing-permission: fail`, a mis-scoped token already fails the run; pair `on-missing-permission: warn` with `required-sections: rulesets` when you want the other sections to degrade gracefully while protection stays a hard requirement. The jobs are independently convergent, not a transaction.
+Where one write token is still too broad, the `sections` allowlist splits it further: one job with an Issues-only PAT and `sections: labels,milestones`, another with the Administration PAT and `sections: repository,rulesets,collaborators`. The jobs are independently convergent, not a transaction.
+
+Under the default `on-missing-permission: fail`, a mis-scoped token already fails the run; pair `on-missing-permission: warn` with `required-sections: rulesets` when you want the other sections to degrade gracefully while protection stays a hard requirement.

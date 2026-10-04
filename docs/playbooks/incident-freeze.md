@@ -63,4 +63,9 @@ jobs:
           settings-file: .github/profiles/${{ inputs.profile }}.yml
 ```
 
-The recovery file re-declares the same ruleset as `enforcement: disabled` on purpose: undeclared rulesets are kept by default, so a recovery file that simply omitted it would leave the freeze in place. The interaction limit is the failsafe in the other direction, since it self-expires after a day even if nobody runs the recover profile. One scope constraint: GitHub limits push rulesets to private and internal repositories (and their fork networks), so on a public repository this profile's brake is the interaction limit alone; freeze a public repository with a branch ruleset instead, targeting `~ALL` with an `update` rule. Both runs are visible dispatches by a named actor on a gated environment: the audit trail comes free.
+How to read the two files:
+
+- **The recovery file re-declares the same ruleset as `enforcement: disabled` on purpose.** Undeclared rulesets are kept by default, so a recovery file that simply omitted it would leave the freeze in place.
+- **The interaction limit is the failsafe in the other direction.** It self-expires after a day even if nobody runs the recover profile.
+- **One scope constraint.** GitHub limits push rulesets to private and internal repositories (and their fork networks), so on a public repository this profile's brake is the interaction limit alone. Freeze a public repository with a branch ruleset instead, targeting `~ALL` with an `update` rule.
+- **The audit trail comes free.** Both runs are visible dispatches by a named actor on a gated environment.
