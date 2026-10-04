@@ -263,8 +263,16 @@ describe("denial barrier", () => {
   });
 
   type Step = [method: string, path: string, body?: unknown];
-  /** Every response status and every logged deniedBy in request order, then the violations the run collected. */
-  type Outcome = { statuses: number[]; deniedBy: (string | undefined)[]; violations: string[] };
+  /**
+   * The whole log shape a row pins: every logged request as "METHOD path", every response status, and every logged
+   * deniedBy, all in request order, then the violations the run collected.
+   */
+  type Outcome = {
+    requests: string[];
+    statuses: number[];
+    deniedBy: (string | undefined)[];
+    violations: string[];
+  };
   const CASES: Array<{
     name: string;
     scenario: Partial<Scenario>;
@@ -281,13 +289,23 @@ describe("denial barrier", () => {
         ["GET", labelsPath],
         ["POST", labelsPath, { name: "x" }],
       ],
-      expected: { statuses: [200, 403], deniedBy: [undefined, "issues"], violations: [] },
+      expected: {
+        requests: [`GET ${labelsPath}`, `POST ${labelsPath}`],
+        statuses: [200, 403],
+        deniedBy: [undefined, "issues"],
+        violations: [],
+      },
     },
     {
       name: "a denied write to an absent-posture section under fine_grained does not arm the barrier",
       scenario: { token_permissions: { environments: "none" } },
       steps: [["PUT", envPath, {}]],
-      expected: { statuses: [403], deniedBy: ["environments"], violations: [] },
+      expected: {
+        requests: [`PUT ${envPath}`],
+        statuses: [403],
+        deniedBy: ["environments"],
+        violations: [],
+      },
     },
     {
       // Under warn there is no preflight (orchestrate gates it on fail), so a denied-posture section whose first
@@ -298,7 +316,12 @@ describe("denial barrier", () => {
         token_permissions: { administration: "none" },
       },
       steps: [["PATCH", repoPath, describeRepo]],
-      expected: { statuses: [403], deniedBy: ["administration"], violations: [] },
+      expected: {
+        requests: [`PATCH ${repoPath}`],
+        statuses: [403],
+        deniedBy: ["administration"],
+        violations: [],
+      },
     },
     {
       // Under fail, preflight reads first; a none grade denies it (fatal), so an apply write afterwards proves broken sequencing.
@@ -312,6 +335,7 @@ describe("denial barrier", () => {
         ["POST", labelsPath, { name: "x" }],
       ],
       expected: {
+        requests: [`GET ${labelsPath}`, `POST ${labelsPath}`],
         statuses: [404, 403],
         deniedBy: ["issues", "issues"],
         violations: [aborted(`POST ${labelsPath}`, "labels", "denied", "fine_grained")],
@@ -334,6 +358,11 @@ describe("denial barrier", () => {
         ["PUT", `${repoPath}/branches/main-0/protection`, {}],
       ],
       expected: {
+        requests: [
+          `GET ${repoPath}/branches/main-0/protection`,
+          `GET ${repoPath}/branches/main-0`,
+          `PUT ${repoPath}/branches/main-0/protection`,
+        ],
         statuses: [404, 403, 403],
         deniedBy: [undefined, "contents", "administration"],
         violations: [],
@@ -349,6 +378,7 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/svc-probe", describeRepo],
       ],
       expected: {
+        requests: ["GET /repos/e2e-owner/svc-probe", "PATCH /repos/e2e-owner/svc-probe"],
         statuses: [404, 403],
         deniedBy: ["administration", "administration"],
         violations: [],
@@ -365,6 +395,11 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/svc-probe", describeRepo],
       ],
       expected: {
+        requests: [
+          "GET /repos/e2e-owner/svc-probe",
+          "GET /repos/e2e-owner/svc-probe",
+          "PATCH /repos/e2e-owner/svc-probe",
+        ],
         statuses: [404, 404, 403],
         deniedBy: ["administration", "administration", "administration"],
         violations: [
@@ -381,6 +416,7 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/svc-show", describeRepo],
       ],
       expected: {
+        requests: ["GET /repos/e2e-owner/svc-show", "PATCH /repos/e2e-owner/svc-show"],
         statuses: [404, 403],
         deniedBy: ["administration", "administration"],
         violations: [
@@ -397,6 +433,7 @@ describe("denial barrier", () => {
         ["PATCH", repoPath, describeRepo],
       ],
       expected: {
+        requests: [`GET ${repoPath}`, `PATCH ${repoPath}`],
         statuses: [404, 403],
         deniedBy: ["administration", "administration"],
         violations: [aborted(`PATCH ${repoPath}`, "repository", "denied", "fine_grained")],
@@ -414,6 +451,7 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/disc-x", describeRepo],
       ],
       expected: {
+        requests: ["GET /repos/e2e-owner/disc-x", "PATCH /repos/e2e-owner/disc-x"],
         statuses: [404, 403],
         deniedBy: ["administration", "administration"],
         violations: [
@@ -433,6 +471,11 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/svc-fault", describeRepo],
       ],
       expected: {
+        requests: [
+          "GET /repos/e2e-owner/svc-fault",
+          "GET /repos/e2e-owner/svc-fault",
+          "PATCH /repos/e2e-owner/svc-fault",
+        ],
         statuses: [403, 404, 403],
         deniedBy: [undefined, "administration", "administration"],
         violations: [],
@@ -452,6 +495,13 @@ describe("denial barrier", () => {
         ["PATCH", "/repos/e2e-owner/svc-allfault", describeRepo],
       ],
       expected: {
+        requests: [
+          "GET /repos/e2e-owner/svc-allfault",
+          "GET /repos/e2e-owner/svc-allfault",
+          "GET /repos/e2e-owner/svc-allfault",
+          "GET /repos/e2e-owner/svc-allfault",
+          "PATCH /repos/e2e-owner/svc-allfault",
+        ],
         statuses: [403, 403, 403, 404, 403],
         deniedBy: [undefined, undefined, undefined, "administration", "administration"],
         violations: [
@@ -468,7 +518,12 @@ describe("denial barrier", () => {
         token_permissions: { administration: "none" },
       },
       steps: [["PATCH", repoPath, describeRepo]],
-      expected: { statuses: [403], deniedBy: ["administration"], violations: [] },
+      expected: {
+        requests: [`PATCH ${repoPath}`],
+        statuses: [403],
+        deniedBy: ["administration"],
+        violations: [],
+      },
     },
     {
       // The engine aborts a section at a hard-denied read, so a later write for that section proves broken
@@ -484,6 +539,7 @@ describe("denial barrier", () => {
         ["POST", labelsPath, { name: "x" }],
       ],
       expected: {
+        requests: [`GET ${labelsPath}`, `POST ${labelsPath}`],
         statuses: [403, 403],
         deniedBy: ["issues", "issues"],
         violations: [aborted(`POST ${labelsPath}`, "labels", "denied", 403)],
@@ -501,6 +557,7 @@ describe("denial barrier", () => {
         ["PUT", envPath, {}],
       ],
       expected: {
+        requests: [`GET ${envPath}`, `PUT ${envPath}`],
         statuses: [404, 403],
         deniedBy: ["environments", "environments"],
         violations: [],
@@ -515,6 +572,7 @@ describe("denial barrier", () => {
       statuses.push((await call(h, method, path, body === undefined ? {} : { body })).status);
     }
     expect({
+      requests: h.requests.map((r) => `${r.method} ${r.pathname}`),
       statuses,
       deniedBy: h.requests.map((r) => r.deniedBy),
       violations: h.violations,
