@@ -5,10 +5,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { GraphqlOp } from "../../src/github/api.js";
 import {
+  classifyApiError,
   DEFAULT_API_VERSION,
   GitHubApi,
-  isPermissionError,
-  isRateLimitError,
   REDACTED_RESPONSE_WITHHELD,
   SECRET_RESPONSE_WITHHELD,
 } from "../../src/github/api.js";
@@ -93,8 +92,9 @@ describe("tryGraphql errors[] mapping", () => {
       expect(result.error.message).toBe("Could not resolve to a Repository");
       expect(result.error.graphqlTypes).toEqual([type]);
       expect(result.error.rateLimited).toBe(rateLimited);
-      expect(isRateLimitError(result.error)).toBe(rateLimited === true);
-      expect(isPermissionError(result.error)).toBe(rateLimited !== true);
+      expect(classifyApiError(result.error)).toBe(
+        rateLimited === true ? "rate-limit" : "permission",
+      );
     },
   );
 
@@ -177,8 +177,7 @@ describe("tryGraphql errors[] mapping", () => {
     }
     expect(result.error.status).toBe(403);
     expect(result.error.rateLimited).toBe(true);
-    expect(isRateLimitError(result.error)).toBe(true);
-    expect(isPermissionError(result.error)).toBe(false);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
   });
 
   test("partial data beside errors still fails closed", async () => {
@@ -319,7 +318,7 @@ describe("tryGraphql tracing and redaction", () => {
       throw new Error("expected an error result");
     }
     expect(result.error.rateLimited).toBe(true);
-    expect(isRateLimitError(result.error)).toBe(true);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
     expect(result.error.message).toBe(REDACTED_RESPONSE_WITHHELD);
     expect(result.error.documentationUrl).toBeUndefined();
   });

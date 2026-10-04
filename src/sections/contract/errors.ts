@@ -1,5 +1,5 @@
 import type { ApiError } from "../../github/api.js";
-import { isPermissionError, isRateLimitError } from "../../github/api.js";
+import { classifyApiError } from "../../github/api.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
 import { toleratedGraphqlErrors } from "./graphql.js";
 import {
@@ -112,7 +112,8 @@ export function failureFor(
   const outcome = `${error.status} ${error.message}`;
   const cause = `${context?.operation ? `${context.operation} failed - ` : ""}${request}: ${outcome}`;
   const denied = `${request}${context?.operation ? ` (${context.operation})` : ""}: ${outcome}`;
-  if (isRateLimitError(error)) {
+  const kind = classifyApiError(error);
+  if (kind === "rate-limit") {
     // Secondary rate limits arrive as 403 and must not read as missing permissions.
     return {
       kind: "rate-limit",
@@ -126,7 +127,7 @@ export function failureFor(
     return { kind: "rejected", message: `${section.key}: ${cause}. ${sentence(rejection.advice)}` };
   }
   const effective = op ? endpointPermission(section, op) : undefined;
-  if (isPermissionError(error) && effective !== "none") {
+  if (kind === "permission" && effective !== "none") {
     const alsoMissing =
       error.status === 404 ? " (a 404 here can also mean the resource does not exist)" : "";
     const denialHint = context?.op?.denialHint ? `. Note: ${context.op.denialHint}` : "";

@@ -2,10 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
   type ApiError,
+  classifyApiError,
   DEFAULT_API_VERSION,
   GitHubApi,
-  isPermissionError,
-  isRateLimitError,
   MAX_RETRIES,
   MAX_RETRY_WAIT_S,
   redactingOctokitLog,
@@ -326,11 +325,9 @@ describe("response shaping", () => {
 describe("error classification", () => {
   test("rate-limit 403s are rate limits, not permission errors", () => {
     const limited = { status: 403, message: "API rate limit exceeded for user", body: "" };
-    expect(isRateLimitError(limited)).toBe(true);
-    expect(isPermissionError(limited)).toBe(false);
+    expect(classifyApiError(limited)).toBe("rate-limit");
     const denied = { status: 403, message: "Resource not accessible", body: "" };
-    expect(isRateLimitError(denied)).toBe(false);
-    expect(isPermissionError(denied)).toBe(true);
+    expect(classifyApiError(denied)).toBe("permission");
   });
 
   test("a 403 with retry-after classifies structurally even without the phrase", async () => {
@@ -348,8 +345,7 @@ describe("error classification", () => {
       throw new Error("expected an error result");
     }
     expect(result.error.rateLimited).toBe(true);
-    expect(isRateLimitError(result.error)).toBe(true);
-    expect(isPermissionError(result.error)).toBe(false);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
     // The common (non-secret) path keeps its diagnostic body.
     expect(result.error.message).toBe("Forbidden");
   });
@@ -374,8 +370,7 @@ describe("error classification", () => {
         throw new Error("expected an error result");
       }
       expect(result.error.rateLimited).toBeUndefined();
-      expect(isRateLimitError(result.error)).toBe(limited);
-      expect(isPermissionError(result.error)).toBe(!limited);
+      expect(classifyApiError(result.error)).toBe(limited ? "rate-limit" : "permission");
     },
   );
 });
@@ -752,7 +747,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
         throw new Error("expected an error result");
       }
       expect(result.error.status).toBe(status);
-      expect(isRateLimitError(result.error)).toBe(limited);
+      expect(classifyApiError(result.error)).toBe(limited ? "rate-limit" : "other");
       expect(result.error.documentationUrl).toBeUndefined();
       expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
       expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
@@ -837,7 +832,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
   });
 
   test("a secret-carrying 403 rate limit still classifies as a rate limit", async () => {
-    // The wholesale replacement destroys the message isRateLimitError reads, so the content-free flag must carry the classification;
+    // The wholesale replacement destroys the message classifyApiError reads, so the content-free flag must carry the classification;
     // apiErrorFromHttp classifies on the original body before replacing it.
     stubFetch([
       () =>
@@ -864,7 +859,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     }
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
     expect(result.error.body).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(isRateLimitError(result.error)).toBe(true);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
     expect(JSON.stringify(result.error)).not.toContain("he said");
   });
 
@@ -893,7 +888,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
       throw new Error("expected an error result");
     }
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
-    expect(isRateLimitError(result.error)).toBe(limited);
+    expect(classifyApiError(result.error)).toBe(limited ? "rate-limit" : "permission");
   });
 
   test("an echoed 'rate limit' string cannot spoof the classification", async () => {
@@ -913,7 +908,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    expect(isRateLimitError(result.error)).toBe(false);
+    expect(classifyApiError(result.error)).toBe("permission");
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
@@ -934,7 +929,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    expect(isRateLimitError(result.error)).toBe(true);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 
@@ -953,7 +948,7 @@ describe("secret-field request redaction and fail-closed error responses", () =>
     if (!("error" in result)) {
       throw new Error("expected an error result");
     }
-    expect(isRateLimitError(result.error)).toBe(true);
+    expect(classifyApiError(result.error)).toBe("rate-limit");
     expect(result.error.message).toBe(SECRET_RESPONSE_WITHHELD);
   });
 

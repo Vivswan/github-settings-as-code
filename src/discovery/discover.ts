@@ -6,7 +6,7 @@
 
 import type { components } from "@octokit/openapi-types";
 import { err, ok, ResultAsync } from "neverthrow";
-import { type GitHubClient, isPermissionError } from "../github/api.js";
+import { classifyApiError, type GitHubClient } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import { classifyVisibility } from "../github/repo-visibility.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
@@ -120,14 +120,14 @@ export function discoverRepos(
       });
     }
     if ("error" in page) {
-      // A rate-limit 403 is NOT a permission problem (isPermissionError excludes it), so it never reads as denied and
-      // never tells the operator to swap tokens; 401 (an invalid or expired token) does.
+      // A rate-limit 403 is NOT a permission problem (classifyApiError keeps the kinds apart), so it never reads as denied
+      // and never tells the operator to swap tokens; 401 (an invalid or expired token) does.
       return err<DiscoveryResult, DiscoveryProblem>({
         code: "discovery-request-failed",
         path,
         status: page.error.status,
         message: page.error.message,
-        denied: isPermissionError(page.error) || page.error.status === 401,
+        denied: classifyApiError(page.error) === "permission" || page.error.status === 401,
       });
     }
     if ("malformed" in page) {

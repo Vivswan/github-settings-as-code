@@ -12,7 +12,7 @@
 
 import type { RepoRef } from "../discovery/targets.js";
 import type { ApiError, GitHubClient } from "../github/api.js";
-import { isPermissionError } from "../github/api.js";
+import { classifyApiError } from "../github/api.js";
 import { paginate } from "../github/paginate.js";
 import type { SettingsFile } from "../schema.js";
 import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";
@@ -82,9 +82,10 @@ type Failure = Extract<IssueDelivery, { warning: string }>;
 
 /** Public-safe by construction: the HTTP status and generic advice only. The slug, the path, or the API message would land in public logs. */
 function deliveryWarning(error: ApiError, landed: LandedWrites): Failure {
-  const advice = isPermissionError(error)
-    ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
-    : "Re-run, or set private-report: none if it persists";
+  const advice =
+    classifyApiError(error) === "permission"
+      ? `To fix, ${grantFor(ISSUE_REPORT_PERMISSION)} for the target repository, or set private-report: none`
+      : "Re-run, or set private-report: none if it persists";
   return {
     warning: `could not deliver the private report (HTTP ${error.status}). ${advice}`,
     landed,
