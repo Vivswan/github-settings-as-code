@@ -25,9 +25,9 @@ describe("canonicalPath", () => {
       (base) => join(realpathSync.native(base), "missing", "deeper", "nope.yml"),
     ],
     [
-      "a spelling through the system temp directory, a link on macOS",
-      (base) => base,
-      (base) => realpathSync.native(base),
+      "a spelling through a directory link, named as the filesystem names it",
+      (base) => join(base, "alias", "x"),
+      (base) => realpathSync.native(join(base, "elsewhere", "x")),
     ],
     [
       ".. after a segment that does not exist, back onto a link: the dir form's join collapses it the same way",
@@ -40,6 +40,7 @@ describe("canonicalPath", () => {
       writeFileSync(join(base, "elsewhere", "x"), "");
       writeFileSync(join(base, "x"), "");
       symlinkSync(join("elsewhere", "inner"), join(base, "link"));
+      symlinkSync("elsewhere", join(base, "alias"));
       expect(canonicalPath(input(base))).toBe(expected(base));
     }),
   );
