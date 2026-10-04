@@ -16,7 +16,7 @@ The step's exit code carries the verdict, and the `result` output names it:
 |---|---|---|
 | No drift anywhere | `clean` | 0 |
 | Any drift | `drift` | 1, so a scheduled check turns red the moment reality diverges from the file |
-| A section error: a permission denial under the default `on-missing-permission: fail`, or any non-permission API error | that section and the run are marked failed | 1 |
+| A section error: a permission denial under the default `on-missing-permission: fail`, or any non-permission API error; the section is marked failed | `failed` | 1 |
 | A denied section under `on-missing-permission: warn`, with nothing else drifting | `partial` | 0; [the denial policy](../reference/permissions.md#the-denial-policy) owns the skip |
 
 Apply mode behaves differently on purpose: `mode: apply` exits 0 whether or not it changed anything (`result: applied` covers both), and only a failure exits 1. A green scheduled apply therefore says nothing about whether settings had drifted; a green scheduled check does. In multi-repo mode the worst result across all targets decides the exit code, so one drifted target fails the whole check run (see [multi-repo mode](multi-repo.md)).
