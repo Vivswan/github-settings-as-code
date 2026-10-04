@@ -1,13 +1,16 @@
-# The bun setup and the dependency install of every repo-owned workflow job; the caller keeps its own checkout and
-# setup-node, whose options differ per job.
-#   install -> --ignore-scripts: scripts.prepare installs lefthook, a git hook no runner uses; "false" (any letter
-#              case, as GitHub compares) skips the install for a job that runs a bare script or resolves the lockfile itself
 name: Set up bun
-description: The pinned bun, and the locked dependencies unless told not to
+description: |
+  Installs the pinned bun and, unless told not to, the locked dependencies.
+
+  The bun version is the one .bun-version pins.
+
+  The install runs bun install --frozen-lockfile --ignore-scripts, so the lockfile never changes and the prepare script (lefthook, a git hook no runner uses) never runs.
+
+  The caller keeps its own checkout and setup-node steps, whose options differ per job.
 
 inputs:
   install:
-    description: '"false" sets up bun alone; anything else runs bun install --frozen-lockfile --ignore-scripts'
+    description: '"false" (in any letter case, as GitHub compares) sets up bun alone, and any other value installs the locked dependencies too.'
     default: "true"
 
 runs:
