@@ -5,11 +5,7 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
-import {
-  REDACTED_NOTE,
-  type TargetOutcome,
-  WITHHELD_REPORT_NOTICE,
-} from "../../src/flows/redact.js";
+import type { TargetOutcome } from "../../src/flows/redact.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import {
@@ -677,7 +673,7 @@ describe("runMulti private-report: issue wiring", () => {
     expect(targets[0]?.result).toBe("drift");
     expect(annotations).toEqual([
       `warning: private repository #1: could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) under the PAT's Repository permissions for the target repository, or set private-report: none`,
-      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "warning: private repository #1: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
     ]);
   });
 
@@ -729,7 +725,7 @@ describe("runMulti private-report: issue wiring", () => {
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(annotations).toEqual([
       "warning: private repository #1: could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue",
-      `error: private repository #1: failed. ${REDACTED_NOTE}`,
+      "error: private repository #1: failed. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
     ]);
   });
 
@@ -753,8 +749,9 @@ describe("runMulti private-report: issue wiring", () => {
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
     expect(annotations).toEqual([
-      `notice: private repository #1: ${WITHHELD_REPORT_NOTICE}`,
-      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "notice: private repository #1: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), " +
+        "so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
+      "warning: private repository #1: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
     ]);
   });
 
@@ -1033,9 +1030,10 @@ describe("runMulti private-report: artifact wiring", () => {
     expect(document).toContain("CANARY-KNOWN");
     expect(document).not.toContain("CANARY-MAYBE");
     expect(annotations).toEqual([
-      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
-      `notice: private repository #2: ${WITHHELD_REPORT_NOTICE}`,
-      `warning: private repository #2: drift - repository. ${REDACTED_NOTE}`,
+      "warning: private repository #1: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
+      "notice: private repository #2: visibility could not be verified (the repository-metadata probe failed or was inconclusive - typically the token cannot read the target repository), " +
+        "so the private report was withheld rather than risk delivering it to a public repository. Grant the token metadata read access and re-run; a transient API failure also leaves visibility unverified",
+      "warning: private repository #2: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
     ]);
   });
 
@@ -1093,7 +1091,7 @@ describe("runMulti private-report: artifact wiring", () => {
     );
     expect(targets[0]?.result).toBe("drift");
     expect(annotations).toEqual([
-      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "warning: private repository #1: drift - repository. details hidden: the repository is private or internal. Set private-repos: show to reveal them, or run the action inside that repository",
       "warning: could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN env variable. Re-run, or set private-report: none if it persists",
     ]);
   });
