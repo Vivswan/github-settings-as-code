@@ -8,7 +8,7 @@
  * the permission policy can classify them.
  */
 
-import { isPlainObject } from "./plain-data.js";
+import { describeKind } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
 import { agree, countNoun } from "./text.js";
 
@@ -311,7 +311,7 @@ export function unknownDirectivesIssue(unknown: readonly string[]): string {
 /** One line of the collected document problems: a file-wide `_undeclared` outside the two policies, with the values and the fix. */
 export function badDirectiveIssue(actual: unknown, allowed: readonly string[]): string {
   return (
-    `_undeclared must be one of ${allowed.map(quote).join(", ")}; got ${describeShape(actual)}` +
+    `_undeclared must be one of ${allowed.map(quote).join(", ")}; got ${describeKind(actual)}` +
     `${typeof actual === "string" ? " that is none of them" : ""}. Write _undeclared: keep or ` +
     `_undeclared: delete at the top of the file, or remove the key so each list's own policy applies`
   );
@@ -334,23 +334,6 @@ const PASSTHROUGH_ADVICE =
 
 function quote(value: unknown): string {
   return JSON.stringify(String(value));
-}
-
-/** A value's kind for refusal prose: what it is, not what it contains. */
-function describeShape(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "a list";
-  }
-  if (isPlainObject(value)) {
-    return "a mapping";
-  }
-  if (typeof value === "object") {
-    return `a ${value.constructor?.name ?? "tagged"} value`;
-  }
-  return `a ${typeof value}`;
 }
 
 function describeCentralFile(file: CentralFileProblem): string {
@@ -437,7 +420,7 @@ function describeInvalidReposEntries(problem: ProblemOf<"repos-input-invalid-ent
  * private-repos redaction context, so a value echoed there (a label name, a
  * rule type, a mis-shaped section body) could land a private repository's
  * settings in a public log. `actual` reaches the prose only through
- * describeShape; the marker test in test/engine/layers.test.ts pins this.
+ * describeKind; the marker test in test/engine/layers.test.ts pins this.
  */
 export function describeProblem(problem: Problem): string {
   switch (problem.code) {
@@ -568,15 +551,15 @@ export function describeProblem(problem: Problem): string {
     case "layer-cycle":
       return `${layerSite(problem)} contains a reference cycle (a YAML anchor that includes itself); layers must be trees`;
     case "layer-wrong-shape":
-      return `${layerSite(problem)} must be ${problem.expected}; got ${describeShape(problem.actual)}${problem.detail ?? ""}`;
+      return `${layerSite(problem)} must be ${problem.expected}; got ${describeKind(problem.actual)}${problem.detail ?? ""}`;
     case "layer-bad-directive":
-      return `${layerSite(problem)} must be one of ${problem.allowed.map(quote).join(", ")}; got ${describeShape(problem.actual)}${typeof problem.actual === "string" ? " that is none of them" : ""}`;
+      return `${layerSite(problem)} must be one of ${problem.allowed.map(quote).join(", ")}; got ${describeKind(problem.actual)}${typeof problem.actual === "string" ? " that is none of them" : ""}`;
     case "layer-no-key":
       return `${layerSite(problem)} carries no ${problem.keyKind ?? "string"} ${quote(problem.keyField)}${problem.alongside === undefined ? "" : ` paired with its ${quoteList(problem.alongside)}`}, which every entry needs to layer by`;
     case "layer-duplicate-key":
       return `${layerSite(problem)}[${problem.first}] and ${problem.site}[${problem.second}] both claim one ${problem.keyField}; each ${problem.keyField} belongs to one entry within a layer`;
     case "layer-remove-not-true":
-      return `${layerSite(problem)} takes only true; got ${describeShape(problem.actual)}. Write _remove: true to drop the lower entry, or remove the key to keep it`;
+      return `${layerSite(problem)} takes only true; got ${describeKind(problem.actual)}. Write _remove: true to drop the lower entry, or remove the key to keep it`;
     case "layer-remove-with-fields":
       return `${layerSite(problem)} carries _remove: true beside ${quoteList(problem.extra)}; a removal names its ${andList(problem.keyPaths)} and nothing else. Drop the ${agree(problem.extra.length, "field", "fields")}, or the marker`;
     case "layer-remove-nothing":

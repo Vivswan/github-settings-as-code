@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import { isMapping } from "../shared/raw-values.js";
+import { isPlainObject } from "../../plain-data.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -331,7 +331,7 @@ export const RulesetConfig = z
     }
     const actors: unknown = ruleset.bypass_actors;
     for (const [index, actor] of (Array.isArray(actors) ? actors : []).entries()) {
-      if (isMapping(actor) && actor.bypass_mode === "pull_request") {
+      if (isPlainObject(actor) && actor.bypass_mode === "pull_request") {
         refineCtx.addIssue({
           code: "custom",
           path: ["bypass_actors", index, "bypass_mode"],

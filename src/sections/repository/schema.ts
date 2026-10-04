@@ -2,29 +2,9 @@
 
 import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
+import { describeValue } from "../../plain-data.js";
 import type { MustBeNever } from "../../types.js";
 import { conditional } from "../shared/schema-helpers.js";
-
-/**
- * JSON.stringify on an arbitrary YAML value would throw on a cyclic alias and kill the run before
- * the normal failure path, so containers describe by kind only; strings stay quoted so a YAML "no"
- * is visibly a string.
- */
-function describeValue(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "a list";
-  }
-  if (typeof value === "object") {
-    return "a mapping";
-  }
-  return String(value);
-}
 
 /** A PATCH boolean; a null on it is the validator's general refusal (no empty state; write true or false), not this shape's. */
 function repositoryToggle() {

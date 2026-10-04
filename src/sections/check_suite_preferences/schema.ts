@@ -1,7 +1,7 @@
 /** The `check_suite_preferences:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
-import { isMapping } from "../shared/raw-values.js";
+import { isPlainObject } from "../../plain-data.js";
 
 // No GitHub App has id 0, and GitHub rejects fractions. Parse refuses the id here; otherwise the PATCH reports whatever
 // GitHub answers, late and on every run. The duplicate below is the case nothing would ever report.
@@ -30,7 +30,7 @@ export const CheckSuitePreferencesConfig = z
     const firstAt = new Map<number, number>();
     const entries: unknown = declared.auto_trigger_checks;
     (Array.isArray(entries) ? entries : []).forEach((entry: unknown, index) => {
-      if (!isMapping(entry) || typeof entry.app_id !== "number") {
+      if (!isPlainObject(entry) || typeof entry.app_id !== "number") {
         return;
       }
       const { app_id } = entry;

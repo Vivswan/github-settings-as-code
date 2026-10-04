@@ -455,7 +455,7 @@ describe("describeProblem", () => {
       'layer "repo": _layering must be one of "replace", "shallow", "deep"; got a boolean',
     ],
     [
-      "a tagged value where a list belongs is described by its class",
+      "a tagged value where a list belongs is named as validation names it, with the YAML tag that produces it",
       {
         code: "layer-wrong-shape",
         layer: "repo",
@@ -463,7 +463,7 @@ describe("describeProblem", () => {
         expected: "a list of mappings or an {_undeclared, entries} wrapper",
         actual: new Date(0),
       },
-      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date value',
+      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date, e.g. from a YAML !!timestamp tag',
     ],
   ])("renders the variant: %s", (_what, problem, line) => {
     expect(describeProblem(problem)).toBe(line);

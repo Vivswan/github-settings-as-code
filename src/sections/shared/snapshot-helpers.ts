@@ -7,12 +7,12 @@
 import { err, ok, type Result } from "neverthrow";
 import type { z } from "zod";
 import type { ReplaceSweep } from "../../engine/diff.js";
+import { isPlainObject } from "../../plain-data.js";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { defaultUndeclaredPolicy, defOf, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { isMapping } from "./raw-values.js";
 
 /** The schema types the projection treats as leaves: the live value passes through verbatim. */
 const LEAF_TYPES: ReadonlySet<string> = new Set([
@@ -55,7 +55,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
     case "default":
       return project(def.innerType as z.ZodType, live);
     case "object": {
-      if (!isMapping(live)) {
+      if (!isPlainObject(live)) {
         return live;
       }
       const shape = def.shape ?? {};
@@ -81,7 +81,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
         ? live.map((item) => project(def.element as z.ZodType, item))
         : live;
     case "record":
-      return isMapping(live)
+      return isPlainObject(live)
         ? Object.fromEntries(
             Object.entries(live).map(([key, value]) => [
               key,

@@ -17,7 +17,7 @@ export function environmentKey(name: string): EnvironmentKey {
   return name.toLowerCase() as EnvironmentKey;
 }
 
-import { isMapping } from "../shared/raw-values.js";
+import { isPlainObject } from "../../plain-data.js";
 import {
   conditional,
   nestedKnobbed,
@@ -189,7 +189,7 @@ export type EnvironmentConfig = z.infer<typeof EnvironmentConfig>;
 export const EnvironmentsConfig = z.array(EnvironmentConfig).superRefine((entries, refineCtx) => {
   // An entry may be raw beside its own shape issue (see ../shared/raw-values.ts); it declares no pin.
   const pinnedIndexes = entries.flatMap((entry, index) =>
-    isMapping(entry) && entry.pinned === true ? [index] : [],
+    isPlainObject(entry) && entry.pinned === true ? [index] : [],
   );
   if (pinnedIndexes.length > MAX_PINNED_ENVIRONMENTS) {
     refineCtx.addIssue({

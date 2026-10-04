@@ -1186,7 +1186,7 @@ describe("mergeLayers: layer-boundary refusals", () => {
       "a YAML-tagged value where a list belongs",
       { milestones: new Date(0) },
       "layer-wrong-shape",
-      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date value',
+      'layer "repo": milestones must be a list of mappings or an {_undeclared, entries} wrapper; got a Date, e.g. from a YAML !!timestamp tag',
     ],
     [
       "a non-mapping milestone entry",
