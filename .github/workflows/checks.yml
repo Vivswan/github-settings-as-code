@@ -132,8 +132,18 @@ jobs:
         run: bun run build:schema
       - name: Run scenarios and fuzz
         run: |
-          bun test/e2e/run.ts
+          bun run test:e2e
           bun test/e2e/fuzz.ts --iterations 25
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-artifacts-${{ github.run_attempt }}
+          path: test/e2e/.artifacts/
+          # upload-artifact skips hidden paths by default, and .artifacts is one: without this the step uploads nothing.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   # A PR that adds an endpoint without a scenario reaching it must fail on that PR, not the next night. Coldness is a
   # whole-corpus property (deleting one scenario can chill any route), so the full corpus runs.
