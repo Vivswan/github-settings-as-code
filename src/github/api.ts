@@ -29,9 +29,9 @@ export interface ApiError {
   /** GitHub's documentation_url for the failing endpoint, when the body carries one. */
   documentationUrl?: string;
   /**
-   * Content-free rate-limit classification from structural signals alone (429, retry-after, errors[].type RATE_LIMITED,
-   * the secondary-rate phrase; the ambiguous zero-quota header only when the body was withheld). isRateLimitError reads
-   * it beside its message fallback, so a secondary limit arriving as a 403 is never misread as a permission failure.
+   * The client's own proof that a 403 is a rate limit, from signals the value cannot carry (retry-after, errors[].type
+   * RATE_LIMITED, the secondary-rate phrase; the ambiguous zero-quota header only on a withheld body), recorded because
+   * the body it was read from may be withheld. classifyApiError is its one reader; withheld() copies it through.
    */
   rateLimited?: true;
   /**
@@ -331,7 +331,7 @@ function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean): ApiE
     definitiveRateLimit ||
     // x-ratelimit-remaining: 0 is AMBIGUOUS alone: a permission 403 issued on the token's last quota unit carries it
     // too. Only a WITHHELD response, with no message left to disambiguate, accepts it; on the readable path real primary
-    // exhaustion says "API rate limit exceeded", which isRateLimitError's message fallback already classifies.
+    // exhaustion says "API rate limit exceeded", which classifyApiError reads from the message.
     (carriesSecret && error.status === 403 && String(headers["x-ratelimit-remaining"]) === "0");
   let message: string;
   let documentationUrl: string | undefined;
@@ -718,26 +718,34 @@ function apiErrorFromGraphqlErrors(errors: unknown[], carriesSecret: boolean): A
 }
 
 /**
- * Rate limiting in a 403 costume: primary exhaustion and secondary limits arrive as 403 once the throttling plugin gives
- * up. A withheld response has no message to read, so its `rateLimited` flag stands in, as does a GraphQL RATE_LIMITED
- * error, whose 200 the mapper rewrites to 403.
+ * Decided in classifyApiError alone; consumers switch on it and never re-read the status or message for the answer.
+ * A 404 folds into "permission" because fine-grained tokens answer 404 on an endpoint they deny, so an absent
+ * resource lands there too (failureFor's prose says so).
  */
-export function isRateLimitError(error: ApiError): boolean {
-  return (
-    error.status === 429 ||
-    (error.status === 403 && (error.rateLimited === true || /rate limit/i.test(error.message)))
-  );
-}
+export type ApiErrorKind = "rate-limit" | "permission" | "other";
 
 /**
- * True when an error means the token lacks access, as opposed to a bad payload: a status fold, blind
- * to the body. A message an endpoint declares as a definitive rejection (sections/contract/endpoints.ts)
- * is classified ahead of this in failureFor, where the endpoint is known.
+ * GitHub's primary limit answers 403 with "API rate limit exceeded ..." and neither retry-after nor errors[].type, so a
+ * readable message is the one signal left for it, and the one channel a GitHubClient without headers has. A withheld
+ * message is a constant that never matches.
  */
-export function isPermissionError(error: ApiError): boolean {
-  if (isRateLimitError(error)) {
-    return false;
+const RATE_LIMIT_PHRASE = /rate limit/i;
+
+export function classifyApiError(error: ApiError): ApiErrorKind {
+  if (
+    error.status === 429 ||
+    (error.status === 403 && (error.rateLimited === true || RATE_LIMIT_PHRASE.test(error.message)))
+  ) {
+    return "rate-limit";
   }
-  // 403 is the classic missing scope; fine-grained tokens surface missing permissions as 404 on admin endpoints.
-  return error.status === 403 || error.status === 404;
+  return error.status === 403 || error.status === 404 ? "permission" : "other";
+}
+
+/** The library's named views of classifyApiError (src/index.ts, docs/reference/library.md); internal code switches on the kind itself. */
+export function isRateLimitError(error: ApiError): boolean {
+  return classifyApiError(error) === "rate-limit";
+}
+
+export function isPermissionError(error: ApiError): boolean {
+  return classifyApiError(error) === "permission";
 }

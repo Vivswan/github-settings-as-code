@@ -2,7 +2,7 @@ import { err, ok, type Result } from "neverthrow";
 import {
   type ApiError,
   type ClientAnswer,
-  isRateLimitError,
+  classifyApiError,
   type RequestMark,
   SECRET_RESPONSE_WITHHELD,
   SECRET_TRANSPORT_WITHHELD,
@@ -48,9 +48,8 @@ function unanswered(failed: string): SectionFailure {
  * webhook secret would otherwise render through failureFor into outcomes[].detail and a delivered report. A throw is
  * replaced too, since a transport error is free text that can quote the request body.
  *
- * The rate-limit classification is read from the message BEFORE the rebuild drops it: the port carries no headers,
- * so a client may signal a limit only that way, and a limit misread as a denial is a silently skipped section under
- * on-missing-permission: warn, where a denial misread as a limit still fails the run loudly.
+ * The port carries no headers, so a client may signal a limit only through the message the rebuild destroys; hence
+ * `rateLimited` is set first. A limit misread as a denial is a silently skipped section under on-missing-permission: warn.
  */
 async function issue<D>(
   label: string,
@@ -74,9 +73,10 @@ async function issue<D>(
   if (!("error" in result)) {
     return ok(result);
   }
-  const classified = isRateLimitError(result.error)
-    ? { ...result.error, rateLimited: true as const }
-    : result.error;
+  const classified =
+    classifyApiError(result.error) === "rate-limit"
+      ? { ...result.error, rateLimited: true as const }
+      : result.error;
   return ok({ error: withheld(classified, SECRET_RESPONSE_WITHHELD) });
 }
 
@@ -190,7 +190,8 @@ export async function tryCallDeclared(
     ctx.api.tryRequest(method, path, opts.payload, mark),
   );
   return issued.andThen((result) =>
-    "error" in result && (isRateLimitError(result.error) || !opts.tolerated(result.error.status))
+    "error" in result &&
+    (classifyApiError(result.error) === "rate-limit" || !opts.tolerated(result.error.status))
       ? err(
           failureFor(section, method, path, result.error, {
             operation: opts.describe,
@@ -228,7 +229,7 @@ export async function probeAbsent<E extends EndpointDecl>(
   }
   if ("error" in result) {
     // A rate-limited 403 is not an absent resource (the tryCallDeclared rule).
-    if (!isRateLimitError(result.error) && tolerated(result.error.status)) {
+    if (classifyApiError(result.error) !== "rate-limit" && tolerated(result.error.status)) {
       return ok({ missing: true });
     }
     return err(

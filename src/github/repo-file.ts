@@ -9,7 +9,7 @@
  * A failed ref read leaves the proof inconclusive: a denied grant, or an empty repository whose branch has no commit.
  */
 
-import { type ApiError, type GitHubClient, isRateLimitError } from "./api.js";
+import { type ApiError, classifyApiError, type GitHubClient } from "./api.js";
 
 export async function getRepoFile(
   api: GitHubClient,
@@ -63,8 +63,7 @@ export async function getRepoFile(
   if (!("error" in refProbe)) {
     return { missing: true };
   }
-  const denied = refProbe.error.status === 404 || refProbe.error.status === 403;
-  if (!denied || isRateLimitError(refProbe.error)) {
+  if (classifyApiError(refProbe.error) !== "permission") {
     return { error: refProbe.error };
   }
   return {
