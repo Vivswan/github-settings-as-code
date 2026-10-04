@@ -2,12 +2,16 @@
  * One reader for the workflow YAML the docs tests pin, and the parsed shapes.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ROOT } from "../root.js";
 
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
+
+export function workflowFiles(): string[] {
+  return readdirSync(WORKFLOWS_DIR).filter((file) => file.endsWith(".yml"));
+}
 
 export interface Step {
   name?: string;

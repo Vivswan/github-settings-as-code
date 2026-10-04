@@ -78,6 +78,7 @@ jobs:
         with:
           name: fuzz-failures-${{ github.run_attempt }}
           path: test/e2e/.artifacts/
+          include-hidden-files: true
           if-no-files-found: ignore
 
       - name: File or update the fuzz issue
