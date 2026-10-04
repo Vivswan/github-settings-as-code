@@ -1,7 +1,8 @@
 /**
- * The one plain-mapping test and the rejection prose, shared by the boundaries that refuse tagged values
- * (engine/validate.ts, github/secret-scan.ts), so no two of them describe the same value differently; and the two
- * record accessors that keep a document key from reaching the prototype chain.
+ * The one plain-mapping test and the one pipeline that describes a value for refusal prose, shared by every boundary
+ * that refuses a value (the layer fold, the section schemas, engine/validate.ts, github/secret-scan.ts): a kind is
+ * always named the same way, and a boundary that may echo a scalar does so on top of that; and the two record
+ * accessors that keep a document key from reaching the prototype chain.
  */
 
 /**
@@ -16,7 +17,10 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return proto === Object.prototype || proto === null;
 }
 
-/** Prototype comparison only, the same reflective read the callers already perform; no payload method is ever dispatched. */
+/**
+ * The kind of a value isPlainObject refused, naming the YAML tag that produces it. Prototype comparison only, the
+ * same reflective read the callers already perform; no payload method is ever dispatched.
+ */
 export function nonPlainKind(value: unknown): string {
   if (typeof value !== "object" || value === null) {
     return `a ${typeof value}`;
@@ -32,6 +36,39 @@ export function nonPlainKind(value: unknown): string {
     return "a set, e.g. from a YAML !!set tag";
   }
   return "a non-plain object";
+}
+
+/**
+ * A value's kind for refusal prose, never its contents: problem.ts renders layer-fold refusals where a document value
+ * (a label name, a private repository's setting) could land in a public log, so the fold's messages name kinds only.
+ */
+export function describeKind(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "a list";
+  }
+  return isPlainObject(value) ? "a mapping" : nonPlainKind(value);
+}
+
+/**
+ * A value in refusal prose where echoing it is the point: a quoted string, so a YAML "no" is visibly not a boolean,
+ * a number or boolean as written, and anything else by kind, since rendering a container can throw (JSON.stringify
+ * on a YAML alias cycle, String() on what a library caller may define).
+ */
+export function describeValue(value: unknown): string {
+  switch (typeof value) {
+    case "string":
+      return JSON.stringify(value);
+    case "number":
+    case "boolean":
+    case "bigint":
+    case "undefined":
+      return String(value);
+    default:
+      return describeKind(value);
+  }
 }
 
 /** An own property's value: an inherited name (`constructor`) is not a document key. */

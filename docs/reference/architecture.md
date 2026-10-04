@@ -372,6 +372,7 @@ graph TD
   sections --> discovery
   sections --> engine
   sections --> github
+  sections --> plain_data
   sections --> schema
   sections --> text
   sections --> types

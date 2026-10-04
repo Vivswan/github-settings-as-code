@@ -11,6 +11,7 @@
 import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { type Delta, deltas, phantomNote, renderPath, subsetDiff } from "../../engine/diff.js";
+import { isPlainObject } from "../../plain-data.js";
 import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -23,7 +24,6 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData, type Read } from "../contract/plan.js";
-import { isMapping } from "../shared/raw-values.js";
 import { layeredList } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
@@ -102,7 +102,7 @@ function isProtectionVocabulary(path: Delta["path"]): boolean {
  */
 function undocumentedKeysUnder(value: unknown, holder: string): string[] {
   const documented = PROTECTION_VOCABULARY.get(holder);
-  if (!isMapping(value) || documented === undefined) {
+  if (!isPlainObject(value) || documented === undefined) {
     return [];
   }
   return Object.entries(value).flatMap(([key, inner]) => {
@@ -168,7 +168,7 @@ function isEmptySetting(key: string, value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (isMapping(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
+  if (isPlainObject(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
     const keys = Object.keys(value);
     return (
       keys.length > 0 &&
@@ -193,7 +193,7 @@ function omittedLiveDrift(
     const keyPath = path === "" ? key : `${path}.${key}`;
     if (Object.hasOwn(declared, key)) {
       const inner = declared[key];
-      if (isMapping(inner) && isMapping(value)) {
+      if (isPlainObject(inner) && isPlainObject(value)) {
         drift.push(...omittedLiveDrift(inner, value, prefix, keyPath));
       }
       continue;
@@ -273,11 +273,15 @@ export const branchesSection = {
     entries.forEach((entry: BranchConfig, index) => {
       // The entry, its name, or its protection may be raw or missing beside its own shape issue; a regex would
       // coerce the name (`[object Object]` wildcards), and a non-mapping protection holds no keys to sweep.
-      if (!isMapping(entry) || typeof entry.name !== "string" || !isWildcardPattern(entry.name)) {
+      if (
+        !isPlainObject(entry) ||
+        typeof entry.name !== "string" ||
+        !isWildcardPattern(entry.name)
+      ) {
         return;
       }
       const protection = entry.protection;
-      if (!isMapping(protection)) {
+      if (!isPlainObject(protection)) {
         return;
       }
       for (const key of Object.keys(protection)) {
@@ -297,7 +301,7 @@ export const branchesSection = {
       ];
       for (const [key, twins] of nested) {
         const value = protection[key];
-        if (!isMapping(value)) {
+        if (!isPlainObject(value)) {
           continue;
         }
         for (const subKey of Object.keys(value)) {
@@ -494,7 +498,7 @@ async function planLiteralEntry(
         payload[key] = null;
       }
     }
-    if (isMapping(payload.required_status_checks)) {
+    if (isPlainObject(payload.required_status_checks)) {
       payload.required_status_checks = putStatusChecks(payload.required_status_checks);
     }
     let live: Record<string, unknown> | null = null;
@@ -618,7 +622,7 @@ async function planLiteralEntry(
 export function flattenProtection(live: Record<string, unknown>): Record<string, unknown> {
   const out = flattenValue(live) as Record<string, unknown>;
   const checks = out.required_status_checks;
-  if (isMapping(checks)) {
+  if (isPlainObject(checks)) {
     out.required_status_checks = putStatusChecks(checks);
   }
   return out;
@@ -636,12 +640,12 @@ function putStatusChecks<T extends Record<string, unknown>>(status: T): T {
     return status;
   }
   const checks = status.checks.map((check) =>
-    isMapping(check) && check.app_id === null ? { ...check, app_id: -1 } : check,
+    isPlainObject(check) && check.app_id === null ? { ...check, app_id: -1 } : check,
   );
   const contexts = Array.isArray(status.contexts)
     ? status.contexts
     : checks.flatMap((check) =>
-        isMapping(check) && typeof check.context === "string" ? [check.context] : [],
+        isPlainObject(check) && typeof check.context === "string" ? [check.context] : [],
       );
   return { ...status, checks, contexts };
 }
@@ -660,7 +664,7 @@ function foldActorNames(protection: Record<string, unknown>): Record<string, unk
     if (ACTOR_LIST_KEYS.has(key) && Array.isArray(value)) {
       out[key] = value.map((name) => (typeof name === "string" ? name.toLowerCase() : name));
     } else {
-      out[key] = isMapping(value) ? foldActorNames(value) : value;
+      out[key] = isPlainObject(value) ? foldActorNames(value) : value;
     }
   }
   return out;
@@ -679,7 +683,7 @@ const REVIEW_ACTOR_HOLDER_SET: ReadonlySet<string> = new Set(REVIEW_ACTOR_HOLDER
  */
 function withEmptyReviewHolders(live: Record<string, unknown>): Record<string, unknown> {
   const reviews = live.required_pull_request_reviews;
-  if (!isMapping(reviews)) {
+  if (!isPlainObject(reviews)) {
     return live;
   }
   const filled = { ...reviews };

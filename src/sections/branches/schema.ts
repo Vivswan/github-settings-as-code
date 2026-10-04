@@ -1,7 +1,8 @@
 /** The `branches:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
-import { isMapping, stringItems } from "../shared/raw-values.js";
+import { isPlainObject } from "../../plain-data.js";
+import { stringItems } from "../shared/raw-values.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
@@ -56,7 +57,7 @@ const ACTOR_LIST_EXAMPLE = {
 type ActorList = keyof typeof ACTOR_LIST_EXAMPLE;
 
 function copiedActorName(item: unknown): string | null {
-  if (!isMapping(item)) {
+  if (!isPlainObject(item)) {
     return null;
   }
   for (const nameKey of ["login", "slug"] as const) {
@@ -250,7 +251,7 @@ function refuseGetOnlyKeys(
   refineCtx: z.RefinementCtx,
   ancestors: Set<object> = new Set(),
 ): void {
-  if (!Array.isArray(value) && !isMapping(value)) {
+  if (!Array.isArray(value) && !isPlainObject(value)) {
     return;
   }
   if (ancestors.has(value)) {
@@ -328,7 +329,7 @@ export const BranchConfig = z
     // replace wholesale, so a duplicate would apply "successfully" and then drift forever against
     // the deduplicated read-back.
     const routed = entry.protection;
-    if (isMapping(routed)) {
+    if (isPlainObject(routed)) {
       const duplicateActor = duplicateIn(routed.force_push_bypassers);
       if (duplicateActor !== null) {
         refineCtx.addIssue({

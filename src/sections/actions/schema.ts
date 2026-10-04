@@ -1,7 +1,7 @@
 /** The `actions:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
-import { siblingText } from "../shared/raw-values.js";
+import { describeValue } from "../../plain-data.js";
 
 /** GitHub's rule for an OIDC claim key; the PUT 422s on anything else. */
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
@@ -150,8 +150,7 @@ export const ActionsConfig = z
       refineCtx.addIssue({
         code: "custom",
         path: ["selected_actions"],
-        // siblingText: the value may be raw beside its own shape issue, and a bare rendering can throw on a mapping.
-        message: `selected_actions is declared together with allowed_actions: ${siblingText(declared.allowed_actions)}, but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
+        message: `selected_actions is declared together with allowed_actions: ${describeValue(declared.allowed_actions)}, but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
       });
     }
   })

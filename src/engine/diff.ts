@@ -10,8 +10,8 @@
  */
 
 import { err, type Result } from "neverthrow";
+import { isPlainObject } from "../plain-data.js";
 import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
-import { isMapping } from "../sections/shared/raw-values.js";
 import { agree } from "../text.js";
 
 type PathStep = string | number | { readonly key: string };
@@ -96,7 +96,7 @@ function isEmptySetting(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.length === 0;
   }
-  if (isMapping(value)) {
+  if (isPlainObject(value)) {
     return Object.values(value).every(isEmptySetting);
   }
   return false;
@@ -141,7 +141,7 @@ function walk(
     return;
   }
   if (typeof desired === "object") {
-    if (!isMapping(liveValue)) {
+    if (!isPlainObject(liveValue)) {
       out.push(
         absent
           ? { kind: "phantom", path, desired }
@@ -208,8 +208,8 @@ function describeKey(key: MatchKey): string {
  * declaration bug.
  */
 function itemKey(item: unknown, key: MatchKey, keyPath: string, side: "desired" | "live"): string {
-  const parts = isMapping(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
-  if (!isMapping(item) || parts.length === 0) {
+  const parts = isPlainObject(item) ? fieldsOf(key).filter((field) => item[field] != null) : [];
+  if (!isPlainObject(item) || parts.length === 0) {
     throw new Error(
       `BUG: matchBy pairs the list "${keyPath}" by ${describeKey(key)}, but a ${side} item carries no such key: ${JSON.stringify(item)}`,
     );
