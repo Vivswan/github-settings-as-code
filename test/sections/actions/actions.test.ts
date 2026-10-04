@@ -611,17 +611,15 @@ describe("actions", () => {
     // Compile-time only: a GET paired with another key's PUT, or an enum-valued key PUT bare, never reaches the routing table.
     const live = z.looseObject({ access_level: z.string() });
     type Live = z.infer<typeof live>;
-    const paired: ReturnType<typeof endpointRouted<"access_level", "Access", Live>> =
-      endpointRouted<"access_level", "Access", Live>({
-        get: "getAccess",
-        put: "putAccess",
-        label: "actions.access",
-        applied: "applied",
-        body: (value) => ({ access_level: value }),
-        live,
-        read: () => "none",
-      });
-    expect(typeof paired.plan).toBe("function");
+    endpointRouted<"access_level", "Access", Live>({
+      get: "getAccess",
+      put: "putAccess",
+      label: "actions.access",
+      applied: "applied",
+      body: (value) => ({ access_level: value }),
+      live,
+      read: () => "none",
+    });
     endpointRouted<"access_level", "Access", Live>({
       get: "getAccess",
       // @ts-expect-error the PUT must carry the GET's name

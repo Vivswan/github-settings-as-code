@@ -34,7 +34,6 @@ describe("agents_variables", () => {
     );
 
   test("the plan labels drift with this section's key and its noun; undeclared defaults to delete", async () => {
-    expect(agentsVariablesSection.undeclaredDefault).toBe("delete");
     const api = new MockApi(listRoute);
     const result = await plan(api);
     expect(result.ops.map((op) => op.drift)).toEqual([

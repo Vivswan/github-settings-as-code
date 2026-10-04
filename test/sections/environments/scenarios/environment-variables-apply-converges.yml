@@ -19,7 +19,7 @@ live_state:
     production:
       name: production
       protection_rules:
-        - id: 3736
+        - id: 8101
           type: wait_timer
           wait_timer: 15
   environment_variables:

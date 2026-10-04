@@ -14,15 +14,15 @@ live_state:
     production:
       name: production
       protection_rules:
-        - id: 3755
-          node_id: MDQ6R2F0ZTM3NTU=
+        - id: 8102
+          node_id: MDQ6R2F0ZTgxMDI=
           type: required_reviewers
           prevent_self_review: true
           reviewers:
             - type: User
               reviewer:
                 login: octocat
-                id: 583231
+                id: 100001
       deployment_branch_policy: null
 token_permissions:
   environments: write

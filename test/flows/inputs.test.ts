@@ -290,36 +290,49 @@ describe("mode: render", () => {
     layering: "deep",
   };
 
-  test("parses without any token, carrying the ordered layers, the output path, and the layering", () => {
-    expect(merge({ layering: "replace" })).toEqual(ok({ ...RENDER_CONFIG, layering: "replace" }));
-  });
-
-  test("the undeclared input rides into the render config, and a bad value is refused as in apply", () => {
-    expect(merge({ undeclared: "keep" })).toEqual(ok({ ...RENDER_CONFIG, undeclared: "keep" }));
-    expect(rejection(merge({ undeclared: "kep" }))).toMatchObject({
-      code: "input-unsupported-value",
-      input: "undeclared",
-      fallback: null,
-    });
-  });
-
-  test("the layering input defaults to deep and a comma list of layers works too", () => {
-    expect(merge({ "settings-file": " fleet.yml , team.yml ,repo.yml" })).toEqual(
+  test.each<
+    [name: string, inputs: Partial<Record<InputName, string>>, expected: Result<RunConfig, Problem>]
+  >([
+    ["the two layers alone, layering at its deep default", {}, ok(RENDER_CONFIG)],
+    [
+      "layering set to replace",
+      { layering: "replace" },
+      ok({ ...RENDER_CONFIG, layering: "replace" }),
+    ],
+    [
+      "a comma list of layers, each trimmed",
+      { "settings-file": " fleet.yml , team.yml ,repo.yml" },
       ok({ ...RENDER_CONFIG, settingsFiles: ["fleet.yml", "team.yml", "repo.yml"] }),
-    );
-  });
-
-  test("an empty layer list is rejected", () => {
-    expect(rejection(merge({ "settings-file": "," }))).toEqual({
-      code: "input-settings-file-empty",
-      value: ",",
-    });
-  });
-
-  test("a missing rendered-file is rejected", () => {
-    expect(rejection(merge({ "rendered-file": "" }))).toEqual({
-      code: "input-rendered-file-missing",
-    });
+    ],
+    [
+      "the undeclared input, which rides into the render config",
+      { undeclared: "keep" },
+      ok({ ...RENDER_CONFIG, undeclared: "keep" }),
+    ],
+    [
+      "a misspelled undeclared value, refused as in apply",
+      { undeclared: "kep" },
+      err({
+        code: "input-unsupported-value",
+        input: "undeclared",
+        value: "kep",
+        noun: "undeclared policy",
+        allowed: ["keep", "delete"],
+        fallback: null,
+      }),
+    ],
+    [
+      "an empty layer list",
+      { "settings-file": "," },
+      err({ code: "input-settings-file-empty", value: "," }),
+    ],
+    [
+      "a missing rendered-file",
+      { "rendered-file": "" },
+      err({ code: "input-rendered-file-missing" }),
+    ],
+  ])("%s", (_name, inputs, expected) => {
+    expect(merge(inputs)).toEqual(expected);
   });
 
   // RENDER_REJECTED_INPUTS is every declared input outside RENDER_INPUTS; test/docs/guides.test.ts pins the set against

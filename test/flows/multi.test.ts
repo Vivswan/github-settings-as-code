@@ -5,7 +5,11 @@ import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { DEFAULT_DISCOVERY_FILTERS } from "../../src/discovery/discover.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { runMulti } from "../../src/flows/multi.js";
-import type { TargetOutcome } from "../../src/flows/redact.js";
+import {
+  REDACTED_NOTE,
+  type TargetOutcome,
+  WITHHELD_REPORT_NOTICE,
+} from "../../src/flows/redact.js";
 import { isPrivate } from "../../src/private.js";
 import { describeProblem, type Problem } from "../../src/problem.js";
 import {
@@ -226,31 +230,31 @@ describe("runMulti", () => {
   test("central per-repo files are applied as written; the defaults never reach them", async () => {
     // Both live repos drift on both keys, so each PATCH carrying exactly its own file's key proves the defaults never merged in.
     const api = new MockApi({
-      "GET /repos/viv/api": { data: { has_wiki: true, has_projects: true } },
+      "GET /repos/example-org/api": { data: { has_wiki: true, has_projects: true } },
       "GET /repos/octo/web": { data: { has_wiki: true, has_projects: true } },
-    }).allowMutations("PATCH /repos/viv/api", "PATCH /repos/octo/web");
+    }).allowMutations("PATCH /repos/example-org/api", "PATCH /repos/octo/web");
     const { io } = captureIo();
     const targets = await runTargets(
       api,
       cfg({
         reposDir: "test/fixtures/repos",
         defaultsFile: "test/fixtures/defaults.yml",
-        adminOwner: "viv",
+        adminOwner: "example-org",
         onMissingPermission: "warn",
       }),
       io,
     );
     expect(targets.map((t) => [t.display, t.result]).sort()).toEqual([
+      ["example-org/api", "applied"],
       ["octo/web", "applied"],
-      ["viv/api", "applied"],
     ]);
     const patches = api
       .mutations()
       .map((m) => [m.method, m.path, m.payload])
       .sort();
     expect(patches).toEqual([
+      ["PATCH", "/repos/example-org/api", { has_wiki: false }],
       ["PATCH", "/repos/octo/web", { has_projects: false }],
-      ["PATCH", "/repos/viv/api", { has_wiki: false }],
     ]);
   });
 
@@ -309,7 +313,11 @@ describe("runMulti", () => {
     const { io, annotations } = captureIo();
     const fatal = await runFatal(
       api,
-      cfg({ reposDir: "test/fixtures/repos", adminOwner: "viv", discoveryFiltersSet: ["forks"] }),
+      cfg({
+        reposDir: "test/fixtures/repos",
+        adminOwner: "example-org",
+        discoveryFiltersSet: ["forks"],
+      }),
       io,
     );
     expect(fatal).toEqual({
@@ -667,12 +675,10 @@ describe("runMulti private-report: issue wiring", () => {
       io,
     );
     expect(targets[0]?.result).toBe("drift");
-    const warning = annotations.find((a) => a.includes("could not deliver the private report"));
-    expect(warning).toBeDefined();
-    expect(warning).toContain("private repository #1");
-    expect(warning).toContain("HTTP 403");
-    expect(warning).not.toContain("o/priv");
-    expect(warning).not.toContain("Resource not accessible");
+    expect(annotations).toEqual([
+      `warning: private repository #1: could not deliver the private report (HTTP 403). To fix, grant "Issues" (read and write) under the PAT's Repository permissions for the target repository, or set private-report: none`,
+      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+    ]);
   });
 
   test("no report is delivered under channel none, policy show, or for a non-redacted target", async () => {
@@ -721,11 +727,10 @@ describe("runMulti private-report: issue wiring", () => {
     expect(targets[0]?.result).toBe("failed");
     expect(redacted(targets[0])).toBe(true);
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
-    const warning = annotations.find((a) => a.includes("could not deliver the private report"));
-    expect(warning).toBeDefined();
-    expect(warning).toContain("private repository #1");
-    expect(warning).toContain("not an owner/name repository slug");
-    expect(annotations.join("\n")).not.toContain("justonename");
+    expect(annotations).toEqual([
+      "warning: private repository #1: could not deliver the private report: the target name is not an owner/name repository slug, so there is no repository to hold the report issue",
+      `error: private repository #1: failed. ${REDACTED_NOTE}`,
+    ]);
   });
 
   test("unknown visibility redacts publicly but does NOT deliver the report (fail closed)", async () => {
@@ -747,10 +752,10 @@ describe("runMulti private-report: issue wiring", () => {
     expect(redacted(targets[0])).toBe(true);
     expect(api.calls.some((c) => c.path.includes("/issues"))).toBe(false);
     expect(api.calls.some((c) => c.method === "POST" && c.path.endsWith("/labels"))).toBe(false);
-    const withheld = annotations.find((a) => a.includes("visibility could not be verified"));
-    expect(withheld).toBeDefined();
-    expect(withheld).toContain("private repository #1");
-    expect(annotations.join("\n")).not.toContain("o/maybe");
+    expect(annotations).toEqual([
+      `notice: private repository #1: ${WITHHELD_REPORT_NOTICE}`,
+      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+    ]);
   });
 
   test("an internal target IS deliverable (proven private/internal)", async () => {
@@ -1027,9 +1032,11 @@ describe("runMulti private-report: artifact wiring", () => {
     const document = await decrypt(uploads[0]?.file.data as Uint8Array);
     expect(document).toContain("CANARY-KNOWN");
     expect(document).not.toContain("CANARY-MAYBE");
-    const withheld = annotations.find((a) => a.includes("visibility could not be verified"));
-    expect(withheld).toBeDefined();
-    expect(annotations.join("\n")).not.toContain("o/maybe");
+    expect(annotations).toEqual([
+      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      `notice: private repository #2: ${WITHHELD_REPORT_NOTICE}`,
+      `warning: private repository #2: drift - repository. ${REDACTED_NOTE}`,
+    ]);
   });
 
   test("no deliverable target means no upload at all", async () => {
@@ -1085,10 +1092,9 @@ describe("runMulti private-report: artifact wiring", () => {
       uploader,
     );
     expect(targets[0]?.result).toBe("drift");
-    const warning = annotations.find((a) => a.includes("could not upload the private report"));
-    expect(warning).toBeDefined();
-    expect(warning).toContain("ACTIONS_RUNTIME_TOKEN");
-    expect(annotations.join("\n")).not.toContain("o/priv");
-    expect(annotations.join("\n")).not.toContain("CANARY");
+    expect(annotations).toEqual([
+      `warning: private repository #1: drift - repository. ${REDACTED_NOTE}`,
+      "warning: could not upload the private report artifact: Unable to get the ACTIONS_RUNTIME_TOKEN env variable. Re-run, or set private-report: none if it persists",
+    ]);
   });
 });

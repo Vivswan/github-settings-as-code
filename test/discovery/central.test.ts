@@ -54,15 +54,15 @@ describe("resolveCentralTargets", () => {
     }));
 
   test("the same repo defined twice is refused, naming both files", () => {
-    expect(resolveCentralTargets("test/fixtures/repos-dup", "viv")).toEqual(
+    expect(resolveCentralTargets("test/fixtures/repos-dup", "example-org")).toEqual(
       err({
         code: "repos-dir-invalid-files",
         reposDir: "test/fixtures/repos-dup",
         files: [
           {
             kind: "duplicate",
-            slug: "viv/x",
-            first: "test/fixtures/repos-dup/viv/x.yml",
+            slug: "example-org/x",
+            first: "test/fixtures/repos-dup/example-org/x.yml",
             second: "test/fixtures/repos-dup/x.yml",
           },
         ],
