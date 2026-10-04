@@ -84,4 +84,8 @@ How to read it:
 - A file named `payments.yml` in the merged directory targets `acme/payments` under the admin repository's owner; the [multi-repo guide](../operate/multi-repo.md) covers the naming.
 - `.github/repos/` is flat here: `find -maxdepth 1` reads only its top level, and a file's bare name is the repository. A repository of another owner needs the `<owner>/<name>.yml` form the multi-repo guide describes, carried through to `rendered-file`.
 
-Adding a repository is adding its file under `.github/repos/`; the `plan` job reads the directory, so no list is maintained by hand. The `render` matrix runs one job per file, and a matrix runs at most 256 jobs; past that, split the directory by cohort into copies of this workflow, each filtered on its folder and commenting on its own. The [layering guide](../operate/layering.md) owns what the fold does to each layer.
+Adding a repository is adding its file under `.github/repos/`; the `plan` job reads the directory, so no list is maintained by hand.
+
+The `render` matrix runs one job per file, and a matrix runs at most 256 jobs. Past that, split the directory by cohort into copies of this workflow, each filtered on its folder and commenting on its own.
+
+The [layering guide](../operate/layering.md) owns what the fold does to each layer.

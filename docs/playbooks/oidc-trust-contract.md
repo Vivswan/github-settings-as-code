@@ -34,4 +34,6 @@ The fleet story is two layers. `[repo, context]` belongs in the fleet baseline l
 
 A repository with no settings file of its own takes the baseline through the `defaults-file` fallback instead.
 
-One adjacent setting to know about: `use_immutable_subject: true` opts the repository into a stable repository-ID-based subject (`repo:acme@OWNER-ID/payments@REPO-ID:...`). Repositories created after July 15, 2026 carry that format by default, organizations can opt in fleet-wide, and GitHub documents the flag only as an opt-in with no documented way back - so on a repository with immutable subjects, write the trust policy against the immutable shape rather than declaring `false` and expecting the name-based shape to return. Whichever subject model the repository actually has is the one the policy must match.
+One adjacent setting to know about: `use_immutable_subject: true` opts the repository into a stable repository-ID-based subject (`repo:acme@OWNER-ID/payments@REPO-ID:...`). Repositories created after July 15, 2026 carry that format by default, and organizations can opt in fleet-wide.
+
+GitHub documents the flag only as an opt-in with no documented way back. On a repository with immutable subjects, write the trust policy against the immutable shape rather than declaring `false` and expecting the name-based shape to return; whichever subject model the repository actually has is the one the policy must match.

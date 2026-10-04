@@ -48,4 +48,6 @@ jobs:
         run: gh issue create --title "Settings drift $(date -I)" --body "See run $GITHUB_RUN_ID"
 ```
 
-The reason this must be a check and not an apply is stated in the [check mode guide](../operate/check-mode.md): apply exits 0 whether or not it changed anything, so a green scheduled apply proves nothing about drift, while a green scheduled check is exactly the claim the auditor needs. For a fleet with private repositories, add `private-repos: redact` (the default) and deliver the full detail through `private-report: artifact` with an age key, which keeps slugs and settings out of the public run while preserving the evidence; the [private repositories guide](../operate/private-repositories.md) covers the setup.
+This must be a check and not an apply, for the reason the [check mode guide](../operate/check-mode.md#exit-behavior) states: apply exits 0 whether or not it changed anything, so a green scheduled apply proves nothing about drift, while a green scheduled check is exactly the claim the auditor needs.
+
+For a fleet with private repositories, add `private-repos: redact` (the default) and deliver the full detail through `private-report: artifact` with an age key. That keeps slugs and settings out of the public run while preserving the evidence; the [private repositories guide](../operate/private-repositories.md#delivering-a-private-report) covers the setup.
