@@ -3,8 +3,9 @@
  * auto-assign.yml with the issue number. The links a rename on one side breaks with no other check noticing: the directory the
  * runner writes and the artifact the fuzz issue cites, the conditions the steps run under, the step ids the expressions read, the
  * label the report and the resolve share, the input names the dispatch passes to a workflow the platform syncs, and in nightly.yml
- * the sibling jobs the report job's red and green conditions fold in. Across every workflow: an upload of a hidden path (the e2e
- * artifacts directory is one) includes hidden files, which upload-artifact otherwise skips without a word.
+ * the sibling jobs the report job's red and green conditions fold in. Across every workflow: each pattern of an upload path under
+ * test/e2e is the artifacts directory the runner writes, and an upload of a hidden path (that directory is one) includes hidden
+ * files, which upload-artifact otherwise skips without a word.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -202,11 +203,17 @@ const uploadSteps = (workflows: Workflows) =>
     ),
   );
 
-/** upload-artifact skips every item whose basename starts with a dot, the search root included; a path block is one pattern per line. */
-const hasHiddenSegment = (path: unknown) =>
+/** A path block is one pattern per line; a trailing slash names the same directory. */
+const patternsOf = (path: unknown) =>
   String(path ?? "")
     .split("\n")
-    .flatMap((pattern) => pattern.trim().split("/"))
+    .map((pattern) => pattern.trim().replace(/\/$/, ""))
+    .filter((pattern) => pattern !== "");
+
+/** upload-artifact skips every item whose basename starts with a dot, the search root included. */
+const hasHiddenSegment = (path: unknown) =>
+  patternsOf(path)
+    .flatMap((pattern) => pattern.split("/"))
     .some((segment) => segment.startsWith(".") && segment !== "." && segment !== "..");
 
 /** The uploads that would upload nothing: a hidden path without include-hidden-files: true. */
@@ -218,44 +225,62 @@ const emptyHiddenUploads = (workflows: Workflows) =>
     )
     .map(({ where }) => where);
 
+const e2ePatterns = (step: Step) =>
+  patternsOf(step.with?.path).filter((pattern) => pattern.startsWith("test/e2e/"));
+
+const driftedE2eUploads = (workflows: Workflows) =>
+  uploadSteps(workflows)
+    .filter(({ step }) =>
+      e2ePatterns(step).some((pattern) => join(ROOT, pattern) !== ARTIFACTS_DIR),
+    )
+    .map(({ where }) => where);
+
 describe("upload-artifact steps", () => {
   const workflows: Workflows = workflowFiles().map((file) => [file, readWorkflow(file)]);
-  const uploadPath = (step: Step) => String(step.with?.path ?? "").replace(/\/$/, "");
 
   // The failure is silent: with if-no-files-found: ignore the step goes green on an empty upload, and the e2e nightlies shipped that
   // way for as long as they existed.
-  test("every upload under test/e2e is the artifacts directory, and every upload of a hidden path includes hidden files", () => {
-    const underE2e = uploadSteps(workflows).filter(({ step }) =>
-      uploadPath(step).startsWith("test/e2e/"),
-    );
+  test("every pattern under test/e2e is the artifacts directory, and every upload of a hidden path includes hidden files", () => {
+    const underE2e = uploadSteps(workflows).filter(({ step }) => e2ePatterns(step).length > 0);
     expect(underE2e.length, "no workflow uploads the e2e artifacts directory").toBeGreaterThan(0);
-    expect(
-      underE2e
-        .filter(({ step }) => join(ROOT, uploadPath(step)) !== ARTIFACTS_DIR)
-        .map(({ where }) => where),
-    ).toEqual([]);
+    expect(driftedE2eUploads(workflows)).toEqual([]);
     expect(emptyHiddenUploads(workflows)).toEqual([]);
   });
 
-  test.each<[string, unknown]>([
-    ["omitted", undefined],
-    ["false", false],
-  ])(
-    "include-hidden-files %s on every upload fails the guard (negative control)",
-    (_case, value) => {
-      const mutated: Workflows = workflows.map(([file, workflow]) => [
-        file,
-        structuredClone(workflow),
-      ]);
-      for (const { step } of uploadSteps(mutated)) {
-        if (value === undefined) delete step.with?.["include-hidden-files"];
-        else if (step.with) step.with["include-hidden-files"] = value;
-      }
-      const hidden = uploadSteps(mutated)
-        .filter(({ step }) => hasHiddenSegment(step.with?.path))
-        .map(({ where }) => where);
-      expect(hidden.length).toBeGreaterThan(0);
-      expect(emptyHiddenUploads(mutated)).toEqual(hidden);
-    },
-  );
+  test.each<[string, (step: Step) => boolean, (workflows: Workflows) => string[]]>([
+    [
+      "include-hidden-files omitted",
+      (step) => {
+        delete step.with?.["include-hidden-files"];
+        return hasHiddenSegment(step.with?.path);
+      },
+      emptyHiddenUploads,
+    ],
+    [
+      "include-hidden-files false",
+      (step) => {
+        if (step.with) step.with["include-hidden-files"] = false;
+        return hasHiddenSegment(step.with?.path);
+      },
+      emptyHiddenUploads,
+    ],
+    [
+      "a multiline path whose second pattern drifts under test/e2e",
+      (step) => {
+        if (step.with) step.with.path = "dist/\ntest/e2e/wrong/";
+        return true;
+      },
+      driftedE2eUploads,
+    ],
+  ])("%s on every upload fails the guard (negative control)", (_case, mutate, guard) => {
+    const mutated: Workflows = workflows.map(([file, workflow]) => [
+      file,
+      structuredClone(workflow),
+    ]);
+    const violating = uploadSteps(mutated)
+      .filter(({ step }) => mutate(step))
+      .map(({ where }) => where);
+    expect(violating.length).toBeGreaterThan(0);
+    expect(guard(mutated)).toEqual(violating);
+  });
 });
