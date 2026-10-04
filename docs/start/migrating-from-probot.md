@@ -8,7 +8,11 @@ This page walks through moving a repository from the [Probot Settings app](https
 
 ## Why migrate
 
-The app applies settings from a hosted GitHub App installation, and when something goes wrong it does nothing: there is no run log a repository owner can open, so a misconfigured or uninstalled app looks exactly like a healthy one. This action is a step in your own workflow instead. Every apply is a visible run with a log, annotations, a step summary, and a red X on failure, and `mode: check` reports drift between the file and the live repository without changing any settings. On top of that you get rulesets, a partial-success policy, a token you scope yourself, and per-call debug tracing. The [comparison table](#compared-to-the-probot-settings-app) below lists the differences one by one.
+The app applies settings from a hosted GitHub App installation, and when something goes wrong it does nothing: there is no run log a repository owner can open, so a misconfigured or uninstalled app looks exactly like a healthy one.
+
+This action is a step in your own workflow instead. Every apply is a visible run with a log, annotations, a step summary, and a red X on failure, and `mode: check` reports drift between the file and the live repository without changing any settings.
+
+On top of that you get rulesets, a partial-success policy, a token you scope yourself, and per-call debug tracing. The [comparison table](#compared-to-the-probot-settings-app) below lists the differences one by one.
 
 ## Compared to the Probot Settings app
 
@@ -27,7 +31,7 @@ The one Probot-family feature without a direct equivalent is suborg-level groupi
 
 ## What carries over as-is
 
-Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array - the wrapped form (`{_undeclared, entries}`, or `{_layering, entries}` on `branches`, whose wrapper takes no policy) is this action's own extension on top.
+Your existing settings.yml keeps working for `repository`, `labels`, `branches`, `collaborators`, `teams`, and `milestones`: their original Probot shapes remain compatible, including label renames via `new_name` and `protection: null` to remove branch protection. For the list sections among them the compatible shape is the plain array. The wrapped form (`{_undeclared, entries}`, or `{_layering, entries}` on `branches`, whose wrapper takes no policy) is this action's own extension on top.
 
 This list is the parity claim the contract tests pin. The sections outside that list (`rulesets`, `autolinks`, `actions`, `workflows`, `pages`, `code_scanning_default_setup`, and the rest) are not covered by the parity guarantee; the check run below tells you whether such a section validates as-is.
 
@@ -37,13 +41,20 @@ YAML anchors, aliases, and merge keys (`<<`) resolve as they did under the app's
 
 The delivery model is a workflow plus a fine-grained PAT, not an app installation. You mint the token, scope it to exactly the sections your file declares, and save it as a repository secret; permission errors name the exact grant to add. See [Token permissions](../reference/permissions.md).
 
-Failures are loud. An unknown top-level key in the settings file is a hard error, not a silent no-op, because a misspelled section that quietly did nothing is the app's failure mode this action exists to replace; an unknown underscore key is one too, so a note goes in a YAML comment. The closed sections also reject entry keys they do not recognize: in `collaborators` and `teams` a misspelled `permission` key would silently grant the default role, and in `workflows` the enable/disable calls send no payload, so an unrecognized key would silently do nothing. [Forward compatibility](../reference/forward-compatibility.md) lists the full closed set.
+Failures are loud. An unknown top-level key in the settings file is a hard error, not a silent no-op, because a misspelled section that quietly did nothing is the app's failure mode this action exists to replace. An unknown underscore key is one too, so a note goes in a YAML comment.
+
+The closed sections also reject entry keys they do not recognize, and [Forward compatibility](../reference/forward-compatibility.md) lists the full closed set:
+
+- **`collaborators` and `teams`:** a misspelled `permission` key would silently grant the default role.
+- **`workflows`:** the enable/disable calls send no payload, so an unrecognized key would silently do nothing.
 
 The engine is stateless. There is no state file and nothing is stored between runs; resources are matched by their natural names, and only declared keys are ever applied or compared. Removing a section from the file stops managing it; it does not revert anything.
 
 Rulesets are first class. Your `branches` section keeps working, and you can optionally move protection to `rulesets`, which cover branch, tag, and push targets. Undeclared rulesets are kept by default - deleting them is an explicit opt-in (`_undeclared: delete`), so removing protection stays a deliberate action.
 
-Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables - plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns. Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
+Deletions still exist where the app had them: undeclared labels are deleted by default (Probot parity), and so are undeclared autolinks, collaborators, Actions variables, and Copilot agents variables, plus, within a declared per-environment key, that environment's variables and deployment branch-policy patterns.
+
+Nothing else is ever deleted implicitly; the [Sections table](../reference/sections.md#the-undeclared-default-column) states each section's default in its Undeclared default column, and the check run lists everything an apply would delete before you let it.
 
 ## Step by step
 
