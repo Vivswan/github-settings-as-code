@@ -53,12 +53,12 @@ The `sections` and `required-sections` inputs apply to all targets alike, and th
 
 Discovery takes six filter inputs that apply only to `repos: "*"`; setting any of them in another mode fails the run. Repositories a filter drops are reported in one aggregate notice per reason.
 
-- `visibility` keeps public, private, or internal repositories.
+- `visibility` keeps public, private, or internal repositories. `internal` is matched client-side, since only Enterprise has it.
 - `archived` defaults to `skip`, because settings writes fail on archived repositories; `archived: only` is mostly useful with `mode: check`.
 - `forks` includes, excludes, or keeps only forks.
-- `topics` keeps repositories carrying at least one listed topic, so a single marker topic can opt repositories in.
+- `topics` keeps repositories carrying at least one listed topic, so a single marker topic can opt repositories in. It is unrelated to the `topics` settings section.
 - `exclude` takes wildcard patterns where `*` matches anything: a pattern containing `/` is matched against the full `owner/name`, any other against the name alone, case-insensitively.
-- `affiliation` selects which relationships to the token's user qualify: `owner` (the default), `collaborator`, or `organization_member`. The list replaces the default, so widening discovery beyond owned repositories takes `owner,collaborator`.
+- `affiliation` selects which relationships to the token's user qualify, passed to GitHub's `/user/repos` listing: `owner` (the default), `collaborator`, or `organization_member`. The list replaces the default, so widening discovery beyond owned repositories takes `owner,collaborator`.
 
 ## Fallback for repositories without a settings file
 

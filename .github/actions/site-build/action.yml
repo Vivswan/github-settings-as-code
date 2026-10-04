@@ -1,22 +1,26 @@
-# Repo-owned: generated once by Vivswan/repo-platform, never
-# overwritten by sync. ci.yml's `site` leg runs this action on the judged
-# commit before the fleet renders docs/ and deploys: build this repository's
-# own website here. Contract and examples: repo-platform's docs/site.md.
+# Repo-owned: generated once by Vivswan/repo-platform, never overwritten by sync.
 
 name: Site Build
-description: Builds this repository's own website for the fleet's Pages deploy.
+description: |
+  Builds this repository's own website for the fleet's Pages deploy.
+
+  ci.yml's site leg runs this action on the judged commit, before the fleet renders docs/ and deploys.
+
+  A repository with no site of its own leaves the build step a no-op, and docs/ publishes alone.
+
+  Contract and examples: repo-platform's docs/site.md.
 
 inputs:
   base-path:
-    description: The URL path the site is served under ("/" with a custom domain, else "/<repo>/")
+    description: 'The URL path the site is served under: "/" with a custom domain, else "/<repo>/".'
     required: true
   origin:
-    description: The site's origin (https://<owner>.github.io, or https://<domain>)
+    description: The site's origin, https://<owner>.github.io or https://<domain>.
     required: true
 
 outputs:
   dist:
-    description: The built site's directory, relative to the repository root; empty = no repository site
+    description: The built site's directory relative to the repository root, empty when the repository has no site.
     value: ${{ steps.build.outputs.dist }}
 
 runs:

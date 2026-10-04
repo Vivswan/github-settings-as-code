@@ -633,34 +633,25 @@ describe("the help text", () => {
   });
 
   test("the repository flag's help names the terminal's requirement, not the runner's default", () => {
-    const runnerDefault = "Defaults to the current repository";
+    const runnerDefault = "the current repository by default";
     const escapeClause = "unless repos or repos-dir is set";
     for (const subcommand of [modeSubcommand("check"), INIT_SUBCOMMAND]) {
       const description = inputDescription("repository", subcommand);
-      expect(description).toStartWith(INPUT_DECLS.repository.description.split(".")[0] ?? "");
+      expect(description).toStartWith(INPUT_DECLS.repository.description.split(",")[0] ?? "");
       expect(description).not.toContain(runnerDefault);
-      expect(description).toContain("Required");
+      expect(description).toContain("required");
       expect(description).toContain("GITHUB_REPOSITORY supplies it");
       // The escape clause holds only where the multi-repo flags exist: init has none.
       expect(description.includes(escapeClause)).toBe(subcommand.flags.has("repos"));
     }
   });
 
-  test("init's sections flag keeps the declaration's first sentence and drops the mode restriction", () => {
-    const declared = INPUT_DECLS.sections.description;
-    // The declaration's first sentence is the allowlist itself; the clause after it names the modes init never runs.
-    expect(inputDescription("sections", INIT_SUBCOMMAND)).toBe(
-      declared.slice(0, declared.indexOf(". ") + 1),
-    );
-    expect(inputDescription("sections", modeSubcommand("check"))).toBe(declared);
-  });
-
   test("the private-report flag's help offers exactly the channels the CLI accepts", () => {
     // parseConfig refuses the artifact channel for a face without an upload, so its value leaves the list and the other channels stay.
     const accepted = PRIVATE_REPORT_CHANNELS.filter((channel) => channel !== "artifact");
     const check = inputDescription("private-report", modeSubcommand("check"));
-    const opening = check.slice(0, check.indexOf(". ") + 1);
-    // Every word of the opening sentence besides its connectives is a channel name, so a stray channel cannot hide in it.
+    const opening = check.slice(0, check.indexOf(":"));
+    // Every word of the channel list besides its connectives is a channel name, so a stray channel cannot hide in it.
     const named = opening
       .replace(/[.,()]/g, " ")
       .split(/\s+/)
@@ -680,8 +671,8 @@ describe("the help text", () => {
     expect(() => declared("repository", "a sentence the declaration never had")).toThrow(
       /^BUG: the repository input's description no longer says "a sentence the declaration never had"/,
     );
-    expect(declared("repository", "Target repository (owner/name).")).toBe(
-      "Target repository (owner/name).",
+    expect(declared("repository", "The owner/name repository to run against")).toBe(
+      "The owner/name repository to run against",
     );
   });
 });

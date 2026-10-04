@@ -55,19 +55,16 @@ export function inputsForMode(mode: Mode): InputName[] {
 export interface Subcommand {
   /** The inputs the subcommand takes as flags. */
   readonly flags: ReadonlySet<InputName>;
-  /** The mode the subcommand runs, or null for init, which runs none. */
-  readonly mode: Mode | null;
 }
 
 /** A mode's subcommand: its flags are the inputs the mode reads. */
 export function modeSubcommand(mode: Mode): Subcommand {
-  return { flags: new Set(inputsForMode(mode)), mode };
+  return { flags: new Set(inputsForMode(mode)) };
 }
 
 /**
  * The init subcommand: the snapshot inputs of one repository, with
- * settings-file as the destination in place of snapshot-file. No mode runs
- * it, so the clauses restricted to modes leave its help.
+ * settings-file as the destination in place of snapshot-file.
  */
 export const INIT_SUBCOMMAND: Subcommand = {
   flags: new Set<InputName>([
@@ -77,7 +74,6 @@ export const INIT_SUBCOMMAND: Subcommand = {
     "sections",
     "api-version",
   ]),
-  mode: null,
 };
 
 /** init's flags in declaration order, the order the help keeps. */
@@ -109,95 +105,46 @@ export function declared(input: InputName, text: string): string {
 }
 
 /**
- * A stretch of a declaration's description whose truth rests on other flags
- * or on the mode, removed verbatim (its leading separator included) from the
- * help of a subcommand that does not meet the assumption.
+ * A stretch of a declaration's description whose truth rests on other flags,
+ * removed verbatim from the help of a subcommand that lacks one of them.
  */
 interface Clause {
   readonly input: InputName;
   readonly text: string;
-  /** What stands in for `text` when it is removed; a bare removal by default. */
-  readonly replacement?: string;
+  /** What stands in for `text` when it is removed. */
+  readonly replacement: string;
   /** Met when the subcommand accepts every one of these flags. */
-  readonly flags?: readonly InputName[];
-  /** Met when the subcommand runs one of these modes. */
-  readonly modes?: readonly Mode[];
+  readonly flags: readonly InputName[];
 }
 
 const MULTI_REPO_FLAGS: readonly InputName[] = ["repos", "repos-dir"];
 
 const CLAUSES: readonly Clause[] = [
   {
-    input: "repository",
-    text: declared(
-      "repository",
-      " Single-repo mode only; cannot be combined with repos or repos-dir.",
-    ),
-    flags: MULTI_REPO_FLAGS,
-  },
-  {
-    input: "settings-file",
-    text: declared(
-      "settings-file",
-      " Single-repo and render modes only; multi-repo targets read repos-dir files or each " +
-        "repository's own .github/settings.yml, so overriding it alongside repos or repos-dir fails the run.",
-    ),
-    flags: MULTI_REPO_FLAGS,
-  },
-  {
-    input: "snapshot-dir",
-    text: declared("snapshot-dir", "; defaults-file does not apply"),
-    flags: ["defaults-file"],
-  },
-  {
-    input: "sections",
-    text: declared(
-      "sections",
-      " apply, check, and snapshot only: mode: render writes every section its layers declare, " +
-        "so the allowlist belongs on the step that runs the rendered document and fails the render when set.",
-    ),
-    modes: ["apply", "check", "snapshot"],
-  },
-  {
     input: "private-report",
-    text: declared(
-      "private-report",
-      " Under artifact, those reports are concatenated, age-encrypted to report-public-key, and " +
-        "uploaded as one workflow artifact (settings-as-code-private-report) for readers who hold " +
-        "the key but no GitHub access to the targets; the artifact channel needs the Actions " +
-        "artifact service, so on GitHub Enterprise Server it warns and uploads nothing.",
-    ),
-    flags: ["report-public-key"],
-  },
-  {
-    input: "private-report",
-    text: declared("private-report", "issue, issue-on-failure, or artifact."),
-    replacement: "issue, or issue-on-failure.",
+    text: declared("private-report", "issue, issue-on-failure, or artifact"),
+    replacement: "issue, or issue-on-failure",
     flags: ["report-public-key"],
   },
 ];
 
 function meets(subcommand: Subcommand, clause: Clause): boolean {
-  const flags = (clause.flags ?? []).every((flag) => subcommand.flags.has(flag));
-  const mode =
-    clause.modes === undefined ||
-    (subcommand.mode !== null && clause.modes.includes(subcommand.mode));
-  return flags && mode;
+  return clause.flags.every((flag) => subcommand.flags.has(flag));
 }
 
-/** The sentence the action's `repository` description spends on a default a terminal never has. */
-const ACTIONS_DEFAULT_SENTENCE = declared("repository", "Defaults to the current repository.");
+/** The clause the action's `repository` description spends on a default a terminal never has. */
+const ACTIONS_DEFAULT_CLAUSE = declared("repository", ", the current repository by default");
 
 /**
  * A flag's help text under `subcommand`: the declaration's, minus the clauses
- * about flags and modes the subcommand lacks, and reworded where it assumes
- * the Actions runner.
+ * about flags the subcommand lacks, and reworded where it assumes the
+ * Actions runner.
  */
 export function inputDescription(name: InputName, subcommand: Subcommand): string {
   let description: string = INPUT_DECLS[name].description;
   for (const clause of CLAUSES) {
     if (clause.input === name && !meets(subcommand, clause)) {
-      description = description.replace(clause.text, clause.replacement ?? "");
+      description = description.replace(clause.text, clause.replacement);
     }
   }
   if (name === "repository") {
@@ -205,8 +152,8 @@ export function inputDescription(name: InputName, subcommand: Subcommand): strin
       ? " unless repos or repos-dir is set"
       : "";
     description = description.replace(
-      ACTIONS_DEFAULT_SENTENCE,
-      `Required${unless} (inside GitHub Actions, GITHUB_REPOSITORY supplies it).`,
+      ACTIONS_DEFAULT_CLAUSE,
+      `, required${unless} (inside GitHub Actions, GITHUB_REPOSITORY supplies it)`,
     );
   }
   return description;
