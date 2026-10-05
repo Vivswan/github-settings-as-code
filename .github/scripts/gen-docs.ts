@@ -460,7 +460,10 @@ export function renderCoverage(
   return renderCoveragePage(coveragePage(sections, docs, data, anchors));
 }
 
-/** The key cell as keyCell() writes it: the section key, and the row's keys when it has them. The dotAll flag keeps the two Unicode line separators cellFault() admits inside the keys. */
+/**
+ * The key cell as keyCell() writes it, read back.
+ * The dotAll flag is for the two Unicode line separators cellFault() admits inside the keys: without it `.` would not match them.
+ */
 const KEY_CELL = new RegExp(
   String.raw`^\[\x60([a-z_]+)\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60(.*)\x60\))?$`,
   "s",
