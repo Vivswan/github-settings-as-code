@@ -6,7 +6,8 @@
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { exactName, listSection } from "../shared/list-section.js";
+import { listSection } from "../shared/list-section.js";
+import { exactName } from "../shared/list-section-decl.js";
 import {
   DeployKeyConfig,
   declaresAlgorithm,

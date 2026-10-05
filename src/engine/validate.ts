@@ -7,7 +7,7 @@ import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import type { DeclaredIssue, DeclaredSecretValue } from "../sections/contract/module.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
-import { valueAt } from "../sections/shared/list-section.js";
+import { valueAt } from "../sections/shared/list-section-write.js";
 import { agree, countNoun } from "../text.js";
 import { type SettingsSource, validateSecretRef } from "./secret-refs.js";
 

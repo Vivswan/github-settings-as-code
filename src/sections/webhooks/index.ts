@@ -8,12 +8,8 @@
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import {
-  exactName,
-  type ListComparable,
-  type ListWrite,
-  listSection,
-} from "../shared/list-section.js";
+import { listSection } from "../shared/list-section.js";
+import { exactName, type ListComparable, type ListWrite } from "../shared/list-section-decl.js";
 import { WebhookConfig } from "./schema.js";
 
 const LiveHook = z.looseObject({

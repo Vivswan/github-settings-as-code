@@ -9,7 +9,7 @@ import type {
   ListEndpoints,
   ListSectionKey,
   ListSectionModule,
-} from "../../src/sections/shared/list-section.js";
+} from "../../src/sections/shared/list-section-decl.js";
 import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
