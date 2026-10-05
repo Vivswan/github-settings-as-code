@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { walk as walkTree } from "estree-walker";
 import { parseSync } from "oxc-parser";
@@ -865,11 +865,6 @@ function read(root: string, path: string): string {
 export function refusalSources(root: string): Source[] {
   const sources: Source[] = [];
   const add = (path: string, sites: Sites) => {
-    if (!existsSync(join(root, path))) {
-      throw new Error(
-        `${path} is a refusal source of this census but does not exist; a moved or renamed source is listed again under its new path`,
-      );
-    }
     sources.push({ path, text: read(root, path), sites });
   };
   const sectionDirs = readdirSync(join(root, "src/sections"), { withFileTypes: true })
@@ -960,9 +955,7 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
     withTempDir("refusal-sources-", (root) => {
       mkdirSync(join(root, "src/sections/planted"), { recursive: true });
       writeFileSync(join(root, "src/sections/planted/schema.ts"), "export const a = 1;\n");
-      expect(() => refusalSources(root)).toThrow(
-        /^src\/sections\/planted\/index\.ts is a refusal source of this census but does not exist/,
-      );
+      expect(() => refusalSources(root)).toThrow(/ENOENT.*src\/sections\/planted\/index\.ts/);
     }));
 
   /** One literal per exclusion position, then a message in every spelling a source can give one. */
