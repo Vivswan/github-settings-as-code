@@ -10,7 +10,7 @@ import {
   type ListSectionKey,
   type ListSectionModule,
   updateRole,
-} from "../../../src/sections/shared/list-section.js";
+} from "../../../src/sections/shared/list-section-decl.js";
 import type { MockState } from "./state.js";
 import { asObject, type Handler, type Json, noContent, ok, paged } from "./support.js";
 
