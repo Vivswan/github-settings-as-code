@@ -4,7 +4,8 @@
  * check matches what GitHub serves.
  */
 
-import type { ApiError, GitHubClient } from "./api.js";
+import type { GitHubClient } from "./api.js";
+import type { ApiError } from "./api-error.js";
 
 export type PageResult =
   | { items: unknown[] }

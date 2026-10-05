@@ -1,5 +1,4 @@
-import type { ApiError } from "../../github/api.js";
-import { classifyApiError } from "../../github/api.js";
+import { type ApiError, classifyApiError } from "../../github/api-error.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
 import { toleratedGraphqlErrors } from "./graphql.js";
 import {

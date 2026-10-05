@@ -11,8 +11,8 @@
  */
 
 import type { RepoRef } from "../discovery/targets.js";
-import type { ApiError, GitHubClient } from "../github/api.js";
-import { classifyApiError } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
+import { type ApiError, classifyApiError } from "../github/api-error.js";
 import { paginate } from "../github/paginate.js";
 import type { SettingsFile } from "../schema.js";
 import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";

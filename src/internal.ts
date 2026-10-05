@@ -66,13 +66,10 @@ export {
 } from "./flows/redact.js";
 export { writeReplacing } from "./flows/settings-write.js";
 export { SNAPSHOT_SCHEMA_URL } from "./flows/snapshot.js";
-export {
-  SECRET_RESPONSE_WITHHELD,
-  SECRET_TRANSPORT_WITHHELD,
-  type TraceIo,
-} from "./github/api.js";
+export { SECRET_RESPONSE_WITHHELD, SECRET_TRANSPORT_WITHHELD } from "./github/api-error.js";
 export { getRepoFile } from "./github/repo-file.js";
 export { createVisibilityResolver, type RepoVisibility } from "./github/repo-visibility.js";
+export type { TraceIo } from "./github/trace-redaction.js";
 export {
   type CentralFileProblem,
   type LayerProblem,

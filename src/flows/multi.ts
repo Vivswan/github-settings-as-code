@@ -24,7 +24,8 @@ import {
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
 import type { SettingsSource } from "../engine/secret-refs.js";
-import { classifyApiError, type GitHubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
+import { classifyApiError } from "../github/api-error.js";
 import { getRepoFile } from "../github/repo-file.js";
 import { createVisibilityResolver, type RepoVisibility } from "../github/repo-visibility.js";
 import { type SlugKey, slugKey } from "../github/slug.js";

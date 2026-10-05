@@ -1,10 +1,5 @@
-import type {
-  ApiError,
-  ClientAnswer,
-  GitHubClient,
-  GraphqlOp,
-  RequestMark,
-} from "../src/github/api.js";
+import type { ClientAnswer, GitHubClient, GraphqlOp, RequestMark } from "../src/github/api.js";
+import type { ApiError } from "../src/github/api-error.js";
 
 /** `failed` is the client's own line for a request with no HTTP answer (not sent, the transport failed). */
 export type Route = { data?: unknown; error?: ApiError; failed?: string };

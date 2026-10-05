@@ -1131,7 +1131,7 @@ export function genScenario(
   const ownerKind: OwnerKind = rng.pick(["org", "user"] as const);
   personalizeCollaborators(settings, ownerKind);
   // 404 answers every denial with Not Found, but the client still classifies a 404 on a write as a permission denial
-  // (src/github/api.ts), so its outcome classes equal fine_grained's for every operation generated today; 403 discriminates.
+  // (src/github/api-error.ts), so its outcome classes equal fine_grained's for every operation generated today; 403 discriminates.
   const denialStyle: DenialStyle = rng.pick(["fine_grained", 403, 404] as const);
   const requiredDraw = chosen.filter(() => rng.bool(0.25));
   // A strict nonempty subset of the declared sections, so the EXCLUDED outcome is always reachable.

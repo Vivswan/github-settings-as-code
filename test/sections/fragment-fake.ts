@@ -7,7 +7,8 @@
  *   GraphQL                     -> dispatched by operation name onto the mock's GraphQL handlers
  */
 
-import type { ApiError, GitHubClient } from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
+import type { ApiError } from "../../src/github/api-error.js";
 import type { SectionKey } from "../../src/schema.js";
 import { endpointPermission, type SectionMeta } from "../../src/sections/contract/module.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";

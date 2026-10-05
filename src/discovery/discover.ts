@@ -6,7 +6,8 @@
 
 import type { components } from "@octokit/openapi-types";
 import { err, ok, ResultAsync } from "neverthrow";
-import { classifyApiError, type GitHubClient } from "../github/api.js";
+import type { GitHubClient } from "../github/api.js";
+import { classifyApiError } from "../github/api-error.js";
 import { paginate } from "../github/paginate.js";
 import { classifyVisibility } from "../github/repo-visibility.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
