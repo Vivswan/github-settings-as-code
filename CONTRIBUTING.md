@@ -5,6 +5,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 ## Toolchain
 
 - `src/` is TypeScript built with [bun](https://bun.com). The scripts in `package.json` are the commands; `bun run check` is the whole local gate.
+- Run `bun install` once after cloning, and again after `lefthook.yml` changes: it installs the dependencies and the git hooks. The hooks themselves never install or fetch anything, and a missing tool fails the commit naming that command.
 - GitHub's OpenAPI descriptor and GraphQL schema come from the `@octokit/openapi` and `@octokit/graphql-schema` devDependencies, so no test or generator touches the network. Dependabot moves the pins; a bump that stops documenting a path the action calls, starts documenting an upstream gap, or retires a field a query selects fails the schema tests on that PR by name.
 - `bun run test` and `bun run fuzz` run `bun run build:schema` first: the tests and the fuzzer load the built, gitignored `lib/settings.schema.json`.
 - Committed generated output is the table in `.github/scripts/generated.ts`: `src/upstream-gaps/index.ts` and the generated regions of `action.yml` and the docs pages.
