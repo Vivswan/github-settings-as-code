@@ -75,7 +75,7 @@ const INVARIANT_PREFIX = "BUG:";
  *   invariant                    a "BUG:" message for the developer holding the stack
  *   DATA_CONSTANTS               a named constant holding a key, a pattern piece, or a vocabulary; prose inside one is a message
  *   DATA_FUNCTIONS               a function that assembles regex source
- *   DATA_ARGUMENTS               a data argument of a local factory (`bareRule("creation")`)
+ *   DATA_ARGUMENTS               a data argument of a local factory (`bareRule("creation")`, the kind of `knobbedList`)
  */
 const VOCABULARY_CALLS: ReadonlySet<string> = new Set([
   "enum",
@@ -145,10 +145,11 @@ const SCHEMA_TWIN_CALLS: ReadonlySet<string> = new Set(["meta", "conditional"]);
 const DATA_FUNCTIONS: ReadonlySet<string> = new Set(["render", "codePointEscape"]);
 
 /**
- * The local factories and helpers whose string arguments are data (a key name, a rule type, a failure code, a size
- * measure, a definition id), by argument index, and those whose string arguments are pieces a longer message is
- * composed from (pinned by containment). Auditable by name; a control below fails naming an entry no source declares
- * or imports.
+ * The local factories and helpers whose string arguments are data (a key name, a rule type, a wrapper kind, a
+ * failure code, a size measure, a definition id, a noun), by argument index, and those whose string arguments are
+ * pieces a longer message is composed from (pinned by containment). A key or a noun that renders inside a message
+ * is data too: its pin by containment would hold wherever a test spells the key. Auditable by name; a control below
+ * fails naming an entry no source declares or imports.
  */
 const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   actorList: [0, 1],
@@ -161,6 +162,10 @@ const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   boundedString: [1],
   sealedSecretConfig: [0],
   variableConfig: [0],
+  wrappedList: [1],
+  knobbedList: [1],
+  commitMessageFamily: [0, 1],
+  githubName: [0],
 };
 
 const PIECE_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
@@ -171,8 +176,6 @@ const PIECE_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   duplicateVariableNameIssues: [1],
   duplicateSecretNameIssues: [1],
   holderError: [0],
-  commitMessageFamily: [0, 1],
-  githubName: [0],
   renamedKeyError: [0, 1, 2, 3],
 };
 
@@ -982,6 +985,7 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
       'const twin = z.object({}).meta({ anyOf: [{ required: ["contexts"] }] });',
       'const pattern = new RegExp("^[a-z]+$"); const names = new Set(["a", "b"]); const ok = !"(|^$".includes(previous);',
       'function render(): string { return "[^"; }',
+      'const knob = knobbedList(entry, "knobbed", (knobs) => knobs);',
       'throw new Error("BUG: a planted invariant names no user");',
       // messages, every spelling
       'export const Word = z.string({ error: "probe" });',
@@ -1066,33 +1070,33 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
     );
     expect(unpinnedMessages(planted, prose)).toEqual([
       'src/sections/planted/schema.ts:13: "a planted directive sentence inside an as const table"',
-      'src/sections/planted/schema.ts:18: "probe"',
-      'src/sections/planted/schema.ts:19: "probe2"',
-      'src/sections/planted/schema.ts:20: "Missing"',
-      'src/sections/planted/schema.ts:20: "Bad"',
-      'src/sections/planted/schema.ts:21: "too long"',
-      'src/sections/planted/schema.ts:22: "probe3"',
-      'src/sections/planted/schema.ts:22: "a planted table entry read by property"',
-      'src/sections/planted/schema.ts:24: "probe4"',
-      'src/sections/planted/schema.ts:25: "probe5"',
-      'src/sections/planted/schema.ts:27: "probe6"',
-      'src/sections/planted/schema.ts:28: ": !!!"',
-      'src/sections/planted/schema.ts:29: "Color required"',
-      'src/sections/planted/schema.ts:30: "probe7"',
-      'src/sections/planted/schema.ts:31: "probe8"',
-      'src/sections/planted/schema.ts:31: "probe9"',
-      'src/sections/planted/schema.ts:32: "probe10"',
-      'src/sections/planted/schema.ts:33: ": too short"',
-      'src/sections/planted/schema.ts:34: "Please "',
-      'src/sections/planted/schema.ts:34: "enter text"',
-      'src/sections/planted/schema.ts:35: "probe tagged"',
-      'src/sections/planted/schema.ts:36: "a planted rule message"',
-      'src/sections/planted/schema.ts:37: "Please pick a planted state"',
-      'src/sections/planted/schema.ts:37: "probe lit"',
-      'src/sections/planted/schema.ts:38: "a planted key holds only "',
-      'src/sections/planted/schema.ts:38: "; remove the other characters"',
-      'src/sections/planted/schema.ts:39: "a planted reason for a q escape"',
-      'src/sections/planted/schema.ts:40: "a planted sentence inside a data constant"',
+      'src/sections/planted/schema.ts:19: "probe"',
+      'src/sections/planted/schema.ts:20: "probe2"',
+      'src/sections/planted/schema.ts:21: "Missing"',
+      'src/sections/planted/schema.ts:21: "Bad"',
+      'src/sections/planted/schema.ts:22: "too long"',
+      'src/sections/planted/schema.ts:23: "probe3"',
+      'src/sections/planted/schema.ts:23: "a planted table entry read by property"',
+      'src/sections/planted/schema.ts:25: "probe4"',
+      'src/sections/planted/schema.ts:26: "probe5"',
+      'src/sections/planted/schema.ts:28: "probe6"',
+      'src/sections/planted/schema.ts:29: ": !!!"',
+      'src/sections/planted/schema.ts:30: "Color required"',
+      'src/sections/planted/schema.ts:31: "probe7"',
+      'src/sections/planted/schema.ts:32: "probe8"',
+      'src/sections/planted/schema.ts:32: "probe9"',
+      'src/sections/planted/schema.ts:33: "probe10"',
+      'src/sections/planted/schema.ts:34: ": too short"',
+      'src/sections/planted/schema.ts:35: "Please "',
+      'src/sections/planted/schema.ts:35: "enter text"',
+      'src/sections/planted/schema.ts:36: "probe tagged"',
+      'src/sections/planted/schema.ts:37: "a planted rule message"',
+      'src/sections/planted/schema.ts:38: "Please pick a planted state"',
+      'src/sections/planted/schema.ts:38: "probe lit"',
+      'src/sections/planted/schema.ts:39: "a planted key holds only "',
+      'src/sections/planted/schema.ts:39: "; remove the other characters"',
+      'src/sections/planted/schema.ts:40: "a planted reason for a q escape"',
+      'src/sections/planted/schema.ts:41: "a planted sentence inside a data constant"',
       'src/sections/planted/index.ts:1: "the key "',
       'src/sections/planted/index.ts:1: " would silently do nothing on this endpoint"',
       'src/sections/planted/index.ts:6: "an optional planted directive"',
@@ -1155,7 +1159,7 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
       "settings:\n  planted:\n    - key: probe\nexpect:\n  outcomes:\n    planted: probe2\n",
     );
     expect(unpinnedMessages([plantedSlice], inputsOnly)).toContain(
-      'src/sections/planted/schema.ts:18: "probe"',
+      'src/sections/planted/schema.ts:19: "probe"',
     );
     const scenario = [
       "expect:",
@@ -1166,8 +1170,8 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
     ].join("\n");
     const pins = testStrings("test/planted/scenarios/planted.yml", scenario);
     const left = unpinnedMessages([plantedSlice], pins);
-    expect(left).not.toContain('src/sections/planted/schema.ts:18: "probe"');
-    expect(left).not.toContain('src/sections/planted/schema.ts:19: "probe2"');
+    expect(left).not.toContain('src/sections/planted/schema.ts:19: "probe"');
+    expect(left).not.toContain('src/sections/planted/schema.ts:20: "probe2"');
   });
 
   test("a source that does not parse fails naming it instead of reading as pinned (control)", () => {

@@ -8,10 +8,10 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ROOT } from "../root.js";
-import { SETTINGS_SCHEMA_PATH } from "../settings-schema.js";
+import { SETTINGS_SCHEMA_PATH, schemaNotBuilt } from "../settings-schema.js";
 import { withTempDir } from "../temp-dir.js";
 
 const PAGE = "docs/reference/library.md";
@@ -55,9 +55,13 @@ export function tsFences(markdown: string): Fence[] {
  * The fences as one module: only the two package paths are rewritten, on the
  * lines they already occupy, so a program line is a page line by offset alone
  * and nothing else about a fence is repaired before tsc sees it. The page
- * imports each name once, in the first example that uses it.
+ * imports each name once, in the first example that uses it. `schema` is where
+ * the package's schema subpath lands.
  */
-export function examplesProgram(fences: readonly Fence[]): {
+export function examplesProgram(
+  fences: readonly Fence[],
+  schema: string,
+): {
   text: string;
   pageLine: (programLine: number) => number;
 } {
@@ -67,7 +71,7 @@ export function examplesProgram(fences: readonly Fence[]): {
   for (const fence of fences) {
     starts.push(line);
     const body = fence.body
-      .replaceAll(`"${PACKAGE}/settings.schema.json"`, JSON.stringify(SETTINGS_SCHEMA_PATH))
+      .replaceAll(`"${PACKAGE}/settings.schema.json"`, JSON.stringify(schema))
       .replaceAll(`"${PACKAGE}"`, JSON.stringify(ENTRY));
     parts.push(body);
     line += body.split("\n").length;
@@ -93,14 +97,38 @@ export function examplesProgram(fences: readonly Fence[]): {
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 
 /**
+ * Whether the program imports `module` (a static import, a re-export, a dynamic import, each spelled as the page
+ * spells it: `from`, or `import` and an optional parenthesis, then the quoted path); a string value naming the path
+ * is not a dependency.
+ */
+function importsModule(program: string, module: string): boolean {
+  const quoted = JSON.stringify(module);
+  for (let at = program.indexOf(quoted); at !== -1; at = program.indexOf(quoted, at + 1)) {
+    if (/\b(?:from|import)\s*\(?\s*$/.test(program.slice(0, at))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Every diagnostic tsc reports for the page's fences, as `<label>:<page line>: TS<code>: <message>`.
  * A diagnostic outside the examples file keeps its own path. The compile runs in a temp project
  * that symlinks this checkout's node_modules, so `types` and the runtime dependencies resolve
- * exactly as they do for src/; the project is removed on every path.
+ * exactly as they do for src/; the project is removed on every path. A fence that imports the
+ * schema subpath needs the built schema, so its absence is named before tsc would misreport it as
+ * a module the page cannot find.
  */
-export function compileExamples(markdown: string, label: string): Promise<string[]> {
+export function compileExamples(
+  markdown: string,
+  label: string,
+  schema = SETTINGS_SCHEMA_PATH,
+): Promise<string[]> {
   const fences = tsFences(markdown);
-  const { text, pageLine } = examplesProgram(fences);
+  const { text, pageLine } = examplesProgram(fences, schema);
+  if (importsModule(text, schema) && !existsSync(schema)) {
+    return Promise.reject(schemaNotBuilt(schema));
+  }
   return withTempDir("gsac-library-examples-", (dir) => {
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
     const examples = join(dir, "examples.ts");
@@ -233,4 +261,31 @@ describe(`${PAGE} examples`, () => {
       }
     },
   );
+
+  // The schema subpath resolves to a built file no checkout starts with; a page importing it names the build step,
+  // and a page that only spells the subpath as a string value compiles without the file.
+  test("a fence importing the schema subpath on an unbuilt checkout fails naming the build step, not a missing module", () =>
+    withTempDir("gsac-library-unbuilt-", async (dir) => {
+      const unbuilt = join(dir, "lib", "settings.schema.json");
+      const importsSchema = [
+        "```ts",
+        'import schema from "@vivswan/github-settings-as-code/settings.schema.json" with { type: "json" };',
+        "",
+        "console.log(schema.$schema);",
+        "```",
+        "",
+      ].join("\n");
+      await expect(compileExamples(importsSchema, "page.md", unbuilt)).rejects.toThrow(
+        /lib\/settings\.schema\.json is not built; run `bun run build:schema`$/,
+      );
+      const noSchema = [
+        "```ts",
+        'import { SECTION_KEYS } from "@vivswan/github-settings-as-code";',
+        "",
+        'console.log(SECTION_KEYS.length, "@vivswan/github-settings-as-code/settings.schema.json");',
+        "```",
+        "",
+      ].join("\n");
+      expect(await compileExamples(noSchema, "page.md", unbuilt)).toEqual([]);
+    }));
 });
