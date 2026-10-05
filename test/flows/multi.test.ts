@@ -321,8 +321,9 @@ describe("runMulti", () => {
       filters: ["forks"],
       targets: "repos-dir",
     });
-    // Central-resolution warnings buffered before this fatal return must still be emitted; the fixture's README.md (non-yaml) and octo/deep/ (too
-    // deep) each produce one.
+    // Central-resolution warnings are annotated once the mask step settles and before its result is unwrapped, so
+    // this fatal from that step still emits them; the fixture's README.md (non-yaml) and octo/deep/ (too deep)
+    // each produce one.
     expect(annotations.some((a) => a.startsWith("warning: ignoring "))).toBe(true);
   });
 
