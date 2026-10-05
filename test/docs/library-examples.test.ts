@@ -6,13 +6,16 @@
  * inputs that motivated this.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ROOT } from "../root.js";
 import { SETTINGS_SCHEMA_PATH } from "../settings-schema.js";
 import { withTempDir } from "../temp-dir.js";
+
+// The tsc spawn per test times out bun's 5s default under parallel machine load.
+setDefaultTimeout(60_000);
 
 const PAGE = "docs/reference/library.md";
 const PACKAGE = "@vivswan/github-settings-as-code";
