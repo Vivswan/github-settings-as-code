@@ -36,13 +36,7 @@ export {
   failRun,
 } from "./flows/deliver.js";
 export { executeRun, type RunDeps, type RunEnd } from "./flows/execute.js";
-export {
-  type ConfigEnv,
-  type InputReader,
-  parseConfig,
-  type RunCapabilities,
-  type RunConfig,
-} from "./flows/inputs.js";
+export type { ConfigEnv, InputReader } from "./flows/inputs.js";
 export { readLayerFiles } from "./flows/layers.js";
 export {
   type ApplyOptions,
@@ -65,6 +59,7 @@ export {
 export { type MultiConfig, runMulti } from "./flows/multi.js";
 export type { TargetOutcome } from "./flows/redact.js";
 export { type RenderConfig, runRender } from "./flows/render.js";
+export { parseConfig, type RunCapabilities, type RunConfig } from "./flows/run-config.js";
 export { parseSettingsDoc, readSettingsFile } from "./flows/settings-read.js";
 export { runSingle, type SingleConfig, type SingleOutcome } from "./flows/single.js";
 export {

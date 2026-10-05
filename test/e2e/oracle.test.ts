@@ -636,7 +636,7 @@ describe("predictSection rules", () => {
   });
 
   test("an EMPTY allowlist is unrestricted, mirroring the engine's size > 0 gate", () => {
-    // inputs.ts builds onlySections from a comma-split with filter(Boolean), and orchestrate.ts only
+    // input-readers.ts builds onlySections from a comma-split with filter(Boolean), and orchestrate.ts only
     // excludes when the set is non-empty, so `[]` must predict exactly like an undefined allowlist.
     const p = predictOutcomes(
       meta({
