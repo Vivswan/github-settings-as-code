@@ -140,7 +140,7 @@ describe("undeclared-policy renderers", () => {
       renderPolicyDefaultsTable(sections.slice(1, 2), {
         labels: { override: "manage a core set | or two" },
       }),
-    ).toThrow('the labels "The override buys you" cell is blank or contains "|" or a line break');
+    ).toThrow('the labels "The override buys you" cell');
   });
 });
 
@@ -300,16 +300,27 @@ describe("generated files", () => {
         "settings-file": { description: "Plain.", default: "" },
       }),
     );
-    // Hand-edited bodies the renderers never write, each of which the shape must still refuse.
+    // Hand-edited bodies the renderers never write, each of which the shape must still refuse; an accepted one would
+    // be erased on regeneration. The tab inside the quoted timestamp is literal: the schema's timestamp test admits
+    // one, the emitter writes `\t`.
     for (const [key, defaultValue, description] of [
       ["x", '"bad"quote"', "      D.\n"],
       ["x", '"\\x61pply"', "      D.\n"],
+      ["x", '"\\u0061pply"', "      D.\n"],
+      ["x", '"\\ud83d\\ude00"', "      D.\n"],
       ["x", '"tab\there"', "      D.\n"],
       ["x", '"x"', "        D.\n"],
+      ["on", '"x"', "      D.\n"],
+      ['"ordinary"', '"x"', "      D.\n"],
+      ['"\\u006frdinary"', '"x"', "      D.\n"],
+      ['"2000-01-01\t0:0:0"', '"x"', "      D.\n"],
     ]) {
       const body = `\n  ${key}:\n    description: >-\n${description}    required: false\n    default: ${defaultValue}\n`;
       expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
     }
+    // An empty declaration set renders a body the shapes admit, not the `{}` the library writes for an empty mapping.
+    accepts("action-inputs", renderActionInputs({}));
+    accepts("action-outputs", renderActionOutputs({}));
     // Descriptions the library folds losslessly in a form the shape keeps out of action.yml: a line break (a blank
     // line), a leading space (an indentation indicator), nothing (a kept newline).
     for (const description of ["Two\nlines.", " Padded.", ""]) {

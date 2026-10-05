@@ -31,8 +31,8 @@ const ROOT = join(import.meta.dir, "..", "..");
 const YAML_VERSION = "1.1";
 
 /** Column budget for a folded description line, indent included; the library takes it as a soft limit (a line one
- * column over stays whole). */
-const YAML_STYLE: ToStringOptions = { lineWidth: 78, singleQuote: false };
+ * column over stays whole). Quoted scalars are JSON strings, the one spelling JSON_STRING names. */
+const YAML_STYLE: ToStringOptions = { lineWidth: 78, singleQuote: false, doubleQuotedAsJSON: true };
 
 const PLAIN_NAME_CLASS = "[a-z][a-z0-9-]*";
 const PLAIN_NAME = new RegExp(`^${PLAIN_NAME_CLASS}$`);
@@ -60,6 +60,10 @@ function yamlEntries<T>(
   const map = new YAMLMap<Scalar<string>, object>(doc.schema);
   for (const [name, decl] of Object.entries(decls)) {
     map.set(yamlKey(name), entry(decl));
+  }
+  // An empty mapping serializes as `{}` on the key's own line; the region then holds nothing.
+  if (map.items.length === 0) {
+    return "";
   }
   doc.set(key, map);
   return doc.toString(YAML_STYLE).slice(`${key}:\n`.length, -1);
@@ -294,12 +298,28 @@ function tableShape(header: string, cells: string): RegExp {
   return blockShape(String.raw`${RegExp.escape(header)}\n(?:\| ${cells} \|\n)*`);
 }
 
-/** A JSON string literal as JSON.stringify() emits it: its own escapes only, bare quotes never. */
-const JSON_STRING = String.raw`"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"`;
+/** A JSON string literal as JSON.stringify() emits it: the short escapes, `\u00xx` for the other control characters,
+ * `\udxxx` for a lone surrogate (never a pair, which it writes as the character), bare quotes never. A printable
+ * character has one spelling, so neither a plain-shaped name nor a default can hide behind an escape. */
+const JSON_STRING = String.raw`"(?:[^"\\\u0000-\u001f]|\\(?:["\\bfnrt]|u00[01][0-9a-f]|ud[89ab][0-9a-f]{2}(?!\\ud[c-f])|ud[c-f][0-9a-f]{2}))*"`;
 
-/** An action.yml mapping key line at two spaces, in the two forms yamlKey() writes: a plain-shaped name, or a
- * double-quoted string (a name the schema re-types, or one that is not plain-shaped). */
-const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_NAME_CLASS}|${JSON_STRING}):\n`;
+/** The re-typing tests of the schema the keys are rendered under, read off the schema itself: the regexes the
+ * library consults before leaving a string plain, so the grammar below and the emitter can never disagree on
+ * which words come out quoted. */
+const RE_TYPED_WORD = `(?:${new Document(null, { version: YAML_VERSION }).schema.tags
+  .flatMap((tag) =>
+    "test" in tag && tag.test !== undefined && tag.default && tag.tag !== "tag:yaml.org,2002:str"
+      ? [tag.test.source.replace(/^\^|\$$/g, "")]
+      : [],
+  )
+  .join("|")})`;
+
+/** An action.yml mapping key line at two spaces, in the two forms yamlKey() writes and nothing else, so an authored
+ * key under the markers is refused rather than erased. The re-typing tests are consulted only behind the plain-shaped
+ * class, so a tab the timestamp test admits still has to pass JSON_STRING. */
+const PLAIN_KEY = `(?!${RE_TYPED_WORD}:)${PLAIN_NAME_CLASS}`;
+const QUOTED_KEY = `(?:"(?=${RE_TYPED_WORD}")${PLAIN_NAME_CLASS}"|(?!"${PLAIN_NAME_CLASS}")${JSON_STRING})`;
+const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_KEY}|${QUOTED_KEY}):\n`;
 
 const YAML_DESCRIPTION = String.raw`    description: >-\n(?:      \S[^\n]*\n)+`;
 
