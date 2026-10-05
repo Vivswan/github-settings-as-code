@@ -24,7 +24,13 @@ import type {
   GraphqlVariablesOf,
 } from "./graphql.js";
 import { parseLive } from "./live.js";
-import type { EndpointDict, GraphqlDict, SectionContext, SectionMeta } from "./module.js";
+import type {
+  EndpointDict,
+  GraphqlDict,
+  SectionContext,
+  SectionMeta,
+  ValidatedInput,
+} from "./module.js";
 import {
   call,
   callGraphql,
@@ -358,12 +364,53 @@ export interface PlanContext<
  * A plan handler with its context's key brand erased: a shared handler serving several sections is
  * compared to each branded per-key signature through this (repo-secrets, repo-variables, setup-section).
  */
-export type KeyErasedPlan<P> = P extends (
+type KeyErasedPlan<P> = P extends (
   ctx: PlanContext<infer E, infer G, infer _K>,
   declared: infer D,
 ) => infer R
   ? (ctx: PlanContext<E, G>, declared: D) => R
   : never;
+
+/**
+ * One section's plan() under its own key brand, over exactly its own dictionary and declared value (the
+ * registry's exactness lockstep).
+ */
+export type KeyedPlan<K extends SectionKey, E extends EndpointDict> = (
+  ctx: PlanContext<E, GraphqlDict, K>,
+  declared: ValidatedInput<K>,
+) => Promise<Result<SectionPlan<PlannedOp<E>>, SectionFailure>>;
+
+/**
+ * The plan a factory file writes ONCE over its wide dictionary (every route the union over the sections it
+ * serves): inside the generic factory the section is unresolved, so the contract's role derivations only
+ * resolve over this view. The brand on `declared` names the section it is called as.
+ */
+export type WidePlan<Keys extends SectionKey, Wide extends EndpointDict> = <F extends Keys>(
+  ctx: PlanContext<Wide>,
+  declared: ValidatedInput<F>,
+) => Promise<Result<SectionPlan<PlannedOp<Wide>>, SectionFailure>>;
+
+type WidePlanAt<F extends SectionKey, Wide extends EndpointDict> = (
+  ctx: PlanContext<Wide>,
+  declared: ValidatedInput<F>,
+) => Promise<Result<SectionPlan<PlannedOp<Wide>>, SectionFailure>>;
+
+type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/**
+ * The sections whose own plan signature the wide plan is NOT, key brand aside: a factory file pins it to
+ * never, so a role the wide view carries and a section's dictionary does not (or the reverse) fails to compile
+ * there instead of losing role checking silently.
+ */
+export type PlanMisfits<
+  Keys extends SectionKey,
+  Wide extends EndpointDict,
+  Table extends { readonly [F in Keys]: Wide },
+> = {
+  [K in Keys]: Invariant<WidePlanAt<K, Wide>, KeyErasedPlan<KeyedPlan<K, Table[K]>>> extends true
+    ? never
+    : K;
+}[Keys];
 
 /** The run's on-missing-permission input: how a read the token is denied classifies. */
 export type OnMissingPermission = "fail" | "warn";

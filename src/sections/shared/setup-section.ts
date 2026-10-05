@@ -21,11 +21,13 @@ import { type GraphqlDict, requirePlainMapping, type SectionSnapshot } from "../
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
+  type KeyedPlan,
+  type PlanMisfits,
   type PlannedOp,
   type SectionPlan,
   type SnapshotContext,
+  type WidePlan,
 } from "../contract/plan.js";
-import type { FamilyPlan, PlanMisfits, WidePlan } from "./keyed-values.js";
 import { type SetupLanguages, undeclarableLanguages } from "./setup-schema.js";
 import { leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
@@ -76,7 +78,7 @@ type SetupTable = { readonly [F in SetupKey]: SetupEndpoints<F> };
 
 /** One setup's plan(), indexed by K so the factory's one WidePlan can be assigned to it. */
 type SetupPlan<K extends SetupKey> = {
-  [F in SetupKey]: FamilyPlan<F, SetupTable[F]>;
+  [F in SetupKey]: KeyedPlan<F, SetupTable[F]>;
 }[K];
 
 type WideEndpoints = SetupEndpoints<SetupKey>;
