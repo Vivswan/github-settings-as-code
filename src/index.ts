@@ -121,6 +121,7 @@ export {
 export type { SectionFailure } from "./sections/contract/errors.js";
 export type { GraphqlOpDecl } from "./sections/contract/graphql.js";
 export {
+  type PlainTyped,
   type SectionInput,
   type SectionModule,
   type SectionSnapshot,

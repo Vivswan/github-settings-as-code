@@ -17,7 +17,7 @@ import {
   undeclaredDrift,
   undeclaredNote,
 } from "../contract/module.js";
-import { hasDrift, plainData, type Read } from "../contract/plan.js";
+import { hasDrift, type Read } from "../contract/plan.js";
 import {
   type EnvironmentRestOp,
   type EnvironmentsRestContext,
@@ -101,7 +101,7 @@ function createPolicyOp(
   return {
     role: "createPolicy",
     params: { environment_name: envName },
-    payload: plainData(pattern),
+    payload: pattern,
     describe: `creating deployment branch policy "${pattern.name}" in environment "${envName}"`,
   };
 }

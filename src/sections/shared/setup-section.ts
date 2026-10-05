@@ -29,7 +29,6 @@ import {
   type KeyErasedPlan,
   type PlanContext,
   type PlannedOp,
-  plainData,
   type SectionPlan,
   type SnapshotContext,
 } from "../contract/plan.js";
@@ -233,7 +232,7 @@ export function setupSection<K extends SetupKey>(setup: {
     }
     planned.ops.push({
       role: "update",
-      payload: plainData(desired),
+      payload: declared,
       drift,
       // 409 is a declared status of the PATCH, so the tolerance can give wait-and-retry advice instead of failureFor's generic text.
       tolerate: {

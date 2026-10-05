@@ -23,7 +23,7 @@ import {
   secretValuesOf,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { hasDrift, plainData } from "../contract/plan.js";
+import { hasDrift } from "../contract/plan.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
 import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
@@ -204,7 +204,7 @@ export const environmentsSection = {
           plan.ops.push({
             role: "update",
             params,
-            payload: plainData(settings),
+            payload: settings,
             before: refuseOmitted(label, omitted),
             drift,
             change: `applied environment "${name}"`,

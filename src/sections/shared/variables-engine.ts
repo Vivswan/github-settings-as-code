@@ -19,7 +19,7 @@ import {
   undeclaredNote,
   valueDrift,
 } from "../contract/module.js";
-import { type PlainData, paramsWith, plainData, type SectionPlan } from "../contract/plan.js";
+import { type PlainData, paramsWith, type SectionPlan } from "../contract/plan.js";
 
 /** Case-insensitive key for variable names (GitHub stores them uppercased). */
 export function variableKey(name: string): string {
@@ -200,7 +200,7 @@ export async function planVariables<
     if (!existing) {
       plan.ops.push(
         scope.create({
-          payload: plainData({ name: variable.name, value: variable.value, ...extraKeys }),
+          payload: { name: variable.name, value: variable.value, ...extraKeys },
           drift: [missingDrift(label, { where: `on ${scope.where ?? "the repo"}` })],
           change: `created ${scope.noun} "${variable.name}"${suffix}`,
           describe: `creating ${scope.noun} "${variable.name}"${suffix}`,
@@ -232,7 +232,7 @@ export async function planVariables<
     plan.ops.push(
       scope.update({
         liveName: existing.name,
-        payload: plainData({ value: variable.value, ...extraKeys }),
+        payload: { value: variable.value, ...extraKeys },
         drift: [first, ...rest],
         change: `updated ${scope.noun} "${variable.name}"${suffix}`,
         describe: `updating ${scope.noun} "${variable.name}"${suffix}`,

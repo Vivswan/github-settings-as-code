@@ -19,7 +19,6 @@ import {
   hasDrift,
   type PlanContext,
   type PlannedOp,
-  plainData,
   type Read,
   type SectionPlan,
 } from "../contract/plan.js";
@@ -250,7 +249,7 @@ export const interactionLimitsSection = {
         // the drift may legitimately be empty here.
         plan.ops.push({
           role: "put",
-          payload: plainData(base),
+          payload: base,
           describe: `arming the "${base.limit}" interaction limit`,
           drift,
           tolerate: {
@@ -295,7 +294,7 @@ export const interactionLimitsSection = {
           if (hasDrift(drift)) {
             plan.ops.push({
               role: "capPatch",
-              payload: plainData(cap),
+              payload: cap,
               describe: "setting the pull request creation cap",
               drift,
               tolerate: {
