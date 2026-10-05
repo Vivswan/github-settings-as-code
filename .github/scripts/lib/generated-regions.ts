@@ -139,12 +139,24 @@ type RegionPlacement =
   | { readonly kind: "tail" }
   | { readonly kind: "under-key"; readonly key: string };
 
+/**
+ * What a region's body may hold: every body its generator could have written (stale or fresh), and nothing
+ * authored. A regex names a shape; a check returns why a body is refused, or undefined to admit it.
+ */
+export type BodyShape = RegExp | ((body: string) => string | undefined);
+
 /** A generated region as its generator declares it: its markers' name, its home, and the shape of its body. */
 export interface RegionSpec {
   readonly name: string;
   readonly placement: RegionPlacement;
-  /** Matches every body this generator could have written (stale or fresh), and nothing authored. */
-  readonly body: RegExp;
+  readonly body: BodyShape;
+}
+
+export function bodyRefusal(shape: BodyShape, body: string): string | undefined {
+  if (shape instanceof RegExp) {
+    return shape.test(body) ? undefined : "it does not match the body shape";
+  }
+  return shape(body);
 }
 
 interface MarkdownScan {
@@ -336,7 +348,7 @@ function assertYamlPlacement(
  * reads wrong, or erase the authored text it came to enclose. `path` picks the marker syntax.
  */
 export function assertRegionPlacement(text: string, spec: RegionSpec, path: string): void {
-  if (/[gy]/.test(spec.body.flags)) {
+  if (spec.body instanceof RegExp && /[gy]/.test(spec.body.flags)) {
     throw new Error(
       `the ${spec.name} region's body shape carries the stateful "${spec.body.flags}" flags; test() would alternate between calls`,
     );
@@ -358,9 +370,10 @@ export function assertRegionPlacement(text: string, spec: RegionSpec, path: stri
     }
     assertMarkdownPlacement(text, spec, spec.placement, begin, end, path);
   }
-  if (!spec.body.test(text.slice(begin[1], end[0]))) {
+  const refusal = bodyRefusal(spec.body, text.slice(begin[1], end[0]));
+  if (refusal !== undefined) {
     throw new Error(
-      `the ${spec.name} region in ${path} encloses content the generator would not write; move its marker back`,
+      `the ${spec.name} region in ${path} encloses content the generator would not write; move its marker back (${refusal})`,
     );
   }
 }
@@ -391,9 +404,10 @@ export function regenerateRegions(
   const syntax = markerSyntaxFor(path);
   return regions.reduce((current, region) => {
     const body = region.render();
-    if (!region.body.test(body)) {
+    const refusal = bodyRefusal(region.body, body);
+    if (refusal !== undefined) {
       throw new Error(
-        `the ${region.name} region's renderer wrote a body its own shape rejects: ${JSON.stringify(body)}`,
+        `the ${region.name} region's renderer wrote a body its own shape rejects: ${JSON.stringify(body)} (${refusal})`,
       );
     }
     return replaceRegion(current, region.name, body, syntax);

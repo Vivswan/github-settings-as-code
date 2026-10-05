@@ -14,6 +14,8 @@ import {
   renderPolicyDefaultsTable,
 } from "../../.github/scripts/gen-action-docs.js";
 import {
+  type BodyShape,
+  bodyRefusal,
   markerSyntaxFor,
   type RegionSpec,
   regionBounds,
@@ -65,24 +67,25 @@ describe("action.yml renderers", () => {
     );
   });
 
-  test("a name a YAML parser would re-type is quoted, and only then", () => {
+  test("a name a YAML 1.1 parser would re-type is quoted, and only then", () => {
+    // The 1.1 schema is the generator's choice; the library's default 1.2 schema would leave every word but null,
+    // true, and false bare.
+    const words = ["null", "true", "false", "yes", "no", "on", "off", "y", "n"];
     const decls = {
-      null: { description: "A null-named input.", default: "" },
-      on: { description: "An on-named input.", default: "x" },
+      ...Object.fromEntries(
+        words.map((word) => [word, { description: `A ${word} input.`, default: "x" }]),
+      ),
       Mixed_Case: { description: "Not a plain lowercase name.", default: "" },
+      plain: { description: "A plain name.", default: "" },
     };
     const text = renderActionInputs(decls);
     // The key lines are the only ones at exactly two-space indent.
     expect(text.split("\n").filter((line) => /^ {2}\S/.test(line))).toEqual([
-      '  "null":',
-      '  "on":',
+      ...words.map((word) => `  "${word}":`),
       '  "Mixed_Case":',
+      "  plain:",
     ]);
-    expect(Object.keys(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual([
-      "null",
-      "on",
-      "Mixed_Case",
-    ]);
+    expect(Object.keys(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual(Object.keys(decls));
     expect(renderActionOutputs({ y: { description: "Short." } })).toBe(
       '  "y":\n    description: >-\n      Short.',
     );
@@ -90,14 +93,13 @@ describe("action.yml renderers", () => {
 
   test.each([
     ["a double space", "Two  spaces."],
-    ["a newline", "Two\nlines."],
-    ["a leading space", " Padded."],
     ["a trailing space", "Padded. "],
-    ["nothing in it", ""],
-  ])("rejects a description with %s, which would not fold back verbatim", (_label, description) => {
-    expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
-      /single-spaced prose/,
-    );
+    ["quotes, a colon, and a hash", 'Targets, or "*" to discover: owner/name #1.'],
+    ["a word longer than the line", "A".repeat(200)],
+    ["one column over the line budget", `${"a".repeat(30)} ${"b".repeat(42)}`],
+  ])("a description with %s folds back verbatim", (_label, description) => {
+    const text = renderActionInputs({ x: { description, default: "" } });
+    expect(parseYaml(`inputs:\n${text}\n`).inputs.x.description).toBe(description);
   });
 });
 
@@ -136,6 +138,11 @@ describe("undeclared-policy renderers", () => {
     expect(() => renderPolicyDefaultsTable(sections, {})).toThrow(
       /no Defaults-per-section prose for the "labels" section/,
     );
+    expect(() =>
+      renderPolicyDefaultsTable(sections.slice(1, 2), {
+        labels: { override: "manage a core set | or two" },
+      }),
+    ).toThrow('the labels "The override buys you" cell');
   });
 });
 
@@ -278,14 +285,16 @@ describe("generated files", () => {
     ).toThrow(`the ${name} region ${home}`);
   });
 
+  const shapes = new Map<string, BodyShape>(
+    Object.values(GENERATED_REGIONS)
+      .flat()
+      .map((region) => [region.name, region.body]),
+  );
+  const shapeOf = (name: string): BodyShape => shapes.get(name) ?? (() => `no ${name} region`);
+
   test("each region's body shape accepts its renderer's output on edge-case declarations", () => {
-    const shapes = new Map(
-      Object.values(GENERATED_REGIONS)
-        .flat()
-        .map((region) => [region.name, region.body]),
-    );
     const accepts = (name: string, rendered: string): void => {
-      expect(`\n${rendered}\n`, name).toMatch(shapes.get(name) ?? /(?!)/);
+      expect(bodyRefusal(shapeOf(name), `\n${rendered}\n`), name).toBeUndefined();
     };
     accepts(
       "action-inputs",
@@ -295,18 +304,9 @@ describe("generated files", () => {
         "settings-file": { description: "Plain.", default: "" },
       }),
     );
-    // Hand-edited bodies the renderers never write, each of which the shape must still refuse.
-    for (const [key, defaultValue, description] of [
-      ["x", '"bad"quote"', "      D.\n"],
-      ["x", '"\\x61pply"', "      D.\n"],
-      ["x", '"tab\there"', "      D.\n"],
-      ["x", '"x"', "        D.\n"],
-      ["on", '"x"', "      D.\n"],
-      ['"ordinary"', '"x"', "      D.\n"],
-    ]) {
-      const body = `\n  ${key}:\n    description: >-\n${description}    required: false\n    default: ${defaultValue}\n`;
-      expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
-    }
+    // An empty declaration set renders a body the shapes admit, not the `{}` the library writes for an empty mapping.
+    accepts("action-inputs", renderActionInputs({}));
+    accepts("action-outputs", renderActionOutputs({}));
     accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
     const knobbed = [
       { key: "labels", undeclaredDefault: "delete" },
@@ -321,6 +321,15 @@ describe("generated files", () => {
       }),
     );
     accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
+    // Rows tableCell() refuses to write, so the shape must refuse them too or regeneration erases them.
+    for (const row of [
+      "| `labels` | delete | `keep`: manage a core set | authored |",
+      "| `labels` | delete (a | b) | `keep`: manage a core set |",
+      "| `labels` | delete (a\rb) | `keep`: manage a core set |",
+    ]) {
+      const body = `\n| Section | Default | The override buys you |\n|---|---|---|\n${row}\n`;
+      expect(bodyRefusal(shapeOf("policy-defaults-table"), body), row).toBeDefined();
+    }
     const overrideGated: SectionMeta = {
       ...sectionModule("labels"),
       endpoints: {
@@ -359,7 +368,6 @@ describe("generated files", () => {
     const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
       list.map((region) => ({ path, region })),
     );
-    const shapes = new Map(regions.map(({ region }) => [region.name, region.body.source]));
     const bodies = new Map(
       regions.map(({ path, region }) => {
         const text = readFileSync(join(ROOT, path), "utf8");
@@ -371,18 +379,84 @@ describe("generated files", () => {
       const foreign = [
         "\nAuthored prose the generator never writes.\n",
         "\n## A heading\n",
-        ...[...bodies]
-          .filter(([name]) => shapes.get(name) !== region.body.source)
-          .map(([, body]) => body),
+        ...[...bodies].filter(([name]) => shapes.get(name) !== region.body).map(([, body]) => body),
       ];
       for (const body of foreign) {
         expect(
-          region.body.test(body),
+          bodyRefusal(region.body, body),
           `${region.name} accepts ${JSON.stringify(body.slice(0, 40))}`,
-        ).toBe(false);
+        ).toBeDefined();
       }
     }
   });
+
+  // Each row is YAML the emitter never writes; admitted, it would be replaced on the next regeneration. The tab inside
+  // the quoted timestamp is literal, and the two-line description folds to one line.
+  const inputEntry = (
+    key: string,
+    defaultValue: string,
+    description = "      D.\n",
+    header = ">-",
+  ) =>
+    `\n  ${key}:\n    description: ${header}\n${description}    required: false\n    default: ${defaultValue}\n`;
+  test.each<[label: string, body: string, refusal: RegExp]>([
+    ["a bare YAML word as a key", inputEntry("on", '"x"'), /line 1 reads " {2}on:"/],
+    ["a quoted plain name", inputEntry('"ordinary"', '"x"'), /line 1 reads/],
+    [
+      "a quoted timestamp holding a literal tab",
+      inputEntry('"2000-01-01\t0:0:0"', '"x"'),
+      /line 1 reads/,
+    ],
+    ["an escaped surrogate pair as a default", inputEntry("x", '"\\ud83d\\ude00"'), /line 5 reads/],
+    ["a \\u0009 default the emitter spells \\t", inputEntry("x", '"\\u0009"'), /line 5 reads/],
+    ["a two-line description", inputEntry("x", '"x"', "      One\n      two.\n"), /line 3 reads/],
+    ["a number as a default", inputEntry("x", "42"), /x\.default: .*received number/],
+    [
+      "a leading-space description",
+      inputEntry("x", '"x"', "       Padded.\n", ">2-"),
+      /x\.description/,
+    ],
+    ["an input entry under the outputs markers", inputEntry("x", '"x"'), /x: Unrecognized key/],
+    ["text that is not YAML", "\n  x: [\n", /does not parse as YAML/],
+    ["an alias without its anchor", "\n  x: *missing\n", /does not convert from YAML/],
+  ])("the guard refuses %s, which does not round-trip", (label, body, refusal) => {
+    const shape = shapeOf(label.includes("outputs") ? "action-outputs" : "action-inputs");
+    expect(bodyRefusal(shape, body)).toMatch(refusal);
+  });
+
+  test.each<[label: string, name: string, decl: { description: string; default: string }]>([
+    ["a lone low surrogate in a default", "x", { description: "D.", default: "\udc00" }],
+    ["a description beginning with a hash", "x", { description: "# not a comment", default: "" }],
+    ["a description beginning with a dash", "x", { description: "- not a list item", default: "" }],
+    ["a NUL default", "x", { description: "D.", default: "\u0000" }],
+    ["a __proto__ name", "__proto__", { description: "D.", default: "" }],
+    [
+      "the merge-key spelling as name, description, and default",
+      "<<",
+      { description: "<<", default: "<<" },
+    ],
+  ])("legitimate emitter output with %s round-trips through the guard", (_label, name, decl) => {
+    const text = renderActionInputs(Object.fromEntries([[name, decl]]));
+    expect(bodyRefusal(shapeOf("action-inputs"), `\n${text}\n`)).toBeUndefined();
+    expect(Object.entries(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual([
+      [name, { ...decl, required: false }],
+    ]);
+  });
+
+  test.each([
+    ["a line feed", "One\nTwo"],
+    ["a carriage return", "One\rTwo"],
+  ])(
+    "the renderer refuses a description broken by %s, naming the declaration",
+    (_label, description) => {
+      expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
+        /the inputs declarations: x\.description/,
+      );
+      expect(() => renderActionOutputs({ x: { description } })).toThrow(
+        /the outputs declarations: x\.description/,
+      );
+    },
+  );
 
   test("action.yml parses back to the input and output declarations", () => {
     const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as {

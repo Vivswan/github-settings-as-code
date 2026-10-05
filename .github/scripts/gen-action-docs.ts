@@ -1,5 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  Document,
+  type DocumentOptions,
+  type ParseOptions,
+  parseDocument,
+  Scalar,
+  type SchemaOptions,
+  type ToStringOptions,
+  YAMLMap,
+} from "yaml";
+import { z } from "zod";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { InputDecl } from "../../src/flows/inputs.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
@@ -21,85 +32,113 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import { countWord } from "./lib/count-word.js";
 import { type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
+import { tableCell } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-/** Column budget for a folded description line, indent included. */
-const YAML_WIDTH = 78;
+/** The schema the scalars are rendered and read back under: a key YAML 1.1 would re-type (on, y, null, ...) comes out
+ * quoted, for the 1.1 readers of action.yml still in the wild. Its merge tag is removed: it claims the string "<<"
+ * itself, whatever style the scalar asks for, and action.yml carries no merges. */
+const YAML_DOCUMENT: DocumentOptions & SchemaOptions & ParseOptions = {
+  version: "1.1",
+  merge: false,
+  customTags: (tags) =>
+    tags.filter((tag) =>
+      typeof tag === "string" ? tag !== "merge" : tag.tag !== "tag:yaml.org,2002:merge",
+    ),
+};
 
-function wrap(text: string, width: number): string[] {
-  const lines: string[] = [];
-  let current = "";
-  for (const word of text.split(" ")) {
-    if (current !== "" && current.length + 1 + word.length > width) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = current === "" ? word : `${current} ${word}`;
+/** Column budget for a folded description line, indent included; the library takes it as a soft limit (a line one
+ * column over stays whole). Quoted scalars are JSON strings: one line however long, with JSON's escapes. */
+const YAML_STYLE: ToStringOptions = { lineWidth: 78, singleQuote: false, doubleQuotedAsJSON: true };
+
+const PLAIN_NAME = /^[a-z][a-z0-9-]*$/;
+
+/** One line not starting with whitespace: any other description would fold into a form action.yml does not carry (a
+ * blank line, an indentation indicator, a kept newline), so the generator refuses it instead of writing it. */
+const DESCRIPTION = z
+  .string()
+  .regex(/^\S[^\r\n]*$/, "one line of text, not starting with whitespace");
+
+const INPUT_ENTRY = z.strictObject({
+  description: DESCRIPTION,
+  required: z.literal(false),
+  default: z.string(),
+});
+const OUTPUT_ENTRY = z.strictObject({ description: DESCRIPTION });
+
+const DESCRIBED = z.object({ description: DESCRIPTION });
+
+/** Each declaration parsed with `schema`, every own name kept (a record schema would drop `__proto__`, a name the
+ * emitter writes), or the first miss as "name.path: message". */
+function declarations<T>(
+  schema: z.ZodType<T>,
+  decls: Readonly<Record<string, unknown>>,
+): Record<string, T> | string {
+  const parsed: Array<[string, T]> = [];
+  for (const [name, decl] of Object.entries(decls)) {
+    const result = schema.safeParse(decl);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      return `${[name, ...(issue?.path ?? [])].map(String).join(".")}: ${issue?.message ?? "invalid"}`;
     }
+    parsed.push([name, result.data]);
   }
-  return current === "" ? lines : [...lines, current];
+  return Object.fromEntries(parsed);
 }
 
-/** Folding turns each line break back into one space, so only single-spaced prose without edge spaces parses back to
- * the declaration verbatim; anything else is rejected. */
-function foldedDescription(text: string, indent: number): string {
-  if (text === "" || /^ | $|[^ \S]| {2}/.test(text)) {
-    throw new Error(`a description must be single-spaced prose to fold losslessly: ${text}`);
-  }
-  const pad = " ".repeat(indent);
-  return [
-    `${pad}description: >-`,
-    ...wrap(text, YAML_WIDTH - indent - 2).map((line) => `${pad}  ${line}`),
-  ].join("\n");
+function scalar(value: string, type: Scalar.Type): Scalar<string> {
+  const node = new Scalar(value);
+  node.type = type;
+  return node;
 }
 
-/** Words a YAML 1.1 parser would re-type if left as a plain key. */
-const YAML_WORDS = new Set(["null", "true", "false", "yes", "no", "on", "off", "y", "n"]);
+/** A plain-shaped name stays plain unless the schema would re-type it; any other name is quoted outright. */
+function yamlKey(name: string): Scalar<string> {
+  return scalar(name, PLAIN_NAME.test(name) ? Scalar.PLAIN : Scalar.QUOTE_DOUBLE);
+}
 
-function yamlKey(name: string): string {
-  return /^[a-z][a-z0-9-]*$/.test(name) && !YAML_WORDS.has(name) ? name : JSON.stringify(name);
+/** The entries of the top-level `key` mapping, rendered under that key so they carry the file's own nesting; the
+ * key line itself is the file's, outside the region. */
+function yamlEntries<T extends { readonly description: string }>(
+  key: string,
+  decls: Readonly<Record<string, T>>,
+  entry: (decl: T) => object,
+): string {
+  const described = declarations(DESCRIBED, decls);
+  if (typeof described === "string") {
+    throw new Error(`the ${key} declarations: ${described}`);
+  }
+  const doc = new Document({}, YAML_DOCUMENT);
+  const map = new YAMLMap<Scalar<string>, object>(doc.schema);
+  for (const [name, decl] of Object.entries(decls)) {
+    map.set(yamlKey(name), entry(decl));
+  }
+  // An empty mapping serializes as `{}` on the key's own line; the region then holds nothing.
+  if (map.items.length === 0) {
+    return "";
+  }
+  doc.set(key, map);
+  return doc.toString(YAML_STYLE).slice(`${key}:\n`.length, -1);
 }
 
 export function renderActionInputs(
   decls: Readonly<Record<string, Pick<InputDecl, "description" | "default">>>,
 ): string {
-  return Object.entries(decls)
-    .map(([name, decl]) =>
-      [
-        `  ${yamlKey(name)}:`,
-        foldedDescription(decl.description, 4),
-        "    required: false",
-        // Always double-quoted: a bare default could re-type itself (2022-11-28 is a YAML timestamp, "" needs its quotes to exist).
-        `    default: ${JSON.stringify(decl.default)}`,
-      ].join("\n"),
-    )
-    .join("\n");
+  return yamlEntries("inputs", decls, (decl) => ({
+    description: scalar(decl.description, Scalar.BLOCK_FOLDED),
+    required: false,
+    // Every default double-quoted: one form for the region shape to name, and the string type visible at a glance.
+    default: scalar(decl.default, Scalar.QUOTE_DOUBLE),
+  }));
 }
 
 export function renderActionOutputs(
   decls: Readonly<Record<string, { readonly description: string }>>,
 ): string {
-  return Object.entries(decls)
-    .map(([name, decl]) =>
-      [`  ${yamlKey(name)}:`, foldedDescription(decl.description, 4)].join("\n"),
-    )
-    .join("\n");
-}
-
-/** A markdown table cell: an unescaped pipe gets its backslash; a line break is rejected (it would end the row). */
-function cell(text: string): string {
-  if (/[\r\n]/.test(text)) {
-    throw new Error(`a table cell cannot contain a line break: ${text}`);
-  }
-  // A pipe behind an odd run of backslashes is already escaped.
-  return text.replace(/(\\*)\|/g, (match, slashes: string) =>
-    slashes.length % 2 === 0 ? `${slashes}\\|` : match,
-  );
-}
-
-function row(cells: readonly string[]): string {
-  return `| ${cells.map(cell).join(" | ")} |`;
+  return yamlEntries("outputs", decls, (decl) => ({
+    description: scalar(decl.description, Scalar.BLOCK_FOLDED),
+  }));
 }
 
 function proseList(items: readonly string[]): string {
@@ -148,11 +187,15 @@ export function renderPolicyDefaultsTable(
     }
     const caveat = text.caveat === undefined ? "" : ` (${text.caveat})`;
     const opposite = section.undeclaredDefault === "delete" ? "keep" : "delete";
-    return row([
+    const cells = [
       `\`${section.key}\``,
-      `${section.undeclaredDefault}${caveat}`,
-      `\`${opposite}\`: ${text.override}`,
-    ]);
+      tableCell(`${section.undeclaredDefault}${caveat}`, `the ${section.key} Default cell`),
+      tableCell(
+        `\`${opposite}\`: ${text.override}`,
+        `the ${section.key} "The override buys you" cell`,
+      ),
+    ];
+    return `| ${cells.join(" | ")} |`;
   });
   return [DEFAULTS_TABLE_HEADER, ...rows].join("\n");
 }
@@ -308,18 +351,52 @@ function tableShape(header: string, cells: string): RegExp {
   return blockShape(String.raw`${RegExp.escape(header)}\n(?:\| ${cells} \|\n)*`);
 }
 
-/** A JSON string literal as JSON.stringify() emits it: its own escapes only, bare quotes never. */
-const JSON_STRING = String.raw`"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"`;
-
-/** The key forms yamlKey() writes: a plain name that is no YAML word, or a JSON string holding a YAML word or a name that is not plain-shaped. */
-const YAML_WORD = [...YAML_WORDS].join("|");
-const PLAIN_KEY = `(?!(?:${YAML_WORD}):)[a-z][a-z0-9-]*`;
-const QUOTED_KEY = `(?:"(?:${YAML_WORD})"|(?!"[a-z][a-z0-9-]*")${JSON_STRING})`;
-
-/** An action.yml mapping key line at two spaces, as yamlKey() renders it. */
-const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_KEY}|${QUOTED_KEY}):\n`;
-
-const YAML_DESCRIPTION = String.raw`    description: >-\n(?:      \S[^\n]*\n)+`;
+/** The emitter is its own grammar: a body is admitted when re-rendering the declarations it parses to reproduces it
+ * byte for byte, so no spelling the emitter does not write gets through. A freshly placed region holds "\n" and
+ * renders next. */
+function roundTrip<T extends { readonly description: string }>(
+  key: string,
+  entry: z.ZodType<T>,
+  render: (decls: Readonly<Record<string, T>>) => string,
+): (body: string) => string | undefined {
+  return (body) => {
+    if (body === "\n") {
+      return undefined;
+    }
+    const doc = parseDocument(`${key}:${body}`, YAML_DOCUMENT);
+    const error = doc.errors[0];
+    if (error !== undefined) {
+      return `it does not parse as YAML (${error.message.split("\n")[0]})`;
+    }
+    let root: unknown;
+    try {
+      root = doc.toJS();
+    } catch (failure) {
+      // An alias without its anchor parses but does not convert; to the guard that is a refusal.
+      return `it does not convert from YAML (${failure instanceof Error ? failure.message : String(failure)})`;
+    }
+    const mapping =
+      typeof root === "object" && root !== null
+        ? ((root as Record<string, unknown>)[key] ?? {})
+        : root;
+    if (typeof mapping !== "object" || mapping === null || Array.isArray(mapping)) {
+      return `it is not a mapping of ${key} declarations`;
+    }
+    const declared = declarations(entry, mapping as Record<string, unknown>);
+    if (typeof declared === "string") {
+      return `it is not a set of ${key} declarations (${declared})`;
+    }
+    const rendered = `\n${render(declared)}\n`;
+    if (rendered === body) {
+      return undefined;
+    }
+    const authored = body.split("\n");
+    const expected = rendered.split("\n");
+    const differing = authored.findIndex((line, i) => line !== expected[i]);
+    const at = differing === -1 ? authored.length : differing;
+    return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+  };
+}
 
 const GATED_READ_BULLET =
   String.raw`- GitHub gates (?:even )?the [^\n]+ reads at write, so \x60[a-z_]+\x60 needs ` +
@@ -337,15 +414,13 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "action-inputs",
       placement: { kind: "under-key", key: "inputs" },
-      body: blockShape(
-        String.raw`(?:${YAML_ENTRY_KEY}${YAML_DESCRIPTION}    required: false\n    default: ${JSON_STRING}\n)+`,
-      ),
+      body: roundTrip("inputs", INPUT_ENTRY, renderActionInputs),
       render: block(() => renderActionInputs(INPUT_DECLS)),
     },
     {
       name: "action-outputs",
       placement: { kind: "under-key", key: "outputs" },
-      body: blockShape(`(?:${YAML_ENTRY_KEY}${YAML_DESCRIPTION})+`),
+      body: roundTrip("outputs", OUTPUT_ENTRY, renderActionOutputs),
       render: block(() => renderActionOutputs(OUTPUT_DECLS)),
     },
   ],
@@ -359,9 +434,10 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "policy-defaults-table",
       placement: { kind: "under-heading", heading: "## Defaults per section" },
+      // A cell holds no pipe and no line break: tableCell() refuses both, so a row carrying one is authored, not stale output.
       body: tableShape(
         DEFAULTS_TABLE_HEADER,
-        String.raw`\x60[a-z_]+\x60 \| (?:delete|keep)(?: \([^\n]+\))? \| \x60(?:delete|keep)\x60: [^\n]+`,
+        String.raw`\x60[a-z_]+\x60 \| (?:delete|keep)(?: \([^\r\n|]+\))? \| \x60(?:delete|keep)\x60: [^\r\n|]+`,
       ),
       render: block(() => renderPolicyDefaultsTable(knobbedSections(), POLICY_ROW_PROSE)),
     },
