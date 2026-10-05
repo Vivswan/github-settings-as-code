@@ -434,9 +434,10 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "policy-defaults-table",
       placement: { kind: "under-heading", heading: "## Defaults per section" },
+      // A cell holds no pipe and no line break: tableCell() refuses both, so a row carrying one is authored, not stale output.
       body: tableShape(
         DEFAULTS_TABLE_HEADER,
-        String.raw`\x60[a-z_]+\x60 \| (?:delete|keep)(?: \([^\n]+\))? \| \x60(?:delete|keep)\x60: [^\n]+`,
+        String.raw`\x60[a-z_]+\x60 \| (?:delete|keep)(?: \([^\r\n|]+\))? \| \x60(?:delete|keep)\x60: [^\r\n|]+`,
       ),
       render: block(() => renderPolicyDefaultsTable(knobbedSections(), POLICY_ROW_PROSE)),
     },

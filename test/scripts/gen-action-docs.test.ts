@@ -321,6 +321,15 @@ describe("generated files", () => {
       }),
     );
     accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
+    // Rows tableCell() refuses to write, so the shape must refuse them too or regeneration erases them.
+    for (const row of [
+      "| `labels` | delete | `keep`: manage a core set | authored |",
+      "| `labels` | delete (a | b) | `keep`: manage a core set |",
+      "| `labels` | delete (a\rb) | `keep`: manage a core set |",
+    ]) {
+      const body = `\n| Section | Default | The override buys you |\n|---|---|---|\n${row}\n`;
+      expect(bodyRefusal(shapeOf("policy-defaults-table"), body), row).toBeDefined();
+    }
     const overrideGated: SectionMeta = {
       ...sectionModule("labels"),
       endpoints: {
