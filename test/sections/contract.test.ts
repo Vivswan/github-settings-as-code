@@ -1219,16 +1219,21 @@ describe("a marked request's failure is rebuilt on the engine's side of the clie
   const echo = "Validation Failed: token hunter2 is too weak";
   const answering = (status: number, message = echo): GitHubClient => ({
     tryRequest: async () => ({ error: { status, message, body: message } }),
+    tryList: async () => ({ error: { status, message, body: message } }),
     tryGraphql: async () => ({
       error: { status, message, body: message, graphqlTypes: ["UNPROCESSABLE"] },
     }),
   });
   const failing: GitHubClient = {
     tryRequest: async () => ({ failed: `PATCH failed: ${echo}` }),
+    tryList: async () => ({ failed: `GET failed: ${echo}` }),
     tryGraphql: async () => ({ failed: `GRAPHQL failed: ${echo}` }),
   };
   const throwing: GitHubClient = {
     tryRequest: async () => {
+      throw new Error(echo);
+    },
+    tryList: async () => {
       throw new Error(echo);
     },
     tryGraphql: async () => {

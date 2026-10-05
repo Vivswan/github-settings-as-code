@@ -7,7 +7,7 @@
  *   GraphQL                     -> dispatched by operation name onto the mock's GraphQL handlers
  */
 
-import type { GitHubClient } from "../../src/github/api.js";
+import { type ClientAnswer, type GitHubClient, PAGE_SIZE } from "../../src/github/api.js";
 import type { ApiError } from "../../src/github/api-error.js";
 import type { SectionKey } from "../../src/schema.js";
 import { endpointPermission, type SectionMeta } from "../../src/sections/contract/module.js";
@@ -23,7 +23,7 @@ import {
 import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
 import { acceptedBody } from "../e2e/mock/request-body.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
-import type { Handler, Json } from "../e2e/mock/support.js";
+import type { Handler, Json, MockResponse } from "../e2e/mock/support.js";
 import type { DenialStyle, PermissionMask } from "../e2e/schema.js";
 import { REPO } from "./section-run.js";
 
@@ -60,72 +60,108 @@ function handlerFake(
 ): FragmentFake {
   const state = buildStateForSlug(REPO.slug, { settingsYaml: null, liveState: live }, "org");
   const writes: string[] = [];
+  const serve = (
+    method: string,
+    path: string,
+    payload: unknown,
+    accept: string | undefined,
+  ): { response: MockResponse } | { error: ApiError } => {
+    const url = new URL(path, "https://api.github.com");
+    const matched = matchEndpoint(method, url.pathname);
+    const handler = matched === null ? undefined : handlers[matched.key];
+    if (
+      matched === null ||
+      (only !== null && matched.endpoint.section !== only) ||
+      handler === undefined
+    ) {
+      return { error: { status: 404, message: `unexpected ${method} ${path}`, body: "" } };
+    }
+    const requirement = endpointRequirement(matched.endpoint);
+    if (token !== undefined && !gradeRequirement(token.mask, requirement).allowed) {
+      // The mock's own denial, so a section meets exactly what the e2e pipeline answers.
+      const denied = denialResponse(token.denialStyle, requirement.kind);
+      return {
+        error: {
+          status: denied.status,
+          message: String((denied.body as { message?: unknown }).message ?? ""),
+          body: JSON.stringify(denied.body),
+        },
+      };
+    }
+    if (method !== "GET") {
+      writes.push(`${method} ${url.pathname}`);
+    }
+    // The stage the wire pipeline runs before its handler (routes.ts): the handler keeps only the body fields GitHub
+    // documents, so a section proof cannot converge on a key GitHub never stores.
+    const accepted = acceptedBody(matched.endpoint.route, payload);
+    const response =
+      "rejected" in accepted
+        ? accepted.rejected
+        : handler({
+            state,
+            endpoint: matched.endpoint,
+            param: (name) => {
+              const value = matched.params[name];
+              if (value === undefined) {
+                throw new Error(
+                  `fragmentFake: ${matched.endpoint.route} declares no "${name}" param`,
+                );
+              }
+              return value;
+            },
+            query: Object.fromEntries(url.searchParams),
+            body: accepted.body,
+            // The section's media type reaches the handler, so a probe whose reply GitHub shapes by Accept is proven here too.
+            headers: requestHeaders(accept === undefined ? {} : { accept }),
+            grants: (kind) =>
+              token === undefined ||
+              gradeRequirement(token.mask, { permission: requirement.permission, kind }).allowed,
+          });
+    return { response };
+  };
+  const answerOf = (response: MockResponse): ClientAnswer<unknown> => {
+    if (response.status >= 400) {
+      const error: ApiError = {
+        status: response.status,
+        message: String((response.body as { message?: unknown } | null)?.message ?? ""),
+        body: JSON.stringify(response.body),
+      };
+      return { error };
+    }
+    return { data: response.body };
+  };
   return {
     state,
     writes,
     async tryRequest(method, path, payload, options) {
-      const url = new URL(path, "https://api.github.com");
-      const matched = matchEndpoint(method, url.pathname);
-      const handler = matched === null ? undefined : handlers[matched.key];
-      if (
-        matched === null ||
-        (only !== null && matched.endpoint.section !== only) ||
-        handler === undefined
-      ) {
-        return { error: { status: 404, message: `unexpected ${method} ${path}`, body: "" } };
+      const served = serve(method, path, payload, options?.accept);
+      return "error" in served ? served : answerOf(served.response);
+    },
+    // The handler's `nextPage` is what the wire pipeline renders as the Link header, so the walk here ends where the
+    // real client's would.
+    async tryList(path, options) {
+      const perPage = options?.perPage ?? PAGE_SIZE;
+      const separator = path.includes("?") ? "&" : "?";
+      const pages: unknown[] = [];
+      for (let page = 1; ; page++) {
+        const served = serve(
+          "GET",
+          `${path}${separator}per_page=${perPage}&page=${page}`,
+          undefined,
+          undefined,
+        );
+        if ("error" in served) {
+          return served;
+        }
+        const answer = answerOf(served.response);
+        if (!("data" in answer)) {
+          return answer;
+        }
+        pages.push(answer.data);
+        if (served.response.nextPage === undefined || options?.until?.(answer.data) === true) {
+          return { data: pages };
+        }
       }
-      const requirement = endpointRequirement(matched.endpoint);
-      if (token !== undefined && !gradeRequirement(token.mask, requirement).allowed) {
-        // The mock's own denial, so a section meets exactly what the e2e pipeline answers.
-        const denied = denialResponse(token.denialStyle, requirement.kind);
-        return {
-          error: {
-            status: denied.status,
-            message: String((denied.body as { message?: unknown }).message ?? ""),
-            body: JSON.stringify(denied.body),
-          },
-        };
-      }
-      if (method !== "GET") {
-        writes.push(`${method} ${url.pathname}`);
-      }
-      // The stage the wire pipeline runs before its handler (routes.ts): the handler keeps only the body fields GitHub
-      // documents, so a section proof cannot converge on a key GitHub never stores.
-      const accepted = acceptedBody(matched.endpoint.route, payload);
-      const response =
-        "rejected" in accepted
-          ? accepted.rejected
-          : handler({
-              state,
-              endpoint: matched.endpoint,
-              param: (name) => {
-                const value = matched.params[name];
-                if (value === undefined) {
-                  throw new Error(
-                    `fragmentFake: ${matched.endpoint.route} declares no "${name}" param`,
-                  );
-                }
-                return value;
-              },
-              query: Object.fromEntries(url.searchParams),
-              body: accepted.body,
-              // The section's media type reaches the handler, so a probe whose reply GitHub shapes by Accept is proven here too.
-              headers: requestHeaders(
-                options?.accept === undefined ? {} : { accept: options.accept },
-              ),
-              grants: (kind) =>
-                token === undefined ||
-                gradeRequirement(token.mask, { permission: requirement.permission, kind }).allowed,
-            });
-      if (response.status >= 400) {
-        const error: ApiError = {
-          status: response.status,
-          message: String((response.body as { message?: unknown } | null)?.message ?? ""),
-          body: JSON.stringify(response.body),
-        };
-        return { error };
-      }
-      return { data: response.body };
     },
     async tryGraphql(op, variables) {
       const dispatched = graphqlOpForBody({ operationName: op.name }, allGraphqlOps());

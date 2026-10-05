@@ -5,7 +5,7 @@ import { actionsVariablesSection } from "../../../src/sections/actions_variables
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { variableKey } from "../../../src/sections/shared/variables-engine.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -52,7 +52,7 @@ async function apply(api: GitHubClient, declared: Declared) {
 function liveRepo(
   variables: Array<{ name: string; value: string }>,
 ): GitHubClient & { writes: string[] } {
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       if (method === "GET") {
@@ -80,7 +80,7 @@ function liveRepo(
     async tryGraphql() {
       throw new Error("the actions_variables section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("actions_variables", () => {

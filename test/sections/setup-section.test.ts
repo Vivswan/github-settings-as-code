@@ -10,7 +10,7 @@ import { type PlanContext, planContext } from "../../src/sections/contract/plan.
 import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
 import type { MustBeNever } from "../../src/types.js";
 import type { LiveState } from "../e2e/mock/state.js";
-import { MockApi } from "../mock-api.js";
+import { MockApi, withListing } from "../mock-api.js";
 import { registryFake } from "./fragment-fake.js";
 import { provePlanIdempotent } from "./plan-idempotence.js";
 import { REPO, unwrap } from "./section-run.js";
@@ -146,7 +146,7 @@ function liveSetup(
   seed: Record<string, unknown>,
 ): GitHubClient & { writes: string[] } {
   let live = seed;
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, requestPath, payload) {
       if (requestPath !== path) {
@@ -162,7 +162,7 @@ function liveSetup(
     async tryGraphql() {
       throw new Error("the setup sections issue no GraphQL");
     },
-  };
+  });
 }
 
 const tools = { resolveSecret: () => "" };

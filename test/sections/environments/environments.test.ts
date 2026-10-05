@@ -1557,17 +1557,16 @@ describe("environments snapshot", () => {
       },
     });
     const actionsGated = /\/(deployment-branch-policies|deployment_protection_rules)(\?|$)/;
+    const denied = {
+      error: { status: 403, message: "Resource not accessible by personal access token", body: "" },
+    };
     const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         actionsGated.test(path)
-          ? Promise.resolve({
-              error: {
-                status: 403,
-                message: "Resource not accessible by personal access token",
-                body: "",
-              },
-            })
+          ? Promise.resolve(denied)
           : inner.tryRequest(method, path, payload, options),
+      tryList: (path, options) =>
+        actionsGated.test(path) ? Promise.resolve(denied) : inner.tryList(path, options),
       tryGraphql: (op, variables, slug) => inner.tryGraphql(op, variables, slug),
     };
     const snapshot = unwrap(
@@ -1657,6 +1656,7 @@ describe("environments snapshot", () => {
     const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
         inner.tryRequest(method, path, payload, options),
+      tryList: (path, options) => inner.tryList(path, options),
       tryGraphql: () =>
         Promise.resolve({
           error: {

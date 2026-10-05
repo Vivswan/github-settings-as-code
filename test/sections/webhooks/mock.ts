@@ -12,8 +12,8 @@ import {
   maskHookSecret,
   noContent,
   ok,
+  paged,
   type SectionRestHandlers,
-  slicePage,
   storedHookConfig,
 } from "../../e2e/mock/support.js";
 
@@ -30,7 +30,7 @@ export const WEBHOOKS_MOCK: ListMockSpec = {
 };
 
 export const webhooksMockHandlers: SectionRestHandlers<"webhooks"> = {
-  "webhooks.list": ({ state, query }) => ok(slicePage(state.hooks.map(maskHookSecret), query)),
+  "webhooks.list": ({ state, query }) => paged(state.hooks.map(maskHookSecret), query),
   "webhooks.create": ({ state, body }) => {
     const payload = asObject(body);
     const hook = completeHook(

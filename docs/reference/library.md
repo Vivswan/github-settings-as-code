@@ -126,12 +126,14 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 |---|---|---|
 | `GitHubApi` | class | The REST and GraphQL client the action uses: retries, throttling, the pinned API version, trace redaction |
 | `GitHubApiOptions` | type | Its constructor's options: `token` required; `io` (the trace sink), `baseUrl`, `apiVersion`, `retryBaseMs` (real milliseconds per plugin second), `scheduler` (the throttling limiter), `userAgent` optional |
-| `GitHubClient` | type | The port every verb reads and writes through, and the interface a test double implements; it answers, never rejects |
+| `GitHubClient` | type | The port every verb reads and writes through, and the interface a test double implements: `tryRequest` for one request, `tryList` for one paginated GET, `tryGraphql` for one operation; it answers, never rejects |
 | `ClientAnswer` | type | What one request ends in: `data`, an `error` (GitHub's answer, an `ApiError`), or `failed` (the whole line for a request with no HTTP answer: not sent, the transport failed, a GraphQL body off the wire contract) |
 | `DEFAULT_API_VERSION` | const | The `X-GitHub-Api-Version` the action pins |
 | `ApiError` | type | A failed request as the port returns it: `status`, `message`, `body` |
 | `GraphqlOp` | type | A GraphQL operation as the port takes it |
 | `RequestMark` | type | The per-request options; `carriesSecret` marks a payload holding a resolved secret |
+| `ListOptions` | type | What `tryList` takes beside the path: `perPage` (the page size, `PAGE_SIZE` when omitted) and `until` (ends the walk after the first page it accepts) |
+| `PAGE_SIZE` | const | The page size a list walk asks for unless the endpoint caps lower: 100, GitHub's maximum |
 | `classifyApiError` | function | Which `ApiErrorKind` an `ApiError` is, the one judgment the two predicates below read |
 | `ApiErrorKind` | type | `"rate-limit"`, `"permission"` (any other 403, and every 404: a fine-grained token answers 404 for a resource it denies, so an absent one lands here too), or `"other"` |
 | `isPermissionError` | function | Whether an `ApiError` is a denial |

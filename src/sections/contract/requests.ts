@@ -8,7 +8,6 @@ import {
   transportFailure,
   withheld,
 } from "../../github/api-error.js";
-import { paginate } from "../../github/paginate.js";
 import {
   type DeclaredErrorStatus,
   type EndpointDecl,
@@ -242,7 +241,7 @@ export async function probeAbsent<E extends EndpointDecl>(
   return ok({ data: result.data });
 }
 
-/** `extract` adapts the response shape (bare array, or a {total_count, <key>: []} envelope). */
+/** `extract` selects the list from one page's body (bare array, or a {total_count, <key>: []} envelope). */
 async function listPages(
   ctx: SectionContext,
   section: SectionMeta,
@@ -252,7 +251,12 @@ async function listPages(
   shape: string,
   describe?: string,
 ): Promise<Result<unknown[], SectionFailure>> {
-  const result = await paginate(ctx.api, path, extract, undefined, endpoint.pageSize);
+  // A page without the list ends the walk there, so its malformed diagnosis stands ahead of whatever a later page
+  // would answer.
+  const result = await ctx.api.tryList(path, {
+    perPage: endpoint.pageSize,
+    until: (page) => extract(page) === null,
+  });
   if ("failed" in result) {
     return err(unanswered(result.failed));
   }
@@ -261,13 +265,18 @@ async function listPages(
       failureFor(section, "GET", path, result.error, { operation: describe, op: endpoint }),
     );
   }
-  if ("malformed" in result) {
-    return err({
-      kind: "malformed",
-      message: `${section.key}: GET ${path} returned a JSON value without ${shape}, so the response cannot be paginated. Check the "api-version" input against the GitHub REST docs for this endpoint`,
-    });
+  const items: unknown[] = [];
+  for (const page of result.data) {
+    const chunk = extract(page);
+    if (chunk === null) {
+      return err({
+        kind: "malformed",
+        message: `${section.key}: GET ${path} returned a JSON value without ${shape}, so the response cannot be paginated. Check the "api-version" input against the GitHub REST docs for this endpoint`,
+      });
+    }
+    items.push(...chunk);
   }
-  return ok(result.items);
+  return ok(items);
 }
 
 export async function listAll<E extends EndpointDecl>(

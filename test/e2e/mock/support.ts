@@ -35,6 +35,8 @@ export interface MockResponse {
   status: number;
   body: unknown;
   headers?: Record<string, string>;
+  /** The page after this one, when one exists; server.ts renders it as the `Link` header the client walks. */
+  nextPage?: number;
   /**
    * Marks a reply that REJECTS a deliberately off-spec request body: settings pass through to the API
    * verbatim, so scenarios send user typos the schema forbids and the handler answers GitHub's real 4xx.
@@ -86,20 +88,45 @@ export type SectionGraphqlHandlers<K extends SectionKey> = Readonly<
 // --- Pagination -----------------------------------------------------------
 
 /**
- * Slices the way src/github/paginate.ts asks: per_page (100, or the endpoint's declared smaller pageSize)
- * and page=N, stopping on a short chunk. `cap` is the endpoint's documented maximum: GitHub clamps an
- * oversized per_page rather than honoring it, so a capped endpoint never serves more per page.
+ * Slices the way the client's list walk asks: per_page (100, or the endpoint's declared smaller pageSize)
+ * and page=N. `cap` is the endpoint's documented maximum: GitHub clamps an oversized per_page rather than
+ * honoring it, so a capped endpoint never serves more per page.
  */
 export function slicePage<T>(
   items: readonly T[],
   query: Record<string, string>,
   cap?: number,
 ): T[] {
-  const requested = clampInt(query.per_page, 100);
-  const perPage = cap === undefined ? requested : Math.min(requested, cap);
-  const page = clampInt(query.page, 1);
+  const { perPage, page } = pageWindow(query, cap);
   const start = (page - 1) * perPage;
   return items.slice(start, start + perPage);
+}
+
+/**
+ * One page of `items` as GitHub serves it: `envelope` wraps the slice (a bare list unless given), and `nextPage`
+ * marks the pages still to come, which server.ts renders as GitHub's `Link: <url>; rel="next"` header. The client's
+ * walk follows that header and nothing else, so a list served without it would end on its first page.
+ */
+export function paged<T>(
+  items: readonly T[],
+  query: Record<string, string>,
+  cap?: number,
+  envelope: (page: T[]) => unknown = (page) => page,
+): MockResponse {
+  const { perPage, page } = pageWindow(query, cap);
+  const response = ok(envelope(slicePage(items, query, cap)));
+  return page * perPage < items.length ? { ...response, nextPage: page + 1 } : response;
+}
+
+function pageWindow(
+  query: Record<string, string>,
+  cap?: number,
+): { perPage: number; page: number } {
+  const requested = clampInt(query.per_page, 100);
+  return {
+    perPage: cap === undefined ? requested : Math.min(requested, cap),
+    page: clampInt(query.page, 1),
+  };
 }
 
 function clampInt(raw: string | undefined, fallback: number): number {
@@ -162,7 +189,7 @@ function secretWriteStamp(writeCount: number): string {
 
 /** A secret family's enveloped list page: names and timestamps, never values. */
 export function secretsList(list: Json[], query: Record<string, string>): MockResponse {
-  return ok({ total_count: list.length, secrets: slicePage(list, query) });
+  return paged(list, query, undefined, (page) => ({ total_count: list.length, secrets: page }));
 }
 
 /**
@@ -278,10 +305,10 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
   const list = (state: MockState): Json[] => state[key];
   const roles: Readonly<Record<VariablesRole, Handler>> = {
     list: ({ state, query }) =>
-      ok({
+      paged(list(state), query, section.endpoints.list.pageSize, (page) => ({
         total_count: list(state).length,
-        variables: slicePage(list(state), query, section.endpoints.list.pageSize),
-      }),
+        variables: page,
+      })),
     create: ({ state, body }) => {
       const payload = asObject(body);
       // GitHub stores variable names uppercased however they are entered.

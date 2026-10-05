@@ -152,7 +152,10 @@ export async function startMockServer(
         sendBody(res, status, { "content-type": "application/json" }, result.wire.text);
         return;
       }
-      const extraHeaders = result.response.headers ?? {};
+      const extraHeaders = {
+        ...result.response.headers,
+        ...nextLink(req, url, result.response.nextPage),
+      };
       if (result.response.body === null || result.response.body === undefined) {
         res.writeHead(status, extraHeaders);
         res.end();
@@ -217,6 +220,23 @@ export async function startMockServer(
       });
     },
   };
+}
+
+/**
+ * GitHub announces the page after this one as `Link: <url>; rel="next"`, the one header the client's walk reads. The
+ * URL is the request's own, host and prefix included, with `page` advanced, so the client never composes a page URL.
+ */
+function nextLink(
+  req: IncomingMessage,
+  url: URL,
+  nextPage: number | undefined,
+): Record<string, string> {
+  if (nextPage === undefined) {
+    return {};
+  }
+  const next = new URL(`${url.pathname}${url.search}`, `http://${req.headers.host ?? "localhost"}`);
+  next.searchParams.set("page", String(nextPage));
+  return { link: `<${next.href}>; rel="next"` };
 }
 
 function sendBody(

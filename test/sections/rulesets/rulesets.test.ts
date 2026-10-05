@@ -9,7 +9,7 @@ import {
   rulesetsSection,
 } from "../../../src/sections/rulesets/index.js";
 import type { RulesetConfig } from "../../../src/sections/rulesets/schema.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
 
@@ -49,7 +49,7 @@ function liveRepo(
   let nextId = 1000;
   const stored = (body: unknown): Record<string, unknown> =>
     Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => !ignoredKeys.includes(key)));
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       const byId = path.match(/\/rulesets\/(\d+)$/);
@@ -82,7 +82,7 @@ function liveRepo(
     async tryGraphql() {
       throw new Error("the rulesets section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("rulesets", () => {

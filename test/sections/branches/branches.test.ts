@@ -35,7 +35,7 @@ import type { MustBeNever } from "../../../src/types.js";
 import { buildState, completeRule, type LiveState, ruleWireNode } from "../../e2e/mock/state.js";
 import type { Json } from "../../e2e/mock/support.js";
 import { captureIo } from "../../io/capture.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { registryFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { failureOf, REPO, unwrap } from "../section-run.js";
@@ -77,7 +77,7 @@ function liveRepo(live: LiveState): GitHubClient & { writes: Recorded[] } {
   const state = buildState(live, "org");
   const endpoints = allEndpoints([branchesSection]);
   const graphqlOps = allGraphqlOps([branchesSection]);
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       const match = Object.entries(endpoints).find(
@@ -143,7 +143,7 @@ function liveRepo(live: LiveState): GitHubClient & { writes: Recorded[] } {
       }
       return { data: result.data };
     },
-  };
+  });
 }
 
 /** A rules-query response over the given nodes, MockApi-route shaped. */

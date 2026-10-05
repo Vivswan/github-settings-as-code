@@ -165,6 +165,7 @@ describe("snapshot round trip", () => {
           method === "GET" && path === "/repos/o/r/interaction-limits/pulls/creation-cap"
             ? Promise.resolve({ data: body })
             : fake.tryRequest(method, path, payload, options),
+        tryList: (path, options) => fake.tryList(path, options),
         tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
       };
       expect(
@@ -185,13 +186,21 @@ describe("snapshot round trip", () => {
     const fake = registryFake({});
     const api: GitHubClient = {
       tryRequest: (method, path, payload, options) =>
-        method === "GET" && path.startsWith("/repos/o/r/hooks?")
+        fake.tryRequest(method, path, payload, options),
+      tryList: (path, options) =>
+        path.startsWith("/repos/o/r/hooks")
           ? Promise.resolve({
               data: [
-                { id: 7, name: "web", config: { url: "https://ci.example.com/hook", secret: 123 } },
+                [
+                  {
+                    id: 7,
+                    name: "web",
+                    config: { url: "https://ci.example.com/hook", secret: 123 },
+                  },
+                ],
               ],
             })
-          : fake.tryRequest(method, path, payload, options),
+          : fake.tryList(path, options),
       tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
     };
     expect(

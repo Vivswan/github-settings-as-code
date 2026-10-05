@@ -63,6 +63,7 @@ describe("the owner gate's memo", () => {
         path === "/orgs/o" && outages-- > 0
           ? Promise.resolve({ error: { status: 500, message: "Internal Server Error", body: "" } })
           : inner.tryRequest(method, path, payload, options),
+      tryList: (...args) => inner.tryList(...args),
       tryGraphql: (...args) => inner.tryGraphql(...args),
     };
     const [first, second] = gated;

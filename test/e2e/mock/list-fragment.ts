@@ -12,7 +12,7 @@ import {
   updateRole,
 } from "../../../src/sections/shared/list-section.js";
 import type { MockState } from "./state.js";
-import { asObject, type Handler, type Json, noContent, ok, slicePage } from "./support.js";
+import { asObject, type Handler, type Json, noContent, ok, paged } from "./support.js";
 
 export interface ListMockSpec {
   /** The MockState collection the section's live list is served from. */
@@ -89,11 +89,9 @@ export function mockFragmentFor<
   };
   const roles: Readonly<Record<string, Handler>> = {
     list: ({ state, query }) =>
-      ok(
-        listing?.unpaginated === true
-          ? spec.collection(state)
-          : slicePage(spec.collection(state), query, endpoints.list.pageSize),
-      ),
+      listing?.unpaginated === true
+        ? ok(spec.collection(state))
+        : paged(spec.collection(state), query, endpoints.list.pageSize),
     create: ({ state, body }) => {
       const payload = asObject(body);
       if (spec.collection(state).some((item) => uniqueOf(item) === uniqueOf(payload))) {

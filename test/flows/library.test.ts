@@ -138,6 +138,7 @@ describe("a caller-supplied client that echoes a secret", () => {
         marks.push(options?.carriesSecret === true ? true : undefined);
         return create();
       },
+      tryList: (path, options) => reads.tryList(path, options),
       tryGraphql: (op, variables, slug, options) => reads.tryGraphql(op, variables, slug, options),
     };
     return { client, marks };

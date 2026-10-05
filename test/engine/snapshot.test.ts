@@ -43,13 +43,14 @@ function renderable(result: SnapshotResult): RenderableSnapshot {
 
 /** A client that answers `status` (the fine-grained denial is 404) to GETs whose path matches `denied`. */
 function denying(api: GitHubClient, denied: RegExp, status: 403 | 404 = 404): GitHubClient {
+  const denial = { status, message: status === 404 ? "Not Found" : "Forbidden", body: "" };
   return {
     tryRequest: (method, path, payload, options) =>
       method === "GET" && denied.test(path)
-        ? Promise.resolve({
-            error: { status, message: status === 404 ? "Not Found" : "Forbidden", body: "" },
-          })
+        ? Promise.resolve({ error: denial })
         : api.tryRequest(method, path, payload, options),
+    tryList: (path, options) =>
+      denied.test(path) ? Promise.resolve({ error: denial }) : api.tryList(path, options),
     tryGraphql: (op, variables, slug) => api.tryGraphql(op, variables, slug),
   };
 }
@@ -62,6 +63,10 @@ function recording(api: GitHubClient, reads: Set<string>): GitHubClient {
         reads.add(`GET ${path}`);
       }
       return api.tryRequest(method, path, payload, options);
+    },
+    tryList: (path, options) => {
+      reads.add(`GET ${path}`);
+      return api.tryList(path, options);
     },
     tryGraphql: (op, variables, slug) => {
       if (op.kind === "read") {
@@ -84,6 +89,8 @@ function denyingRead(api: GitHubClient, read: string): GitHubClient {
       `${method} ${path}` === read
         ? Promise.resolve({ error: forbidden })
         : api.tryRequest(method, path, payload, options),
+    tryList: (path, options) =>
+      `GET ${path}` === read ? Promise.resolve({ error: forbidden }) : api.tryList(path, options),
     tryGraphql: (op, variables, slug) =>
       `GRAPHQL ${op.name}` === read
         ? Promise.resolve({ error: { ...forbidden, graphqlTypes: ["FORBIDDEN" as const] } })
@@ -394,6 +401,7 @@ describe("pages null body", () => {
         method === "GET" && path === "/repos/o/r/pages"
           ? Promise.resolve({ data: null })
           : fake.tryRequest(method, path, payload, options),
+      tryList: (path, options) => fake.tryList(path, options),
       tryGraphql: (op, variables, slug) => fake.tryGraphql(op, variables, slug),
     };
     const result = await snapshotRepository(

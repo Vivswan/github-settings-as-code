@@ -29,7 +29,7 @@ import {
   type MockResponse,
   nextNumber,
   ok,
-  slicePage,
+  paged,
 } from "./support.js";
 
 /** The log-less sibling of contract.ts's violationFor; the pipeline attaches the log entry. */
@@ -59,7 +59,7 @@ export function handleUserRepos(
     return coreViolation(`unexpected ${method} on /user/repos`);
   }
   const filtered = applyServerSideDiscovery(multi.discoveryPool, query);
-  return { response: ok(slicePage(filtered, query)) };
+  return { response: paged(filtered, query) };
 }
 
 /**
@@ -427,7 +427,7 @@ export function handleIssueReport(
     const matched = repoState.issues
       .filter((issue) => issueMatchesQuery(issue, query))
       .sort((a, b) => (newestFirst ? 1 : -1) * (Number(b.number) - Number(a.number)));
-    return { response: ok(slicePage(matched, query)), coreKey: "core.issuesList" };
+    return { response: paged(matched, query), coreKey: "core.issuesList" };
   }
   if (method === "POST" && issueNumber === undefined) {
     const payload = asObject(body);

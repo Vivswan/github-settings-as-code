@@ -16,8 +16,8 @@ import {
   ok,
   orgProbeHandler,
   PERMISSION_NOT_GRANTABLE,
+  paged,
   type SectionRestHandlers,
-  slicePage,
 } from "../../e2e/mock/support.js";
 
 /** The Accept media type the probe's role_name body is served under; the section sends it (probeTeamRole, index.ts). */
@@ -71,7 +71,7 @@ function slugKey(param: (name: string) => string): string {
 
 export const teamsMockHandlers: SectionRestHandlers<"teams"> = {
   "teams.org": orgProbeHandler,
-  "teams.list": ({ state, query }) => ok(slicePage(repoTeams(state), query)),
+  "teams.list": ({ state, query }) => paged(repoTeams(state), query),
   "teams.probe": ({ state, param, headers }) => {
     const access = state.teams[slugKey(param)];
     if (!access) {

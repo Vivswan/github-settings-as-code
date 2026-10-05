@@ -1,14 +1,16 @@
 /**
- * The GitHubClient port and its one implementation, GitHubApi, on @octokit/core with the request-log, retry, and
- * throttling plugins; what a failed request becomes is api-error.ts's, and what a trace line may show is
- * trace-redaction.ts's. A payload's JSON body is its own serialization (redactSecretPayloadSafe), never an endpoint
- * typing that could drop an unknown field.
+ * The GitHubClient port and its one implementation, GitHubApi, on @octokit/core with the request-log, retry,
+ * throttling, and paginate-rest plugins; what a failed request becomes is api-error.ts's, and what a trace line may
+ * show is trace-redaction.ts's. A payload's JSON body is its own serialization (redactSecretPayloadSafe), never an
+ * endpoint typing that could drop an unknown field.
  */
 
 import { Octokit } from "@octokit/core";
+import { paginateRest } from "@octokit/plugin-paginate-rest";
 import { requestLog } from "@octokit/plugin-request-log";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
+import type { EndpointOptions, RequestInterface } from "@octokit/types";
 import type Bottleneck from "bottleneck/light.js";
 import { maskRegistry } from "../io.js";
 import {
@@ -16,6 +18,7 @@ import {
   apiErrorFromGraphqlErrors,
   apiErrorFromHttp,
   isHttpError,
+  type OctokitHttpError,
   REDACTED_RESPONSE_WITHHELD,
   REDACTED_TRANSPORT_WITHHELD,
   SECRET_TRANSPORT_WITHHELD,
@@ -72,6 +75,16 @@ export interface RequestMark {
  */
 export type ClientAnswer<D> = { data: D } | { error: ApiError } | { failed: string };
 
+/** The page size every list walk asks GitHub for, GitHub's documented maximum, unless the endpoint caps lower. */
+export const PAGE_SIZE = 100;
+
+export interface ListOptions {
+  /** Items per page; PAGE_SIZE when omitted. An endpoint with a documented cap below it passes the cap. */
+  perPage?: number | undefined;
+  /** Ends the walk after the first page this accepts, for a scan that needs only the newest page carrying a match. */
+  until?: (page: unknown) => boolean;
+}
+
 export interface GitHubClient {
   /**
    * `redactTrace` holds the request's `/repos/<owner>/<repo>` slug redacted for the request's duration, for the
@@ -83,6 +96,12 @@ export interface GitHubClient {
     payload?: unknown,
     options?: RequestMark & { accept?: string; raw?: boolean; redactTrace?: boolean },
   ): Promise<ClientAnswer<unknown>>;
+  /**
+   * One GET list walk: `data` carries every page's body in order, each as GitHub sent it (a bare list, or the
+   * `{total_count, <key>: []}` envelope), so the caller selects the list by its key. The walk ends where GitHub's
+   * pagination ends, or after the page `until` accepts; the first page it cannot fetch is the whole answer.
+   */
+  tryList(path: string, options?: ListOptions): Promise<ClientAnswer<unknown[]>>;
   /**
    * Failures, including the errors[] GitHub delivers inside an HTTP 200, come back as the same ApiError the REST
    * classifiers read. `slug` names the owner/repo: GraphQL carries the target in the request BODY, invisible to the
@@ -122,7 +141,7 @@ export const MAX_RETRY_WAIT_S = 60;
 export const MAX_RETRIES = 2;
 
 // The request-log plugin stays: its per-attempt trace line carries GitHub's request id, which support asks for.
-const ActionOctokit = Octokit.plugin(requestLog, retry, throttling);
+const ActionOctokit = Octokit.plugin(requestLog, retry, throttling, paginateRest);
 
 /** GSAC_RETRY_BASE_MS is the one knob the e2e runner sets: millisecond plugin units and the immediate scheduler for the spawned bundle. */
 function envRetryBaseMs(): number | undefined {
@@ -220,6 +239,84 @@ export class GitHubApi implements GitHubClient {
       return await this.request(method, path, payload, options);
     } finally {
       release();
+    }
+  }
+
+  /**
+   * The paginate plugin walks GitHub's `Link: <url>; rel="next"` header; the request method it walks with is this
+   * wrapper over octokit.request, so every page meets the retry and throttling hooks and leaves a trace line. The page
+   * body stays here as GitHub sent it, because the plugin's own list normalization rewrites an envelope in place
+   * (drops `total_count`, keeps whichever key comes first), so the plugin is handed an empty body in its place. A 409
+   * is noted before the plugin reads it as an empty list (GitHub's answer for an empty repository) and surfaces as the
+   * error it is.
+   */
+  async tryList(path: string, options?: ListOptions): Promise<ClientAnswer<unknown[]>> {
+    const pages: unknown[] = [];
+    let conflict: OctokitHttpError | undefined;
+    let current = path;
+    // Every page is requested on the route the caller named: GitHub's next Link addresses the repository by id
+    // (/repositories/<id>/...), a form the slug redaction cannot match, so only its query (the page cursor) is taken.
+    let route: URL | undefined;
+    const fetchPage = async (page: EndpointOptions) => {
+      const started = Date.now();
+      const linked = new URL(page.url);
+      route ??= linked;
+      const url = new URL(route.href);
+      url.search = linked.search;
+      current = url.href.startsWith(this.baseUrl) ? url.href.slice(this.baseUrl.length) : url.href;
+      const trace = (status: number): void => {
+        this.trace.debug(
+          `GET ${this.trace.path(current).path} -> ${status} (${Date.now() - started}ms)`,
+        );
+      };
+      try {
+        const response = await this.octokit.request({ ...page, url: url.href });
+        trace(response.status);
+        pages.push(response.data);
+        return { ...response, data: [] };
+      } catch (error) {
+        if (isHttpError(error)) {
+          trace(error.status);
+          if (error.status === 409) {
+            conflict = error;
+          }
+        }
+        throw error;
+      }
+    };
+    const request = Object.assign(fetchPage, {
+      endpoint: this.octokit.request.endpoint,
+      defaults: this.octokit.request.defaults,
+    }) as unknown as RequestInterface;
+    // The plugin types a request method's parameters off its route-string overload; at run time it hands them whole
+    // to request.endpoint, which merges them into the first page's URL.
+    const firstPage = {
+      method: "GET",
+      url: path,
+      per_page: options?.perPage ?? PAGE_SIZE,
+      page: 1,
+      headers: {
+        accept: "application/vnd.github+json",
+        "x-github-api-version": this.apiVersion,
+      },
+    } as unknown as Parameters<RequestInterface>[0];
+    try {
+      for await (const _page of this.octokit.paginate.iterator(request, firstPage)) {
+        if (conflict !== undefined) {
+          return { error: apiErrorFromHttp(conflict, false) };
+        }
+        if (options?.until?.(pages[pages.length - 1]) === true) {
+          break;
+        }
+      }
+      return { data: pages };
+    } catch (error) {
+      if (isHttpError(error)) {
+        return { error: apiErrorFromHttp(error, false) };
+      }
+      return {
+        failed: transportFailure(`GET ${current}`, transportReason(error, undefined), this.baseUrl),
+      };
     }
   }
 

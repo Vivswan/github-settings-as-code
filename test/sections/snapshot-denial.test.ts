@@ -109,12 +109,14 @@ describe("snapshot under a token without grants", () => {
     }
     // The engine runs the registered modules, so the control bends the wire instead: a 500 is a failure no policy skips.
     const fake = registryFake({}, DENIED_403);
+    const outage = { error: { status: 500, message: "Internal Server Error", body: "" } };
     const erroring: FragmentFake = {
       ...fake,
       tryRequest: (method, path, payload, options) =>
         method === "GET"
-          ? Promise.resolve({ error: { status: 500, message: "Internal Server Error", body: "" } })
+          ? Promise.resolve(outage)
           : fake.tryRequest(method, path, payload, options),
+      tryList: () => Promise.resolve(outage),
     };
     await expect(proveClassified(section, DENIED_403, erroring)).rejects.toThrow();
   });
@@ -127,12 +129,12 @@ describe("snapshot under a token without grants", () => {
     const fake = registryFake({}, DENIED_404);
     const swallowing: FragmentFake = {
       ...fake,
-      tryRequest: async (method, path, payload, options) => {
-        const answer = await fake.tryRequest(method, path, payload, options);
+      tryList: async (path, options) => {
+        const answer = await fake.tryList(path, options);
         return "error" in answer &&
           answer.error.status === 404 &&
           path.includes("/actions/workflows")
-          ? { data: { total_count: 0, workflows: [] } }
+          ? { data: [{ total_count: 0, workflows: [] }] }
           : answer;
       },
     };

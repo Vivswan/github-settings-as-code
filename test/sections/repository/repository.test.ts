@@ -17,7 +17,7 @@ import {
   PATCH_FIELDS,
   RepositoryConfig,
 } from "../../../src/sections/repository/schema.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { deniedDetail, REPO, SectionFailed, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -89,7 +89,7 @@ function liveRepo(seed: {
   const toggles: Record<string, boolean> = { ...seed.toggles };
   const feature = seed.features ?? { hasSponsorshipsEnabled: false, issueCreationPolicy: "ALL" };
   const off = { error: { status: 404, message: "Not Found", body: "" } } as const;
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       const body = payload as Record<string, unknown>;
@@ -139,7 +139,7 @@ function liveRepo(seed: {
       }
       return { data: { updateRepository: { repository: { ...feature } } } };
     },
-  };
+  });
 }
 
 describe("normalizeTopics", () => {
