@@ -1,10 +1,9 @@
 /**
  * The scaffolding the repo-scoped secret families (./repo-secrets.ts) and variable families (./repo-variables.ts)
- * share: what a section supplies, the undeclared-policy unwrap, the knobbed snapshot wrap, the wide plan every
- * family of a kind is served by, and the lockstep proving it is each family's own plan. What a value IS (sealed
- * and write-only, or readable and compared) stays in the family file: it decides the routes, the plan scope, and
- * the read-back, so those are written once per kind, not once per section. The plan types and the lockstep are
- * not keyed-values specific: the setup factory (./setup-section.ts) proves its one plan the same way.
+ * share: what a section supplies, the undeclared-policy unwrap, and the knobbed snapshot wrap. What a value IS
+ * (sealed and write-only, or readable and compared) stays in the family file: it decides the routes, the plan
+ * scope, and the read-back, so those are written once per kind, not once per section. The wide plan a family file
+ * writes and the lockstep proving it is each family's own plan are the contract's (../contract/plan.ts).
  */
 
 import type { Result } from "neverthrow";
@@ -14,20 +13,11 @@ import type { SectionFailure } from "../contract/errors.js";
 import {
   defaultUndeclaredPolicy,
   type EndpointDict,
-  type GraphqlDict,
   type SectionMeta,
   undeclaredPolicy,
-  type ValidatedInput,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type {
-  KeyErasedPlan,
-  PlanContext,
-  PlannedOp,
-  Read,
-  SectionPlan,
-  SnapshotContext,
-} from "../contract/plan.js";
+import type { Read, SnapshotContext } from "../contract/plan.js";
 import { knobbedSnapshot } from "./snapshot-helpers.js";
 
 export interface KeyedValuesFamily<K extends SectionKey> {
@@ -39,44 +29,6 @@ export interface KeyedValuesFamily<K extends SectionKey> {
 }
 
 export type Declared<Entry> = Entry[] | UndeclaredPolicyList<Entry>;
-
-/** One family's plan() over exactly its own dictionary and declared value (the registry's exactness lockstep). */
-export type FamilyPlan<K extends SectionKey, E extends EndpointDict> = (
-  ctx: PlanContext<E, GraphqlDict, K>,
-  declared: ValidatedInput<K>,
-) => Promise<Result<SectionPlan<PlannedOp<E>>, SectionFailure>>;
-
-/**
- * The plan a family file writes ONCE over its wide dictionary (every route the union over the kind's
- * segments): inside the generic factory the segment is unresolved, so the contract's role derivations only
- * resolve over this view. The brand on `declared` names the family it is called as.
- */
-export type WidePlan<Keys extends SectionKey, Wide extends EndpointDict> = <F extends Keys>(
-  ctx: PlanContext<Wide>,
-  declared: ValidatedInput<F>,
-) => Promise<Result<SectionPlan<PlannedOp<Wide>>, SectionFailure>>;
-
-type WidePlanAt<F extends SectionKey, Wide extends EndpointDict> = (
-  ctx: PlanContext<Wide>,
-  declared: ValidatedInput<F>,
-) => Promise<Result<SectionPlan<PlannedOp<Wide>>, SectionFailure>>;
-
-type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-/**
- * The sections whose own plan signature the wide plan is NOT, key brand aside: a factory file pins it to
- * never, so a role the wide view carries and a section's dictionary does not (or the reverse) fails to compile
- * there instead of losing role checking silently.
- */
-export type PlanMisfits<
-  Keys extends SectionKey,
-  Wide extends EndpointDict,
-  Table extends { readonly [F in Keys]: Wide },
-> = {
-  [K in Keys]: Invariant<WidePlanAt<K, Wide>, KeyErasedPlan<FamilyPlan<K, Table[K]>>> extends true
-    ? never
-    : K;
-}[Keys];
 
 export function knobbedEntries<Entry>(
   meta: SectionMeta<UndeclaredPolicySection>,

@@ -20,15 +20,18 @@ import {
   type SectionSnapshot,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlannedOp, SnapshotContext } from "../contract/plan.js";
+import type {
+  KeyedPlan,
+  PlanMisfits,
+  PlannedOp,
+  SnapshotContext,
+  WidePlan,
+} from "../contract/plan.js";
 import {
   type Declared,
-  type FamilyPlan,
   type KeyedValuesFamily,
   knobbedEntries,
-  type PlanMisfits,
   snapshotOf,
-  type WidePlan,
 } from "./keyed-values.js";
 import { knobbed, routed } from "./schema-helpers.js";
 import { projectOntoSchema } from "./snapshot-helpers.js";
@@ -105,7 +108,7 @@ type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
 
 /** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
 type RepoVariablesPlan<K extends RepoVariablesKey> = {
-  [F in RepoVariablesKey]: FamilyPlan<F, VariablesTable[F]>;
+  [F in RepoVariablesKey]: KeyedPlan<F, VariablesTable[F]>;
 }[K];
 
 type _WidePlanIsEveryFamilyPlan = MustBeNever<

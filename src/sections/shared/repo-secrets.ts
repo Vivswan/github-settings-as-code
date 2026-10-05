@@ -24,16 +24,19 @@ import {
   type SectionSnapshot,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type { PlannedOp, SnapshotContext } from "../contract/plan.js";
+import type {
+  KeyedPlan,
+  PlanMisfits,
+  PlannedOp,
+  SnapshotContext,
+  WidePlan,
+} from "../contract/plan.js";
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
 import {
   type Declared,
-  type FamilyPlan,
   type KeyedValuesFamily,
   knobbedEntries,
-  type PlanMisfits,
   snapshotOf,
-  type WidePlan,
 } from "./keyed-values.js";
 import { knobbed, routed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
@@ -117,7 +120,7 @@ type WideEndpoints = RepoSecretsEndpoints<SecretsSegment>;
 
 /** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
 type RepoSecretsPlan<K extends RepoSecretsKey> = {
-  [F in RepoSecretsKey]: FamilyPlan<F, SecretsTable[F]>;
+  [F in RepoSecretsKey]: KeyedPlan<F, SecretsTable[F]>;
 }[K];
 
 type _WidePlanIsEveryFamilyPlan = MustBeNever<
