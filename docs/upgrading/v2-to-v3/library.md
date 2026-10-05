@@ -180,7 +180,11 @@ Fix: add the `failed` arm to every `GitHubClient` double and read it before `err
 
 For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
 
-Every paginated REST list read (labels, rulesets, the secrets envelopes, discovery's `/user/repos`, the report's issue scan) goes through the port's third member, `tryList(path, { perPage, until })`. It resolves to a `ClientAnswer<unknown[]>` whose `data` holds one body per page, in order, as GitHub sent it: a bare list, or the `{total_count, <key>: []}` envelope, which the caller reads by its key. `GitHubApi` follows GitHub's `Link: <url>; rel="next"` header through `@octokit/plugin-paginate-rest`, and keeps every page on the route the caller named, taking only the Link's query (`per_page`, `page`) from GitHub. A 409 surfaces as the error it is. The pre-release builds walked `tryRequest("GET", path?per_page=100&page=N)` themselves and stopped on a short page.
+- **Every paginated REST list read** (labels, rulesets, the secrets envelopes, discovery's `/user/repos`, the report's issue scan) goes through the port's third member, `tryList(path, { perPage, until })`.
+- **It resolves to a `ClientAnswer<unknown[]>`** whose `data` holds one body per page, in order, as GitHub sent it: a bare list, or the `{total_count, <key>: []}` envelope, which the caller reads by its key.
+- **`GitHubApi` follows GitHub's `Link: <url>; rel="next"` header** through `@octokit/plugin-paginate-rest`, and keeps every page on the route the caller named, taking only the Link's query (`per_page`, `page`) from GitHub.
+- **A 409 surfaces** as the error it is.
+- **The pre-release builds** walked `tryRequest("GET", path?per_page=100&page=N)` themselves and stopped on a short page.
 
 ```text
 pre-release   tryRequest("GET", "/repos/o/r/labels?per_page=100&page=1")   // the engine asked page by page

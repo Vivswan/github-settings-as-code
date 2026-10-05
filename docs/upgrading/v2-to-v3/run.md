@@ -214,6 +214,29 @@ Fix the declaration, in the excluded section too. For `@vivswan/github-settings-
 
 ## 61. Discovery: `exclude` patterns are globs under an owned grammar
 
-For every `repos: "*"` workflow that sets `exclude`, and for `@vivswan/github-settings-as-code` consumers building `DiscoveryFilters`. In v2 an `exclude` pattern knew one operator, `*`, and matched every other character literally, so a `?`, a `[`, or a leading `!` could only ever match nothing. In v3 the pattern is a glob matched by picomatch inside a grammar the input boundary owns: `*` any run of characters, `?` one character, `[abc]` one of a set, `[!abc]` or `[^abc]` one outside it, one leading `!` negating the whole pattern, and beyond those only name characters (letters, digits, `.`, `-`, `_`) with at most one `/`; the scope rule is unchanged (a pattern with `/` matches `owner/name`, any other the name alone, case-insensitively). A pattern that gains glob meaning matched nothing in v2 and matches now: `exclude: "!svc-*"` discovered every repository, and now excludes every one whose name is not `svc-*` (`notice: repos: "*" discovery skipped 2 repositories by exclude pattern "!svc-*": o/tooling, o/website`). A pattern outside the grammar (a leading `./`, a run of stars, a `.` or `..` side, a second `/`, a doubled `!!`, a regex token such as `(a)+`) is your input, so it fails the run before discovery starts, naming every flaw and its fix, never repaired: `exclude: "./tmp-**"` matched nothing in v2 and now exits with `error: the "exclude" input pattern "./tmp-**" is not a usable glob: it starts with "./", which names no owner, so drop every leading "./", and it holds a run of stars, which matches no more than one "*" does, so write one "*". Write ...`.
+For every `repos: "*"` workflow that sets `exclude`, and for `@vivswan/github-settings-as-code` consumers building `DiscoveryFilters`. In v2 an `exclude` pattern knew one operator, `*`, and matched every other character literally, so a `?`, a `[`, or a leading `!` could only ever match nothing.
+
+In v3 the pattern is a glob matched by picomatch inside a grammar the input boundary owns. The scope rule is unchanged: a pattern with `/` matches `owner/name`, any other the name alone, case-insensitively.
+
+| In the pattern | Matches |
+|---|---|
+| `*` | any run of characters |
+| `?` | one character |
+| `[abc]` | one of a set |
+| `[!abc]` or `[^abc]` | one outside it |
+| one leading `!` | negates the whole pattern |
+| anything else | name characters only (letters, digits, `.`, `-`, `_`), with at most one `/` |
+
+A pattern that gains glob meaning matched nothing in v2 and matches now: `exclude: "!svc-*"` discovered every repository, and now excludes every one whose name is not `svc-*`:
+
+```text
+notice: repos: "*" discovery skipped 2 repositories by exclude pattern "!svc-*": o/tooling, o/website
+```
+
+A pattern outside the grammar (a leading `./`, a run of stars, a `.` or `..` side, a second `/`, a doubled `!!`, a regex token such as `(a)+`) is your input, so it fails the run before discovery starts, naming every flaw and its fix, never repaired. `exclude: "./tmp-**"` matched nothing in v2 and now exits with:
+
+```text
+error: the "exclude" input pattern "./tmp-**" is not a usable glob: it starts with "./", which names no owner, so drop every leading "./", and it holds a run of stars, which matches no more than one "*" does, so write one "*". Write ...
+```
 
 Fix: delete a pattern that relied on `?`, `[`, `]`, or `!` matching literally, since it never matched a repository; rewrite one that meant a glob in the grammar above, following the fix each refusal names. For library callers, `DiscoveryFilters.exclude` takes compiled `ExcludePattern` values instead of strings: run each pattern through `compileExcludePattern` at your input boundary and pass the `Result`'s value.
