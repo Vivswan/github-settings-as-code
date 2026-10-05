@@ -4,14 +4,17 @@
 //
 // Reach and exemptions are the plugin's `overrides` entry in biome.json, with `includes` relative to the repository
 // root; a top-level `plugins[].includes` matches the absolute path (biomejs/biome#11082), so the checkout's parent
-// directories would decide the reach. The one exemption:
-//   src/cli/inputs.ts  -> commander's argParser reports a refused value by throwing InvalidArgumentError; it has no value form
+// directories would decide the reach. The rule covers src/** only; .github/scripts/ stays exempt by policy, since a
+// build script may throw on a user-caused failure.
+//   src/cli/inputs.ts  -> exempt: commander's argParser can only refuse a value by throwing InvalidArgumentError
 //
-// GritQL has no scopes, so a second binding of the caught name anywhere in the catch body (a declaration, a
-// destructuring, a nested function's parameter) flags every rethrow in that body, not only the shadowed one; the
-// fix is to rename. A namespace or an `import x = require()` counts as a binding too. A name inside a type alias, an
-// interface, or a type annotation does not, since nothing there holds a value; a function-type parameter anywhere else
-// (a cast, a return type, a declare signature) still counts, and the fix is the same rename. The regex reads the literal's source text, so BUG: must open the string or template itself.
+// GritQL has no scopes, so a second binding of the caught name anywhere in the catch body flags every rethrow in that
+// body, not only the shadowed one; the fix is to rename. The regex reads the literal's source text, so BUG: must open
+// the string or template itself.
+//   a declaration, a destructuring, a nested function's parameter  -> a binding
+//   a namespace, an `import x = require()`                          -> a binding
+//   a function-type parameter in a cast, return type, or signature  -> a binding
+//   a name in a type alias, an interface, or a type annotation       -> not one: nothing there holds a value
 
 `throw $arg` as $throw where {
   not or {
