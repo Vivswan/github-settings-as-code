@@ -556,23 +556,16 @@ describe("environments nested secrets validation and shape", () => {
     );
   });
 
-  test("secretValues walks every entry's secrets list and survives malformed containers", () => {
-    // The double cast feeds secretValues a pre-validation document slice on purpose: its contract is defensiveness against any merged value.
+  test("secretValues walks every entry's secrets list in either nested form and labels each by its environment", () => {
     const values = environmentsSection.secretValues?.([
       { name: "a", secrets: [{ name: "X", value: "$X" }] },
       { name: "b", secrets: { entries: [{ name: "Y", value: "$Y" }] } },
       { name: "c" },
-      { name: "d", secrets: "garbage" },
-      "not-an-entry",
-    ] as unknown as EnvironmentConfig[]);
+    ]);
     expect(values).toEqual([
       { label: 'the secret entry "X" of environment "a"', value: "$X" },
       { label: 'the secret entry "Y" of environment "b"', value: "$Y" },
     ]);
-    // A non-list section value contributes nothing (validation reports it).
-    expect(
-      environmentsSection.secretValues?.({ not: "a list" } as unknown as EnvironmentConfig[]),
-    ).toEqual([]);
   });
 });
 

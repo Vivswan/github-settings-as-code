@@ -756,33 +756,15 @@ export interface DeclaredSecretValue {
 }
 
 /**
- * The secret values of a list section's declared value, one `extract` per entry. The engine hands it zod's output
- * (engine/validate.ts after the shape parse, engine/secrets.ts the validated document), but the erased list
- * declaration and a library caller of sectionModule() reach it as `unknown`, so a malformed container or entry
- * contributes nothing rather than throwing, and the actionable error always comes from validation.
+ * The secret values of a list section's declared value in either form, one `extract` per entry. Every caller hands
+ * it zod's output (engine/validate.ts after the shape parse, engine/secrets.ts the validated document), so the
+ * entries are the section's own type and a malformed value is validation's to report, never this walk's.
  */
-export function secretValuesOf(
-  declared: unknown,
-  extract: (entry: Readonly<Record<string, unknown>>) => readonly DeclaredSecretValue[],
+export function secretValuesOf<E>(
+  declared: readonly E[] | { readonly entries: readonly E[] },
+  extract: (entry: E) => readonly DeclaredSecretValue[],
 ): DeclaredSecretValue[] {
-  const isWrapper =
-    typeof declared === "object" &&
-    declared !== null &&
-    !Array.isArray(declared) &&
-    Array.isArray((declared as { entries?: unknown }).entries);
-  if (!Array.isArray(declared) && !isWrapper) {
-    return [];
-  }
-  // "keep" is a placeholder: only the entries are read.
-  const { entries } = undeclaredPolicy(
-    declared as readonly unknown[] | UndeclaredPolicyList<unknown>,
-    "keep",
-  );
-  return entries.flatMap((entry) =>
-    typeof entry === "object" && entry !== null && !Array.isArray(entry)
-      ? [...extract(entry as Readonly<Record<string, unknown>>)]
-      : [],
-  );
+  return listEntries(declared).flatMap((entry) => [...extract(entry)]);
 }
 
 /**
