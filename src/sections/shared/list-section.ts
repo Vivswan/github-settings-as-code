@@ -27,7 +27,15 @@ import { snapshotList } from "./list-section-snapshot.js";
 import { identityClaims, pathOf, valueAt } from "./list-section-write.js";
 import { knobbed, routed } from "./schema-helpers.js";
 
-function secretValuesFor(decl: ErasedDecl<string>, declared: unknown): DeclaredSecretValue[] {
+/**
+ * valueAt() walks the erased entry, so a declared secret field reads as `unknown`: absent on an entry that leaves
+ * the optional field out, a string otherwise, like the identity beside it. The narrowing is that walk's, not a
+ * second proof of the shape.
+ */
+function secretValuesFor(
+  decl: ErasedDecl<string>,
+  declared: ErasedDeclared,
+): DeclaredSecretValue[] {
   const fields = decl.secrets ?? [];
   return secretValuesOf(declared, (entry) =>
     fields.flatMap((field) => {
@@ -66,7 +74,10 @@ export function listSection<
     shape: routed(knobbed(decl.entry)),
     ...(decl.secrets === undefined
       ? {}
-      : { secretValues: (declared: Declared<K>) => secretValuesFor(erased, declared) }),
+      : {
+          secretValues: (declared: Declared<K>) =>
+            secretValuesFor(erased, declared as unknown as ErasedDeclared),
+        }),
     layering: {
       keys: (entry) => identityClaims(erased.identity, entry),
       keyField: decl.identity.field,

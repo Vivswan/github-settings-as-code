@@ -12,7 +12,6 @@ import type { SectionFailure } from "../contract/errors.js";
 
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  type DeclaredSecretValue,
   declaredEntries,
   identifiedBy,
   type KeyedListLayering,
@@ -137,21 +136,16 @@ export const environmentsSection = {
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
   shape: routed(layeredList(EnvironmentsConfig)),
-  /**
-   * Labels carry the environment: sibling environments can declare same-named secrets.
-   * A malformed container contributes nothing rather than throwing, so the actionable error
-   * always comes from shape validation.
-   */
-  secretValues(declared: unknown): DeclaredSecretValue[] {
-    return secretValuesOf(declared, (entry) => {
-      const env = entry as EnvironmentConfig;
-      const where =
-        typeof env.name === "string" ? `environment "${env.name}"` : "an unnamed environment";
-      return listSecretValues(env.secrets).map(({ label, value }) => ({
-        label: `${label} of ${where}`,
-        value,
-      }));
-    });
+  /** Labels carry the environment: sibling environments can declare same-named secrets. */
+  secretValues(declared) {
+    return secretValuesOf(declared, (env) =>
+      env.secrets === undefined
+        ? []
+        : listSecretValues(env.secrets).map(({ label, value }) => ({
+            label: `${label} of environment "${env.name}"`,
+            value,
+          })),
+    );
   },
   validate(desired) {
     const issues = IDENTITY.validate(desired);

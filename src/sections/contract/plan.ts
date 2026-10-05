@@ -150,14 +150,15 @@ export interface ExecTools {
   resolveSecret(reference: string): string;
 }
 
+/** What every member of a bound port is, whatever the helper takes. */
+type Helper = (...args: never[]) => unknown;
+
 /** The runtime shape of the gated ports: the token is discarded, so the gate is the type alone. */
-function gated<T extends object>(bound: T): object {
+function gated<T extends { readonly [H in keyof T]: Helper }>(bound: T): object {
   return Object.fromEntries(
-    Object.entries(bound).map(([name, helper]) => [
+    Object.entries<Helper>(bound).map(([name, helper]) => [
       name,
-      typeof helper === "function"
-        ? (_exec: ExecTools, ...args: unknown[]) => helper(...args)
-        : helper,
+      (_exec: ExecTools, ...args: never[]) => helper(...args),
     ]),
   );
 }

@@ -121,17 +121,12 @@ export function secretKey(name: string): string {
 }
 
 /** Each value is labelled with its entry's secret NAME so a validation error can point at it. */
-export function listSecretValues(declared: unknown): DeclaredSecretValue[] {
-  return secretValuesOf(declared, (entry) => {
-    if (typeof entry.value !== "string") {
-      return [];
-    }
-    const label =
-      typeof entry.name === "string"
-        ? `the secret entry "${entry.name}"`
-        : "an unnamed secret entry";
-    return [{ label, value: entry.value }];
-  });
+export function listSecretValues(
+  declared: SecretEntry[] | UndeclaredPolicyList<SecretEntry>,
+): DeclaredSecretValue[] {
+  return secretValuesOf(declared, (entry) => [
+    { label: `the secret entry "${entry.name}"`, value: entry.value },
+  ]);
 }
 
 /**

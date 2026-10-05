@@ -125,14 +125,6 @@ describe("webhooks secretValues", () => {
       }),
     ).toEqual([{ label: 'the webhook "https://a.test" config.secret', value: "$B" }]);
   });
-
-  test("malformed containers return [] and leave the error to validation", () => {
-    // The extractor faces any merged value, so the double cast feeds it a pre-validation value on purpose; validation is where the user gets the
-    // message.
-    for (const malformed of [null, "hooks", 42, { _undeclared: "keep" }, [null, "x"]]) {
-      expect(webhooksSection.secretValues?.(malformed as unknown as WebhookConfig[])).toEqual([]);
-    }
-  });
 });
 
 describe("webhooks plan", () => {
