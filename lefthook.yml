@@ -1,9 +1,21 @@
 # Git hooks, installed by `bun install` (the prepare script). Deliberately cheap: staged lint plus a whole-project
 # typecheck; builds and tests are CI's job behind the all-green gate.
+#
+# A hook fetches and installs nothing, which rules out the convenient routes:
+#   bun x <tool>               -> downloads the package when it is not installed
+#   the default hook script    -> falls back to mint, mise, uv and the like, which install lefthook on demand
+#   pre-commit.setup           -> is no gate: lefthook reports a failed setup and still runs the jobs
+#   auto-install               -> rewrites .git/hooks at commit time; `bun install` is the one installer
+no_auto_install: true
+lefthook: test -x node_modules/.bin/lefthook || { echo 'lefthook is missing from node_modules/.bin; run bun install first' >&2; exit 1; }; node_modules/.bin/lefthook
 pre-commit:
   parallel: true
   jobs:
     - name: biome (staged)
-      run: bun x biome check --staged --no-errors-on-unmatched
+      run: |
+        test -x node_modules/.bin/biome || { echo 'biome is missing from node_modules/.bin; run bun install first' >&2; exit 1; }
+        node_modules/.bin/biome check --staged --no-errors-on-unmatched
     - name: typecheck
-      run: bun run typecheck
+      run: |
+        test -x node_modules/.bin/tsc || { echo 'tsc is missing from node_modules/.bin; run bun install first' >&2; exit 1; }
+        node_modules/.bin/tsc -p .
