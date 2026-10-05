@@ -6,6 +6,7 @@ import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
   type CoverageSection,
   FACT_WORD_CAP,
+  PAGE_REGIONS,
   patFormParameters,
   renderCoverage,
   renderCoverageFile,
@@ -13,7 +14,12 @@ import {
   renderPatCell,
   renderPatFormUrl,
   renderSectionsTable,
+  SECTIONS_TABLE_HEADER,
+  type SectionsTableRow,
+  sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
+import { bodyRefusal } from "../../.github/scripts/lib/generated-regions.js";
+import { tableFault, tableRow } from "../../.github/scripts/lib/markdown-table.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
 
@@ -65,12 +71,159 @@ describe("renderSectionsTable", () => {
       renderSectionsTable([row], {
         labels: { sections_table: { endpoints: "labels | CRUD", notes: "" } },
       }),
-    ).toThrow('the labels Endpoints cell is blank or contains "|" or a line break');
+    ).toThrow('row 1 of the table cell 2 is blank or contains "|" or a line break');
     expect(() =>
       renderSectionsTable([row], {
         labels: { sections_table: { endpoints: "labels CRUD", notes: "upsert\nby name" } },
       }),
-    ).toThrow('the labels Notes cell is blank or contains "|" or a line break');
+    ).toThrow('row 1 of the table cell 5 is blank or contains "|" or a line break');
+  });
+});
+
+describe("the Sections table guard", () => {
+  const shape =
+    PAGE_REGIONS["docs/reference/sections.md"]?.find((region) => region.name === "sections-table")
+      ?.body ?? (() => "no sections-table region");
+  const sectionsRow =
+    "| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name |";
+  const sectionsTable = (rows: string): string =>
+    `\n| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|\n${rows}\n`;
+
+  test("admits the renderer's output, padded and punctuated cells included", () => {
+    // Surrounding blanks, parentheses, backticks, and colons are all tableCell() output and read back byte for byte.
+    const rendered = renderSectionsTable(
+      [
+        { key: "labels", permission: { repo: ["issues"] }, undeclaredDefault: "delete" },
+        { key: "rulesets", permission: { repo: ["administration"] }, undeclaredDefault: "keep" },
+      ],
+      {
+        labels: { sections_table: { endpoints: " labels (CRUD): `x` ", notes: "a: (b) `c`" } },
+        rulesets: { sections_table: { endpoints: "rulesets CRUD", notes: "n" } },
+      },
+    );
+    expect(rendered).toContain("|  labels (CRUD): `x`  |");
+    expect(bodyRefusal(shape, `\n${rendered}\n`)).toBeUndefined();
+    expect(bodyRefusal(shape, sectionsTable("").slice(0, -1))).toBeUndefined();
+    expect(bodyRefusal(shape, "\n")).toBeUndefined();
+  });
+
+  // Each body is table text the renderer never writes; admitted, it would be erased on the next regeneration.
+  test.each<[label: string, body: string, refusal: RegExp]>([
+    [
+      "a pipe in the Notes cell",
+      sectionsTable(sectionsRow.replace("upsert by name", "upsert | rename")),
+      /line 3 has 6 cells where the table has 5/,
+    ],
+    [
+      "a carriage return in the Notes cell",
+      sectionsTable(sectionsRow.replace("upsert by name", "upsert\rby name")),
+      /line 3 cell 5 is blank or contains "\|" or a line break/,
+    ],
+    [
+      "a sixth cell",
+      sectionsTable(`${sectionsRow.slice(0, -2)} | authored |`),
+      /line 3 has 6 cells where the table has 5/,
+    ],
+    [
+      "a blank Endpoints cell",
+      sectionsTable(sectionsRow.replace("labels CRUD", "")),
+      /line 3 cell 2 is blank/,
+    ],
+    [
+      "a row without its outer pipes",
+      sectionsTable(sectionsRow.slice(2, -2)),
+      /line 3 has 3 cells where the table has 5/,
+    ],
+    [
+      "an Undeclared default outside the three displays",
+      sectionsTable(sectionsRow.replace("deleted (settable)", "deleted")),
+      /line 3 shows an Undeclared default the renderer has no display for/,
+    ],
+    [
+      "a Section cell outside a code span",
+      sectionsTable(sectionsRow.replace("`labels`", "labels")),
+      /line 3 does not open with a section key in a code span/,
+    ],
+    [
+      "a second row for the same section with other prose",
+      sectionsTable(`${sectionsRow}\n${sectionsRow.replace("upsert by name", "other notes")}`),
+      /line 4 repeats the `labels` row/,
+    ],
+    [
+      "the page's column table",
+      "\n| Value | Meaning |\n|---|---|\n| `untouched` | never read |\n",
+      /line 1 reads "\| Value \| Meaning \|" where the generator writes "\| Section \| Endpoints/,
+    ],
+    ["a blank line after the last row", sectionsTable(`${sectionsRow}\n`), /line 4 has 0 cells/],
+  ])("refuses %s, which does not round-trip", (_label, body, refusal) => {
+    expect(bodyRefusal(shape, body)).toMatch(refusal);
+  });
+
+  // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
+  // exactly the fault tableFault() states for the cells, the guard admits what the renderer wrote, and the guard
+  // refuses the same cells joined without the renderer whenever the statement faults. A check on one side only
+  // turns a generated input red.
+  test("the Sections renderer and guard agree with the shared statement on every generated input", () => {
+    const displays = ["delete", "keep", "untouched"] as const;
+    const row = (key: "labels" | "rulesets", undeclaredDefault: (typeof displays)[number]) =>
+      ({ key, permission: { repo: ["issues"] }, undeclaredDefault }) as const;
+    const outcomes = new Map<string, "written" | "faulted">();
+    const hold = (
+      input: string,
+      sections: readonly SectionsTableRow[],
+      text: { endpoints: string; notes: string },
+    ): void => {
+      const docs = { labels: { sections_table: text }, rulesets: { sections_table: text } };
+      const cells = sectionsCells(sections, docs);
+      const fault = tableFault(SECTIONS_TABLE_HEADER, cells);
+      let rendered: string | undefined;
+      let thrown: string | undefined;
+      try {
+        rendered = renderSectionsTable(sections, docs);
+      } catch (error) {
+        thrown = error instanceof Error ? error.message : String(error);
+      }
+      expect(thrown, input).toBe(fault);
+      if (rendered !== undefined) {
+        expect(bodyRefusal(shape, `\n${rendered}\n`), input).toBeUndefined();
+        outcomes.set(input, "written");
+      } else {
+        const joined = [SECTIONS_TABLE_HEADER, ...cells.map(tableRow)].join("\n");
+        expect(bodyRefusal(shape, `\n${joined}\n`), input).toBeDefined();
+        outcomes.set(input, "faulted");
+      }
+    };
+    const texts = ["x", "", "  ", "a | b", "a\rb", " padded ", "`code`: (p)", "y\u2028z"];
+    for (const display of displays) {
+      const lists = {
+        one: [row("labels", display)],
+        two: [row("labels", display), row("rulesets", display)],
+        twice: [row("labels", display), row("labels", display)],
+      };
+      for (const [name, sections] of Object.entries(lists)) {
+        for (const endpoints of texts) {
+          for (const notes of texts) {
+            const input = `${display} ${name} ${JSON.stringify({ endpoints, notes })}`;
+            hold(input, sections, { endpoints, notes });
+          }
+        }
+      }
+    }
+    expect(outcomes.get('delete twice {"endpoints":"x","notes":"x"}')).toBe("faulted");
+    expect(outcomes.get('untouched one {"endpoints":"x","notes":" padded "}')).toBe("written");
+    const written = [...outcomes.values()].filter((outcome) => outcome === "written").length;
+    expect(written).toBeGreaterThan(0);
+    expect(outcomes.size - written).toBeGreaterThan(0);
+  });
+
+  test("a region that renders a table carries a round trip, never a hand-written grammar", () => {
+    // A table region's guard and its renderer share one grammar only through the round trip, so a RegExp body on a
+    // table region is a second grammar.
+    for (const region of Object.values(PAGE_REGIONS).flat()) {
+      if (region.render().startsWith("\n|")) {
+        expect(region.body, region.name).not.toBeInstanceOf(RegExp);
+      }
+    }
   });
 });
 

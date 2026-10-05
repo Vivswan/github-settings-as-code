@@ -30,9 +30,14 @@ import {
 } from "../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
+import type { UndeclaredPolicy } from "../../src/types.js";
 import { countWord } from "./lib/count-word.js";
-import { type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
-import { tableCell } from "./lib/markdown-table.js";
+import {
+  type GeneratedRegion,
+  regenerateRegions,
+  renderedMismatch,
+} from "./lib/generated-regions.js";
+import { renderTable, tableFault, tableRoundTrip } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -174,30 +179,102 @@ export interface PolicyRowProse {
   readonly override: string;
 }
 
-const DEFAULTS_TABLE_HEADER = "| Section | Default | The override buys you |\n|---|---|---|";
+/**
+ * Why a row's prose cannot be rendered: blank prose would render `delete ()` or a bare policy span, cells
+ * tableCell() admits since the policy word fills them. The renderer refuses it at its own boundary and the parser
+ * through this same check, by the trimmed-blank rule tableCell() uses, so what the renderer writes is exactly what
+ * the guard reads back. A structural type cannot vouch for a property a narrowing hid, so the value is inspected
+ * as unknown.
+ */
+function proseFault(row: PolicyRowProse): string | undefined {
+  const blank = (value: unknown): boolean => typeof value !== "string" || value.trim() === "";
+  return blank(row.override) || (row.caveat !== undefined && blank(row.caveat))
+    ? "has a blank caveat or override"
+    : undefined;
+}
+
+const OPPOSITE: Readonly<Record<UndeclaredPolicy, UndeclaredPolicy>> = {
+  delete: "keep",
+  keep: "delete",
+};
+
+export const DEFAULTS_TABLE_HEADER = "| Section | Default | The override buys you |\n|---|---|---|";
+
+/** One Defaults row: the section and the prose its cells carry. */
+export interface PolicyRow {
+  readonly section: KnobbedSection;
+  readonly prose: PolicyRowProse;
+}
+
+/** A row's three cells, as the renderer writes them and the guard reads them back. */
+export function policyCells(row: PolicyRow): readonly string[] {
+  const caveat = row.prose.caveat === undefined ? "" : ` (${row.prose.caveat})`;
+  return [
+    `\`${row.section.key}\``,
+    `${row.section.undeclaredDefault}${caveat}`,
+    `\`${OPPOSITE[row.section.undeclaredDefault]}\`: ${row.prose.override}`,
+  ];
+}
+
+/**
+ * The one statement of what a Defaults table may hold: each row's prose by proseFault(), then the table rule over
+ * the cells. The renderer consults it whole before writing; the guard consults the same two rules as it parses,
+ * so a test can hold both sides to it.
+ */
+export function policyTableFault(rows: readonly PolicyRow[]): string | undefined {
+  for (const row of rows) {
+    const fault = proseFault(row.prose);
+    if (fault !== undefined) {
+      return `the "${row.section.key}" Defaults row ${fault}`;
+    }
+  }
+  return tableFault(DEFAULTS_TABLE_HEADER, rows.map(policyCells));
+}
 
 export function renderPolicyDefaultsTable(
   sections: readonly KnobbedSection[],
   prose: Readonly<Record<string, PolicyRowProse>>,
 ): string {
-  const rows = deleteFirst(sections).map((section) => {
+  const rows = deleteFirst(sections).map((section): PolicyRow => {
     const text = prose[section.key];
     if (text === undefined) {
       throw new Error(`no Defaults-per-section prose for the "${section.key}" section`);
     }
-    const caveat = text.caveat === undefined ? "" : ` (${text.caveat})`;
-    const opposite = section.undeclaredDefault === "delete" ? "keep" : "delete";
-    const cells = [
-      `\`${section.key}\``,
-      tableCell(`${section.undeclaredDefault}${caveat}`, `the ${section.key} Default cell`),
-      tableCell(
-        `\`${opposite}\`: ${text.override}`,
-        `the ${section.key} "The override buys you" cell`,
-      ),
-    ];
-    return `| ${cells.join(" | ")} |`;
+    // Read once, so the fault check and the cells see the same values.
+    return { section, prose: { caveat: text.caveat, override: text.override } };
   });
-  return [DEFAULTS_TABLE_HEADER, ...rows].join("\n");
+  const fault = policyTableFault(rows);
+  if (fault !== undefined) {
+    throw new Error(fault);
+  }
+  return renderTable(DEFAULTS_TABLE_HEADER, rows.map(policyCells));
+}
+
+/** A Defaults row read back to the section and prose it renders from; the delete-first order is then the
+ * renderer's to check, through the byte compare. The dotAll flag keeps the two Unicode line separators
+ * tableCell() admits inside the prose. */
+function policyRow(
+  cells: readonly string[],
+  key: string,
+): { readonly section: KnobbedSection; readonly prose: PolicyRowProse } | string {
+  const policy = /^(delete|keep)(?: \((.*)\))?$/s.exec(cells[1] ?? "");
+  const buys = /^`(delete|keep)`: (.*)$/s.exec(cells[2] ?? "");
+  if (policy === null) {
+    return "states no delete or keep default";
+  }
+  if (buys === null) {
+    return "names no policy span before its override prose";
+  }
+  const undeclaredDefault = policy[1] === "delete" ? "delete" : "keep";
+  if (buys[1] !== OPPOSITE[undeclaredDefault]) {
+    return `names \`${buys[1]}\` where the override is the opposite policy, \`${OPPOSITE[undeclaredDefault]}\``;
+  }
+  const row = { caveat: policy[2], override: buys[2] ?? "" };
+  const fault = proseFault(row);
+  if (fault !== undefined) {
+    return `${fault}, which the renderer refuses`;
+  }
+  return { section: { key, undeclaredDefault }, prose: row };
 }
 
 /** The row every secret family shares: the value is write-only, so a wrong delete is a loss, not a drift. */
@@ -347,10 +424,6 @@ function blockShape(lines: string): RegExp {
   return new RegExp(String.raw`^\n(?:${lines}|\n)?$`);
 }
 
-function tableShape(header: string, cells: string): RegExp {
-  return blockShape(String.raw`${RegExp.escape(header)}\n(?:\| ${cells} \|\n)*`);
-}
-
 /** The emitter is its own grammar: a body is admitted when re-rendering the declarations it parses to reproduces it
  * byte for byte, so no spelling the emitter does not write gets through. A freshly placed region holds "\n" and
  * renders next. */
@@ -386,15 +459,7 @@ function roundTrip<T extends { readonly description: string }>(
     if (typeof declared === "string") {
       return `it is not a set of ${key} declarations (${declared})`;
     }
-    const rendered = `\n${render(declared)}\n`;
-    if (rendered === body) {
-      return undefined;
-    }
-    const authored = body.split("\n");
-    const expected = rendered.split("\n");
-    const differing = authored.findIndex((line, i) => line !== expected[i]);
-    const at = differing === -1 ? authored.length : differing;
-    return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+    return renderedMismatch(body, `\n${render(declared)}\n`);
   };
 }
 
@@ -434,10 +499,11 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "policy-defaults-table",
       placement: { kind: "under-heading", heading: "## Defaults per section" },
-      // A cell holds no pipe and no line break: tableCell() refuses both, so a row carrying one is authored, not stale output.
-      body: tableShape(
-        DEFAULTS_TABLE_HEADER,
-        String.raw`\x60[a-z_]+\x60 \| (?:delete|keep)(?: \([^\r\n|]+\))? \| \x60(?:delete|keep)\x60: [^\r\n|]+`,
+      body: tableRoundTrip(DEFAULTS_TABLE_HEADER, policyRow, (rows) =>
+        renderPolicyDefaultsTable(
+          rows.map((row) => row.section),
+          Object.fromEntries(rows.map((row) => [row.section.key, row.prose])),
+        ),
       ),
       render: block(() => renderPolicyDefaultsTable(knobbedSections(), POLICY_ROW_PROSE)),
     },

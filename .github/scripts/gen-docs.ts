@@ -16,7 +16,7 @@ import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import { type GeneratedRegion, regenerateRegions, regionBounds } from "./lib/generated-regions.js";
-import { tableCell } from "./lib/markdown-table.js";
+import { renderTable, tableCell, tableRoundTrip, tableRow } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 export const COVERAGE_PATH = "docs/reference/coverage.md";
@@ -86,27 +86,37 @@ export function renderPatCell(grant: string): string {
   return `${cell}; ${rendered}`;
 }
 
-const TABLE_HEADER =
+export const SECTIONS_TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
-export function renderSectionsTable(
+/**
+ * The cells of each section's row, as the renderer writes them and the guard reads them back; the table rule
+ * judges them.
+ */
+export function sectionsCells(
   sections: readonly SectionsTableRow[],
   docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
-): string {
-  const rows = sections.map((section) => {
+): ReadonlyArray<readonly string[]> {
+  return sections.map((section) => {
     const doc = docs[section.key];
     if (doc === undefined) {
       throw new Error(`gen-docs: section "${section.key}" has no docs entry`);
     }
     return [
       `\`${section.key}\``,
-      tableCell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
-      tableCell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
+      doc.sections_table.endpoints,
+      renderPatCell(sectionGrant(section)),
       UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault],
-      tableCell(doc.sections_table.notes, `the ${section.key} Notes cell`),
+      doc.sections_table.notes,
     ];
   });
-  return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");
+}
+
+export function renderSectionsTable(
+  sections: readonly SectionsTableRow[],
+  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
+): string {
+  return renderTable(SECTIONS_TABLE_HEADER, sectionsCells(sections, docs));
 }
 
 /** Text for inside a markdown code span: a cell, and a backtick would close the span early. */
@@ -244,7 +254,7 @@ function renderSection(
       `[\`${section.key}\`](${SECTIONS_PAGE})${keys}`,
       tableCell(renderCalls(section, row, claimed, carrier, anchors), `${where}'s Endpoints cell`),
     ];
-    return `| ${cells.join(" | ")} |`;
+    return tableRow(cells);
   });
   const declared = [...Object.keys(section.endpoints), ...Object.keys(section.graphql ?? {})];
   const unclaimed = declared.filter((role) => !claimed.has(role));
@@ -310,7 +320,7 @@ export function renderCoverage(
               tableCell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
               tableCell(row.why, `${where}'s Why cell`),
             ];
-            return `| ${cells.join(" | ")} |`;
+            return tableRow(cells);
           }),
         ];
   return [
@@ -407,14 +417,21 @@ function patFormUrl(): string {
   );
 }
 
-// The body shape is this generator's own output (or an empty body), built from the renderer constants, so a marker
-// moved over authored prose or another table fails instead of erasing it.
+// The three prose cells are opaque; a row is this table's when its Undeclared default cell is one of the displays,
+// the one cell the table rule does not judge.
+function sectionsRow(cells: readonly string[]): readonly string[] | string {
+  if (!Object.values(UNDECLARED_DEFAULT_DISPLAY).includes(cells[3] ?? "")) {
+    return "shows an Undeclared default the renderer has no display for";
+  }
+  return cells;
+}
+
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
   return {
     name,
     placement: { kind: "under-heading", heading },
-    body: new RegExp(
-      String.raw`^\n(?:${RegExp.escape(TABLE_HEADER)}\n(?:\| \x60[a-z_]+\x60 \| [^\n]* \|\n)*)?$`,
+    body: tableRoundTrip(SECTIONS_TABLE_HEADER, sectionsRow, (rows) =>
+      renderTable(SECTIONS_TABLE_HEADER, rows),
     ),
     render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
   };
