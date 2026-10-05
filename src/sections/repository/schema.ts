@@ -554,7 +554,6 @@ export const RepositoryConfig = z
     enable_sponsorships: repositoryToggle(),
     issue_creation_policy: creationPolicy(),
   })
-  .catchall(z.unknown())
   .check(
     rule((declared, ctx) => {
       // A refusal here, not a strict object: a field GitHub adds to the PATCH tomorrow must still pass through.

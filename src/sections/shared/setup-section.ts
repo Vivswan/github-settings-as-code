@@ -17,22 +17,16 @@ import {
 import { expand } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
-import {
-  type GraphqlDict,
-  requirePlainMapping,
-  type SectionSnapshot,
-  type ValidatedInput,
-} from "../contract/module.js";
+import { type GraphqlDict, requirePlainMapping, type SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
-  type KeyErasedPlan,
-  type PlanContext,
   type PlannedOp,
   plainData,
   type SectionPlan,
   type SnapshotContext,
 } from "../contract/plan.js";
+import type { FamilyPlan, PlanMisfits, WidePlan } from "./keyed-values.js";
 import { type SetupLanguages, undeclarableLanguages } from "./setup-schema.js";
 import { leftOutOfSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
 
@@ -79,46 +73,18 @@ type SetupEndpoints<K extends SetupKey> = {
 
 type SetupDeclared<K extends SetupKey> = Exclude<SettingsFile[K], undefined>;
 
-/**
- * One setup's plan() over exactly its own dictionary and declared value (the
- * registry's exactness lockstep); indexed by K so the factory's one
- * SharedPlan serves it.
- */
+type SetupTable = { readonly [F in SetupKey]: SetupEndpoints<F> };
+
+/** One setup's plan(), indexed by K so the factory's one WidePlan can be assigned to it. */
 type SetupPlan<K extends SetupKey> = {
-  [F in SetupKey]: (
-    ctx: PlanContext<SetupEndpoints<F>, GraphqlDict, F>,
-    declared: ValidatedInput<F>,
-  ) => Promise<Result<SectionPlan<PlannedOp<SetupEndpoints<F>>>, SectionFailure>>;
+  [F in SetupKey]: FamilyPlan<F, SetupTable[F]>;
 }[K];
 
 type WideEndpoints = SetupEndpoints<SetupKey>;
 
-type WideContext = PlanContext<WideEndpoints>;
-
-type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
-
-/** The shared implementation's signature at setup F (the brand names the setup); the lockstep below compares it to the setup's own. */
-type SharedPlanAt<F extends SetupKey> = (
-  ctx: WideContext,
-  declared: ValidatedInput<F>,
-) => WidePlanned;
-
-/** The one implementation: SharedPlanAt, generic over the setup it is called as. */
-type SharedPlan = <F extends SetupKey>(
-  ...args: Parameters<SharedPlanAt<F>>
-) => ReturnType<SharedPlanAt<F>>;
-
-type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-// Equality per setup: SharedPlanAt<K> takes the input validated AS that setup (the brand names it), so at each
-// key the shared plan's signature is the setup's own, languages vocabulary included.
-type _SharedPlanServesEverySetup = MustBeNever<
-  {
-    [K in SetupKey]: Invariant<SharedPlanAt<K>, KeyErasedPlan<SetupPlan<K>>> extends true
-      ? never
-      : K;
-  }[SetupKey]
->;
+// At each key the wide plan takes the input validated AS that setup (the brand names it), so its signature
+// is the setup's own, languages vocabulary included.
+type _WidePlanIsEverySetupPlan = MustBeNever<PlanMisfits<SetupKey, WideEndpoints, SetupTable>>;
 
 /** The 202 body's configuration run; the optional fields admit the spec's plain-200 EMPTY object, nullish a null or absent body. */
 const LiveConfigurationRun = z
@@ -204,7 +170,7 @@ export function setupSection<K extends SetupKey>(setup: {
   };
 
   const wide: WideEndpoints = endpoints;
-  const plan: SharedPlan = async (ctx, declared) => {
+  const plan: WidePlan<SetupKey, WideEndpoints> = async (ctx, declared) => {
     const desired: Record<string, unknown> = declared;
     const planned: SectionPlan<PlannedOp<WideEndpoints>> = { ops: [], notes: [], drift: [] };
     const read = await ctx.read.get.call(LiveSetup);

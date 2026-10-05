@@ -3,7 +3,8 @@
  * share: what a section supplies, the undeclared-policy unwrap, the knobbed snapshot wrap, the wide plan every
  * family of a kind is served by, and the lockstep proving it is each family's own plan. What a value IS (sealed
  * and write-only, or readable and compared) stays in the family file: it decides the routes, the plan scope, and
- * the read-back, so those are written once per kind, not once per section.
+ * the read-back, so those are written once per kind, not once per section. The plan types and the lockstep are
+ * not keyed-values specific: the setup factory (./setup-section.ts) proves its one plan the same way.
  */
 
 import type { Result } from "neverthrow";
@@ -63,8 +64,8 @@ type WidePlanAt<F extends SectionKey, Wide extends EndpointDict> = (
 type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 /**
- * The families whose own plan signature the wide plan is NOT, key brand aside: a family file pins it to
- * never, so a role the wide view carries and a family's dictionary does not (or the reverse) fails to compile
+ * The sections whose own plan signature the wide plan is NOT, key brand aside: a factory file pins it to
+ * never, so a role the wide view carries and a section's dictionary does not (or the reverse) fails to compile
  * there instead of losing role checking silently.
  */
 export type PlanMisfits<

@@ -35,7 +35,6 @@ const WebhookDeliveryConfig = z
       })
       .optional(),
   })
-  .catchall(z.unknown())
   .meta({ id: "WebhookDeliveryConfig" });
 
 export const WebhookConfig = open({
