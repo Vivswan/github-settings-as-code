@@ -278,7 +278,10 @@ interface MaskedFleet {
   redact: boolean;
 }
 
-/** Emits nothing but the mask itself; resolveTargets relies on that to order the central warnings after it. */
+/**
+ * Emits no notice, warning, or log line of this flow's own before the mask (the client's debug traces are the
+ * client's); resolveTargets relies on that to order the central warnings after it.
+ */
 function maskFleet(
   api: GitHubClient,
   cfg: TargetsConfig,
