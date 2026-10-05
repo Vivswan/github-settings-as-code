@@ -50,8 +50,12 @@ export type PlainData =
   | { readonly [key: string]: PlainData | undefined };
 
 /**
- * The loose schemas type a declared value `unknown`, and YAML can spell what JSON cannot (an alias cycle,
- * a tagged scalar), so this ONE walk proves plainness instead of a cast per section.
+ * The document was proved plain before any section planned (engine/validate.ts, the ProvedPlain brand), but the
+ * proof stops at a section's declared value: the loose schemas type the fields `unknown`, and a body is assembled
+ * from them as a `Record<string, unknown>` (a spread, a key subset, a lens's wire or recreate) that carries no
+ * brand. This walk is that boundary's one cast. A refusal here is a section's own assembly producing a non-plain
+ * value, or a library caller's object changed since the walk (a getter answering differently, a field assigned
+ * afterwards; a YAML document can do neither), never a settings file, so it is a BUG.
  */
 export function plainData(value: unknown): PlainData {
   const render = (path: readonly (string | number)[]): string =>

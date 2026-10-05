@@ -105,7 +105,7 @@ describe("section shape validation", () => {
         issue === null
           ? ok(structuredClone(doc))
           : err({ code: "settings-malformed-sections" as const, source: "f.yml", issues: [issue] });
-      expect(validateSectionShapes(doc, "f.yml")).toEqual(expected);
+      expect<unknown>(validateSectionShapes(doc, "f.yml")).toEqual(expected);
     },
   );
 
@@ -137,7 +137,7 @@ describe("section shape validation", () => {
       { _layering: "replace", pages: { source: { branch: "main" } } },
       "f.yml",
     );
-    expect(verdict).toEqual(ok({ pages: { source: { branch: "main" } } }));
+    expect<unknown>(verdict).toEqual(ok({ pages: { source: { branch: "main" } } }));
   });
 });
 

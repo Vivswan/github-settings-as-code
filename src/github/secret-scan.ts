@@ -1,7 +1,9 @@
 /**
  * Plain-data normalization and secret-field scanning for outgoing payloads, transport-free on purpose: the guarantees
  * (no payload-supplied method or accessor is ever invoked, the scanned tree IS the sent tree, secret fields are masked
- * in traces) must hold independent of any transport.
+ * in traces) must hold independent of any transport. The body arrives `unknown` from the client (GitHubClient is a
+ * library export, so a caller's own object reaches it), so the document's plainness proof (engine/validate.ts) never
+ * covers this input and the scan judges every value itself.
  */
 
 import { err, ok, type Result } from "neverthrow";
