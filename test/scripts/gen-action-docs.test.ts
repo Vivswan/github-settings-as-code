@@ -26,9 +26,9 @@ import {
   type RegionSpec,
   regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
-import { tableRow } from "../../.github/scripts/lib/markdown-table.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
+import { tableRow } from "../../src/report/markdown.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
 import { sectionModule } from "../../src/sections/registry.js";
 import { ROOT } from "../root.js";
@@ -333,7 +333,7 @@ describe("generated files", () => {
       { key: "rulesets", undeclaredDefault: "keep" },
     ] as const;
     accepts("policy-count-sentence", renderPolicyCountSentence(knobbed));
-    // Parentheses, backticks, colons, and the two Unicode line separators tableCell() admits must read back as the
+    // Parentheses, backticks, colons, and the two Unicode line separators cellFault() admits must read back as the
     // opaque prose they are.
     accepts(
       "policy-defaults-table",

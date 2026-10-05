@@ -1,6 +1,15 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { err, ok, Result, safeTry } from "neverthrow";
 import { RUN_RESULTS, type RunOutcome } from "../../src/engine/outcome.js";
+import {
+  cellFault,
+  renderTable,
+  roundTrip,
+  tableFault,
+  tableRoundTrip,
+  tableRows,
+} from "../../src/report/markdown.js";
 import type { CoverageRow, SectionDocs } from "../../src/sections/contract/docs.js";
 import {
   type SectionMeta,
@@ -16,7 +25,6 @@ import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import { type GeneratedRegion, regenerateRegions, regionBounds } from "./lib/generated-regions.js";
-import { renderTable, tableCell, tableRoundTrip, tableRow } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 export const COVERAGE_PATH = "docs/reference/coverage.md";
@@ -112,33 +120,47 @@ export function sectionsCells(
   });
 }
 
+// The generator's boundary: the table rule is the author's to meet, so a faulty row stops the build naming it.
 export function renderSectionsTable(
   sections: readonly SectionsTableRow[],
   docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
 ): string {
-  return renderTable(SECTIONS_TABLE_HEADER, sectionsCells(sections, docs));
+  const cells = sectionsCells(sections, docs);
+  const fault = tableFault(SECTIONS_TABLE_HEADER, cells, "keyed");
+  if (fault !== undefined) {
+    throw new Error(fault);
+  }
+  return renderTable(SECTIONS_TABLE_HEADER, cells);
 }
 
-/** Text for inside a markdown code span: a cell, and a backtick would close the span early. */
-function codeSpan(text: string, where: string): string {
-  if (text.includes("`")) {
-    throw new Error(
-      `gen-docs: ${where} contains a backtick, which would close its code span: ${text}`,
-    );
+/**
+ * A cell of authored prose, refused rather than escaped: an escape would silently change the rendered text.
+ * `where` names the cell as its author knows it.
+ */
+function cell(text: string, where: string): string {
+  const fault = cellFault(text);
+  if (fault !== undefined) {
+    throw new Error(`${where} ${fault}, which would break its table row: "${text}"`);
   }
-  return tableCell(text, where);
+  return text;
 }
 
 /** The longest paragraph or bullet the page carries; a fact past it is two facts. */
 export const FACT_WORD_CAP = 70;
 
+/** Why `text` is not one paragraph or bullet of the page: the printer writes each as one line, so a blank or a line break is no line of its. */
+function proseFault(text: string): string | undefined {
+  return text.trim() === "" || /[\r\n]/.test(text) ? "is blank or spans several lines" : undefined;
+}
+
 /**
- * A paragraph of authored prose: one line, at most FACT_WORD_CAP words. A blank one would leave its heading
- * unexplained, and a long one is a blob the page exists to avoid, so both are refused.
+ * A paragraph or bullet of authored prose: one line, at most FACT_WORD_CAP words. A blank one would leave its
+ * heading unexplained, and a long one is a blob the page exists to avoid, so both are refused.
  */
 function paragraph(text: string, where: string): string {
-  if (text.trim() === "" || /[\r\n]/.test(text)) {
-    throw new Error(`gen-docs: ${where} is blank or spans several lines: "${text}"`);
+  const fault = proseFault(text);
+  if (fault !== undefined) {
+    throw new Error(`gen-docs: ${where} ${fault}: "${text}"`);
   }
   const words = text.trim().split(/\s+/).length;
   if (words > FACT_WORD_CAP) {
@@ -147,11 +169,6 @@ function paragraph(text: string, where: string): string {
     );
   }
   return text;
-}
-
-/** One fact as a markdown bullet, under paragraph()'s line and word rules. */
-function fact(text: string, where: string): string {
-  return `- ${paragraph(text, where)}`;
 }
 
 const SUPPORTED_HEADING = "## Supported";
@@ -238,23 +255,93 @@ function renderCalls(
   return sharedCalls(carrier.label);
 }
 
-function renderSection(
+/** One Supported row with the notes group it carries: the printer writes both from it, the guard reads both back into it. */
+interface SupportedRow {
+  readonly area: string;
+  readonly key: string;
+  readonly keys?: string;
+  readonly endpoints: string;
+  readonly notes: readonly string[];
+}
+
+/**
+ * The one statement of what a Supported row may hold, as the field and its fault: the authoring side throws it
+ * and the parse refuses by it, so a row the generator refuses is no row the guard admits.
+ */
+function supportedRowFault(
+  row: Omit<SupportedRow, "notes">,
+): { readonly field: string; readonly fault: string } | undefined {
+  const broken = (text: string, fault: string): string =>
+    `${fault}, which would break its table row: "${text}"`;
+  const area = cellFault(row.area);
+  if (area !== undefined) {
+    return { field: "Area cell", fault: broken(row.area, area) };
+  }
+  if (row.keys !== undefined) {
+    if (row.keys.includes("`")) {
+      return {
+        field: "keys",
+        fault: `contains a backtick, which would close its code span: ${row.keys}`,
+      };
+    }
+    const keys = cellFault(row.keys);
+    if (keys !== undefined) {
+      return { field: "keys", fault: broken(row.keys, keys) };
+    }
+  }
+  const endpoints = cellFault(row.endpoints);
+  if (endpoints !== undefined) {
+    return { field: "Endpoints cell", fault: broken(row.endpoints, endpoints) };
+  }
+  const label = areaLabel(row.area);
+  if (/[*\r\n]/.test(label) || label.trim() === "") {
+    return {
+      field: "Area cell",
+      fault: 'cannot label its notes (blank, or holding "*" or a line break)',
+    };
+  }
+  return undefined;
+}
+
+/** The gaps section: the empty-state note over a bare header, or the rows. */
+type Gaps = { readonly emptyNote: string } | { readonly rows: ReadonlyArray<readonly string[]> };
+
+/**
+ * The page as renderCoveragePage() prints it. coveragePage() derives it from the declarations and the authored
+ * data, parseCoveragePage() reads a committed page back into it, and the two meet in the byte compare.
+ */
+interface CoveragePage {
+  readonly intro: readonly string[];
+  readonly supported: readonly SupportedRow[];
+  readonly gaps: Gaps;
+  readonly noPublicApi: { readonly intro: string; readonly items: readonly string[] };
+  readonly outOfScope: readonly string[];
+}
+
+function supportedRows(
   section: CoverageSection,
   rows: readonly CoverageRow[],
   anchors: EndpointAnchors,
-): { rows: string[]; notes: string[] } {
+): SupportedRow[] {
   const claimed = new Set<string>();
   /** The nearest row above that listed calls, whose calls a call-less row rides. */
   const carrier: { label?: string } = {};
-  const tableRows = rows.map((row) => {
-    const where = `a ${section.key} coverage row`;
-    const keys = row.keys === undefined ? "" : ` (\`${codeSpan(row.keys, `${where}'s keys`)}\`)`;
-    const cells = [
-      tableCell(row.area, `${where}'s Area cell`),
-      `[\`${section.key}\`](${SECTIONS_PAGE})${keys}`,
-      tableCell(renderCalls(section, row, claimed, carrier, anchors), `${where}'s Endpoints cell`),
-    ];
-    return tableRow(cells);
+  const supported = rows.map((row): SupportedRow => {
+    const fields = {
+      area: row.area,
+      key: section.key,
+      ...(row.keys === undefined ? {} : { keys: row.keys }),
+      endpoints: renderCalls(section, row, claimed, carrier, anchors),
+    };
+    const faulty = supportedRowFault(fields);
+    if (faulty !== undefined) {
+      throw new Error(`gen-docs: a ${section.key} coverage row's ${faulty.field} ${faulty.fault}`);
+    }
+    const label = areaLabel(row.area);
+    const notes = row.notes.map((note) =>
+      paragraph(note, `a note under the "${label}" row of ${section.key}`),
+    );
+    return { ...fields, notes };
   });
   const declared = [...Object.keys(section.endpoints), ...Object.keys(section.graphql ?? {})];
   const unclaimed = declared.filter((role) => !claimed.has(role));
@@ -263,29 +350,15 @@ function renderSection(
       `gen-docs: the coverage rows of ${section.key} list none of its roles [${unclaimed.join(", ")}]; every declared call is listed on at least one row`,
     );
   }
-  const notes = rows.flatMap((row) => {
-    const label = areaLabel(row.area);
-    if (/[*\r\n]/.test(label) || label.trim() === "") {
-      throw new Error(
-        `gen-docs: the "${label}" row of ${section.key} has an Area cell that cannot label its notes (blank, or holding "*" or a line break)`,
-      );
-    }
-    return [
-      `**${label}** (\`${section.key}\`)`,
-      "",
-      ...row.notes.map((note) => fact(note, `a note under the "${label}" row of ${section.key}`)),
-      "",
-    ];
-  });
-  return { rows: tableRows, notes };
+  return supported;
 }
 
-export function renderCoverage(
+function coveragePage(
   sections: readonly CoverageSection[],
   docs: Readonly<Record<string, Pick<SectionDocs, "coverage">>>,
   data: CoverageData,
   anchors: EndpointAnchors,
-): string {
+): CoveragePage {
   const byKey = new Map(sections.map((section) => [section.key, section]));
   const ordered = new Set<string>(data.supportedOrder);
   const missing = [...byKey.keys()].filter((key) => !ordered.has(key));
@@ -297,7 +370,7 @@ export function renderCoverage(
       `gen-docs: supportedOrder must list every section exactly once; missing [${missing.join(", ")}], unknown or repeated [${stray.join(", ")}]`,
     );
   }
-  const supported = data.supportedOrder.map((key) => {
+  const supported = data.supportedOrder.flatMap((key) => {
     const doc = docs[key];
     if (doc === undefined) {
       throw new Error(`gen-docs: section "${key}" has no docs entry`);
@@ -306,47 +379,244 @@ export function renderCoverage(
     if (section === undefined) {
       throw new Error(`gen-docs: section "${key}" is not registered`);
     }
-    return renderSection(section, doc.coverage, anchors);
+    return supportedRows(section, doc.coverage, anchors);
   });
-  const gaps =
+  const gaps: Gaps =
     data.gaps.rows === undefined
-      ? [paragraph(data.gaps.emptyNote, "the gaps section's empty-state note"), "", GAPS_HEADER]
-      : [
-          GAPS_HEADER,
-          ...data.gaps.rows.map((row) => {
+      ? { emptyNote: paragraph(data.gaps.emptyNote, "the gaps section's empty-state note") }
+      : {
+          rows: data.gaps.rows.map((row) => {
             const where = `the "${row.area}" gap row`;
-            const cells = [
-              tableCell(row.area, `${where}'s Area cell`),
-              tableCell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
-              tableCell(row.why, `${where}'s Why cell`),
+            return [
+              cell(row.area, `${where}'s Area cell`),
+              cell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
+              cell(row.why, `${where}'s Why cell`),
             ];
-            return tableRow(cells);
           }),
-        ];
+        };
+  return {
+    intro: data.intro.map((line, i) => paragraph(line, `intro paragraph ${i + 1}`)),
+    supported,
+    gaps,
+    noPublicApi: {
+      intro: paragraph(data.noPublicApi.intro, "the no-public-API intro"),
+      items: data.noPublicApi.items.map((item) => paragraph(item, "a no-public-API item")),
+    },
+    outOfScope: data.outOfScope.items.map((item) => paragraph(item, "an out-of-scope item")),
+  };
+}
+
+/** The key cell of a Supported row: the section key linking to the Sections page, then the row's keys in a code span. */
+function keyCell(row: Pick<SupportedRow, "key" | "keys">): string {
+  return `[\`${row.key}\`](${SECTIONS_PAGE})${row.keys === undefined ? "" : ` (\`${row.keys}\`)`}`;
+}
+
+/** The label of a row's notes group: the Area cell with its link unwrapped, and the section key. */
+function notesLabel(row: Pick<SupportedRow, "area" | "key">): string {
+  return `**${areaLabel(row.area)}** (\`${row.key}\`)`;
+}
+
+function bullets(items: readonly string[]): string[] {
+  return items.map((item) => `- ${item}`);
+}
+
+function renderCoveragePage(page: CoveragePage): string {
   return [
-    ...data.intro.flatMap((line, i) => [paragraph(line, `intro paragraph ${i + 1}`), ""]),
+    ...page.intro.flatMap((line) => [line, ""]),
     SUPPORTED_HEADING,
     "",
-    SUPPORTED_HEADER,
-    ...supported.flatMap((section) => section.rows),
+    renderTable(
+      SUPPORTED_HEADER,
+      page.supported.map((row) => [row.area, keyCell(row), row.endpoints]),
+    ),
     "",
     NOTES_HEADING,
     "",
-    ...supported.flatMap((section) => section.notes),
+    ...page.supported.flatMap((row) => [notesLabel(row), "", ...bullets(row.notes), ""]),
     GAPS_HEADING,
     "",
-    ...gaps,
+    ...("rows" in page.gaps
+      ? [renderTable(GAPS_HEADER, page.gaps.rows)]
+      : [page.gaps.emptyNote, "", GAPS_HEADER]),
     "",
     NO_API_HEADING,
     "",
-    paragraph(data.noPublicApi.intro, "the no-public-API intro"),
+    page.noPublicApi.intro,
     "",
-    ...data.noPublicApi.items.map((item) => fact(item, "a no-public-API item")),
+    ...bullets(page.noPublicApi.items),
     "",
     OUT_OF_SCOPE_HEADING,
     "",
-    ...data.outOfScope.items.map((item) => fact(item, "an out-of-scope item")),
+    ...bullets(page.outOfScope),
   ].join("\n");
+}
+
+export function renderCoverage(
+  sections: readonly CoverageSection[],
+  docs: Readonly<Record<string, Pick<SectionDocs, "coverage">>>,
+  data: CoverageData,
+  anchors: EndpointAnchors,
+): string {
+  return renderCoveragePage(coveragePage(sections, docs, data, anchors));
+}
+
+/** The key cell as keyCell() writes it: the section key, and the row's keys when it has them. The dotAll flag keeps the two Unicode line separators cellFault() admits inside the keys. */
+const KEY_CELL = new RegExp(
+  String.raw`^\[\x60([a-z_]+)\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60(.*)\x60\))?$`,
+  "s",
+);
+
+/** A Supported row's cells read back and held to the row statement, its notes still to come from the group under the table. */
+function supportedRow(cells: readonly string[]): Result<Omit<SupportedRow, "notes">, string> {
+  const [area = "", key = "", endpoints = ""] = cells;
+  const match = KEY_CELL.exec(key);
+  if (match === null) {
+    return err(`names no section key linking to ${SECTIONS_PAGE} in its second cell`);
+  }
+  const keys = match[2];
+  const row = { area, key: match[1] ?? "", ...(keys === undefined ? {} : { keys }), endpoints };
+  const faulty = supportedRowFault(row);
+  return faulty === undefined ? ok(row) : err(`${faulty.field} ${faulty.fault}`);
+}
+
+/**
+ * A committed page read back into the shape renderCoveragePage() prints from, or why it is not one the printer
+ * wrote, naming the line as renderedMismatch() numbers it. Prose slots (a paragraph, a bullet, an Area or an
+ * Endpoints cell) are opaque and kept, so what the guard refuses here is structure the printer never writes.
+ */
+function parseCoveragePage(body: string): Result<CoveragePage, string> {
+  const lines = body.split("\n");
+  let at = 0;
+  /** The line under the cursor, or "" past the end: the printer never writes past the body. */
+  const current = (): string => lines[at] ?? "";
+  const refusal = (what: string): Result<never, string> => err(`line ${at} ${what}`);
+  const literal = (text: string, what: string): Result<void, string> => {
+    if (current() !== text) {
+      return refusal(what);
+    }
+    at += 1;
+    return ok();
+  };
+  const blank = (): Result<void, string> =>
+    literal("", "is not the blank line the generator writes there");
+  const heading = (text: string): Result<void, string> =>
+    literal(text, `is not the "${text}" heading`);
+  const prose = (what: string): Result<string, string> => {
+    const line = current();
+    const fault = proseFault(line);
+    if (fault !== undefined) {
+      return refusal(`should hold ${what} but ${fault}`);
+    }
+    at += 1;
+    return ok(line);
+  };
+  /** The `- ` bullets up to the next blank line, at least one. */
+  const items = (what: string): Result<string[], string> => {
+    const found: string[] = [];
+    while (current().startsWith("- ")) {
+      const text = current().slice(2);
+      const fault = proseFault(text);
+      if (fault !== undefined) {
+        return refusal(`should hold ${what} bullet but ${fault}`);
+      }
+      found.push(text);
+      at += 1;
+    }
+    return found.length === 0 ? refusal(`is not the first ${what} bullet`) : ok(found);
+  };
+  /** `header`'s lines, then the rows up to the next blank line under the cell rule, each through `parseRow`. */
+  const table = <Row>(
+    header: string,
+    what: string,
+    parseRow: (cells: readonly string[]) => Result<Row, string>,
+  ): Result<Row[], string> => {
+    for (const line of header.split("\n")) {
+      if (current() !== line) {
+        return refusal(`is not the ${what} table's header`);
+      }
+      at += 1;
+    }
+    const start = at;
+    while (current() !== "") {
+      at += 1;
+    }
+    const line = (row: number): string => `line ${start + row}`;
+    return tableRows(header, lines.slice(start, at), "cells")
+      .mapErr((faulty) => `${line(faulty.row)} ${faulty.fault}`)
+      .andThen((rows) =>
+        Result.combine(
+          rows.map((cells, row) => parseRow(cells).mapErr((fault) => `${line(row)} ${fault}`)),
+        ),
+      );
+  };
+  /** Whether `texts` sit at the cursor, line for line: a paragraph may repeat one structural line, never a run of them. */
+  const ahead = (...texts: string[]): boolean =>
+    texts.every((text, offset) => lines[at + offset] === text);
+  const [gapsHeaderLine, gapsSeparator] = GAPS_HEADER.split("\n");
+  return safeTry(function* () {
+    yield* blank();
+    const intro: string[] = [];
+    do {
+      intro.push(yield* prose("an intro paragraph"));
+      yield* blank();
+    } while (!ahead(SUPPORTED_HEADING, "", ...SUPPORTED_HEADER.split("\n")));
+    yield* heading(SUPPORTED_HEADING);
+    yield* blank();
+    const rows = yield* table(SUPPORTED_HEADER, "Supported", supportedRow);
+    if (rows.length === 0) {
+      return refusal("is not the first Supported row");
+    }
+    yield* blank();
+    yield* heading(NOTES_HEADING);
+    yield* blank();
+    const supported: SupportedRow[] = [];
+    for (const row of rows) {
+      yield* literal(
+        notesLabel(row),
+        `is not the notes label of the "${areaLabel(row.area)}" Supported row`,
+      );
+      yield* blank();
+      const notes = yield* items("a note");
+      yield* blank();
+      supported.push({ ...row, notes });
+    }
+    yield* heading(GAPS_HEADING);
+    yield* blank();
+    let gaps: Gaps;
+    if (ahead(gapsHeaderLine ?? "", gapsSeparator ?? "")) {
+      const gapRows = yield* table(GAPS_HEADER, "gaps", (cells) => ok(cells));
+      if (gapRows.length === 0) {
+        return refusal("is not the first gap row, and no empty-state note precedes the table");
+      }
+      gaps = { rows: gapRows };
+    } else {
+      gaps = { emptyNote: yield* prose("the gaps section's empty-state note") };
+      yield* blank();
+      yield* table(GAPS_HEADER, "gaps", () =>
+        err("is a gap row under the empty-state note, which stands only over an empty table"),
+      );
+    }
+    yield* blank();
+    yield* heading(NO_API_HEADING);
+    yield* blank();
+    const noApiIntro = yield* prose("the no-public-API intro");
+    yield* blank();
+    const noApiItems = yield* items("a no-public-API");
+    yield* blank();
+    yield* heading(OUT_OF_SCOPE_HEADING);
+    yield* blank();
+    const outOfScope = yield* items("an out-of-scope");
+    if (at !== lines.length - 1 || current() !== "") {
+      return refusal("is not the line break that closes the body");
+    }
+    return ok({
+      intro,
+      supported,
+      gaps,
+      noPublicApi: { intro: noApiIntro, items: noApiItems },
+      outOfScope,
+    });
+  });
 }
 
 /** The prose after the enumeration; the region's body regex admits exactly this tail. */
@@ -419,18 +689,18 @@ function patFormUrl(): string {
 
 // The three prose cells are opaque; a row is this table's when its Undeclared default cell is one of the displays,
 // the one cell the table rule does not judge.
-function sectionsRow(cells: readonly string[]): readonly string[] | string {
+function sectionsRow(cells: readonly string[]): Result<readonly string[], string> {
   if (!Object.values(UNDECLARED_DEFAULT_DISPLAY).includes(cells[3] ?? "")) {
-    return "shows an Undeclared default the renderer has no display for";
+    return err("shows an Undeclared default the renderer has no display for");
   }
-  return cells;
+  return ok(cells);
 }
 
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
   return {
     name,
     placement: { kind: "under-heading", heading },
-    body: tableRoundTrip(SECTIONS_TABLE_HEADER, sectionsRow, (rows) =>
+    body: tableRoundTrip(SECTIONS_TABLE_HEADER, "keyed", sectionsRow, (rows) =>
       renderTable(SECTIONS_TABLE_HEADER, rows),
     ),
     render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
@@ -503,30 +773,13 @@ export function renderPage(path: string, text: string): string {
   return out;
 }
 
-// nonBlank is unambiguous on purpose: overlapping parts would backtrack exponentially over a 60-row table.
-const nonBlank = (excluded: string): string =>
-  String.raw`[ \t]*[^${excluded}\s][^${excluded}\r\n]*`;
-const PROSE_LINE = `${nonBlank("")}\n`;
-const CELL = nonBlank("|");
-const KEY_CELL = String.raw`\[\x60[a-z_]+\x60\]\(${RegExp.escape(SECTIONS_PAGE)}\)(?: \(\x60${nonBlank("|\x60")}\x60\))?`;
-const SUPPORTED_ROWS = String.raw`(?:\| ${CELL} \| ${KEY_CELL} \| ${CELL} \|\n)+`;
-const GAP_ROWS = String.raw`(?:\| ${CELL} \| ${CELL} \| ${CELL} \|\n)+`;
-const GAPS_BODY = String.raw`(?:${PROSE_LINE}\n${RegExp.escape(GAPS_HEADER)}\n|${RegExp.escape(GAPS_HEADER)}\n${GAP_ROWS})`;
-const BULLETS = `(?:- ${PROSE_LINE})+`;
-const NOTE_GROUPS = String.raw`(?:\*\*${nonBlank("*")}\*\* \(\x60[a-z_]+\x60\)\n\n${BULLETS}\n)+`;
-
 // The one region closes the file and holds everything below the title (or an empty body between fresh markers), so
 // a marker moved over authored prose fails instead of erasing it.
 const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
   {
     name: "coverage",
     placement: { kind: "tail" },
-    body: new RegExp(
-      String.raw`^\n(?:(?:${PROSE_LINE}\n)+${RegExp.escape(SUPPORTED_HEADING)}\n\n${RegExp.escape(SUPPORTED_HEADER)}\n` +
-        String.raw`${SUPPORTED_ROWS}\n${RegExp.escape(NOTES_HEADING)}\n\n${NOTE_GROUPS}` +
-        String.raw`${RegExp.escape(GAPS_HEADING)}\n\n${GAPS_BODY}\n${RegExp.escape(NO_API_HEADING)}\n\n` +
-        String.raw`${PROSE_LINE}\n${BULLETS}\n${RegExp.escape(OUT_OF_SCOPE_HEADING)}\n\n${BULLETS})?$`,
-    ),
+    body: roundTrip(parseCoveragePage, renderCoveragePage),
     render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS)}\n`,
   },
 ];
