@@ -383,7 +383,7 @@ and `validate` and `permissions` read a settings file alone. The [command line g
 
 ## Versioning
 
-The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version.
+The package and the action share one version, the one in `.release-please-manifest.json` (release-please rewrites `package.json` from it), so a settings file that validates on the library validates on the action of the same version. An added name is a minor (a `feat` commit), and a rename or a removal is a major, listed in the [upgrading guide](../upgrading/README.md).
 
 | npm dist-tag | Publishes on | Version | Install |
 |---|---|---|---|
