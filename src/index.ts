@@ -82,7 +82,13 @@ export {
   type GraphqlOp,
   type RequestMark,
 } from "./github/api.js";
-export { type ApiError, isPermissionError, isRateLimitError } from "./github/api-error.js";
+export {
+  type ApiError,
+  type ApiErrorKind,
+  classifyApiError,
+  isPermissionError,
+  isRateLimitError,
+} from "./github/api-error.js";
 export {
   type AnnotationLevel,
   type CollectedLine,

@@ -132,6 +132,8 @@ console.log(parsed.success, SECTION_KEYS.length, schema.$schema);
 | `ApiError` | type | A failed request as the port returns it: `status`, `message`, `body` |
 | `GraphqlOp` | type | A GraphQL operation as the port takes it |
 | `RequestMark` | type | The per-request options; `carriesSecret` marks a payload holding a resolved secret |
+| `classifyApiError` | function | Which `ApiErrorKind` an `ApiError` is, the one judgment the two predicates below read |
+| `ApiErrorKind` | type | `"rate-limit"`, `"permission"` (any other 403, and every 404: a fine-grained token answers 404 for a resource it denies, so an absent one lands here too), or `"other"` |
 | `isPermissionError` | function | Whether an `ApiError` is a denial |
 | `isRateLimitError` | function | Whether an `ApiError` is the rate limit |
 
