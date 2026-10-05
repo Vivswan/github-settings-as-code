@@ -15,6 +15,7 @@ import {
 } from "../../src/engine/canonical.js";
 import { DOCUMENT_DIRECTIVE_KEYS, SECTION_KEYS, SettingsFile } from "../../src/schema.js";
 import { SECTIONS } from "../../src/sections/registry.js";
+import { schemaNode } from "../../src/sections/shared/schema-node.js";
 
 /** A document spelled in the canonical order, so the shuffled twin below has something to converge on. */
 const ORDERED: Record<string, unknown> = {
@@ -228,66 +229,49 @@ function _directivesFirst(): Array<[string, unknown]> {
   return DOCUMENT_DIRECTIVE_KEYS.map((key) => [key, "deep"]);
 }
 
-interface Def {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  valueType?: z.ZodType;
-}
-
-const defOf = (schema: z.ZodType): Def => (schema as unknown as { _zod: { def: Def } })._zod.def;
-
-/** Every list of mappings the schema declares, by the path LIST_IDENTITY spells (a knob wrapper's `entries` transparent). */
 /** Whether a list of this element is a mapping list: a mapping, or a union whose options include one (a ruleset's rules). */
 function isMappingSchema(schema: z.ZodType): boolean {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-      return isMappingSchema(def.innerType as z.ZodType);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      return isMappingSchema(node.inner);
     case "object":
     case "record":
       return true;
     case "union":
-      return (def.options ?? []).some(isMappingSchema);
+      return node.options.some(isMappingSchema);
     default:
       return false;
   }
 }
 
+/** Every list of mappings the schema declares, by the path LIST_IDENTITY spells (a knob wrapper's `entries` transparent). */
 function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): void {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-      mappingListPaths(def.innerType as z.ZodType, path, out);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      mappingListPaths(node.inner, path, out);
       return;
     case "object":
-      for (const [key, child] of Object.entries(def.shape ?? {})) {
+      for (const [key, child] of Object.entries(node.shape)) {
         mappingListPaths(child, path === "" ? key : `${path}.${key}`, out);
       }
       return;
     case "array": {
-      const element = def.element as z.ZodType;
-      if (isMappingSchema(element)) {
+      if (isMappingSchema(node.element)) {
         out.add(path);
       }
-      mappingListPaths(element, `${path}[]`, out);
+      mappingListPaths(node.element, `${path}[]`, out);
       return;
     }
     case "record":
-      mappingListPaths(def.valueType as z.ZodType, `${path}.*`, out);
+      mappingListPaths(node.value, `${path}.*`, out);
       return;
     case "union": {
-      const options = def.options ?? [];
-      const wrapper = options.find((option) => defOf(option).shape?.entries !== undefined);
-      for (const option of options) {
+      const wrapper = node.knob?.wrapper;
+      for (const option of node.options) {
         if (option === wrapper) {
-          for (const [key, child] of Object.entries(defOf(option).shape ?? {})) {
+          for (const [key, child] of Object.entries(wrapper.shape)) {
             mappingListPaths(child, key === "entries" ? path : `${path}.${key}`, out);
           }
         } else {
@@ -296,7 +280,7 @@ function mappingListPaths(schema: z.ZodType, path: string, out: Set<string>): vo
       }
       return;
     }
-    default:
+    case "leaf":
       return;
   }
 }

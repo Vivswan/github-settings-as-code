@@ -15,6 +15,7 @@ import type {
   UndeclaredPolicyList,
 } from "../../types.js";
 import { type Layering, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
+import { schemaNode } from "../shared/schema-node.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -796,29 +797,6 @@ export function requirePlainMapping(shape: z.ZodType): z.ZodType {
     .pipe(shape);
 }
 
-/** The zod internals a schema walk reads, one view for every walk in the tree. */
-export interface ZodDef {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  catchall?: z.ZodType;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  valueType?: z.ZodType;
-  checks?: readonly unknown[];
-}
-
-export function defOf(schema: z.ZodType): ZodDef {
-  return (schema as unknown as { _zod: { def: ZodDef } })._zod.def;
-}
-
-function cloneWith(schema: z.ZodType, patch: Partial<ZodDef>): z.ZodType {
-  return z.util.clone(
-    schema as unknown as Parameters<typeof z.util.clone>[0],
-    { ...defOf(schema), ...patch } as never,
-  ) as unknown as z.ZodType;
-}
-
 /**
  * Every plain (strip) object becomes a passthrough looseObject, so unknown keys ride through to GitHub and the
  * rules reading undeclared keys can see them. Preserved as authored:
@@ -826,87 +804,46 @@ function cloneWith(schema: z.ZodType, patch: Partial<ZodDef>): z.ZodType {
  *   strictObject           -> stays strict
  *   a node's own checks    -> survive on the clone (rule() gates each beside a failed nested value); one on the knobbed union itself throws
  *   knobbed-section union  -> rewrapped as a container-routed check, so a failing entry keeps its path (`labels[2].name`)
- *   unrecognized CONTAINER -> throws, rather than ship a shape that silently skipped loosening
  */
 export function loosen(schema: z.ZodType): z.ZodType {
-  const def = defOf(schema);
-  switch (def.type) {
+  const node = schemaNode(schema);
+  switch (node.kind) {
     case "object": {
-      const shape = def.shape ?? {};
-      const loosened = Object.fromEntries(
-        Object.entries(shape).map(([key, value]) => [key, loosen(value)]),
+      const shape = Object.fromEntries(
+        Object.entries(node.shape).map(([key, value]) => [key, loosen(value)]),
       );
       // z.never stays never (strict stays strict); an absent catchall means strip, which becomes passthrough.
-      const catchall = def.catchall === undefined ? z.unknown() : loosen(def.catchall);
-      return cloneWith(schema, { shape: loosened, catchall });
+      const catchall = node.catchall === undefined ? z.unknown() : loosen(node.catchall);
+      return z.clone(node.schema, { ...node.schema.def, shape, catchall });
     }
     case "array":
-      return cloneWith(schema, { element: loosen(def.element as z.ZodType) });
+      return z.clone(node.schema, { ...node.schema.def, element: loosen(node.element) });
     case "record":
-      return cloneWith(schema, { valueType: loosen(def.valueType as z.ZodType) });
-    case "optional":
-    case "nullable":
-    case "default":
-      return cloneWith(schema, { innerType: loosen(def.innerType as z.ZodType) });
+      return z.clone(node.schema, { ...node.schema.def, valueType: loosen(node.value) });
+    case "wrapper":
+      return z.clone(node.schema, { ...node.schema.def, innerType: loosen(node.inner) });
     case "union": {
-      const options = def.options ?? [];
-      const knob = detectKnobUnion(options);
+      const { knob } = node;
       if (knob !== null) {
-        if ((def.checks?.length ?? 0) > 0) {
+        if ((node.schema.def.checks?.length ?? 0) > 0) {
           throw new Error(
             "BUG: loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
           );
         }
-        return routedListShape(loosen(knob.list), loosen(knob.wrapper));
+        return routedListShape(loosen(knob.list), loosen(knob.wrapper), knob.wrapper);
       }
-      return cloneWith(schema, { options: options.map(loosen) });
+      return z.clone(node.schema, { ...node.schema.def, options: node.options.map(loosen) });
     }
-    default:
-      if (!LOOSEN_LEAF_TYPES.has(def.type)) {
-        throw new Error(
-          `BUG: loosen(): unhandled schema type "${def.type}" - teach loosen() its runtime derivation before authoring it in src/schema.ts`,
-        );
-      }
+    case "leaf":
       return schema;
   }
 }
 
-const LOOSEN_LEAF_TYPES: ReadonlySet<string> = new Set([
-  "string",
-  "number",
-  "boolean",
-  "enum",
-  "literal",
-  "unknown",
-  "never",
-  "null",
-]);
-
-/** The knobbed() and layeredList() unions (../shared/schema-helpers.ts): the entry array beside a strict wrapper with `entries`; engine/canonical.ts walks them by this detector too. */
-export function detectKnobUnion(
-  options: readonly z.ZodType[],
-): { list: z.ZodType; wrapper: z.ZodType } | null {
-  if (options.length !== 2) {
-    return null;
-  }
-  const list = options.find((option) => defOf(option).type === "array");
-  const wrapper = options.find((option) => {
-    const def = defOf(option);
-    return (
-      def.type === "object" &&
-      def.catchall !== undefined &&
-      defOf(def.catchall).type === "never" &&
-      def.shape?.entries !== undefined
-    );
-  });
-  return list !== undefined && wrapper !== undefined ? { list, wrapper } : null;
-}
-
 /** A transform, not a union, so a failing entry keeps its precise issue path and the output is the routed shape's parsed data. */
-function routedListShape(list: z.ZodType, wrapper: z.ZodType): z.ZodType {
+function routedListShape(list: z.ZodType, wrapper: z.ZodType, authored: z.ZodObject): z.ZodType {
   // The wrapper's own words for what rides beside `entries`: the policy on a knobbed section, the directive alone on a plain list.
   const beside =
-    defOf(wrapper).shape?._undeclared === undefined
+    authored.shape._undeclared === undefined
       ? 'an optional "_layering" directive'
       : 'an optional "_undeclared" policy';
   return z

@@ -11,20 +11,9 @@ import { isPlainObject } from "../../plain-data.js";
 import type { UndeclaredPolicySection } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
-import { defaultUndeclaredPolicy, defOf, type SectionMeta } from "../contract/module.js";
+import { defaultUndeclaredPolicy, type SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-
-/** The schema types the projection treats as leaves: the live value passes through verbatim. */
-const LEAF_TYPES: ReadonlySet<string> = new Set([
-  "string",
-  "number",
-  "int",
-  "boolean",
-  "enum",
-  "literal",
-  "unknown",
-  "null",
-]);
+import { schemaNode } from "./schema-node.js";
 
 /**
  * A live value projected onto a schema slice, so server-assigned fields fall away without a hand
@@ -48,28 +37,24 @@ function project(schema: z.ZodType, live: unknown): unknown {
   if (live === null) {
     return schema.safeParse(null).success ? null : undefined;
   }
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-      return project(def.innerType as z.ZodType, live);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      return project(node.inner, live);
     case "object": {
       if (!isPlainObject(live)) {
         return live;
       }
-      const shape = def.shape ?? {};
       const out: Record<string, unknown> = {};
-      for (const [key, child] of Object.entries(shape)) {
+      for (const [key, child] of Object.entries(node.shape)) {
         const projected = project(child, live[key]);
         if (projected !== undefined) {
           out[key] = projected;
         }
       }
-      // A catchall other than never is a passthrough object: its extra keys are declarable.
-      if (def.catchall !== undefined && defOf(def.catchall).type !== "never") {
+      if (node.open) {
         for (const [key, value] of Object.entries(live)) {
-          if (!(key in shape) && value !== undefined) {
+          if (!(key in node.shape) && value !== undefined) {
             out[key] = value;
           }
         }
@@ -77,28 +62,18 @@ function project(schema: z.ZodType, live: unknown): unknown {
       return out;
     }
     case "array":
-      return Array.isArray(live)
-        ? live.map((item) => project(def.element as z.ZodType, item))
-        : live;
+      return Array.isArray(live) ? live.map((item) => project(node.element, item)) : live;
     case "record":
       return isPlainObject(live)
         ? Object.fromEntries(
-            Object.entries(live).map(([key, value]) => [
-              key,
-              project(def.valueType as z.ZodType, value),
-            ]),
+            Object.entries(live).map(([key, value]) => [key, project(node.value, value)]),
           )
         : live;
     case "union": {
-      const option = (def.options ?? []).find((candidate) => candidate.safeParse(live).success);
+      const option = node.options.find((candidate) => candidate.safeParse(live).success);
       return option === undefined ? live : project(option, live);
     }
-    default:
-      if (!LEAF_TYPES.has(def.type)) {
-        throw new Error(
-          `BUG: projectOntoSchema(): unhandled schema type "${def.type}" - teach the projection its walk before authoring it in a section slice`,
-        );
-      }
+    case "leaf":
       return live;
   }
 }
@@ -122,39 +97,39 @@ function collectSweep(
   passthrough: string[],
   nullable: string[],
 ): void {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "default":
-      collectSweep(def.innerType as z.ZodType, path, passthrough, nullable);
-      return;
-    case "nullable":
-      nullable.push(path);
-      collectSweep(def.innerType as z.ZodType, path, passthrough, nullable);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      if (node.wrap === "nullable") {
+        nullable.push(path);
+      }
+      collectSweep(node.inner, path, passthrough, nullable);
       return;
     case "array":
-      collectSweep(def.element as z.ZodType, `${path}[]`, passthrough, nullable);
+      collectSweep(node.element, `${path}[]`, passthrough, nullable);
       return;
     case "union":
-      for (const option of def.options ?? []) {
+      for (const option of node.options) {
         collectSweep(option, path, passthrough, nullable);
       }
       return;
     case "object": {
-      if (def.catchall !== undefined && defOf(def.catchall).type !== "never") {
+      if (node.open) {
         passthrough.push(path);
         return;
       }
-      for (const [key, child] of Object.entries(def.shape ?? {})) {
+      for (const [key, child] of Object.entries(node.shape)) {
         collectSweep(child, path === "" ? key : `${path}.${key}`, passthrough, nullable);
       }
       return;
     }
     case "record":
-    case "unknown":
       passthrough.push(path);
       return;
-    default:
+    case "leaf":
+      if (node.type === "unknown") {
+        passthrough.push(path);
+      }
       return;
   }
 }

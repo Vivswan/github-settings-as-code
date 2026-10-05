@@ -29,22 +29,10 @@ import { PagesConfig } from "../src/sections/pages/schema.js";
 import { RepositoryConfig } from "../src/sections/repository/schema.js";
 import { RulesetConfig } from "../src/sections/rulesets/schema.js";
 import { SecretScanningPatternConfig } from "../src/sections/secret_scanning_custom_patterns/schema.js";
+import { schemaNode } from "../src/sections/shared/schema-node.js";
 import { TeamConfig } from "../src/sections/teams/schema.js";
 import { WebhookConfig } from "../src/sections/webhooks/schema.js";
 import { WorkflowsConfig } from "../src/sections/workflows/schema.js";
-
-/** The zod internals the unwrap below reads (the loosen() idiom). */
-interface ZodDefView {
-  type?: string;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  element?: z.ZodType;
-  shape?: Record<string, z.ZodType>;
-}
-
-function defOf(schema: z.ZodType): ZodDefView {
-  return (schema as unknown as { _zod: { def: ZodDefView } })._zod.def;
-}
 
 /**
  * Keyed over SectionKey, so a new section fails to compile here until its expectation is declared.
@@ -90,31 +78,34 @@ const EXPECTED: Record<
 describe("SettingsFile slice composition identity", () => {
   for (const key of SECTION_KEYS) {
     test(`${key} is composed from its section's slice export`, () => {
-      const property = SettingsFile.shape[key] as z.ZodType;
-      const propertyDef = defOf(property);
-      expect(propertyDef.type, `${key}: the property must be .optional()`).toBe("optional");
-      const inner = propertyDef.innerType as z.ZodType;
+      const property = schemaNode(SettingsFile.shape[key] as z.ZodType);
+      expect(
+        property.kind === "wrapper" && property.wrap === "optional",
+        `${key}: the property must be .optional()`,
+      ).toBe(true);
+      if (property.kind !== "wrapper") {
+        return;
+      }
       const expected = EXPECTED[key];
       if (expected.kind === "slice") {
         expect(
-          inner === expected.slice,
+          property.inner === expected.slice,
           `${key}: the property's inner schema is not the section's slice export instance`,
         ).toBe(true);
         return;
       }
       // knobbed() and layeredList() build the inner union in root, so identity holds one level down.
-      const innerDef = defOf(inner);
-      expect(innerDef.type, `${key}: the wrapped property must wrap a union`).toBe("union");
-      const options = innerDef.options ?? [];
-      const list = options.find((option) => defOf(option).type === "array");
-      const wrapper = options.find((option) => defOf(option).type === "object");
-      expect(list !== undefined && wrapper !== undefined, `${key}: wrapper branches missing`).toBe(
-        true,
-      );
-      const entries = defOf(wrapper as z.ZodType).shape?.entries as z.ZodType;
+      const inner = schemaNode(property.inner);
+      expect(inner.kind, `${key}: the wrapped property must wrap a union`).toBe("union");
+      const knob = inner.kind === "union" ? inner.knob : null;
+      expect(knob !== null, `${key}: wrapper branches missing`).toBe(true);
+      if (knob === null) {
+        return;
+      }
+      const entries = knob.wrapper.shape.entries as z.ZodType;
       if (expected.kind === "layered") {
         expect(
-          list === expected.slice,
+          knob.list === expected.slice,
           `${key}: the plain-array branch is not the section's list slice instance`,
         ).toBe(true);
         expect(
@@ -124,11 +115,12 @@ describe("SettingsFile slice composition identity", () => {
         return;
       }
       expect(
-        defOf(list as z.ZodType).element === expected.entry,
+        knob.list.element === expected.entry,
         `${key}: the plain-array branch's element is not the entry slice instance`,
       ).toBe(true);
+      const entriesNode = schemaNode(entries);
       expect(
-        defOf(entries).element === expected.entry,
+        entriesNode.kind === "array" && entriesNode.element === expected.entry,
         `${key}: the wrapper's entries element is not the entry slice instance`,
       ).toBe(true);
     });
