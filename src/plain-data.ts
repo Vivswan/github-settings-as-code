@@ -8,18 +8,13 @@
 declare const provedPlain: unique symbol;
 
 /**
- * The brand's carrier, named so a bundled declaration can print it (it cannot spell the unexported symbol).
- * A type-level mark only: no runtime field, so a branded document still spreads and serializes as written.
- */
-export type PlainProof = { readonly [provedPlain]: true };
-
-/**
  * The proof that engine/validate.ts walked a parsed document and found only plain YAML data (no tagged value, no
  * alias cycle, no list with a hole, nothing JSON cannot carry). validateSectionShapes is the ONE mint; the
  * ValidatedSettings document (engine/orchestrate.ts) is built from a ProvedPlain value and nothing else, so a
- * document that skipped the walk cannot become planner input.
+ * document that skipped the walk cannot become planner input. A type-level mark only: no runtime field, so a
+ * branded document still spreads and serializes as written.
  */
-export type ProvedPlain<T> = T & PlainProof;
+export type ProvedPlain<T> = T & { readonly [provedPlain]: true };
 
 /**
  * A YAML tag (!!timestamp, !!set) parses to a Date or Set, an object too; spread as a mapping it would become `{}` and

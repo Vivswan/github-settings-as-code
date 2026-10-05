@@ -1,7 +1,7 @@
 /**
  * Each proof brand is minted at ONE site, the validator's success return, and every other value carrying it is read
  * off that document: the validated brand (ValidatedInput, ValidatedBrand, ValidatedSettings) at validateSettingsDoc's
- * mint, the plainness proof (ProvedPlain, PlainProof) at validateSectionShapes'. A cast to a branded type anywhere
+ * mint, the plainness proof (ProvedPlain) at validateSectionShapes'. A cast to a branded type anywhere
  * else is a second mint that skips the checks the brand stands for, so the tree is scanned for one.
  *
  * Scope: the scan catches casts written in the ordinary form (`as`, `<T>`) to the brand or to a type that carries it
@@ -41,7 +41,7 @@ const VALIDATED: Brand = {
 };
 
 const PROVED_PLAIN: Brand = {
-  names: ["PlainProof", "ProvedPlain", "provedPlain"],
+  names: ["ProvedPlain", "provedPlain"],
   mint: {
     file: "src/engine/validate.ts",
     within: "validateSectionShapes",
