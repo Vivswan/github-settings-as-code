@@ -39,10 +39,9 @@ Code is the source of truth: this section holds only the rules and the decisions
 - Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them.
 - `lib/index.js`, `lib/settings.schema.json`, and `lib/pkg/` are built, never committed on main.
 - Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`failureFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
-- A malformation in a settings file or an input with one unambiguous repair (an identical duplicate entry, surrounding whitespace, an enum value off only by case) is healed where it is parsed
-  and the repair reported in the run output, the healing step's comment stating this rule in one line.
-  One with no single repair is refused there, naming the key and the fix, never discovered at apply time:
-  GET-only fields, other enum violations, contradictory key pairs, and unknown keys in a closed GitHub shape have none, since dropping or guessing a value discards what the author wrote.
+- What can be known wrong from the settings file or the run inputs alone is refused when the file is parsed, naming the key and the fix, never discovered at apply time:
+  GET-only fields, enum violations, contradictory key pairs, unknown keys in a closed GitHub shape.
+  Healing is for state this repository owns; the settings file and the inputs are the user's and are refused, never repaired.
   Open passthrough shapes keep unknown keys and note them at check time when GitHub does not echo them back.
 - The import layering of `src/` is declared in `architecture.yml`; a new cross-layer import is a deliberate edit to that file.
 - A type a section module exposes is exported from its home module, or the bundled declarations cannot reach it and the package-smoke job fails.
