@@ -223,8 +223,11 @@ type _RoutedScalarsSound = MustBeNever<Exclude<RoutedScalarKey, keyof Environmen
 // A key in both strip lists would be claimed by whichever loop ran first and never reach the other's handling.
 type _StripListsDisjoint = MustBeNever<Extract<NestedKey, RoutedScalarKey>>;
 
+/** What rides the environment PUT body: the entry minus its name, the nested lists, and the routed scalars. */
+export type EnvironmentSettings = Omit<EnvironmentConfig, "name" | NestedKey | RoutedScalarKey>;
+
 export function splitEntry(env: EnvironmentConfig): {
-  settings: Record<string, unknown>;
+  settings: EnvironmentSettings;
   nested: Pick<EnvironmentConfig, NestedKey>;
   routed: Pick<EnvironmentConfig, RoutedScalarKey>;
 } {
@@ -243,7 +246,7 @@ export function splitEntry(env: EnvironmentConfig): {
       delete settings[key];
     }
   }
-  return { settings: settings as Record<string, unknown>, nested, routed };
+  return { settings, nested, routed };
 }
 
 /** One environment's live Actions variables. */

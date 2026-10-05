@@ -8,7 +8,7 @@ import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { CheckSuitePreferencesConfig } from "./schema.js";
 
 const permission: SectionPermission = { repo: ["checks"] };
@@ -44,7 +44,7 @@ export const checkSuitePreferencesSection = {
     );
     plan.ops.push({
       role: "update",
-      payload: plainData(desired),
+      payload: desired,
       describe: "setting check suite preferences",
       drift: [],
       change: (response) => {

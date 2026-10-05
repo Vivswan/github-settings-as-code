@@ -50,13 +50,14 @@ export type PlainData =
   | { readonly [key: string]: PlainData | undefined };
 
 /**
- * The document was proved plain before any section planned (engine/validate.ts, the ProvedPlain brand), but the
- * proof stops at the declared value: a body is assembled from `unknown`-typed fields as a `Record<string, unknown>`
- * that carries no brand, so the walk runs once more here. What can still reach a refusal, none of it a settings file:
+ * The runtime proof for a body the types cannot vouch for. A body built from declared values and literals is
+ * PlainData by type alone (PlainTyped in ./module.ts reads the validated document's `unknown` leaves as the walk
+ * proved them), so it skips this walk; a body that erased its typing on the way to the wire comes through here.
+ * What can still reach a refusal, none of it a settings file:
  *
- *   a section's own assembly (a lens's wire or recreate, a hand-built test declaration)  -> a non-plain value
- *   a library caller's getter answering differently than under the walk                  -> the same, after the proof
- *   a library caller assigning a field after the walk                                    -> the same, after the proof
+ *   a lens's wire or recreate output, typed as erased fields              -> a non-plain value of the lens's making
+ *   a secret-resolved write, rebuilt field by field from the erased view  -> the same
+ *   a library caller's getter answering differently than under the walk  -> the same, after the proof
  */
 export function plainData(value: unknown): PlainData {
   const render = (path: readonly (string | number)[]): string =>

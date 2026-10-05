@@ -16,9 +16,9 @@ import type { SectionPermission } from "../contract/permissions.js";
 import {
   type ChangeLines,
   hasDrift,
+  type PlainData,
   type PlanContext,
   type PlannedOp,
-  plainData,
   type Read,
   type SectionPlan,
 } from "../contract/plan.js";
@@ -474,12 +474,9 @@ export const repositorySection = {
     return safeTry(async function* () {
       const plan: RepositoryPlan = { ops: [], notes: [], drift: [] };
       const desired: Record<string, unknown> = declared;
-      const patch: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(desired)) {
-        if (!SPECIAL_KEYS.has(key)) {
-          patch[key] = value;
-        }
-      }
+      const patch: Record<string, PlainData | undefined> = Object.fromEntries(
+        Object.entries(declared).filter(([key]) => !SPECIAL_KEYS.has(key)),
+      );
 
       const live = yield* ctx.read.get.call(LiveRepository);
       if (Object.keys(patch).length > 0) {
@@ -495,7 +492,7 @@ export const repositorySection = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "update",
-            payload: plainData(patch),
+            payload: patch,
             drift,
             change: `patched repository fields: ${Object.keys(patch).join(", ")}`,
           });

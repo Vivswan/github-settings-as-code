@@ -3,7 +3,7 @@ import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionModule, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
+import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { PAGES_SITE_SHAPE, PagesConfig } from "./schema.js";
 
@@ -118,7 +118,7 @@ export const pagesSection = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "update",
-            payload: plainData(payload),
+            payload,
             drift,
             change: "updated GitHub Pages configuration",
           });
@@ -137,7 +137,7 @@ export const pagesSection = {
       }
       plan.ops.push({
         role: "create",
-        payload: plainData(create),
+        payload: create,
         drift: [
           "pages: declared in the settings file but GitHub Pages is not enabled on the repo; apply will enable it",
         ],
@@ -147,7 +147,7 @@ export const pagesSection = {
       if (rest.length > 0) {
         plan.ops.push({
           role: "update",
-          payload: plainData(payload),
+          payload,
           drift: [
             `pages: the create call takes only build_type and source, so apply will then set the remaining configuration (${rest.join(", ")})`,
           ],

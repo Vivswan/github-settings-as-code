@@ -9,9 +9,9 @@ import { type SectionMeta, type SectionModule, valueDrift } from "../contract/mo
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
+  type PlainData,
   type PlanContext,
   type PlannedOp,
-  plainData,
   type SectionPlan,
   type SnapshotContext,
 } from "../contract/plan.js";
@@ -269,7 +269,7 @@ export function endpointRouted<
     read: (live: Live) => ActionsConfig[K];
   } & (NonNullable<ActionsConfig[K]> extends Record<string, unknown>
     ? {
-        body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown>;
+        body?: (declared: NonNullable<ActionsConfig[K]>) => Record<string, PlainData | undefined>;
         /**
          * The declared mapping's shape and what the note calls the live object: a passthrough key
          * outside the shape that the GET never echoes is noted as never converging, while a key
@@ -278,13 +278,14 @@ export function endpointRouted<
         mapping: { shape: z.ZodObject; noun: string };
       }
     : {
-        body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, unknown>;
+        body: (declared: NonNullable<ActionsConfig[K]>) => Record<string, PlainData | undefined>;
         mapping?: undefined;
       }),
 ): RoutedDestination<K> {
   const body =
     wiring.body ??
-    ((declared: NonNullable<ActionsConfig[K]>) => declared as Record<string, unknown>);
+    ((declared: NonNullable<ActionsConfig[K]>) =>
+      declared as Record<string, PlainData | undefined>);
   return {
     plan: async (ctx, _section, declared, plan) =>
       ctx.read[wiring.get].call(wiring.live).andThen((live) => {
@@ -304,7 +305,7 @@ export function endpointRouted<
         if (hasDrift(drift)) {
           plan.ops.push({
             role: wiring.put,
-            payload: plainData(payload),
+            payload,
             describe: wiring.describe,
             drift,
             change: wiring.applied,
@@ -342,7 +343,7 @@ const KEY_DESTINATION = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "putSelected",
-            payload: plainData(declared),
+            payload: declared,
             drift,
             change: "applied selected-actions policy",
           });
@@ -387,7 +388,7 @@ const KEY_DESTINATION = {
   cache: {
     plan: async (ctx, _section, declared, plan) =>
       safeTry(async function* () {
-        const cache = declared as Record<string, unknown>;
+        const cache: Record<string, PlainData | undefined> = declared;
         for (const [key, wiring] of Object.entries(CACHE_ENDPOINT_BY_KEY)) {
           if (!(key in cache)) {
             continue;
@@ -398,7 +399,7 @@ const KEY_DESTINATION = {
           if (hasDrift(drift)) {
             plan.ops.push({
               role: wiring.put,
-              payload: plainData(body),
+              payload: body,
               describe: `setting the cache ${wiring.label} limit`,
               drift,
               change: `applied cache ${wiring.label} limit`,
@@ -464,7 +465,7 @@ const KEY_DESTINATION = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "putOidcSub",
-            payload: plainData(declared),
+            payload: declared,
             describe: "customizing the OIDC subject claim",
             drift,
             change: "applied the OIDC subject claim template",
@@ -572,9 +573,9 @@ export const actionsSection = {
     const section = this;
     return safeTry(async function* () {
       const plan: ActionsPlan = { ops: [], notes: [], drift: [] };
-      const permissions: Record<string, unknown> = {};
-      const workflow: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(desired as Record<string, unknown>)) {
+      const permissions: Record<string, PlainData | undefined> = {};
+      const workflow: Record<string, PlainData | undefined> = {};
+      for (const [key, value] of Object.entries(desired)) {
         if (ROUTED_KEY_SET.has(key)) {
           continue;
         }
@@ -620,7 +621,7 @@ export const actionsSection = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "putPermissions",
-            payload: plainData(permissions),
+            payload: permissions,
             drift,
             change: "applied actions permissions",
           });
@@ -635,7 +636,7 @@ export const actionsSection = {
         if (hasDrift(drift)) {
           plan.ops.push({
             role: "putWorkflow",
-            payload: plainData(workflow),
+            payload: workflow,
             drift,
             change: "applied workflow token permissions",
           });

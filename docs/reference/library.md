@@ -291,7 +291,8 @@ const sealed = await encryptReport(recipient, "# report");
 | `sectionModule` | function | One module by key |
 | `SectionModule` | type | A module: its `key`, `endpoints`, `permission`, `plan()`, `snapshot()` when it has one, and `validate()` on a list section (its file-only checks, run by document validation) |
 | `ValidatedInput` | type | What `plan()` takes: one section's value read off a `ValidatedSettings` document (`settings.labels`); only validation mints it, so a hand-built entry list does not compile |
-| `ValidatedBrand` | type | The mark a `ValidatedInput` carries: a type-level property holding the section key the value was validated as, with no runtime field; a declaration spells a planner's input as the section's value `& ValidatedBrand<"labels">` |
+| `ValidatedBrand` | type | The mark a `ValidatedInput` carries: a type-level property holding the section key the value was validated as, with no runtime field; a declaration spells a planner's input as `PlainTyped<` the section's value `> & ValidatedBrand<"labels">` |
+| `PlainTyped` | type | The section's value as a `ValidatedInput` reads it: a leaf the schema left `unknown` (a passthrough key) is plain JSON data, since validation walked it, so a request body built from declared values needs no second check |
 | `SectionInput` | type | The section's value without the brand, as the schema types it; what a list module's `validate()` hook takes, since it runs inside validation |
 | `sectionGrant` | function | The PAT grant a section needs, as prose |
 | `allEndpoints` | function | Every declared REST route, tagged with its owner |

@@ -26,7 +26,7 @@ import {
 import type { SectionFailure } from "./errors.js";
 import type { GraphqlOpDecl } from "./graphql.js";
 import { grantFor, type SectionPermission } from "./permissions.js";
-import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
+import type { PlainData, PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
 
 interface SectionContextBase {
   api: GitHubClient;
@@ -467,7 +467,23 @@ export type ValidatedInput<K extends SectionKey> = K extends SectionKey
   ? Validated<SectionInput<K>, K>
   : never;
 
-type Validated<T, K extends SectionKey> = T extends null ? null : T & ValidatedBrand<K>;
+type Validated<T, K extends SectionKey> = T extends null ? null : PlainTyped<T> & ValidatedBrand<K>;
+
+/**
+ * The declared shape as the brand's proof lets a planner read it. The checks behind the brand include the plainness
+ * walk (engine/validate.ts), which found plain data at every leaf the schema left `unknown` (a catchall, a
+ * passthrough record), so such a leaf reads as PlainData here. A request body assembled from declared values and
+ * literals is then PlainData by type alone, with no second walk; a body carrying a part the types do not constrain
+ * (a live `unknown` field copied back, a lens's wire) still proves itself through plainData() (./plan.ts).
+ *
+ * The leaf admits `undefined` too: a catchall's index signature must take what every optional named key beside it
+ * can hold, or the bundled declaration, which spells the mapped type out, fails a strict consumer's compile.
+ */
+export type PlainTyped<T> = unknown extends T
+  ? PlainData | undefined
+  : T extends object
+    ? { [P in keyof T]: PlainTyped<T[P]> }
+    : T;
 
 interface SectionModuleBase<
   K extends SectionKey = SectionKey,
@@ -740,9 +756,10 @@ export interface DeclaredSecretValue {
 }
 
 /**
- * The secret values of a list section's declared value, one `extract` per entry. DEFENSIVE by contract:
- * secretValues runs before shape validation, so a malformed container or entry contributes nothing
- * rather than throwing, and the actionable error always comes from validation.
+ * The secret values of a list section's declared value, one `extract` per entry. The engine hands it zod's output
+ * (engine/validate.ts after the shape parse, engine/secrets.ts the validated document), but the erased list
+ * declaration and a library caller of sectionModule() reach it as `unknown`, so a malformed container or entry
+ * contributes nothing rather than throwing, and the actionable error always comes from validation.
  */
 export function secretValuesOf(
   declared: unknown,

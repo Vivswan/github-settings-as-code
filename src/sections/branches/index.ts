@@ -18,11 +18,12 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   identifiedBy,
   listEntries,
+  type PlainTyped,
   type SectionMeta,
   type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
-import { plainData, type Read } from "../contract/plan.js";
+import type { Read } from "../contract/plan.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
@@ -247,10 +248,13 @@ export type ClassifiedEntry =
   | { kind: "wildcard"; branch: BranchConfig; graphqlRun: GraphqlRun }
   | {
       kind: "routed";
-      branch: { name: string; protection: RoutedProtection };
+      branch: { name: string; protection: PlainTyped<RoutedProtection> };
       graphqlRun: GraphqlRun;
     }
-  | { kind: "literal"; branch: { name: string; protection: RestOnlyProtection | null } };
+  | {
+      kind: "literal";
+      branch: { name: string; protection: PlainTyped<RestOnlyProtection> | null };
+    };
 
 const WILDCARD_KEY_ERROR = (name: string, key: string): string =>
   `the wildcard entry "${name}" declares protection.${key}, which this section does not manage on wildcard rules; ` +
@@ -333,7 +337,7 @@ export const branchesSection = {
       let graphqlRun: GraphqlRun | null = null;
       const entries: ClassifiedEntry[] = [];
       for (const branch of branches) {
-        const protection: SplitProtection | null = branch.protection;
+        const protection: PlainTyped<SplitProtection> | null = branch.protection;
         if (isWildcardPattern(branch.name)) {
           graphqlRun ??= yield* startGraphqlRun(ctx);
           entries.push({ kind: "wildcard", branch, graphqlRun });
@@ -530,7 +534,7 @@ async function planLiteralEntry(
       plan.ops.push({
         role: "putProtection",
         params,
-        payload: plainData(payload),
+        payload,
         describe: `replacing protection for branch "${branch.name}"`,
         drift: [
           `branches[${branch.name}]: unprotected live but the settings file declares protection; apply will protect it`,
@@ -567,7 +571,7 @@ async function planLiteralEntry(
         plan.ops.push({
           role: "putProtection",
           params,
-          payload: plainData(payload),
+          payload,
           describe: `replacing protection for branch "${branch.name}"`,
           drift,
           change: `applied protection to "${branch.name}"`,
