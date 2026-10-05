@@ -99,10 +99,10 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue, kind: WrapperKind): string 
 }
 
 /**
- * The bare list beside its strict wrapper, whose keys `shape` chooses around `entries`. loosen() (../contract/module.ts)
- * and engine/canonical.ts recognize the union by the wrapper's `entries`. The wrapper's definition name derives from
- * the list element's own .meta({id}), so the document composition and a section's runtime derivation can never label
- * one entry differently.
+ * The bare list beside its strict wrapper, whose keys `shape` chooses around `entries`. schemaNode() (./schema-node.ts)
+ * recognizes the union as a knob by the wrapper's `entries`. The wrapper's definition name derives from the list
+ * element's own .meta({id}), so the document composition and a section's runtime derivation can never label one
+ * entry differently.
  *
  *   element without an id                      -> throws at MODULE LOAD, not typecheck
  *   z.toJSONSchema(SettingsFile)               -> fine: it resolves metadata by schema identity
