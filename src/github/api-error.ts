@@ -101,7 +101,8 @@ export function apiErrorFromHttp(error: OctokitHttpError, carriesSecret: boolean
   // advice, so the headers and errors[] decide first.
   //   retry-after, errors[].type RATE_LIMITED, "secondary rate"  -> definitive: no documented permission 403 carries any of them
   //   a secret echoing "secondary rate"                          -> cannot spoof: a permission 403 never echoes the payload
-  //   x-ratelimit-remaining: 0                                   -> rides a permission 403 on the token's last quota unit too; only a withheld body accepts it
+  //   x-ratelimit-remaining: 0                                   -> rides a permission 403 on the token's last quota unit too;
+  //                                                                 only a withheld body accepts it
   const errorsRateLimited =
     typeof body === "object" &&
     body !== null &&

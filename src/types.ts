@@ -13,7 +13,10 @@ export type UndeclaredPolicy = "keep" | "delete";
 export interface UndeclaredPolicyList<E> {
   _undeclared?: UndeclaredPolicy;
   entries: E[];
-  /** Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()); the values are LAYERINGS in src/sections/shared/schema-helpers.ts, pinned there. */
+  /**
+   * Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()); the values are LAYERINGS in
+   * src/sections/shared/schema-helpers.ts, pinned in src/sections/contract/module.ts.
+   */
   _layering?: "replace" | "shallow" | "deep";
 }
 

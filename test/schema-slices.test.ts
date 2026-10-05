@@ -1,6 +1,6 @@
 /**
- * The type-level SliceDerivation pin in src/schema.ts is structural, so a type-identical LOOKALIKE schema (a slice minus its refinements) would still
- * typecheck; this asserts OBJECT IDENTITY instead.
+ * The type-level SliceDerivation pin in src/schema.ts is structural, so a type-identical LOOKALIKE schema (a slice
+ * minus its refinements) would still typecheck; this asserts OBJECT IDENTITY instead.
  */
 
 import { describe, expect, test } from "bun:test";

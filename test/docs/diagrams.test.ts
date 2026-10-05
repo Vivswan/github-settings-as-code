@@ -34,7 +34,8 @@ function exportsSymbol(file: string, name: string): boolean {
 const NODE_DEFINITION = /(?<![\w"-])([A-Za-z_][\w-]*)([[({>]+)(?![-|])/g;
 
 /**
- * A mermaid block's node labels, standalone or inline on an edge line; an unquoted label is invisible to the pins, so it is reported instead of read.
+ * A mermaid block's node labels, standalone or inline on an edge line; an unquoted label is invisible to the pins,
+ * so it is reported instead of read.
  */
 function nodeLabels(mermaid: string): { labels: string[]; problems: string[] } {
   const labels: string[] = [];

@@ -72,7 +72,6 @@ function isRemoval(entry: unknown): entry is Readonly<Record<string, unknown>> {
   return isPlainObject(entry) && entry[REMOVE_KEY] === true;
 }
 
-/** What the fold knows inside one keyed entry, at `prefix` below the entry's top: the nested keyed lists its module declares (reachable at the top only). */
 interface EntryScope {
   readonly nested: Readonly<Record<string, KeyedListLayering>> | undefined;
   readonly prefix: string;
@@ -92,7 +91,10 @@ function nestedList(scope: EntryScope | undefined, key: string): KeyedListLayeri
     : own(scope.nested, key);
 }
 
-/** Value-free under the refusals' invariant (`Refusal` in admit.ts): mode: render has no redaction context, so no document value may reach a log through the merge. */
+/**
+ * Value-free under the refusals' invariant (`Refusal` in admit.ts): mode: render has no redaction context, so no
+ * document value may reach a log through the merge.
+ */
 export function describeRemoval(notice: RemovalNotice): string {
   return `${notice.layer}: ${notice.path} carries _remove: true and dropped the entry a lower layer declared under its key`;
 }

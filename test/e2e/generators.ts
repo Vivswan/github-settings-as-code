@@ -1667,24 +1667,25 @@ export interface MergeLayer {
 /**
  * Each is refused with a message naming the layer: at the layer boundary, by the layer's own validation (null-section),
  * or by the fold (remove-unmatched). A reference cycle cannot be spelled in scenario JSON, so it is not generated.
- *
- * duplicate-rule-type / duplicate-label      -> two entries of one keyed list sharing a key (rules by type, labels by case-folded name)
- * bad-wrapper-layering / bad-file-layering   -> a directive value outside replace|shallow|deep (the retired `merge` among them)
- * bad-file-undeclared                        -> a top-level `_undeclared` outside keep|delete (null among them: the knob has no empty state)
- * remove-under-replace                       -> a `_remove: true` entry in a list whose effective directive is replace
- * remove-unmatched                           -> a `_remove: true` entry no lower layer declares a key for
- * remove-with-fields                         -> a `_remove: true` entry carrying a field beside its key
- * null-section                               -> a whole-section null on a section whose value null is not
  */
 export const MERGE_REFUSAL_KINDS = [
+  /** Two entries of one keyed list sharing a key: rules, by type. */
   "duplicate-rule-type",
+  /** Two entries of one keyed list sharing a key: labels, by case-folded name. */
   "duplicate-label",
+  /** A wrapper's `_layering` outside replace|shallow|deep. */
   "bad-wrapper-layering",
+  /** A file's top-level `_layering` outside replace|shallow|deep. */
   "bad-file-layering",
+  /** A top-level `_undeclared` outside keep|delete (null among them: the knob has no empty state). */
   "bad-file-undeclared",
+  /** A `_remove: true` entry in a list whose effective directive is replace. */
   "remove-under-replace",
+  /** A `_remove: true` entry no lower layer declares a key for. */
   "remove-unmatched",
+  /** A `_remove: true` entry carrying a field beside its key. */
   "remove-with-fields",
+  /** A whole-section null on a section whose value null is not. */
   "null-section",
 ] as const;
 type MergeRefusalKind = (typeof MERGE_REFUSAL_KINDS)[number];
@@ -1701,7 +1702,10 @@ export const MERGE_FEATURES = [
   "union-labels",
   /** Rulesets declared under an effective shallow or deep layering while the fold holds rulesets. */
   "union-rulesets",
-  /** Environments declared under an effective shallow or deep layering while the fold holds environments: a plain-list union, its nested lists with it under deep. */
+  /**
+   * Environments declared under an effective shallow or deep layering while the fold holds environments: a plain-list
+   * union, its nested lists with it under deep.
+   */
   "union-environments",
   /** A plain-list section (environments, branches, workflows) drawn in its `{_layering, entries}` wrapper form. */
   "wrapper-layered",
@@ -1855,7 +1859,10 @@ function mergeLayerName(index: number, count: number): string {
   return index === count - 1 ? "settings.yml" : `layer-${index}.yml`;
 }
 
-/** Every nested key path through a mapping section's plain mappings; lists are data to the merge, so the walk never enters one, nor a list section's wrapper. */
+/**
+ * Every nested key path through a mapping section's plain mappings; lists are data to the merge, so the walk never
+ * enters one, nor a list section's wrapper.
+ */
 function nestedMappingPaths(doc: Json): string[][] {
   const paths: string[][] = [];
   const walk = (value: unknown, path: string[]): void => {

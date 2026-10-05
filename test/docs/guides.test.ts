@@ -128,8 +128,8 @@ function linesOutsideFences(markdown: string, source: string): string[] {
 }
 
 /**
- * HTMLRewriter hands back the attribute's source text, so character references (semicolon-less legacy named entities included) are decoded here under
- * the spec's attribute-value rules.
+ * HTMLRewriter hands back the attribute's source text, so character references (semicolon-less legacy named entities
+ * included) are decoded here under the spec's attribute-value rules.
  */
 function decodeAttribute(raw: string): string {
   return decodeHTML(raw, DecodingMode.Attribute);
@@ -168,8 +168,8 @@ const SITE_ROOT = "/docs-root-7c1e/";
 
 /**
  * Relative links in the docs/ page at `page` that resolve outside docs/.
- * Resolution is the WHATWG URL parser's, as a browser does it; the published site is built from docs/ alone, so a link to the README, COVERAGE.md, or
- * lib/ has nothing to land on there.
+ * Resolution is the WHATWG URL parser's, as a browser does it; the published site is built from docs/ alone, so a link
+ * to the README, COVERAGE.md, or lib/ has nothing to land on there.
  */
 async function linksLeavingDocs(markdown: string, page: string): Promise<string[]> {
   const base = new URL(`${SITE_ROOT}${page}`, SITE_ORIGIN);
@@ -448,7 +448,10 @@ describe("docs/ guide pages", () => {
     expect(offenders).toEqual([]);
   });
 
-  /** Every file release-please's generic updater may rewrite, the snapshot flow's schema-hint source included; both marker tests iterate this one list. */
+  /**
+   * Every file release-please's generic updater may rewrite, the snapshot flow's schema-hint source included; both
+   * marker tests iterate this one list.
+   */
   function markerScanFiles(): Array<{ label: string; path: string }> {
     const rootPages = readdirSync(ROOT)
       .filter((name) => name.endsWith(".md"))

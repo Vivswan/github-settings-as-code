@@ -203,7 +203,10 @@ const uploadSteps = (workflows: Workflows) =>
     ),
   );
 
-/** A path block is one pattern per line, read in its normalized spelling: the guards match on prefixes, so ./test/e2e/x would slip past test/e2e/ otherwise. */
+/**
+ * A path block is one pattern per line, read in its normalized spelling: the guards match on prefixes, so ./test/e2e/x
+ * would slip past test/e2e/ otherwise.
+ */
 const patternsOf = (path: unknown) =>
   String(path ?? "")
     .split("\n")
