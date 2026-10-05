@@ -614,11 +614,15 @@ export interface DiscoveryFilters {
 }
 
 /**
- * An INDEPENDENT glob matcher, deliberately not src's excludeMatches (a RegExp compile), so a bug in
- * either surfaces as a disagreement. A pattern with "/" matches the full slug, otherwise the name
- * portion, mirroring the repos-dir <name>.yml vs <owner>/<name>.yml split.
+ * An INDEPENDENT glob matcher, deliberately not src's compileExcludePattern (a picomatch compile), so a bug in
+ * either surfaces as a disagreement; it covers the forms the scenarios write ("*", "?", a leading "!"), not
+ * the whole picomatch grammar. A pattern with "/" matches the full slug, otherwise the name portion,
+ * mirroring the repos-dir <name>.yml vs <owner>/<name>.yml split.
  */
 function globMatches(pattern: string, slug: string): boolean {
+  if (pattern.startsWith("!")) {
+    return !globMatches(pattern.slice(1), slug);
+  }
   const target = (pattern.includes("/") ? slug : (slug.split("/")[1] ?? slug)).toLowerCase();
   const pat = pattern.toLowerCase();
   let p = 0;
@@ -626,7 +630,7 @@ function globMatches(pattern: string, slug: string): boolean {
   let star = -1;
   let mark = 0;
   while (t < target.length) {
-    if (p < pat.length && (pat[p] === target[t] || pat[p] === "*")) {
+    if (p < pat.length && (pat[p] === target[t] || pat[p] === "*" || pat[p] === "?")) {
       if (pat[p] === "*") {
         star = p;
         mark = t;

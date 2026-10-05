@@ -127,8 +127,15 @@ const SPECIMENS = {
     'the "affiliation" input entry "member" is not a supported affiliation, so discovery cannot build the /user/repos query. Use a comma-separated list of "owner", "collaborator", "organization_member"',
   ],
   "input-exclude-pattern-invalid": [
-    { code: "input-exclude-pattern-invalid", pattern: "a/b/c" },
-    'the "exclude" input pattern "a/b/c" can never match an owner/name repository: a pattern takes at most one "/", with a non-empty glob on each side of it. Use "<name-glob>" or "<owner-glob>/<name-glob>", where "*" matches any characters',
+    {
+      code: "input-exclude-pattern-invalid",
+      pattern: "a/b/c",
+      reason: 'it takes at most one "/", with a non-empty glob on each side of it',
+    },
+    'the "exclude" input pattern "a/b/c" is not a usable glob: it takes at most one "/", with a non-empty glob ' +
+      'on each side of it. Write "<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ' +
+      '".", "-", "_", "*", "?", and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one ' +
+      'optional leading "!" negating the whole pattern',
   ],
   "discovery-filters-without-wildcard": [
     { code: "discovery-filters-without-wildcard", filters: ["forks"], targets: "single-repo" },

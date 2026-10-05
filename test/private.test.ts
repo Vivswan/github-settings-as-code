@@ -33,6 +33,7 @@ const OPENER_IMPORTERS: Record<string, string[]> = {
     "DEFAULT_DISCOVERY_FILTERS",
     "FORKS_FILTERS",
     "VISIBILITY_FILTERS",
+    "compileExcludePattern",
     "discoverRepos",
     "excludeMatches",
     "formatSkipNotice",

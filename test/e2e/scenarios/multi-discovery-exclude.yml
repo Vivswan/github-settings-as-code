@@ -1,0 +1,57 @@
+# Multi-repo repos: "*" discovery with exclude globs. The pool carries two
+# managed services, tmp-1, tmp-20, and legacy-old. "tmp-?" matches one
+# character after the dash, so it drops tmp-1 and keeps tmp-20, and
+# "E2E-Owner/legacy-*" matches the whole owner/name case-insensitively. The
+# action must issue zero requests to the two excluded repos, and the skip notice
+# names the pattern that fired.
+name: multi-discovery-exclude
+settings: {}
+discovery:
+  inputs:
+    exclude: "tmp-?,E2E-Owner/legacy-*"
+  pool:
+    - {slug: e2e-owner/svc-a}
+    - {slug: e2e-owner/svc-b}
+    - {slug: e2e-owner/tmp-1}
+    - {slug: e2e-owner/tmp-20}
+    - {slug: e2e-owner/legacy-old}
+repos:
+  e2e-owner/svc-a:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+  e2e-owner/svc-b:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+  e2e-owner/tmp-20:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+token_permissions:
+  issues: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  repos_result:
+    e2e-owner/svc-a: applied
+    e2e-owner/svc-b: applied
+    e2e-owner/tmp-20: applied
+  stdout_contains:
+    - 'skipped 1 repository by exclude pattern "tmp-?": e2e-owner/tmp-1'
+    - 'skipped 1 repository by exclude pattern "E2E-Owner/legacy-*": e2e-owner/legacy-old'
+  never:
+    - "GET /repos/e2e-owner/tmp-1"
+    - "GET /repos/e2e-owner/legacy-old"
+  requests_contain:
+    - "GET /user/repos"

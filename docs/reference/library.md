@@ -246,6 +246,8 @@ const renderExitCode = runRender(
 | `discoverRepos` | function | The repositories a token can see, filtered |
 | `DiscoveryFilters` | type | The filters: `visibility`, `archived`, `forks`, `affiliation`, `topics`, `exclude` |
 | `DEFAULT_DISCOVERY_FILTERS` | const | The action's defaults |
+| `compileExcludePattern` | function | One `exclude` glob compiled once, or the problem naming why it is unusable and the fix |
+| `ExcludePattern` | type | A compiled `exclude` entry: the operator's text, the scope its slash chose, and the regex |
 | `parseReposInput` | function | The `repos` input form: slugs, or `"*"` for discovery |
 | `resolveCentralTargets` | function | The `<owner>/<name>.yml` files of a repos-dir as targets, with warnings for the files it skipped |
 | `dedupeTargets` | function | Merge the central and the remote targets, central first; a remote target whose slug a central one already names is dropped with a notice |

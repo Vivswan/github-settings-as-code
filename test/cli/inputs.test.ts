@@ -485,7 +485,8 @@ describe("the per-mode flag split", () => {
     exclude: {
       argv: discovery,
       pair: ["x/*", "tmp-*"],
-      kept: (cfg) => (cfg.kind === "multi" ? cfg.discoveryFilters.exclude : []),
+      kept: (cfg) =>
+        cfg.kind === "multi" ? cfg.discoveryFilters.exclude.map((e) => e.pattern) : [],
     },
     topics: {
       argv: discovery,

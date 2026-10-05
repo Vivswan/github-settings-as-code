@@ -156,6 +156,7 @@ describe("run in multi-repo mode (env glue)", () => {
   const EXCLUDE = (pattern: string): Problem => ({
     code: "input-exclude-pattern-invalid",
     pattern,
+    reason: 'it takes at most one "/", with a non-empty glob on each side of it',
   });
   // A row names the whole Problem where that is the rule, and a message fragment where the whole message would restate
   // the input's option list or a library's own wording.
@@ -180,6 +181,11 @@ describe("run in multi-repo mode (env glue)", () => {
     ["exclude: a/b/c", { INPUT_REPOS: "*", INPUT_EXCLUDE: "a/b/c" }, EXCLUDE("a/b/c")],
     ["exclude: octo/", { INPUT_REPOS: "*", INPUT_EXCLUDE: "octo/" }, EXCLUDE("octo/")],
     ["exclude: /repo", { INPUT_REPOS: "*", INPUT_EXCLUDE: "/repo" }, EXCLUDE("/repo")],
+    [
+      "exclude: svc-[ab",
+      { INPUT_REPOS: "*", INPUT_EXCLUDE: "svc-[ab" },
+      'the "exclude" input pattern "svc-[ab" is not a usable glob: its "[" at 4 has no partner, so remove it',
+    ],
     [
       "a filter with an explicit repos list",
       { INPUT_REPOS: "o/a", INPUT_FORKS: "exclude" },

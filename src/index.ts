@@ -6,9 +6,11 @@
 
 export { resolveCentralTargets } from "./discovery/central.js";
 export {
+  compileExcludePattern,
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveryFilters,
   discoverRepos,
+  type ExcludePattern,
 } from "./discovery/discover.js";
 export { parseReposInput } from "./discovery/repos-input.js";
 export {
