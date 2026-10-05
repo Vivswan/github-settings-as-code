@@ -14,7 +14,7 @@ import { capture, requireEnv, run } from "./lib/workflow-step.js";
 
 function push(): void {
   // bun has already read its bunfig.toml and .env from the trusted checkout it started in; only git runs in the
-  // PR branch's tree from here on, and a PR cannot put a hook or a config there.
+  // PR branch's tree from here on, with main's environment and no hook or config of that branch.
   process.chdir(requireEnv("PR_CHECKOUT"));
   const token = requireEnv("GH_TOKEN");
   const headRef = requireEnv("HEAD_REF");

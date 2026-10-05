@@ -8,8 +8,8 @@
  *                         GITHUB_OUTPUT
  *
  * FIX_OWNED_PATHS is a security boundary and stays literal here: the patch is cut on a runner PR code ran on, so
- * the push job admits nothing outside it, and it runs this file from the default branch's checkout, so a PR cannot
- * widen the list for its own push. test/scripts/auto-fix-steps.test.ts pins the list and GENERATORS to the
+ * the push job admits nothing outside it, and it runs this file from the default branch's checkout, so the list it
+ * enforces is main's. test/scripts/auto-fix-steps.test.ts pins the list and GENERATORS to the
  * generated-output table (.github/scripts/generated.ts), so a newly registered output cannot slip past either step.
  *
  * Node builtins only: the push job installs nothing, so no git hook or lifecycle script exists where the write
@@ -95,7 +95,7 @@ function rebuild(): void {
 
 function push(): void {
   // bun has already read its bunfig.toml and .env from the trusted checkout it started in; only git runs in the
-  // PR branch's tree from here on, and a PR cannot put a hook or a config there.
+  // PR branch's tree from here on, with main's environment and no hook or config of that branch.
   process.chdir(requireEnv("PR_CHECKOUT"));
   const token = requireEnv("TOKEN");
   const canRetrigger = requireEnv("CAN_RETRIGGER");

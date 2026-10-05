@@ -11,8 +11,10 @@
 # re-checks the applied paths before committing. Both steps' logic is .github/scripts/auto-fix-steps.ts.
 #   --ignore-scripts on the build job's install  -> lefthook and dependency lifecycle scripts never run
 #   no install at all on the push job            -> no git hooks exist where the write token is; bun alone is set up
-#   the push script from the default branch      -> the job executes nothing the PR branch holds: the PR authors the
-#                                                   patch alone, and the fix-owned list the job enforces is main's
+#   the push script from the default branch      -> bun starts in and imports only default-branch code, so no bunfig,
+#                                                   .env, hook, or script of the PR branch runs there; the fix-owned
+#                                                   list the job enforces is main's (a same-repo author can still edit
+#                                                   this workflow file, which predates the split)
 #
 # Dependabot-triggered runs read the Dependabot secrets store, not the Actions one, so REPO_PLATFORM_TOKEN goes in
 # both. A push made with github.token starts no workflows.
@@ -101,8 +103,8 @@ jobs:
       contents: write
       pull-requests: write # the sticky no-retrigger comment below
     steps:
-      # The script that holds the write token comes from the default branch, which a PR cannot edit; the PR branch
-      # is checked out beside it, as the tree the patch applies to.
+      # The script that holds the write token comes from the default branch, so nothing checked out from the PR
+      # branch is executed here; that branch is checked out beside it, as the tree the patch applies to.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}

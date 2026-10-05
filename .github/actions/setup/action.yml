@@ -4,7 +4,8 @@ description: |
 
   The bun version is the one .bun-version pins.
 
-  The install runs bun install --frozen-lockfile --ignore-scripts, so the lockfile never changes and the prepare script (lefthook, a git hook no runner uses) never runs.
+  The install runs bun install --frozen-lockfile --ignore-scripts, so the lockfile never changes and the prepare
+  script (lefthook, a git hook no runner uses) never runs.
 
   The caller keeps its own checkout and setup-node steps, whose options differ per job.
 

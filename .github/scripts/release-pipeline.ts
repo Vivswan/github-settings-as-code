@@ -1253,15 +1253,14 @@ function belowFloor(version: string, floor: string): boolean {
 }
 
 /** An npm at or above `floor` on PATH: an older bundled npm is upgraded once (`npm install -g npm@latest`, on the
- * step's log), then held to the floor; one still below it after that is refused. */
-export function npmFloor(floor = NPM_FLOOR): { version: string; upgraded: boolean } {
+ * step's log), then held to the floor; `atFloor` false is the version still below it after that. */
+export function npmFloor(floor = NPM_FLOOR): { version: string; atFloor: boolean } {
   const read = (): string =>
     execFileSync("npm", ["--version"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "inherit"],
     }).trim();
   let version = read();
-  let upgraded = false;
   if (belowFloor(version, floor)) {
     const install = spawnSync("npm", ["install", "-g", "npm@latest"], { stdio: "inherit" });
     if (install.status !== 0) {
@@ -1273,14 +1272,8 @@ export function npmFloor(floor = NPM_FLOOR): { version: string; upgraded: boolea
       );
     }
     version = read();
-    upgraded = true;
   }
-  if (belowFloor(version, floor)) {
-    throw new Error(
-      `npm ${version} cannot publish through OIDC; trusted publishing needs npm ${floor} or newer.`,
-    );
-  }
-  return { version, upgraded };
+  return { version, atFloor: !belowFloor(version, floor) };
 }
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
@@ -1378,10 +1371,14 @@ async function main(): Promise<void> {
       break;
     }
     case "npm-floor": {
+      // Silent when the floor holds, as the shell step was; the refusal is the annotation it printed.
       const result = npmFloor();
-      console.error(
-        `npm ${result.version} is at or above ${NPM_FLOOR}${result.upgraded ? " after an upgrade" : ""}; it publishes through OIDC`,
-      );
+      if (!result.atFloor) {
+        console.log(
+          `::error::npm ${result.version} cannot publish through OIDC; trusted publishing needs npm ${NPM_FLOOR} or newer.`,
+        );
+        process.exit(1);
+      }
       break;
     }
     case "npm-confirm": {

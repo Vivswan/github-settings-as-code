@@ -1879,21 +1879,15 @@ describe("npmFloor", () => {
       : [];
 
   test.each([
-    [
-      "at the floor",
-      "11.5.1",
-      "11.5.1",
-      0,
-      [],
-      "npm 11.5.1 is at or above 11.5.1; it publishes through OIDC\n",
-    ],
+    ["at the floor", "11.5.1", "11.5.1", 0, [], "", ""],
     [
       "above it by a two-digit minor (numeric, not textual, order)",
       "11.10.0",
       "11.10.0",
       0,
       [],
-      "npm 11.10.0 is at or above 11.5.1; it publishes through OIDC\n",
+      "",
+      "",
     ],
     [
       "below it, with an upgrade that reaches it",
@@ -1901,7 +1895,8 @@ describe("npmFloor", () => {
       "11.6.0",
       0,
       ["install -g npm@latest"],
-      "npm 11.6.0 is at or above 11.5.1 after an upgrade; it publishes through OIDC\n",
+      "",
+      "",
     ],
     [
       "below it, with an upgrade that does not",
@@ -1909,7 +1904,8 @@ describe("npmFloor", () => {
       "10.9.2",
       1,
       ["install -g npm@latest"],
-      "release-pipeline npm-floor: npm 10.9.2 cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+      "::error::npm 10.9.2 cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+      "",
     ],
     [
       "below it, with an upgrade that fails",
@@ -1917,6 +1913,7 @@ describe("npmFloor", () => {
       "fail 7",
       1,
       ["install -g npm@latest"],
+      "",
       "release-pipeline npm-floor: npm 10.9.2 is below 11.5.1 and npm install -g npm@latest exited 7; the publish needs npm 11.5.1 or newer.\n",
     ],
     [
@@ -1925,16 +1922,17 @@ describe("npmFloor", () => {
       "not-a-version",
       1,
       ["install -g npm@latest"],
-      "release-pipeline npm-floor: npm not-a-version cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+      "::error::npm not-a-version cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+      "",
     ],
   ])(
-    "an npm %s: the upgrade runs once at most, and the step passes only once the floor holds",
-    (_, version, after, status, upgrades, stderr) =>
+    "an npm %s: the upgrade runs once at most, the floor holding is silent, and the floor failing is the annotation",
+    (_, version, after, status, upgrades, stdout, stderr) =>
       withTempDir("npm-floor-", async (dir) => {
         const npm = withNpm(dir, version, after);
         expect(
           await subcommand(ROOT, { PATH: `${npm}:${process.env.PATH ?? ""}` }, "npm-floor"),
-        ).toEqual({ stdout: "", stderr, status });
+        ).toEqual({ stdout, stderr, status });
         expect(installs(npm)).toEqual(upgrades);
       }),
   );
