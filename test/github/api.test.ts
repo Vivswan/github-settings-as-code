@@ -1,22 +1,23 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
-  type ApiError,
-  classifyApiError,
   DEFAULT_API_VERSION,
   GitHubApi,
   MAX_RETRIES,
   MAX_RETRY_WAIT_S,
-  redactingOctokitLog,
-  SECRET_RESPONSE_WITHHELD,
-  TraceRedaction,
-  withheld,
 } from "../../src/github/api.js";
+import {
+  type ApiError,
+  classifyApiError,
+  SECRET_RESPONSE_WITHHELD,
+  withheld,
+} from "../../src/github/api-error.js";
 import {
   IMMEDIATE_SCHEDULER,
   type Scheduler,
   TIMERS_SCHEDULER,
 } from "../../src/github/scheduler.js";
+import { redactingOctokitLog, TraceRedaction } from "../../src/github/trace-redaction.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 
 afterEach(restoreFetch);

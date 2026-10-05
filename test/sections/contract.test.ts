@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import {
-  type GitHubClient,
-  SECRET_RESPONSE_WITHHELD,
-  SECRET_TRANSPORT_WITHHELD,
-} from "../../src/github/api.js";
+import type { GitHubClient } from "../../src/github/api.js";
+import { SECRET_RESPONSE_WITHHELD, SECRET_TRANSPORT_WITHHELD } from "../../src/github/api-error.js";
 import { actionsSection } from "../../src/sections/actions/index.js";
 import {
   type EndpointDecl,

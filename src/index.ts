@@ -74,17 +74,15 @@ export {
   type SnapshotConfig,
 } from "./flows/snapshot.js";
 export {
-  type ApiError,
   type ClientAnswer,
   DEFAULT_API_VERSION,
   GitHubApi,
   type GitHubApiOptions,
   type GitHubClient,
   type GraphqlOp,
-  isPermissionError,
-  isRateLimitError,
   type RequestMark,
 } from "./github/api.js";
+export { type ApiError, isPermissionError, isRateLimitError } from "./github/api-error.js";
 export {
   type AnnotationLevel,
   type CollectedLine,

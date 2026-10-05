@@ -4,13 +4,12 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { GraphqlOp } from "../../src/github/api.js";
+import { DEFAULT_API_VERSION, GitHubApi } from "../../src/github/api.js";
 import {
   classifyApiError,
-  DEFAULT_API_VERSION,
-  GitHubApi,
   REDACTED_RESPONSE_WITHHELD,
   SECRET_RESPONSE_WITHHELD,
-} from "../../src/github/api.js";
+} from "../../src/github/api-error.js";
 import { IMMEDIATE_SCHEDULER, TIMERS_SCHEDULER } from "../../src/github/scheduler.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";
 

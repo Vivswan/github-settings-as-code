@@ -7,7 +7,8 @@
 import { ok, type Result, ResultAsync } from "neverthrow";
 import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
-import type { ApiError, GitHubClient } from "../../github/api.js";
+import type { GitHubClient } from "../../github/api.js";
+import type { ApiError } from "../../github/api-error.js";
 import type { SectionKey } from "../../schema.js";
 import {
   type DeclaredErrorStatus,

@@ -1,4 +1,5 @@
-import { DEFAULT_API_VERSION, GitHubApi, type TraceIo } from "../../src/github/api.js";
+import { DEFAULT_API_VERSION, GitHubApi } from "../../src/github/api.js";
+import type { TraceIo } from "../../src/github/trace-redaction.js";
 import { type Io, maskRegistry } from "../../src/io.js";
 
 const realFetch = globalThis.fetch;

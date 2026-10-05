@@ -1,14 +1,13 @@
 import { err, ok, type Result } from "neverthrow";
+import type { ClientAnswer, RequestMark } from "../../github/api.js";
 import {
   type ApiError,
-  type ClientAnswer,
   classifyApiError,
-  type RequestMark,
   SECRET_RESPONSE_WITHHELD,
   SECRET_TRANSPORT_WITHHELD,
   transportFailure,
   withheld,
-} from "../../github/api.js";
+} from "../../github/api-error.js";
 import { paginate } from "../../github/paginate.js";
 import {
   type DeclaredErrorStatus,

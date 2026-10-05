@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import { type GitHubClient, SECRET_RESPONSE_WITHHELD } from "../../../src/github/api.js";
+import type { GitHubClient } from "../../../src/github/api.js";
+import { SECRET_RESPONSE_WITHHELD } from "../../../src/github/api-error.js";
 import { actionsSecretsSection } from "../../../src/sections/actions_secrets/index.js";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { driftOf, type ExecTools, planContext } from "../../../src/sections/contract/plan.js";
