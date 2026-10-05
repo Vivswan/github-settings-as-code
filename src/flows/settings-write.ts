@@ -27,22 +27,20 @@ import {
 import { basename, dirname, join, parse, resolve, sep } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 
+const SEGMENT = sep === "\\" ? /[\\/]/ : sep;
+const SEPARATORS = sep === "\\" ? "\\/" : "/";
+
 /**
- * `path` as the filesystem names it: the real path of what exists, the rest
- * as spelled. Built one segment at a time, so ".." steps out of a symlink's
- * TARGET as the write will: handed "link/../x" whole, bun's realpath collapses
- * the ".." lexically before following the link and names a different file
- * than the one the write reaches. Every step retries realpath, since
- * "missing/../link" is back on existing ground after the "..". The flows
- * compare a destination against the files they read through this name, so a
- * spelling through a symlinked directory (macOS's /tmp for /private/tmp) or a
- * case alias cannot slip a write onto an input.
+ * The real path of what exists, the rest as spelled; snapshot.ts compares destinations that do not exist yet against
+ * authored files by this name. One realpath per segment, not one for the whole path: bun's realpath collapses
+ * `link/../x` to the sibling of `link` before following it, while the rename follows `link` first and lands beside
+ * its target.
  */
 export function canonicalPath(path: string): string {
   // The platform reads the root (a drive-relative "C:x" resolves on that drive); the walk reads the rest.
   const { root } = parse(path);
   let real = realOrSpelled(root === "" ? process.cwd() : resolve(root));
-  for (const part of path.slice(root.length).split(sep === "\\" ? /[\\/]/ : sep)) {
+  for (const part of path.slice(root.length).split(SEGMENT)) {
     if (part === "" || part === ".") {
       continue;
     }
@@ -50,9 +48,6 @@ export function canonicalPath(path: string): string {
   }
   return real;
 }
-
-const SEGMENT = sep === "\\" ? /[\\/]/ : sep;
-const SEPARATORS = sep === "\\" ? "\\/" : "/";
 
 /** `path` without its trailing separators, the root's own kept: basename ignores them, so slicing its length off `out.yml/` would leave `o`. */
 function withoutTrailingSeparators(path: string): string {

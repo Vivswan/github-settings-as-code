@@ -843,6 +843,41 @@ describe("runSnapshot, dir form", () => {
       expect(readFileSync(join(dir, "old", "r.yml"), "utf8")).toBe("labels: []\n");
     }));
 
+  test("a collision whose first claimant is redacted names it by its placeholder; the sealed slug reaches no public surface", () =>
+    withTempDir("snapshot-flow-", async (dir) => {
+      const api = new MockApi({
+        "GET /repos/alice/p": { data: { private: true, visibility: "private" } },
+        "GET /repos/bob/p": { data: { private: false } },
+        ...labelsRoute("alice/p", [BUG]),
+        ...labelsRoute("bob/p", [DOCS]),
+      });
+      const cfg = dirCfg(dir, { reposInput: "alice/p,bob/p" });
+      mkdirSync(join(cfg.snapshotDir, "alice"), { recursive: true });
+      symlinkSync("alice", join(cfg.snapshotDir, "bob"));
+      const collected = collectingIo();
+      expect(await run(api, cfg, collected.io)).toBe(1);
+      expect(collected.lines).toEqual([
+        TAKEN,
+        {
+          level: "error",
+          line:
+            `bob/p: cannot write the snapshot to ${join(cfg.snapshotDir, "bob", "p.yml")}: the filesystem carries it to ` +
+            'the file this run already claimed for private repository #1. Remove the link under the "snapshot-dir" ' +
+            "input that folds the two owners together, so each target has a file of its own",
+        },
+        { line: "result: failed" },
+      ]);
+      const publicText = [
+        ...collected.lines.map((entry) => entry.line),
+        ...collected.summary,
+        ...Object.values(collected.outputs),
+      ].join("\n");
+      expect(publicText).not.toContain("alice/p");
+      expect(parseYaml(readFileSync(join(cfg.snapshotDir, "alice", "p.yml"), "utf8"))).toEqual(
+        doc(BUG),
+      );
+    }));
+
   test("a destination that was a link to another owner's file claims only itself: that owner's own target still writes", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // alice/r.yml -> ../old/r.yml before the run; the rename replaces the link, so old/r.yml is not alice's file and
@@ -1082,27 +1117,37 @@ describe("runSnapshot, dir form", () => {
       expect(publicText).not.toContain("o/p.yml");
     }));
 
-  test("a name that would leave the directory fails its target alone; the rest of the fleet is written", () =>
-    withTempDir("snapshot-flow-", async (dir) => {
-      const api = new MockApi({ ...labelsRoute("o/a", [BUG]) });
-      const cfg = dirCfg(dir, { reposInput: "../escape,o/a", privateRepos: "show" });
-      const collected = collectingIo();
-      expect(await run(api, cfg, collected.io)).toBe(1);
-      expect(existsSync(join(dir, "escape.yml"))).toBe(false);
-      expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
-      expect(collected.lines[1]).toEqual({
-        level: "error",
-        line: `../escape: the repository name "../escape" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
-      });
-      expect(collected.outputs).toEqual({
-        result: "failed",
-        "skipped-sections": "",
-        "repos-result": JSON.stringify({
-          "../escape": { result: "failed", source: "remote", "skipped-sections": [] },
-          "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
-        }),
-      });
-    }));
+  // SLUG_RE admits a "." or ".." segment, so the refusal here is the only thing between such a slug and a file that
+  // leaves the directory (owner "..") or carries a name no GitHub repository has (the others).
+  test.each<[string, (cfg: DirConfig) => string]>([
+    ["../escape", (cfg) => join(dirname(cfg.snapshotDir), "escape.yml")],
+    ["./r", (cfg) => join(cfg.snapshotDir, "r.yml")],
+    ["o/.", (cfg) => join(cfg.snapshotDir, "o", "..yml")],
+    ["o/..", (cfg) => join(cfg.snapshotDir, "o", "...yml")],
+  ])(
+    "the slug %s has no file and fails its target alone; the rest of the fleet is written",
+    (slug, wouldBe) =>
+      withTempDir("snapshot-flow-", async (dir) => {
+        const api = new MockApi({ ...labelsRoute("o/a", [BUG]) });
+        const cfg = dirCfg(dir, { reposInput: `${slug},o/a`, privateRepos: "show" });
+        const collected = collectingIo();
+        expect(await run(api, cfg, collected.io)).toBe(1);
+        expect(existsSync(wouldBe(cfg))).toBe(false);
+        expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
+        expect(collected.lines[1]).toEqual({
+          level: "error",
+          line: `${slug}: the repository name "${slug}" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
+        });
+        expect(collected.outputs).toEqual({
+          result: "failed",
+          "skipped-sections": "",
+          "repos-result": JSON.stringify({
+            [slug]: { result: "failed", source: "remote", "skipped-sections": [] },
+            "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
+          }),
+        });
+      }),
+  );
 
   test("a fleet whose every target fails writes nothing and the summary says so", () =>
     withTempDir("snapshot-flow-", async (dir) => {
