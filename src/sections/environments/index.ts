@@ -24,10 +24,10 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift } from "../contract/plan.js";
+import { upperKey } from "../shared/named-scope.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
-import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
+import { listSecretValues } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
-import { variableKey } from "../shared/variables-engine.js";
 import { ENDPOINTS } from "./endpoints.js";
 import {
   NESTED_KEYS,
@@ -112,11 +112,11 @@ const IDENTITY = identifiedBy("environments", "name", "environment", {
   fold: environmentKey,
   nested: {
     variables: keyedBy("name", {
-      fold: variableKey,
+      fold: upperKey,
       undeclaredDefault: nestedDefaultPolicy("variables"),
     }),
     secrets: keyedBy("name", {
-      fold: secretKey,
+      fold: upperKey,
       undeclaredDefault: nestedDefaultPolicy("secrets"),
     }),
     deployment_branch_policies: keyedBy("name", {

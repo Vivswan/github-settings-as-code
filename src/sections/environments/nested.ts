@@ -10,15 +10,14 @@ import {
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { Read } from "../contract/plan.js";
+import { duplicateNameIssues } from "../shared/named-scope.js";
 import {
-  duplicateSecretNameIssues,
   LiveSecretName,
   planSecrets,
   type SecretsPlanScope,
   secretOps,
 } from "../shared/secrets-engine.js";
 import {
-  duplicateVariableNameIssues,
   LiveVariable,
   planVariables,
   type VariablesPlanScope,
@@ -118,7 +117,7 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     missingNote: (envName) =>
       `environments[${envName}].variables: not verifiable while the environment is missing; apply will create the environment and reconcile the declared variables`,
     validate: (entries, envName) =>
-      duplicateVariableNameIssues(entries, `variable of the "${envName}" environment`),
+      duplicateNameIssues(entries, `variable of the "${envName}" environment`),
     plan: planEnvironmentVariables,
   },
   secrets: {
@@ -128,7 +127,7 @@ const NESTED_PLANNERS: { [K in NestedKey]: NestedPlanner<K> } = {
     missingNote: (envName) =>
       `environments[${envName}].secrets: not verifiable while the environment is missing; apply will create the environment and reconcile the declared secrets`,
     validate: (entries, envName) =>
-      duplicateSecretNameIssues(entries, `secret of the "${envName}" environment`),
+      duplicateNameIssues(entries, `secret of the "${envName}" environment`),
     plan: planEnvironmentSecrets,
   },
   deployment_branch_policies: {

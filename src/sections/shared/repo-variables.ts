@@ -30,16 +30,14 @@ import {
   snapshotOf,
   type WidePlan,
 } from "./keyed-values.js";
+import { duplicateNameIssues, liveByName, upperKey } from "./named-scope.js";
 import { knobbed, routed } from "./schema-helpers.js";
 import { projectOntoSchema } from "./snapshot-helpers.js";
 import {
-  duplicateVariableNameIssues,
   LiveVariable,
-  liveVariablesByKey,
   planVariables,
   type VariableEntry,
   type VariablesPlanScope,
-  variableKey,
   variableOps,
 } from "./variables-engine.js";
 
@@ -165,7 +163,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(
     permission: { repo: [resource] as const },
     endpoints,
     shape: routed(knobbed(VARIABLES_ENTRIES[key])),
-    layering: keyedBy("name", { fold: variableKey }),
+    layering: keyedBy("name", { fold: upperKey }),
   };
 
   const plan: WidePlan<RepoVariablesKey, WideEndpoints> = async (ctx, declared) => {
@@ -187,7 +185,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(
   const snapshot = snapshotOf<WideEndpoints, VariableEntry>(meta, (ctx) =>
     ctx.read.list
       .listAllEnveloped("variables", LiveVariable)
-      .andThen((live) => liveVariablesByKey(meta, noun, live))
+      .andThen((live) => liveByName(meta, noun, live))
       .map((byKey) => ({
         entries: [...byKey.values()].map((variable) =>
           projectOntoSchema(VARIABLES_ENTRIES[key], variable),
@@ -198,7 +196,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(
 
   return {
     ...meta,
-    validate: (declared) => duplicateVariableNameIssues(declared, "variable"),
+    validate: (declared) => duplicateNameIssues(declared, "variable"),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),

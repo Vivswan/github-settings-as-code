@@ -3,9 +3,9 @@ import { err, ok } from "neverthrow";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
+import { duplicateNameIssues } from "../../src/sections/shared/named-scope.js";
 import { decodeBase64, sealForGithub } from "../../src/sections/shared/sealed-box.js";
 import {
-  duplicateSecretNameIssues,
   parseSealingKey,
   planSecrets,
   type SealedSecretPayload,
@@ -140,7 +140,7 @@ describe("sealing", () => {
 describe("duplicate secret names", () => {
   test("two entries differing only by case are one issue at the later entry's name, so the last write cannot silently win", () => {
     expect(
-      duplicateSecretNameIssues(
+      duplicateNameIssues(
         [
           { name: "Deploy_Token", value: "$A" },
           { name: "DEPLOY_TOKEN", value: "$B" },

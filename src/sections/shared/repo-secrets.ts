@@ -35,16 +35,14 @@ import {
   snapshotOf,
   type WidePlan,
 } from "./keyed-values.js";
+import { duplicateNameIssues, liveByName, upperKey } from "./named-scope.js";
 import { knobbed, routed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
-  duplicateSecretNameIssues,
   LiveSecretName,
   listSecretValues,
-  liveSecretsByKey,
   planSecrets,
   type SecretEntry,
   type SecretsPlanScope,
-  secretKey,
   secretOps,
 } from "./secrets-engine.js";
 import { unreadableSecretNote } from "./snapshot-helpers.js";
@@ -205,7 +203,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(
     permission: { repo: [resource] as const },
     endpoints,
     shape: routed(knobbed(SECRETS_ENTRIES[key])),
-    layering: keyedBy("name", { fold: secretKey }),
+    layering: keyedBy("name", { fold: upperKey }),
   };
 
   const wide: WideEndpoints = endpoints;
@@ -230,7 +228,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(
   const snapshot = snapshotOf<WideEndpoints, SecretEntry>(meta, (ctx) =>
     ctx.read.list
       .listAllEnveloped("secrets", LiveSecretName)
-      .andThen((live) => liveSecretsByKey(meta, noun, live))
+      .andThen((live) => liveByName(meta, noun, live))
       .map((byKey) => {
         const references = [...byKey.keys()].map((name) => ({
           name,
@@ -249,7 +247,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(
     ...meta,
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
-    validate: (declared) => duplicateSecretNameIssues(declared, "secret"),
+    validate: (declared) => duplicateNameIssues(declared, "secret"),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
