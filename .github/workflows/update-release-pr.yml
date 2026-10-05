@@ -93,34 +93,20 @@ jobs:
       # older bundled npm is upgraded once, then held to the floor.
       - name: Require an npm that publishes through OIDC
         if: steps.oidc.outputs.proceed == 'true'
-        run: |
-          floor=11.5.1
-          below_floor() { [ "$(printf '%s\n' "$floor" "$(npm --version)" | sort -V | head -n1)" != "$floor" ]; }
-          if below_floor; then
-            npm install -g npm@latest
-          fi
-          if below_floor; then
-            echo "::error::npm $(npm --version) cannot publish through OIDC; trusted publishing needs npm $floor or newer."
-            exit 1
-          fi
+        run: bun .github/scripts/release-pipeline.ts npm-floor
       # The tarball's files list names the schema beside lib/pkg/.
       - name: Build the library
         if: steps.oidc.outputs.proceed == 'true'
         run: bun run build:schema && bun run build:lib
-      # scripts.prepare is dropped from the published manifest: it installs
-      # lefthook, a devDependency the tarball does not carry, and npm blocks
-      # install scripts from a provenance-attested package anyway.
-      # The guard is a safety on npm state, not a decision about whether to
-      # publish (the refresh that called this workflow decided that): it reads
-      # the registry's origin record (the CDN's copy lags a publish by up to
-      # 300 s) and places every published pre-release by the ancestry of the
-      # source sha it names. A version already there (a rerun of this run) or
-      # a pre-release of a descendant of this commit (a stale retry after
-      # newer runs published) publishes nothing, so next never moves back on
-      # what the run can see; a source the checkout cannot place is ignored
-      # with a notice. A registry error stops the job instead of publishing
-      # blind. npm's provenance names the commit in GITHUB_SHA, so the source
-      # is passed in.
+      # scripts.prepare is dropped from the published manifest: it installs lefthook, a devDependency the tarball
+      # does not carry, and npm blocks install scripts from a provenance-attested package anyway. The verdict is a
+      # safety on npm state, not the decision to publish (the refresh that called this workflow made that); npm's
+      # provenance names the commit in GITHUB_SHA, so the source is passed in. What the verdict reads and answers is
+      # nextPublishVerdict in .github/scripts/release-pipeline.ts:
+      #   the version already on the record (a rerun)                -> skip
+      #   a pre-release of a descendant on the record (a stale retry)  -> skip, so next never moves back
+      #   a source the checkout cannot place                           -> ignored with a notice
+      #   a registry error                                             -> the job stops instead of publishing blind
       - name: Publish the pre-release under the next dist-tag
         id: publish
         if: steps.oidc.outputs.proceed == 'true'

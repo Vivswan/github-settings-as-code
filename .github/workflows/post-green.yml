@@ -26,7 +26,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-          # The script names the tag by this commit's position on main and judges latest's source against its history; a shallow checkout can do neither.
+          # The script names the tag by this commit's position on main and judges latest's source against its
+          # history; a shallow checkout can do neither.
           fetch-depth: 0
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
       # A dry-run push asks origin for its receive-pack advertisement over the channel the real push uses, which a

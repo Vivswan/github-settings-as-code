@@ -1,52 +1,177 @@
 /**
- * A property of the repo-owned commit-back workflows a later edit breaks with no other check noticing: the push jobs
- * run no PR code under their write token and push only over the head they patched.
+ * A property of the repo-owned commit-back workflows a later edit breaks with no other check noticing: under the
+ * write token, the push jobs execute code from the default branch alone (bun starts there, imports from there, and
+ * runs no local action, install, or PR-branch file), the PR branch is a second checkout that only git touches, and
+ * the push script gets the lease's inputs (HEAD_SHA, HEAD_REF) from the step's env.
  */
 
 import { describe, expect, test } from "bun:test";
-import { readWorkflow, type Step } from "./workflow-loader.js";
+import { type Job, readWorkflow, type Step } from "./workflow-loader.js";
 
-/** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs what it finds there. */
+const TRUSTED = "trusted";
+const BRANCH = "branch";
+const DEFAULT_BRANCH_REF = `\${{ github.event.repository.default_branch }}`;
+const HEAD_REF = `\${{ github.event.pull_request.head.ref }}`;
+const PR_CHECKOUT = `\${{ github.workspace }}/${BRANCH}`;
+const PUSH_SCRIPT = /^bun \.github\/scripts\/[\w-]+-steps\.ts push$/;
+
+/** A runtime or package manager at a command position: each reads the checkout's manifest or scripts and runs
+ * what it finds there. */
 const RUNS_CHECKOUT = /(?:^|[\s;&|(])(?:bun|bunx|node|npm|npx|pnpm|yarn|deno|tsx)(?=\s|$)/m;
 /** The script with its quoted strings blanked, so a word inside an echo is not read as a command. */
 const commandsOf = (run: string) => run.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
-/** A step that runs code from the checkout: a run step invoking a runtime, or any local action (its action.yml is PR-editable). */
-const runsCheckoutCode = (step: Step) =>
-  RUNS_CHECKOUT.test(commandsOf(step.run ?? "")) || (step.uses ?? "").startsWith("./");
+const label = (step: Step): string => step.name ?? step.uses ?? step.run ?? "unnamed step";
+const workingDirectory = (step: Step): unknown =>
+  (step as Step & { "working-directory"?: unknown })["working-directory"];
+
+/** A drift tripwire over the named lexical shapes of a push job (the default-branch ref into trusted, the PR head
+ * into branch, the working directory, no literal branch or PR_CHECKOUT reference, one push-script step), not an
+ * enumeration of every bypass; the assertion and the negative controls read this one list. */
+function boundaryProblems(push: Job | undefined): string[] {
+  const problems: string[] = [];
+  const steps = push?.steps ?? [];
+  if (push?.permissions?.contents !== "write") problems.push("the push job has no write token");
+  const checkouts = steps.filter((step) => (step.uses ?? "").startsWith("actions/checkout@"));
+  const trusted = checkouts.find((step) => step.with?.path === TRUSTED);
+  const branch = checkouts.find((step) => step.with?.path === BRANCH);
+  if (trusted?.with?.ref !== DEFAULT_BRANCH_REF) {
+    problems.push(`the ${TRUSTED} checkout is not the default branch`);
+  }
+  if (branch?.with?.ref !== HEAD_REF) problems.push(`the ${BRANCH} checkout is not the PR head`);
+  for (const step of checkouts) {
+    if (step.with?.["persist-credentials"] !== false) {
+      problems.push(`the ${String(step.with?.path)} checkout keeps its credentials`);
+    }
+  }
+  const setupBun = steps.find((step) => (step.uses ?? "").startsWith("oven-sh/setup-bun@"));
+  if (setupBun?.with?.["bun-version-file"] !== `${TRUSTED}/.bun-version`) {
+    problems.push(`bun is not pinned from ${TRUSTED}/.bun-version`);
+  }
+  let pushes = 0;
+  for (const step of steps) {
+    if ((step.uses ?? "").startsWith("./")) {
+      problems.push(`"${label(step)}" is a local action, run from a checkout`);
+    }
+    if (step.run === undefined) continue;
+    const commands = commandsOf(step.run);
+    if (RUNS_CHECKOUT.test(commands) && workingDirectory(step) !== TRUSTED) {
+      problems.push(`"${label(step)}" runs checkout code outside ${TRUSTED}`);
+    }
+    if (/\binstall\b/.test(commands))
+      problems.push(`"${label(step)}" installs under the write token`);
+    // The raw text: a quoted path is still a path.
+    if (new RegExp(`\\b${BRANCH}\\b`).test(step.run)) {
+      problems.push(`"${label(step)}" names the ${BRANCH} checkout; only PR_CHECKOUT may`);
+    }
+    // The one push is leasePush() inside the script; a push written here has no lease the tests exercise.
+    if (/\bgit\s+push\b/.test(step.run)) {
+      problems.push(`"${label(step)}" pushes outside the push script`);
+    }
+    // The PR tree's path reaches the push script through its env alone; a run step that reads it would run from it.
+    if (/PR_CHECKOUT/.test(step.run)) {
+      problems.push(`"${label(step)}" reads PR_CHECKOUT; only the push script may`);
+    }
+    if (!PUSH_SCRIPT.test(step.run.trim())) continue;
+    pushes += 1;
+    for (const name of ["HEAD_SHA", "HEAD_REF", "PR_CHECKOUT"]) {
+      if (step.env?.[name] === undefined) problems.push(`the push step has no ${name} in its env`);
+    }
+    if (step.env?.PR_CHECKOUT !== PR_CHECKOUT) problems.push(`PR_CHECKOUT is not ${PR_CHECKOUT}`);
+    if (step.env?.HEAD_REF !== HEAD_REF) problems.push(`HEAD_REF is not the PR head`);
+  }
+  if (pushes !== 1) problems.push(`${pushes} push script steps, not one`);
+  return problems;
+}
 
 describe("the commit-back push jobs", () => {
   test.each(["auto-fix.yml", "auto-format.yml"])(
-    "%s: no PR code runs under the write token, and the push is leased to the patched head",
+    "%s: under the write token only default-branch code runs, the PR branch is git's tree alone, and the push script gets the lease's inputs",
     (file) => {
-      const push = readWorkflow(file).jobs.push;
-      expect(push?.permissions?.contents).toBe("write");
-      expect((push?.steps ?? []).filter(runsCheckoutCode)).toEqual([]);
-      // The lease names the sha the job verified and guards one ref, so a push under the write token is exactly: that lease as its only
-      // option, one https remote, and that ref as its only destination. Every push command of every step is judged.
-      const pushes = (push?.steps ?? []).flatMap((step) =>
-        [...(step.run ?? "").replace(/\\\n/g, " ").matchAll(/\bgit\s+push\b[^;&|()\n]*/g)].map(
-          (m) => ({
-            step,
-            words: m[0]
-              .split(/\s+/)
-              .slice(2)
-              .map((w) => w.replace(/["']/g, "").replace(/\$\{(\w+)\}/g, "$$$1")),
-          }),
-        ),
-      );
-      expect(pushes.length, `${file} has no git push`).toBeGreaterThan(0);
-      for (const { step, words } of pushes) {
-        expect(
-          step.env?.HEAD_SHA,
-          `${file}: a push step without HEAD_SHA in its env`,
-        ).toBeDefined();
-        expect(words.filter((word) => word.startsWith("-"))).toEqual([
-          "--force-with-lease=refs/heads/$HEAD_REF:$HEAD_SHA",
-        ]);
-        const operands = words.filter((word) => !word.startsWith("-"));
-        expect(operands[0], "the remote is not a URL").toMatch(/^https:\/\//);
-        expect(operands.slice(1)).toEqual(["HEAD:refs/heads/$HEAD_REF"]);
-      }
+      expect(boundaryProblems(readWorkflow(file).jobs.push)).toEqual([]);
     },
   );
+
+  const pushStep = (push: Job): Step =>
+    (push.steps ?? []).find((step) => PUSH_SCRIPT.test((step.run ?? "").trim())) as Step;
+  test.each<[string, (push: Job) => void, RegExp]>([
+    [
+      "the trusted checkout taken from the PR head",
+      (push) => {
+        const trusted = (push.steps ?? []).find((step) => step.with?.path === TRUSTED) as Step;
+        trusted.with = { ...trusted.with, ref: HEAD_REF };
+      },
+      /trusted checkout is not the default branch/,
+    ],
+    [
+      "the push script run from the PR branch",
+      (push) => {
+        (pushStep(push) as Step & { "working-directory"?: string })["working-directory"] = BRANCH;
+      },
+      /runs checkout code outside trusted/,
+    ],
+    [
+      "a step running a PR-branch file by path",
+      (push) => {
+        push.steps?.push({
+          run: "bun ../branch/postinstall.ts",
+          "working-directory": TRUSTED,
+        } as Step);
+      },
+      /names the branch checkout/,
+    ],
+    [
+      "a step running a PR-branch file by a quoted path",
+      (push) => {
+        push.steps?.push({
+          run: 'bun "../branch/postinstall.ts"',
+          "working-directory": TRUSTED,
+        } as Step);
+      },
+      /names the branch checkout/,
+    ],
+    [
+      "a step running a PR-branch file through PR_CHECKOUT",
+      (push) => {
+        push.steps?.push({
+          run: 'bun "$PR_CHECKOUT/postinstall.ts"',
+          "working-directory": TRUSTED,
+          env: { PR_CHECKOUT },
+        } as Step);
+      },
+      /reads PR_CHECKOUT/,
+    ],
+    [
+      "a push written in the workflow beside the script's leased one",
+      (push) => {
+        push.steps?.push({
+          run: "git push --force https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY.git HEAD:refs/heads/$HEAD_REF",
+          "working-directory": TRUSTED,
+          env: { TOKEN: `\${{ github.token }}`, HEAD_REF },
+        } as Step);
+      },
+      /pushes outside the push script/,
+    ],
+    [
+      "the setup composite action, read from a checkout",
+      (push) => {
+        push.steps?.push({ uses: "./.github/actions/setup" });
+      },
+      /is a local action/,
+    ],
+    [
+      "a push step without the lease's head",
+      (push) => {
+        const step = pushStep(push);
+        const { HEAD_SHA: _dropped, ...env } = step.env ?? {};
+        step.env = env;
+      },
+      /no HEAD_SHA in its env/,
+    ],
+  ])("%s fails the boundary (negative control)", (_case, mutate, message) => {
+    for (const file of ["auto-fix.yml", "auto-format.yml"]) {
+      const push = structuredClone(readWorkflow(file).jobs.push) as Job;
+      mutate(push);
+      expect(boundaryProblems(push).join("\n"), file).toMatch(message);
+    }
+  });
 });

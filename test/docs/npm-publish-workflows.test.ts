@@ -2,8 +2,9 @@
  * The two npm publishers (update-release-pr.yml's publish-next, update-release.yml's publish-npm) share one contract, trusted
  * publishing through the runner's OIDC token and nothing else, and one was copied from the other. The relations here: both are guarded to the
  * repository package.json names; both take one lane; the stable one runs after every other job of its workflow; neither hands npm a
- * token, as the library page promises; the steps they share are the same text; both publish to one registry. The probe, the floor
- * guard, and the publish blocks also run under bash against stubs, since no pin shows what a branch does.
+ * token, as the library page promises; the steps they share are the same text; both publish to one registry. The
+ * probe and the publish blocks also run under bash against stubs, since no pin shows what a branch does; the floor
+ * guard is the script's npm-floor subcommand, whose branches test/scripts/release-pipeline.test.ts runs.
  *
  * The static guards catch ACCIDENTAL drift: a guard, lane, or env edited in plain YAML. Deliberately hiding a token or a second
  * publisher behind other syntax is out of scope.
@@ -55,9 +56,12 @@ const stepNamed = (job: RunJob, name: string): Step =>
     job.steps.find((step) => step.name === name),
     `step ${name}`,
   );
-/** The npm the guard step's script refuses to publish below: its `floor=` line. */
-const guardFloor = (guard: Step): string =>
-  must(guard.run?.match(/^floor=(\S+)$/m)?.[1], "floor= line in the guard");
+/** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline.ts. */
+const FLOOR_GUARD = "bun .github/scripts/release-pipeline.ts npm-floor";
+const FLOOR_GUARD_NAME = "Require an npm that publishes through OIDC";
+/** The pipeline script's text, where the floor and the confirm outcomes are defined. */
+const pipelineSource = (): string =>
+  readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
 const setupNode = (job: RunJob): Step =>
   must(
     job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")),
@@ -283,17 +287,10 @@ describe("the npm publish jobs", () => {
       /publish-npm: "Build the library" runs after the publish/,
     ],
     [
-      "a floor guard fixed in one job only",
+      "a floor guard changed in one job only",
       (w) => {
-        const guard = stepNamed(
-          runJob(w.jobs[NEXT_JOB], "next"),
-          "Require an npm that publishes through OIDC",
-        );
-        const floor = guardFloor(guard);
-        guard.run = guard.run?.replace(
-          `floor=${floor}`,
-          `floor=${Number(floor.split(".")[0]) + 1}.0.0`,
-        );
+        stepNamed(runJob(w.jobs[NEXT_JOB], "next"), FLOOR_GUARD_NAME).run =
+          `${FLOOR_GUARD} --floor 99.0.0`;
       },
       /"Require an npm that publishes through OIDC" diverged/,
     ],
@@ -381,75 +378,36 @@ describe("the OIDC probe under bash", () => {
   });
 });
 
-describe("the npm floor guard under bash", () => {
-  const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);
-  const guard = stepNamed(stable, "Require an npm that publishes through OIDC");
-  const run = must(guard.run, "guard run");
-  /** Trusted publishing exists from this npm on (npm's changelog for 11.5.1); the script must hold that floor or a newer one. */
+describe("the npm floor guard", () => {
+  const { next, stableWorkflow } = publishers();
+  const stable = runJob(stableWorkflow.jobs[STABLE_JOB], `${STABLE_JOB} job`);
+  /** Trusted publishing exists from this npm on (npm's changelog for 11.5.1); the script's floor must be it or
+   * newer. */
   const OIDC_NPM = "11.5.1";
-  const floor = guardFloor(guard);
 
-  test("the script's floor is not below the npm that introduced trusted publishing", () => {
-    const [scriptFloor] = [floor, OIDC_NPM].sort((a, b) =>
+  test("both publishers run the one npm-floor subcommand, which the script dispatches, and its floor is defined once, not below the npm that introduced trusted publishing", () => {
+    for (const job of [next, stable]) {
+      expect(stepNamed(job, FLOOR_GUARD_NAME).run?.trim()).toBe(FLOOR_GUARD);
+    }
+    const source = pipelineSource();
+    expect(source).toContain('case "npm-floor":');
+    const floors = [...source.matchAll(/^export const NPM_FLOOR = "(\d+\.\d+\.\d+)";$/gm)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(floors).toHaveLength(1);
+    const [scriptFloor] = [floors[0] ?? "", OIDC_NPM].sort((a, b) =>
       a.localeCompare(b, undefined, { numeric: true }),
     );
-    expect(scriptFloor, `floor=${floor} admits an npm that cannot publish through OIDC`).toBe(
-      OIDC_NPM,
-    );
-  });
-
-  /** An npm stub reporting `before` until `npm install -g` runs, then `after`. */
-  const stubNpm =
-    (before: string, after: string) =>
-    (bin: string): void => {
-      writeFileSync(join(bin, "version"), before);
-      writeFileSync(
-        join(bin, "npm"),
-        [
-          "#!/bin/sh",
-          `here="$(dirname "$0")"`,
-          'case "$1" in',
-          `  --version) cat "$here/version"; echo ;;`,
-          `  install) printf '%s' "${after}" > "$here/version"; echo "installed $*" ;;`,
-          '  *) echo "unexpected npm $*" >&2; exit 2 ;;',
-          "esac",
-          "",
-        ].join("\n"),
-        { mode: 0o755 },
-      );
-    };
-
-  const floors: [string, string, string, { lines: string[]; status: number }][] = [
-    ["at the floor", floor, floor, { lines: [], status: 0 }],
-    ["above it", "99.0.0", "99.0.0", { lines: [], status: 0 }],
-    [
-      "just below the OIDC floor, upgraded past it",
-      "11.4.2",
-      "99.0.0",
-      { lines: ["installed install -g npm@latest"], status: 0 },
-    ],
-    [
-      "below it and still below after the upgrade",
-      "1.0.0",
-      "1.0.0",
-      {
-        lines: [
-          "installed install -g npm@latest",
-          `::error::npm 1.0.0 cannot publish through OIDC; trusted publishing needs npm ${floor} or newer.`,
-        ],
-        status: 1,
-      },
-    ],
-  ];
-  test.each(floors)("an npm %s", async (_name, before, after, expected) => {
-    const guard = await runStep(run, {}, stubNpm(before, after));
-    expect({ lines: guard.lines, status: guard.status }).toEqual(expected);
+    expect(
+      scriptFloor,
+      `NPM_FLOOR ${floors[0]} admits an npm that cannot publish through OIDC`,
+    ).toBe(OIDC_NPM);
   });
 });
 
 /** The outcome literals of the pipeline's ConfirmVerdict union, read from the type the script exports; the case block must name each. */
 function confirmOutcomes(): string[] {
-  const source = readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
+  const source = pipelineSource();
   const union = must(
     source.match(/export type ConfirmVerdict =([\s\S]*?);\n/)?.[1],
     "the ConfirmVerdict union",

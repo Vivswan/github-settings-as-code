@@ -21,6 +21,7 @@
  *   npm-verdict next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional)
  *   npm-confirm next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional), NPM_CONFIRM_PAUSE_MS (optional)
  *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
+ *   npm-floor                      both publish jobs       (nothing; npm on PATH)
  *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
  *   boundary-check, anchor-check   checks.yml              (the checkout alone)
  *   prerelease-version             by hand                 GITHUB_SHA (the version a commit's next publish carries)
@@ -32,7 +33,7 @@
  * Node builtins only: bun runs this before `bun install`. Tests: test/scripts/release-pipeline*.test.ts over release-pipeline-fixture.ts.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -1242,6 +1243,39 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
   }
 }
 
+/** Trusted publishing (and its provenance) exists from npm 11.5.1 on. */
+export const NPM_FLOOR = "11.5.1";
+
+/** Bun's own semver, so a two-digit minor orders numerically and a prerelease of the floor sits below it; a
+ * string that is no version at all (nothing npm --version prints) counts as below it and reaches the refusal. */
+function belowFloor(version: string, floor: string): boolean {
+  return !Bun.semver.satisfies(version, `>=${floor}`);
+}
+
+/** An npm at or above `floor` on PATH: an older bundled npm is upgraded once (`npm install -g npm@latest`, on the
+ * step's log), then held to the floor; `atFloor` false is the version still below it after that. */
+export function npmFloor(floor = NPM_FLOOR): { version: string; atFloor: boolean } {
+  const read = (): string =>
+    execFileSync("npm", ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    }).trim();
+  let version = read();
+  if (belowFloor(version, floor)) {
+    const install = spawnSync("npm", ["install", "-g", "npm@latest"], { stdio: "inherit" });
+    if (install.status !== 0) {
+      const how =
+        install.status === null ? `died of ${install.signal}` : `exited ${install.status}`;
+      const detail = install.error === undefined ? "" : ` (${install.error.message})`;
+      throw new Error(
+        `npm ${version} is below ${floor} and npm install -g npm@latest ${how}${detail}; the publish needs npm ${floor} or newer.`,
+      );
+    }
+    version = read();
+  }
+  return { version, atFloor: !belowFloor(version, floor) };
+}
+
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 /** 15 reads 20 s apart (up to 280 s): three of the first five publishes were still unreadable after 80 s. */
 const CONFIRM_READS = 15;
@@ -1336,6 +1370,17 @@ async function main(): Promise<void> {
       console.log(verdict.publish ? `publish ${verdict.version}` : `skip ${verdict.reason}`);
       break;
     }
+    case "npm-floor": {
+      // Silent when the floor holds, as the shell step was; the refusal is the annotation it printed.
+      const result = npmFloor();
+      if (!result.atFloor) {
+        console.log(
+          `::error::npm ${result.version} cannot publish through OIDC; trusted publishing needs npm ${NPM_FLOOR} or newer.`,
+        );
+        process.exit(1);
+      }
+      break;
+    }
     case "npm-confirm": {
       if (argument !== "next") {
         throw new Error(
@@ -1358,7 +1403,7 @@ async function main(): Promise<void> {
     }
     default:
       throw new Error(
-        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | boundary-check | anchor-check | package-commit | prerelease-version | npm-verdict | npm-confirm`,
+        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | boundary-check | anchor-check | package-commit | prerelease-version | npm-verdict | npm-floor | npm-confirm`,
       );
   }
 }
