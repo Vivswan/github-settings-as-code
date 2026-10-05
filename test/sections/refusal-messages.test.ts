@@ -58,25 +58,7 @@ const MIN_PROSE_LENGTH = 16;
 
 const INVARIANT_PREFIX = "BUG:";
 
-/**
- * The exclusions, each a syntactic position a string literal can sit in and not be a message; the planted control
- * below carries one literal per position. Every other literal of a literal-first source is a message.
- *
- *   property key                 `{ "error": ... }`, the key itself
- *   module specifier             `import { z } from "zod"`
- *   type position                a literal type, an annotation
- *   vocabulary call              argument 0 of `z.enum([...])`, `z.literal("web")`, `.default("branch")`, `.includes("<num>")`
- *   value method                 `.split(",")`, `.join(", ")`, `.startsWith("-----BEGIN")`, `new RegExp("...")`, `new Set([...])`
- *   comparison or case           `name === ""`, `case "boolean":`
- *   data field                   `path: ["key"]`, `code: "custom"`, `id: "LabelConfig"`, `route: "GET ..."`
- *   as const vocabulary          `["a", "b"] as const`, reached through arrays, objects, and properties only
- *   schema twin                  the argument of `.meta({...})` or `conditional(...)`, a JSON Schema mirror of a refinement
- *   regex source                 a `String.raw` template
- *   invariant                    a "BUG:" message for the developer holding the stack
- *   DATA_CONSTANTS               a named constant holding a key, a pattern piece, or a vocabulary; prose inside one is a message
- *   DATA_FUNCTIONS               a function that assembles regex source
- *   DATA_ARGUMENTS               a data argument of a local factory (`bareRule("creation")`, the kind of `knobbedList`)
- */
+/** Every position exclusion() names has one planted literal in plantedSlice below, so a new exclusion plants its own. */
 const VOCABULARY_CALLS: ReadonlySet<string> = new Set([
   "enum",
   "discriminatedUnion",
