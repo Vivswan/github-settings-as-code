@@ -5,7 +5,7 @@
 
 import { err } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
-import type { GitHubClient } from "../github/api.js";
+import type { ClientAnswer, GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import { describeProblem } from "../problem.js";
 import type { SectionKey } from "../schema.js";
@@ -91,15 +91,19 @@ function watchingNotFound(
     return api;
   }
   const template = endpointPath(read.route);
+  const notFoundOn = (path: string, result: ClientAnswer<unknown>): boolean =>
+    "error" in result && result.error.status === 404 && matchesTemplate(template, path);
   return {
     tryRequest: async (method, path, payload, options) => {
       const result = await api.tryRequest(method, path, payload, options);
-      if (
-        "error" in result &&
-        result.error.status === 404 &&
-        method === "GET" &&
-        matchesTemplate(template, path)
-      ) {
+      if (method === "GET" && notFoundOn(path, result)) {
+        seen.notFound = true;
+      }
+      return result;
+    },
+    tryList: async (path, options) => {
+      const result = await api.tryList(path, options);
+      if (notFoundOn(path, result)) {
         seen.notFound = true;
       }
       return result;

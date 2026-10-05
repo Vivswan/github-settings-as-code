@@ -3,7 +3,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { pagesSection } from "../../../src/sections/pages/index.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -13,7 +13,7 @@ const GET = "GET /repos/o/r/pages";
 /** A stateful fake of the Pages API, so a plan over executed state sees the converged site. */
 function liveRepo(site: Record<string, unknown> | null): GitHubClient & { writes: string[] } {
   let live = site;
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       if (method === "GET") {
@@ -32,7 +32,7 @@ function liveRepo(site: Record<string, unknown> | null): GitHubClient & { writes
     async tryGraphql() {
       throw new Error("the pages section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("pages shape", () => {

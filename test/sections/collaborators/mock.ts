@@ -15,12 +15,12 @@ import {
   noContent,
   ok,
   PERMISSION_NOT_GRANTABLE,
+  paged,
   type SectionRestHandlers,
-  slicePage,
 } from "../../e2e/mock/support.js";
 
 export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
-  "collaborators.list": ({ state, query }) => ok(slicePage(state.collaborators, query)),
+  "collaborators.list": ({ state, query }) => paged(state.collaborators, query),
   "collaborators.update": ({ state, param, body }) => {
     const username = param("username");
     // Before any lookup, like GitHub: a permission it cannot grant here is refused whether or not the user has access.
@@ -66,7 +66,7 @@ export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
     }
     return noContent();
   },
-  "collaborators.listInvitations": ({ state, query }) => ok(slicePage(state.invitations, query)),
+  "collaborators.listInvitations": ({ state, query }) => paged(state.invitations, query),
   "collaborators.updateInvitation": ({ state, param, body }) => {
     const id = param("invitation_id");
     const invitation = state.invitations.find((i) => String(i.id) === id);

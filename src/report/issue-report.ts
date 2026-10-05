@@ -13,7 +13,6 @@
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import { type ApiError, classifyApiError } from "../github/api-error.js";
-import { paginate } from "../github/paginate.js";
 import type { SettingsFile } from "../schema.js";
 import { type EndpointDecl, expand } from "../sections/contract/endpoints.js";
 import { grantFor, type SectionPermission } from "../sections/contract/permissions.js";
@@ -177,22 +176,31 @@ async function findReportIssue(
   landed: LandedWrites,
 ): Promise<{ found: ReportIssue | null } | Failure> {
   const path = expand(ISSUE_REPORT_ENDPOINTS.list, ref, undefined, query);
-  const page = await paginate(
-    api,
-    path,
-    undefined,
-    (items) => reportCandidatesIn(items).length > 0,
-  );
-  if ("failed" in page) {
+  const candidatesIn = (page: unknown): ReportIssue[] | null =>
+    Array.isArray(page) ? reportCandidatesIn(page) : null;
+  // The walk ends on the first page carrying a candidate, and on a page that is not a list, so the malformed
+  // diagnosis stands ahead of a later page's answer.
+  const answer = await api.tryList(path, {
+    until: (page) => {
+      const candidates = candidatesIn(page);
+      return candidates === null || candidates.length > 0;
+    },
+  });
+  if ("failed" in answer) {
     return transportWarning(landed);
   }
-  if ("error" in page) {
-    return deliveryWarning(page.error, landed);
+  if ("error" in answer) {
+    return deliveryWarning(answer.error, landed);
   }
-  if ("malformed" in page) {
-    return malformedWarning(`${lookup} returned a non-list page`, landed);
+  const found: ReportIssue[] = [];
+  for (const page of answer.data) {
+    const candidates = candidatesIn(page);
+    if (candidates === null) {
+      return malformedWarning(`${lookup} returned a non-list page`, landed);
+    }
+    found.push(...candidates);
   }
-  return { found: pickReportIssue(reportCandidatesIn(page.items)) };
+  return { found: pickReportIssue(found) };
 }
 
 /**

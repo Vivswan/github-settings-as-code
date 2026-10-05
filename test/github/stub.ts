@@ -12,13 +12,16 @@ export function restoreFetch(): void {
 export function stubFetch(responses: Array<() => Response>): {
   calls: number;
   paths: string[];
+  /** Every request's full URL, query included, in order. */
+  urls: string[];
 } {
-  const state = { calls: 0, paths: [] as string[] };
+  const state = { calls: 0, paths: [] as string[], urls: [] as string[] };
   globalThis.fetch = (async (input: string | URL | Request) => {
     const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const make = responses[Math.min(state.calls, responses.length - 1)];
     state.calls++;
     state.paths.push(new URL(href).pathname);
+    state.urls.push(href);
     if (!make) {
       throw new Error("no stubbed response");
     }

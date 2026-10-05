@@ -47,8 +47,8 @@ interface Seed {
 
 /**
  * A section whose plan() and snapshot() read no live list, and why. The claim is checked, not
- * trusted: both handlers run against the fake with `declared`, and a paginated read (a GET carrying
- * `per_page`, a GraphQL connection) fails the section's exemption.
+ * trusted: both handlers run against the fake with `declared`, and a paginated read (a list walk through
+ * the port, a GraphQL connection) fails the section's exemption.
  */
 interface NoLiveList {
   readonly noLiveList: string;
@@ -505,6 +505,10 @@ function clientFor(fake: FragmentFake, seed: Seed): GitHubClient {
       served.path !== undefined && method === "GET" && path.startsWith(served.path)
         ? Promise.resolve({ data: served.body })
         : fake.tryRequest(method, path, payload, options),
+    tryList: (path, options) =>
+      served.path !== undefined && path.startsWith(served.path)
+        ? Promise.resolve({ data: [served.body] })
+        : fake.tryList(path, options),
     tryGraphql: (op, variables, slug, mark) =>
       served.ops?.includes(op.name)
         ? Promise.resolve({ data: served.data })
@@ -518,19 +522,18 @@ function isSeeded(entry: Seeds | NoLiveList): entry is Seeds {
 
 /**
  * The exemption's check: plan() and snapshot() run against the default state, and neither may issue
- * a paginated read (a GET carrying `per_page`, the page loop's signature, or a GraphQL call carrying
- * the connection loop's `cursor` variable). An unpaginated list read through `call` is the one
+ * a paginated read (a list walk through the port's tryList, or a GraphQL call carrying the connection
+ * loop's `cursor` variable). An unpaginated list read through `call` is the one
  * shape this cannot see; the seed table covers it.
  */
 async function proveNoLiveList(section: SectionModule, declared: unknown): Promise<void> {
   const fake = registryFake({});
   const reads: string[] = [];
   const api: GitHubClient = {
-    tryRequest: (method, path, payload, options) => {
-      if (method === "GET" && path.includes("per_page=")) {
-        reads.push(`GET ${path}`);
-      }
-      return fake.tryRequest(method, path, payload, options);
+    tryRequest: (method, path, payload, options) => fake.tryRequest(method, path, payload, options),
+    tryList: (path, options) => {
+      reads.push(`GET ${path}`);
+      return fake.tryList(path, options);
     },
     tryGraphql: (op, variables, slug, mark) => {
       if (Object.hasOwn(variables, "cursor")) {

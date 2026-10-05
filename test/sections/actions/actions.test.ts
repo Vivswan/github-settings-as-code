@@ -15,7 +15,7 @@ import {
   planContext,
   snapshotContext,
 } from "../../../src/sections/contract/plan.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -43,7 +43,7 @@ const FORK_PRIVATE = `GET ${BASE}/fork-pr-workflows-private-repos`;
  */
 function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: string[] } {
   const stored = new Map(Object.entries(seed));
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       if (method === "GET") {
@@ -67,7 +67,7 @@ function liveActions(seed: Record<string, unknown>): GitHubClient & { writes: st
     async tryGraphql() {
       throw new Error("the actions section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("actions", () => {
@@ -807,6 +807,10 @@ describe("actions snapshot", () => {
       tryRequest: (method, path, payload) => {
         requested.push(`${method} ${path}`);
         return live.tryRequest(method, path, payload);
+      },
+      tryList: (path, options) => {
+        requested.push(`GET ${path}`);
+        return live.tryList(path, options);
       },
       tryGraphql: live.tryGraphql,
     };

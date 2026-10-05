@@ -28,11 +28,11 @@ import {
   type MockResponse,
   noContent,
   ok,
+  paged,
   rejected,
   repoNodeId,
   type SectionGraphqlHandlers,
   type SectionRestHandlers,
-  slicePage,
 } from "../../e2e/mock/support.js";
 
 /**
@@ -255,19 +255,17 @@ export const branchesMockHandlers: SectionRestHandlers<"branches"> = {
           ? all.filter((name) => !protectedNames.includes(name))
           : all;
     const slug = `${param("owner")}/${param("repo")}`;
-    return ok(
-      slicePage(
-        names.map((name) => ({
-          name,
-          commit: {
-            sha: createHash("sha1").update(name).digest("hex"),
-            url: `https://api.github.com/repos/${slug}/commits/${name}`,
-          },
-          protected: protectedNames.includes(name),
-          protection_url: `https://api.github.com/repos/${slug}/branches/${name}/protection`,
-        })),
-        query,
-      ),
+    return paged(
+      names.map((name) => ({
+        name,
+        commit: {
+          sha: createHash("sha1").update(name).digest("hex"),
+          url: `https://api.github.com/repos/${slug}/commits/${name}`,
+        },
+        protected: protectedNames.includes(name),
+        protection_url: `https://api.github.com/repos/${slug}/branches/${name}/protection`,
+      })),
+      query,
     );
   },
   "branches.getProtection": ({ state, param }) => {

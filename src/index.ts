@@ -75,6 +75,8 @@ export {
   type GitHubApiOptions,
   type GitHubClient,
   type GraphqlOp,
+  type ListOptions,
+  PAGE_SIZE,
   type RequestMark,
 } from "./github/api.js";
 export {

@@ -10,7 +10,7 @@ import {
   mockSodiumReady,
   unsealSecretValue,
 } from "../../e2e/mock/secrets.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -76,7 +76,7 @@ function sealedPayload(call: { payload?: unknown } | undefined) {
 
 /** A stateful fake: the list reflects every PUT and DELETE, so a re-plan sees converged state. */
 function liveRepo(names: string[]): GitHubClient & { writes: string[] } {
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       if (method === "GET" && path.endsWith("/public-key")) {
@@ -100,7 +100,7 @@ function liveRepo(names: string[]): GitHubClient & { writes: string[] } {
     async tryGraphql() {
       throw new Error("the actions_secrets section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("actions_secrets planning", () => {

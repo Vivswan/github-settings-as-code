@@ -14,17 +14,17 @@ import {
   mintSecretScanningVersion,
   noContent,
   ok,
+  paged,
   SECRET_SCANNING_STALE_VERSION,
   SECRET_SCANNING_UPDATABLE_KEYS,
   type SectionRestHandlers,
   secretScanningPatternFromCreate,
-  slicePage,
 } from "../../e2e/mock/support.js";
 
 export const secretScanningCustomPatternsMockHandlers: SectionRestHandlers<"secret_scanning_custom_patterns"> =
   {
     "secret_scanning_custom_patterns.list": ({ state, query }) =>
-      ok(slicePage(state.secret_scanning_patterns, query)),
+      paged(state.secret_scanning_patterns, query),
     "secret_scanning_custom_patterns.create": ({ state, body }) => {
       const patterns = asObject(body).patterns;
       // An empty or missing patterns array is GitHub's documented 422. A MISSING one is also how a

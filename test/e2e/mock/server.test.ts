@@ -74,6 +74,53 @@ describe("pagination slicing", () => {
     expect(second).toHaveLength(0);
     expect(h.requests.map((r) => r.query)).toEqual(["per_page=100&page=1", "per_page=100&page=2"]);
   });
+
+  // GitHub announces the next page in the Link header, which is the one signal the client's walk reads.
+  test("a page with more behind it carries GitHub's Link header, the request's own URL with page advanced", async () => {
+    const h = await start(
+      scenario({
+        live_state: { labels: { generate: { count: 150, prefix: "gen", color: "ededed" } } },
+      }),
+    );
+    const first = await call(h, "GET", `${labelsPath}?per_page=100&page=1`);
+    expect(first.headers.get("link")).toBe(
+      `<${h.url}${labelsPath}?per_page=100&page=2>; rel="next"`,
+    );
+    const second = await call(h, "GET", `${labelsPath}?per_page=100&page=2`);
+    expect(second.headers.get("link")).toBeNull();
+  });
+
+  test("an exactly full page with nothing behind it announces no next page", async () => {
+    const h = await start(
+      scenario({
+        live_state: { labels: { generate: { count: 100, prefix: "gen", color: "ededed" } } },
+      }),
+    );
+    const only = await call(h, "GET", `${labelsPath}?per_page=100&page=1`);
+    expect(only.headers.get("link")).toBeNull();
+    expect(await jsonArray(only)).toHaveLength(100);
+  });
+
+  test("the real client walks a two-page listing against the mock and concatenates it in order", async () => {
+    const h = await start(
+      scenario({
+        live_state: { labels: { generate: { count: 150, prefix: "gen", color: "ededed" } } },
+      }),
+    );
+    const api = new GitHubApi({
+      token: "e2e-token",
+      io: silentTrace,
+      baseUrl: h.url,
+      retryBaseMs: 1,
+    });
+    const result = await api.tryList(labelsPath);
+    const names =
+      "data" in result
+        ? result.data.flatMap((page) => (page as { name: string }[]).map((l) => l.name))
+        : [];
+    expect(names).toEqual(Array.from({ length: 150 }, (_, i) => `gen-${i + 1}`));
+    expect(h.requests.map((r) => r.query)).toEqual(["per_page=100&page=1", "per_page=100&page=2"]);
+  });
 });
 
 describe("permission gate grades", () => {

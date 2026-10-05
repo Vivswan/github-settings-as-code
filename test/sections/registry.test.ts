@@ -573,7 +573,11 @@ describe("matchesTemplate", () => {
 
   test("every declared route path matches its own expanded concrete path", () => {
     const ctx: SectionContext = {
-      api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
+      api: {
+        tryRequest: async () => ({ data: null }),
+        tryList: async () => ({ data: [] }),
+        tryGraphql: async () => ({ data: {} }),
+      },
       repo: { owner: "octo", name: "repo", slug: "octo/repo" },
       check: true,
     };
@@ -599,7 +603,11 @@ describe("matchesTemplate", () => {
 
 describe("expand", () => {
   const ctx = (): SectionContext => ({
-    api: { tryRequest: async () => ({ data: null }), tryGraphql: async () => ({ data: {} }) },
+    api: {
+      tryRequest: async () => ({ data: null }),
+      tryList: async () => ({ data: [] }),
+      tryGraphql: async () => ({ data: {} }),
+    },
     repo: { owner: "octo", name: "repo", slug: "octo/repo" },
     check: true,
   });
@@ -667,6 +675,7 @@ describe("probeAbsent tolerance derivation", () => {
   const ctxWith = (status: number): SectionContext => ({
     api: {
       tryRequest: async () => ({ error: { status, message: "nope", body: "" } }),
+      tryList: async () => ({ error: { status, message: "nope", body: "" } }),
       tryGraphql: async () => ({ error: { status, message: "nope", body: "" } }),
     },
     repo: { owner: "octo", name: "repo", slug: "octo/repo" },

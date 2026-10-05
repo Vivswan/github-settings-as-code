@@ -9,8 +9,8 @@ import {
   type Json,
   noContent,
   ok,
+  paged,
   type SectionRestHandlers,
-  slicePage,
 } from "../../e2e/mock/support.js";
 
 /**
@@ -39,7 +39,7 @@ function withBypassActors(ruleset: Json): Json {
 
 export const rulesetsMockHandlers: SectionRestHandlers<"rulesets"> = {
   "rulesets.list": ({ state, query }) =>
-    ok(slicePage(state.rulesets, query).map(withoutBypassActors)),
+    paged(state.rulesets, query, undefined, (page) => page.map(withoutBypassActors)),
   "rulesets.create": ({ state, body }) => {
     const invalid = invalidRuleTypeResponse(body, "create-a-repository-ruleset");
     if (invalid) {

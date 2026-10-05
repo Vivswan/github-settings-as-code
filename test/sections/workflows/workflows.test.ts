@@ -3,7 +3,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { workflowsSection } from "../../../src/sections/workflows/index.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -18,7 +18,7 @@ interface LiveWorkflow {
 
 /** A stateful fake of the workflows API, so a plan over executed state sees the converged repository. */
 function liveRepo(workflows: LiveWorkflow[]): GitHubClient & { writes: string[] } {
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path) {
       if (method === "GET") {
@@ -36,7 +36,7 @@ function liveRepo(workflows: LiveWorkflow[]): GitHubClient & { writes: string[] 
     async tryGraphql() {
       throw new Error("the workflows section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("workflows", () => {

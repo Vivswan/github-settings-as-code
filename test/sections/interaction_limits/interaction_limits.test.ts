@@ -5,7 +5,7 @@ import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { type PlannedOp, planContext } from "../../../src/sections/contract/plan.js";
 import { interactionLimitsSection } from "../../../src/sections/interaction_limits/index.js";
 import type { InteractionLimitsConfig } from "../../../src/sections/interaction_limits/schema.js";
-import { MockApi } from "../../mock-api.js";
+import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { deniedDetail, REPO, SectionFailed, unwrap } from "../section-run.js";
 import { validatedInput } from "../validated-input.js";
@@ -44,7 +44,7 @@ function liveRepo(seed: {
   let limit = seed.limit ?? null;
   let cap = seed.cap ?? CAP_LIVE;
   let bypass = seed.bypass ?? [];
-  return {
+  return withListing({
     writes: [],
     async tryRequest(method, path, payload) {
       const body = payload as Record<string, unknown>;
@@ -80,7 +80,7 @@ function liveRepo(seed: {
     async tryGraphql() {
       throw new Error("the interaction_limits section issues no GraphQL");
     },
-  };
+  });
 }
 
 describe("interaction_limits", () => {

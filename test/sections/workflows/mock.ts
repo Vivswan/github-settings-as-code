@@ -2,13 +2,14 @@
  * The workflows e2e mock fragment (registered in test/e2e/mock/sections.ts).
  */
 
-import { noContent, ok, type SectionRestHandlers, slicePage } from "../../e2e/mock/support.js";
+import { noContent, paged, type SectionRestHandlers } from "../../e2e/mock/support.js";
 
 export const workflowsMockHandlers: SectionRestHandlers<"workflows"> = {
-  "workflows.list": ({ state, query }) => {
-    const page = slicePage(state.workflows, query);
-    return ok({ total_count: state.workflows.length, workflows: page });
-  },
+  "workflows.list": ({ state, query }) =>
+    paged(state.workflows, query, undefined, (page) => ({
+      total_count: state.workflows.length,
+      workflows: page,
+    })),
   "workflows.enable": ({ state, param }) => {
     const id = param("workflow_id");
     const workflow = state.workflows.find((w) => String(w.id) === id);

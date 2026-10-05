@@ -23,13 +23,13 @@ import {
   type Json,
   noContent,
   ok,
+  paged,
   pinTargetName,
   type SectionGraphqlHandlers,
   type SectionRestHandlers,
   sealedSecretPut,
   secretRemove,
   secretsList,
-  slicePage,
   variableName,
 } from "../../e2e/mock/support.js";
 
@@ -66,10 +66,10 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     const environments = Object.entries(state.environments).map(([name, environment]) =>
       servedEnvironment(state, name, environment),
     );
-    return ok({
+    return paged(environments, query, undefined, (page) => ({
       total_count: environments.length,
-      environments: slicePage(environments, query),
-    });
+      environments: page,
+    }));
   },
   "environments.probe": ({ state, param }) => {
     const name = environmentName(state, param);
@@ -99,10 +99,12 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     }
     const variables = state.environment_variables[env] ?? [];
     // The clamp comes from the endpoint declaration: one source for the client loop, the sweep, and here.
-    return ok({
-      total_count: variables.length,
-      variables: slicePage(variables, query, environmentsSection.endpoints.listVariables.pageSize),
-    });
+    return paged(
+      variables,
+      query,
+      environmentsSection.endpoints.listVariables.pageSize,
+      (page) => ({ total_count: variables.length, variables: page }),
+    );
   },
   "environments.createVariable": ({ state, param, body }) => {
     const env = environmentName(state, param);
@@ -210,10 +212,10 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
       return { status: 404, body: { message: "Not Found" } };
     }
     const policies = state.environment_branch_policies[env] ?? [];
-    return ok({
+    return paged(policies, query, undefined, (page) => ({
       total_count: policies.length,
-      branch_policies: slicePage(policies, query),
-    });
+      branch_policies: page,
+    }));
   },
   "environments.createPolicy": ({ state, param, body }) => {
     const env = environmentName(state, param);
@@ -274,13 +276,10 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     if (!state.environments[env]) {
       return { status: 404, body: { message: "Not Found" } };
     }
-    return ok({
+    return paged(PROTECTION_RULE_APPS, query, undefined, (page) => ({
       total_count: PROTECTION_RULE_APPS.length,
-      available_custom_deployment_protection_rule_integrations: slicePage(
-        PROTECTION_RULE_APPS,
-        query,
-      ),
-    });
+      available_custom_deployment_protection_rule_integrations: page,
+    }));
   },
   "environments.createProtectionRule": ({ state, param, body }) => {
     const env = environmentName(state, param);

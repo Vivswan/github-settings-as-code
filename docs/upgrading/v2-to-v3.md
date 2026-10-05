@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Fifty-nine breaks. Nine are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, 56, and 58), and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
+Sixty breaks. Ten are for library consumers (sections 9, 23, 24, 27, 34, 35, 54, 56, 58, and 60), and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
 
 Eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Sections 53 and 57 are silent: YAML merge keys resolve, and one validation message is respelled.
 
@@ -75,6 +75,7 @@ The changelog entry for 3.0.0 will carry the release-please footers in the [CHAN
 | A closed section's unrecognized key names the entry by index | `collaborators[octocat]: declares "permision", which this section does not recognize ...` | `collaborators[0] (username "octocat"): declares "permision", which this section does not recognize ...`; under a wrapper, `collaborators.entries[0] (username "octocat")` | Anything that greps the bracket for the entry's identity needs the new spelling; [section 57](#57-a-closed-sections-unrecognized-key-names-the-entry-by-index) |
 | Library: `GitHubClient` and `ArtifactUploader` answer, never reject | `tryRequest()` and `tryGraphql()` rejected for a request with no HTTP answer (not sent, the transport failed, a GraphQL body off the wire contract); `upload()` rejected to report a failed upload | Both port methods resolve to a `ClientAnswer` whose third arm is `{ failed }`, the whole line; `upload()` resolves to `{ uploaded: true }` or `{ failed }`. A test double that still throws is read as a broken contract: the failure is reported, never classified | A double returning `void` from `upload()`, or a caller reading `.data` off a `ClientAnswer` without narrowing `failed`, fails to compile; [section 58](#58-library-githubclient-and-artifactuploader-answer-never-reject) |
 | `next` publishes on a release-PR refresh | The pre-release v3 builds published a `next` pre-release from every green push to `main` that changed the shipped surface | The pre-release publishes when release-please creates or refreshes the release PR, which a releasable commit (feat, fix, perf, revert, or a breaking marker) does; a merge of hidden types alone publishes nothing | No error: `@next` keeps resolving, to the last releasable commit's pre-release; a build of one exact commit is the packaged commit under its `build/*` tag; [section 59](#59-next-publishes-on-a-release-pr-refresh) |
+| Library: `GitHubClient` lists through `tryList()` | The verbs walked a list page by page through `tryRequest("GET", path?per_page=100&page=N)` and stopped on a short page | The port has a third member, `tryList(path, {perPage, until})`, resolving to a `ClientAnswer<unknown[]>` of page bodies; `GitHubApi` follows GitHub's `Link` header through `@octokit/plugin-paginate-rest` | A double or client without `tryList` fails to compile, naming the missing member; [section 60](#60-library-githubclient-lists-through-trylist) |
 
 ## 1. The defaults-file fallback
 
@@ -1264,6 +1265,21 @@ v3            merge build(deps): bump yaml   -> green -> no release-PR refresh  
 ```
 
 Fix: nothing for a consumer of `@next`. For a build of one exact commit, install the packaged commit (`github:Vivswan/github-settings-as-code#<packaged sha>`, from a `build/<position>.<sha7>` tag, the ten newest kept, or a release tag).
+
+## 60. Library: `GitHubClient` lists through `tryList()`
+
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
+
+Every paginated REST list read (labels, rulesets, the secrets envelopes, discovery's `/user/repos`, the report's issue scan) goes through the port's third member, `tryList(path, { perPage, until })`. It resolves to a `ClientAnswer<unknown[]>` whose `data` holds one body per page, in order, as GitHub sent it: a bare list, or the `{total_count, <key>: []}` envelope, which the caller reads by its key. `GitHubApi` follows GitHub's `Link: <url>; rel="next"` header through `@octokit/plugin-paginate-rest`, and keeps every page on the route the caller named, taking only the Link's query (`per_page`, `page`) from GitHub. A 409 surfaces as the error it is. The pre-release builds walked `tryRequest("GET", path?per_page=100&page=N)` themselves and stopped on a short page.
+
+```text
+pre-release   tryRequest("GET", "/repos/o/r/labels?per_page=100&page=1")   // the engine asked page by page
+              tryRequest("GET", "/repos/o/r/labels?per_page=100&page=2")
+
+v3            tryList("/repos/o/r/labels", { perPage: 100 })               // resolves to { data: [page1Body, page2Body] }
+```
+
+Fix: add `tryList` to every `GitHubClient` double: answer the pages your `tryRequest` route table would (`per_page=N&page=K` from 1, until a page is short) and return their bodies as `{ data: [...] }`; a client over another transport returns each page's body as received, and honors `until` by stopping after the first page it accepts.
 
 ## Order of operations
 

@@ -8,7 +8,6 @@ import type { components } from "@octokit/openapi-types";
 import { err, ok, ResultAsync } from "neverthrow";
 import type { GitHubClient } from "../github/api.js";
 import { classifyApiError } from "../github/api-error.js";
-import { paginate } from "../github/paginate.js";
 import { classifyVisibility } from "../github/repo-visibility.js";
 import { isPrivate, markPrivate, type Private } from "../private.js";
 import { revealPrivate } from "../private-open.js";
@@ -108,36 +107,41 @@ export function discoverRepos(
   const path = `/user/repos?${params.join("&")}`;
   // A client that throws breaks the GitHubClient contract; its message is folded like the `failed` line it owed.
   return ResultAsync.fromPromise(
-    paginate(api, path),
+    // A page that is not a list ends the walk there, so that diagnosis stands ahead of a later page's answer.
+    api.tryList(path, { until: (page) => !Array.isArray(page) }),
     (error): DiscoveryProblem => ({
       code: "discovery-transport-failed",
       reason: error instanceof Error ? error.message : String(error),
     }),
-  ).andThen((page) => {
-    if ("failed" in page) {
+  ).andThen((answer) => {
+    if ("failed" in answer) {
       return err<DiscoveryResult, DiscoveryProblem>({
         code: "discovery-transport-failed",
-        reason: page.failed,
+        reason: answer.failed,
       });
     }
-    if ("error" in page) {
+    if ("error" in answer) {
       // A rate-limit 403 is NOT a permission problem (classifyApiError keeps the kinds apart), so it never reads as denied
       // and never tells the operator to swap tokens; 401 (an invalid or expired token) does.
       return err<DiscoveryResult, DiscoveryProblem>({
         code: "discovery-request-failed",
         path,
-        status: page.error.status,
-        message: page.error.message,
-        denied: classifyApiError(page.error) === "permission" || page.error.status === 401,
+        status: answer.error.status,
+        message: answer.error.message,
+        denied: classifyApiError(answer.error) === "permission" || answer.error.status === 401,
       });
     }
-    if ("malformed" in page) {
-      return err<DiscoveryResult, DiscoveryProblem>({
-        code: "discovery-response-not-a-list",
-        path,
-      });
+    const repos: DiscoveredRepo[] = [];
+    for (const page of answer.data) {
+      if (!Array.isArray(page)) {
+        return err<DiscoveryResult, DiscoveryProblem>({
+          code: "discovery-response-not-a-list",
+          path,
+        });
+      }
+      repos.push(...(page as DiscoveredRepo[]));
     }
-    return ok(applyFilters(page.items as DiscoveredRepo[], filters));
+    return ok(applyFilters(repos, filters));
   });
 }
 

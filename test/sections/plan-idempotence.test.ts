@@ -12,7 +12,7 @@ import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import { declaredEntries, type SectionModule } from "../../src/sections/contract/module.js";
 import type { ExecTools, PlannedOp } from "../../src/sections/contract/plan.js";
 import type { UndeclaredPolicyList } from "../../src/types.js";
-import { MockApi } from "../mock-api.js";
+import { MockApi, withListing } from "../mock-api.js";
 import { identityOf, provePlanIdempotent, requestOf } from "./plan-idempotence.js";
 
 /** The listed secret's identity, the one field the synthetic sections read. */
@@ -119,7 +119,7 @@ function client(secrets: Array<{ name: string }>): MockApi {
 /** A stateful fake: the secrets list reflects every PUT it accepts; any other request is refused. */
 function liveSecrets(): GitHubClient {
   const secrets: Array<{ name: string }> = [];
-  return {
+  return withListing({
     async tryRequest(method, path) {
       if (method === "GET" && path.startsWith("/repos/o/r/actions/secrets?")) {
         return { data: { total_count: secrets.length, secrets } };
@@ -137,7 +137,7 @@ function liveSecrets(): GitHubClient {
     async tryGraphql() {
       throw new Error("the secrets sections issue no GraphQL");
     },
-  };
+  });
 }
 
 describe("provePlanIdempotent", () => {
