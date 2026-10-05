@@ -7,7 +7,7 @@
 
 import { environmentsSection } from "../../../src/sections/environments/index.js";
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/sections/environments/schema.js";
-import { variableKey } from "../../../src/sections/shared/variables-engine.js";
+import { upperKey } from "../../../src/sections/shared/named-scope.js";
 import { mintNodeId } from "../../e2e/mock/node-id.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../e2e/mock/secrets.js";
 import {
@@ -134,7 +134,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     const env = environmentName(state, param);
     const name = param("name");
     const variable = (state.environment_variables[env] ?? []).find(
-      (v) => variableName(v) === variableKey(name),
+      (v) => variableName(v) === upperKey(name),
     );
     if (!state.environments[env] || !variable) {
       return { status: 404, body: { message: "Not Found" } };
@@ -152,7 +152,7 @@ export const environmentsMockHandlers: SectionRestHandlers<"environments"> = {
     const env = environmentName(state, param);
     const name = param("name");
     const list = state.environment_variables[env] ?? [];
-    const index = list.findIndex((v) => variableName(v) === variableKey(name));
+    const index = list.findIndex((v) => variableName(v) === upperKey(name));
     if (!state.environments[env] || index < 0) {
       return { status: 404, body: { message: "Not Found" } };
     }

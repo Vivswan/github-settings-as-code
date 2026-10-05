@@ -4,7 +4,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { actionsVariablesSection } from "../../../src/sections/actions_variables/index.js";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
-import { variableKey } from "../../../src/sections/shared/variables-engine.js";
+import { upperKey } from "../../../src/sections/shared/named-scope.js";
 import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";
@@ -61,7 +61,7 @@ function liveRepo(
       const body = payload as { name?: string; value: string };
       const name = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
       if (method === "POST") {
-        variables.push({ name: variableKey(body.name ?? ""), value: body.value });
+        variables.push({ name: upperKey(body.name ?? ""), value: body.value });
       } else if (method === "PATCH") {
         const target = variables.find((v) => v.name === name);
         if (target === undefined) {

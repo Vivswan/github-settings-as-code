@@ -11,9 +11,8 @@ import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { liveSecretsByKey } from "../shared/secrets-engine.js";
+import { liveByName } from "../shared/named-scope.js";
 import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/snapshot-helpers.js";
-import { liveVariablesByKey } from "../shared/variables-engine.js";
 import { listBranchPolicies, policiesByName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
 import type { LiveEnvironmentBody } from "./index.js";
@@ -94,7 +93,7 @@ export async function snapshotNested(
     const notes: string[] = [];
     const variables = [
       ...(yield* listEnvironmentVariables(ctx, envName).andThen((live) =>
-        liveVariablesByKey(section, "variable", live),
+        liveByName(section, "variable", live),
       )).values(),
     ];
     if (variables.length > 0) {
@@ -105,7 +104,7 @@ export async function snapshotNested(
     }
     const secrets = [
       ...(yield* listEnvironmentSecrets(ctx, envName).andThen((live) =>
-        liveSecretsByKey(section, `${envName} environment secret`, live),
+        liveByName(section, `${envName} environment secret`, live),
       )).keys(),
     ];
     if (secrets.length > 0) {

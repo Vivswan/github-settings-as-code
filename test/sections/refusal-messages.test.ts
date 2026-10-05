@@ -173,8 +173,7 @@ const PIECE_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   identifiedBy: [2],
   duplicateFieldIssues: [2],
   duplicateIssues: [2],
-  duplicateVariableNameIssues: [1],
-  duplicateSecretNameIssues: [1],
+  duplicateNameIssues: [1],
   holderError: [0],
   renamedKeyError: [0, 1, 2, 3],
 };

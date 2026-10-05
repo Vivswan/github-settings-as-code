@@ -18,8 +18,8 @@ import type {
   TaggedEndpoint,
   TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
+import { upperKey } from "../../../src/sections/shared/named-scope.js";
 import type { SetupKey, SetupSectionModule } from "../../../src/sections/shared/setup-section.js";
-import { variableKey } from "../../../src/sections/shared/variables-engine.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {
   MOCK_SECRETS_KEY_ID,
@@ -323,14 +323,14 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       return { status: 201, body: {} };
     },
     update: ({ state, param, body }) => {
-      const name = variableKey(param("name"));
+      const name = upperKey(param("name"));
       const variable = list(state).find((v) => variableName(v) === name);
       if (!variable) {
         return { status: 404, body: { message: "Not Found" } };
       }
       const payload = asObject(body);
       if (typeof payload.name === "string") {
-        variable.name = variableKey(payload.name);
+        variable.name = upperKey(payload.name);
       }
       if (payload.value !== undefined) {
         variable.value = payload.value;
@@ -338,7 +338,7 @@ export function repoVariablesRestHandlers<K extends VariablesFamilyKey>(section:
       return noContent();
     },
     remove: ({ state, param }) => {
-      const name = variableKey(param("name"));
+      const name = upperKey(param("name"));
       const index = list(state).findIndex((v) => variableName(v) === name);
       if (index < 0) {
         return { status: 404, body: { message: "Not Found" } };
@@ -466,7 +466,7 @@ function labelName(label: Json): NameKey {
 /** A variable's case-insensitive matching key (GitHub uppercases the match). */
 export function variableName(variable: Json): string {
   // The engine's own mint, so the mock never folds a name differently than the handler does.
-  return variableKey(String(variable.name ?? ""));
+  return upperKey(String(variable.name ?? ""));
 }
 
 export function findLabel(state: MockState, name: string): Json | undefined {
