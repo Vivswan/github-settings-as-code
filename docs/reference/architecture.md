@@ -128,7 +128,8 @@ The phase runs in check and apply before the first request to that repository's 
 
 - The zod shape of each section, with its cross-field rules. A rule still runs beside a sibling that failed, so one run reports the bad enum and the contradictory pair together.
 - The section's `validate` hook, required on every list section: duplicates by the section's key, a rename that collides, a nested list's own duplicates. Its issues carry paths under the section key, like the shape's.
-- Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite. Their proof is the `ProvedPlain` brand on the walk's output, the only input the `ValidatedSettings` mint accepts.
+- Two document-wide walks: a value that is not plain YAML data (a tagged mapping, a list with a hole) and a passthrough number that is not finite.
+  Their proof is the `ProvedPlain` brand on the walk's output, the only input the `ValidatedSettings` mint accepts.
 
 Every issue the phase finds lands in one list: unknown directives, unknown sections, a single document's `_remove` markers, then each section's issues in apply order. Zero section requests reach that repository, and the run exits 1; in a multi-repo run only that target fails. One downgrade: an unknown section outside a non-empty `sections` allowlist is a warning, so an older action can run a file written for a newer one.
 

@@ -51,11 +51,12 @@ export type PlainData =
 
 /**
  * The document was proved plain before any section planned (engine/validate.ts, the ProvedPlain brand), but the
- * proof stops at a section's declared value: the loose schemas type the fields `unknown`, and a body is assembled
- * from them as a `Record<string, unknown>` (a spread, a key subset, a lens's wire or recreate) that carries no
- * brand. This walk is that boundary's one cast. A refusal here is a section's own assembly producing a non-plain
- * value, or a library caller's object changed since the walk (a getter answering differently, a field assigned
- * afterwards; a YAML document can do neither), never a settings file, so it is a BUG.
+ * proof stops at the declared value: a body is assembled from `unknown`-typed fields as a `Record<string, unknown>`
+ * that carries no brand, so the walk runs once more here. What can still reach a refusal, none of it a settings file:
+ *
+ *   a section's own assembly (a lens's wire or recreate, a hand-built test declaration)  -> a non-plain value
+ *   a library caller's getter answering differently than under the walk                  -> the same, after the proof
+ *   a library caller assigning a field after the walk                                    -> the same, after the proof
  */
 export function plainData(value: unknown): PlainData {
   const render = (path: readonly (string | number)[]): string =>
