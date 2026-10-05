@@ -1,7 +1,7 @@
 /** The `labels:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
-import { boundedString } from "../shared/schema-helpers.js";
+import { boundedString, open } from "../shared/schema-helpers.js";
 
 // GitHub stores a color as exactly six hex digits: a name or CSS shorthand 422s on create, and on an existing label
 // drifts and re-PATCHes every run, so both are refused here. The lens strips the optional "#" and folds the case.
@@ -22,12 +22,10 @@ const LabelDescription = boundedString(
   (count) => `${DESCRIPTION_CAP}; this one has ${count}`,
 );
 
-export const LabelConfig = z
-  .object({
-    name: z.string(),
-    color: LabelColor.optional(),
-    description: LabelDescription.optional(),
-    new_name: z.string().optional(),
-  })
-  .meta({ id: "LabelConfig" });
+export const LabelConfig = open({
+  name: z.string(),
+  color: LabelColor.optional(),
+  description: LabelDescription.optional(),
+  new_name: z.string().optional(),
+}).meta({ id: "LabelConfig" });
 export type LabelConfig = z.infer<typeof LabelConfig>;

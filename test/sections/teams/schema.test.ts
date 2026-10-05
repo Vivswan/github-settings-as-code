@@ -1,7 +1,7 @@
 /**
  * The team name is the team_slug in every API path, and GitHub answers a wrong one with the same 404 as a team
  * without access: check would report "no access; apply will grant" for a team that has it under its slug, and the
- * grant PUT would 404. Parsed through the loosened document shape, so a rule that survives here reaches the run.
+ * grant PUT would 404. Parsed through the section's runtime shape, so a rule that survives here reaches the run.
  */
 
 import { describe, expect, test } from "bun:test";

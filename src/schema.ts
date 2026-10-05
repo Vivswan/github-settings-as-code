@@ -6,11 +6,13 @@
  * app's plain-array form so an existing Probot config applies to them unchanged; every other section is an addition.
  *
  * descriptions                            -> the docs files (docs/schema.docs.yml, each docs/sections/<key>.docs.yml)
- * refine checks                           -> runtime-only, invisible to toJSONSchema, and they survive loosen()
- * z.object (the default)                  -> published OPEN; loosen() makes it a passthrough looseObject at runtime
- * z.strictObject                          -> additionalProperties: false, and loosen() keeps it strict (the wrapper, nested shapes)
- * z.looseObject                           -> where the config type carries an index signature, so the inferred type keeps it
- * runtime checks reading UNDECLARED keys  -> see them only through loosen()'s passthrough clone; the authored strip parse never runs at runtime
+ * refine checks                           -> runtime-only, invisible to toJSONSchema
+ * open() (sections/shared/schema-helpers) -> published OPEN, closed in the type; the runtime keeps undeclared keys
+ * z.object (the document root alone)      -> strip: an unknown top-level key is a document problem validateSettingsDoc
+ *                                            (engine/orchestrate.ts) names, never a passthrough
+ * z.strictObject                          -> additionalProperties: false, published and at runtime (the wrappers)
+ * z.looseObject                           -> where the config type carries an index signature the inferred type keeps
+ * a knobbed or layered list section       -> the union here; routed() (sections/shared/schema-helpers.ts) runs it
  */
 
 import { z } from "zod";

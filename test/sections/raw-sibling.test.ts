@@ -1,7 +1,7 @@
 /**
  * A rule of a registered shape meets the raw value of a sibling that failed its type (rule() in
  * src/sections/shared/schema-helpers.ts), and a throw there is a bug that ends the parse. The walk takes the
- * structure from the authored document schema (the loosened shape hides a knobbed list behind its routed transform),
+ * structure from the authored document schema (a section's routed() shape hides a knobbed list behind its transform),
  * builds one well-typed value per section plus a variant per other value a field admits (so a rule gated on a flag
  * or an option runs), then puts each raw value at every property and list item in turn and runs document
  * validation, which parses the registered shape; a throw anywhere is the finding.

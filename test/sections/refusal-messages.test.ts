@@ -1029,7 +1029,7 @@ describe("every parse-refusal message a user can read is pinned by a test", () =
       '  ...identifiedBy("planted", "name", "planted thing"),',
       '  noun: "planted noun",',
       '  validate: (label: string) => [{ path: "[0].key", message: WHY(label) }, { path: "[1].key", message: "probe" }, { path: "[2].key", message: plantedWhy() }, ...malformedListIssues()],',
-      '  shape: loosen(z.object({ title: z.string({ error: "Please declare a title" }) })),',
+      '  shape: open({ title: z.string({ error: "Please declare a title" }) }),',
       '  closedSurface: { consequence: "the planted body carries only the name", other: { consequence: "drops keys" } },',
       '  endpoints: { list: { statuses: { 200: "the planted list, which no refusal quotes" } } },',
       "};",

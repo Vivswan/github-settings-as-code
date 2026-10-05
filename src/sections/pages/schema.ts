@@ -2,7 +2,7 @@
 
 import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 
 type PagesPutBody = NonNullable<
   operations["repos/update-information-about-pages-site"]["requestBody"]
@@ -34,17 +34,16 @@ const READ_ONLY_SITE_FIELDS = {
 
 // Not exported: consumers spell it NonNullable<PagesConfig>. The definition id stays "PagesConfig";
 // moving it onto the nullable wrapper would change the published schema.
-const PagesSite = z
-  .object({
-    build_type: z.enum(["workflow", "legacy"]).optional(),
-    source: z.object({ branch: z.string(), path: z.enum(["/", "/docs"]).optional() }).optional(),
-    cname: z.string().nullable().optional(),
-    https_enforced: z.boolean().optional(),
-    public: z.boolean().optional(),
-  })
+const PagesSite = open({
+  build_type: z.enum(["workflow", "legacy"]).optional(),
+  source: open({ branch: z.string(), path: z.enum(["/", "/docs"]).optional() }).optional(),
+  cname: z.string().nullable().optional(),
+  https_enforced: z.boolean().optional(),
+  public: z.boolean().optional(),
+})
   .check(
     rule((site, refineCtx) => {
-      // The strict type hides these keys; only the loosen()ed shape that parses documents lets them reach here.
+      // The type hides these keys; the open() parse lets them reach here.
       for (const [key, fix] of Object.entries(READ_ONLY_SITE_FIELDS)) {
         if ((site as Record<string, unknown>)[key] !== undefined) {
           refineCtx.addIssue({

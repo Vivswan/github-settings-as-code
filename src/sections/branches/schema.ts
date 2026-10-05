@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { stringItems } from "../shared/raw-values.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
@@ -330,11 +330,10 @@ export const BranchProtectionConfig = z
   .meta({ id: "BranchProtectionConfig" });
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 
-export const BranchConfig = z
-  .object({
-    name: z.string(),
-    protection: BranchProtectionConfig.nullable(),
-  })
+export const BranchConfig = open({
+  name: z.string(),
+  protection: BranchProtectionConfig.nullable(),
+})
   .check(
     rule((entry, refineCtx) => {
       // GitHub canonicalizes actor and environment names case-insensitively and the routed lists

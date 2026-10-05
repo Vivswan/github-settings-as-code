@@ -19,7 +19,6 @@ import type { SectionFailure } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
 import {
   type GraphqlDict,
-  loosen,
   requirePlainMapping,
   type SectionSnapshot,
   type ValidatedInput,
@@ -279,7 +278,7 @@ export function setupSection<K extends SetupKey>(setup: {
     permission,
     grantCaveat,
     endpoints,
-    shape: requirePlainMapping(loosen(slice)),
+    shape: requirePlainMapping(slice),
     plan,
     snapshot,
   };

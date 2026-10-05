@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { agree } from "../../text.js";
 import { stringItems } from "../shared/raw-values.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 
 const INTERACTION_GROUPS = ["existing_users", "contributors_only", "collaborators_only"] as const;
 const INTERACTION_EXPIRIES = [
@@ -43,19 +43,17 @@ const InteractionLimits = z
       expiry: z.enum(INTERACTION_EXPIRIES, { error: EXPIRY_RULE }).optional(),
       // The cap object IS the PATCH body, open so future fields ride it; the flag is typed so a
       // YAML-quoted "true" fails upfront in document validation, before any section writes.
-      pull_request_creation_cap: z
-        .object({
-          enabled: z.boolean({
-            error:
-              'enabled must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the cap direction is unambiguous',
-          }),
-          max_open_pull_requests: z
-            .int({ error: CAP_RULE })
-            .min(1, CAP_RULE)
-            .max(1000, CAP_RULE)
-            .optional(),
-        })
-        .optional(),
+      pull_request_creation_cap: open({
+        enabled: z.boolean({
+          error:
+            'enabled must be an unquoted true or false (YAML parses "no"/"off"/"yes" as strings, not booleans), so the cap direction is unambiguous',
+        }),
+        max_open_pull_requests: z
+          .int({ error: CAP_RULE })
+          .min(1, CAP_RULE)
+          .max(1000, CAP_RULE)
+          .optional(),
+      }).optional(),
       pull_request_creation_bypass: z.array(z.string()).optional(),
     },
     { error: unknownKeyError },

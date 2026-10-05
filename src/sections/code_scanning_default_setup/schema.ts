@@ -3,7 +3,7 @@
 import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
 import type { MustBeNever } from "../../types.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 import {
   languagesSchema,
   refineSetup,
@@ -34,15 +34,14 @@ type _VocabularyIsTheVendoredSpec = MustBeNever<
   >
 >;
 
-export const CodeScanningDefaultSetupConfig = z
-  .object({
-    state: z.enum(["configured", "not-configured"]).optional(),
-    query_suite: z.enum(["default", "extended"]).optional(),
-    languages: languagesSchema(CODE_SCANNING_LANGUAGES).optional(),
-    runner_type: z.enum(["standard", "labeled"]).optional(),
-    runner_label: z.string().nullable().optional(),
-    threat_model: z.enum(["remote", "remote_and_local"]).optional(),
-  })
+export const CodeScanningDefaultSetupConfig = open({
+  state: z.enum(["configured", "not-configured"]).optional(),
+  query_suite: z.enum(["default", "extended"]).optional(),
+  languages: languagesSchema(CODE_SCANNING_LANGUAGES).optional(),
+  runner_type: z.enum(["standard", "labeled"]).optional(),
+  runner_label: z.string().nullable().optional(),
+  threat_model: z.enum(["remote", "remote_and_local"]).optional(),
+})
   .check(rule(refineSetup))
   .meta({ id: "CodeScanningDefaultSetupConfig" });
 export type CodeScanningDefaultSetupConfig = z.infer<typeof CodeScanningDefaultSetupConfig>;

@@ -13,7 +13,6 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   identifiedBy,
-  loosen,
   ORG_PROBE,
   type SectionMeta,
   type SectionModule,
@@ -26,7 +25,7 @@ import {
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
-import { knobbed } from "../shared/schema-helpers.js";
+import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { TeamConfig } from "./schema.js";
 
@@ -135,7 +134,7 @@ export const teamsSection = {
   // Teams exist only under an organization owner; the registry's owner gate (contract/owner.ts) probes the `org` role.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(knobbed(TeamConfig)),
+  shape: routed(knobbed(TeamConfig)),
   // The grant PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { name: true, permission: true },

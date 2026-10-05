@@ -3,8 +3,9 @@
  * heavy lifting and the docs files supply the descriptions (lib/schema-descriptions.ts); this script adds the
  * publication posture:
  *
- *   plain (strip) objects  -> OPENED: the additionalProperties: false zod emits is deleted, since GitHub-bound bodies
- *                             must accept future fields; only strictObject declarations stay closed, like the runtime
+ *   open() objects         -> OPENED: the additionalProperties zod emits for their catchall is deleted, since
+ *                             GitHub-bound bodies must accept future fields; only strictObject declarations stay
+ *                             closed, like the runtime
  *   format keywords        -> DELETED: every format zod emits goes, whether ajv-formats judges it by a grammar the runtime
  *                             does not share ("uri" refuses non-ASCII hosts and spaces new URL() takes; "date-time" rounds
  *                             a long fractional second into an invalid :60) or JSON Schema does not define it at all
@@ -32,9 +33,9 @@ const generated = z.toJSONSchema(SettingsFile, {
   override(ctx) {
     const node = ctx.zodSchema instanceof z.ZodType ? schemaNode(ctx.zodSchema) : null;
     const json = ctx.jsonSchema as Record<string, unknown>;
-    // The runtime passes unknown keys of a plain object through to GitHub, and the published schema must not reject
-    // what the runtime accepts. Strict objects carry a catchall (z.never) and keep their false.
-    if (node?.kind === "object" && node.catchall === undefined) {
+    // An open() mapping passes unknown keys through to GitHub and says nothing about them, so its published form says
+    // nothing either. Strict objects keep their false, and a z.looseObject keeps the {} its catchall emits.
+    if (node?.kind === "object" && node.openness === "declared") {
       delete json.additionalProperties;
     }
     // The published schema carries no format keyword, so this covers ajv-formats grammars the runtime does not share

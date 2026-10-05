@@ -1,12 +1,14 @@
 /**
- * Imports only zod, the text leaf, and the leaf modules beside it: a section schema importing src/schema.ts back
- * would be a cycle whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
+ * Imports only zod, the text leaf, and the leaf modules beside it (none imports a section): a section schema
+ * importing src/schema.ts back would be a cycle whose top-level consts TDZ-crash at import time, so everything both
+ * sides need lives here.
  */
 
 import { z } from "zod";
 import { agree } from "../../text.js";
 import { renamedKeyError } from "./renamed-key.js";
-import { knobOf, markKnob } from "./schema-marks.js";
+import { type Knob, knobOf, markKnob, OPEN_CATCHALL } from "./schema-marks.js";
+import { schemaNode } from "./schema-node.js";
 
 /**
  * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
@@ -15,6 +17,15 @@ import { knobOf, markKnob } from "./schema-marks.js";
 export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
 
 export const UndeclaredPolicySchema = z.enum(UNDECLARED_POLICIES).meta({ id: "UndeclaredPolicy" });
+
+/**
+ * A mapping open at runtime, so rules see undeclared keys and a GitHub-bound body keeps them, and closed in the
+ * type, so planners and fixtures keep their excess-property checks. Undeclared keys stay outside its contract: the
+ * walks project the declared keys and the published schema says nothing about the rest, unlike z.looseObject.
+ */
+export function open<S extends z.core.$ZodShape>(shape: S): z.ZodObject<S> {
+  return z.object(shape).catchall(OPEN_CATCHALL) as z.ZodObject<S>;
+}
 
 /**
  * A JSON Schema conditional for the published schema, the one place the keyword pair is spelled. zod refinements
@@ -177,14 +188,12 @@ export function layeredList<L extends z.ZodArray<z.ZodType>>(list: L) {
 }
 
 /**
- * The runtime shape of a knob union: a transform, not the union, so an array parses against the list and a mapping
- * against the wrapper, and a failing entry keeps its path (`labels[2].name`). The published schema keeps the union.
- * `derive` is what the runtime makes of each form before it is routed.
+ * The runtime shape of a list section: a transform, not the union knobbed() or layeredList() minted, so an array
+ * parses against the list and a mapping against the wrapper, and a failing entry keeps its path (`labels[2].name`).
+ * The published schema and the section's type keep the union. A knob nested in an entry (an environment's
+ * `variables`) is routed the same way.
  */
-export function routed(
-  union: z.ZodType,
-  derive: (form: z.ZodType) => z.ZodType = (form) => form,
-): z.ZodType {
+export function routed(union: z.ZodType): z.ZodType {
   const knob = union instanceof z.ZodUnion ? knobOf(union) : undefined;
   if (knob === undefined) {
     throw new Error(
@@ -196,8 +205,34 @@ export function routed(
       "BUG: routed(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
     );
   }
-  const list = derive(knob.list);
-  const wrapper = derive(knob.wrapper);
+  return routedForms(knob, routeKnobs(knob.list), routeKnobs(knob.wrapper));
+}
+
+function routeKnobs(schema: z.ZodType): z.ZodType {
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "object": {
+      const shape = Object.fromEntries(
+        Object.entries(node.shape).map(([key, value]) => [key, routeKnobs(value)]),
+      );
+      return z.clone(node.schema, { ...node.schema.def, shape });
+    }
+    case "array":
+      return z.clone(node.schema, { ...node.schema.def, element: routeKnobs(node.element) });
+    case "record":
+      return z.clone(node.schema, { ...node.schema.def, valueType: routeKnobs(node.value) });
+    case "wrapper":
+      return z.clone(node.schema, { ...node.schema.def, innerType: routeKnobs(node.inner) });
+    case "union":
+      return node.knob === null
+        ? z.clone(node.schema, { ...node.schema.def, options: node.options.map(routeKnobs) })
+        : routed(node.schema);
+    case "leaf":
+      return schema;
+  }
+}
+
+function routedForms(knob: Knob, list: z.ZodType, wrapper: z.ZodType): z.ZodType {
   const beside =
     knob.kind === "layered"
       ? 'an optional "_layering" directive'
@@ -300,22 +335,12 @@ export function maxLength(maximum: number, message: string): z.core.$ZodCheckMax
 
 /** A repository-scope sealed secret entry (name + `$NAME` reference value). */
 export function sealedSecretConfig(id: string) {
-  return z
-    .object({
-      name: secretName,
-      value: z.string(),
-    })
-    .meta({ id });
+  return open({ name: secretName, value: z.string() }).meta({ id });
 }
 
 /** A repository-scope plain-text variable entry; the environments section's nested list is the same shape. */
 export function variableConfig(id: string) {
-  return z
-    .object({
-      name: variableName,
-      value: variableValue,
-    })
-    .meta({ id });
+  return open({ name: variableName, value: variableValue }).meta({ id });
 }
 
 /**

@@ -6,7 +6,7 @@
 import { ok } from "neverthrow";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { loosen, type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
+import { type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { CheckSuitePreferencesConfig } from "./schema.js";
@@ -31,7 +31,7 @@ export const checkSuitePreferencesSection = {
   endpoints: ENDPOINTS,
   // Loose on purpose: the PATCH forwards the object verbatim, so future fields ride along at both
   // levels; only the natural pair is checked.
-  shape: loosen(CheckSuitePreferencesConfig),
+  shape: CheckSuitePreferencesConfig,
   async plan(_ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     // Derived, not restated: writeOnlyCheckNote proves against ENDPOINTS that no read exists, so

@@ -5,7 +5,7 @@ import { agree } from "../../text.js";
 import type { MustBeNever } from "../../types.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
-import { loosen, type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
+import { type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
@@ -567,7 +567,7 @@ export const actionsSection = {
   permission,
   grantCaveat: 'the "oidc_customization_sub" key alone instead needs "Actions" (read and write)',
   endpoints: ENDPOINTS,
-  shape: loosen(ActionsConfig),
+  shape: ActionsConfig,
   async plan(ctx, desired) {
     const section = this;
     return safeTry(async function* () {

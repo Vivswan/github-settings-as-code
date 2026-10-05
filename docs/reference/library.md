@@ -110,7 +110,7 @@ console.log(merged.value.yaml, merged.value.notices.length);
 | `UNDECLARED_POLICY_SECTIONS` | const | The list sections whose wrapper takes `_undeclared` beside `_layering`; `environments`, `branches`, and `workflows` layer by key too, through a `{_layering, entries}` wrapper of their own (`LIST_SECTIONS` in the schema module) |
 | `UndeclaredPolicySection` | type | One of them |
 
-The schema subpath serves the built JSON Schema.
+The schema subpath serves the built JSON Schema. Inside a section, `SettingsFile` parses as the action does: an undeclared key survives the parse, and a key a section rule refuses fails it with the key named. The root strips an unknown top-level key, so a caller who wants the action's whole judgment, unknown sections included, calls `validateSettings`.
 
 ```ts
 import { SECTION_KEYS, SettingsFile } from "@vivswan/github-settings-as-code";

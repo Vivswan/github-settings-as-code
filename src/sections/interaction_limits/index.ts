@@ -13,12 +13,7 @@ import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import {
-  cannotVerifyNote,
-  loosen,
-  requirePlainMapping,
-  type SectionModule,
-} from "../contract/module.js";
+import { cannotVerifyNote, requirePlainMapping, type SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,
@@ -190,7 +185,7 @@ export const interactionLimitsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: requirePlainMapping(loosen(InteractionLimitsConfig)),
+  shape: requirePlainMapping(InteractionLimitsConfig),
   async plan(ctx, desired) {
     return safeTry(async function* () {
       const plan: InteractionLimitsPlan = { ops: [], notes: [], drift: [] };

@@ -20,7 +20,6 @@ import {
   type GraphqlDict,
   type KeyedListLayering,
   keyedBy,
-  loosen,
   type SectionModule,
   type SectionSnapshot,
 } from "../contract/module.js";
@@ -36,7 +35,7 @@ import {
   snapshotOf,
   type WidePlan,
 } from "./keyed-values.js";
-import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
+import { knobbed, routed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   duplicateSecretNameIssues,
   LiveSecretName,
@@ -205,7 +204,7 @@ export function repoSecretsSection<K extends RepoSecretsKey>(
     undeclaredDefault: "keep" as const,
     permission: { repo: [resource] as const },
     endpoints,
-    shape: loosen(knobbed(SECRETS_ENTRIES[key])),
+    shape: routed(knobbed(SECRETS_ENTRIES[key])),
     layering: keyedBy("name", { fold: secretKey }),
   };
 

@@ -15,7 +15,6 @@ import {
   declaredEntries,
   defaultUndeclaredPolicy,
   identifiedBy,
-  loosen,
   ORG_PROBE,
   type SectionMeta,
   type SectionModule,
@@ -27,7 +26,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
-import { knobbed } from "../shared/schema-helpers.js";
+import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, projectOntoSchema } from "../shared/snapshot-helpers.js";
 import { CustomPropertyConfig } from "./schema.js";
 
@@ -152,7 +151,7 @@ export const customPropertiesSection = {
   // probes the `org` role and no-ops with a note on a personal account.
   ownerSensitivity: "org",
   endpoints: ENDPOINTS,
-  shape: loosen(knobbed(CustomPropertyConfig)),
+  shape: routed(knobbed(CustomPropertyConfig)),
   // The bulk PATCH body is built from exactly property_name and value, so an extra key has no
   // destination and is always a typo.
   closedSurface: {

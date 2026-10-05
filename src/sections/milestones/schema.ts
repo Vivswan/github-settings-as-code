@@ -1,6 +1,7 @@
 /** The `milestones:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
+import { open } from "../shared/schema-helpers.js";
 
 /**
  * A due date is a calendar day; the lens compares and snapshots the day, and the wire hook in index.ts sends it
@@ -11,12 +12,10 @@ const DueOn = z.union([z.iso.date(), z.iso.datetime()], {
     "due_on is a calendar day, YYYY-MM-DD (or an ISO 8601 UTC timestamp, YYYY-MM-DDTHH:MM:SSZ, whose time GitHub discards)",
 });
 
-export const MilestoneConfig = z
-  .object({
-    title: z.string(),
-    description: z.string().optional(),
-    state: z.enum(["open", "closed"]).optional(),
-    due_on: DueOn.optional(),
-  })
-  .meta({ id: "MilestoneConfig" });
+export const MilestoneConfig = open({
+  title: z.string(),
+  description: z.string().optional(),
+  state: z.enum(["open", "closed"]).optional(),
+  due_on: DueOn.optional(),
+}).meta({ id: "MilestoneConfig" });
 export type MilestoneConfig = z.infer<typeof MilestoneConfig>;

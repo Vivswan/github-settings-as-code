@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { loosen, type SectionModule, type SectionSnapshot } from "../contract/module.js";
+import type { SectionModule, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, plainData, type SectionPlan } from "../contract/plan.js";
 import { projectOntoSchema } from "../shared/snapshot-helpers.js";
@@ -69,7 +69,7 @@ export const pagesSection = {
   endpoints: ENDPOINTS,
   // The handler dereferences source.path before the API sees it, so the shape must catch
   // source: null or a source without a branch.
-  shape: loosen(PagesConfig),
+  shape: PagesConfig,
   async plan(ctx, desired) {
     const plan: SectionPlan<PlannedOp<typeof ENDPOINTS>> = { ops: [], notes: [], drift: [] };
     return ctx.read.get.probeAbsent(LiveSite).map((probe) => {

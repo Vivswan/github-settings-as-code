@@ -17,7 +17,6 @@ import {
   type GraphqlDict,
   type KeyedListLayering,
   keyedBy,
-  loosen,
   type SectionSnapshot,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
@@ -31,7 +30,7 @@ import {
   snapshotOf,
   type WidePlan,
 } from "./keyed-values.js";
-import { knobbed } from "./schema-helpers.js";
+import { knobbed, routed } from "./schema-helpers.js";
 import { projectOntoSchema } from "./snapshot-helpers.js";
 import {
   duplicateVariableNameIssues,
@@ -165,7 +164,7 @@ export function repoVariablesSection<K extends RepoVariablesKey>(
     undeclaredDefault: "delete" as const,
     permission: { repo: [resource] as const },
     endpoints,
-    shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
+    shape: routed(knobbed(VARIABLES_ENTRIES[key])),
     layering: keyedBy("name", { fold: variableKey }),
   };
 

@@ -81,8 +81,8 @@ interface RunnerFields {
 }
 
 /**
- * The setup slice's rule(). Only the loosen()ed clone, which keeps unknown keys, parses
- * documents, so the GET-only keys are read off the parsed record.
+ * The setup slice's rule(). The open() slice keeps unknown keys, so the GET-only keys are read
+ * off the parsed record.
  *
  *   schedule / updated_at declared        -> refused: the PATCH has no such field
  *   runner_type: labeled, no runner_label -> refused: GitHub needs the label to pick the runner

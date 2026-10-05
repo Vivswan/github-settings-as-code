@@ -6,8 +6,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { loosen } from "../../src/sections/contract/module.js";
-import { knobbed, maxLength, minLength, rule } from "../../src/sections/shared/schema-helpers.js";
+import {
+  knobbed,
+  maxLength,
+  minLength,
+  routed,
+  rule,
+} from "../../src/sections/shared/schema-helpers.js";
 
 const needsModeA = (
   value: { mode?: "a" | "b"; list?: string[] },
@@ -75,9 +80,9 @@ describe("rule() reports beside a failed nested value", () => {
     expect(calls).toEqual(["gated", "gated"]);
   });
 
-  test("a rule composed onto the loosened routed list shape reports beside a failed entry, in both container forms", () => {
+  test("a rule composed onto the routed list shape reports beside a failed entry, in both container forms", () => {
     const knob = knobbed(z.object({ name: z.string() }).meta({ id: "RuleTestEntry" }));
-    const composed = loosen(knob).check(
+    const composed = routed(knob).check(
       rule((value, ctx) => {
         const wrapped = !Array.isArray(value);
         const entries = wrapped ? (value as { entries: unknown[] }).entries : value;

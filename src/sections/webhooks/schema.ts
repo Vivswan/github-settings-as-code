@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { describeValue } from "../../plain-data.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 import { REPOSITORY_WEBHOOK_EVENTS, WEBHOOK_EVENTS_REFERENCE } from "./events.js";
 
 // GitHub 422s each of these at apply time ("is not a valid event", "Url is not a valid URL"); the REST wire types are
@@ -38,18 +38,17 @@ const WebhookDeliveryConfig = z
   .catchall(z.unknown())
   .meta({ id: "WebhookDeliveryConfig" });
 
-export const WebhookConfig = z
-  .object({
-    name: z.literal("web").optional(),
-    config: WebhookDeliveryConfig,
-    events: z.array(WebhookEvent).optional(),
-    active: z.boolean().optional(),
-  })
+export const WebhookConfig = open({
+  name: z.literal("web").optional(),
+  config: WebhookDeliveryConfig,
+  events: z.array(WebhookEvent).optional(),
+  active: z.boolean().optional(),
+})
   .check(
     rule((entry, refineCtx) => {
       // An ENTRY-level secret would pass the loose shape, ship the raw reference text verbatim, and
       // create a silently unauthenticated hook, the exact failure this feature exists to prevent. The
-      // strict type hides the key; only the loosen()ed shape that parses documents lets it reach here.
+      // type hides the key; the open() parse lets it reach here.
       if ((entry as Record<string, unknown>).secret !== undefined) {
         refineCtx.addIssue({
           code: "custom",

@@ -14,8 +14,7 @@ import type {
   UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../../types.js";
-import { type Layering, routed, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
-import { schemaNode } from "../shared/schema-node.js";
+import { type Layering, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
 import {
   type EndpointDecl,
   endpointKind,
@@ -795,43 +794,6 @@ export function requirePlainMapping(shape: z.ZodType): z.ZodType {
       }),
     )
     .pipe(shape);
-}
-
-/**
- * Every plain (strip) object becomes a passthrough looseObject, so unknown keys ride through to GitHub and the
- * rules reading undeclared keys can see them. Preserved as authored:
- *
- *   strictObject           -> stays strict
- *   a node's own checks    -> survive on the clone (rule() gates each beside a failed nested value); one on the knobbed union itself throws
- *   knobbed-section union  -> routed() (../shared/schema-helpers.ts) over its loosened forms; an entry keeps its path
- */
-export function loosen(schema: z.ZodType): z.ZodType {
-  const node = schemaNode(schema);
-  switch (node.kind) {
-    case "object": {
-      const shape = Object.fromEntries(
-        Object.entries(node.shape).map(([key, value]) => [key, loosen(value)]),
-      );
-      // z.never stays never (strict stays strict); an absent catchall means strip, which becomes passthrough.
-      const catchall = node.catchall === undefined ? z.unknown() : loosen(node.catchall);
-      return z.clone(node.schema, { ...node.schema.def, shape, catchall });
-    }
-    case "array":
-      return z.clone(node.schema, { ...node.schema.def, element: loosen(node.element) });
-    case "record":
-      return z.clone(node.schema, { ...node.schema.def, valueType: loosen(node.value) });
-    case "wrapper":
-      return z.clone(node.schema, { ...node.schema.def, innerType: loosen(node.inner) });
-    case "union": {
-      const { knob } = node;
-      if (knob !== null) {
-        return routed(node.schema, loosen);
-      }
-      return z.clone(node.schema, { ...node.schema.def, options: node.options.map(loosen) });
-    }
-    case "leaf":
-      return schema;
-  }
 }
 
 export type EntryOf<T> = T extends readonly (infer E)[]
