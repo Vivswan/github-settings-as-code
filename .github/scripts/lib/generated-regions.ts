@@ -159,6 +159,18 @@ export function bodyRefusal(shape: BodyShape, body: string): string | undefined 
   return shape(body);
 }
 
+/** A round-trip guard's verdict: undefined when `body` is `rendered` byte for byte, else the first differing line. */
+export function renderedMismatch(body: string, rendered: string): string | undefined {
+  if (rendered === body) {
+    return undefined;
+  }
+  const authored = body.split("\n");
+  const expected = rendered.split("\n");
+  const differing = authored.findIndex((line, i) => line !== expected[i]);
+  const at = differing === -1 ? authored.length : differing;
+  return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+}
+
 interface MarkdownScan {
   /** Fenced code blocks, an unclosed one running to the end of the text. */
   readonly fenced: readonly MarkerSpan[];

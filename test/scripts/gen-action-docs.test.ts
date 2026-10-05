@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  DEFAULTS_TABLE_HEADER,
   GENERATED_REGIONS,
+  type KnobbedSection,
+  type PolicyRow,
+  type PolicyRowProse,
+  policyCells,
+  policyTableFault,
   regenerateText,
   renderActionInputs,
   renderActionOutputs,
@@ -20,6 +26,7 @@ import {
   type RegionSpec,
   regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
+import { tableRow } from "../../.github/scripts/lib/markdown-table.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
@@ -142,7 +149,20 @@ describe("undeclared-policy renderers", () => {
       renderPolicyDefaultsTable(sections.slice(1, 2), {
         labels: { override: "manage a core set | or two" },
       }),
-    ).toThrow('the labels "The override buys you" cell');
+    ).toThrow('row 1 of the table cell 3 is blank or contains "|" or a line break');
+    // The renderer refuses at its own boundary what its guard could never read back: a blank caveat or override,
+    // whatever the type said about the value, since a narrowing can hide a property.
+    const labels = sections.slice(1, 2);
+    const empty = 'the "labels" Defaults row has a blank caveat or override';
+    expect(() =>
+      renderPolicyDefaultsTable(labels, { labels: { caveat: "", override: "x" } }),
+    ).toThrow(empty);
+    expect(() => renderPolicyDefaultsTable(labels, { labels: { override: "" } })).toThrow(empty);
+    const hidden: { readonly labels: { readonly caveat: readonly []; readonly override: "x" } } = {
+      labels: { caveat: [], override: "x" },
+    };
+    const narrowed: { readonly labels: { readonly override: "x" } } = hidden;
+    expect(() => renderPolicyDefaultsTable(labels, narrowed)).toThrow(empty);
   });
 });
 
@@ -313,23 +333,17 @@ describe("generated files", () => {
       { key: "rulesets", undeclaredDefault: "keep" },
     ] as const;
     accepts("policy-count-sentence", renderPolicyCountSentence(knobbed));
+    // Parentheses, backticks, colons, and the two Unicode line separators tableCell() admits must read back as the
+    // opaque prose they are.
     accepts(
       "policy-defaults-table",
       renderPolicyDefaultsTable(knobbed, {
-        labels: { caveat: "Probot parity", override: "manage a core set" },
-        rulesets: { override: "make the file the inventory" },
+        labels: { caveat: "Probot (parity): `delete`\u2028", override: "manage a core set" },
+        rulesets: { override: "make the file (`settings.yml`): the inventory\u2029" },
       }),
     );
+    accepts("policy-defaults-table", renderPolicyDefaultsTable([], {}));
     accepts("permissions-grant-sentence", renderGrantSentence([sectionModule("teams")]));
-    // Rows tableCell() refuses to write, so the shape must refuse them too or regeneration erases them.
-    for (const row of [
-      "| `labels` | delete | `keep`: manage a core set | authored |",
-      "| `labels` | delete (a | b) | `keep`: manage a core set |",
-      "| `labels` | delete (a\rb) | `keep`: manage a core set |",
-    ]) {
-      const body = `\n| Section | Default | The override buys you |\n|---|---|---|\n${row}\n`;
-      expect(bodyRefusal(shapeOf("policy-defaults-table"), body), row).toBeDefined();
-    }
     const overrideGated: SectionMeta = {
       ...sectionModule("labels"),
       endpoints: {
@@ -386,6 +400,173 @@ describe("generated files", () => {
           bodyRefusal(region.body, body),
           `${region.name} accepts ${JSON.stringify(body.slice(0, 40))}`,
         ).toBeDefined();
+      }
+    }
+  });
+
+  // Each body is table text the renderer never writes; admitted, it would be erased on the next regeneration.
+  const policyRow = "| `labels` | delete (Probot parity) | `keep`: manage a core set |";
+  const policyTable = (rows: string): string =>
+    `\n| Section | Default | The override buys you |\n|---|---|---|\n${rows}\n`;
+  test.each<[label: string, body: string, refusal: RegExp]>([
+    [
+      "an override naming the default policy itself",
+      policyTable("| `labels` | delete | `delete`: manage a core set |"),
+      /line 3 names `delete` where the override is the opposite policy, `keep`/,
+    ],
+    [
+      "a keep row above a delete row",
+      policyTable(
+        `| \`rulesets\` | keep | \`delete\`: make the file the inventory |\n${policyRow}`,
+      ),
+      /line 3 reads "\| `rulesets` .* where the generator writes "\| `labels` /,
+    ],
+    [
+      "a fourth cell",
+      policyTable(`${policyRow.slice(0, -2)} | authored |`),
+      /line 3 has 4 cells where the table has 3/,
+    ],
+    [
+      "a pipe in the caveat",
+      policyTable(policyRow.replace("Probot parity", "a | b")),
+      /line 3 has 4 cells/,
+    ],
+    [
+      "a carriage return in the caveat",
+      policyTable(policyRow.replace("Probot parity", "a\rb")),
+      /line 3 cell 2 is blank or contains "\|" or a line break/,
+    ],
+    [
+      "a blank Default cell",
+      policyTable(policyRow.replace("delete (Probot parity)", "")),
+      /line 3 cell 2 is blank/,
+    ],
+    [
+      "a Section cell outside a code span",
+      policyTable(policyRow.replace("`labels`", "labels")),
+      /line 3 does not open with a section key/,
+    ],
+    [
+      "a Default outside delete and keep",
+      policyTable(policyRow.replace("delete (", "deleted (")),
+      /line 3 states no delete or keep default/,
+    ],
+    [
+      "an override without its policy span",
+      policyTable(policyRow.replace("`keep`: ", "")),
+      /line 3 names no policy span/,
+    ],
+    [
+      "the same section twice",
+      policyTable(`${policyRow}\n${policyRow}`),
+      /line 4 repeats the `labels` row/,
+    ],
+    [
+      "a blank caveat, which the renderer refuses",
+      policyTable(policyRow.replace("Probot parity", "")),
+      /line 3 has a blank caveat or override/,
+    ],
+    [
+      "a blank override, which the renderer refuses",
+      policyTable(policyRow.replace("manage a core set", "")),
+      /line 3 has a blank caveat or override/,
+    ],
+    [
+      "another table's header",
+      "\n| Section | Default |\n|---|---|\n",
+      /line 1 reads "\| Section \| Default \|" where the generator writes/,
+    ],
+    ["a body without its closing newline", policyTable(policyRow).slice(0, -1), /line 3 reads/],
+  ])("the Defaults table guard refuses %s, which does not round-trip", (_label, body, refusal) => {
+    expect(bodyRefusal(shapeOf("policy-defaults-table"), body)).toMatch(refusal);
+  });
+
+  // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
+  // exactly the fault policyTableFault() states for the rows, the guard admits what the renderer wrote, and the
+  // guard refuses the same cells joined without the renderer whenever the statement faults. A check on one side
+  // only turns a generated input red.
+  test("the Defaults renderer and guard agree with the shared statement on every generated input", () => {
+    const shape = shapeOf("policy-defaults-table");
+    const outcomes = new Map<string, "written" | "faulted">();
+    const hold = (
+      input: string,
+      sections: readonly KnobbedSection[],
+      prose: Readonly<Record<string, PolicyRowProse>>,
+    ): void => {
+      // The renderer's delete-first order, so a fault names the same row on both sides.
+      const rows = ["delete", "keep"].flatMap((policy) =>
+        sections
+          .filter((section) => section.undeclaredDefault === policy)
+          .map(
+            (section): PolicyRow => ({ section, prose: prose[section.key] ?? { override: "" } }),
+          ),
+      );
+      const fault = policyTableFault(rows);
+      let rendered: string | undefined;
+      let thrown: string | undefined;
+      try {
+        rendered = renderPolicyDefaultsTable(sections, prose);
+      } catch (error) {
+        thrown = error instanceof Error ? error.message : String(error);
+      }
+      expect(thrown, input).toBe(fault);
+      if (rendered !== undefined) {
+        expect(bodyRefusal(shape, `\n${rendered}\n`), input).toBeUndefined();
+        outcomes.set(input, "written");
+      } else {
+        const joined = [DEFAULTS_TABLE_HEADER, ...rows.map(policyCells).map(tableRow)].join("\n");
+        expect(bodyRefusal(shape, `\n${joined}\n`), input).toBeDefined();
+        outcomes.set(input, "faulted");
+      }
+    };
+    const policies = ["delete", "keep"] as const;
+    const caveats = [
+      undefined,
+      "Probot parity",
+      "",
+      "  ",
+      " padded ",
+      "(nested) `x`",
+      "a | b",
+      "a\rb",
+    ];
+    const overrides = ["x", "", "   ", " padded ", "`keep`: y", "a | b", "y\u2028z"];
+    for (const key of ["labels", "Labels", "secret_scanning_custom_patterns"]) {
+      for (const undeclaredDefault of policies) {
+        for (const caveat of caveats) {
+          for (const override of overrides) {
+            const prose = caveat === undefined ? { override } : { caveat, override };
+            hold(
+              `${key} ${undeclaredDefault} ${JSON.stringify(prose)}`,
+              [{ key, undeclaredDefault }],
+              {
+                [key]: prose,
+              },
+            );
+          }
+        }
+      }
+    }
+    const labels: KnobbedSection = { key: "labels", undeclaredDefault: "delete" };
+    const rulesets: KnobbedSection = { key: "rulesets", undeclaredDefault: "keep" };
+    const prose = { labels: { override: "x" }, rulesets: { caveat: "c", override: "y" } };
+    hold("labels twice", [labels, labels], prose);
+    hold("keep before delete", [rulesets, labels], prose);
+    hold("whitespace override", [labels], { labels: { override: "   " } });
+    expect(outcomes.get("labels twice")).toBe("faulted");
+    expect(outcomes.get("keep before delete")).toBe("written");
+    expect(outcomes.get("whitespace override")).toBe("faulted");
+    const written = [...outcomes.values()].filter((outcome) => outcome === "written").length;
+    expect(written).toBeGreaterThan(0);
+    expect(outcomes.size - written).toBeGreaterThan(0);
+  });
+
+  test("a region that renders a table carries a round trip, never a hand-written grammar", () => {
+    // A table region's guard and its renderer share one grammar only through the round trip, so a RegExp body on a
+    // table region is a second grammar.
+    for (const region of Object.values(GENERATED_REGIONS).flat()) {
+      if (region.render().startsWith("\n|")) {
+        expect(region.body, region.name).not.toBeInstanceOf(RegExp);
       }
     }
   });
