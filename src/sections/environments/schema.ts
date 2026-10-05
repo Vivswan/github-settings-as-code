@@ -22,6 +22,7 @@ import {
   conditional,
   maxLength,
   nestedKnobbed,
+  open,
   rule,
   secretName,
   variableConfig,
@@ -36,12 +37,10 @@ const MAX_REVIEWERS = 6;
 /** GitHub's cap on pinned environments per repository. */
 export const MAX_PINNED_ENVIRONMENTS = 10;
 
-export const DeploymentBranchPolicyConfig = z
-  .object({
-    name: z.string(),
-    type: z.enum(["branch", "tag"]).optional(),
-  })
-  .meta({ id: "DeploymentBranchPolicyConfig" });
+export const DeploymentBranchPolicyConfig = open({
+  name: z.string(),
+  type: z.enum(["branch", "tag"]).optional(),
+}).meta({ id: "DeploymentBranchPolicyConfig" });
 export type DeploymentBranchPolicyConfig = z.infer<typeof DeploymentBranchPolicyConfig>;
 
 export const DeploymentProtectionRuleConfig = z
@@ -66,11 +65,10 @@ export type EnvironmentSecretConfig = z.infer<typeof EnvironmentSecretConfig>;
  * GitHub accepts exactly one flag on: both true is a 422, and both false is a 422 too because "any
  * branch may deploy" is spelled `deployment_branch_policy: null`.
  */
-const DeploymentBranchPolicyFlags = z
-  .object({
-    protected_branches: z.boolean(),
-    custom_branch_policies: z.boolean(),
-  })
+const DeploymentBranchPolicyFlags = open({
+  protected_branches: z.boolean(),
+  custom_branch_policies: z.boolean(),
+})
   .check(
     rule((flags, refineCtx) => {
       // A raw flag beside its own shape issue is neither setting: two equal raw values (0 and 0, a YAML alias
@@ -98,40 +96,39 @@ const DeploymentBranchPolicyFlags = z
     ),
   );
 
-export const EnvironmentConfig = z
-  .object({
-    name: z.string(),
-    // Routed (see EnvironmentRoutedScalars): stripped from the PUT body and applied through the
-    // GraphQL pin mutations after every PUT.
-    pinned: z.boolean().optional(),
-    wait_timer: z
-      .int("wait_timer is a whole number of minutes")
-      .min(0, "wait_timer cannot be negative; 0 declares the wait timer off")
-      .max(
-        MAX_WAIT_TIMER_MINUTES,
-        `GitHub caps wait_timer at ${MAX_WAIT_TIMER_MINUTES} minutes (30 days)`,
-      )
-      .optional(),
-    prevent_self_review: z.boolean().optional(),
-    reviewers: z
-      .array(z.object({ type: z.enum(["User", "Team"]), id: z.number() }))
-      .check(
-        maxLength(
-          MAX_REVIEWERS,
-          `GitHub allows at most ${MAX_REVIEWERS} required reviewers per environment; keep ${MAX_REVIEWERS} or fewer entries`,
-        ),
-      )
-      .optional(),
-    deployment_branch_policy: DeploymentBranchPolicyFlags.nullable().optional(),
-    deployment_branch_policies: nestedKnobbed(DeploymentBranchPolicyConfig).optional(),
-    deployment_protection_rules: nestedKnobbed(DeploymentProtectionRuleConfig).optional(),
-    variables: nestedKnobbed(EnvironmentVariableConfig).optional(),
-    secrets: nestedKnobbed(EnvironmentSecretConfig).optional(),
-  })
+export const EnvironmentConfig = open({
+  name: z.string(),
+  // Routed (see EnvironmentRoutedScalars): stripped from the PUT body and applied through the
+  // GraphQL pin mutations after every PUT.
+  pinned: z.boolean().optional(),
+  wait_timer: z
+    .int("wait_timer is a whole number of minutes")
+    .min(0, "wait_timer cannot be negative; 0 declares the wait timer off")
+    .max(
+      MAX_WAIT_TIMER_MINUTES,
+      `GitHub caps wait_timer at ${MAX_WAIT_TIMER_MINUTES} minutes (30 days)`,
+    )
+    .optional(),
+  prevent_self_review: z.boolean().optional(),
+  reviewers: z
+    .array(open({ type: z.enum(["User", "Team"]), id: z.number() }))
+    .check(
+      maxLength(
+        MAX_REVIEWERS,
+        `GitHub allows at most ${MAX_REVIEWERS} required reviewers per environment; keep ${MAX_REVIEWERS} or fewer entries`,
+      ),
+    )
+    .optional(),
+  deployment_branch_policy: DeploymentBranchPolicyFlags.nullable().optional(),
+  deployment_branch_policies: nestedKnobbed(DeploymentBranchPolicyConfig).optional(),
+  deployment_protection_rules: nestedKnobbed(DeploymentProtectionRuleConfig).optional(),
+  variables: nestedKnobbed(EnvironmentVariableConfig).optional(),
+  secrets: nestedKnobbed(EnvironmentSecretConfig).optional(),
+})
   .check(
     rule((entry, refineCtx) => {
-      // A singular `secret` would ride the passthrough PUT verbatim and configure nothing. The strict
-      // type hides the key; only the loosen()ed shape that parses documents lets it reach here.
+      // A singular `secret` would ride the passthrough PUT verbatim and configure nothing. The type
+      // hides the key; the open() parse lets it reach here.
       if ((entry as Record<string, unknown>).secret !== undefined) {
         refineCtx.addIssue({
           code: "custom",

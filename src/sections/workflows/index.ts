@@ -11,7 +11,6 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   identifiedBy,
   listEntries,
-  loosen,
   type SectionMeta,
   type SectionModule,
   type SectionSnapshot,
@@ -19,7 +18,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
-import { layeredList } from "../shared/schema-helpers.js";
+import { layeredList, routed } from "../shared/schema-helpers.js";
 import { WorkflowsConfig } from "./schema.js";
 
 const LiveWorkflow = z.looseObject({
@@ -75,7 +74,7 @@ export const workflowsSection = {
   undeclaredDefault: "untouched",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(layeredList(WorkflowsConfig)),
+  shape: routed(layeredList(WorkflowsConfig)),
   // The enable/disable PUTs carry no body at all, so an extra key can only be a typo that would silently do nothing.
   closedSurface: {
     known: { path: true, state: true },

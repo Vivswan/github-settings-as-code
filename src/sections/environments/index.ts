@@ -18,14 +18,13 @@ import {
   type KeyedListLayering,
   keyedBy,
   listEntries,
-  loosen,
   missingDrift,
   type SectionModule,
   secretValuesOf,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, plainData } from "../contract/plan.js";
-import { layeredList } from "../shared/schema-helpers.js";
+import { layeredList, routed } from "../shared/schema-helpers.js";
 import { listSecretValues, secretKey } from "../shared/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { variableKey } from "../shared/variables-engine.js";
@@ -137,7 +136,7 @@ export const environmentsSection = {
   grantCaveat: NESTED_OVERRIDES_CAVEAT,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: loosen(layeredList(EnvironmentsConfig)),
+  shape: routed(layeredList(EnvironmentsConfig)),
   /**
    * Labels carry the environment: sibling environments can declare same-named secrets.
    * A malformed container contributes nothing rather than throwing, so the actionable error

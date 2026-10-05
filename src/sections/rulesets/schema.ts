@@ -5,7 +5,7 @@
 
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
-import { rule as gatedRule } from "../shared/schema-helpers.js";
+import { rule as gatedRule, open } from "../shared/schema-helpers.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -309,27 +309,22 @@ const RuleConfig = z
 
 // --- The ruleset --------------------------------------------------------------------
 
-export const RulesetConfig = z
-  .object({
-    name: z.string(),
-    // The file may omit both: target takes the default GitHub documents for a create, enforcement the value chosen
-    // here (the create requires one). The parsed entry carries both, so the PUT sends them and the comparison never
-    // reads a live value under either key as omitted.
-    target: z.enum(["branch", "tag", "push"]).default("branch"),
-    enforcement: z.enum(["active", "evaluate", "disabled"]).default("active"),
-    conditions: z
-      .object({
-        ref_name: z
-          .object({
-            include: z.array(RefNamePattern).optional(),
-            exclude: z.array(RefNamePattern).optional(),
-          })
-          .optional(),
-      })
-      .optional(),
-    rules: z.array(RuleConfig).optional(),
-    bypass_actors: z.array(BypassActorConfig).optional(),
-  })
+export const RulesetConfig = open({
+  name: z.string(),
+  // The file may omit both: target takes the default GitHub documents for a create, enforcement the value chosen
+  // here (the create requires one). The parsed entry carries both, so the PUT sends them and the comparison never
+  // reads a live value under either key as omitted.
+  target: z.enum(["branch", "tag", "push"]).default("branch"),
+  enforcement: z.enum(["active", "evaluate", "disabled"]).default("active"),
+  conditions: open({
+    ref_name: open({
+      include: z.array(RefNamePattern).optional(),
+      exclude: z.array(RefNamePattern).optional(),
+    }).optional(),
+  }).optional(),
+  rules: z.array(RuleConfig).optional(),
+  bypass_actors: z.array(BypassActorConfig).optional(),
+})
   .check(
     gatedRule((ruleset, refineCtx) => {
       // The spec: `pull_request` bypass applies to branch rulesets only; the target defaults to branch upstream. The

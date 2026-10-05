@@ -276,8 +276,8 @@ describe("branches protection parse rules", () => {
           "https://api.github.com/repos/octocat/hello-world/branches/main/protection/restrictions/users",
       },
     };
-    // The actor object is a typed field's failure; the mapping's own key sweep runs beside it (loosen() rewires
-    // every check to report beside a failed sibling), so the whole copy is refused in one round.
+    // The actor object is a typed field's failure; the mapping's own key sweep runs beside it (rule() reports
+    // beside a failed sibling), so the whole copy is refused in one round.
     const keySweep = [
       "0.protection.required_status_checks.contexts_url: protection.required_status_checks.contexts_url is a link GitHub's GET response carries and the protection PUT has no word for; remove it",
       "0.protection.required_status_checks.enforcement_level: protection.required_status_checks.enforcement_level is GitHub's GET-only echo, which the protection PUT has no word for; remove it (strict and the check list carry the requirement)",

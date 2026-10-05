@@ -2,7 +2,7 @@
  * The repository section's parse refusals, each pinned as the problem line a user reads: a quoted boolean or a bare
  * number where the PATCH takes a toggle or a string, the vocabularies GitHub 422s (feature status, creation
  * policy, the commit-message pairs), the topic grammar and cap, the closed security_and_analysis shape, and the
- * GET-only fields that would drift forever. Parsed through the loosened document shape, so a rule that survives here
+ * GET-only fields that would drift forever. Parsed through the section's runtime shape, so a rule that survives here
  * reaches the run.
  */
 

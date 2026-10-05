@@ -1,7 +1,7 @@
 /** The `secret_scanning_custom_patterns:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
-import { minLength, rule } from "../shared/schema-helpers.js";
+import { minLength, open, rule } from "../shared/schema-helpers.js";
 import { compileFailure } from "./compilable-form.js";
 
 const DELIMITER_CLEAR_ERROR =
@@ -56,16 +56,14 @@ export function unverifiableRegexFields(entry: unknown): string[] {
   return labels;
 }
 
-export const SecretScanningPatternConfig = z
-  .object({
-    name: z.string(),
-    pattern: regexSource(),
-    // "" cannot mean "clear the delimiter" (the PATCH updates provided fields only), so the spelling
-    // fails at document validation, before any repository is touched.
-    start_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
-    end_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
-    must_match: z.array(regexSource()).optional(),
-    must_not_match: z.array(regexSource()).optional(),
-  })
-  .meta({ id: "SecretScanningPatternConfig" });
+export const SecretScanningPatternConfig = open({
+  name: z.string(),
+  pattern: regexSource(),
+  // "" cannot mean "clear the delimiter" (the PATCH updates provided fields only), so the spelling
+  // fails at document validation, before any repository is touched.
+  start_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
+  end_delimiter: regexSource().check(minLength(1, DELIMITER_CLEAR_ERROR)).optional(),
+  must_match: z.array(regexSource()).optional(),
+  must_not_match: z.array(regexSource()).optional(),
+}).meta({ id: "SecretScanningPatternConfig" });
 export type SecretScanningPatternConfig = z.infer<typeof SecretScanningPatternConfig>;

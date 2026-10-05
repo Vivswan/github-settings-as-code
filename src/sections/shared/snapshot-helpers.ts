@@ -20,8 +20,9 @@ import { schemaNode } from "./schema-node.js";
  * list per section. A nested `null` the slice cannot hold is GitHub's "no value" (a not-configured
  * setup's runner_type) and its key is omitted; a value the slice rejects at the root stays, so the
  * engine's validation names a body outside the shape instead of the section vanishing. A
- * passthrough slice (a catchall other than never) keeps every live key by design, so a section on
- * one names the keys it reads back itself. The casts are the boundary the engine validates behind.
+ * z.looseObject slice keeps every live key by design, so a section on one names the keys it reads
+ * back itself, and an open() slice keeps the declared ones alone. The casts are the boundary the
+ * engine validates behind.
  */
 export function projectOntoSchema<T>(schema: z.ZodType<T>, live: unknown): T {
   if (live === null && !schema.safeParse(null).success) {
@@ -52,7 +53,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
           out[key] = projected;
         }
       }
-      if (node.open) {
+      if (node.openness === "open") {
         for (const [key, value] of Object.entries(live)) {
           if (!(key in node.shape) && value !== undefined) {
             out[key] = value;
@@ -80,7 +81,7 @@ function project(schema: z.ZodType, live: unknown): unknown {
 
 /**
  * What a replace-write comparison's omission sweep needs to know about a slice: the dotted paths where it stops
- * typing keys (a record, an unknown, or an object with a catchall, a list item spelled `[]`: `rules[].parameters`,
+ * typing keys (a record, an unknown, or a z.looseObject, a list item spelled `[]`: `rules[].parameters`,
  * `bypass_actors[]`), which the sweep skips while the typed list key itself still counts, and the paths that accept
  * `null`, whose clearing spelling is `null`.
  */
@@ -114,7 +115,7 @@ function collectSweep(
       }
       return;
     case "object": {
-      if (node.open) {
+      if (node.openness === "open") {
         passthrough.push(path);
         return;
       }

@@ -18,7 +18,6 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   identifiedBy,
-  loosen,
   missingDrift,
   type SectionMeta,
   type SectionModule,
@@ -30,7 +29,7 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";
-import { knobbed } from "../shared/schema-helpers.js";
+import { knobbed, routed } from "../shared/schema-helpers.js";
 import {
   knobbedSnapshot,
   leftOutOfSnapshot,
@@ -166,7 +165,7 @@ export const secretScanningPatternsSection = {
   undeclaredDefault: "keep",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(knobbed(SecretScanningPatternConfig)),
+  shape: routed(knobbed(SecretScanningPatternConfig)),
   // The POST/PATCH bodies carry only the six declared fields, so an extra key has no destination and can only be a typo.
   closedSurface: {
     known: {

@@ -1,9 +1,13 @@
 /**
  * The marks the minting helpers (./schema-helpers.ts) leave for schemaNode() (./schema-node.ts) to read, so a knob
- * union is known by what minted it, never by its shape. Imports only zod: both sides import this file.
+ * union is known by what minted it and an open() mapping by its catchall, never by shape. Imports only zod: both
+ * sides import this file.
  */
 
-import type { z } from "zod";
+import { z } from "zod";
+
+/** The one catchall open() hands out, so schemaNode() tells its mappings from a z.looseObject. */
+export const OPEN_CATCHALL = z.unknown();
 
 /** The two forms a list section takes, as knobbed(), nestedKnobbed(), or layeredList() minted them. */
 export interface Knob {

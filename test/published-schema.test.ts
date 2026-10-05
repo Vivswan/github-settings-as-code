@@ -30,7 +30,21 @@ const runtimeAccepts = (doc: Record<string, unknown>): boolean =>
 const prod = (entry: Record<string, unknown>) => ({ environments: [{ name: "prod", ...entry }] });
 const customPolicies = { protected_branches: false, custom_branch_policies: true };
 
-describe("published schema wrapper strictness", () => {
+describe("published schema openness", () => {
+  test("an open() slice publishes no additionalProperties, and a z.looseObject slice publishes its catchall", () => {
+    const { definitions } = schema;
+    expect("additionalProperties" in schema).toBe(false);
+    for (const name of ["LabelConfig", "EnvironmentConfig"]) {
+      expect(definitions[name], name).toBeDefined();
+      expect("additionalProperties" in (definitions[name] ?? {}), name).toBe(false);
+    }
+    for (const name of ["RepositoryConfig", "WebhookDeliveryConfig"]) {
+      expect(definitions[name]?.additionalProperties, name).toEqual({
+        description: expect.stringMatching(/pass(es)? through/),
+      });
+    }
+  });
+
   test("one closed wrapper definition per knobbed section and nested knob", () => {
     const wrappers = Object.entries(schema.definitions).filter(([name]) =>
       name.startsWith("UndeclaredPolicyList<"),

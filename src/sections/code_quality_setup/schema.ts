@@ -3,7 +3,7 @@
 import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
 import type { MustBeNever } from "../../types.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 import {
   languagesSchema,
   refineSetup,
@@ -24,14 +24,13 @@ type _VocabularyIsTheVendoredSpec = MustBeNever<
   >
 >;
 
-export const CodeQualitySetupConfig = z
-  .object({
-    state: z.enum(["configured", "not-configured"]).optional(),
-    languages: languagesSchema(CODE_QUALITY_LANGUAGES).optional(),
-    runner_type: z.enum(["standard", "labeled"]).optional(),
-    runner_label: z.string().nullable().optional(),
-    ai_findings_option: z.enum(["disabled", "on_push"]).optional(),
-  })
+export const CodeQualitySetupConfig = open({
+  state: z.enum(["configured", "not-configured"]).optional(),
+  languages: languagesSchema(CODE_QUALITY_LANGUAGES).optional(),
+  runner_type: z.enum(["standard", "labeled"]).optional(),
+  runner_label: z.string().nullable().optional(),
+  ai_findings_option: z.enum(["disabled", "on_push"]).optional(),
+})
   .check(rule(refineSetup))
   .meta({ id: "CodeQualitySetupConfig" });
 export type CodeQualitySetupConfig = z.infer<typeof CodeQualitySetupConfig>;

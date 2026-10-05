@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { describeValue } from "../../plain-data.js";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 
 /** GitHub's rule for an OIDC claim key; the PUT 422s on anything else. */
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
@@ -10,8 +10,8 @@ const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
 /**
  * The fields the GET reports and the PUT does not take, as [path to the holder, field]: a declared value
  * can only diff against live and re-PUT forever, so the document is refused with the key named. The
- * holder is read off the loosened (passthrough) parse output, which is how the refinement sees a key
- * the shape does not declare.
+ * holder is read off the open() parse output, which is how the refinement sees a key the shape does
+ * not declare.
  */
 const REPORTED_ONLY: readonly (readonly [readonly string[], string])[] = [
   [[], "selected_actions_url"],
@@ -70,13 +70,13 @@ const ClaimKeys = z
 /**
  * The two templates are two variants, discriminated on use_default, so the claim-key list has no
  * home on the default one and the plan narrows on the flag instead of re-checking it. The default
- * variant is passthrough once loosened, so a list declared beside use_default: true is refused by
- * name here rather than riding through.
+ * variant is open(), so a list declared beside use_default: true is refused by name here rather
+ * than riding through.
  */
 const OidcTemplate = z
   .discriminatedUnion("use_default", [
-    z.object({ use_default: z.literal(true), use_immutable_subject: z.boolean().optional() }),
-    z.object({
+    open({ use_default: z.literal(true), use_immutable_subject: z.boolean().optional() }),
+    open({
       use_default: z.literal(false),
       include_claim_keys: ClaimKeys.optional(),
       use_immutable_subject: z.boolean().optional(),
@@ -97,53 +97,48 @@ const OidcTemplate = z
     }),
   );
 
-export const ActionsConfig = z
-  .object({
-    enabled: z.boolean().optional(),
-    allowed_actions: z.enum(["all", "local_only", "selected"]).optional(),
-    sha_pinning_required: z.boolean().optional(),
-    // STRICT: the spec documents the complete allowlist body, and this PUT has no unrecognized-key
-    // note, so a misspelled key would otherwise re-PUT on every run without a word.
-    selected_actions: z
-      .strictObject({
-        github_owned_allowed: z.boolean().optional(),
-        verified_allowed: z.boolean().optional(),
-        patterns_allowed: z.array(z.string()).optional(),
-      })
-      .optional(),
-    default_workflow_permissions: z.enum(["read", "write"]).optional(),
-    can_approve_pull_request_reviews: z.boolean().optional(),
-    access_level: z.enum(["none", "user", "organization"]).optional(),
-    // The upper bounds of the retention and cache limits are plan-dependent, so only the integer rule is checked here.
-    artifact_and_log_retention: z.object({ days: z.int().positive() }).optional(),
-    // STRICT, unlike its siblings: each cache limit is the entire body of its own endpoint, so an
-    // unrecognized cache key has no passthrough destination and can only be a typo.
-    cache: z
-      .strictObject({
-        max_cache_retention_days: z.int().positive().optional(),
-        max_cache_size_gb: z.int().positive().optional(),
-      })
-      .optional(),
-    oidc_customization_sub: OidcTemplate.optional(),
-    fork_pr_contributor_approval: z
-      .object({
-        approval_policy: z.enum([
-          "first_time_contributors_new_to_github",
-          "first_time_contributors",
-          "all_external_contributors",
-        ]),
-      })
-      .optional(),
-    // Only the first toggle is required, as in the request body; the docs advise declaring all four.
-    fork_pr_workflows_private_repos: z
-      .object({
-        run_workflows_from_fork_pull_requests: z.boolean(),
-        send_write_tokens_to_workflows: z.boolean().optional(),
-        send_secrets_and_variables: z.boolean().optional(),
-        require_approval_for_fork_pr_workflows: z.boolean().optional(),
-      })
-      .optional(),
-  })
+export const ActionsConfig = open({
+  enabled: z.boolean().optional(),
+  allowed_actions: z.enum(["all", "local_only", "selected"]).optional(),
+  sha_pinning_required: z.boolean().optional(),
+  // STRICT: the spec documents the complete allowlist body, and this PUT has no unrecognized-key
+  // note, so a misspelled key would otherwise re-PUT on every run without a word.
+  selected_actions: z
+    .strictObject({
+      github_owned_allowed: z.boolean().optional(),
+      verified_allowed: z.boolean().optional(),
+      patterns_allowed: z.array(z.string()).optional(),
+    })
+    .optional(),
+  default_workflow_permissions: z.enum(["read", "write"]).optional(),
+  can_approve_pull_request_reviews: z.boolean().optional(),
+  access_level: z.enum(["none", "user", "organization"]).optional(),
+  // The upper bounds of the retention and cache limits are plan-dependent, so only the integer rule is checked here.
+  artifact_and_log_retention: open({ days: z.int().positive() }).optional(),
+  // STRICT, unlike its siblings: each cache limit is the entire body of its own endpoint, so an
+  // unrecognized cache key has no passthrough destination and can only be a typo.
+  cache: z
+    .strictObject({
+      max_cache_retention_days: z.int().positive().optional(),
+      max_cache_size_gb: z.int().positive().optional(),
+    })
+    .optional(),
+  oidc_customization_sub: OidcTemplate.optional(),
+  fork_pr_contributor_approval: open({
+    approval_policy: z.enum([
+      "first_time_contributors_new_to_github",
+      "first_time_contributors",
+      "all_external_contributors",
+    ]),
+  }).optional(),
+  // Only the first toggle is required, as in the request body; the docs advise declaring all four.
+  fork_pr_workflows_private_repos: open({
+    run_workflows_from_fork_pull_requests: z.boolean(),
+    send_write_tokens_to_workflows: z.boolean().optional(),
+    send_secrets_and_variables: z.boolean().optional(),
+    require_approval_for_fork_pr_workflows: z.boolean().optional(),
+  }).optional(),
+})
   .check(
     rule((declared, refineCtx) => {
       // Checked in the shape, not in plan(), so both modes reject the document before ANY section

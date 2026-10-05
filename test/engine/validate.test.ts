@@ -608,7 +608,7 @@ describe("every parse error in a document is reported in one run", () => {
       ],
     ],
     [
-      "a failed entry and a rule the section attaches to its loosened list (branches wildcard keys)",
+      "a failed entry and a rule the section attaches to its routed list (branches wildcard keys)",
       {
         branches: [
           { name: 1, protection: null },

@@ -6,7 +6,6 @@ import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
 import {
   cannotVerifyNote,
-  loosen,
   requirePlainMapping,
   type SectionMeta,
   type SectionModule,
@@ -469,7 +468,7 @@ export const repositorySection = {
   permission,
   endpoints: ENDPOINTS,
   graphql: GRAPHQL_OPS,
-  shape: requirePlainMapping(loosen(RepositoryConfig)),
+  shape: requirePlainMapping(RepositoryConfig),
   async plan(ctx, declared) {
     const section = this;
     return safeTry(async function* () {

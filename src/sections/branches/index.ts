@@ -18,13 +18,12 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   identifiedBy,
   listEntries,
-  loosen,
   type SectionMeta,
   type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { plainData, type Read } from "../contract/plan.js";
-import { layeredList, rule } from "../shared/schema-helpers.js";
+import { layeredList, routed, rule } from "../shared/schema-helpers.js";
 import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
@@ -261,7 +260,7 @@ export const branchesSection = {
   graphql: GRAPHQL,
   // The wildcard key sweep composes HERE, not in schema.ts: it reads the GraphQL translation tables,
   // which are this section's own machinery, and nothing outside them can reach a wildcard rule.
-  shape: loosen(layeredList(BranchesConfig)).check(
+  shape: routed(layeredList(BranchesConfig)).check(
     rule((declared, refineCtx) => {
       // The routed shape parsed one of the two forms; under the wrapper an issue's path starts at `entries`.
       const wrapped = !Array.isArray(declared);

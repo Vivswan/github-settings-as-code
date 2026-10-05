@@ -12,7 +12,6 @@ import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
   defaultUndeclaredPolicy,
   identifiedBy,
-  loosen,
   type SectionMeta,
   type SectionModule,
   undeclaredDrift,
@@ -28,7 +27,7 @@ import {
   readBackPermission,
   roleForPermission,
 } from "../shared/roles.js";
-import { knobbed } from "../shared/schema-helpers.js";
+import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
 import { CollaboratorConfig } from "./schema.js";
 
@@ -145,7 +144,7 @@ export const collaboratorsSection = {
   undeclaredDefault: "delete",
   permission,
   endpoints: ENDPOINTS,
-  shape: loosen(knobbed(CollaboratorConfig)),
+  shape: routed(knobbed(CollaboratorConfig)),
   // The PUT accepts exactly one setting ("permission"), so an extra key is always a typo.
   closedSurface: {
     known: { username: true, permission: true },

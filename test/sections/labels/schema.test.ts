@@ -1,7 +1,7 @@
 /**
  * GitHub's label rules the platform does not enforce for us before the wire: a color must be six hex digits (a name or
  * three-digit shorthand 422s on create, and on an existing label drifts and re-PATCHes every run) and a description is
- * capped at 100 characters. Parsed through the loosened document shape, so a rule that survives here reaches the run.
+ * capped at 100 characters. Parsed through the section's runtime shape, so a rule that survives here reaches the run.
  */
 
 import { describe, expect, test } from "bun:test";

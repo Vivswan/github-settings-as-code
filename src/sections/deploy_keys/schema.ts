@@ -2,7 +2,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import { rule } from "../shared/schema-helpers.js";
+import { open, rule } from "../shared/schema-helpers.js";
 
 /**
  * The key types GitHub accepts for a deploy key; the docs field note lists them for the reader. DSA (ssh-dss) is
@@ -153,12 +153,11 @@ export function parseStoredKey(raw: string): Result<PublicKeyMaterial, string> {
   return parseMaterial(STORED_KEY_PATTERN, raw, storedRejection);
 }
 
-export const DeployKeyConfig = z
-  .object({
-    title: z.string(),
-    key: z.string().meta({ pattern: PUBLIC_KEY_PATTERN.source }),
-    read_only: z.boolean().optional(),
-  })
+export const DeployKeyConfig = open({
+  title: z.string(),
+  key: z.string().meta({ pattern: PUBLIC_KEY_PATTERN.source }),
+  read_only: z.boolean().optional(),
+})
   // Entry-level so the refusal can name the entry by title; the field-level form would know only the index.
   .check(
     rule((entry, refineCtx) => {

@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { PermissionSchema } from "../shared/roles.js";
+import { open } from "../shared/schema-helpers.js";
 
 // The name is the team_slug in every API path. A display name ("Core Team") probes /teams/Core%20Team, 404s, and the
 // section reads that as "no access": check reports a lie and the grant PUT 404s in turn. Uppercase passes; GitHub
@@ -17,12 +18,10 @@ function slugError(declared: string): string {
     : `${rule}, and ${shown} is not one`;
 }
 
-export const TeamConfig = z
-  .object({
-    name: z.string().regex(SLUG_PATTERN, {
-      error: (issue: { input: unknown }) => slugError(String(issue.input)),
-    }),
-    permission: PermissionSchema.optional(),
-  })
-  .meta({ id: "TeamConfig" });
+export const TeamConfig = open({
+  name: z.string().regex(SLUG_PATTERN, {
+    error: (issue: { input: unknown }) => slugError(String(issue.input)),
+  }),
+  permission: PermissionSchema.optional(),
+}).meta({ id: "TeamConfig" });
 export type TeamConfig = z.infer<typeof TeamConfig>;

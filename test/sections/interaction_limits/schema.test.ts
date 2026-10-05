@@ -3,7 +3,7 @@
  * enums (a typo 422s the PUT, and since the PUT re-arms on every apply the typo can never surface earlier), the PUT
  * body is exactly limit and expiry (a declared origin or expires_at is GitHub's read-back and diffs unequal forever),
  * and max_open_pull_requests is a whole number in GitHub's 1 to 1000 range. Each refusal is pinned as the problem
- * line a user reads. Parsed through the loosened document shape, so a rule that survives here reaches the run.
+ * line a user reads. Parsed through the section's runtime shape, so a rule that survives here reaches the run.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -142,8 +142,8 @@ describe("an interaction limit GitHub would 422, or could never converge on, nev
   );
 
   test("a cap key this version does not know survives the parse: the cap object is open, and the phantom note reports it at plan time", () => {
-    // The section is strict but the cap is a plain object, which loosen() turns into passthrough; a strip here would
-    // silently drop a future PATCH field instead of sending it.
+    // The section is strict but the cap is open(); a strip here would silently drop a future PATCH field instead
+    // of sending it.
     const cap = { enabled: true, max_open_prs: 5 };
     expect(interactionLimitsSection.shape.parse({ pull_request_creation_cap: cap })).toEqual({
       pull_request_creation_cap: cap,

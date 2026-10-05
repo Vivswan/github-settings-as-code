@@ -2,7 +2,7 @@
  * GitHub's check-suite preference rules, enforced before the PATCH. An app_id is a positive integer: no app 0 exists
  * and GitHub rejects fractions. One app gets one entry: GitHub keeps whichever it reads last. Without the bound the
  * PATCH reports whatever GitHub answers, late and on every run. Without the pair rule the lost entry is never
- * reported, since no read endpoint exists. Parsed through the loosened document shape, so a rule that survives here
+ * reported, since no read endpoint exists. Parsed through the section's runtime shape, so a rule that survives here
  * reaches the run.
  */
 

@@ -3,15 +3,16 @@
  * section slice or the document schema. A schema kind no walk handles is refused here, once, so a new zod
  * construct is taught its walk before it is authored in a slice.
  *
- *   object.open  -> a catchall other than never admits undeclared keys; a strip object (no catchall) is closed to the
- *                   walks, and loosen() in ../contract/module.ts is what opens it at runtime
- *   union.knob   -> the pair knobbed()/nestedKnobbed()/layeredList() minted (./schema-helpers.ts), known by the marks
- *                   they left (./schema-marks.ts), never by the options' shape; canonical and loosen() route it
+ *   object.openness  -> what undeclared keys are to the mapping's contract: refused (strictObject), outside it
+ *                       (open() and a bare z.object: the walks project the declared keys, the published schema says
+ *                       nothing about the rest), or part of it (z.looseObject: kept everywhere)
+ *   union.knob       -> the pair knobbed()/nestedKnobbed()/layeredList() minted (./schema-helpers.ts), known by the
+ *                       marks they left (./schema-marks.ts), never by the options' shape; routed() routes it
  *   leaf.values  -> what an enum or literal admits, duplicates included, so a seeded draw over them is stable
  */
 
 import { z } from "zod";
-import { type Knob, knobOf } from "./schema-marks.js";
+import { type Knob, knobOf, OPEN_CATCHALL } from "./schema-marks.js";
 
 const WRAPPERS = [
   [z.ZodOptional, "optional"],
@@ -29,13 +30,14 @@ type WrapperKind = (typeof WRAPPERS)[number][1];
 
 type LeafType = "string" | "number" | "boolean" | "null" | "unknown" | "never" | "enum" | "literal";
 
+type Openness = "strict" | "declared" | "open";
+
 export type SchemaNode =
   | {
       readonly kind: "object";
       readonly schema: z.ZodObject;
       readonly shape: Readonly<Record<string, z.ZodType>>;
-      readonly catchall: z.ZodType | undefined;
-      readonly open: boolean;
+      readonly openness: Openness;
     }
   | { readonly kind: "array"; readonly schema: z.ZodArray; readonly element: z.ZodType }
   | { readonly kind: "record"; readonly schema: z.ZodRecord; readonly value: z.ZodType }
@@ -58,16 +60,16 @@ function classic(schema: z.core.$ZodType): z.ZodType {
   return schema as z.ZodType;
 }
 
+function openness(catchall: z.core.$ZodType | undefined): Openness {
+  if (catchall instanceof z.ZodNever) {
+    return "strict";
+  }
+  return catchall === undefined || catchall === OPEN_CATCHALL ? "declared" : "open";
+}
+
 export function schemaNode(schema: z.ZodType): SchemaNode {
   if (schema instanceof z.ZodObject) {
-    const catchall = schema.def.catchall === undefined ? undefined : classic(schema.def.catchall);
-    return {
-      kind: "object",
-      schema,
-      shape: schema.shape,
-      catchall,
-      open: catchall !== undefined && !(catchall instanceof z.ZodNever),
-    };
+    return { kind: "object", schema, shape: schema.shape, openness: openness(schema.def.catchall) };
   }
   if (schema instanceof z.ZodArray) {
     return { kind: "array", schema, element: classic(schema.element) };

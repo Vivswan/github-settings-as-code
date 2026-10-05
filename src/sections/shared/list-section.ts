@@ -38,7 +38,6 @@ import {
   type EntryOf,
   type GraphqlDict,
   type KeyedListLayering,
-  loosen,
   missingDrift,
   type SectionMeta,
   type SectionSnapshot,
@@ -62,7 +61,7 @@ import {
   type SnapshotContext,
   type Unverifiable,
 } from "../contract/plan.js";
-import { knobbed } from "./schema-helpers.js";
+import { knobbed, routed } from "./schema-helpers.js";
 import {
   knobbedSnapshot,
   leftOutOfSnapshot,
@@ -1157,7 +1156,7 @@ export function listSection<
     permission: decl.permission,
     undeclaredDefault: decl.undeclaredDefault,
     endpoints: decl.endpoints,
-    shape: loosen(knobbed(decl.entry)),
+    shape: routed(knobbed(decl.entry)),
     ...(decl.secrets === undefined
       ? {}
       : { secretValues: (declared: Declared<K>) => secretValuesFor(erased, declared) }),
