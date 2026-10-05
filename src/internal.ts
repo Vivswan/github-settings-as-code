@@ -38,15 +38,12 @@ export {
   type InputName,
   MODES,
   type Mode,
-  parseSnapshotFileConfig,
   RENDER_INPUTS,
   RENDER_ONLY_INPUTS,
   RENDER_REJECTED_INPUTS,
   SNAPSHOT_INPUTS,
   SNAPSHOT_ONLY_INPUTS,
   SNAPSHOT_REJECTED_INPUTS,
-  type SnapshotFileConfig,
-  snapshotFileDestination,
 } from "./flows/inputs.js";
 export { type FoldedLayers, foldLayers } from "./flows/layers.js";
 export {
@@ -64,6 +61,11 @@ export {
   publicDetail,
   toPublicView,
 } from "./flows/redact.js";
+export {
+  parseSnapshotFileConfig,
+  type SnapshotFileConfig,
+  snapshotFileDestination,
+} from "./flows/run-config.js";
 export { writeReplacing } from "./flows/settings-write.js";
 export { SNAPSHOT_SCHEMA_URL } from "./flows/snapshot.js";
 export { SECRET_RESPONSE_WITHHELD, SECRET_TRANSPORT_WITHHELD } from "./github/api-error.js";

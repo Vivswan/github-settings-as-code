@@ -8,9 +8,9 @@ import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
 import type { ArtifactUploader } from "../report/artifact-report.js";
 import { concludeRender, concludeRun, failRun } from "./deliver.js";
-import type { RunConfig } from "./inputs.js";
 import { runMulti } from "./multi.js";
 import { runRender } from "./render.js";
+import type { RunConfig } from "./run-config.js";
 import { runSingle } from "./single.js";
 import { concludeSnapshot, runSnapshot } from "./snapshot.js";
 

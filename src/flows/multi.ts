@@ -53,7 +53,7 @@ import {
 } from "./redact.js";
 import { parseSettingsDoc, readSettingsFile } from "./settings-read.js";
 
-/** The single source for the action.yml `settings-file` default, the multi-repo override guard in src/flows/inputs.ts, and the prose below. */
+/** The single source for the action.yml `settings-file` default, the multi-repo override guard in src/flows/run-config.ts, and the prose below. */
 export const DEFAULT_SETTINGS_FILE = ".github/settings.yml";
 
 /**

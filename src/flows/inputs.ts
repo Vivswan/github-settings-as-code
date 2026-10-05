@@ -1,34 +1,16 @@
 /**
- * parseConfig() validates every input read through a caller-supplied port (each problem names the input and the fix)
- * into the RunConfig the run executes, so no execution code touches a raw input and a CLI reads the same declarations
+ * The input declarations: INPUT_DECLS is the single source action.yml and the inputs reference are generated from,
+ * and the per-mode lists beside it say which declared inputs each mode reads, so a CLI reads the same declarations
  * the action does.
  */
 
-import { err, ok, type Result, safeTry } from "neverthrow";
-import {
-  AFFILIATIONS,
-  ARCHIVED_FILTERS,
-  DEFAULT_DISCOVERY_FILTERS,
-  type DiscoveryFilters,
-  FORKS_FILTERS,
-  VISIBILITY_FILTERS,
-} from "../discovery/discover.js";
-import { LIST_SEPARATOR } from "../discovery/repos-input.js";
-import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
-import { LAYERINGS, type Layering, UNDECLARED_POLICIES } from "../engine/layers.js";
-import { SectionSelection } from "../engine/section-selection.js";
+import type { DiscoveryFilters } from "../discovery/discover.js";
+import type { Layering } from "../engine/layers.js";
 import { DEFAULT_API_VERSION } from "../github/api.js";
-import type { Problem } from "../problem.js";
-import { parseRecipient } from "../report/artifact-report.js";
-import { PRIVATE_REPORT_CHANNELS, type PrivateReportChannel } from "../report/delivery.js";
-import { SECTION_KEYS, type SectionKey } from "../schema.js";
-import type { MustBeNever, UndeclaredPolicy } from "../types.js";
-import type { RunFlowConfig } from "./deliver.js";
-import { DEFAULT_SETTINGS_FILE, type MultiConfig } from "./multi.js";
-import { PRIVATE_REPOS_POLICIES, type PrivateReposPolicy } from "./redact.js";
-import type { RenderConfig } from "./render.js";
-import type { SingleConfig } from "./single.js";
-import type { SnapshotConfig } from "./snapshot.js";
+import type { PrivateReportChannel } from "../report/delivery.js";
+import type { MustBeNever } from "../types.js";
+import { DEFAULT_SETTINGS_FILE } from "./multi.js";
+import type { PrivateReposPolicy } from "./redact.js";
 
 /** Default `private-repos`, pinned against action.yml by the contract test. */
 export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
@@ -37,7 +19,7 @@ export const DEFAULT_PRIVATE_REPOS = "redact" satisfies PrivateReposPolicy;
 const DEFAULT_PRIVATE_REPORT = "none" satisfies PrivateReportChannel;
 
 /** The `layering` input's effective default; its declared default stays empty so "explicitly set" is detectable. */
-const DEFAULT_LAYERING = "deep" satisfies Layering;
+export const DEFAULT_LAYERING = "deep" satisfies Layering;
 
 /**
  * One input's action.yml entry. The runner applies the defaults; parseConfig() falls back to them outside the
@@ -223,7 +205,7 @@ export const INPUT_DECLS = {
 export type InputName = keyof typeof INPUT_DECLS;
 
 /** The inputs declared `list: true`, the only names the list() port accepts. */
-type ListInput = {
+export type ListInput = {
   [K in InputName]: (typeof INPUT_DECLS)[K] extends { readonly list: true } ? K : never;
 }[InputName];
 
@@ -237,21 +219,6 @@ export type InputReader = (name: InputName) => string;
  *   GITHUB_SERVER_URL, GITHUB_RUN_ID   -> the run URL
  */
 export type ConfigEnv = Readonly<Record<string, string | undefined>>;
-
-interface Inputs {
-  readonly value: InputReader;
-  readonly orDefault: (name: InputName) => string;
-  /** A declared list input, split; the default when unset. */
-  readonly list: (name: ListInput) => string[];
-}
-
-function inputs(read: InputReader): Inputs {
-  // The runner's getInput trims; a CLI's port may not. Trimming here gives every port one rule.
-  const value: InputReader = (name) => read(name).trim();
-  const orDefault = (name: InputName): string => value(name) || INPUT_DECLS[name].default;
-  return { value, orDefault, list: (name) => splitList(orDefault(name)) };
-}
-
 export const FILTER_INPUTS = [
   "visibility",
   "archived",
@@ -264,47 +231,6 @@ export const FILTER_INPUTS = [
 type FilterInput = (typeof FILTER_INPUTS)[number];
 
 type _UnlistedFilter = MustBeNever<Exclude<keyof DiscoveryFilters, FilterInput>>;
-
-/**
- * An enum input: unset reads as `fallback`, which is one of the values or, for an input whose unset state means "no
- * value" (`undeclared` leaves each list its own default), undefined.
- */
-function readEnum<T extends string, F extends T | undefined>(
-  input: Inputs,
-  name: InputName,
-  allowed: readonly T[],
-  fallback: F,
-  noun: string,
-): Result<T | F, Problem> {
-  const value = input.value(name);
-  if (value === "") {
-    return ok(fallback);
-  }
-  const match = allowed.find((candidate) => candidate === value);
-  if (match === undefined) {
-    return err({
-      code: "input-unsupported-value",
-      input: name,
-      value,
-      noun,
-      allowed,
-      fallback: fallback ?? null,
-    });
-  }
-  return ok(match);
-}
-
-function readUndeclared(input: Inputs): Result<UndeclaredPolicy | undefined, Problem> {
-  return readEnum(input, "undeclared", UNDECLARED_POLICIES, undefined, "undeclared policy");
-}
-
-function splitList(value: string): string[] {
-  return value
-    .split(LIST_SEPARATOR)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 export const MODES = ["apply", "check", "render", "snapshot"] as const;
 
 export type Mode = (typeof MODES)[number];
@@ -321,59 +247,6 @@ export const SNAPSHOT_ONLY_INPUTS = [
   "snapshot-file",
   "snapshot-dir",
 ] as const satisfies readonly InputName[];
-
-function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> {
-  const sectionInputs = ["required-sections", "sections"] as const;
-  const names = sectionInputs.map((name) => ({
-    input: name,
-    names: input.list(name),
-  }));
-  const knownSections = new Set<string>(SECTION_KEYS);
-  const unknown = names
-    .map(({ input: name, names: listed }) => ({
-      input: name,
-      names: [...new Set(listed)].filter((entry) => !knownSections.has(entry)),
-    }))
-    .filter((entry) => entry.names.length > 0);
-  if (unknown.length > 0) {
-    return err({ code: "input-unknown-sections", unknown, known: SECTION_KEYS });
-  }
-  const isSectionKey = (name: string): name is SectionKey => knownSections.has(name);
-  const [required = [], only = []] = names.map((entry) => entry.names.filter(isSectionKey));
-  return SectionSelection.of({ only, required });
-}
-
-/**
- * The key is required exactly when the channel is `artifact` and rejected otherwise (set for another channel it would
- * silently do nothing); it is parsed through the age library here so a malformed recipient fails before any API work.
- */
-function resolveReportPublicKey(
-  input: Inputs,
-  channel: PrivateReportChannel,
-): Result<string, Problem> {
-  const key = input.value("report-public-key");
-  if (channel !== "artifact") {
-    return key ? err({ code: "input-report-key-unused", channel }) : ok("");
-  }
-  if (!key) {
-    return err({ code: "input-report-key-missing" });
-  }
-  return parseRecipient(key)
-    .map(() => key)
-    .mapErr((invalid) => ({ code: "input-report-key-invalid", reason: invalid.reason }));
-}
-
-/** selfSlug (GITHUB_REPOSITORY) and runUrl are read from the environment once here, so the run flows stay env-free. */
-interface CommonConfig extends RunFlowConfig {
-  token: string;
-  apiVersion: string;
-}
-
-export type RunConfig =
-  | (CommonConfig & (({ kind: "single" } & SingleConfig) | ({ kind: "multi" } & MultiConfig)))
-  | ({ kind: "render" } & RenderConfig)
-  | ({ kind: "snapshot" } & Pick<CommonConfig, "token" | "apiVersion"> & SnapshotConfig);
-
 /**
  * `token` is tolerated unread (a workflow commonly sets it on every step). Every declared input NOT listed here is an
  * apply/check control, so the merge rejects it unless it holds its declared default, which the runner supplies whether
@@ -395,134 +268,6 @@ export const RENDER_INPUTS = [
 export const RENDER_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(RENDER_INPUTS as readonly string[]).includes(name));
-
-function parseRenderConfig(input: Inputs): Result<Extract<RunConfig, { kind: "render" }>, Problem> {
-  return safeTry(function* () {
-    const rejected = RENDER_REJECTED_INPUTS.filter((name) => {
-      const value = input.value(name);
-      return value !== "" && value !== INPUT_DECLS[name].default;
-    });
-    if (rejected.length > 0) {
-      return err({ code: "input-rejected-in-render", inputs: rejected });
-    }
-    const renderedFile = input.value("rendered-file");
-    if (!renderedFile) {
-      return err({ code: "input-rendered-file-missing" });
-    }
-    const layering = yield* readEnum(input, "layering", LAYERINGS, DEFAULT_LAYERING, "layering");
-    const undeclared = yield* readUndeclared(input);
-    const settingsFiles = input.list("settings-file");
-    if (settingsFiles.length === 0) {
-      return err({
-        code: "input-settings-file-empty",
-        value: input.orDefault("settings-file"),
-      });
-    }
-    return ok({ kind: "render", settingsFiles, renderedFile, layering, undeclared });
-  });
-}
-
-/** The token the API modes call with: the input, else the environment's. */
-function readToken(input: Inputs, env: ConfigEnv): Result<string, Problem> {
-  const token = input.value("token") || env.GITHUB_TOKEN || "";
-  return token ? ok(token) : err({ code: "input-token-missing" });
-}
-
-/** The policies every API mode reads, each validated against its own vocabulary. */
-function readPolicies(input: Inputs): Result<
-  {
-    onMissingPermission: "fail" | "warn";
-    sections: SectionSelection;
-    privateRepos: PrivateReposPolicy;
-  },
-  Problem
-> {
-  return safeTry(function* () {
-    const onMissingPermission = yield* readEnum(
-      input,
-      "on-missing-permission",
-      ["fail", "warn"] as const,
-      INPUT_DECLS["on-missing-permission"].default,
-      "policy",
-    );
-    const sections = yield* readSectionSelection(input);
-    const privateRepos = yield* readEnum(
-      input,
-      "private-repos",
-      PRIVATE_REPOS_POLICIES,
-      INPUT_DECLS["private-repos"].default,
-      "private-repository policy",
-    );
-    return ok({ onMissingPermission, sections, privateRepos });
-  });
-}
-
-/** The validated filters plus the names the workflow set explicitly, which the misuse rejections name. */
-function readDiscoveryFilters(
-  input: Inputs,
-): Result<{ discoveryFilters: DiscoveryFilters; discoveryFiltersSet: string[] }, Problem> {
-  return safeTry(function* () {
-    const discoveryFiltersSet = FILTER_INPUTS.filter((name) => input.value(name) !== "");
-    const visibility = yield* readEnum(
-      input,
-      "visibility",
-      VISIBILITY_FILTERS,
-      DEFAULT_DISCOVERY_FILTERS.visibility,
-      "discovery filter",
-    );
-    const archived = yield* readEnum(
-      input,
-      "archived",
-      ARCHIVED_FILTERS,
-      DEFAULT_DISCOVERY_FILTERS.archived,
-      "archived-repository policy",
-    );
-    const forks = yield* readEnum(
-      input,
-      "forks",
-      FORKS_FILTERS,
-      DEFAULT_DISCOVERY_FILTERS.forks,
-      "fork policy",
-    );
-    const affiliation = [...new Set(input.list("affiliation"))];
-    const unsupported = affiliation.find(
-      (entry) => !(AFFILIATIONS as readonly string[]).includes(entry),
-    );
-    if (unsupported !== undefined) {
-      return err({
-        code: "input-affiliation-unsupported",
-        entry: unsupported,
-        allowed: AFFILIATIONS,
-      });
-    }
-    const exclude = input.list("exclude");
-    const unmatchable = exclude.find((pattern) => {
-      const parts = pattern.split("/");
-      return parts.length > 2 || (parts.length === 2 && (!parts[0] || !parts[1]));
-    });
-    if (unmatchable !== undefined) {
-      return err({ code: "input-exclude-pattern-invalid", pattern: unmatchable });
-    }
-    const discoveryFilters: DiscoveryFilters = {
-      visibility,
-      archived,
-      forks,
-      affiliation: affiliation.length > 0 ? affiliation : DEFAULT_DISCOVERY_FILTERS.affiliation,
-      topics: input.list("topics").map((topic) => topic.toLowerCase()),
-      exclude,
-    };
-    return ok({ discoveryFilters, discoveryFiltersSet });
-  });
-}
-
-/** The single-repo target: the repository input, else the workflow's own repository. */
-function readSingleTarget(input: Inputs, githubRepository: string): Result<RepoRef, Problem> {
-  const rawRepo = input.value("repository") || githubRepository;
-  return parseRepoSlug(rawRepo).mapErr(
-    (): Problem => ({ code: "input-repository-not-slug", value: rawRepo }),
-  );
-}
-
 /**
  * Every declared input NOT listed here is an apply, check, or merge control, so the snapshot rejects it unless it
  * holds its declared default, which the runner supplies whether or not the workflow set the input.
@@ -549,239 +294,3 @@ export const SNAPSHOT_INPUTS = [
 export const SNAPSHOT_REJECTED_INPUTS: readonly InputName[] = (
   Object.keys(INPUT_DECLS) as InputName[]
 ).filter((name) => !(SNAPSHOT_INPUTS as readonly string[]).includes(name));
-
-/** The file form of a mode: snapshot run: one repository written to snapshotFile. */
-export type SnapshotFileConfig = Extract<RunConfig, { kind: "snapshot"; form: "file" }>;
-
-/** What both snapshot forms read before the destination picks the arm. */
-function readSnapshotBase(input: Inputs, env: ConfigEnv) {
-  return safeTry(function* () {
-    const token = yield* readToken(input, env);
-    const policies = yield* readPolicies(input);
-    const filters = yield* readDiscoveryFilters(input);
-    return ok({
-      base: {
-        kind: "snapshot" as const,
-        token,
-        apiVersion: input.orDefault("api-version"),
-        onMissingPermission: policies.onMissingPermission,
-        sections: policies.sections,
-        privateRepos: policies.privateRepos,
-        selfSlug: env.GITHUB_REPOSITORY ?? "",
-      },
-      filters,
-    });
-  });
-}
-
-/** The file arm: one repository, the fleet inputs refused. */
-function parseSnapshotFileArm(
-  input: Inputs,
-  env: ConfigEnv,
-  snapshotFile: string,
-): Result<SnapshotFileConfig, Problem> {
-  return safeTry(function* () {
-    const { base, filters } = yield* readSnapshotBase(input, env);
-    if (input.value("repos") || input.value("repos-dir")) {
-      return err({ code: "input-snapshot-file-with-multi" });
-    }
-    if (filters.discoveryFiltersSet.length > 0) {
-      return err({
-        code: "discovery-filters-without-wildcard",
-        filters: filters.discoveryFiltersSet,
-        targets: "snapshot-file",
-      });
-    }
-    const repo = yield* readSingleTarget(input, base.selfSlug);
-    return ok({ ...base, form: "file" as const, repo, snapshotFile });
-  });
-}
-
-/**
- * The file the `settings-file` input names, or its declared default: known before any parsing, so a failure can
- * name it. The CLI's init writes that file, the one apply and check read.
- */
-export function snapshotFileDestination(read: InputReader): string {
-  return inputs(read).orDefault("settings-file");
-}
-
-/**
- * The file arm for the CLI's init, whose destination is the `settings-file` input
- * (refusing a list separator as apply and check do) and can never be the dir form.
- */
-export function parseSnapshotFileConfig(
-  read: InputReader,
-  env: ConfigEnv,
-): Result<SnapshotFileConfig, Problem> {
-  const path = snapshotFileDestination(read);
-  if (LIST_SEPARATOR.test(path)) {
-    return err({ code: "input-settings-file-is-list", value: path, mode: "init" });
-  }
-  return parseSnapshotFileArm(inputs(read), env, path);
-}
-
-/** Read and validate the mode: snapshot inputs; the first problem wins. */
-function parseSnapshotConfig(
-  input: Inputs,
-  env: ConfigEnv,
-): Result<Extract<RunConfig, { kind: "snapshot" }>, Problem> {
-  return safeTry(function* () {
-    const rejected = SNAPSHOT_REJECTED_INPUTS.filter((name) => {
-      const value = input.value(name);
-      return value !== "" && value !== INPUT_DECLS[name].default;
-    });
-    if (rejected.length > 0) {
-      return err({ code: "input-rejected-in-snapshot", inputs: rejected });
-    }
-    const snapshotFile = input.value("snapshot-file");
-    const snapshotDir = input.value("snapshot-dir");
-    if (snapshotFile && snapshotDir) {
-      return err({ code: "input-snapshot-destinations-both" });
-    }
-    if (!snapshotFile && !snapshotDir) {
-      return err({ code: "input-snapshot-destination-missing" });
-    }
-    if (snapshotFile) {
-      return parseSnapshotFileArm(input, env, snapshotFile);
-    }
-    const { base, filters } = yield* readSnapshotBase(input, env);
-    if (input.value("repository")) {
-      return err({ code: "input-repository-with-snapshot-dir" });
-    }
-    const reposInput = input.value("repos");
-    const reposDir = input.value("repos-dir");
-    if (!reposInput && !reposDir) {
-      return err({ code: "input-snapshot-dir-without-targets" });
-    }
-    return ok({
-      ...base,
-      form: "dir" as const,
-      snapshotDir,
-      reposInput,
-      reposDir,
-      adminOwner: base.selfSlug.split("/")[0] ?? "",
-      discoveryFilters: filters.discoveryFilters,
-      discoveryFiltersSet: filters.discoveryFiltersSet,
-    });
-  });
-}
-
-/**
- * What the face running the config can do; parseConfig refuses an input that needs a capability the face lacks, so
- * the refusal has one owner and the flows never re-check it.
- */
-export interface RunCapabilities {
-  /** The face hands the run a workflow-artifact uploader (the Actions runner); without it `private-report: artifact` is refused. */
-  readonly artifactUpload: boolean;
-}
-
-/** Read and validate every input through `read`; the first problem wins. */
-export function parseConfig(
-  read: InputReader,
-  env: ConfigEnv,
-  capabilities: RunCapabilities,
-): Result<RunConfig, Problem> {
-  const input = inputs(read);
-  return safeTry(function* () {
-    // The mode decides which inputs exist at all, so it is read first: a merge never needs the token.
-    const mode = yield* readEnum(input, "mode", MODES, INPUT_DECLS.mode.default, "mode");
-    if (mode === "render") {
-      return parseRenderConfig(input);
-    }
-    if (mode === "snapshot") {
-      return parseSnapshotConfig(input, env);
-    }
-    const renderOnly = RENDER_ONLY_INPUTS.filter((name) => input.value(name) !== "");
-    if (renderOnly.length > 0) {
-      return err({ code: "input-render-only", inputs: renderOnly, mode });
-    }
-    const snapshotOnly = SNAPSHOT_ONLY_INPUTS.filter((name) => input.value(name) !== "");
-    if (snapshotOnly.length > 0) {
-      return err({ code: "input-snapshot-only", inputs: snapshotOnly, mode });
-    }
-    const token = yield* readToken(input, env);
-    const githubRepository = env.GITHUB_REPOSITORY ?? "";
-    const { onMissingPermission, sections, privateRepos } = yield* readPolicies(input);
-    const undeclared = yield* readUndeclared(input);
-    const apiVersion = input.orDefault("api-version");
-    const privateReport = yield* readEnum(
-      input,
-      "private-report",
-      PRIVATE_REPORT_CHANNELS,
-      INPUT_DECLS["private-report"].default,
-      "private-report channel",
-    );
-    // Refused before the channel's key is asked for: a face with no upload has no use for the key either.
-    if (privateReport === "artifact" && !capabilities.artifactUpload) {
-      return err({ code: "input-artifact-unsupported" });
-    }
-    // A report channel only ever runs for a REDACTED target, so combined with private-repos: show it would silently deliver nothing.
-    if (privateReport !== "none" && privateRepos === "show") {
-      return err({ code: "input-report-without-redaction" });
-    }
-    const reportPublicKey = yield* resolveReportPublicKey(input, privateReport);
-    const serverUrl = env.GITHUB_SERVER_URL ?? "";
-    const runId = env.GITHUB_RUN_ID ?? "";
-    const runUrl =
-      serverUrl && githubRepository && runId
-        ? `${serverUrl}/${githubRepository}/actions/runs/${runId}`
-        : "";
-    const common: CommonConfig = {
-      token,
-      mode,
-      onMissingPermission,
-      sections,
-      apiVersion,
-      privateRepos,
-      privateReport,
-      reportPublicKey,
-      selfSlug: githubRepository,
-      runUrl,
-      undeclared,
-    };
-
-    const { discoveryFilters, discoveryFiltersSet } = yield* readDiscoveryFilters(input);
-
-    const reposInput = input.value("repos");
-    const reposDir = input.value("repos-dir");
-    const defaultsFile = input.value("defaults-file");
-    const settingsFile = input.orDefault("settings-file");
-
-    if (reposInput || reposDir) {
-      if (input.value("repository")) {
-        return err({ code: "input-repository-with-multi" });
-      }
-      if (settingsFile !== DEFAULT_SETTINGS_FILE) {
-        return err({ code: "input-settings-file-with-multi" });
-      }
-      const adminOwner = githubRepository.split("/")[0] ?? "";
-      return ok({
-        ...common,
-        kind: "multi",
-        reposDir,
-        reposInput,
-        defaultsFile,
-        adminOwner,
-        discoveryFilters,
-        discoveryFiltersSet,
-      });
-    }
-
-    if (discoveryFiltersSet.length > 0) {
-      return err({
-        code: "discovery-filters-without-wildcard",
-        filters: discoveryFiltersSet,
-        targets: "single-repo",
-      });
-    }
-    if (defaultsFile) {
-      return err({ code: "input-defaults-file-without-multi" });
-    }
-    // The engine modes read exactly one file, so even a stray separator ("only.yml,") is rejected rather than repaired.
-    if (LIST_SEPARATOR.test(settingsFile)) {
-      return err({ code: "input-settings-file-is-list", value: settingsFile, mode });
-    }
-    const repo = yield* readSingleTarget(input, githubRepository);
-    return ok({ ...common, kind: "single", repo, settingsFile });
-  });
-}
