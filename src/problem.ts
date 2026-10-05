@@ -10,7 +10,7 @@
 
 import { describeKind } from "./plain-data.js";
 import type { SectionKey } from "./schema.js";
-import { agree, countNoun } from "./text.js";
+import { agree, countNoun, quote } from "./text.js";
 
 /**
  * The advice appended to a transient (non-permission) API failure: a network
@@ -131,7 +131,11 @@ export type Problem =
       readonly entry: string;
       readonly allowed: readonly string[];
     }
-  | { readonly code: "input-exclude-pattern-invalid"; readonly pattern: string }
+  | {
+      readonly code: "input-exclude-pattern-invalid";
+      readonly pattern: string;
+      readonly reason: string;
+    }
   | { readonly code: "input-repository-with-multi" }
   | { readonly code: "input-settings-file-with-multi" }
   | {
@@ -332,10 +336,6 @@ const PASSTHROUGH_ADVICE =
   "through, except in closed sections and strict nested objects like actions.cache, which reject " +
   "unrecognized keys)";
 
-function quote(value: unknown): string {
-  return JSON.stringify(String(value));
-}
-
 function describeCentralFile(file: CentralFileProblem): string {
   switch (file.kind) {
     case "not-a-slug":
@@ -509,12 +509,20 @@ export function describeProblem(problem: Problem): string {
       return 'the "private-report" input delivers reports only for redacted targets, but "private-repos" is "show", so nothing is redacted and no report would ever be sent. Set private-repos: redact, or set private-report: none';
     case "input-affiliation-unsupported":
       return `the "affiliation" input entry "${problem.entry}" is not a supported affiliation, so discovery cannot build the /user/repos query. Use a comma-separated list of ${quoteList(problem.allowed)}`;
-    case "input-exclude-pattern-invalid":
+    case "input-exclude-pattern-invalid": {
+      const shown =
+        problem.pattern.length > 60 ? `${problem.pattern.slice(0, 60)}...` : problem.pattern;
+      // A position names a character in the pattern as the fixes before it leave it, counted from 0.
+      const positioned = / at \d+/.test(problem.reason)
+        ? ", applying the fixes in order with positions counted from 0 in the pattern as the earlier fixes leave it"
+        : "";
       return (
-        `the "exclude" input pattern "${problem.pattern}" can never match an owner/name repository: a ` +
-        `pattern takes at most one "/", with a non-empty glob on each side of it. Use ` +
-        `"<name-glob>" or "<owner-glob>/<name-glob>", where "*" matches any characters`
+        `the "exclude" input pattern ${quote(shown)} is not a usable glob: ${problem.reason}${positioned}. Write ` +
+        `"<name-glob>" or "<owner-glob>/<name-glob>", where a glob is letters, digits, ".", "-", "_", "*", "?", ` +
+        `and the classes "[abc]", "[!abc]", or "[^abc]" over those characters, with one optional leading "!" ` +
+        `negating the whole pattern`
       );
+    }
     case "input-repository-with-multi":
       return 'the "repository" input cannot be combined with "repos" or "repos-dir"; multi-repo targets come from those inputs. Remove "repository", or remove the multi-repo inputs to stay in single-repo mode';
     case "input-settings-file-with-multi":

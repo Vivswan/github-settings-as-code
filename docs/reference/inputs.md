@@ -38,7 +38,7 @@ A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `af
 | `visibility` | <p>Keeps only repositories of this visibility in repos: "*" discovery: all (default), public, private, or internal.</p> | `false` | `""` |
 | `archived` | <p>Archived-repository policy for repos: "*" discovery: skip (default), include, or only.</p> | `false` | `""` |
 | `forks` | <p>Fork policy for repos: "*" discovery: include (default), exclude, or only.</p> | `false` | `""` |
-| `exclude` | <p>Comma- or newline-separated wildcard patterns removing repositories from repos: "*" discovery.</p> | `false` | `""` |
+| `exclude` | <p>Comma- or newline-separated glob patterns removing repositories from repos: "*" discovery, compared case-insensitively against owner/name when the pattern has a "/" and against the name alone otherwise. A star matches any run of characters, "?" one character, "[abc]" one of a set, "[!abc]" or "[^abc]" one outside it, and one leading "!" negates the pattern. Beyond those a pattern holds only letters, digits, ".", "-", and "_", with at most one "/", nothing empty around it, and no side that is just "." or ".."; anything else (a leading "./", a run of stars, a regex token such as "(a)+") fails the run naming the fix.</p> | `false` | `""` |
 | `topics` | <p>Comma- or newline-separated topics, of which repos: "*" discovery keeps the repositories carrying at least one.</p> | `false` | `""` |
 | `affiliation` | <p>Comma- or newline-separated affiliations for repos: "*" discovery: owner (default), collaborator, or organization_member.</p> | `false` | `""` |
 <!-- action-docs-inputs source="action.yml" -->

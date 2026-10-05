@@ -57,7 +57,10 @@ Discovery takes six filter inputs that apply only to `repos: "*"`; setting any o
 - `archived` defaults to `skip`, because settings writes fail on archived repositories; `archived: only` is mostly useful with `mode: check`.
 - `forks` includes, excludes, or keeps only forks.
 - `topics` keeps repositories carrying at least one listed topic, so a single marker topic can opt repositories in. It is unrelated to the `topics` settings section.
-- `exclude` takes wildcard patterns where `*` matches anything: a pattern containing `/` is matched against the full `owner/name`, any other against the name alone, case-insensitively.
+- `exclude` takes glob patterns, matched case-insensitively: a pattern containing `/` against the full `owner/name`, any other against the name alone.
+  - `*` matches any run of characters, `?` one character, `[abc]` one of a set, `[!abc]` or `[^abc]` one outside it.
+  - One leading `!` negates the pattern, so `!svc-*` drops everything except the services.
+  - Beyond those operators a pattern holds only name characters (letters, digits, `.`, `-`, `_`), at most one `/` with a non-empty glob on each side, and no side that is just `.` or `..`. Anything else (a leading `./`, a run of stars, a brace, a parenthesis, a backslash, a quote, a second `/`, a class holding `*`) fails the run before discovery starts, naming the fix, as does a class like `[z-a]`. The matcher is [picomatch](https://github.com/micromatch/picomatch), confined to that grammar.
 - `affiliation` selects which relationships to the token's user qualify, passed to GitHub's `/user/repos` listing: `owner` (the default), `collaborator`, or `organization_member`. The list replaces the default, so widening discovery beyond owned repositories takes `owner,collaborator`.
 
 ## Fallback for repositories without a settings file

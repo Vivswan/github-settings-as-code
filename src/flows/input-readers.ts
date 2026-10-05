@@ -7,8 +7,10 @@ import { err, ok, type Result, safeTry } from "neverthrow";
 import {
   AFFILIATIONS,
   ARCHIVED_FILTERS,
+  compileExcludePattern,
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveryFilters,
+  type ExcludePattern,
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
@@ -196,13 +198,9 @@ export function readDiscoveryFilters(
         allowed: AFFILIATIONS,
       });
     }
-    const exclude = input.list("exclude");
-    const unmatchable = exclude.find((pattern) => {
-      const parts = pattern.split("/");
-      return parts.length > 2 || (parts.length === 2 && (!parts[0] || !parts[1]));
-    });
-    if (unmatchable !== undefined) {
-      return err({ code: "input-exclude-pattern-invalid", pattern: unmatchable });
+    const exclude: ExcludePattern[] = [];
+    for (const pattern of input.list("exclude")) {
+      exclude.push(yield* compileExcludePattern(pattern));
     }
     const discoveryFilters: DiscoveryFilters = {
       visibility,

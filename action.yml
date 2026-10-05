@@ -146,8 +146,15 @@ inputs:
     default: ""
   exclude:
     description: >-
-      Comma- or newline-separated wildcard patterns removing repositories from
-      repos: "*" discovery.
+      Comma- or newline-separated glob patterns removing repositories from
+      repos: "*" discovery, compared case-insensitively against owner/name
+      when the pattern has a "/" and against the name alone otherwise. A star
+      matches any run of characters, "?" one character, "[abc]" one of a set,
+      "[!abc]" or "[^abc]" one outside it, and one leading "!" negates the
+      pattern. Beyond those a pattern holds only letters, digits, ".", "-",
+      and "_", with at most one "/", nothing empty around it, and no side that
+      is just "." or ".."; anything else (a leading "./", a run of stars, a
+      regex token such as "(a)+") fails the run naming the fix.
     required: false
     default: ""
   topics:

@@ -1,0 +1,45 @@
+# Multi-repo repos: "*" discovery with a negated exclude glob. "!svc-*" excludes
+# every repository whose name does NOT match svc-*, so the exclude input doubles
+# as an allowlist: svc-a and svc-b are kept, the other two are dropped under the
+# one negated pattern, and the action issues zero requests to them.
+name: multi-discovery-exclude-negation
+settings: {}
+discovery:
+  inputs:
+    exclude: "!svc-*"
+  pool:
+    - {slug: e2e-owner/svc-a}
+    - {slug: e2e-owner/svc-b}
+    - {slug: e2e-owner/tooling}
+    - {slug: e2e-owner/website}
+repos:
+  e2e-owner/svc-a:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+  e2e-owner/svc-b:
+    settings:
+      labels:
+        - name: managed
+          color: "00ff00"
+    expect:
+      result: applied
+token_permissions:
+  issues: write
+  contents: read
+expect:
+  exit_code: 0
+  result: applied
+  repos_result:
+    e2e-owner/svc-a: applied
+    e2e-owner/svc-b: applied
+  stdout_contains:
+    - 'skipped 2 repositories by exclude pattern "!svc-*": e2e-owner/tooling, e2e-owner/website'
+  never:
+    - "GET /repos/e2e-owner/tooling"
+    - "GET /repos/e2e-owner/website"
+  requests_contain:
+    - "GET /user/repos"
