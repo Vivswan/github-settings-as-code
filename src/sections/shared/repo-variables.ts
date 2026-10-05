@@ -1,38 +1,38 @@
 /**
  * GitHub's two repo-scoped variable families (Actions, Copilot agents) expose the same four endpoints under
  * a different path segment and differ only in PAT resource and noun, so each section module is ONE
- * repoVariablesSection() call.
+ * repoVariablesSection() call. A variable is readable: the plan compares values and the snapshot writes them.
  *
  *   environments section -> plans its nested variables through ./variables-engine.ts too, one scope per environment
  */
 
-import { ok, type Result } from "neverthrow";
+import type { Result } from "neverthrow";
 import type { z } from "zod";
-import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
+import type { MustBeNever } from "../../types.js";
 import { ActionsVariableConfig } from "../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../agents_variables/schema.js";
 import type { SectionFailure } from "../contract/errors.js";
 import {
   type DeclaredIssue,
-  defaultUndeclaredPolicy,
   type GraphqlDict,
   type KeyedListLayering,
   keyedBy,
   loosen,
   type SectionSnapshot,
-  undeclaredPolicy,
-  type ValidatedInput,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type {
-  KeyErasedPlan,
-  PlanContext,
-  PlannedOp,
-  SectionPlan,
-  SnapshotContext,
-} from "../contract/plan.js";
+import type { PlannedOp, SnapshotContext } from "../contract/plan.js";
+import {
+  type Declared,
+  type FamilyPlan,
+  type KeyedValuesFamily,
+  knobbedEntries,
+  type PlanMisfits,
+  snapshotOf,
+  type WidePlan,
+} from "./keyed-values.js";
 import { knobbed } from "./schema-helpers.js";
-import { knobbedSnapshot, projectOntoSchema } from "./snapshot-helpers.js";
+import { projectOntoSchema } from "./snapshot-helpers.js";
 import {
   duplicateVariableNameIssues,
   LiveVariable,
@@ -98,57 +98,19 @@ type RepoVariablesEndpoints<P extends VariablesSegment> = {
   };
 };
 
-/**
- * One family's plan() over exactly its own dictionary and declared value (the
- * registry's exactness lockstep); indexed by K so the generic factory can
- * assign its one SharedPlan to it.
- */
-type RepoVariablesPlan<K extends RepoVariablesKey> = {
-  [F in RepoVariablesKey]: (
-    ctx: PlanContext<RepoVariablesEndpoints<VariablesSegment<F>>, GraphqlDict, F>,
-    declared: ValidatedInput<F>,
-  ) => Promise<
-    Result<SectionPlan<PlannedOp<RepoVariablesEndpoints<VariablesSegment<F>>>>, SectionFailure>
-  >;
-}[K];
-
-/** Every family's routes as one dictionary; see repo-secrets.ts for why the plan is written over it. */
-type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
-
-type WideDeclared = VariableEntry[] | UndeclaredPolicyList<VariableEntry>;
-
-type WideContext = PlanContext<WideEndpoints>;
-
-type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
-
-/** The shared implementation's signature at family F (the brand names the family); the lockstep below compares it to the family's own. */
-type SharedPlanAt<F extends RepoVariablesKey> = (
-  ctx: WideContext,
-  declared: ValidatedInput<F>,
-) => WidePlanned;
-
-/** The one implementation: SharedPlanAt, generic over the family it is called as. */
-type SharedPlan = <F extends RepoVariablesKey>(
-  ...args: Parameters<SharedPlanAt<F>>
-) => ReturnType<SharedPlanAt<F>>;
-
-/** What every family's snapshot reads back: one shape, since the two entry slices are identical. */
-type WideSnapshot = {
-  value: UndeclaredPolicyList<{ name: string; value: string }> | undefined;
-  notes: string[];
+type VariablesTable = {
+  readonly [F in RepoVariablesKey]: RepoVariablesEndpoints<VariablesSegment<F>>;
 };
 
-type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type WideEndpoints = RepoVariablesEndpoints<VariablesSegment>;
 
-type _SharedPlanIsEveryFamilyPlan = MustBeNever<
-  {
-    [K in RepoVariablesKey]: Invariant<
-      SharedPlanAt<K>,
-      KeyErasedPlan<RepoVariablesPlan<K>>
-    > extends true
-      ? never
-      : K;
-  }[RepoVariablesKey]
+/** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
+type RepoVariablesPlan<K extends RepoVariablesKey> = {
+  [F in RepoVariablesKey]: FamilyPlan<F, VariablesTable[F]>;
+}[K];
+
+type _WidePlanIsEveryFamilyPlan = MustBeNever<
+  PlanMisfits<RepoVariablesKey, WideEndpoints, VariablesTable>
 >;
 
 /** The module shape repoVariablesSection() mints (SectionModule<K> at the registry). */
@@ -159,7 +121,7 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
   readonly endpoints: RepoVariablesEndpoints<VariablesSegment<K>>;
   readonly shape: z.ZodType;
   readonly layering: KeyedListLayering;
-  readonly validate: (declared: WideDeclared) => readonly DeclaredIssue[];
+  readonly validate: (declared: Declared<VariableEntry>) => readonly DeclaredIssue[];
   readonly plan: RepoVariablesPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoVariablesEndpoints<VariablesSegment<K>>, GraphqlDict, K>,
@@ -168,15 +130,11 @@ export interface RepoVariablesSectionModule<K extends RepoVariablesKey> {
 
 /**
  * Delete-undeclared-by-default: variables are readable, recreatable configuration; the wrapped
- * `_undeclared: keep` form softens deletion to notes. A family supplies only its key, PAT resource, and noun.
+ * `_undeclared: keep` form softens deletion to notes.
  */
-export function repoVariablesSection<K extends RepoVariablesKey>(family: {
-  key: K;
-  /** The fine-grained-PAT Repository permission gating the family. */
-  resource: PatResource;
-  /** The output noun ("Actions variable", "Copilot agents variable"). */
-  noun: string;
-}): RepoVariablesSectionModule<K> {
+export function repoVariablesSection<K extends RepoVariablesKey>(
+  family: KeyedValuesFamily<K>,
+): RepoVariablesSectionModule<K> {
   const { key, resource, noun } = family;
   const pathSegment: VariablesSegment<K> = VARIABLES_SEGMENTS[key];
   const endpoints: RepoVariablesEndpoints<VariablesSegment<K>> = {
@@ -202,10 +160,16 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
     },
   };
 
-  const plan: SharedPlan = async (ctx, declared) => {
-    const defaultPolicy = defaultUndeclaredPolicy(section);
-    const wideDeclared: WideDeclared = declared;
-    const { policy, entries } = undeclaredPolicy(wideDeclared, defaultPolicy);
+  const meta = {
+    key,
+    undeclaredDefault: "delete" as const,
+    permission: { repo: [resource] as const },
+    endpoints,
+    shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
+    layering: keyedBy("name", { fold: variableKey }),
+  };
+
+  const plan: WidePlan<RepoVariablesKey, WideEndpoints> = async (ctx, declared) => {
     // Built where the routes are known, so params typecheck ({name} on update/remove).
     type Op = PlannedOp<WideEndpoints>;
     const scope: VariablesPlanScope<
@@ -218,35 +182,26 @@ export function repoVariablesSection<K extends RepoVariablesKey>(family: {
       list: () => ctx.read.list.listAllEnveloped("variables", LiveVariable),
       ...variableOps({ create: "create", update: "update", remove: "remove" }, undefined),
     };
-    return planVariables(section, scope, { entries, policy, defaultPolicy });
+    return planVariables(meta, scope, knobbedEntries<VariableEntry>(meta, declared));
   };
 
-  const snapshot = async (
-    ctx: SnapshotContext<WideEndpoints>,
-  ): Promise<Result<WideSnapshot, SectionFailure>> =>
-    ctx.read.list.listAllEnveloped("variables", LiveVariable).andThen((live) => {
-      if (live.length === 0) {
-        return ok<WideSnapshot, SectionFailure>({ value: undefined, notes: [] });
-      }
-      return liveVariablesByKey(section, noun, live).map((byKey) => {
-        const entries = [...byKey.values()].map((variable) =>
+  const snapshot = snapshotOf<WideEndpoints, VariableEntry>(meta, (ctx) =>
+    ctx.read.list
+      .listAllEnveloped("variables", LiveVariable)
+      .andThen((live) => liveVariablesByKey(meta, noun, live))
+      .map((byKey) => ({
+        entries: [...byKey.values()].map((variable) =>
           projectOntoSchema(VARIABLES_ENTRIES[key], variable),
-        );
-        return { value: knobbedSnapshot(section, entries), notes: [] };
-      });
-    });
+        ),
+        notes: [],
+      })),
+  );
 
-  const section: RepoVariablesSectionModule<K> = {
-    key,
-    undeclaredDefault: "delete",
-    permission: { repo: [resource] },
-    endpoints,
-    shape: loosen(knobbed(VARIABLES_ENTRIES[key])),
-    layering: keyedBy("name", { fold: variableKey }),
+  return {
+    ...meta,
     validate: (declared) => duplicateVariableNameIssues(declared, "variable"),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
   };
-  return section;
 }

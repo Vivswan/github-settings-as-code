@@ -1,40 +1,41 @@
 /**
  * GitHub's four repo-scoped secret families (Actions, Dependabot, Codespaces, Copilot agents) expose the
  * same four endpoints under a different path segment and differ only in PAT resource, noun, and (Codespaces)
- * the grade GitHub gates the reads at, so each section module is ONE repoSecretsSection() call.
+ * the grade GitHub gates the reads at, so each section module is ONE repoSecretsSection() call. A secret is
+ * write-only: the plan re-seals every declared value and the snapshot writes a reference it cannot read.
  *
  *   environments section -> plans its nested secrets through ./secrets-engine.ts too, one scope per environment
  */
 
-import { ok, type Result } from "neverthrow";
+import type { Result } from "neverthrow";
 import { z } from "zod";
 import { snapshotSecretReference } from "../../engine/secrets.js";
-import type { MustBeNever, UndeclaredPolicyList } from "../../types.js";
+import type { MustBeNever } from "../../types.js";
 import { ActionsSecretConfig } from "../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
 import type { SectionFailure } from "../contract/errors.js";
 import {
   type DeclaredIssue,
-  defaultUndeclaredPolicy,
   type GraphqlDict,
   type KeyedListLayering,
   keyedBy,
   loosen,
   type SectionModule,
   type SectionSnapshot,
-  undeclaredPolicy,
-  type ValidatedInput,
 } from "../contract/module.js";
 import type { PatResource } from "../contract/permissions.js";
-import type {
-  KeyErasedPlan,
-  PlanContext,
-  PlannedOp,
-  SectionPlan,
-  SnapshotContext,
-} from "../contract/plan.js";
+import type { PlannedOp, SnapshotContext } from "../contract/plan.js";
 import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
+import {
+  type Declared,
+  type FamilyPlan,
+  type KeyedValuesFamily,
+  knobbedEntries,
+  type PlanMisfits,
+  snapshotOf,
+  type WidePlan,
+} from "./keyed-values.js";
 import { knobbed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   duplicateSecretNameIssues,
@@ -47,7 +48,7 @@ import {
   secretKey,
   secretOps,
 } from "./secrets-engine.js";
-import { knobbedSnapshot, unreadableSecretNote } from "./snapshot-helpers.js";
+import { unreadableSecretNote } from "./snapshot-helpers.js";
 
 export type RepoSecretsKey =
   | "actions_secrets"
@@ -111,58 +112,17 @@ type RepoSecretsEndpoints<P extends SecretsSegment> = {
   };
 };
 
-/**
- * One family's plan() over exactly its own dictionary and declared value (the
- * registry's exactness lockstep); indexed by K so the generic factory can
- * assign its one SharedPlan to it.
- */
-type RepoSecretsPlan<K extends RepoSecretsKey> = {
-  [F in RepoSecretsKey]: (
-    ctx: PlanContext<RepoSecretsEndpoints<SecretsSegment<F>>, GraphqlDict, F>,
-    declared: ValidatedInput<F>,
-  ) => Promise<
-    Result<SectionPlan<PlannedOp<RepoSecretsEndpoints<SecretsSegment<F>>>>, SectionFailure>
-  >;
-}[K];
+type SecretsTable = { readonly [F in RepoSecretsKey]: RepoSecretsEndpoints<SecretsSegment<F>> };
 
-/**
- * Every family's routes as one dictionary (each route the union over the
- * segments): inside the generic factory the segment is unresolved, so the
- * contract's role derivations only resolve over this view.
- */
 type WideEndpoints = RepoSecretsEndpoints<SecretsSegment>;
 
-type WideDeclared = SecretEntry[] | UndeclaredPolicyList<SecretEntry>;
+/** One family's plan(), indexed by K so the generic factory can assign its one WidePlan to it. */
+type RepoSecretsPlan<K extends RepoSecretsKey> = {
+  [F in RepoSecretsKey]: FamilyPlan<F, SecretsTable[F]>;
+}[K];
 
-type WideContext = PlanContext<WideEndpoints>;
-
-type WidePlanned = Promise<Result<SectionPlan<PlannedOp<WideEndpoints>>, SectionFailure>>;
-
-/** The shared implementation's signature at family F (the brand names the family); the lockstep below compares it to the family's own. */
-type SharedPlanAt<F extends RepoSecretsKey> = (
-  ctx: WideContext,
-  declared: ValidatedInput<F>,
-) => WidePlanned;
-
-/** The one implementation: SharedPlanAt, generic over the family it is called as. */
-type SharedPlan = <F extends RepoSecretsKey>(
-  ...args: Parameters<SharedPlanAt<F>>
-) => ReturnType<SharedPlanAt<F>>;
-
-/** What every family's snapshot reads back: one shape, since the four entry slices are identical. */
-type WideSnapshot = { value: UndeclaredPolicyList<SecretEntry> | undefined; notes: string[] };
-
-type Invariant<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-
-type _SharedPlanIsEveryFamilyPlan = MustBeNever<
-  {
-    [K in RepoSecretsKey]: Invariant<
-      SharedPlanAt<K>,
-      KeyErasedPlan<RepoSecretsPlan<K>>
-    > extends true
-      ? never
-      : K;
-  }[RepoSecretsKey]
+type _WidePlanIsEveryFamilyPlan = MustBeNever<
+  PlanMisfits<RepoSecretsKey, WideEndpoints, SecretsTable>
 >;
 
 /**
@@ -191,7 +151,7 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
   readonly secretValues: typeof listSecretValues;
   readonly closedSurface: typeof CLOSED_SURFACE;
   readonly layering: KeyedListLayering;
-  readonly validate: (declared: WideDeclared) => readonly DeclaredIssue[];
+  readonly validate: (declared: Declared<SecretEntry>) => readonly DeclaredIssue[];
   readonly plan: RepoSecretsPlan<K>;
   readonly snapshot: (
     ctx: SnapshotContext<RepoSecretsEndpoints<SecretsSegment<K>>, GraphqlDict, K>,
@@ -200,20 +160,17 @@ export interface RepoSecretsSectionModule<K extends RepoSecretsKey> {
 
 /**
  * Keep-by-default on purpose: a deleted secret's value is unrecoverable, so deletion is opt-in via the
- * wrapped `_undeclared: delete` form. A family supplies only its key, PAT resource, noun, and (Codespaces) read grade.
+ * wrapped `_undeclared: delete` form.
  */
-export function repoSecretsSection<K extends RepoSecretsKey>(family: {
-  key: K;
-  /** The fine-grained-PAT Repository permission gating the family. */
-  resource: PatResource;
-  /** The output noun for notes ("Actions secret", "Dependabot secret", ...). */
-  noun: string;
-  /**
-   * The fine-grained "Codespaces secrets" permission gates even the GETs (list, public-key) at write;
-   * the writes are write-graded by method already.
-   */
-  accessGrade?: "write";
-}): RepoSecretsSectionModule<K> {
+export function repoSecretsSection<K extends RepoSecretsKey>(
+  family: KeyedValuesFamily<K> & {
+    /**
+     * The fine-grained "Codespaces secrets" permission gates even the GETs (list, public-key) at write;
+     * the writes are write-graded by method already.
+     */
+    readonly accessGrade?: "write";
+  },
+): RepoSecretsSectionModule<K> {
   const { key, resource, noun, accessGrade } = family;
   const pathSegment: SecretsSegment<K> = SECRETS_SEGMENTS[key];
   const readGrade = accessGrade === undefined ? {} : { accessGrade };
@@ -243,11 +200,17 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
     },
   };
 
+  const meta = {
+    key,
+    undeclaredDefault: "keep" as const,
+    permission: { repo: [resource] as const },
+    endpoints,
+    shape: loosen(knobbed(SECRETS_ENTRIES[key])),
+    layering: keyedBy("name", { fold: secretKey }),
+  };
+
   const wide: WideEndpoints = endpoints;
-  const plan: SharedPlan = async (ctx, declared) => {
-    const defaultPolicy = defaultUndeclaredPolicy(section);
-    const wideDeclared: WideDeclared = declared;
-    const { policy, entries } = undeclaredPolicy(wideDeclared, defaultPolicy);
+  const plan: WidePlan<RepoSecretsKey, WideEndpoints> = async (ctx, declared) => {
     // Built where the routes are known, so params typecheck.
     type Op = PlannedOp<WideEndpoints>;
     type Described<R extends Op["role"]> = Extract<Op, { role: R }> & { readonly describe: string };
@@ -259,45 +222,37 @@ export function repoSecretsSection<K extends RepoSecretsKey>(family: {
       publicKeyEndpoint: wide.publicKey,
       ...secretOps({ put: "put", remove: "remove" }, undefined),
     };
-    return planSecrets(section, scope, { entries, policy, defaultPolicy });
+    return planSecrets(meta, scope, knobbedEntries<SecretEntry>(meta, declared));
   };
 
   // GitHub lists names only, so each entry carries the per-store reference the operator must
   // export before an apply, and a note says so per secret. The engine's index hands back the
   // uppercase keys GitHub stores and the planner compares by, so the reference grammar holds.
-  const snapshot = async (
-    ctx: SnapshotContext<WideEndpoints>,
-  ): Promise<Result<WideSnapshot, SectionFailure>> =>
-    ctx.read.list.listAllEnveloped("secrets", LiveSecretName).andThen((live) => {
-      if (live.length === 0) {
-        return ok<WideSnapshot, SectionFailure>({ value: undefined, notes: [] });
-      }
-      return liveSecretsByKey(section, noun, live).map((byKey) => {
+  const snapshot = snapshotOf<WideEndpoints, SecretEntry>(meta, (ctx) =>
+    ctx.read.list
+      .listAllEnveloped("secrets", LiveSecretName)
+      .andThen((live) => liveSecretsByKey(meta, noun, live))
+      .map((byKey) => {
         const references = [...byKey.keys()].map((name) => ({
           name,
           ...snapshotSecretReference(pathSegment, name),
         }));
-        const entries = references.map(({ name, reference }) => ({ name, value: reference }));
-        const notes = references.map(({ name, variable }) =>
-          unreadableSecretNote(`${key}[${name}]`, name, variable),
-        );
-        return { value: knobbedSnapshot(section, entries), notes };
-      });
-    });
+        return {
+          entries: references.map(({ name, reference }) => ({ name, value: reference })),
+          notes: references.map(({ name, variable }) =>
+            unreadableSecretNote(`${key}[${name}]`, name, variable),
+          ),
+        };
+      }),
+  );
 
-  const section: RepoSecretsSectionModule<K> = {
-    key,
-    undeclaredDefault: "keep",
-    permission: { repo: [resource] },
-    endpoints,
-    shape: loosen(knobbed(SECRETS_ENTRIES[key])),
+  return {
+    ...meta,
     secretValues: listSecretValues,
     closedSurface: CLOSED_SURFACE,
-    layering: keyedBy("name", { fold: secretKey }),
     validate: (declared) => duplicateSecretNameIssues(declared, "secret"),
     plan,
     // The family's port is the wide port at one segment; the cast is that boundary.
     snapshot: (ctx) => snapshot(ctx as SnapshotContext<WideEndpoints, GraphqlDict, K>),
   };
-  return section;
 }
