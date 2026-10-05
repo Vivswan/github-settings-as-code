@@ -6,6 +6,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
+import type { UndeclaredPolicyList } from "../../types.js";
 import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import {
