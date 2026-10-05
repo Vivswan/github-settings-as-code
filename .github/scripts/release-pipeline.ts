@@ -11,9 +11,7 @@
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone:
- * forward along main, under a compare-and-set on the value origin advertised, never back. The `build` branch that
- * carried a chain of packaged commits before the tags is history: this script never reads it, and the branch
- * was deleted on 2026-09-13.
+ * forward along main, under a compare-and-set on the value origin advertised, never back.
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off); one subcommand runs
  * per workflow step:

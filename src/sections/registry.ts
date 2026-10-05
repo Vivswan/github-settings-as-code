@@ -218,9 +218,10 @@ const byKeyErased: { [K in SectionKey]: SectionModule<K> } = byKey;
 /**
  * The runtime twin of PlanContext's key brand, for a JavaScript consumer and the erased roster (SECTIONS
  * is homogeneous, so the brand cannot tell two of its members apart): a handler given another section's
- * context would otherwise fail on its first read with an undefined port. A rejection, not a throw, so
- * the handler's promise contract holds for a consumer's `.catch()`. Each arm calls the module's own
- * property at call time: handlers read `this`, and a test stubs the module while the engine holds this.
+ * context would otherwise fail on its first read with an undefined port.
+ *
+ *   refusal as a rejection         -> a synchronous throw would escape a consumer's `.catch()`
+ *   module property read per call  -> handlers read `this`, and a test stubs the module while the engine holds this
  */
 function refusingForeignContexts<K extends SectionKey>(module: SectionModule<K>): SectionModule<K> {
   const refusal = (ctx: PlanContext, handler: "plan" | "snapshot"): Error | null =>

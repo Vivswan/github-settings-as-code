@@ -42,13 +42,14 @@ function unanswered(failed: string): SectionFailure {
 }
 
 /**
- * A request the executor marked as carrying a resolved secret has its failure rebuilt HERE, on the engine's side of
- * the client port, so the guarantee holds for a library caller's own GitHubClient: such a client's 422 body echoing a
- * webhook secret would otherwise render through failureFor into outcomes[].detail and a delivered report. A throw is
- * replaced too, since a transport error is free text that can quote the request body.
+ * A secret-carrying request's failure is rebuilt on the engine's side of the client port, so a caller's own
+ * GitHubClient (the port src/index.ts exports) cannot echo a webhook secret through errors.ts's failureFor
+ * into a report.
  *
- * The port carries no headers, so a client may signal a limit only through the message the rebuild destroys; hence
- * `rateLimited` is set first. A limit misread as a denial is a silently skipped section under on-missing-permission: warn.
+ *   a throw, or a `failed` line  -> withheld too: transport free text can quote the request body
+ *   a rate limit                 -> classified BEFORE the rebuild, which keeps status and `rateLimited` but destroys
+ *                                   the message, a 403's only other limit evidence; misread as a denial it is a
+ *                                   section silently skipped under on-missing-permission: warn
  */
 async function issue<D>(
   label: string,

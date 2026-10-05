@@ -4,9 +4,9 @@
  * the summary, outputs, and report reach it only through projections.
  *
  *   resolve targets -> resolve visibility -> plan redaction, mask every hidden slug
- *   -> flush buffered central warnings -> run each target through its channel
+ *   -> emit the central warnings -> run each target through its channel
  *
- * Before the mask step nothing is emitted that could name a target, except a fatal exit: its message and the flushed
+ * Before the mask step nothing is emitted that could name a target, except a fatal exit: its message and the
  * central warnings may name slugs the operator wrote into the workflow or the admin repo.
  */
 
@@ -225,6 +225,9 @@ export interface ResolvedTargets {
   visibilityOf: (slug: string) => RepoVisibility;
 }
 
+/** Typed so a literal's `code` stays a literal inside a safeTry generator, where no return type narrows it. */
+const fail = (problem: Problem): Err<never, Problem> => err(problem);
+
 /**
  * Resolve the run's targets (repos-dir files, explicit repos, "*" discovery),
  * decide redaction, and register every masked slug BEFORE the first line is
@@ -237,37 +240,59 @@ export function resolveTargets(
   cfg: TargetsConfig,
   io: Io,
 ): ResultAsync<ResolvedTargets, Problem> {
-  // Central-resolution warnings are buffered so nothing emits before the redaction mask is registered; every exit path,
-  // fatal or not, flushes them through this one helper (the fatal ones via orTee). They name repos-dir paths and slugs,
-  // which are self-disclosed (checked into the public admin repo), so flushing them before masking on a fatal path leaks nothing.
-  const bufferedWarnings: string[] = [];
-  let warningsFlushed = false;
-  const flushWarnings = (): void => {
-    if (warningsFlushed) {
-      return;
-    }
-    warningsFlushed = true;
-    for (const warning of bufferedWarnings) {
+  return safeTry(async function* () {
+    const central: { targets: CentralTarget[]; warnings: string[] } = cfg.reposDir
+      ? yield* resolveCentralTargets(cfg.reposDir, cfg.adminOwner)
+      : { targets: [], warnings: [] };
+    const masked = await maskFleet(api, cfg, io, central.targets);
+    // Central warnings name repos-dir paths and slugs the admin repo already discloses, so a fatal exit may emit them
+    // unmasked; on success they follow the mask and precede the first notice.
+    for (const warning of central.warnings) {
       io.annotate("warning", warning);
     }
-  };
-  // Typed so a literal's `code` stays a literal inside the generator, where no return type narrows it.
-  const fail = (problem: Problem): Err<never, Problem> => err(problem);
+    const { remote, plan, visibilityOf, skipGroups, filteredOutCount, redact } = yield* masked;
 
-  return safeTry(async function* () {
-    let central: CentralTarget[] = [];
-    if (cfg.reposDir) {
-      const resolved = yield* resolveCentralTargets(cfg.reposDir, cfg.adminOwner);
-      bufferedWarnings.push(...resolved.warnings);
-      central = resolved.targets;
+    for (const group of skipGroups) {
+      io.annotate("notice", formatSkipNotice(group, redact));
     }
+    const targets = dedupeTargets(
+      central.targets,
+      remote,
+      (message) => io.annotate("notice", message),
+      (slug) => plan.display(slug),
+      (slug) => plan.isRedacted(slug),
+    );
+    if (targets.length === 0) {
+      return fail({ code: "no-targets", filteredOut: filteredOutCount });
+    }
+    return ok({ targets, plan, visibilityOf });
+  });
+}
 
+/** The fleet with every hidden slug registered; what resolveTargets lists and reports from. */
+interface MaskedFleet {
+  remote: RemoteTarget[];
+  plan: RedactionPlan;
+  visibilityOf: (slug: string) => RepoVisibility;
+  skipGroups: Array<{ reason: string; repos: Parameters<typeof formatSkipNotice>[0]["repos"] }>;
+  filteredOutCount: number;
+  redact: boolean;
+}
+
+/**
+ * Emits no notice, warning, or log line of this flow's own before the mask (the client's debug traces are the
+ * client's); resolveTargets relies on that to order the central warnings after it.
+ */
+function maskFleet(
+  api: GitHubClient,
+  cfg: TargetsConfig,
+  io: Io,
+  central: CentralTarget[],
+): ResultAsync<MaskedFleet, Problem> {
+  return safeTry(async function* () {
     let remote: RemoteTarget[] = [];
     let filteredOutCount = 0;
-    const skipGroups: Array<{
-      reason: string;
-      repos: Parameters<typeof formatSkipNotice>[0]["repos"];
-    }> = [];
+    const skipGroups: MaskedFleet["skipGroups"] = [];
     // Visibility learned from discovery is authoritative for those repos, so their per-target probe is skipped.
     const knownVisibility = new Map<SlugKey, RepoVisibility>();
     // Private slugs discovery filtered out are masked but never placeholdered.
@@ -311,9 +336,9 @@ export function resolveTargets(
     const redact = cfg.privateRepos === "redact";
     const self = slugKey(cfg.selfSlug);
 
-    // Visibility is resolved for every distinct target slug before the plan, and the resolved value (not a boolean) drives
-    // two decisions that fail closed in opposite directions, so an unknown never posts a private report to a repo that
-    // might be public.
+    // Visibility is resolved for every distinct target slug before the plan, and the resolved value (not a boolean)
+    // drives two decisions that fail closed in opposite directions, so an unknown never posts a private report to a
+    // repo that might be public.
     //   discovery knew it          -> that value, no probe
     //   `show`, or the self slug   -> no probe
     //   redaction                  -> hide unless proven public
@@ -335,8 +360,8 @@ export function resolveTargets(
         visibilityBySlug.set(key, known ?? (await resolveVisibility(slug)));
       }
     }
-    // Under `redact` the map holds every target slug, so the fallback only fires under `show`, where visibility is never
-    // consulted; it still fails CLOSED, since "unknown" redacts as private and delivers as unproven.
+    // Under `redact` the map holds every target slug, so the fallback only fires under `show`, where visibility is
+    // never consulted; it still fails CLOSED, since "unknown" redacts as private and delivers as unproven.
     const visibilityOf = (slug: string): RepoVisibility =>
       visibilityBySlug.get(slugKey(slug)) ?? "unknown";
 
@@ -348,28 +373,13 @@ export function resolveTargets(
       cfg.selfSlug,
     );
 
-    // Every hidden slug is masked before the first line that could name a target; the API trace reads the same registry.
+    // Every hidden slug is masked before the first line that could name a target; the API trace reads the same
+    // registry.
     for (const slug of plan.maskedSlugs) {
       io.mask(slug);
     }
-
-    flushWarnings();
-    for (const group of skipGroups) {
-      io.annotate("notice", formatSkipNotice(group, redact));
-    }
-
-    const targets = dedupeTargets(
-      central,
-      remote,
-      (message) => io.annotate("notice", message),
-      (slug) => plan.display(slug),
-      (slug) => plan.isRedacted(slug),
-    );
-    if (targets.length === 0) {
-      return fail({ code: "no-targets", filteredOut: filteredOutCount });
-    }
-    return ok({ targets, plan, visibilityOf });
-  }).orTee(flushWarnings);
+    return ok({ remote, plan, visibilityOf, skipGroups, filteredOutCount, redact });
+  });
 }
 
 /**
