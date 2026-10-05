@@ -19,7 +19,7 @@ import {
   sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
 import { bodyRefusal } from "../../.github/scripts/lib/generated-regions.js";
-import { tableFault, tableRow } from "../../.github/scripts/lib/markdown-table.js";
+import { tableFault, tableRow } from "../../src/report/markdown.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
 
@@ -90,7 +90,7 @@ describe("the Sections table guard", () => {
     `\n| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|\n${rows}\n`;
 
   test("admits the renderer's output, padded and punctuated cells included", () => {
-    // Surrounding blanks, parentheses, backticks, and colons are all tableCell() output and read back byte for byte.
+    // Surrounding blanks, parentheses, backticks, and colons are all cells cellFault() admits and read back byte for byte.
     const rendered = renderSectionsTable(
       [
         { key: "labels", permission: { repo: ["issues"] }, undeclaredDefault: "delete" },
@@ -175,7 +175,7 @@ describe("the Sections table guard", () => {
     ): void => {
       const docs = { labels: { sections_table: text }, rulesets: { sections_table: text } };
       const cells = sectionsCells(sections, docs);
-      const fault = tableFault(SECTIONS_TABLE_HEADER, cells);
+      const fault = tableFault(SECTIONS_TABLE_HEADER, cells, "keyed");
       let rendered: string | undefined;
       let thrown: string | undefined;
       try {
@@ -355,6 +355,26 @@ describe("renderCoverage", () => {
     );
   });
 
+  // Prose may repeat a structural line word for word, and keys may hold the two Unicode line separators the cell
+  // rule admits; the guard reads the structure from the lines around a line, never from one line alone, or a page
+  // the generator wrote would be refused as authored.
+  test("a page whose prose repeats the Supported heading or the gaps header line, or whose keys hold a line separator, still reads back as the generator's", () => {
+    const rendered = render({
+      docs: {
+        ...docs,
+        labels: {
+          coverage: [{ area: "Labels", keys: "x\u2028y", endpoints: ["list"], notes: ["CRUD."] }],
+        },
+      },
+      data: {
+        intro: ["Intro.", "## Supported"],
+        gaps: { emptyNote: "| Area | Endpoints | Why it matters |" },
+      },
+    });
+    const file = `---\norder: 115\n---\n\n# Coverage\n\n<!-- BEGIN GENERATED: coverage -->\n${rendered}\n<!-- END GENERATED: coverage -->\n`;
+    expect(() => renderCoverageFile(file)).not.toThrow();
+  });
+
   test("a known gap renders as a table row and drops the empty-state note", () => {
     const rendered = render({
       data: {
@@ -473,7 +493,7 @@ describe("renderCoverage", () => {
     [
       "an Area cell that cannot label the notes",
       { area: "**Bold**" },
-      'the "**Bold**" row of labels has an Area cell that cannot label its notes',
+      "a labels coverage row's Area cell cannot label its notes",
     ],
     [
       "a note with a line break",
@@ -756,7 +776,7 @@ describe("the committed coverage page", () => {
     expect(() =>
       renderCoverageFile(coverage.replace(topics, "[`repository`](semantics.md) (`topics`)")),
     ).toThrow(shape);
-    // A parenthesized qualifier is what codeSpan() lets through, so the shape accepts it.
+    // A parenthesized qualifier is what supportedRowFault() lets through, so the guard admits it.
     expect(() =>
       renderCoverageFile(
         coverage.replace(topics, "[`repository`](sections.md) (`topics (legacy)`)"),
@@ -787,6 +807,15 @@ describe("the committed coverage page", () => {
           .replace(gapsHeader, `${gapsHeader}| a | b | c |\n`),
       ),
     ).not.toThrow();
+    // A label the authoring side refuses (a star inside the double stars) is no label the printer writes, even
+    // when the Area cell and the label agree with each other.
+    expect(() =>
+      renderCoverageFile(
+        coverage
+          .replace("[Labels](", "[*Labels*](")
+          .replace("**Labels** (`labels`)", "***Labels*** (`labels`)"),
+      ),
+    ).toThrow(shape);
     // A carriage return is not something any validator lets through, so the shape refuses it too.
     expect(coverage).toContain("[Labels](");
     expect(() => renderCoverageFile(coverage.replace("[Labels](", "[Labels]\r("))).toThrow(shape);

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { err, ok, type Result } from "neverthrow";
 import {
   Document,
   type DocumentOptions,
@@ -14,6 +15,12 @@ import { z } from "zod";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { InputDecl } from "../../src/flows/inputs.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
+import {
+  renderedMismatch,
+  renderTable,
+  tableFault,
+  tableRoundTrip,
+} from "../../src/report/markdown.js";
 import { UNDECLARED_POLICY_SECTIONS, type UndeclaredPolicySection } from "../../src/schema.js";
 import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
 import type { SectionMeta } from "../../src/sections/contract/module.js";
@@ -32,12 +39,7 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
 import { countWord } from "./lib/count-word.js";
-import {
-  type GeneratedRegion,
-  regenerateRegions,
-  renderedMismatch,
-} from "./lib/generated-regions.js";
-import { renderTable, tableFault, tableRoundTrip } from "./lib/markdown-table.js";
+import { type GeneratedRegion, regenerateRegions } from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -181,8 +183,8 @@ export interface PolicyRowProse {
 
 /**
  * Why a row's prose cannot be rendered: blank prose would render `delete ()` or a bare policy span, cells
- * tableCell() admits since the policy word fills them. The renderer refuses it at its own boundary and the parser
- * through this same check, by the trimmed-blank rule tableCell() uses, so what the renderer writes is exactly what
+ * cellFault() admits since the policy word fills them. The renderer refuses it at its own boundary and the parser
+ * through this same check, by the trimmed-blank rule cellFault() uses, so what the renderer writes is exactly what
  * the guard reads back. A structural type cannot vouch for a property a narrowing hid, so the value is inspected
  * as unknown.
  */
@@ -228,7 +230,7 @@ export function policyTableFault(rows: readonly PolicyRow[]): string | undefined
       return `the "${row.section.key}" Defaults row ${fault}`;
     }
   }
-  return tableFault(DEFAULTS_TABLE_HEADER, rows.map(policyCells));
+  return tableFault(DEFAULTS_TABLE_HEADER, rows.map(policyCells), "keyed");
 }
 
 export function renderPolicyDefaultsTable(
@@ -252,29 +254,31 @@ export function renderPolicyDefaultsTable(
 
 /** A Defaults row read back to the section and prose it renders from; the delete-first order is then the
  * renderer's to check, through the byte compare. The dotAll flag keeps the two Unicode line separators
- * tableCell() admits inside the prose. */
+ * cellFault() admits inside the prose. */
 function policyRow(
   cells: readonly string[],
   key: string,
-): { readonly section: KnobbedSection; readonly prose: PolicyRowProse } | string {
+): Result<{ readonly section: KnobbedSection; readonly prose: PolicyRowProse }, string> {
   const policy = /^(delete|keep)(?: \((.*)\))?$/s.exec(cells[1] ?? "");
   const buys = /^`(delete|keep)`: (.*)$/s.exec(cells[2] ?? "");
   if (policy === null) {
-    return "states no delete or keep default";
+    return err("states no delete or keep default");
   }
   if (buys === null) {
-    return "names no policy span before its override prose";
+    return err("names no policy span before its override prose");
   }
   const undeclaredDefault = policy[1] === "delete" ? "delete" : "keep";
   if (buys[1] !== OPPOSITE[undeclaredDefault]) {
-    return `names \`${buys[1]}\` where the override is the opposite policy, \`${OPPOSITE[undeclaredDefault]}\``;
+    return err(
+      `names \`${buys[1]}\` where the override is the opposite policy, \`${OPPOSITE[undeclaredDefault]}\``,
+    );
   }
   const row = { caveat: policy[2], override: buys[2] ?? "" };
   const fault = proseFault(row);
   if (fault !== undefined) {
-    return `${fault}, which the renderer refuses`;
+    return err(`${fault}, which the renderer refuses`);
   }
-  return { section: { key, undeclaredDefault }, prose: row };
+  return ok({ section: { key, undeclaredDefault }, prose: row });
 }
 
 /** The row every secret family shares: the value is write-only, so a wrong delete is a loss, not a drift. */
@@ -499,7 +503,7 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "policy-defaults-table",
       placement: { kind: "under-heading", heading: "## Defaults per section" },
-      body: tableRoundTrip(DEFAULTS_TABLE_HEADER, policyRow, (rows) =>
+      body: tableRoundTrip(DEFAULTS_TABLE_HEADER, "keyed", policyRow, (rows) =>
         renderPolicyDefaultsTable(
           rows.map((row) => row.section),
           Object.fromEntries(rows.map((row) => [row.section.key, row.prose])),
