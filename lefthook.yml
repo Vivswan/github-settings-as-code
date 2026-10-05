@@ -6,16 +6,17 @@
 #   the default hook script    -> falls back to mint, mise, uv and the like, which install lefthook on demand
 #   pre-commit.setup           -> is no gate: lefthook reports a failed setup and still runs the jobs
 #   auto-install               -> rewrites .git/hooks at commit time; `bun install` is the one installer
+#   the launchers' own shebang -> is `#!/usr/bin/env node`; `bun --no-install <file>` runs them with node off PATH
 no_auto_install: true
-lefthook: test -x node_modules/.bin/lefthook || { echo 'lefthook is missing from node_modules/.bin; run bun install first' >&2; exit 1; }; node_modules/.bin/lefthook
+lefthook: test -x node_modules/.bin/lefthook || { echo 'lefthook is missing from node_modules/.bin; run bun install first' >&2; exit 1; }; bun --no-install node_modules/.bin/lefthook
 pre-commit:
   parallel: true
   jobs:
     - name: biome (staged)
       run: |
         test -x node_modules/.bin/biome || { echo 'biome is missing from node_modules/.bin; run bun install first' >&2; exit 1; }
-        node_modules/.bin/biome check --staged --no-errors-on-unmatched
+        bun --no-install node_modules/.bin/biome check --staged --no-errors-on-unmatched
     - name: typecheck
       run: |
         test -x node_modules/.bin/tsc || { echo 'tsc is missing from node_modules/.bin; run bun install first' >&2; exit 1; }
-        node_modules/.bin/tsc -p .
+        bun --no-install node_modules/.bin/tsc -p .
