@@ -29,25 +29,31 @@ import { ENDPOINTS, MISSING_BRANCH } from "./endpoints.js";
 import {
   type BranchesContext,
   type BranchesPlan,
+  GRAPHQL,
+  type GraphqlRun,
+} from "./graphql-ops.js";
+import {
   fetchRules,
   fetchRulesForSnapshot,
-  GRAPHQL,
+  routedKeysSnapshot,
+  wildcardSnapshot,
+} from "./graphql-reads.js";
+import {
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
-  type GraphqlRun,
   hasRoutedGraphqlKeys,
-  justified,
-  planRoutedUpdate,
-  planWildcardEntry,
   type RestOnlyProtection,
   type RoutedProtection,
-  resolveActorIds,
-  routedKeysSnapshot,
   type SplitProtection,
   WILDCARD_KEY_SET,
   WILDCARD_KEYS,
-  wildcardSnapshot,
-} from "./graphql-rules.js";
+} from "./graphql-vocabulary.js";
+import {
+  justified,
+  planRoutedUpdate,
+  planWildcardEntry,
+  resolveActorIds,
+} from "./graphql-writes.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey } from "./keys.js";
 import {
   type BranchConfig,

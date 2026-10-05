@@ -20,7 +20,7 @@ import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
   GRAPHQL_STATUS_CHECK_TWINS,
-} from "../../src/sections/branches/graphql-rules.js";
+} from "../../src/sections/branches/graphql-vocabulary.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
 import type { UnshippedGraphqlSdl } from "../../src/upstream-gaps/gap.js";
 import { UNSHIPPED_GRAPHQL_SDL } from "../../src/upstream-gaps/index.js";

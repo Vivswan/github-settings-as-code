@@ -11,8 +11,8 @@ export const isUrlKey = (key: string): boolean => key === "url" || key.endsWith(
 export const isGetOnlyKey = (key: string): boolean => GET_ONLY_KEYS.has(key) || isUrlKey(key);
 
 /**
- * The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled}; graphql-rules.ts
- * pins its twin table to this list, so a control added there is added here first.
+ * The controls the PUT takes as a bare boolean and the GET wraps as {url, enabled};
+ * graphql-vocabulary.ts pins its twin table to this list, so a control added there is added here first.
  */
 const BOOLEAN_CONTROLS = [
   "enforce_admins",

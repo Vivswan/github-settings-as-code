@@ -1,4 +1,4 @@
-/** The REST endpoint dictionary both index.ts and graphql-rules.ts derive their plan context type from. */
+/** The REST endpoint dictionary both index.ts and graphql-ops.ts derive their plan context type from. */
 
 import type { DefinitiveRejection, EndpointDecl } from "../contract/endpoints.js";
 

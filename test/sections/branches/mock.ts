@@ -4,7 +4,8 @@
 
 import { createHash } from "node:crypto";
 import { MISSING_BRANCH } from "../../../src/sections/branches/endpoints.js";
-import { classicViewOfRule, RuleNode } from "../../../src/sections/branches/graphql-rules.js";
+import { RuleNode } from "../../../src/sections/branches/graphql-ops.js";
+import { classicViewOfRule } from "../../../src/sections/branches/graphql-reads.js";
 import { BOOLEAN_CONTROL_SET, NULLABLE_CONTROLS } from "../../../src/sections/branches/keys.js";
 import { decodeNodeId, mintNodeId } from "../../e2e/mock/node-id.js";
 import {

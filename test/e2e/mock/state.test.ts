@@ -5,11 +5,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { subsetDiff } from "../../../src/engine/diff.js";
+import { RuleNode } from "../../../src/sections/branches/graphql-ops.js";
 import {
   bypassActorStrings,
   classicViewOfRule,
-  RuleNode,
-} from "../../../src/sections/branches/graphql-rules.js";
+} from "../../../src/sections/branches/graphql-reads.js";
 import { flattenProtection } from "../../../src/sections/branches/index.js";
 import { flattenEnvironment } from "../../../src/sections/environments/index.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
