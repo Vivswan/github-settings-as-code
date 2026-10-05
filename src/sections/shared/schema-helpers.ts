@@ -11,8 +11,8 @@ import { type Knob, knobOf, markKnob, OPEN_CATCHALL } from "./schema-marks.js";
 import { schemaNode } from "./schema-node.js";
 
 /**
- * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
- * engine/undeclared.ts resolves it and engine/layers.ts re-exports it to the flows. Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
+ * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input.
+ * Described in docs/sections/shared.docs.yml and docs/schema.docs.yml.
  */
 export const UNDECLARED_POLICIES = ["keep", "delete"] as const;
 

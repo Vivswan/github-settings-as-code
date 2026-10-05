@@ -134,7 +134,10 @@ function realOrSpelled(path: string): string {
   }
 }
 
-/** The bits a replaced regular file keeps; a link at `path` is stat-followed, since the write replaces the link with a regular file of its referent's mode. */
+/**
+ * The bits a replaced regular file keeps; a link at `path` is stat-followed, since the write replaces the link with
+ * a regular file of its referent's mode.
+ */
 function regularFileMode(path: string): number | undefined {
   try {
     const stat = statSync(path);

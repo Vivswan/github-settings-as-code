@@ -24,8 +24,12 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
   return paths.map((path) => ({ path, generator, kind: "regions" }));
 }
 
-/** A page two generators write into (docs/reference/inputs.md) has one row per generator. Table order is run order:
- * the docs and action.yml generators import the gaps index through src/, and action.yml feeds the inputs table, so each renders first, or a new gap file or a bump would leave a run stale. */
+/**
+ * A page two generators write into (docs/reference/inputs.md) has one row per generator. Rows stay in dependency
+ * order, each artifact before its readers, or a new gap file or a bump would leave a run stale.
+ *   the gaps index -> imported through src/ by the docs and action.yml generators
+ *   action.yml     -> feeds the inputs table
+ */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
   { path: INDEX_PATH, generator: "build:gaps-index", kind: "file" },
   ...regions("build:docs", [COVERAGE_PATH, ...Object.keys(PAGE_REGIONS)]),

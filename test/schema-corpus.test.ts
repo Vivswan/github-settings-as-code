@@ -62,8 +62,8 @@ function independentYmlListing(roots: readonly string[]): string[] {
 }
 
 /**
- * Every settings fragment in the curated scenarios, walked by the same collectYmlFiles the scenario loader uses; each root is asserted non-empty so a
- * renamed directory fails here instead of shrinking the corpus.
+ * Every settings fragment in the curated scenarios, walked by the same collectYmlFiles the scenario loader uses;
+ * each root is asserted non-empty so a renamed directory fails here instead of shrinking the corpus.
  */
 function scenarioDocs(): CorpusDoc[] {
   const roots = scenarioRoots();

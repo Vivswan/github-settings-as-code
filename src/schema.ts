@@ -185,7 +185,10 @@ type WrapperOf<K extends SectionKey> = Extract<
   { entries: readonly unknown[] }
 >;
 
-/** Both branches are required, the plain array AND the wrapper, so a section whose config merely carries `entries` is not a list section by accident. */
+/**
+ * Both branches are required, the plain array AND the wrapper, so a section whose config merely carries `entries`
+ * is not a list section by accident.
+ */
 type ListByType = {
   [K in SectionKey]: [Extract<NonNullable<SettingsFile[K]>, readonly unknown[]>] extends [never]
     ? never
@@ -196,7 +199,10 @@ type ListByType = {
 type _ListComplete = MustBeNever<Exclude<ListByType, ListSection>>;
 type _ListSound = MustBeNever<Exclude<ListSection, ListByType>>;
 
-/** Knobbed: a list section whose wrapper takes the `_undeclared` policy. Read off the wrapper's keys, since a wrapper without the key is assignable to one with it optional. */
+/**
+ * Knobbed: a list section whose wrapper takes the `_undeclared` policy. Read off the wrapper's keys, since a wrapper
+ * without the key is assignable to one with it optional.
+ */
 type KnobbedByType = {
   [K in ListByType]: "_undeclared" extends keyof WrapperOf<K> ? K : never;
 }[ListByType];
@@ -207,7 +213,10 @@ type _KnobListSound = MustBeNever<
   Exclude<(typeof UNDECLARED_POLICY_SECTIONS)[number], KnobbedByType>
 >;
 
-/** Sections whose plain form (no wrapper) matches the Probot Settings app schema; docs/start/migrating-from-probot.md is pinned against this list. */
+/**
+ * Sections whose plain form (no wrapper) matches the Probot Settings app schema; docs/start/migrating-from-probot.md
+ * is pinned against this list.
+ */
 export const PROBOT_PARITY_KEYS = [
   "repository",
   "labels",

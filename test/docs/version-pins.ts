@@ -1,7 +1,4 @@
-/**
- * One home for the manifest read, the pre-release guard, the major derivation, and the uses:-pin pattern, so the README and guides tests cannot drift
- * on what counts as a pin.
- */
+/** One home for what counts as a pin, so the README and guides tests cannot drift on it. */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
