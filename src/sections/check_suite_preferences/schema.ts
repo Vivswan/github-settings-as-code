@@ -19,7 +19,6 @@ export const CheckSuitePreferencesConfig = z
   .looseObject({
     auto_trigger_checks: z.array(AutoTriggerCheckConfig),
   })
-  .catchall(z.unknown())
   .check(
     rule((declared, refineCtx) => {
       // GitHub keeps whichever entry for an app it reads last, on every run, and no read endpoint exists to show the other
