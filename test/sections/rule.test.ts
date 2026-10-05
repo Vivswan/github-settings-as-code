@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { loosen } from "../../src/sections/contract/module.js";
-import { maxLength, minLength, rule } from "../../src/sections/shared/schema-helpers.js";
+import { knobbed, maxLength, minLength, rule } from "../../src/sections/shared/schema-helpers.js";
 
 const needsModeA = (
   value: { mode?: "a" | "b"; list?: string[] },
@@ -76,14 +76,7 @@ describe("rule() reports beside a failed nested value", () => {
   });
 
   test("a rule composed onto the loosened routed list shape reports beside a failed entry, in both container forms", () => {
-    const entry = z.object({ name: z.string() });
-    const knob = z.union([
-      z.array(entry),
-      z.strictObject({
-        _undeclared: z.enum(["keep", "delete"]).optional(),
-        entries: z.array(entry),
-      }),
-    ]);
+    const knob = knobbed(z.object({ name: z.string() }).meta({ id: "RuleTestEntry" }));
     const composed = loosen(knob).check(
       rule((value, ctx) => {
         const wrapped = !Array.isArray(value);

@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { loosen } from "../../src/sections/contract/module.js";
+import { knobbed, rule } from "../../src/sections/shared/schema-helpers.js";
 
 describe("loosen", () => {
   test("strip objects become passthrough, and their superRefines see unknown keys", () => {
@@ -47,14 +48,7 @@ describe("loosen", () => {
   });
 
   test("the knobbed union is rewrapped with per-container issue paths", () => {
-    const knob = z.union([
-      z.array(z.object({ name: z.string() })),
-      z.strictObject({
-        _undeclared: z.enum(["keep", "delete"]).optional(),
-        entries: z.array(z.object({ name: z.string() })),
-      }),
-    ]);
-    const runtime = loosen(knob);
+    const runtime = loosen(knobbed(z.object({ name: z.string() }).meta({ id: "LoosenTestEntry" })));
     expect(runtime.safeParse([{ name: "a" }]).success).toBe(true);
     expect(runtime.safeParse({ entries: [{ name: "a" }] }).success).toBe(true);
     expect(runtime.safeParse([{ name: 1 }]).error?.issues[0]?.path).toEqual([0, "name"]);
@@ -65,16 +59,30 @@ describe("loosen", () => {
     ]);
   });
 
+  test.each([
+    ["a .meta() clone", (knob: z.ZodType) => knob.meta({ description: "x" })],
+    ["a .describe() clone", (knob: z.ZodType) => knob.describe("x")],
+  ])(
+    "%s of the knobbed union is still routed, so a failing entry keeps its path",
+    (_name, clone) => {
+      const runtime = loosen(
+        clone(knobbed(z.object({ name: z.string() }).meta({ id: "LoosenCloneEntry" }))),
+      );
+      expect(runtime.safeParse({ entries: [{ name: 1 }] }).error?.issues[0]?.path).toEqual([
+        "entries",
+        0,
+        "name",
+      ]);
+    },
+  );
+
   test("a knobbed union carrying its own refinement fails loudly instead of dropping it", () => {
-    const knob = z
-      .union([
-        z.array(z.object({ name: z.string() })),
-        z.strictObject({ entries: z.array(z.object({ name: z.string() })) }),
-      ])
-      .superRefine(() => {});
+    const knob = knobbed(z.object({ name: z.string() }).meta({ id: "LoosenCheckedEntry" })).check(
+      rule(() => {}),
+    );
     expect(() => loosen(knob)).toThrow(
       new Error(
-        "BUG: loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+        "BUG: routed(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
       ),
     );
   });
