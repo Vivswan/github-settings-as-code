@@ -5,7 +5,10 @@ import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import { MISSING_BRANCH } from "../../../src/sections/branches/endpoints.js";
-import type { ExplicitKeys, RestCarriedKey } from "../../../src/sections/branches/graphql-rules.js";
+import type {
+  ExplicitKeys,
+  RestCarriedKey,
+} from "../../../src/sections/branches/graphql-vocabulary.js";
 import {
   branchesSection,
   type ClassifiedEntry,
@@ -1491,7 +1494,8 @@ describe("branches plan contract", () => {
   });
 
   test("the routed-keys coverage tripwire is not vacuous: a tuple that forgets a key fails it", () => {
-    // Compile-time only. graphql-rules.ts pins that the explicit schema keys minus the routed, REST-carried, and signatures keys are
+    // Compile-time only. graphql-vocabulary.ts pins that the explicit schema keys minus the routed,
+    // REST-carried, and signatures keys are
     // never; this is the negative control showing the key alias still yields keys, so a mutation that empties it cannot pass silently.
     type _Short = MustBeNever<
       // @ts-expect-error a tuple that forgot required_deployments leaves that schema key uncovered
