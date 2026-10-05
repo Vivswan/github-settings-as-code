@@ -1,7 +1,8 @@
 /**
- * The validated brand (ValidatedInput, ValidatedBrand, ValidatedSettings) is minted at ONE site, validateSettingsDoc's
- * success return; every other value carrying it is read off that document. A cast to a branded type anywhere else is a
- * second mint that skips the file-only checks, so the tree is scanned for one.
+ * Each proof brand is minted at ONE site, the validator's success return, and every other value carrying it is read
+ * off that document: the validated brand (ValidatedInput, ValidatedBrand, ValidatedSettings) at validateSettingsDoc's
+ * mint, the plainness proof (ProvedPlain) at validateSectionShapes'. A cast to a branded type anywhere
+ * else is a second mint that skips the checks the brand stands for, so the tree is scanned for one.
  *
  * Scope: the scan catches casts written in the ordinary form (`as`, `<T>`) to the brand or to a type that carries it
  * in an annotated data or return position. A value laundered through `any`, `never`, `typeof`, an inferred member
@@ -17,20 +18,35 @@ import { join, relative } from "node:path";
 import { parseSync } from "oxc-parser";
 import { ROOT } from "../root.js";
 
-/** The brand's own names: the carrier aliases and the unique symbols they key on. */
-const BRAND_NAMES = [
-  "ValidatedBrand",
-  "ValidatedInput",
-  "ValidatedSettings",
-  "validatedInput",
-  "validatedSettings",
-] as const;
+interface Brand {
+  /** The brand's own names: the carrier aliases and the unique symbols they key on. */
+  readonly names: readonly string[];
+  /** The mint, named so a move is a deliberate edit here. */
+  readonly mint: Cast;
+}
 
-/** The mint, named so a move is a deliberate edit here. */
-const MINT = {
-  file: "src/engine/orchestrate.ts",
-  within: "validateSettingsDoc",
-  text: "resolved as ValidatedSettings",
+const VALIDATED: Brand = {
+  names: [
+    "ValidatedBrand",
+    "ValidatedInput",
+    "ValidatedSettings",
+    "validatedInput",
+    "validatedSettings",
+  ],
+  mint: {
+    file: "src/engine/orchestrate.ts",
+    within: "mintValidatedSettings",
+    text: "resolved as ValidatedSettings",
+  },
+};
+
+const PROVED_PLAIN: Brand = {
+  names: ["ProvedPlain", "provedPlain"],
+  mint: {
+    file: "src/engine/validate.ts",
+    within: "validateSectionShapes",
+    text: "parsedSections as ProvedPlain<SettingsFile>",
+  },
 };
 
 const SCANNED_DIRS = ["src", "test", ".github/scripts"];
@@ -398,8 +414,8 @@ class Tree {
  * fixpoint: RepoRunOptions holds a ValidatedSettings, so a cast to RepoRunOptions mints too. A type that only takes
  * the brand as a parameter (SectionModule's plan) is a consumer and stays out.
  */
-function brandCarriers(tree: Tree): Carriers {
-  const carriers: Carriers = { keys: new Set(), names: new Set(BRAND_NAMES) };
+function brandCarriers(tree: Tree, brand: Brand): Carriers {
+  const carriers: Carriers = { keys: new Set(), names: new Set(brand.names) };
   let grew = true;
   while (grew) {
     grew = false;
@@ -443,9 +459,12 @@ function brandCasts(tree: Tree, carriers: Carriers): Cast[] {
   return casts;
 }
 
-export function scanBrand(sources: readonly Source[]): { carriers: Set<string>; casts: Cast[] } {
+export function scanBrand(
+  sources: readonly Source[],
+  brand: Brand = VALIDATED,
+): { carriers: Set<string>; casts: Cast[] } {
   const tree = new Tree(sources);
-  const carriers = brandCarriers(tree);
+  const carriers = brandCarriers(tree, brand);
   return { carriers: carriers.names, casts: brandCasts(tree, carriers) };
 }
 
@@ -465,7 +484,8 @@ function readTree(): Source[] {
 }
 
 describe("the validated brand's mint", () => {
-  const { carriers, casts } = scanBrand(readTree());
+  const sources = readTree();
+  const { carriers, casts } = scanBrand(sources);
 
   test("the carrier closure reaches the run options, not the module contract or a picked plain field", () => {
     expect(carriers.has("RepoRunOptions")).toBe(true);
@@ -476,7 +496,15 @@ describe("the validated brand's mint", () => {
   });
 
   test("exactly one cast constructs it: the validator's success return", () => {
-    expect(casts).toEqual([MINT]);
+    expect(casts).toEqual([VALIDATED.mint]);
+  });
+
+  // The ValidatedSettings mint takes the proof as a parameter, so it consumes the plainness brand and never carries
+  // it: the two brands have one mint each, not a shared one.
+  test("the plainness proof has its own single mint: the section walk's success return", () => {
+    const plain = scanBrand(sources, PROVED_PLAIN);
+    expect(plain.carriers.has("ValidatedSettings")).toBe(false);
+    expect(plain.casts).toEqual([PROVED_PLAIN.mint]);
   });
 
   test("a cast to the brand, a carrier, or an inline type holding one is found (positive control)", () => {

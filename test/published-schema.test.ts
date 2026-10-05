@@ -363,7 +363,7 @@ describe("the document-level directives", () => {
   );
 
   test("the apply-path shape validation copies only sections, so the directive never reaches the engine", () => {
-    expect(
+    expect<unknown>(
       validateSectionShapes({ _layering: "replace", labels: [{ name: "bug" }] }, "settings.yml"),
     ).toEqual(ok({ labels: [{ name: "bug" }] }));
   });

@@ -2,7 +2,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import { nonPlainKind } from "../plain-data.js";
+import { nonPlainKind, type ProvedPlain } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import type { DeclaredIssue, DeclaredSecretValue } from "../sections/contract/module.js";
@@ -179,16 +179,18 @@ function parsedOffence(value: unknown, at: "item" | "field"): string | null {
 }
 
 /**
- * The result is zod's output (fresh plain objects at every node the shape describes), never the caller's document.
- * Every file-only check runs here: the plainness walks, the shape, the closed surface, the section's own validate
- * hook, and the secret-reference check under the document's provenance, so a settings-file mistake fails the run
- * before the preflight barrier and the first write, in every mode and in a section the `sections` input excludes.
+ * The result is zod's output (fresh plain objects at every node the shape describes), never the caller's document,
+ * branded ProvedPlain: this is the one place the plainness proof is minted, and the one place a document is walked
+ * for it. Every file-only check runs here: the plainness walks, the shape, the closed surface, the section's own
+ * validate hook, and the secret-reference check under the document's provenance, so a settings-file mistake fails
+ * the run before the preflight barrier and the first write, in every mode and in a section the `sections` input
+ * excludes.
  */
 export function validateSectionShapes(
   settings: Record<string, unknown>,
   sourceLabel: string,
   secretSource: SettingsSource = "operator",
-): Result<SettingsFile, ProblemOf<"settings-malformed-sections">> {
+): Result<ProvedPlain<SettingsFile>, ProblemOf<"settings-malformed-sections">> {
   const problems: string[] = [];
   const parsedSections: Record<string, unknown> = {};
   for (const key of SECTION_KEYS) {
@@ -245,7 +247,8 @@ export function validateSectionShapes(
     parsedSections[key] = parsed.data;
   }
   if (problems.length === 0) {
-    return ok(parsedSections as SettingsFile);
+    // The brand's one cast: every section above passed both plainness walks.
+    return ok(parsedSections as ProvedPlain<SettingsFile>);
   }
   return err({ code: "settings-malformed-sections", source: sourceLabel, issues: problems });
 }

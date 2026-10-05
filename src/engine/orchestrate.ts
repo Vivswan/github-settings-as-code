@@ -7,6 +7,7 @@ import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
+import type { ProvedPlain } from "../plain-data.js";
 import {
   badDirectiveIssue,
   type SettingsProblem,
@@ -63,10 +64,10 @@ export type SectionOutcome =
     };
 
 /**
- * The brand has exactly one construction site (validateSettingsDoc's success return), so a RepoRunOptions built from an
- * unvalidated document is a compile error. The value is the PARSED document zod built, never the caller's object. Each
- * section's value reads back as ValidatedInput, the per-section proof every plan() takes, so the document is the only
- * source of planner input.
+ * The brand has exactly one construction site (mintValidatedSettings, below validateSettingsDoc), so a RepoRunOptions
+ * built from an unvalidated document is a compile error. The value is the PARSED document zod built, never the
+ * caller's object. Each section's value reads back as ValidatedInput, the per-section proof every plan() takes, so
+ * the document is the only source of planner input.
  */
 declare const validatedSettings: unique symbol;
 export type ValidatedSettings = {
@@ -190,12 +191,21 @@ export function validateSettingsDoc(
   if (issues.length > 0) {
     return err({ code: "settings-malformed-sections", source: sourceLabel, issues });
   }
-  return shapes.map((parsed) => {
-    // validateSectionShapes copies the sections alone, so the directive admitted above is passed, never re-read.
-    const resolved: Record<string, unknown> = { ...parsed };
-    resolveUndeclaredPolicies(resolved, policy ?? options.undeclared);
-    return resolved as ValidatedSettings;
-  });
+  return shapes.map((parsed) => mintValidatedSettings(parsed, policy ?? options.undeclared));
+}
+
+/**
+ * The one cast to ValidatedSettings, fed only a document validate.ts proved plain and shape-valid; the brand on the
+ * parameter is what keeps a raw SettingsFile out. validateSectionShapes copies the sections alone, so the directive
+ * validateSettingsDoc admitted is passed in, never re-read.
+ */
+function mintValidatedSettings(
+  proved: ProvedPlain<SettingsFile>,
+  policy: UndeclaredPolicy | undefined,
+): ValidatedSettings {
+  const resolved: Record<string, unknown> = { ...proved };
+  resolveUndeclaredPolicies(resolved, policy);
+  return resolved as ValidatedSettings;
 }
 
 /** A non-mapping document's top level in typeof terms; the only object left by the caller's guard is null. */

@@ -1,9 +1,20 @@
 /**
  * The one plain-mapping test and the one pipeline that describes a value for refusal prose, shared by every boundary
  * that refuses a value (the layer fold, the section schemas, engine/validate.ts, github/secret-scan.ts): a kind is
- * always named the same way, and a boundary that may echo a scalar does so on top of that; and the two record
- * accessors that keep a document key from reaching the prototype chain.
+ * always named the same way, and a boundary that may echo a scalar does so on top of that; the brand that carries
+ * the one plainness proof; and the two record accessors that keep a document key from reaching the prototype chain.
  */
+
+declare const provedPlain: unique symbol;
+
+/**
+ * The proof that engine/validate.ts walked a parsed document and found only plain YAML data (no tagged value, no
+ * alias cycle, no list with a hole, nothing JSON cannot carry). validateSectionShapes is the ONE mint; the
+ * ValidatedSettings document (engine/orchestrate.ts) is built from a ProvedPlain value and nothing else, so a
+ * document that skipped the walk cannot become planner input. A type-level mark only: no runtime field, so a
+ * branded document still spreads and serializes as written.
+ */
+export type ProvedPlain<T> = T & { readonly [provedPlain]: true };
 
 /**
  * A YAML tag (!!timestamp, !!set) parses to a Date or Set, an object too; spread as a mapping it would become `{}` and

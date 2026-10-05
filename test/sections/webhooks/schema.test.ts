@@ -121,6 +121,6 @@ describe("every spelling GitHub accepts parses", () => {
 
   test("an unknown config key survives the parse (a stripping shape would also parse, so success alone proves nothing)", () => {
     const webhooks = [{ config: { url: HOOK_URL, future_flag: "x" } }];
-    expect(validateSectionShapes({ webhooks }, "settings.yml")).toEqual(ok({ webhooks }));
+    expect<unknown>(validateSectionShapes({ webhooks }, "settings.yml")).toEqual(ok({ webhooks }));
   });
 });
