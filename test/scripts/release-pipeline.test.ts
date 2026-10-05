@@ -5,7 +5,7 @@
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   anchorCheck,
@@ -1849,4 +1849,93 @@ describe("prereleaseVersion", () => {
       });
     });
   });
+});
+
+describe("npmFloor", () => {
+  /** A scripted npm first on PATH: `--version` prints the version file, `install -g npm@latest` logs itself and
+   * replaces that file with the planned upgrade, or exits with the planned status when the plan says `fail <n>`. */
+  function withNpm(dir: string, version: string, after: string): string {
+    writeFileSync(join(dir, "version"), `${version}\n`);
+    writeFileSync(join(dir, "after"), `${after}\n`);
+    writeFileSync(
+      join(dir, "npm"),
+      [
+        "#!/bin/sh",
+        `here="${dir}"`,
+        'if [ "$1" = "--version" ]; then cat "$here/version"; exit 0; fi',
+        'printf "%s\\n" "$*" >> "$here/calls.log"',
+        'read -r kind code < "$here/after"',
+        'if [ "$kind" = "fail" ]; then exit "$code"; fi',
+        'cp "$here/after" "$here/version"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return dir;
+  }
+  const installs = (dir: string): string[] =>
+    existsSync(join(dir, "calls.log"))
+      ? readFileSync(join(dir, "calls.log"), "utf8").split("\n").filter(Boolean)
+      : [];
+
+  test.each([
+    [
+      "at the floor",
+      "11.5.1",
+      "11.5.1",
+      0,
+      [],
+      "npm 11.5.1 is at or above 11.5.1; it publishes through OIDC\n",
+    ],
+    [
+      "above it by a two-digit minor (numeric, not textual, order)",
+      "11.10.0",
+      "11.10.0",
+      0,
+      [],
+      "npm 11.10.0 is at or above 11.5.1; it publishes through OIDC\n",
+    ],
+    [
+      "below it, with an upgrade that reaches it",
+      "10.9.2",
+      "11.6.0",
+      0,
+      ["install -g npm@latest"],
+      "npm 11.6.0 is at or above 11.5.1 after an upgrade; it publishes through OIDC\n",
+    ],
+    [
+      "below it, with an upgrade that does not",
+      "10.9.2",
+      "10.9.2",
+      1,
+      ["install -g npm@latest"],
+      "release-pipeline npm-floor: npm 10.9.2 cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+    ],
+    [
+      "below it, with an upgrade that fails",
+      "10.9.2",
+      "fail 7",
+      1,
+      ["install -g npm@latest"],
+      "release-pipeline npm-floor: npm 10.9.2 is below 11.5.1 and npm install -g npm@latest exited 7; the publish needs npm 11.5.1 or newer.\n",
+    ],
+    [
+      "at a prerelease of the floor, with an upgrade that still prints no version",
+      "11.5.1-pre.0",
+      "not-a-version",
+      1,
+      ["install -g npm@latest"],
+      "release-pipeline npm-floor: npm not-a-version cannot publish through OIDC; trusted publishing needs npm 11.5.1 or newer.\n",
+    ],
+  ])(
+    "an npm %s: the upgrade runs once at most, and the step passes only once the floor holds",
+    (_, version, after, status, upgrades, stderr) =>
+      withTempDir("npm-floor-", async (dir) => {
+        const npm = withNpm(dir, version, after);
+        expect(
+          await subcommand(ROOT, { PATH: `${npm}:${process.env.PATH ?? ""}` }, "npm-floor"),
+        ).toEqual({ stdout: "", stderr, status });
+        expect(installs(npm)).toEqual(upgrades);
+      }),
+  );
 });

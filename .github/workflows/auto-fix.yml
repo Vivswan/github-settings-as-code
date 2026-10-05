@@ -8,9 +8,11 @@
 #
 # Regenerating the generated files executes PR-controlled code, so the fix is computed in an unprivileged job and crosses to
 # the push job as a git patch over the fix-owned paths only; applying a patch executes nothing, and the push job
-# re-checks the applied paths before committing.
+# re-checks the applied paths before committing. Both steps' logic is .github/scripts/auto-fix-steps.ts.
 #   --ignore-scripts on the build job's install  -> lefthook and dependency lifecycle scripts never run
-#   no install at all on the push job            -> no git hooks exist where the write token is
+#   no install at all on the push job            -> no git hooks exist where the write token is; bun alone is set up
+#   the push script from the default branch      -> the job executes nothing the PR branch holds: the PR authors the
+#                                                   patch alone, and the fix-owned list the job enforces is main's
 #
 # Dependabot-triggered runs read the Dependabot secrets store, not the Actions one, so REPO_PLATFORM_TOKEN goes in
 # both. A push made with github.token starts no workflows.
@@ -82,38 +84,7 @@ jobs:
       - name: Regenerate the gaps index, docs, and inputs table and stage the fix patch
         id: rebuild
         shell: bash
-        run: |
-          # One line per generator, in .github/scripts/generated.ts table order: the later generators import the
-          # gaps index through src/, and the inputs table reads action.yml, so each source renders first.
-          # test/scripts/auto-fix-allowlist.test.ts pins the list and the order.
-          bun run build:gaps-index
-          bun run build:docs
-          bun run build:action-docs
-          bun run build:inputs-table
-          # Anything the earlier steps left staged is not this workflow's fix: start from an empty index so the
-          # patch holds exactly the allowed paths.
-          git reset -q
-          git add -A -- README.md action.yml \
-            docs/reference/coverage.md docs/reference/undeclared-policy.md docs/reference/permissions.md \
-            docs/operate/check-mode.md docs/reference/sections.md docs/reference/inputs.md \
-            docs/reference/architecture.md docs/start/getting-started.md src/upstream-gaps/
-          git diff --cached --binary > "$RUNNER_TEMP/autofix.patch"
-          if [ ! -s "$RUNNER_TEMP/autofix.patch" ]; then
-            echo "docs and upstream gaps already fresh"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "pruned=false" >> "$GITHUB_OUTPUT"
-          else
-            git diff --cached --stat
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            # A patch touching a gap file means gap files graduated (the index alone is a regeneration); the push
-            # job picks the commit subject from this. --quiet exits 1 on a staged change there and, unlike piping
-            # --name-only into grep -q, cannot trip pipefail on an early-exiting reader.
-            if git diff --cached --quiet -- src/upstream-gaps/ ':(exclude)src/upstream-gaps/index.ts'; then
-              echo "pruned=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "pruned=true" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+        run: bun .github/scripts/auto-fix-steps.ts rebuild
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.rebuild.outputs.changed == 'true'
         with:
@@ -130,15 +101,28 @@ jobs:
       contents: write
       pull-requests: write # the sticky no-retrigger comment below
     steps:
+      # The script that holds the write token comes from the default branch, which a PR cannot edit; the PR branch
+      # is checked out beside it, as the tree the patch applies to.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+          path: branch
           persist-credentials: false
-      # The patch lands OUTSIDE the checkout so nothing in the work tree can shadow or stage it.
+      # The patch lands OUTSIDE both checkouts so nothing in a work tree can shadow or stage it.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: autofix-patch
           path: ${{ runner.temp }}/autofix
+      # bun alone, no install: no git hook or lifecycle script exists where the write token is. It starts in the
+      # trusted checkout, so the bunfig.toml and .env it reads at startup are main's, never the PR branch's.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: trusted/.bun-version
       - name: Commit and push the fix
         id: push
         env:
@@ -147,73 +131,10 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PRUNED: ${{ needs.build.outputs.pruned }}
+          PR_CHECKOUT: ${{ github.workspace }}/branch
         shell: bash
-        run: |
-          # The branch can move between the build and this push (a Dependabot rebase): the patch belongs to
-          # HEAD_SHA only, and the newer head's own run owns the rebuild.
-          superseded() {
-            git fetch --quiet origin "$HEAD_REF"
-            [ "$(git rev-parse "origin/$HEAD_REF")" != "$HEAD_SHA" ]
-          }
-          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
-            echo "::notice::head moved since the build; skipping the stale fix push"
-            exit 0
-          fi
-          git apply --index --binary "$RUNNER_TEMP/autofix/autofix.patch"
-          # The patch was cut on a runner PR code ran on, so it is untrusted: nothing staged outside the fix-owned
-          # paths may be committed. --no-renames lists a staged rename as its delete and add halves, so a rename OUT
-          # of a protected path cannot hide behind an allowed destination.
-          while IFS= read -r -d '' path; do
-            case "$path" in
-              README.md | action.yml | \
-              docs/reference/coverage.md | docs/reference/undeclared-policy.md | docs/reference/permissions.md | \
-              docs/operate/check-mode.md | docs/reference/sections.md | docs/reference/inputs.md | \
-              docs/reference/architecture.md | docs/start/getting-started.md | src/upstream-gaps/*) ;;
-              *)
-                echo "::error::the fix patch staged '$path', outside the generated docs" \
-                  "(README.md, action.yml, docs/reference/coverage.md, docs/reference/undeclared-policy.md," \
-                  "docs/reference/permissions.md, docs/operate/check-mode.md, docs/reference/sections.md," \
-                  "docs/reference/inputs.md, docs/reference/architecture.md, docs/start/getting-started.md)," \
-                  "and src/upstream-gaps/; refusing to push"
-                exit 1
-                ;;
-            esac
-          done < <(git diff --cached --no-renames --name-only -z)
-          if git diff --cached --quiet; then
-            echo "the fix patch stages nothing against the head commit; nothing to push"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          subject="build: regenerate generated files"
-          if git diff --cached --quiet -- src/upstream-gaps/; then
-            subject="docs: regenerate generated docs"
-          fi
-          if [ "$PRUNED" = "true" ]; then
-            subject="fix: graduate upstream gaps octokit now ships"
-          fi
-          # [dependabot skip] keeps Dependabot rebasing and updating the PR over this commit; without it Dependabot
-          # stops touching a PR once someone else pushes to it.
-          git commit --no-verify -m "$subject" -m "[dependabot skip]"
-          # The lease pins the remote to the exact commit the fix was built from, so a concurrent push (even a
-          # force-reset to an ancestor) rejects this one instead of racing it.
-          if ! git push --force-with-lease="refs/heads/${HEAD_REF}:${HEAD_SHA}" \
-              "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-              HEAD:"refs/heads/${HEAD_REF}"; then
-            if superseded; then
-              echo "::notice::head moved during the push; skipping the stale fix push"
-              exit 0
-            fi
-            exit 1
-          fi
-          if [ "$CAN_RETRIGGER" = "true" ]; then
-            exit 0
-          fi
-          # The fix landed via github.token, which starts no workflows, so the PR's checks will not re-run on the new
-          # head: surface that here and, in the step below, on the PR.
-          echo "notify=true" >> "$GITHUB_OUTPUT"
-          echo "::warning::auto-fix pushed without REPO_PLATFORM_TOKEN - checks will not re-run on the new head;" \
-            "close/reopen the PR or register the token"
+        working-directory: trusted
+        run: bun .github/scripts/auto-fix-steps.ts push
       # One sticky comment per PR (the header is its identity), updated in place on later pushes; a failed post fails
       # this step, not the push.
       - name: Tell the PR its checks will not re-run
