@@ -3,6 +3,7 @@
 import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
 import type { MustBeNever } from "../../types.js";
+import { rule } from "../shared/schema-helpers.js";
 import {
   languagesSchema,
   refineSetup,
@@ -42,6 +43,6 @@ export const CodeScanningDefaultSetupConfig = z
     runner_label: z.string().nullable().optional(),
     threat_model: z.enum(["remote", "remote_and_local"]).optional(),
   })
-  .superRefine(refineSetup)
+  .check(rule(refineSetup))
   .meta({ id: "CodeScanningDefaultSetupConfig" });
 export type CodeScanningDefaultSetupConfig = z.infer<typeof CodeScanningDefaultSetupConfig>;

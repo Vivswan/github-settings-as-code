@@ -63,6 +63,10 @@
       "plugins": ["./lint/never-throw.grit"]
     },
     {
+      "includes": ["src/**", "!src/sections/shared/schema-helpers.ts"],
+      "plugins": ["./lint/rule-gate.grit"]
+    },
+    {
       "includes": ["src/action/**"],
       "linter": {
         "rules": {

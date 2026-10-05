@@ -4,7 +4,7 @@ import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
 import { describeValue } from "../../plain-data.js";
 import type { MustBeNever } from "../../types.js";
-import { conditional } from "../shared/schema-helpers.js";
+import { conditional, rule } from "../shared/schema-helpers.js";
 
 /** A PATCH boolean; a null on it is the validator's general refusal (no empty state; write true or false), not this shape's. */
 function repositoryToggle() {
@@ -544,7 +544,7 @@ export const RepositoryConfig = z
     ...patchFieldShape,
     topics: z
       .union([topicList, z.array(topicName)])
-      .superRefine(refineTopicCount)
+      .check(rule(refineTopicCount))
       .optional(),
     enable_vulnerability_alerts: repositoryToggle(),
     enable_automated_security_fixes: repositoryToggle(),
@@ -555,15 +555,17 @@ export const RepositoryConfig = z
     issue_creation_policy: creationPolicy(),
   })
   .catchall(z.unknown())
-  .superRefine((declared, ctx) => {
-    // A refusal here, not a strict object: a field GitHub adds to the PATCH tomorrow must still pass through.
-    for (const key of GET_ONLY_KEYS) {
-      if (Object.hasOwn(declared, key)) {
-        ctx.addIssue({ code: "custom", path: [key], message: getOnlyKeyMessage(key) });
+  .check(
+    rule((declared, ctx) => {
+      // A refusal here, not a strict object: a field GitHub adds to the PATCH tomorrow must still pass through.
+      for (const key of GET_ONLY_KEYS) {
+        if (Object.hasOwn(declared, key)) {
+          ctx.addIssue({ code: "custom", path: [key], message: getOnlyKeyMessage(key) });
+        }
       }
-    }
-    refineCommitMessagePairs(declared, ctx);
-  })
+      refineCommitMessagePairs(declared, ctx);
+    }),
+  )
   .meta({ id: "RepositoryConfig", allOf: commitMessagePairRules() });
 export type RepositoryConfig = z.infer<typeof RepositoryConfig>;
 

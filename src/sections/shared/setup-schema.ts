@@ -81,7 +81,7 @@ interface RunnerFields {
 }
 
 /**
- * For the setup slice's `.superRefine`. Only the loosen()ed clone, which keeps unknown keys, parses
+ * The setup slice's rule(). Only the loosen()ed clone, which keeps unknown keys, parses
  * documents, so the GET-only keys are read off the parsed record.
  *
  *   schedule / updated_at declared        -> refused: the PATCH has no such field

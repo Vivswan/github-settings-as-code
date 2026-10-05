@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { describeValue } from "../../plain-data.js";
+import { rule } from "../shared/schema-helpers.js";
 
 /** GitHub's rule for an OIDC claim key; the PUT 422s on anything else. */
 const CLAIM_KEY = /^[A-Za-z0-9_]+$/;
@@ -45,24 +46,26 @@ const ClaimKeys = z
         'a claim key holds only letters, digits, and underscores (such as "repo" or "job_workflow_ref")',
     }),
   )
-  .superRefine((keys, refineCtx) => {
-    // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts): a YAML alias repeats one
-    // mapping at two items, and rendering it into the message can throw.
-    const seen = new Set<string>();
-    keys.forEach((key, index) => {
-      if (typeof key !== "string") {
-        return;
-      }
-      if (seen.has(key)) {
-        refineCtx.addIssue({
-          code: "custom",
-          path: [index],
-          message: `"${key}" repeats an earlier claim key; GitHub requires the keys to be unique`,
-        });
-      }
-      seen.add(key);
-    });
-  });
+  .check(
+    rule((keys, refineCtx) => {
+      // A raw item beside its own shape issue is passed over (see ../shared/raw-values.ts): a YAML alias repeats one
+      // mapping at two items, and rendering it into the message can throw.
+      const seen = new Set<string>();
+      keys.forEach((key, index) => {
+        if (typeof key !== "string") {
+          return;
+        }
+        if (seen.has(key)) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: [index],
+            message: `"${key}" repeats an earlier claim key; GitHub requires the keys to be unique`,
+          });
+        }
+        seen.add(key);
+      });
+    }),
+  );
 
 /**
  * The two templates are two variants, discriminated on use_default, so the claim-key list has no
@@ -79,18 +82,20 @@ const OidcTemplate = z
       use_immutable_subject: z.boolean().optional(),
     }),
   ])
-  .superRefine((declared, refineCtx) => {
-    // A raw use_default beside its own shape issue is truthy without being true and selects no template.
-    if (declared.use_default === true && Object.hasOwn(declared, "include_claim_keys")) {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["include_claim_keys"],
-        message:
-          "GitHub ignores include_claim_keys under use_default: true, so the declared list could never take; " +
-          "set use_default: false for a custom template, or remove the list",
-      });
-    }
-  });
+  .check(
+    rule((declared, refineCtx) => {
+      // A raw use_default beside its own shape issue is truthy without being true and selects no template.
+      if (declared.use_default === true && Object.hasOwn(declared, "include_claim_keys")) {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["include_claim_keys"],
+          message:
+            "GitHub ignores include_claim_keys under use_default: true, so the declared list could never take; " +
+            "set use_default: false for a custom template, or remove the list",
+        });
+      }
+    }),
+  );
 
 export const ActionsConfig = z
   .object({
@@ -139,20 +144,22 @@ export const ActionsConfig = z
       })
       .optional(),
   })
-  .superRefine((declared, refineCtx) => {
-    // Checked in the shape, not in plan(), so both modes reject the document before ANY section
-    // writes; a plan-time throw would fire after earlier sections already wrote.
-    refuseReportedOnly(refineCtx, declared);
-    if (declared.selected_actions === undefined || declared.allowed_actions === undefined) {
-      return;
-    }
-    if (declared.allowed_actions !== "selected") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["selected_actions"],
-        message: `selected_actions is declared together with allowed_actions: ${describeValue(declared.allowed_actions)}, but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
-      });
-    }
-  })
+  .check(
+    rule((declared, refineCtx) => {
+      // Checked in the shape, not in plan(), so both modes reject the document before ANY section
+      // writes; a plan-time throw would fire after earlier sections already wrote.
+      refuseReportedOnly(refineCtx, declared);
+      if (declared.selected_actions === undefined || declared.allowed_actions === undefined) {
+        return;
+      }
+      if (declared.allowed_actions !== "selected") {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["selected_actions"],
+          message: `selected_actions is declared together with allowed_actions: ${describeValue(declared.allowed_actions)}, but an allowlist only applies under allowed_actions: "selected". Set allowed_actions to "selected", or remove selected_actions`,
+        });
+      }
+    }),
+  )
   .meta({ id: "ActionsConfig" });
 export type ActionsConfig = z.infer<typeof ActionsConfig>;

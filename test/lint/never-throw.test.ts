@@ -4,22 +4,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
+import { lint } from "./fixture-lint.js";
 
-const BIOME = join(ROOT, "node_modules", ".bin", "biome");
-/** The repository's own configuration and the plugin it names, copied so the fixture tree is the root its
- * `overrides` globs are relative to; `vcs.useIgnoreFile` wants that root to be a git repository. The root sits
- * under a `src/` parent, so a glob matching the absolute path would reach every excluded file. */
-const CONFIGURATION = Object.fromEntries(
-  ["biome.json", "lint/never-throw.grit"].map((path) => [
-    path,
-    readFileSync(join(ROOT, path), "utf8"),
-  ]),
-);
 const MESSAGE =
   "throw outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead";
 
@@ -310,39 +300,6 @@ export function hidden(): never {
 
 const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error("x");\n}\n';
 const CONTRACT_FILE = "src/cli/inputs.ts";
-
-interface Diagnostic {
-  category: string;
-  message: string;
-  location: { path: string; start: { line: number } };
-}
-
-function lint(tmp: string, files: Record<string, string>): Record<string, string> {
-  const dir = join(tmp, "src", "checkout");
-  for (const [path, text] of Object.entries({ ...CONFIGURATION, ...files })) {
-    mkdirSync(dirname(join(dir, path)), { recursive: true });
-    writeFileSync(join(dir, path), text);
-  }
-  spawnSync("git", ["init", "--quiet"], { cwd: dir });
-  const run = spawnSync(BIOME, ["lint", "--reporter=json", "--no-errors-on-unmatched", "."], {
-    cwd: dir,
-    encoding: "utf8",
-  });
-  if (run.stdout === "") {
-    throw new Error(`biome wrote no report: ${run.stderr}`);
-  }
-  const { diagnostics } = JSON.parse(run.stdout) as { diagnostics: Diagnostic[] };
-  // One entry per line; when a line also carries a built-in rule's diagnostic (a throw inside finally trips
-  // noUnsafeFinally too), the plugin's wins, since the plugin is what this test pins.
-  const byLine: Record<string, string> = {};
-  for (const d of diagnostics) {
-    const key = `${d.location.path}:${d.location.start.line}`;
-    if (!(key in byLine) || d.category === "plugin") {
-      byLine[key] = `${d.category}: ${d.message}`;
-    }
-  }
-  return byLine;
-}
 
 describe("the never-throw plugin", () => {
   test("flags exactly the throws outside the rule, and nothing outside src/ or in the contract file", () =>

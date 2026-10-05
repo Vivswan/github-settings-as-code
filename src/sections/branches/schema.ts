@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { stringItems } from "../shared/raw-values.js";
+import { rule } from "../shared/schema-helpers.js";
 import { BOOLEAN_CONTROL_SET, isGetOnlyKey, isUrlKey } from "./keys.js";
 
 // --- Actor vocabulary (branches force_push_bypassers) ------------------------
@@ -182,11 +183,13 @@ const RequiredStatusChecks = z
         "required_status_checks must be a mapping of its keys (strict, then contexts or checks), or null to turn the requirement off",
     },
   )
-  .superRefine((status, refineCtx) => {
-    if (status.contexts === undefined && status.checks === undefined) {
-      refineCtx.addIssue({ code: "custom", message: CHECK_LIST_ERROR });
-    }
-  })
+  .check(
+    rule((status, refineCtx) => {
+      if (status.contexts === undefined && status.checks === undefined) {
+        refineCtx.addIssue({ code: "custom", message: CHECK_LIST_ERROR });
+      }
+    }),
+  )
   // The refinement's published-schema twin: zod refinements do not reach z.toJSONSchema, and
   // test/published-schema.test.ts holds the two sides to the same verdicts.
   .meta({ anyOf: [{ required: ["contexts"] }, { required: ["checks"] }] });
@@ -304,7 +307,13 @@ export const BranchProtectionConfig = z
       .optional(),
     force_push_bypassers: z
       .array(
-        z.string().refine((raw) => parseBypassActor(raw) !== null, { error: ACTOR_FORM_ERROR }),
+        z.string().check(
+          rule((raw, refineCtx) => {
+            if (parseBypassActor(raw) === null) {
+              refineCtx.addIssue({ code: "custom", message: ACTOR_FORM_ERROR });
+            }
+          }),
+        ),
       )
       .optional(),
     required_deployments: z
@@ -313,9 +322,11 @@ export const BranchProtectionConfig = z
       .optional(),
   })
   // Every depth: the wrappers sit under each control, and the links under the actor holders too.
-  .superRefine((protection, refineCtx) => {
-    refuseGetOnlyKeys(protection, [], refineCtx);
-  })
+  .check(
+    rule((protection, refineCtx) => {
+      refuseGetOnlyKeys(protection, [], refineCtx);
+    }),
+  )
   .meta({ id: "BranchProtectionConfig" });
 export type BranchProtectionConfig = z.infer<typeof BranchProtectionConfig>;
 
@@ -324,30 +335,32 @@ export const BranchConfig = z
     name: z.string(),
     protection: BranchProtectionConfig.nullable(),
   })
-  .superRefine((entry, refineCtx) => {
-    // GitHub canonicalizes actor and environment names case-insensitively and the routed lists
-    // replace wholesale, so a duplicate would apply "successfully" and then drift forever against
-    // the deduplicated read-back.
-    const routed = entry.protection;
-    if (isPlainObject(routed)) {
-      const duplicateActor = duplicateIn(routed.force_push_bypassers);
-      if (duplicateActor !== null) {
-        refineCtx.addIssue({
-          code: "custom",
-          path: ["protection", "force_push_bypassers"],
-          message: `force_push_bypassers lists "${duplicateActor}" more than once (actor names are case-insensitive); keep one entry per actor`,
-        });
+  .check(
+    rule((entry, refineCtx) => {
+      // GitHub canonicalizes actor and environment names case-insensitively and the routed lists
+      // replace wholesale, so a duplicate would apply "successfully" and then drift forever against
+      // the deduplicated read-back.
+      const routed = entry.protection;
+      if (isPlainObject(routed)) {
+        const duplicateActor = duplicateIn(routed.force_push_bypassers);
+        if (duplicateActor !== null) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: ["protection", "force_push_bypassers"],
+            message: `force_push_bypassers lists "${duplicateActor}" more than once (actor names are case-insensitive); keep one entry per actor`,
+          });
+        }
+        const duplicateEnv = duplicateIn(routed.required_deployments?.environments);
+        if (duplicateEnv !== null) {
+          refineCtx.addIssue({
+            code: "custom",
+            path: ["protection", "required_deployments", "environments"],
+            message: `required_deployments.environments lists "${duplicateEnv}" more than once (environment names are case-insensitive); keep one entry per environment`,
+          });
+        }
       }
-      const duplicateEnv = duplicateIn(routed.required_deployments?.environments);
-      if (duplicateEnv !== null) {
-        refineCtx.addIssue({
-          code: "custom",
-          path: ["protection", "required_deployments", "environments"],
-          message: `required_deployments.environments lists "${duplicateEnv}" more than once (environment names are case-insensitive); keep one entry per environment`,
-        });
-      }
-    }
-  })
+    }),
+  )
   .meta({ id: "BranchConfig" });
 export type BranchConfig = z.infer<typeof BranchConfig>;
 

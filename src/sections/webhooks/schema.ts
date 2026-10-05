@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { describeValue } from "../../plain-data.js";
+import { rule } from "../shared/schema-helpers.js";
 import { REPOSITORY_WEBHOOK_EVENTS, WEBHOOK_EVENTS_REFERENCE } from "./events.js";
 
 // GitHub 422s each of these at apply time ("is not a valid event", "Url is not a valid URL"); the REST wire types are
@@ -44,18 +45,20 @@ export const WebhookConfig = z
     events: z.array(WebhookEvent).optional(),
     active: z.boolean().optional(),
   })
-  .superRefine((entry, refineCtx) => {
-    // An ENTRY-level secret would pass the loose shape, ship the raw reference text verbatim, and
-    // create a silently unauthenticated hook, the exact failure this feature exists to prevent. The
-    // strict type hides the key; only the loosen()ed shape that parses documents lets it reach here.
-    if ((entry as Record<string, unknown>).secret !== undefined) {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["secret"],
-        message:
-          "a webhook secret belongs under config.secret, not at the entry level; here it would pass through verbatim and the hook would be created without a working secret",
-      });
-    }
-  })
+  .check(
+    rule((entry, refineCtx) => {
+      // An ENTRY-level secret would pass the loose shape, ship the raw reference text verbatim, and
+      // create a silently unauthenticated hook, the exact failure this feature exists to prevent. The
+      // strict type hides the key; only the loosen()ed shape that parses documents lets it reach here.
+      if ((entry as Record<string, unknown>).secret !== undefined) {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["secret"],
+          message:
+            "a webhook secret belongs under config.secret, not at the entry level; here it would pass through verbatim and the hook would be created without a working secret",
+        });
+      }
+    }),
+  )
   .meta({ id: "WebhookConfig" });
 export type WebhookConfig = z.infer<typeof WebhookConfig>;

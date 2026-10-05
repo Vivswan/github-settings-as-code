@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
+import { rule as gatedRule } from "../shared/schema-helpers.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -63,31 +64,33 @@ const BypassActorConfig = z
     actor_type: z.enum(BYPASS_ACTOR_TYPES),
     bypass_mode: z.enum(["always", "pull_request", "exempt"]).optional(),
   })
-  .superRefine((actor, refineCtx) => {
-    if (IDENTIFIED_ACTOR_TYPES.has(actor.actor_type) && typeof actor.actor_id !== "number") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["actor_id"],
-        message: `a ${actor.actor_type} bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it`,
-      });
-    }
-    if (actor.actor_type === "DeployKey" && typeof actor.actor_id === "number") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["actor_id"],
-        message:
-          "a DeployKey bypass actor takes no actor_id (GitHub documents it as null); remove the key or write null",
-      });
-    }
-    if (actor.actor_type === "DeployKey" && actor.bypass_mode === "pull_request") {
-      refineCtx.addIssue({
-        code: "custom",
-        path: ["bypass_mode"],
-        message:
-          'bypass_mode "pull_request" does not apply to a DeployKey actor; use "always" or "exempt"',
-      });
-    }
-  })
+  .check(
+    gatedRule((actor, refineCtx) => {
+      if (IDENTIFIED_ACTOR_TYPES.has(actor.actor_type) && typeof actor.actor_id !== "number") {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["actor_id"],
+          message: `a ${actor.actor_type} bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it`,
+        });
+      }
+      if (actor.actor_type === "DeployKey" && typeof actor.actor_id === "number") {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["actor_id"],
+          message:
+            "a DeployKey bypass actor takes no actor_id (GitHub documents it as null); remove the key or write null",
+        });
+      }
+      if (actor.actor_type === "DeployKey" && actor.bypass_mode === "pull_request") {
+        refineCtx.addIssue({
+          code: "custom",
+          path: ["bypass_mode"],
+          message:
+            'bypass_mode "pull_request" does not apply to a DeployKey actor; use "always" or "exempt"',
+        });
+      }
+    }),
+  )
   .meta({ id: "BypassActorConfig" });
 
 // --- Rules ------------------------------------------------------------------------
@@ -270,7 +273,13 @@ const UnknownRule = z
   .looseObject({
     type: z
       .string()
-      .refine((type) => !KNOWN_RULE_TYPES.includes(type), { abort: true })
+      .check(
+        gatedRule((type, refineCtx) => {
+          if (KNOWN_RULE_TYPES.includes(type)) {
+            refineCtx.addIssue({ code: "custom", continue: false });
+          }
+        }),
+      )
       .meta({ not: { enum: [...KNOWN_RULE_TYPES] } }),
     parameters: z.record(z.string(), z.unknown()).optional(),
   })
@@ -321,24 +330,26 @@ export const RulesetConfig = z
     rules: z.array(RuleConfig).optional(),
     bypass_actors: z.array(BypassActorConfig).optional(),
   })
-  .superRefine((ruleset, refineCtx) => {
-    // The spec: `pull_request` bypass applies to branch rulesets only; the target defaults to branch upstream. The
-    // target, the actor list, or an actor may be raw beside its own shape issue (see ../shared/raw-values.ts): only
-    // the two other targets carry the restriction, a non-list holds no actors, and a non-mapping declares no mode.
-    const target: unknown = ruleset.target;
-    if (target !== "tag" && target !== "push") {
-      return;
-    }
-    const actors: unknown = ruleset.bypass_actors;
-    for (const [index, actor] of (Array.isArray(actors) ? actors : []).entries()) {
-      if (isPlainObject(actor) && actor.bypass_mode === "pull_request") {
-        refineCtx.addIssue({
-          code: "custom",
-          path: ["bypass_actors", index, "bypass_mode"],
-          message: `bypass_mode "pull_request" applies to branch rulesets only, and this ruleset targets ${target}; use "always" or "exempt"`,
-        });
+  .check(
+    gatedRule((ruleset, refineCtx) => {
+      // The spec: `pull_request` bypass applies to branch rulesets only; the target defaults to branch upstream. The
+      // target, the actor list, or an actor may be raw beside its own shape issue (see ../shared/raw-values.ts): only
+      // the two other targets carry the restriction, a non-list holds no actors, and a non-mapping declares no mode.
+      const target: unknown = ruleset.target;
+      if (target !== "tag" && target !== "push") {
+        return;
       }
-    }
-  })
+      const actors: unknown = ruleset.bypass_actors;
+      for (const [index, actor] of (Array.isArray(actors) ? actors : []).entries()) {
+        if (isPlainObject(actor) && actor.bypass_mode === "pull_request") {
+          refineCtx.addIssue({
+            code: "custom",
+            path: ["bypass_actors", index, "bypass_mode"],
+            message: `bypass_mode "pull_request" applies to branch rulesets only, and this ruleset targets ${target}; use "always" or "exempt"`,
+          });
+        }
+      }
+    }),
+  )
   .meta({ id: "RulesetConfig" });
 export type RulesetConfig = z.infer<typeof RulesetConfig>;
