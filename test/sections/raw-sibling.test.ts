@@ -12,22 +12,7 @@ import { z } from "zod";
 import { validateSectionShapes } from "../../src/engine/validate.js";
 import { SECTION_KEYS, type SectionKey, SettingsFile } from "../../src/schema.js";
 import { rule } from "../../src/sections/shared/schema-helpers.js";
-
-/** The zod internals the walk reads (the loosen() idiom). */
-interface DefView {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  valueType?: z.ZodType;
-  entries?: Record<string, unknown>;
-  values?: readonly unknown[];
-}
-
-function defOf(schema: z.ZodType): DefView {
-  return (schema as unknown as { _zod: { def: DefView } })._zod.def;
-}
+import { schemaNode } from "../../src/sections/shared/schema-node.js";
 
 function first<T>(items: readonly T[] | undefined, what: string): T {
   const item = items?.[0];
@@ -43,37 +28,39 @@ function first<T>(items: readonly T[] | undefined, what: string): T {
  * parse. A default wrapper unwraps to its inner type: the default value is what absence parses to, not a raw value.
  */
 function canonical(schema: z.ZodType): unknown {
-  const def = defOf(schema);
-  switch (def.type) {
+  const node = schemaNode(schema);
+  switch (node.kind) {
     case "object":
       return Object.fromEntries(
-        Object.entries(def.shape ?? {}).map(([key, value]) => [key, canonical(value)]),
+        Object.entries(node.shape).map(([key, value]) => [key, canonical(value)]),
       );
     case "array":
-      return [canonical(def.element as z.ZodType)];
+      return [canonical(node.element)];
     case "record":
-      return { key: canonical(def.valueType as z.ZodType) };
-    case "optional":
-    case "nullable":
-    case "default":
-      return canonical(def.innerType as z.ZodType);
+      return { key: canonical(node.value) };
+    case "wrapper":
+      return canonical(node.inner);
     case "union":
-      return canonical(first(def.options, "union"));
-    case "string":
-    case "unknown":
-      return "a";
-    case "number":
-      return 1;
-    case "boolean":
-      return true;
-    case "null":
-      return null;
-    case "enum":
-      return first(Object.values(def.entries ?? {}), "enum");
-    case "literal":
-      return first(def.values, "literal");
-    default:
-      throw new Error(`no well-typed value for a "${def.type}" node; teach canonical() the node`);
+      return canonical(first(node.options, "union"));
+    case "leaf":
+      switch (node.type) {
+        case "string":
+        case "unknown":
+          return "a";
+        case "number":
+          return 1;
+        case "boolean":
+          return true;
+        case "null":
+          return null;
+        case "enum":
+        case "literal":
+          return first(node.values, node.type);
+        default:
+          throw new Error(
+            `no well-typed value for a "${node.type}" node; teach canonical() the node`,
+          );
+      }
   }
 }
 
@@ -82,19 +69,25 @@ const ABSENT = Symbol("absent");
 
 /** The other well-typed values a node admits: absence, null, false, the other options of an enum or union. */
 function alternatives(schema: z.ZodType): unknown[] {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "default":
-      return [ABSENT, ...alternatives(def.innerType as z.ZodType)];
-    case "nullable":
-      return [null, ...alternatives(def.innerType as z.ZodType)];
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      switch (node.wrap) {
+        case "optional":
+        case "default":
+          return [ABSENT, ...alternatives(node.inner)];
+        case "nullable":
+          return [null, ...alternatives(node.inner)];
+        default:
+          return [];
+      }
     case "union":
-      return (def.options ?? []).slice(1).map(canonical);
-    case "boolean":
-      return [false];
-    case "enum":
-      return Object.values(def.entries ?? {}).slice(1);
+      return node.options.slice(1).map(canonical);
+    case "leaf":
+      if (node.type === "boolean") {
+        return [false];
+      }
+      return node.type === "enum" ? node.values.slice(1) : [];
     default:
       return [];
   }
@@ -109,16 +102,14 @@ interface Gate {
 
 /** Every property below the canonical value with each other value it admits, one Gate per pair. */
 function gates(schema: z.ZodType, prefix: readonly Step[] = []): Gate[] {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-      return gates(def.innerType as z.ZodType, prefix);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      return gates(node.inner, prefix);
     case "union":
-      return gates(first(def.options, "union"), prefix);
+      return gates(first(node.options, "union"), prefix);
     case "object":
-      return Object.entries(def.shape ?? {}).flatMap(([key, property]) => {
+      return Object.entries(node.shape).flatMap(([key, property]) => {
         const path = [...prefix, key];
         return [
           ...alternatives(property).map((value) => ({ path, value })),
@@ -126,10 +117,10 @@ function gates(schema: z.ZodType, prefix: readonly Step[] = []): Gate[] {
         ];
       });
     case "array":
-      return gates(def.element as z.ZodType, [...prefix, 0]);
+      return gates(node.element, [...prefix, 0]);
     case "record":
-      return gates(def.valueType as z.ZodType, [...prefix, "key"]);
-    default:
+      return gates(node.value, [...prefix, "key"]);
+    case "leaf":
       return [];
   }
 }

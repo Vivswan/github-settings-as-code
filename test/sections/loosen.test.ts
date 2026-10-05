@@ -1,6 +1,6 @@
 /**
- * cloneWith patches zod's internal def through a hand-mirrored view, so these are the tripwire a zod-internal rename (element, innerType, valueType,
- * catchall) would otherwise turn into a silent no-op.
+ * loosen() derives the runtime shape by cloning each node with a patched def, so these pin the derivation itself: a
+ * strip object opens, a strict one stays, children are loosened, and the knobbed union is rerouted.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -82,7 +82,7 @@ describe("loosen", () => {
   test("an unrecognized container type fails loudly instead of skipping the derivation", () => {
     expect(() => loosen(z.tuple([z.string()]))).toThrow(
       new Error(
-        'BUG: loosen(): unhandled schema type "tuple" - teach loosen() its runtime derivation before authoring it in src/schema.ts',
+        'BUG: schemaNode(): unhandled schema type "tuple" - teach schema-node.ts its walk before authoring it in a section slice',
       ),
     );
   });

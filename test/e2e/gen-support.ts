@@ -10,6 +10,7 @@ import type {
   ListSectionKey,
   ListSectionModule,
 } from "../../src/sections/shared/list-section.js";
+import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import type { LiveState } from "./mock/state.js";
 import type { Rng } from "./prng.js";
 
@@ -149,21 +150,6 @@ export function assertSentinelDisjoint(condition: boolean, detail: string): void
 
 // --- Generators from slices --------------------------------------------------
 
-/** Read off zod's internal `_zod.def`, not a public API, so a zod upgrade can rename these. */
-interface SliceDef {
-  type: string;
-  shape?: Record<string, z.ZodType>;
-  element?: z.ZodType;
-  innerType?: z.ZodType;
-  options?: readonly z.ZodType[];
-  entries?: Record<string, string | number>;
-  values?: readonly unknown[];
-}
-
-function defOf(schema: z.ZodType): SliceDef {
-  return (schema as unknown as { _zod: { def: SliceDef } })._zod.def;
-}
-
 export interface SliceSeed {
   /** Per field, the pool to draw its value from; a field not named here draws a type-derived value. */
   readonly fields?: Readonly<Record<string, (rng: Rng) => unknown>>;
@@ -176,13 +162,12 @@ export interface SliceSeed {
  * slice, so a draw a refinement rejects throws naming the field.
  */
 export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng: Rng) => Json {
-  if (defOf(slice).shape === undefined) {
-    throw new Error(
-      `generatorFromSlice: the slice is a ${defOf(slice).type}, not an object schema`,
-    );
+  const node = schemaNode(slice);
+  if (node.kind !== "object") {
+    throw new Error(`generatorFromSlice: the slice is a ${node.kind}, not an object schema`);
   }
   return (rng) => {
-    const entry = drawObject(slice, seed, rng);
+    const entry = drawObject(node.shape, seed, rng);
     // Parsed once at the outer boundary, so a nested issue names its full path.
     const parsed = slice.safeParse(entry);
     if (!parsed.success) {
@@ -197,10 +182,12 @@ export function generatorFromSlice(slice: z.ZodType, seed: SliceSeed = {}): (rng
 }
 
 /** Validation belongs to the caller holding the root slice, so a nested issue names its full path. */
-function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
+function drawObject(shape: Readonly<Record<string, z.ZodType>>, seed: SliceSeed, rng: Rng): Json {
   const entry: Json = {};
-  for (const [field, child] of Object.entries(defOf(schema).shape ?? {})) {
-    const omittable = ["optional", "default"].includes(defOf(child).type);
+  for (const [field, child] of Object.entries(shape)) {
+    const node = schemaNode(child);
+    const omittable =
+      node.kind === "wrapper" && (node.wrap === "optional" || node.wrap === "default");
     if (omittable && !rng.bool(seed.present?.[field] ?? 0.5)) {
       continue;
     }
@@ -211,37 +198,35 @@ function drawObject(schema: z.ZodType, seed: SliceSeed, rng: Rng): Json {
 }
 
 function drawFrom(schema: z.ZodType, rng: Rng, path: string): unknown {
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-    case "prefault":
-    case "catch":
-    case "nonoptional":
-    case "readonly":
-      return drawFrom(def.innerType as z.ZodType, rng, path);
-    case "string":
-      return genName(rng);
-    case "number":
-      return rng.int(100);
-    case "boolean":
-      return rng.bool();
-    case "enum":
-      return rng.pick(Object.values(def.entries ?? {}));
-    case "literal":
-      return rng.pick(def.values ?? []);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      return drawFrom(node.inner, rng, path);
     case "array":
-      return Array.from({ length: rng.int(3) }, () =>
-        drawFrom(def.element as z.ZodType, rng, `${path}[]`),
-      );
+      return Array.from({ length: rng.int(3) }, () => drawFrom(node.element, rng, `${path}[]`));
     case "union":
-      return drawFrom(rng.pick(def.options ?? []), rng, path);
+      return drawFrom(rng.pick(node.options), rng, path);
     case "object":
-      return drawObject(schema, {}, rng);
-    default:
+      return drawObject(node.shape, {}, rng);
+    case "leaf":
+      switch (node.type) {
+        case "string":
+          return genName(rng);
+        case "number":
+          return rng.int(100);
+        case "boolean":
+          return rng.bool();
+        case "enum":
+        case "literal":
+          return rng.pick(node.values);
+        default:
+          throw new Error(
+            `generatorFromSlice: no draw for the ${node.type} at "${path}" - seed the field with a pool`,
+          );
+      }
+    case "record":
       throw new Error(
-        `generatorFromSlice: no draw for the ${def.type} at "${path}" - seed the field with a pool`,
+        `generatorFromSlice: no draw for the record at "${path}" - seed the field with a pool`,
       );
   }
 }

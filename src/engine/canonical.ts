@@ -21,7 +21,7 @@ import { stringify as stringifyYaml } from "yaml";
 import type { z } from "zod";
 import { isPlainObject, own, put } from "../plain-data.js";
 import { SECTION_KEYS, SettingsFile } from "../schema.js";
-import { defOf, detectKnobUnion } from "../sections/contract/module.js";
+import { schemaNode } from "../sections/shared/schema-node.js";
 
 /**
  * The identity field of every mapping list the walk sorts, by list path: the section key, `[]` per entry level,
@@ -179,30 +179,36 @@ function sortEntries(path: string, entries: readonly unknown[]): unknown[] {
 
 /** Whether a value could be an instance of the option, by shape alone; the walk parses only when two options could. */
 function admits(schema: z.ZodType, value: unknown): boolean {
-  const def = defOf(schema);
-  switch (def.type) {
+  const node = schemaNode(schema);
+  switch (node.kind) {
     case "array":
       return Array.isArray(value);
     case "object":
     case "record":
       return isPlainObject(value);
-    case "optional":
-    case "default":
-      return value === undefined || admits(def.innerType as z.ZodType, value);
-    case "nullable":
-      return value === null || admits(def.innerType as z.ZodType, value);
-    case "null":
-      return value === null;
-    case "string":
-      return typeof value === "string";
-    case "number":
-      return typeof value === "number";
-    case "boolean":
-      return typeof value === "boolean";
+    case "wrapper":
+      switch (node.wrap) {
+        case "optional":
+        case "default":
+          return value === undefined || admits(node.inner, value);
+        case "nullable":
+          return value === null || admits(node.inner, value);
+        default:
+          return true;
+      }
     case "union":
-      return (def.options ?? []).some((option) => admits(option, value));
-    default:
-      return true;
+      return node.options.some((option) => admits(option, value));
+    case "leaf":
+      switch (node.type) {
+        case "null":
+          return value === null;
+        case "string":
+        case "number":
+        case "boolean":
+          return typeof value === node.type;
+        default:
+          return true;
+      }
   }
 }
 
@@ -223,18 +229,15 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
   if (schema === undefined || value === null || value === undefined) {
     return unknownNode(value);
   }
-  const def = defOf(schema);
-  switch (def.type) {
-    case "optional":
-    case "nullable":
-    case "default":
-      return canonicalNode(value, def.innerType as z.ZodType, path);
+  const node = schemaNode(schema);
+  switch (node.kind) {
+    case "wrapper":
+      return canonicalNode(value, node.inner, path);
     case "object": {
       if (!isPlainObject(value)) {
         return unknownNode(value);
       }
-      const shape = def.shape ?? {};
-      return mappingNode(value, shape, Object.keys(shape), (key) => `${path}.${key}`);
+      return mappingNode(value, node.shape, Object.keys(node.shape), (key) => `${path}.${key}`);
     }
     case "array":
       if (!Array.isArray(value)) {
@@ -242,7 +245,7 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
       }
       return sortEntries(
         path,
-        value.map((item) => canonicalNode(item, def.element as z.ZodType, `${path}[]`)),
+        value.map((item) => canonicalNode(item, node.element, `${path}[]`)),
       );
     case "record": {
       if (!isPlainObject(value)) {
@@ -250,13 +253,12 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
       }
       const out: Record<string, unknown> = {};
       for (const key of orderedKeys(value, [])) {
-        put(out, key, canonicalNode(value[key], def.valueType as z.ZodType, `${path}.*`));
+        put(out, key, canonicalNode(value[key], node.value, `${path}.*`));
       }
       return out;
     }
     case "union": {
-      const options = def.options ?? [];
-      const knob = detectKnobUnion(options);
+      const { knob } = node;
       if (knob !== null) {
         if (Array.isArray(value)) {
           return canonicalNode(value, knob.list, path);
@@ -264,18 +266,18 @@ function canonicalNode(value: unknown, schema: z.ZodType | undefined, path: stri
         if (!isPlainObject(value)) {
           return unknownNode(value);
         }
-        const shape = defOf(knob.wrapper).shape ?? {};
+        const { shape } = knob.wrapper;
         // The wrapper is transparent to the list path, so `labels` names the entries under both forms.
         return mappingNode(value, shape, Object.keys(shape), (key) =>
           key === "entries" ? path : `${path}.${key}`,
         );
       }
-      const fits = options.filter((option) => admits(option, value));
+      const fits = node.options.filter((option) => admits(option, value));
       const option =
         fits.length > 1 ? (fits.find((o) => o.safeParse(value).success) ?? fits[0]) : fits[0];
       return option === undefined ? unknownNode(value) : canonicalNode(value, option, path);
     }
-    default:
+    case "leaf":
       // The scalar leaves; a mapping under z.unknown has no declared order.
       return unknownNode(value);
   }

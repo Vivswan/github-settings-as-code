@@ -20,25 +20,21 @@ import { join } from "node:path";
 import { z } from "zod";
 import { SettingsFile } from "../../src/schema.js";
 import { SCHEMA_DESCRIPTIONS } from "../../src/sections/docs-registry.js";
+import { schemaNode } from "../../src/sections/shared/schema-node.js";
 import { attachDescriptions, type JsonSchemaNode } from "./lib/schema-descriptions.js";
 import { SCHEMA_ID } from "./lib/schema-id.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-interface ZodDefView {
-  type?: string;
-  catchall?: unknown;
-}
-
 const generated = z.toJSONSchema(SettingsFile, {
   target: "draft-7",
   io: "input",
   override(ctx) {
-    const def = (ctx.zodSchema as unknown as { _zod: { def: ZodDefView } })._zod.def;
+    const node = ctx.zodSchema instanceof z.ZodType ? schemaNode(ctx.zodSchema) : null;
     const json = ctx.jsonSchema as Record<string, unknown>;
     // The runtime passes unknown keys of a plain object through to GitHub, and the published schema must not reject
     // what the runtime accepts. Strict objects carry a catchall (z.never) and keep their false.
-    if (def.type === "object" && def.catchall === undefined) {
+    if (node?.kind === "object" && node.catchall === undefined) {
       delete json.additionalProperties;
     }
     // The published schema carries no format keyword, so this covers ajv-formats grammars the runtime does not share
@@ -48,7 +44,7 @@ const generated = z.toJSONSchema(SettingsFile, {
       delete json.format;
     }
     // z.record's propertyNames: {type: "string"} is a no-op in JSON (keys are always strings).
-    if (def.type === "record" && JSON.stringify(json.propertyNames) === '{"type":"string"}') {
+    if (node?.kind === "record" && JSON.stringify(json.propertyNames) === '{"type":"string"}') {
       delete json.propertyNames;
     }
     // z.int()'s implicit safe-integer bounds are a JS implementation detail, not part of the documented file
