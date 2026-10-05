@@ -1,6 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Document, Scalar, type ToStringOptions, YAMLMap } from "yaml";
+import {
+  Document,
+  type DocumentOptions,
+  type ParseOptions,
+  parseDocument,
+  Scalar,
+  type SchemaOptions,
+  type ToStringOptions,
+  YAMLMap,
+} from "yaml";
+import { z } from "zod";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import type { InputDecl } from "../../src/flows/inputs.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
@@ -26,16 +36,56 @@ import { tableCell } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-/** The schema the scalars are rendered under: a key YAML 1.1 would re-type (on, y, null, ...) comes out quoted, for
- * the 1.1 readers of action.yml still in the wild. */
-const YAML_VERSION = "1.1";
+/** The schema the scalars are rendered and read back under: a key YAML 1.1 would re-type (on, y, null, ...) comes out
+ * quoted, for the 1.1 readers of action.yml still in the wild. Its merge tag is removed: it claims the string "<<"
+ * itself, whatever style the scalar asks for, and action.yml carries no merges. */
+const YAML_DOCUMENT: DocumentOptions & SchemaOptions & ParseOptions = {
+  version: "1.1",
+  merge: false,
+  customTags: (tags) =>
+    tags.filter((tag) =>
+      typeof tag === "string" ? tag !== "merge" : tag.tag !== "tag:yaml.org,2002:merge",
+    ),
+};
 
 /** Column budget for a folded description line, indent included; the library takes it as a soft limit (a line one
- * column over stays whole). Quoted scalars are JSON strings, the one spelling JSON_STRING names. */
+ * column over stays whole). Quoted scalars are JSON strings: one line however long, with JSON's escapes. */
 const YAML_STYLE: ToStringOptions = { lineWidth: 78, singleQuote: false, doubleQuotedAsJSON: true };
 
-const PLAIN_NAME_CLASS = "[a-z][a-z0-9-]*";
-const PLAIN_NAME = new RegExp(`^${PLAIN_NAME_CLASS}$`);
+const PLAIN_NAME = /^[a-z][a-z0-9-]*$/;
+
+/** One line not starting with whitespace: any other description would fold into a form action.yml does not carry (a
+ * blank line, an indentation indicator, a kept newline), so the generator refuses it instead of writing it. */
+const DESCRIPTION = z
+  .string()
+  .regex(/^\S[^\n]*$/, "one line of text, not starting with whitespace");
+
+const INPUT_ENTRY = z.strictObject({
+  description: DESCRIPTION,
+  required: z.literal(false),
+  default: z.string(),
+});
+const OUTPUT_ENTRY = z.strictObject({ description: DESCRIPTION });
+
+const DESCRIBED = z.object({ description: DESCRIPTION });
+
+/** Each declaration parsed with `schema`, every own name kept (a record schema would drop `__proto__`, a name the
+ * emitter writes), or the first miss as "name.path: message". */
+function declarations<T>(
+  schema: z.ZodType<T>,
+  decls: Readonly<Record<string, unknown>>,
+): Record<string, T> | string {
+  const parsed: Array<[string, T]> = [];
+  for (const [name, decl] of Object.entries(decls)) {
+    const result = schema.safeParse(decl);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      return `${[name, ...(issue?.path ?? [])].map(String).join(".")}: ${issue?.message ?? "invalid"}`;
+    }
+    parsed.push([name, result.data]);
+  }
+  return Object.fromEntries(parsed);
+}
 
 function scalar(value: string, type: Scalar.Type): Scalar<string> {
   const node = new Scalar(value);
@@ -43,20 +93,23 @@ function scalar(value: string, type: Scalar.Type): Scalar<string> {
   return node;
 }
 
-/** A plain-shaped name stays plain unless the schema would re-type it; any other name is quoted outright, so a key
- * takes one of the two forms YAML_ENTRY_KEY names. */
+/** A plain-shaped name stays plain unless the schema would re-type it; any other name is quoted outright. */
 function yamlKey(name: string): Scalar<string> {
   return scalar(name, PLAIN_NAME.test(name) ? Scalar.PLAIN : Scalar.QUOTE_DOUBLE);
 }
 
 /** The entries of the top-level `key` mapping, rendered under that key so they carry the file's own nesting; the
  * key line itself is the file's, outside the region. */
-function yamlEntries<T>(
+function yamlEntries<T extends { readonly description: string }>(
   key: string,
   decls: Readonly<Record<string, T>>,
   entry: (decl: T) => object,
 ): string {
-  const doc = new Document({}, { version: YAML_VERSION });
+  const described = declarations(DESCRIBED, decls);
+  if (typeof described === "string") {
+    throw new Error(`the ${key} declarations: ${described}`);
+  }
+  const doc = new Document({}, YAML_DOCUMENT);
   const map = new YAMLMap<Scalar<string>, object>(doc.schema);
   for (const [name, decl] of Object.entries(decls)) {
     map.set(yamlKey(name), entry(decl));
@@ -298,30 +351,52 @@ function tableShape(header: string, cells: string): RegExp {
   return blockShape(String.raw`${RegExp.escape(header)}\n(?:\| ${cells} \|\n)*`);
 }
 
-/** A JSON string literal as JSON.stringify() emits it: the short escapes, `\u00xx` for the other control characters,
- * `\udxxx` for a lone surrogate (never a pair, which it writes as the character), bare quotes never. A printable
- * character has one spelling, so neither a plain-shaped name nor a default can hide behind an escape. */
-const JSON_STRING = String.raw`"(?:[^"\\\u0000-\u001f]|\\(?:["\\bfnrt]|u00[01][0-9a-f]|ud[89ab][0-9a-f]{2}(?!\\ud[c-f])|ud[c-f][0-9a-f]{2}))*"`;
-
-/** The re-typing tests of the schema the keys are rendered under, read off the schema itself: the regexes the
- * library consults before leaving a string plain, so the grammar below and the emitter can never disagree on
- * which words come out quoted. */
-const RE_TYPED_WORD = `(?:${new Document(null, { version: YAML_VERSION }).schema.tags
-  .flatMap((tag) =>
-    "test" in tag && tag.test !== undefined && tag.default && tag.tag !== "tag:yaml.org,2002:str"
-      ? [tag.test.source.replace(/^\^|\$$/g, "")]
-      : [],
-  )
-  .join("|")})`;
-
-/** An action.yml mapping key line at two spaces, in the two forms yamlKey() writes and nothing else, so an authored
- * key under the markers is refused rather than erased. The re-typing tests are consulted only behind the plain-shaped
- * class, so a tab the timestamp test admits still has to pass JSON_STRING. */
-const PLAIN_KEY = `(?!${RE_TYPED_WORD}:)${PLAIN_NAME_CLASS}`;
-const QUOTED_KEY = `(?:"(?=${RE_TYPED_WORD}")${PLAIN_NAME_CLASS}"|(?!"${PLAIN_NAME_CLASS}")${JSON_STRING})`;
-const YAML_ENTRY_KEY = String.raw`  (?:${PLAIN_KEY}|${QUOTED_KEY}):\n`;
-
-const YAML_DESCRIPTION = String.raw`    description: >-\n(?:      \S[^\n]*\n)+`;
+/** The emitter is its own grammar: a body is admitted when re-rendering the declarations it parses to reproduces it
+ * byte for byte, so no spelling the emitter does not write gets through. A freshly placed region holds "\n" and
+ * renders next. */
+function roundTrip<T extends { readonly description: string }>(
+  key: string,
+  entry: z.ZodType<T>,
+  render: (decls: Readonly<Record<string, T>>) => string,
+): (body: string) => string | undefined {
+  return (body) => {
+    if (body === "\n") {
+      return undefined;
+    }
+    const doc = parseDocument(`${key}:${body}`, YAML_DOCUMENT);
+    const error = doc.errors[0];
+    if (error !== undefined) {
+      return `it does not parse as YAML (${error.message.split("\n")[0]})`;
+    }
+    let root: unknown;
+    try {
+      root = doc.toJS();
+    } catch (failure) {
+      // An alias without its anchor parses but does not convert; to the guard that is a refusal.
+      return `it does not convert from YAML (${failure instanceof Error ? failure.message : String(failure)})`;
+    }
+    const mapping =
+      typeof root === "object" && root !== null
+        ? ((root as Record<string, unknown>)[key] ?? {})
+        : root;
+    if (typeof mapping !== "object" || mapping === null || Array.isArray(mapping)) {
+      return `it is not a mapping of ${key} declarations`;
+    }
+    const declared = declarations(entry, mapping as Record<string, unknown>);
+    if (typeof declared === "string") {
+      return `it is not a set of ${key} declarations (${declared})`;
+    }
+    const rendered = `\n${render(declared)}\n`;
+    if (rendered === body) {
+      return undefined;
+    }
+    const authored = body.split("\n");
+    const expected = rendered.split("\n");
+    const differing = authored.findIndex((line, i) => line !== expected[i]);
+    const at = differing === -1 ? authored.length : differing;
+    return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+  };
+}
 
 const GATED_READ_BULLET =
   String.raw`- GitHub gates (?:even )?the [^\n]+ reads at write, so \x60[a-z_]+\x60 needs ` +
@@ -339,15 +414,13 @@ export const GENERATED_REGIONS: Readonly<Record<string, readonly GeneratedRegion
     {
       name: "action-inputs",
       placement: { kind: "under-key", key: "inputs" },
-      body: blockShape(
-        String.raw`(?:${YAML_ENTRY_KEY}${YAML_DESCRIPTION}    required: false\n    default: ${JSON_STRING}\n)+`,
-      ),
+      body: roundTrip("inputs", INPUT_ENTRY, renderActionInputs),
       render: block(() => renderActionInputs(INPUT_DECLS)),
     },
     {
       name: "action-outputs",
       placement: { kind: "under-key", key: "outputs" },
-      body: blockShape(`(?:${YAML_ENTRY_KEY}${YAML_DESCRIPTION})+`),
+      body: roundTrip("outputs", OUTPUT_ENTRY, renderActionOutputs),
       render: block(() => renderActionOutputs(OUTPUT_DECLS)),
     },
   ],

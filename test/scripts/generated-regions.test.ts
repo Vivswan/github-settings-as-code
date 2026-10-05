@@ -269,10 +269,11 @@ const PAGE = [
   "",
 ].join("\n");
 
+const TABLE_BODY = /^\n(?:\| A \| B \|\n\|---\|---\|\n(?:\| `[a-z]+` \| \d+ \|\n)*)?$/;
 const TABLE: RegionSpec = {
   name: "table",
   placement: { kind: "under-heading", heading: "## Inputs" },
-  body: /^\n(?:\| A \| B \|\n\|---\|---\|\n(?:\| `[a-z]+` \| \d+ \|\n)*)?$/,
+  body: TABLE_BODY,
 };
 const LIST: RegionSpec = {
   name: "list",
@@ -509,7 +510,7 @@ describe("assertRegionPlacement", () => {
     ...(["g", "y"] as const).map((flag): [string, string, RegionSpec, string] => [
       `a body shape with the stateful "${flag}" flag, which would pass and fail on alternate calls`,
       PAGE,
-      { ...TABLE, body: new RegExp(TABLE.body.source, flag) },
+      { ...TABLE, body: new RegExp(TABLE_BODY.source, flag) },
       `the table region's body shape carries the stateful "${flag}" flags`,
     ]),
   ])("refuses %s", (_label, text, spec, error) => {
