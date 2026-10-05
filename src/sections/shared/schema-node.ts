@@ -5,12 +5,13 @@
  *
  *   object.open  -> a catchall other than never admits undeclared keys; a strip object (no catchall) is closed to the
  *                   walks, and loosen() in ../contract/module.ts is what opens it at runtime
- *   union.knob   -> the knobbed()/layeredList() pair (../shared/schema-helpers.ts): the bare entry array beside a
- *                   strict wrapper carrying `entries`, which the canonical walk and loosen() route by container
+ *   union.knob   -> the pair knobbed()/nestedKnobbed()/layeredList() minted (./schema-helpers.ts), known by the marks
+ *                   they left (./schema-marks.ts), never by the options' shape; canonical and loosen() route it
  *   leaf.values  -> what an enum or literal admits, duplicates included, so a seeded draw over them is stable
  */
 
 import { z } from "zod";
+import { type Knob, knobOf } from "./schema-marks.js";
 
 const WRAPPERS = [
   [z.ZodOptional, "optional"],
@@ -27,12 +28,6 @@ type Wrapper = InstanceType<(typeof WRAPPERS)[number][0]>;
 type WrapperKind = (typeof WRAPPERS)[number][1];
 
 type LeafType = "string" | "number" | "boolean" | "null" | "unknown" | "never" | "enum" | "literal";
-
-/** The two forms a knobbed or layered list section takes: the bare entry array, or the strict wrapper with `entries`. */
-interface KnobUnion {
-  readonly list: z.ZodArray;
-  readonly wrapper: z.ZodObject;
-}
 
 export type SchemaNode =
   | {
@@ -54,27 +49,13 @@ export type SchemaNode =
       readonly kind: "union";
       readonly schema: z.ZodUnion;
       readonly options: readonly z.ZodType[];
-      readonly knob: KnobUnion | null;
+      readonly knob: Knob | null;
     }
   | { readonly kind: "leaf"; readonly type: LeafType; readonly values: readonly unknown[] };
 
 /** zod types a child by its core supertype; every schema in this tree is built with the classic API, which this restores. */
 function classic(schema: z.core.$ZodType): z.ZodType {
   return schema as z.ZodType;
-}
-
-function knobUnion(options: readonly z.ZodType[]): KnobUnion | null {
-  if (options.length !== 2) {
-    return null;
-  }
-  const list = options.find((option): option is z.ZodArray => option instanceof z.ZodArray);
-  const wrapper = options.find(
-    (option): option is z.ZodObject =>
-      option instanceof z.ZodObject &&
-      option.def.catchall instanceof z.ZodNever &&
-      option.shape.entries !== undefined,
-  );
-  return list !== undefined && wrapper !== undefined ? { list, wrapper } : null;
 }
 
 export function schemaNode(schema: z.ZodType): SchemaNode {
@@ -101,7 +82,7 @@ export function schemaNode(schema: z.ZodType): SchemaNode {
   }
   if (schema instanceof z.ZodUnion) {
     const options = schema.options.map(classic);
-    return { kind: "union", schema, options, knob: knobUnion(options) };
+    return { kind: "union", schema, options, knob: knobOf(schema) ?? null };
   }
   if (schema instanceof z.ZodEnum) {
     return { kind: "leaf", type: "enum", values: Object.values(schema.enum) };

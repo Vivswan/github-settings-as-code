@@ -1,11 +1,12 @@
 /**
- * Imports only zod, renamed-key.ts, and the text leaf: a section schema importing src/schema.ts back would be a cycle
- * whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
+ * Imports only zod, the text leaf, and the leaf modules beside it: a section schema importing src/schema.ts back
+ * would be a cycle whose top-level consts TDZ-crash at import time, so everything both sides need lives here.
  */
 
 import { z } from "zod";
 import { agree } from "../../text.js";
 import { renamedKeyError } from "./renamed-key.js";
+import { knobOf, markKnob } from "./schema-marks.js";
 
 /**
  * The one value set of the `_undeclared` knob (a wrapper's, a file's top level) and the `undeclared` run input;
@@ -55,16 +56,20 @@ const renamedPolicyKeyError = renamedKeyError(
 );
 
 /**
- * The two wrapper kinds, each named as its published definition is (`<name><Entry>`) and with the directives its key
- * error names. Only the knobbed wrapper ever spelled the policy without its underscore, so only it names the rename.
+ * The wrapper kinds, one per minting helper, each named as its published definition is (`<name><Entry>`) and with
+ * the directives its key error names. Only a policy wrapper ever spelled the policy without its underscore, so only
+ * those name the rename.
  */
+const POLICY_WRAPPER = {
+  name: "UndeclaredPolicyList",
+  directives: '"_undeclared" and, on a top-level section, "_layering"',
+  renamed: true,
+} as const;
 const WRAPPER_KINDS = {
-  knobbed: {
-    name: "UndeclaredPolicyList",
-    directives: '"_undeclared" and, on a top-level section, "_layering"',
-    renamed: true,
-  },
+  knobbed: { kind: "knobbed", ...POLICY_WRAPPER },
+  nestedKnobbed: { kind: "nestedKnobbed", ...POLICY_WRAPPER },
   layered: {
+    kind: "layered",
     name: "LayeredList",
     directives:
       '"_layering" alone (this section applies no undeclared policy, so its wrapper takes no "_undeclared")',
@@ -99,8 +104,8 @@ function wrapperKeyError(issue: z.core.$ZodRawIssue, kind: WrapperKind): string 
 }
 
 /**
- * The bare list beside its strict wrapper, whose keys `shape` chooses around `entries`. schemaNode() (./schema-node.ts)
- * recognizes the union as a knob by the wrapper's `entries`. The wrapper's definition name derives from the list
+ * The bare list beside its strict wrapper, whose keys `shape` chooses around `entries`, marked as a knob so the
+ * runtime routes the union by container (routed(), below). The wrapper's definition name derives from the list
  * element's own .meta({id}), so the document composition and a section's runtime derivation can never label one
  * entry differently.
  *
@@ -122,17 +127,19 @@ function wrappedList<L extends z.ZodArray<z.ZodType>, S extends z.core.$ZodShape
   const wrapper = z
     .strictObject(shape(list), { error: (issue) => wrapperKeyError(issue, kind) })
     .meta({ id: `${kind.name}<${entryName}>` });
+  markKnob({ kind: kind.kind, list, wrapper });
   return z.union([list, wrapper]);
 }
 
 function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
   entry: T,
+  kind: typeof WRAPPER_KINDS.knobbed | typeof WRAPPER_KINDS.nestedKnobbed,
   shape: (knobs: {
     _undeclared: z.ZodOptional<typeof UndeclaredPolicySchema>;
     entries: z.ZodArray<T>;
   }) => S,
 ) {
-  return wrappedList(z.array(entry), WRAPPER_KINDS.knobbed, (entries) =>
+  return wrappedList(z.array(entry), kind, (entries) =>
     shape({ _undeclared: UndeclaredPolicySchema.optional(), entries }),
   );
 }
@@ -142,7 +149,10 @@ function knobbedList<T extends z.ZodType, S extends z.core.$ZodShape>(
  * section-level wrapper has layers below it to address.
  */
 export function knobbed<T extends z.ZodType>(entry: T) {
-  return knobbedList(entry, (knobs) => ({ ...knobs, _layering: LayeringSchema.optional() }));
+  return knobbedList(entry, WRAPPER_KINDS.knobbed, (knobs) => ({
+    ...knobs,
+    _layering: LayeringSchema.optional(),
+  }));
 }
 
 /**
@@ -150,7 +160,7 @@ export function knobbed<T extends z.ZodType>(entry: T) {
  * `_layering` on its wrapper would be accepted and never act; the wrapper rejects it.
  */
 export function nestedKnobbed<T extends z.ZodType>(entry: T) {
-  return knobbedList(entry, (knobs) => knobs);
+  return knobbedList(entry, WRAPPER_KINDS.nestedKnobbed, (knobs) => knobs);
 }
 
 /**
@@ -164,6 +174,62 @@ export function layeredList<L extends z.ZodArray<z.ZodType>>(list: L) {
     _layering: LayeringSchema.optional(),
     entries,
   }));
+}
+
+/**
+ * The runtime shape of a knob union: a transform, not the union, so an array parses against the list and a mapping
+ * against the wrapper, and a failing entry keeps its path (`labels[2].name`). The published schema keeps the union.
+ * `derive` is what the runtime makes of each form before it is routed.
+ */
+export function routed(
+  union: z.ZodType,
+  derive: (form: z.ZodType) => z.ZodType = (form) => form,
+): z.ZodType {
+  const knob = union instanceof z.ZodUnion ? knobOf(union) : undefined;
+  if (knob === undefined) {
+    throw new Error(
+      "BUG: routed(): not a union knobbed(), nestedKnobbed(), or layeredList() minted - route the union the helper returned",
+    );
+  }
+  if ((union.def.checks?.length ?? 0) > 0) {
+    throw new Error(
+      "BUG: routed(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
+    );
+  }
+  const list = derive(knob.list);
+  const wrapper = derive(knob.wrapper);
+  const beside =
+    knob.kind === "layered"
+      ? 'an optional "_layering" directive'
+      : 'an optional "_undeclared" policy';
+  return z
+    .custom<unknown>(() => true)
+    .transform((value, ctx) => {
+      const form = Array.isArray(value)
+        ? list
+        : typeof value === "object" && value !== null
+          ? wrapper
+          : null;
+      if (form === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`,
+          // A null list has no empty state of its own: engine/validate.ts names the fix from this, not the type prose.
+          ...(value === null ? { params: { legal: "a list of entries ([] for none)" } } : {}),
+        });
+        return z.NEVER;
+      }
+      const parsed = form.safeParse(value);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue });
+        }
+        // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
+        // entry (rule(), below) and must meet the entries, raw where they failed. The parse fails regardless.
+        return value;
+      }
+      return parsed.data;
+    });
 }
 
 /** The paths of the issues that abort a parse (a wrong type, a refused option); a rule's own finding and an unrecognized key do not. */

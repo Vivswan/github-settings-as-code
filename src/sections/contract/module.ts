@@ -14,7 +14,7 @@ import type {
   UndeclaredPolicy,
   UndeclaredPolicyList,
 } from "../../types.js";
-import { type Layering, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
+import { type Layering, routed, rule, type UNDECLARED_POLICIES } from "../shared/schema-helpers.js";
 import { schemaNode } from "../shared/schema-node.js";
 import {
   type EndpointDecl,
@@ -803,7 +803,7 @@ export function requirePlainMapping(shape: z.ZodType): z.ZodType {
  *
  *   strictObject           -> stays strict
  *   a node's own checks    -> survive on the clone (rule() gates each beside a failed nested value); one on the knobbed union itself throws
- *   knobbed-section union  -> rewrapped as a container-routed check, so a failing entry keeps its path (`labels[2].name`)
+ *   knobbed-section union  -> routed() (../shared/schema-helpers.ts) over its loosened forms; an entry keeps its path
  */
 export function loosen(schema: z.ZodType): z.ZodType {
   const node = schemaNode(schema);
@@ -825,55 +825,13 @@ export function loosen(schema: z.ZodType): z.ZodType {
     case "union": {
       const { knob } = node;
       if (knob !== null) {
-        if ((node.schema.def.checks?.length ?? 0) > 0) {
-          throw new Error(
-            "BUG: loosen(): a knobbed-section union carries its own refinements, which the routed rewrap would silently drop - attach them to the entry array or the wrapper",
-          );
-        }
-        return routedListShape(loosen(knob.list), loosen(knob.wrapper), knob.wrapper);
+        return routed(node.schema, loosen);
       }
       return z.clone(node.schema, { ...node.schema.def, options: node.options.map(loosen) });
     }
     case "leaf":
       return schema;
   }
-}
-
-/** A transform, not a union, so a failing entry keeps its precise issue path and the output is the routed shape's parsed data. */
-function routedListShape(list: z.ZodType, wrapper: z.ZodType, authored: z.ZodObject): z.ZodType {
-  // The wrapper's own words for what rides beside `entries`: the policy on a knobbed section, the directive alone on a plain list.
-  const beside =
-    authored.shape._undeclared === undefined
-      ? 'an optional "_layering" directive'
-      : 'an optional "_undeclared" policy';
-  return z
-    .custom<unknown>(() => true)
-    .transform((value, ctx) => {
-      const shape = Array.isArray(value)
-        ? list
-        : typeof value === "object" && value !== null
-          ? wrapper
-          : null;
-      if (shape === null) {
-        ctx.addIssue({
-          code: "custom",
-          message: `Invalid input: expected a list of entries, or a mapping with "entries" (and ${beside}), but this section parsed as ${value === null ? "null" : typeof value}`,
-          // A null list has no empty state of its own: engine/validate.ts names the fix from this instead of the type prose.
-          ...(value === null ? { params: { legal: "a list of entries ([] for none)" } } : {}),
-        });
-        return z.NEVER;
-      }
-      const parsed = shape.safeParse(value);
-      if (!parsed.success) {
-        for (const issue of parsed.error.issues) {
-          ctx.addIssue({ ...issue });
-        }
-        // The raw value, not z.NEVER: a rule the section composed onto the routed shape runs beside the failed
-        // entry (rule() in ../shared/schema-helpers.ts) and must meet the entries, raw where they failed. The parse fails regardless.
-        return value;
-      }
-      return parsed.data;
-    });
 }
 
 export type EntryOf<T> = T extends readonly (infer E)[]
