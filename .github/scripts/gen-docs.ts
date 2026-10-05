@@ -16,6 +16,7 @@ import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
 import { type GeneratedRegion, regenerateRegions, regionBounds } from "./lib/generated-regions.js";
+import { tableCell } from "./lib/markdown-table.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 export const COVERAGE_PATH = "docs/reference/coverage.md";
@@ -85,16 +86,6 @@ export function renderPatCell(grant: string): string {
   return `${cell}; ${rendered}`;
 }
 
-/** A markdown table cell; a pipe or a line break would split the row, so both are refused. */
-function cell(text: string, where: string): string {
-  if (text.trim() === "" || /[|\r\n]/.test(text)) {
-    throw new Error(
-      `gen-docs: ${where} is blank or contains "|" or a line break, which would break its table row: "${text}"`,
-    );
-  }
-  return text;
-}
-
 const TABLE_HEADER =
   "| Section | Endpoints | PAT permission | Undeclared default | Notes |\n|---|---|---|---|---|";
 
@@ -109,10 +100,10 @@ export function renderSectionsTable(
     }
     return [
       `\`${section.key}\``,
-      cell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
-      cell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
+      tableCell(doc.sections_table.endpoints, `the ${section.key} Endpoints cell`),
+      tableCell(renderPatCell(sectionGrant(section)), `the ${section.key} PAT permission cell`),
       UNDECLARED_DEFAULT_DISPLAY[section.undeclaredDefault],
-      cell(doc.sections_table.notes, `the ${section.key} Notes cell`),
+      tableCell(doc.sections_table.notes, `the ${section.key} Notes cell`),
     ];
   });
   return [TABLE_HEADER, ...rows.map((cells) => `| ${cells.join(" | ")} |`)].join("\n");
@@ -125,7 +116,7 @@ function codeSpan(text: string, where: string): string {
       `gen-docs: ${where} contains a backtick, which would close its code span: ${text}`,
     );
   }
-  return cell(text, where);
+  return tableCell(text, where);
 }
 
 /** The longest paragraph or bullet the page carries; a fact past it is two facts. */
@@ -249,9 +240,9 @@ function renderSection(
     const where = `a ${section.key} coverage row`;
     const keys = row.keys === undefined ? "" : ` (\`${codeSpan(row.keys, `${where}'s keys`)}\`)`;
     const cells = [
-      cell(row.area, `${where}'s Area cell`),
+      tableCell(row.area, `${where}'s Area cell`),
       `[\`${section.key}\`](${SECTIONS_PAGE})${keys}`,
-      cell(renderCalls(section, row, claimed, carrier, anchors), `${where}'s Endpoints cell`),
+      tableCell(renderCalls(section, row, claimed, carrier, anchors), `${where}'s Endpoints cell`),
     ];
     return `| ${cells.join(" | ")} |`;
   });
@@ -315,9 +306,9 @@ export function renderCoverage(
           ...data.gaps.rows.map((row) => {
             const where = `the "${row.area}" gap row`;
             const cells = [
-              cell(row.area, `${where}'s Area cell`),
-              cell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
-              cell(row.why, `${where}'s Why cell`),
+              tableCell(row.area, `${where}'s Area cell`),
+              tableCell(row.endpoints.join(", "), `${where}'s Endpoints cell`),
+              tableCell(row.why, `${where}'s Why cell`),
             ];
             return `| ${cells.join(" | ")} |`;
           }),

@@ -65,24 +65,25 @@ describe("action.yml renderers", () => {
     );
   });
 
-  test("a name a YAML parser would re-type is quoted, and only then", () => {
+  test("a name a YAML 1.1 parser would re-type is quoted, and only then", () => {
+    // The 1.1 schema is the generator's choice; the library's default 1.2 schema would leave every word but null,
+    // true, and false bare.
+    const words = ["null", "true", "false", "yes", "no", "on", "off", "y", "n"];
     const decls = {
-      null: { description: "A null-named input.", default: "" },
-      on: { description: "An on-named input.", default: "x" },
+      ...Object.fromEntries(
+        words.map((word) => [word, { description: `A ${word} input.`, default: "x" }]),
+      ),
       Mixed_Case: { description: "Not a plain lowercase name.", default: "" },
+      plain: { description: "A plain name.", default: "" },
     };
     const text = renderActionInputs(decls);
     // The key lines are the only ones at exactly two-space indent.
     expect(text.split("\n").filter((line) => /^ {2}\S/.test(line))).toEqual([
-      '  "null":',
-      '  "on":',
+      ...words.map((word) => `  "${word}":`),
       '  "Mixed_Case":',
+      "  plain:",
     ]);
-    expect(Object.keys(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual([
-      "null",
-      "on",
-      "Mixed_Case",
-    ]);
+    expect(Object.keys(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual(Object.keys(decls));
     expect(renderActionOutputs({ y: { description: "Short." } })).toBe(
       '  "y":\n    description: >-\n      Short.',
     );
@@ -90,14 +91,13 @@ describe("action.yml renderers", () => {
 
   test.each([
     ["a double space", "Two  spaces."],
-    ["a newline", "Two\nlines."],
-    ["a leading space", " Padded."],
     ["a trailing space", "Padded. "],
-    ["nothing in it", ""],
-  ])("rejects a description with %s, which would not fold back verbatim", (_label, description) => {
-    expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
-      /single-spaced prose/,
-    );
+    ["quotes, a colon, and a hash", 'Targets, or "*" to discover: owner/name #1.'],
+    ["a word longer than the line", "A".repeat(200)],
+    ["one column over the line budget", `${"a".repeat(30)} ${"b".repeat(42)}`],
+  ])("a description with %s folds back verbatim", (_label, description) => {
+    const text = renderActionInputs({ x: { description, default: "" } });
+    expect(parseYaml(`inputs:\n${text}\n`).inputs.x.description).toBe(description);
   });
 });
 
@@ -136,6 +136,11 @@ describe("undeclared-policy renderers", () => {
     expect(() => renderPolicyDefaultsTable(sections, {})).toThrow(
       /no Defaults-per-section prose for the "labels" section/,
     );
+    expect(() =>
+      renderPolicyDefaultsTable(sections.slice(1, 2), {
+        labels: { override: "manage a core set | or two" },
+      }),
+    ).toThrow('the labels "The override buys you" cell is blank or contains "|" or a line break');
   });
 });
 
@@ -301,10 +306,14 @@ describe("generated files", () => {
       ["x", '"\\x61pply"', "      D.\n"],
       ["x", '"tab\there"', "      D.\n"],
       ["x", '"x"', "        D.\n"],
-      ["on", '"x"', "      D.\n"],
-      ['"ordinary"', '"x"', "      D.\n"],
     ]) {
       const body = `\n  ${key}:\n    description: >-\n${description}    required: false\n    default: ${defaultValue}\n`;
+      expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
+    }
+    // Descriptions the library folds losslessly in a form the shape keeps out of action.yml: a line break (a blank
+    // line), a leading space (an indentation indicator), nothing (a kept newline).
+    for (const description of ["Two\nlines.", " Padded.", ""]) {
+      const body = `\n${renderActionInputs({ x: { description, default: "" } })}\n`;
       expect(shapes.get("action-inputs")?.test(body), body).toBe(false);
     }
     accepts("action-outputs", renderActionOutputs({ result: { description: "A | B." } }));
