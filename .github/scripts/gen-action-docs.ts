@@ -58,7 +58,7 @@ const PLAIN_NAME = /^[a-z][a-z0-9-]*$/;
  * blank line, an indentation indicator, a kept newline), so the generator refuses it instead of writing it. */
 const DESCRIPTION = z
   .string()
-  .regex(/^\S[^\n]*$/, "one line of text, not starting with whitespace");
+  .regex(/^\S[^\r\n]*$/, "one line of text, not starting with whitespace");
 
 const INPUT_ENTRY = z.strictObject({
   description: DESCRIPTION,

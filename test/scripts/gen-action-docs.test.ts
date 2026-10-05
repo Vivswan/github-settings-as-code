@@ -434,14 +434,20 @@ describe("generated files", () => {
     ]);
   });
 
-  test("the renderer refuses a description outside the policy, naming the declaration", () => {
-    expect(() => renderActionInputs({ x: { description: "Two\nlines.", default: "" } })).toThrow(
-      /the inputs declarations: x\.description/,
-    );
-    expect(() => renderActionOutputs({ x: { description: "Two\nlines." } })).toThrow(
-      /the outputs declarations: x\.description/,
-    );
-  });
+  test.each([
+    ["a line feed", "One\nTwo"],
+    ["a carriage return", "One\rTwo"],
+  ])(
+    "the renderer refuses a description broken by %s, naming the declaration",
+    (_label, description) => {
+      expect(() => renderActionInputs({ x: { description, default: "" } })).toThrow(
+        /the inputs declarations: x\.description/,
+      );
+      expect(() => renderActionOutputs({ x: { description } })).toThrow(
+        /the outputs declarations: x\.description/,
+      );
+    },
+  );
 
   test("action.yml parses back to the input and output declarations", () => {
     const actionYml = parseYaml(readFileSync(join(ROOT, "action.yml"), "utf8")) as {
