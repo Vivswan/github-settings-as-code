@@ -379,10 +379,6 @@ function lex(source: string): Token[] {
   return tokenize(source).filter((token) => token.kind !== "dropped");
 }
 
-/**
- * `source` with the PCRE-only forms rewritten into the JavaScript spelling: the translation alone, without
- * `pcreRefusal()`; `compileFailure()` is the check.
- */
 export function compilableForm(source: string): string {
   return render(lex(source));
 }

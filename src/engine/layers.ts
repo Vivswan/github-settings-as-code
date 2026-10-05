@@ -72,10 +72,6 @@ function isRemoval(entry: unknown): entry is Readonly<Record<string, unknown>> {
   return isPlainObject(entry) && entry[REMOVE_KEY] === true;
 }
 
-/**
- * What the fold knows inside one keyed entry, at `prefix` below the entry's top: the nested keyed lists its module
- * declares (reachable at the top only).
- */
 interface EntryScope {
   readonly nested: Readonly<Record<string, KeyedListLayering>> | undefined;
   readonly prefix: string;
