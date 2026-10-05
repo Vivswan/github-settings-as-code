@@ -108,9 +108,22 @@ describe("run in multi-repo mode (env glue)", () => {
       },
     });
     expect(await run({ api: api, io: testIo })).toBe(1);
-    const summary = summaries.join("\n");
-    expect(summary).toContain(":warning: drift");
-    expect(summary).toContain("want \\| desc");
+    // One summary per run, its table rows whole: a bare pipe in a value would split a cell.
+    expect(summaries).toEqual([
+      [
+        "## github-settings-as-code (check, 1 repository)",
+        "",
+        "| Repository | Source | Result |",
+        "|---|---|---|",
+        "| o/a | remote | :warning: drift |",
+        "",
+        "### o/a (drift)",
+        "",
+        "| Section | Status | Detail |",
+        "|---|---|---|",
+        '| repository | :warning: drift | repository.description: "want \\| desc" != "live \\| desc" |',
+      ].join("\n"),
+    ]);
   });
 
   test("self-target single-repo run is never redacted (carve-out)", async () => {

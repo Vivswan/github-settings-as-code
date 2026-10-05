@@ -703,78 +703,108 @@ describe("the push probe under bash", () => {
   const steps = must(readWorkflow("post-green.yml").jobs.build, "build job").steps ?? [];
   const run = must(must(steps.find(isProbe), "probe step").run, "probe run");
 
-  /**
-   * The fenced block: git's stderr, indented, between a stop-commands line keyed by a 32-hex token and its own resume line, then one
-   * static error. The runner trims, so an indented "::error::forged" still reads as a command outside a fence; the indent only marks
-   * the lines as quoted text in the log. Returns the token.
-   */
-  function expectFenced(lines: string[], inner: string[]): string {
-    const [open, header, ...rest] = lines;
-    const token = must(open?.match(FENCE_OPEN)?.[1], "a stop-commands line with a 32-hex token");
-    expect(header).toBe("probe stderr:");
-    expect(rest.slice(0, inner.length)).toEqual(inner);
-    expect(rest[inner.length]).toBe(`::${token}::`);
-    const after = rest.slice(inner.length + 1).filter(Boolean);
-    expect(after).toHaveLength(1);
-    expect(after[0]).toMatch(/^::error::/);
-    for (const line of inner) {
-      expect(line.startsWith("  ")).toBe(true);
-      // The error after the fence is static text: none of git's words reach a line the runner reads as a command.
-      expect(after[0]).not.toContain(line.trim());
+  const REFUSED =
+    "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
+  /** The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from. */
+  const NO_PAT =
+    "::warning::this run's token cannot push (the caller grants contents: read); this commit was not packaged and the " +
+    "latest tag was not moved here (the release hook packages each release and moves latest itself). Raise the caller's " +
+    "ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret with Contents (read and write) on this " +
+    "repository, to publish every green push to @latest.";
+
+  /** The fence token a run minted, from its opening line; undefined when no fence opened. */
+  const fenceToken = (probe: ProbeRun): string | undefined =>
+    probe.lines[0]?.match(FENCE_OPEN)?.[1];
+
+  /** A fenced row with the minted 32-hex token in place of `<token>`; a run that opened no such fence fails here, and the
+   * probe's own lines are compared untouched, so a literal `<token>` printed in either fence line cannot pass. */
+  function withToken(expected: ProbeRun, probe: ProbeRun): ProbeRun {
+    if (!expected.lines.some((line) => line.includes("<token>"))) {
+      return expected;
     }
-    return token;
+    const token = must(fenceToken(probe), "a stop-commands line with a 32-hex token");
+    return { ...expected, lines: expected.lines.map((line) => line.replaceAll("<token>", token)) };
   }
 
-  test("a stderr that does not end in a newline still closes the fence on a line of its own, under a token fresh per run", async () => {
-    const probe = await runProbe(run, "refused", 1, true);
-    expect(probe.status).toBe(1);
-    const token = expectFenced(probe.lines, ["  refused"]);
-    expect(probe.probeErrLeft).toBe(false);
-    expect(probe.output).toBe("");
-    // A fixed token is one remote text could name to resume command processing.
-    expect(expectFenced((await runProbe(run, "refused", 1, true)).lines, ["  refused"])).not.toBe(
-      token,
-    );
+  // The whole run per case. Git's stderr sits indented inside the fence (the runner trims, so an unindented "::error::forged"
+  // would read as a command) with one static error after it; without a PAT the probe warns and skips; a passing push prints nothing.
+  test.each<[name: string, stderr: string, gitStatus: number, patSet: boolean, expected: ProbeRun]>(
+    [
+      [
+        "a PAT refused with a stderr that does not end in a newline still closes the fence on a line of its own",
+        "refused",
+        1,
+        true,
+        {
+          lines: [
+            "::stop-commands::<token>",
+            "probe stderr:",
+            "  refused",
+            "::<token>::",
+            REFUSED,
+            "",
+          ],
+          status: 1,
+          output: "",
+          probeErrLeft: false,
+        },
+      ],
+      [
+        "a PAT refused with a stderr carrying workflow-command text keeps it on indented lines inside the fence",
+        "::stop-commands::probe-marker\nremote: %25 done\r\n::error::forged\n",
+        1,
+        true,
+        {
+          lines: [
+            "::stop-commands::<token>",
+            "probe stderr:",
+            "  ::stop-commands::probe-marker",
+            "  remote: %25 done\r",
+            "  ::error::forged",
+            "::<token>::",
+            REFUSED,
+            "",
+          ],
+          status: 1,
+          output: "",
+          probeErrLeft: false,
+        },
+      ],
+      [
+        "a PAT refused with an empty stderr opens and closes the fence around nothing",
+        "",
+        1,
+        true,
+        {
+          lines: ["::stop-commands::<token>", "probe stderr:", "::<token>::", REFUSED, ""],
+          status: 1,
+          output: "",
+          probeErrLeft: false,
+        },
+      ],
+      [
+        "without a PAT a refused probe warns naming both remedies, skips, and prints no stderr (control)",
+        "refused\n",
+        1,
+        false,
+        { lines: [NO_PAT, ""], status: 0, output: "proceed=false\n", probeErrLeft: false },
+      ],
+      [
+        "a probe the token passes proceeds and prints nothing (control)",
+        "",
+        0,
+        true,
+        { lines: [""], status: 0, output: "proceed=true\n", probeErrLeft: false },
+      ],
+    ],
+  )("%s", async (_name, stderr, gitStatus, patSet, expected) => {
+    const probe = await runProbe(run, stderr, gitStatus, patSet);
+    expect(probe).toEqual(withToken(expected, probe));
   });
 
-  test("a stderr carrying workflow-command text is confined to indented lines inside the fence", async () => {
-    const hostile = "::stop-commands::probe-marker\nremote: %25 done\r\n::error::forged\n";
-    const probe = await runProbe(run, hostile, 1, true);
-    expect(probe.status).toBe(1);
-    expectFenced(probe.lines, [
-      "  ::stop-commands::probe-marker",
-      "  remote: %25 done\r",
-      "  ::error::forged",
-    ]);
-    expect(probe.probeErrLeft).toBe(false);
-  });
-
-  test("an empty stderr opens and closes the fence around nothing", async () => {
-    const probe = await runProbe(run, "", 1, true);
-    expect(probe.status).toBe(1);
-    expectFenced(probe.lines, []);
-    expect(probe.probeErrLeft).toBe(false);
-  });
-
-  test("without a PAT a refused probe warns naming both remedies, skips, and prints no stderr (control)", async () => {
-    const probe = await runProbe(run, "refused\n", 1, false);
-    expect(probe.status).toBe(0);
-    const commands = probe.lines.filter((line) => line.startsWith("::"));
-    expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatch(/^::warning::/);
-    // The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from.
-    expect(commands[0]).toContain("contents: write");
-    expect(commands[0]).toContain("REPO_PLATFORM_TOKEN");
-    expect(probe.lines).not.toContain("  refused");
-    expect(probe.output).toBe("proceed=false\n");
-    expect(probe.probeErrLeft).toBe(false);
-  });
-
-  test("a probe the token passes proceeds and prints nothing (control)", async () => {
-    const probe = await runProbe(run, "", 0, true);
-    expect(probe.status).toBe(0);
-    expect(probe.lines).toEqual([""]);
-    expect(probe.output).toBe("proceed=true\n");
-    expect(probe.probeErrLeft).toBe(false);
+  test("the fence token is fresh per run: a fixed one is a token remote text could name to resume command processing", async () => {
+    const first = must(fenceToken(await runProbe(run, "refused", 1, true)), "a fence token");
+    const second = must(fenceToken(await runProbe(run, "refused", 1, true)), "a fence token");
+    expect(first).not.toBe(second);
   });
 });

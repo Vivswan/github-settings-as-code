@@ -408,6 +408,8 @@ describe("packageRelease", () => {
 
   test.each<[tag: string, error: RegExp]>([
     ["v2.1-rc.0", /not a vX\.Y\.Z release tag/],
+    // The shape release-please mints with include-component-in-tag on; the config keeps it off, and the hook refuses it either way.
+    ["github-settings-as-code-v2.1.0", /not a vX\.Y\.Z release tag/],
     // Well-shaped, but not the version this source's manifest released.
     ["v2.2.0", /did not release/],
   ])("the tag %s mints nothing", (tag, error) => {
@@ -1048,23 +1050,23 @@ describe("anchorCheck", () => {
 });
 
 describe("release configuration contract", () => {
-  test("the committed config pins the tagless-draft knobs (shape only; the flow itself is not exercised here)", () => {
+  test("release-please cuts a tagless draft and leaves the release to the hook: no tag ever lands on main, and the release job runs from the hook", () => {
+    // An external tool's knobs the platform does not enforce: a tag release-please created would sit on main, and
+    // skip-github-release would leave release_created unfired, so the hook that packages and tags never runs.
+    // release-please resolves each knob per package first, then from the top level, then its default.
     const config = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8")) as {
-      "skip-github-release"?: unknown;
-      "include-component-in-tag"?: unknown;
-      "last-release-sha"?: unknown;
-      packages: Record<string, Record<string, unknown>>;
+      "skip-github-release"?: boolean;
+      packages: Record<
+        string,
+        { draft?: boolean; "force-tag-creation"?: boolean; "skip-github-release"?: boolean }
+      >;
     };
     const root = config.packages["."];
-    // release-please must never create a tag on main; the hook mints the only tag, on the merge commit's packaged commit.
-    //   draft: true + force-tag-creation: false  -> explicit, since the upstream default could change
-    //   include-component-in-tag: false          -> tags stay strictly vX.Y.Z, the one shape releaseMajor() accepts
-    //   skip-github-release unset                -> set, release_created never fires and the hook never runs
-    expect(root?.draft).toBe(true);
-    expect(root?.["force-tag-creation"]).toBe(false);
-    expect(config["skip-github-release"]).toBeUndefined();
-    expect(config["include-component-in-tag"]).toBe(false);
-    expect(typeof config["last-release-sha"]).toBe("string");
+    expect({
+      draft: root?.draft,
+      forceTagCreation: root?.["force-tag-creation"],
+      skipGithubRelease: root?.["skip-github-release"] ?? config["skip-github-release"] ?? false,
+    }).toEqual({ draft: true, forceTagCreation: false, skipGithubRelease: false });
   });
 });
 

@@ -10,11 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import {
-  camelCaseGapName,
-  gapFileBases,
-  generateIndex,
-} from "../../.github/scripts/gen-gaps-index.js";
+import { gapFileBases, generateIndex } from "../../.github/scripts/gen-gaps-index.js";
 import {
   type Diagnostic,
   isGapFile,
@@ -177,15 +173,6 @@ describe("planGraduation", () => {
   });
 });
 
-describe("camelCaseGapName", () => {
-  test("maps kebab file bases to the index import alias", () => {
-    expect(camelCaseGapName("merge-queue")).toBe("mergeQueue");
-    expect(camelCaseGapName("pages")).toBe("pages");
-    expect(camelCaseGapName("a-b-c")).toBe("aBC");
-    expect(camelCaseGapName("code-scanning-2")).toBe("codeScanning2");
-  });
-});
-
 describe("gapFileBases", () => {
   test.each<[label: string, listing: string[], bases: string[]]>([
     [
@@ -263,10 +250,13 @@ describe("generateIndex", () => {
 });
 
 describe("isSpecPinned", () => {
-  test("detects the documentedInSpec: false flag in a gap source", () => {
-    expect(isSpecPinned("documentedInSpec: false,")).toBe(true);
-    expect(isSpecPinned("documentedInSpec: true,")).toBe(false);
-    expect(isSpecPinned("routes only, spec-only shape")).toBe(false);
+  // The flag's exact spelling decides which gap files the graduation rewrites; a looser read would rewrite a spec-only gap.
+  test.each<[source: string, pinned: boolean]>([
+    ["documentedInSpec: false,", true],
+    ["documentedInSpec: true,", false],
+    ["routes only, spec-only shape", false],
+  ])("the gap source %j is spec-pinned: %p", (source, pinned) => {
+    expect(isSpecPinned(source)).toBe(pinned);
   });
 });
 
@@ -402,10 +392,10 @@ describe("the real src/upstream-gaps/ satisfies the scripts' contracts", () => {
 });
 
 describe("spec-only sources never reach the deletion branch", () => {
-  test("isSpecOnly distinguishes the two gap kinds", () => {
-    expect(isSpecOnly('export const GAP = defineSpecOnlyGap({\n  routes: ["GET /x"],\n});')).toBe(
-      true,
-    );
-    expect(isSpecOnly("export const GAP = defineGap({ documentedInSpec: false });")).toBe(false);
+  test.each<[source: string, specOnly: boolean]>([
+    ['export const GAP = defineSpecOnlyGap({\n  routes: ["GET /x"],\n});', true],
+    ["export const GAP = defineGap({ documentedInSpec: false });", false],
+  ])("the gap source %j is spec-only: %p", (source, specOnly) => {
+    expect(isSpecOnly(source)).toBe(specOnly);
   });
 });

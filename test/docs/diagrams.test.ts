@@ -195,146 +195,156 @@ describe("diagram guard (mutation checks)", () => {
   const demo = `Demonstrated by: [x](${REPO_FILE_URL}test/engine/layers.test.ts).`;
   const page = (label: string, tail = demo): string =>
     `# T\n\n\`\`\`mermaid\nflowchart LR\n  a["${label}"]\n\`\`\`\n\n${tail}\n\n## Next\n`;
+  /** A flowchart whose body is `body` (one or more node definitions), followed by the demonstration line. */
+  const flowchart = (body: string): string =>
+    `# T\n\n\`\`\`mermaid\nflowchart LR\n  ${body}\n\`\`\`\n\n${demo}\n`;
+  const CAPTION_TAIL =
+    "looks like code but reads as a caption; a code segment starts with a src/, test/, docs/, lib/, or .github/ path";
+  const NEITHER_TAIL =
+    "is neither a symbol nor a path; after a path, a label lists only exported symbols";
 
-  test.each<[string, string]>([
+  // Every problem a page can raise, whole: the label (or the line) it names, then the message; an accepted page raises none.
+  test.each<[name: string, markdown: string, problems: string[]]>([
     [
       "a real path with its exported symbols",
-      "src/engine/layers.ts<br>standaloneView() mergeLayers()",
+      page("src/engine/layers.ts<br>standaloneView() mergeLayers()"),
+      [],
     ],
     [
       "a caption before the path, and symbols split across segments and commas",
-      "the fold<br>src/engine/layers.ts mergeLayers()<br>standaloneView(), Layer",
+      page("the fold<br>src/engine/layers.ts mergeLayers()<br>standaloneView(), Layer"),
+      [],
     ],
-  ])("accepts %s", (_case, label) => {
-    expect(diagramProblems(page(label), ROOT)).toEqual([]);
-  });
-
-  test("reads a node defined inline on an edge line", () => {
-    const markdown = `# T
-
-\`\`\`mermaid
-flowchart LR
-  a["x"] -->|label| b["src/engine/nowhere.ts<br>nothing()"]
-\`\`\`
-
-${demo}
-`;
-    expect(diagramProblems(markdown, ROOT)).toEqual([
-      '"src/engine/nowhere.ts<br>nothing()": src/engine/nowhere.ts does not exist',
-    ]);
-  });
-
-  test.each<[string, string, string[]]>([
-    ["a missing file", "src/engine/nowhere.ts<br>fold()", ["src/engine/nowhere.ts does not exist"]],
+    [
+      "a diagram inside a generated region, which needs no demonstration line",
+      `# T\n\n## Map\n\n<!-- BEGIN GENERATED: x -->\n\`\`\`mermaid\ngraph TD\n  a["src/engine/"]\n\`\`\`\n<!-- END GENERATED: x -->\n`,
+      [],
+    ],
+    [
+      "a node defined inline on an edge line",
+      flowchart('a["x"] -->|label| b["src/engine/nowhere.ts<br>nothing()"]'),
+      ['"src/engine/nowhere.ts<br>nothing()": src/engine/nowhere.ts does not exist'],
+    ],
+    [
+      "a missing file",
+      page("src/engine/nowhere.ts<br>fold()"),
+      ['"src/engine/nowhere.ts<br>fold()": src/engine/nowhere.ts does not exist'],
+    ],
     [
       "an unexported symbol",
-      "src/engine/layers.ts<br>foldEverything()",
-      ["src/engine/layers.ts exports no foldEverything"],
+      page("src/engine/layers.ts<br>foldEverything()"),
+      [
+        '"src/engine/layers.ts<br>foldEverything()": src/engine/layers.ts exports no foldEverything',
+      ],
     ],
     [
       "a symbol on a directory",
-      "src/engine/<br>mergeLayers()",
-      ["src/engine/ is a directory, so it exports no mergeLayers"],
+      page("src/engine/<br>mergeLayers()"),
+      ['"src/engine/<br>mergeLayers()": src/engine/ is a directory, so it exports no mergeLayers'],
     ],
     [
       "identifiers after a path that it does not export",
-      "src/engine/layers.ts the fold",
-      ["src/engine/layers.ts exports no the", "src/engine/layers.ts exports no fold"],
+      page("src/engine/layers.ts the fold"),
+      [
+        '"src/engine/layers.ts the fold": src/engine/layers.ts exports no the',
+        '"src/engine/layers.ts the fold": src/engine/layers.ts exports no fold',
+      ],
     ],
     [
       "a token that is neither",
-      "src/engine/layers.ts mergeLayers() re-exported",
-      ['"re-exported" is neither a symbol nor a path'],
+      page("src/engine/layers.ts mergeLayers() re-exported"),
+      [`"src/engine/layers.ts mergeLayers() re-exported": "re-exported" ${NEITHER_TAIL}`],
     ],
     [
       "a caption after the path, which reads as symbols",
-      "src/engine/layers.ts<br>low to high",
+      page("src/engine/layers.ts<br>low to high"),
       [
-        "src/engine/layers.ts exports no low",
-        "src/engine/layers.ts exports no to",
-        "src/engine/layers.ts exports no high",
+        '"src/engine/layers.ts<br>low to high": src/engine/layers.ts exports no low',
+        '"src/engine/layers.ts<br>low to high": src/engine/layers.ts exports no to',
+        '"src/engine/layers.ts<br>low to high": src/engine/layers.ts exports no high',
       ],
     ],
     [
       "a type and an unexported name in a comma list",
-      "src/sections/contract/module.ts<br>SectionModule, NeverExported",
-      ["src/sections/contract/module.ts exports no NeverExported"],
+      page("src/sections/contract/module.ts<br>SectionModule, NeverExported"),
+      [
+        '"src/sections/contract/module.ts<br>SectionModule, NeverExported": src/sections/contract/module.ts exports no NeverExported',
+      ],
     ],
     [
       "a mistyped path root hiding as a caption",
-      "srcc/engine/layers.ts<br>nonexistent()",
+      page("srcc/engine/layers.ts<br>nonexistent()"),
       [
-        '"srcc/engine/layers.ts" looks like code but reads as a caption',
-        '"nonexistent()" looks like code but reads as a caption',
+        `"srcc/engine/layers.ts<br>nonexistent()": "srcc/engine/layers.ts" ${CAPTION_TAIL}`,
+        `"srcc/engine/layers.ts<br>nonexistent()": "nonexistent()" ${CAPTION_TAIL}`,
       ],
     ],
     [
       "a symbol list broken by punctuation",
-      "src/engine/layers.ts<br>mergeLayers(); nonexistent()",
+      page("src/engine/layers.ts<br>mergeLayers(); nonexistent()"),
       [
-        '"mergeLayers();" is neither a symbol nor a path',
-        "src/engine/layers.ts exports no nonexistent",
+        `"src/engine/layers.ts<br>mergeLayers(); nonexistent()": "mergeLayers();" ${NEITHER_TAIL}`,
+        '"src/engine/layers.ts<br>mergeLayers(); nonexistent()": src/engine/layers.ts exports no nonexistent',
       ],
     ],
     [
       "a lone symbol with no path to bind to",
-      "the fold<br>mergeLayers()",
-      ['"mergeLayers()" looks like code but reads as a caption'],
+      page("the fold<br>mergeLayers()"),
+      [`"the fold<br>mergeLayers()": "mergeLayers()" ${CAPTION_TAIL}`],
     ],
-  ])("rejects %s", (_case, label, errors) => {
-    const problems = diagramProblems(page(label), ROOT);
-    expect(problems).toHaveLength(errors.length);
-    for (const [index, error] of errors.entries()) {
-      expect(problems[index]).toContain(error);
-    }
-  });
-
-  test.each<[string, string]>([
-    ["a round node", 'a("src/engine/layers.ts nothing()")'],
-    ["a stadium node", 'a(["src/engine/layers.ts nothing()"])'],
-    ["a rhombus node", 'a{"src/engine/layers.ts nothing()"}'],
-    ["a flag node", 'a>"src/engine/layers.ts nothing()"]'],
-  ])("reads the label of %s", (_case, node) => {
-    const markdown = `# T\n\n\`\`\`mermaid\nflowchart LR\n  ${node}\n\`\`\`\n\n${demo}\n`;
-    expect(diagramProblems(markdown, ROOT)).toEqual([
-      '"src/engine/layers.ts nothing()": src/engine/layers.ts exports no nothing',
-    ]);
-  });
-
-  test("rejects an unquoted node label", () => {
-    const markdown = `# T\n\n\`\`\`mermaid\nflowchart LR\n  a[src/engine/layers.ts nothing()]\n\`\`\`\n\n${demo}\n`;
-    expect(diagramProblems(markdown, ROOT)).toEqual([
-      'node "a[src/engine/layers.ts nothing()]" has an unquoted label; quote it so the pins can read it',
-    ]);
-  });
-
-  test.each<[string, string, string]>([
+    // Every node shape with a quoted label reads the same way.
     [
-      "no demonstration line",
-      "Some prose.",
-      'line 3: the diagram has no "Demonstrated by:" line before the next heading',
+      "a round node",
+      flowchart('a("src/engine/layers.ts nothing()")'),
+      ['"src/engine/layers.ts nothing()": src/engine/layers.ts exports no nothing'],
     ],
     [
-      "a relative demonstration link",
-      "Demonstrated by: [x](../test/engine/layers.test.ts).",
-      `line 3: "../test/engine/layers.test.ts" is not a ${REPO_FILE_URL} link`,
+      "a stadium node",
+      flowchart('a(["src/engine/layers.ts nothing()"])'),
+      ['"src/engine/layers.ts nothing()": src/engine/layers.ts exports no nothing'],
     ],
     [
-      "a demonstration link to a missing file",
-      `Demonstrated by: [x](${REPO_FILE_URL}test/engine/nowhere.test.ts).`,
-      `line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`,
+      "a rhombus node",
+      flowchart('a{"src/engine/layers.ts nothing()"}'),
+      ['"src/engine/layers.ts nothing()": src/engine/layers.ts exports no nothing'],
     ],
     [
-      "a demonstration line linking nothing",
-      "Demonstrated by: the layers test.",
-      'line 3: the "Demonstrated by:" line links nothing',
+      "a flag node",
+      flowchart('a>"src/engine/layers.ts nothing()"]'),
+      ['"src/engine/layers.ts nothing()": src/engine/layers.ts exports no nothing'],
     ],
-  ])("rejects a concept diagram with %s", (_case, tail, error) => {
-    expect(diagramProblems(page("src/engine/layers.ts", tail), ROOT)).toEqual([error]);
-  });
-
-  test("a diagram inside a generated region needs no demonstration line", () => {
-    const generated = `# T\n\n## Map\n\n<!-- BEGIN GENERATED: x -->\n\`\`\`mermaid\ngraph TD\n  a["src/engine/"]\n\`\`\`\n<!-- END GENERATED: x -->\n`;
-    expect(diagramProblems(generated, ROOT)).toEqual([]);
+    [
+      "an unquoted node label",
+      flowchart("a[src/engine/layers.ts nothing()]"),
+      [
+        'node "a[src/engine/layers.ts nothing()]" has an unquoted label; quote it so the pins can read it',
+      ],
+    ],
+    // The demonstration line a concept diagram needs, absent or malformed.
+    [
+      "a concept diagram with no demonstration line",
+      page("src/engine/layers.ts", "Some prose."),
+      ['line 3: the diagram has no "Demonstrated by:" line before the next heading'],
+    ],
+    [
+      "a concept diagram with a relative demonstration link",
+      page("src/engine/layers.ts", "Demonstrated by: [x](../test/engine/layers.test.ts)."),
+      [`line 3: "../test/engine/layers.test.ts" is not a ${REPO_FILE_URL} link`],
+    ],
+    [
+      "a concept diagram with a demonstration link to a missing file",
+      page(
+        "src/engine/layers.ts",
+        `Demonstrated by: [x](${REPO_FILE_URL}test/engine/nowhere.test.ts).`,
+      ),
+      [`line 3: "${REPO_FILE_URL}test/engine/nowhere.test.ts" names a file that does not exist`],
+    ],
+    [
+      "a concept diagram with a demonstration line linking nothing",
+      page("src/engine/layers.ts", "Demonstrated by: the layers test."),
+      ['line 3: the "Demonstrated by:" line links nothing'],
+    ],
+  ])("%s", (_name, markdown, problems) => {
+    expect(diagramProblems(markdown, ROOT)).toEqual(problems);
   });
 });

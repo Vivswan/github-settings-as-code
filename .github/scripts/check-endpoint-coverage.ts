@@ -6,10 +6,12 @@
  * `bun .github/scripts/check-endpoint-coverage.ts` fails on any cold route, naming it.
  */
 
+import { err, ok, type Result } from "neverthrow";
 import {
   endpointMethod,
   endpointPath,
   matchesTemplate,
+  type Route as RegistryRoute,
 } from "../../src/sections/contract/endpoints.js";
 import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
 import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
@@ -20,9 +22,18 @@ type Route =
   | { kind: "rest"; key: string; method: string; path: string }
   | { kind: "graphql"; key: string; opName: string };
 
-export function registeredRoutes(): Route[] {
-  return [
-    ...Object.entries(allEndpoints()).map(
+/** The registry slice the gate reads, keyed "section.role"; a test supplies a fixture of the same shape. */
+export interface RouteRegistry {
+  readonly endpoints: Readonly<Record<string, { readonly route: RegistryRoute }>>;
+  readonly graphqlOps: Readonly<Record<string, { readonly name: string }>>;
+}
+
+/** An empty registry is refused: "0/0 routes hit" would otherwise pass the gate with nothing checked. */
+export function registeredRoutes(
+  registry: RouteRegistry = { endpoints: allEndpoints(), graphqlOps: allGraphqlOps() },
+): Result<Route[], string> {
+  const routes: Route[] = [
+    ...Object.entries(registry.endpoints).map(
       ([key, endpoint]): Route => ({
         kind: "rest",
         key,
@@ -30,10 +41,16 @@ export function registeredRoutes(): Route[] {
         path: endpointPath(endpoint.route),
       }),
     ),
-    ...Object.entries(allGraphqlOps()).map(
+    ...Object.entries(registry.graphqlOps).map(
       ([key, op]): Route => ({ kind: "graphql", key, opName: op.name }),
     ),
   ];
+  if (routes.length === 0) {
+    return err(
+      "no routes registered: allEndpoints() and allGraphqlOps() returned nothing, so the coverage gate would pass vacuously; fix the registry (src/sections/registry.ts) or the import in .github/scripts/check-endpoint-coverage.ts",
+    );
+  }
+  return ok(routes);
 }
 
 export function recordHits(
@@ -65,7 +82,12 @@ export function coldRoutes(hit: ReadonlySet<string>, routes: Route[]): string[] 
 }
 
 async function main(): Promise<number> {
-  const routes = registeredRoutes();
+  const registered = registeredRoutes();
+  if (registered.isErr()) {
+    console.error(`coverage: ${registered.error}`);
+    return 1;
+  }
+  const routes = registered.value;
   const hit = new Set<string>();
 
   const roots = scenarioRoots();
