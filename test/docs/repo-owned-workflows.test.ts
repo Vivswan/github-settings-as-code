@@ -24,7 +24,9 @@ const label = (step: Step): string => step.name ?? step.uses ?? step.run ?? "unn
 const workingDirectory = (step: Step): unknown =>
   (step as Step & { "working-directory"?: unknown })["working-directory"];
 
-/** Every way a push job breaks the boundary; the assertion and the negative controls read this one list. */
+/** A drift tripwire over the named lexical shapes of a push job (the default-branch ref into trusted, the PR head
+ * into branch, the working directory, no literal branch or PR_CHECKOUT reference, one push-script step), not an
+ * enumeration of every bypass; the assertion and the negative controls read this one list. */
 function boundaryProblems(push: Job | undefined): string[] {
   const problems: string[] = [];
   const steps = push?.steps ?? [];
