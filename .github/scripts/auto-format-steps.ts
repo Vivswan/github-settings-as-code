@@ -1,16 +1,37 @@
 /**
- * The auto-format.yml push step: the formatting patch the format job cut on HEAD_SHA, committed and pushed to the
- * PR branch under a lease on that commit.
+ * The two auto-format.yml steps: the format job's run of the formatter, cut into a patch for the push job, and
+ * that job's commit of the patch to the PR branch under a lease on the commit it was cut on.
  *
- *   push   push job   GH_TOKEN, HEAD_REF, HEAD_SHA, RUNNER_TEMP, GITHUB_REPOSITORY   -> the commit on the PR branch
+ *   format   format job   RUNNER_TEMP, GITHUB_OUTPUT                                   -> format.patch, head=, changed=
+ *   push     push job     GH_TOKEN, HEAD_REF, HEAD_SHA, RUNNER_TEMP, GITHUB_REPOSITORY   -> the commit on the PR branch
  *
  * Node builtins only: the push job installs nothing, so no git hook or lifecycle script exists where the write
  * token is.
  */
 
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
-import { capture, requireEnv, run } from "./lib/workflow-step.js";
+import { capture, requireEnv, run, setOutput } from "./lib/workflow-step.js";
+
+function format(): void {
+  // The patch belongs to this commit alone; the push job refuses any other head.
+  setOutput("head", capture(["git", "rev-parse", "HEAD"]));
+  run(["bun", "run", "lint:fix"]);
+  // Anything the formatter left staged is not this workflow's fix: start from an empty index, then stage
+  // modifications and deletions of tracked files alone (a formatter adds nothing).
+  run(["git", "reset", "-q"]);
+  run(["git", "add", "-u"]);
+  const patch = join(requireEnv("RUNNER_TEMP"), "format.patch");
+  run(["git", "diff", "--cached", "--binary"], { stdoutFile: patch });
+  if (statSync(patch).size === 0) {
+    console.log("nothing to format");
+    setOutput("changed", "false");
+    return;
+  }
+  run(["git", "diff", "--cached", "--stat"]);
+  setOutput("changed", "true");
+}
 
 function push(): void {
   // bun has already read its bunfig.toml and .env from the trusted checkout it started in; only git runs in the
@@ -42,11 +63,13 @@ function push(): void {
 
 if (import.meta.main) {
   const command = process.argv[2];
-  if (command === "push") {
+  if (command === "format") {
+    format();
+  } else if (command === "push") {
     push();
   } else {
     console.error(
-      `auto-format-steps: unknown command ${JSON.stringify(command ?? null)}; expected push`,
+      `auto-format-steps: unknown command ${JSON.stringify(command ?? null)}; expected format | push`,
     );
     process.exit(1);
   }
