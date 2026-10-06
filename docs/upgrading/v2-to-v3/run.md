@@ -138,7 +138,7 @@ Two smaller moves ride along:
 - A section that reads anything must declare `snapshot()`; only the write-only `check_suite_preferences` reports `unsupported`, and the `snapshot is not implemented for this section yet` note is gone.
 - The organization-only sections (`teams`, `custom_properties`) are probed for the owner kind by the registry, ahead of their own plan and snapshot. The personal-account note is unchanged. A settings-file mistake in those sections (two entries naming one team) is validation's, before any request ([section 34](#34-file-only-checks-run-before-the-first-write)).
 
-For `@vivswan/github-settings-as-code` consumers, `SectionModule` requires `snapshot()` on a module whose endpoints declare a read; a custom reading module without one stops compiling, so implement it.
+For `@vivswan/github-settings-as-code` consumers, a `SectionModule` typed over its literal endpoint dictionaries requires `snapshot()` when an endpoint declares a read; with the erased default, which `sectionModule()` returns, nothing is checked.
 
 ## 26. The snapshot file is canonical and undated
 
