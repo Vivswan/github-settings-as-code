@@ -4,12 +4,15 @@
  *   probe-schema   @octokit/openapi and @octokit/graphql-schema at latest, then the lockstep tests
  *   probe-types    @octokit/types at latest, then the typecheck, its failures sorted into tripwires and breakage
  *
- * Each ends the night red instead of leaving a later PR to find the break. Node builtins only.
+ * Each ends the night red instead of leaving a later PR to find the break.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { countNoun } from "../../src/text.js";
+import { planGraduation } from "./graduate-upstream-gaps.js";
+import { parseDiagnostics } from "./lib/tsc-diagnostics.js";
 import { capture, run, status } from "./lib/workflow-step.js";
 
 const SCHEMA_PACKAGES = ["@octokit/openapi", "@octokit/graphql-schema"] as const;
@@ -17,8 +20,6 @@ const LOCKSTEP_TESTS = [
   "test/e2e/openapi/validate.test.ts",
   "test/sections/graphql-queries.test.ts",
 ] as const;
-/** tsc's one-error-per-line format under --pretty false: `src/upstream-gaps/<file>.ts(line,col): error TS2344: ...`. */
-const TRIPWIRE_LINE = /^src\/upstream-gaps\/.+error TS2344/;
 
 /** The version `bun add` left under the checkout's node_modules, read from the file itself: bun's resolver would
  * auto-install a package it does not find there, and that is exactly the pin this probe must not test. */
@@ -57,7 +58,7 @@ function typecheck(): { clean: boolean; log: string } {
   const scratch = mkdtempSync(join(tmpdir(), "nightly-typecheck-"));
   try {
     const file = join(scratch, "typecheck.log");
-    // --pretty false keeps the one-error-per-line format TRIPWIRE_LINE parses, independent of tsc's TTY detection.
+    // --pretty false keeps the one-error-per-line format parseDiagnostics reads, independent of tsc's TTY detection.
     const code = status(["bun", "run", "typecheck", "--pretty", "false"], {
       stdoutFile: file,
       stderrToo: true,
@@ -75,25 +76,30 @@ function probeTypes(): void {
     console.log("typecheck is clean against @octokit/types@latest");
     return;
   }
+  // The graduate script's own reading of the log, so the two agree on which files are tripwires. bun's own lines
+  // (`$ bun x tsc ...`, the exit-code line) ride in the merged log and parse as nothing.
+  const { gapFiles, foreign } = planGraduation(parseDiagnostics(log).diagnostics);
+  const report: string[] = [];
+  if (gapFiles.length > 0) {
+    report.push(
+      "::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:",
+      ...gapFiles,
+    );
+  }
+  if (foreign.length > 0) {
+    const count = countNoun(foreign.length, "diagnostic", "diagnostics");
+    report.push(
+      `::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires (${count}); ` +
+        "a types major may have broken the build (see log above)",
+    );
+  }
+  if (report.length === 0) {
+    report.push(
+      "::error::typecheck against @octokit/types@latest failed without a diagnostic this probe can read (see log above)",
+    );
+  }
   // One synchronous write: stdout is a pipe on the runner, and a buffered write process.exit cuts short would
   // drop the tail of a large log and the annotation after it.
-  const tripped = [
-    ...new Set(
-      log
-        .split("\n")
-        .filter((line) => TRIPWIRE_LINE.test(line))
-        .map((line) => line.split("(")[0] ?? line),
-    ),
-  ].sort();
-  const report =
-    tripped.length > 0
-      ? [
-          "::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:",
-          ...tripped,
-        ]
-      : [
-          "::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires; a types major may have broken the build (see log above)",
-        ];
   writeSync(1, `${log}${report.join("\n")}\n`);
   process.exit(1);
 }
