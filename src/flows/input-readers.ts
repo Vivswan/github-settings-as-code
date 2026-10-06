@@ -7,13 +7,12 @@ import { err, ok, type Result, safeTry } from "neverthrow";
 import {
   AFFILIATIONS,
   ARCHIVED_FILTERS,
-  compileExcludePattern,
   DEFAULT_DISCOVERY_FILTERS,
   type DiscoveryFilters,
-  type ExcludePattern,
   FORKS_FILTERS,
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
+import { compileExcludePattern, type ExcludePattern } from "../discovery/exclude-pattern.js";
 import { LIST_SEPARATOR } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { UNDECLARED_POLICIES } from "../engine/layers.js";
