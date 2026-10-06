@@ -471,22 +471,31 @@ describe("assertRegionPlacement", () => {
       'the table region must sit under "## Inputs" in doc.md; "# Title" is the heading above its BEGIN marker',
     ],
     [
-      "a table whose BEGIN marker is indented four spaces",
+      "a table whose BEGIN marker is indented four spaces, as an indented code block",
       PAGE.replace("<!-- BEGIN GENERATED: table", "    <!-- BEGIN GENERATED: table"),
       TABLE,
-      "the table region's BEGIN marker sits on a line indented as code in doc.md",
+      "the table region sits inside a code block in doc.md",
     ],
     [
-      "a table whose END marker is indented with a tab",
+      "a table whose END marker is indented with a tab, which ends the table and opens indented code",
       PAGE.replace("<!-- END GENERATED: table", "\t<!-- END GENERATED: table"),
       TABLE,
-      "the table region's END marker sits on a line indented as code in doc.md",
+      "the table region sits inside a code block in doc.md",
+    ],
+    [
+      "a table whose BEGIN marker sits in a code span, where the page shows it literally",
+      PAGE.replace(
+        "<!-- BEGIN GENERATED: table (edit x) -->",
+        "`<!-- BEGIN GENERATED: table (edit x) -->`",
+      ),
+      TABLE,
+      "the table region sits inside a code span in doc.md",
     ],
     [
       "an inline region on a line indented four spaces, text ahead of its marker",
       PAGE.replace("Result: (", "    Result: ("),
       LIST,
-      "the list region's BEGIN marker sits on a line indented as code in doc.md",
+      "the list region sits inside a code block in doc.md",
     ],
     [
       "a table whose BEGIN marker carries the quote prefix of the paragraph above it",
@@ -601,29 +610,25 @@ describe("assertRegionPlacement", () => {
   });
 
   test.each<[label: string, before: string, block: string]>([
-    ["an unclosed fence", "```\n", "fenced code"],
-    ["mixed delimiters", "```\n~~~\n", "fenced code"],
-    ["a shorter closer", "````\n```\n", "fenced code"],
+    ["an unclosed fence", "```\n", "code"],
+    ["mixed delimiters", "```\n~~~\n", "code"],
+    ["a shorter closer", "````\n```\n", "code"],
     [
       "a backtick fence whose info string holds a backtick, then a real opener",
       "```a`b\n```\n",
-      "fenced code",
+      "code",
     ],
     ["an unclosed raw block", "<pre>\n", "raw HTML"],
     ["an unclosed script block", "<script>\n", "raw HTML"],
     ["an unclosed textarea block", "<textarea>\n", "raw HTML"],
-    ["a stray closing tag, then a real opening one", "</pre>\n<pre>\n", "raw HTML"],
-    [
-      "a fence opened inside a raw block, then a real opener",
-      "<pre>\n```\n</pre>\n```\n",
-      "fenced code",
-    ],
-    ["a quoted fence, with the region quoted along", "> ```\n> ", "fenced code"],
-    ["a root fence holding a quoted fence line", "```\n> ```\n", "fenced code"],
+    ["a stray closing tag, a blank line, then a real opening one", "</pre>\n\n<pre>\n", "raw HTML"],
+    ["a fence opened inside a raw block, then a real opener", "<pre>\n```\n</pre>\n```\n", "code"],
+    ["a quoted fence, with the region quoted along", "> ```\n> ", "code"],
+    ["a root fence holding a quoted fence line", "```\n> ```\n", "code"],
     [
       "a quoted fence holding a deeper quoted fence line, with the region quoted along",
       "> ```\n> > ```\n> ",
-      "fenced code",
+      "code",
     ],
     ["a quoted raw block, with the region quoted along", "> <pre>\n> ", "raw HTML"],
   ])(
