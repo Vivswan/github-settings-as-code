@@ -1,9 +1,14 @@
 import { ok, type Result } from "neverthrow";
-import { type Delta, renderDelta } from "../../engine/diff.js";
-import type { SectionFailure } from "../contract/errors.js";
-import { cannotVerifyNote, valueDrift } from "../contract/module.js";
-import { type ExecTools, type PlainData, plainData, type Unverifiable } from "../contract/plan.js";
-import type { ErasedDecl } from "./list-section-decl.js";
+import { type Delta, renderDelta } from "../../../engine/diff.js";
+import type { SectionFailure } from "../../contract/errors.js";
+import { cannotVerifyNote, valueDrift } from "../../contract/module.js";
+import {
+  type ExecTools,
+  type PlainData,
+  plainData,
+  type Unverifiable,
+} from "../../contract/plan.js";
+import type { ErasedDecl } from "./decl.js";
 
 /** A write or comparable seen as plain fields. */
 export type Fields = Readonly<Record<string, unknown>>;

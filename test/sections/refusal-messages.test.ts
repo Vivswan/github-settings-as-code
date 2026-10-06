@@ -868,7 +868,7 @@ export function refusalSources(root: string): Source[] {
   for (const nested of ["nested", "branch-policies", "protection-rules"]) {
     add(`src/sections/environments/${nested}.ts`, "message-positions");
   }
-  add("src/sections/shared/repo-secrets.ts", "message-positions");
+  add("src/sections/shared/secrets-and-variables/repo-secrets.ts", "message-positions");
   add("src/sections/contract/module.ts", "message-positions");
   add("src/problem.ts", "message-positions");
   return sources;

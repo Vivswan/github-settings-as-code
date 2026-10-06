@@ -1,8 +1,8 @@
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
-import type { ListComparable, ListWrite } from "../shared/list-section-decl.js";
+import type { ListComparable, ListWrite } from "../shared/list/decl.js";
+import { listSection } from "../shared/list/section.js";
 import { LabelConfig } from "./schema.js";
 
 /** Case-insensitive matching is the section's whole contract; the brand marks a name as already folded. */

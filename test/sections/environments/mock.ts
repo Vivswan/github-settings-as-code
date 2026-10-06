@@ -7,7 +7,7 @@
 
 import { environmentsSection } from "../../../src/sections/environments/index.js";
 import { MAX_PINNED_ENVIRONMENTS } from "../../../src/sections/environments/schema.js";
-import { upperKey } from "../../../src/sections/shared/named-scope.js";
+import { upperKey } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import { mintNodeId } from "../../e2e/mock/node-id.js";
 import { MOCK_SECRETS_KEY_ID, MOCK_SECRETS_PUBLIC_KEY } from "../../e2e/mock/secrets.js";
 import {

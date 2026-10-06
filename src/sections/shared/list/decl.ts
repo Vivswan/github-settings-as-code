@@ -5,11 +5,11 @@
 
 import type { Result } from "neverthrow";
 import type { z } from "zod";
-import type { MatchKey } from "../../engine/diff.js";
-import type { SettingsFile, UndeclaredPolicySection } from "../../schema.js";
-import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import type { EndpointDecl, PathParams, Route } from "../contract/endpoints.js";
-import type { SectionFailure } from "../contract/errors.js";
+import type { MatchKey } from "../../../engine/diff.js";
+import type { SettingsFile, UndeclaredPolicySection } from "../../../schema.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../../types.js";
+import type { EndpointDecl, PathParams, Route } from "../../contract/endpoints.js";
+import type { SectionFailure } from "../../contract/errors.js";
 import type {
   DeclaredIssue,
   DeclaredSecretValue,
@@ -20,15 +20,15 @@ import type {
   undeclaredDrift,
   undeclaredNote,
   ValidatedInput,
-} from "../contract/module.js";
-import type { SectionPermission } from "../contract/permissions.js";
+} from "../../contract/module.js";
+import type { SectionPermission } from "../../contract/permissions.js";
 import type {
   PlainData,
   PlanContext,
   PlannedOp,
   SectionPlan,
   SnapshotContext,
-} from "../contract/plan.js";
+} from "../../contract/plan.js";
 
 /** A list section enumerates its live resources, so it is exactly a section with an undeclared policy. */
 export type ListSectionKey = UndeclaredPolicySection;

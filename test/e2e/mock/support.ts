@@ -18,7 +18,7 @@ import type {
   TaggedEndpoint,
   TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
-import { upperKey } from "../../../src/sections/shared/named-scope.js";
+import { upperKey } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import type { SetupKey, SetupSectionModule } from "../../../src/sections/shared/setup-section.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {

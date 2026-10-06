@@ -1,21 +1,21 @@
 /**
  * Existence reconciliation over route-free scopes: values are never read back, and every declared secret
  * is re-sealed on each apply. The four repo families (./repo-secrets.ts) and the environments section's
- * nested secrets (../environments/nested.ts) plan through it; the frame is ./named-scope.ts.
+ * nested secrets (../../environments/nested.ts) plan through it; the frame is ./named-scope.ts.
  */
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import type { UndeclaredPolicyList } from "../../types.js";
-import { type EndpointDecl, endpointPath } from "../contract/endpoints.js";
-import { type SectionFailure, sectionFailure } from "../contract/errors.js";
+import type { UndeclaredPolicyList } from "../../../types.js";
+import { type EndpointDecl, endpointPath } from "../../contract/endpoints.js";
+import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
 import {
   cannotVerifyNote,
   type DeclaredSecretValue,
   type SectionMeta,
   secretValuesOf,
-} from "../contract/module.js";
-import { type ExecTools, paramsWith, type SectionPlan } from "../contract/plan.js";
+} from "../../contract/module.js";
+import { type ExecTools, paramsWith, type SectionPlan } from "../../contract/plan.js";
 import {
   type AnyPlannedOp,
   missingNamedDrift,

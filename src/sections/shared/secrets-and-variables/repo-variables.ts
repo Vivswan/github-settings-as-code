@@ -8,25 +8,27 @@
 
 import type { Result } from "neverthrow";
 import type { z } from "zod";
-import type { MustBeNever } from "../../types.js";
-import { ActionsVariableConfig } from "../actions_variables/schema.js";
-import { AgentsVariableConfig } from "../agents_variables/schema.js";
-import type { SectionFailure } from "../contract/errors.js";
+import type { MustBeNever } from "../../../types.js";
+import { ActionsVariableConfig } from "../../actions_variables/schema.js";
+import { AgentsVariableConfig } from "../../agents_variables/schema.js";
+import type { SectionFailure } from "../../contract/errors.js";
 import {
   type DeclaredIssue,
   type GraphqlDict,
   type KeyedListLayering,
   keyedBy,
   type SectionSnapshot,
-} from "../contract/module.js";
-import type { PatResource } from "../contract/permissions.js";
+} from "../../contract/module.js";
+import type { PatResource } from "../../contract/permissions.js";
 import type {
   KeyedPlan,
   PlanMisfits,
   PlannedOp,
   SnapshotContext,
   WidePlan,
-} from "../contract/plan.js";
+} from "../../contract/plan.js";
+import { knobbed, routed } from "../schema-helpers.js";
+import { projectOntoSchema } from "../snapshot-helpers.js";
 import {
   type Declared,
   type KeyedValuesFamily,
@@ -34,8 +36,6 @@ import {
   snapshotOf,
 } from "./keyed-values.js";
 import { duplicateNameIssues, liveByName, upperKey } from "./named-scope.js";
-import { knobbed, routed } from "./schema-helpers.js";
-import { projectOntoSchema } from "./snapshot-helpers.js";
 import {
   LiveVariable,
   planVariables,

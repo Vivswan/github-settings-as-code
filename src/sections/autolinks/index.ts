@@ -3,8 +3,8 @@
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
-import { exactName } from "../shared/list-section-decl.js";
+import { exactName } from "../shared/list/decl.js";
+import { listSection } from "../shared/list/section.js";
 import { AutolinkConfig } from "./schema.js";
 
 const LiveAutolink = z.looseObject({

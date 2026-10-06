@@ -11,7 +11,7 @@ import type { UndeclaredPolicyList } from "../../types.js";
 import type { SectionFailure } from "../contract/errors.js";
 import type { SectionMeta } from "../contract/module.js";
 import type { SnapshotContext } from "../contract/plan.js";
-import { liveByName } from "../shared/named-scope.js";
+import { liveByName } from "../shared/secrets-and-variables/named-scope.js";
 import { projectOntoSchema, readOrNote, unreadableSecretNote } from "../shared/snapshot-helpers.js";
 import { listBranchPolicies, policiesByName } from "./branch-policies.js";
 import type { ENDPOINTS } from "./endpoints.js";
