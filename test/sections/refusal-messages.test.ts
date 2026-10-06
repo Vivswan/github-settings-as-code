@@ -7,7 +7,7 @@
  *
  * Every string literal in a section schema slice, a shared schema helper, or compilable-form.ts is a refusal message
  * unless its position is in the listed exclusions (DATA_CONSTANTS by name, keys, specifiers, type positions,
- * vocabulary calls); in section modules, module.ts, repo-secrets.ts, and problem.ts, every literal inside a
+ * vocabulary calls); in section modules, module.ts, declared.ts, repo-secrets.ts, and problem.ts, every literal inside a
  * message-shaped object ({path, message}), an error:/consequence: property, or an issue-builder body is a message.
  * No reach or helper analysis: a literal cannot hide from a file scan, so a spelling the census does not follow is
  * not a class it has to learn.
@@ -870,6 +870,7 @@ export function refusalSources(root: string): Source[] {
   }
   add("src/sections/shared/secrets-and-variables/repo-secrets.ts", "message-positions");
   add("src/sections/contract/module.ts", "message-positions");
+  add("src/sections/contract/declared.ts", "message-positions");
   add("src/problem.ts", "message-positions");
   return sources;
 }
