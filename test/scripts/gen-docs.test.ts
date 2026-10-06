@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderArchitectureMermaid } from "../../.github/scripts/arch-lint.js";
 import type { CoverageData } from "../../.github/scripts/coverage-data.js";
 import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
@@ -18,10 +19,22 @@ import {
   type SectionsTableRow,
   sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
-import { bodyRefusal } from "../../.github/scripts/lib/generated-regions.js";
+import type { GeneratedRegion } from "../../.github/scripts/lib/generated-regions.js";
 import { tableFault, tableRow } from "../../src/report/markdown.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
+
+/** The region `name` among `regions`; a page that lost it fails here, not on an undefined read. */
+function regionNamed(
+  regions: readonly GeneratedRegion[] | undefined,
+  name: string,
+): GeneratedRegion {
+  const region = regions?.find((region) => region.name === name);
+  if (region === undefined) {
+    throw new Error(`no ${name} region is registered`);
+  }
+  return region;
+}
 
 describe("renderSectionsTable", () => {
   test("renders one row per section, derived cells around the authored ones", () => {
@@ -81,9 +94,7 @@ describe("renderSectionsTable", () => {
 });
 
 describe("the Sections table guard", () => {
-  const shape =
-    PAGE_REGIONS["docs/reference/sections.md"]?.find((region) => region.name === "sections-table")
-      ?.body ?? (() => "no sections-table region");
+  const region = regionNamed(PAGE_REGIONS["docs/reference/sections.md"], "sections-table");
   const sectionsRow =
     "| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name |";
   const sectionsTable = (rows: string): string =>
@@ -102,9 +113,9 @@ describe("the Sections table guard", () => {
       },
     );
     expect(rendered).toContain("|  labels (CRUD): `x`  |");
-    expect(bodyRefusal(shape, `\n${rendered}\n`)).toBeUndefined();
-    expect(bodyRefusal(shape, sectionsTable("").slice(0, -1))).toBeUndefined();
-    expect(bodyRefusal(shape, "\n")).toBeUndefined();
+    expect(region.bodyRefusal(`\n${rendered}\n`)).toBeUndefined();
+    expect(region.bodyRefusal(sectionsTable("").slice(0, -1))).toBeUndefined();
+    expect(region.bodyRefusal("\n")).toBeUndefined();
   });
 
   // Each body is table text the renderer never writes; admitted, it would be erased on the next regeneration.
@@ -156,7 +167,7 @@ describe("the Sections table guard", () => {
     ],
     ["a blank line after the last row", sectionsTable(`${sectionsRow}\n`), /line 4 has 0 cells/],
   ])("refuses %s, which does not round-trip", (_label, body, refusal) => {
-    expect(bodyRefusal(shape, body)).toMatch(refusal);
+    expect(region.bodyRefusal(body)).toMatch(refusal);
   });
 
   // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
@@ -185,11 +196,11 @@ describe("the Sections table guard", () => {
       }
       expect(thrown, input).toBe(fault);
       if (rendered !== undefined) {
-        expect(bodyRefusal(shape, `\n${rendered}\n`), input).toBeUndefined();
+        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
         outcomes.set(input, "written");
       } else {
         const joined = [SECTIONS_TABLE_HEADER, ...cells.map(tableRow)].join("\n");
-        expect(bodyRefusal(shape, `\n${joined}\n`), input).toBeDefined();
+        expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
         outcomes.set(input, "faulted");
       }
     };
@@ -214,16 +225,6 @@ describe("the Sections table guard", () => {
     const written = [...outcomes.values()].filter((outcome) => outcome === "written").length;
     expect(written).toBeGreaterThan(0);
     expect(outcomes.size - written).toBeGreaterThan(0);
-  });
-
-  test("a region that renders a table carries a round trip, never a hand-written grammar", () => {
-    // A table region's guard and its renderer share one grammar only through the round trip, so a RegExp body on a
-    // table region is a second grammar.
-    for (const region of Object.values(PAGE_REGIONS).flat()) {
-      if (region.render().startsWith("\n|")) {
-        expect(region.body, region.name).not.toBeInstanceOf(RegExp);
-      }
-    }
   });
 });
 
@@ -358,7 +359,7 @@ describe("renderCoverage", () => {
   // Prose may repeat a structural line word for word, and keys may hold the two Unicode line separators the cell
   // rule admits; the guard reads the structure from the lines around a line, never from one line alone, or a page
   // the generator wrote would be refused as authored.
-  test("a page whose prose repeats the Supported heading or the gaps header line, or whose keys hold a line separator, still reads back as the generator's", () => {
+  test("prose repeating a structural line, or keys holding a line separator, still read back as the generator's", () => {
     const rendered = render({
       docs: {
         ...docs,
@@ -731,11 +732,41 @@ describe("the committed pages", () => {
       },
       "the outputs-list region in docs/reference/inputs.md encloses content the generator would not write",
     ],
+    [
+      "the architecture map markers around an authored line inside the fence",
+      "docs/reference/architecture.md",
+      (page) => page.replace("```mermaid\ngraph TD\n", "```mermaid\ngraph TD\nAuthored note.\n"),
+      "the architecture-map region in docs/reference/architecture.md encloses content the generator would not write; move its marker back (line 3 is neither a layer node nor an import edge",
+    ],
+    [
+      "the architecture map markers around an authored line after the diagram",
+      "docs/reference/architecture.md",
+      (page) =>
+        page.replace(
+          "```\n<!-- END GENERATED: architecture-map -->",
+          "```\nAuthored note.\n<!-- END GENERATED: architecture-map -->",
+        ),
+      "the architecture-map region in docs/reference/architecture.md encloses content the generator would not write",
+    ],
   ])("refuses to regenerate %s in %s", (_label, path, mutate, error) => {
     // Each page reads wrong while its markers still pair up: the enclosed text is not the generator's, or a token-form reference
     // has no tail definition. A region moved away from its home is refused by the placement checks generated-regions.test.ts pins.
     const page = readFileSync(join(ROOT, path), "utf8");
     expect(() => renderPage(path, mutate(page))).toThrow(error);
+  });
+});
+
+describe("the architecture map guard", () => {
+  test("a layer id the renderer leaves as is (a dot, a digit) reads back, since only dashes are rewritten", () => {
+    // The parse and renderArchitectureMermaid() must agree on what a node id may hold, or a renamed layer would
+    // refuse its own freshly generated page.
+    const region = regionNamed(PAGE_REGIONS["docs/reference/architecture.md"], "architecture-map");
+    const diagram = renderArchitectureMermaid({
+      layers: { "plain.data": ["src/plain-data.ts"], v2: ["src/v2/", "src/v2.ts"] },
+      edges: { "plain.data": ["v2"] },
+      exclude: [],
+    });
+    expect(region.bodyRefusal(`\n\`\`\`mermaid\n${diagram}\n\`\`\`\n`)).toBeUndefined();
   });
 });
 

@@ -20,10 +20,8 @@ import {
   renderPolicyDefaultsTable,
 } from "../../.github/scripts/gen-action-docs.js";
 import {
-  type BodyShape,
-  bodyRefusal,
+  type GeneratedRegion,
   markerSyntaxFor,
-  type RegionSpec,
   regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
@@ -281,7 +279,7 @@ describe("permissions renderers", () => {
 describe("generated files", () => {
   test.each(
     Object.entries(GENERATED_REGIONS).flatMap(([path, regions]) =>
-      regions.map((region): [name: string, path: string, region: RegionSpec] => [
+      regions.map((region): [name: string, path: string, region: GeneratedRegion] => [
         region.name,
         path,
         region,
@@ -305,16 +303,22 @@ describe("generated files", () => {
     ).toThrow(`the ${name} region ${home}`);
   });
 
-  const shapes = new Map<string, BodyShape>(
+  const regions = new Map(
     Object.values(GENERATED_REGIONS)
       .flat()
-      .map((region) => [region.name, region.body]),
+      .map((region) => [region.name, region]),
   );
-  const shapeOf = (name: string): BodyShape => shapes.get(name) ?? (() => `no ${name} region`);
+  const regionOf = (name: string): GeneratedRegion => {
+    const region = regions.get(name);
+    if (region === undefined) {
+      throw new Error(`no ${name} region is registered`);
+    }
+    return region;
+  };
 
-  test("each region's body shape accepts its renderer's output on edge-case declarations", () => {
+  test("each region admits its renderer's output on edge-case declarations", () => {
     const accepts = (name: string, rendered: string): void => {
-      expect(bodyRefusal(shapeOf(name), `\n${rendered}\n`), name).toBeUndefined();
+      expect(regionOf(name).bodyRefusal(`\n${rendered}\n`), name).toBeUndefined();
     };
     accepts(
       "action-inputs",
@@ -376,9 +380,8 @@ describe("generated files", () => {
     }
   });
 
-  test("each region's body shape rejects authored text and every other region's body", () => {
-    // A shape loosened to accept anything would still pass the renderer test above; a sibling sharing the shape is the same table in another home,
-    // which the shape accepts by design.
+  test("each region refuses authored text and every other region's body", () => {
+    // A parse loosened to read anything back would still pass the renderer test above.
     const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
       list.map((region) => ({ path, region })),
     );
@@ -393,11 +396,11 @@ describe("generated files", () => {
       const foreign = [
         "\nAuthored prose the generator never writes.\n",
         "\n## A heading\n",
-        ...[...bodies].filter(([name]) => shapes.get(name) !== region.body).map(([, body]) => body),
+        ...[...bodies].filter(([name]) => name !== region.name).map(([, body]) => body),
       ];
       for (const body of foreign) {
         expect(
-          bodyRefusal(region.body, body),
+          region.bodyRefusal(body),
           `${region.name} accepts ${JSON.stringify(body.slice(0, 40))}`,
         ).toBeDefined();
       }
@@ -478,7 +481,7 @@ describe("generated files", () => {
     ],
     ["a body without its closing newline", policyTable(policyRow).slice(0, -1), /line 3 reads/],
   ])("the Defaults table guard refuses %s, which does not round-trip", (_label, body, refusal) => {
-    expect(bodyRefusal(shapeOf("policy-defaults-table"), body)).toMatch(refusal);
+    expect(regionOf("policy-defaults-table").bodyRefusal(body)).toMatch(refusal);
   });
 
   // The equivalence the round trip promises, held to the one statement both sides consult: the renderer throws
@@ -486,7 +489,7 @@ describe("generated files", () => {
   // guard refuses the same cells joined without the renderer whenever the statement faults. A check on one side
   // only turns a generated input red.
   test("the Defaults renderer and guard agree with the shared statement on every generated input", () => {
-    const shape = shapeOf("policy-defaults-table");
+    const region = regionOf("policy-defaults-table");
     const outcomes = new Map<string, "written" | "faulted">();
     const hold = (
       input: string,
@@ -511,11 +514,11 @@ describe("generated files", () => {
       }
       expect(thrown, input).toBe(fault);
       if (rendered !== undefined) {
-        expect(bodyRefusal(shape, `\n${rendered}\n`), input).toBeUndefined();
+        expect(region.bodyRefusal(`\n${rendered}\n`), input).toBeUndefined();
         outcomes.set(input, "written");
       } else {
         const joined = [DEFAULTS_TABLE_HEADER, ...rows.map(policyCells).map(tableRow)].join("\n");
-        expect(bodyRefusal(shape, `\n${joined}\n`), input).toBeDefined();
+        expect(region.bodyRefusal(`\n${joined}\n`), input).toBeDefined();
         outcomes.set(input, "faulted");
       }
     };
@@ -561,14 +564,53 @@ describe("generated files", () => {
     expect(outcomes.size - written).toBeGreaterThan(0);
   });
 
-  test("a region that renders a table carries a round trip, never a hand-written grammar", () => {
-    // A table region's guard and its renderer share one grammar only through the round trip, so a RegExp body on a
-    // table region is a second grammar.
-    for (const region of Object.values(GENERATED_REGIONS).flat()) {
-      if (region.render().startsWith("\n|")) {
-        expect(region.body, region.name).not.toBeInstanceOf(RegExp);
-      }
-    }
+  // A prose list the renderer could never have written comes back as a refusal naming the line, never as the
+  // renderer's own throw escaping the round trip.
+  test.each<[label: string, name: string, body: string, refusal: RegExp]>([
+    [
+      'a comma-joined pair with no "and"',
+      "permissions-grant-sentence",
+      "\nTo manage everything in one PAT, grant Issues, Pages at write.\n",
+      /^line 1 lists "Issues, Pages", which holds a comma or the word "and"$/,
+    ],
+    [
+      "a doubled joiner",
+      "permissions-gated-reads",
+      "\n- GitHub gates even the A and and and B reads at write, so `x` needs its write grant in check mode too.\n",
+      /^line 1 lists "and", which holds a comma or the word "and"$/,
+    ],
+    [
+      'a route span holding the word "and"',
+      "check-mode-gated-reads",
+      [
+        "",
+        "The read-only rule has exceptions, each a section to drop from the preview or grant at write:",
+        "",
+        "- GitHub gates the `GET /repos/{owner}/{repo}/labels and more` reads at write, so `labels` needs its Issues write grant in check mode to verify what they return.",
+        "",
+      ].join("\n"),
+      /^line 3 lists "`GET \/repos\/\{owner\}\/\{repo\}\/labels and more`", which holds a comma or the word "and"$/,
+    ],
+  ])("a malformed prose list, %s, is refused naming its line", (_label, name, body, refusal) => {
+    expect(regionOf(name).bodyRefusal(body)).toMatch(refusal);
+  });
+
+  test("the renderer refuses a list item a reader could not tell from a joiner", () => {
+    // A key's span is an item of the count sentence's prose list, so one holding "and" would read back as two.
+    expect(() =>
+      renderPolicyCountSentence([{ key: "labels and more", undeclaredDefault: "delete" }]),
+    ).toThrow(
+      '"`labels and more`" holds a comma or the word "and", which an item of a prose list cannot',
+    );
+  });
+
+  test("a count sentence past the word table is refused naming its line, never handed to the renderer's throw", () => {
+    const spans = Array.from({ length: 21 }, () => "`labels`");
+    const listed = `${spans.slice(0, -1).join(", ")}, and ${spans.at(-1)}`;
+    const body = `\nTwenty-one sections list the live resources sitting next to the declared ones: ${listed}.\n`;
+    expect(regionOf("policy-count-sentence").bodyRefusal(body)).toBe(
+      "line 1 lists 21 section keys, past the 20 the count words name",
+    );
   });
 
   // Each row is YAML the emitter never writes; admitted, it would be replaced on the next regeneration. The tab inside
@@ -601,8 +643,8 @@ describe("generated files", () => {
     ["text that is not YAML", "\n  x: [\n", /does not parse as YAML/],
     ["an alias without its anchor", "\n  x: *missing\n", /does not convert from YAML/],
   ])("the guard refuses %s, which does not round-trip", (label, body, refusal) => {
-    const shape = shapeOf(label.includes("outputs") ? "action-outputs" : "action-inputs");
-    expect(bodyRefusal(shape, body)).toMatch(refusal);
+    const region = regionOf(label.includes("outputs") ? "action-outputs" : "action-inputs");
+    expect(region.bodyRefusal(body)).toMatch(refusal);
   });
 
   test.each<[label: string, name: string, decl: { description: string; default: string }]>([
@@ -618,7 +660,7 @@ describe("generated files", () => {
     ],
   ])("legitimate emitter output with %s round-trips through the guard", (_label, name, decl) => {
     const text = renderActionInputs(Object.fromEntries([[name, decl]]));
-    expect(bodyRefusal(shapeOf("action-inputs"), `\n${text}\n`)).toBeUndefined();
+    expect(regionOf("action-inputs").bodyRefusal(`\n${text}\n`)).toBeUndefined();
     expect(Object.entries(parseYaml(`inputs:\n${text}\n`).inputs)).toEqual([
       [name, { ...decl, required: false }],
     ]);

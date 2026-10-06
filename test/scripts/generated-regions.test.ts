@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import {
   assertRegionPlacement,
+  block,
+  blockLine,
+  blockLines,
+  GeneratedRegion,
   type MarkerSyntax,
   markerSyntaxFor,
-  type RegionSpec,
+  type RegionPlacement,
   regenerateRegions,
   regionBounds,
   replaceRegion,
 } from "../../.github/scripts/lib/generated-regions.js";
+import { renderTable, tableBody } from "../../src/report/markdown.js";
 import { relocatedRegion } from "./relocated-region.js";
 
 const HTML_BLOCK = [
@@ -269,22 +275,64 @@ const PAGE = [
   "",
 ].join("\n");
 
-const TABLE_BODY = /^\n(?:\| A \| B \|\n\|---\|---\|\n(?:\| `[a-z]+` \| \d+ \|\n)*)?$/;
-const TABLE: RegionSpec = {
-  name: "table",
-  placement: { kind: "under-heading", heading: "## Inputs" },
-  body: TABLE_BODY,
-};
-const LIST: RegionSpec = {
-  name: "list",
-  placement: { kind: "under-heading", heading: "## Inputs" },
-  body: /^(?:`[a-z]`(?: \/ `[a-z]`)*)?$/,
-};
-const LINK: RegionSpec = {
-  name: "link",
-  placement: { kind: "tail" },
-  body: /^\n(?:\[form\]: \S+\n)?$/,
-};
+const TABLE_HEADER = "| A | B |\n|---|---|";
+const UNDER_INPUTS: RegionPlacement = { kind: "under-heading", heading: "## Inputs" };
+
+/** The block fixture: key and number rows under "| A | B |", rendered from `rows`. */
+function tableRegion(
+  placement: RegionPlacement = UNDER_INPUTS,
+  rows: ReadonlyArray<readonly [key: string, n: number]> = [],
+): GeneratedRegion {
+  return GeneratedRegion.of<ReadonlyArray<readonly [string, number]>>({
+    name: "table",
+    placement,
+    data: () => rows,
+    render: block((rows) =>
+      renderTable(
+        TABLE_HEADER,
+        rows.map(([key, n]) => [`\`${key}\``, String(n)]),
+      ),
+    ),
+    parse: tableBody(TABLE_HEADER, "keyed", (cells, key) =>
+      /^\d+$/.test(cells[1] ?? "")
+        ? ok([key, Number(cells[1])] as const)
+        : err("has no number in its second cell"),
+    ),
+  });
+}
+
+/** The inline fixture: single letters in code spans joined by " / ", on the marker's own line. */
+function listRegion(letters: readonly string[] = []): GeneratedRegion {
+  return GeneratedRegion.of<readonly string[]>({
+    name: "list",
+    placement: UNDER_INPUTS,
+    data: () => letters,
+    render: (letters) => letters.map((letter) => `\`${letter}\``).join(" / "),
+    parse: (body) =>
+      /^`[a-z]`(?: \/ `[a-z]`)*$/.test(body)
+        ? ok(body.split(" / ").map((span) => span.slice(1, -1)))
+        : err("line 0 is not a list of letters in code spans"),
+  });
+}
+
+/** The tail fixture: one `[form]: <url>` definition closing the file. */
+function linkRegion(url = "https://example.com"): GeneratedRegion {
+  return GeneratedRegion.of<string>({
+    name: "link",
+    placement: { kind: "tail" },
+    data: () => url,
+    render: block((url) => `[form]: ${url}`),
+    parse: (body) =>
+      blockLine(body).andThen((line) => {
+        const url = /^\[form\]: (\S+)$/.exec(line)?.[1];
+        return url === undefined ? err("line 1 is not the [form] definition") : ok(url);
+      }),
+  });
+}
+
+const TABLE = tableRegion();
+const LIST = listRegion();
+const LINK = linkRegion();
 
 // An action manifest: two mapping regions, the END markers at column zero as action.yml writes them.
 const MANIFEST = [
@@ -310,7 +358,44 @@ const MANIFEST = [
   "",
 ].join("\n");
 
-const ENTRIES = /^\n(?: {2}[a-z]+:\n(?: {4,}[^\n]*\n)+)*$/;
+/** One entry of the manifest fixture's mappings: its key line and the deeper-indented lines under it. */
+interface Entry {
+  readonly key: string;
+  readonly lines: readonly string[];
+}
+
+/** The YAML fixture: two-space-indented entries, each followed by its deeper lines. */
+function yamlRegion(
+  name: string,
+  placement: RegionPlacement,
+  entries: readonly Entry[] = [],
+): GeneratedRegion {
+  return GeneratedRegion.of<readonly Entry[]>({
+    name,
+    placement,
+    data: () => entries,
+    render: block((entries) =>
+      entries.flatMap((entry) => [`  ${entry.key}:`, ...entry.lines]).join("\n"),
+    ),
+    parse: (body) =>
+      blockLines(body).andThen((lines) => {
+        const parsed: Array<{ key: string; lines: string[] }> = [];
+        for (const [index, line] of lines.entries()) {
+          const key = /^ {2}([a-z]+):$/.exec(line)?.[1];
+          const last = parsed.at(-1);
+          if (key !== undefined) {
+            parsed.push({ key, lines: [] });
+          } else if (last !== undefined && /^ {4,}/.test(line)) {
+            last.lines.push(line);
+          } else {
+            return err(`line ${index + 1} is neither an entry key nor an indented line of one`);
+          }
+        }
+        return ok(parsed);
+      }),
+  });
+}
+
 /** The file each fixture region is checked in, which picks its marker syntax. */
 const PATH_OF: Readonly<Record<string, string>> = {
   table: "doc.md",
@@ -319,16 +404,8 @@ const PATH_OF: Readonly<Record<string, string>> = {
   ins: "action.yml",
   outs: "action.yml",
 };
-const INS: RegionSpec = {
-  name: "ins",
-  placement: { kind: "under-key", key: "inputs" },
-  body: ENTRIES,
-};
-const OUTS: RegionSpec = {
-  name: "outs",
-  placement: { kind: "under-key", key: "outputs" },
-  body: ENTRIES,
-};
+const INS = yamlRegion("ins", { kind: "under-key", key: "inputs" });
+const OUTS = yamlRegion("outs", { kind: "under-key", key: "outputs" });
 
 describe("assertRegionPlacement", () => {
   test("accepts each region where its spec puts it, with an authored comment or a fenced heading-shaped line in between", () => {
@@ -374,7 +451,7 @@ describe("assertRegionPlacement", () => {
     expect(() => assertRegionPlacement(commented, INS, "action.yml")).not.toThrow();
   });
 
-  test.each<[label: string, text: string, spec: RegionSpec, error: string]>([
+  test.each<[label: string, text: string, region: GeneratedRegion, error: string]>([
     [
       "a table moved under another heading",
       relocatedRegion(PAGE, "table", "html", "## Notes\n\n"),
@@ -474,7 +551,7 @@ describe("assertRegionPlacement", () => {
     [
       "a mapping region with only comments above it",
       "# authored\n# BEGIN GENERATED: outs\nresult: 1\n# END GENERATED: outs\n",
-      { ...OUTS, body: /[\s\S]*/ },
+      OUTS,
       'the outs region must sit directly under the "outputs:" mapping in action.yml; nothing precedes its BEGIN marker',
     ],
     [
@@ -498,23 +575,29 @@ describe("assertRegionPlacement", () => {
     [
       "a heading placement on a YAML file",
       MANIFEST,
-      { ...INS, placement: { kind: "under-heading", heading: "## Inputs" } },
+      yamlRegion("ins", UNDER_INPUTS),
       "the ins region declares a markdown placement, but action.yml uses yaml markers",
     ],
     [
       "a mapping placement on a markdown file",
       PAGE,
-      { ...TABLE, placement: { kind: "under-key", key: "inputs" } },
+      tableRegion({ kind: "under-key", key: "inputs" }),
       "the table region declares a YAML parent key, but doc.md uses html markers",
     ],
-    ...(["g", "y"] as const).map((flag): [string, string, RegionSpec, string] => [
-      `a body shape with the stateful "${flag}" flag, which would pass and fail on alternate calls`,
-      PAGE,
-      { ...TABLE, body: new RegExp(TABLE_BODY.source, flag) },
-      `the table region's body shape carries the stateful "${flag}" flags`,
-    ]),
-  ])("refuses %s", (_label, text, spec, error) => {
-    expect(() => assertRegionPlacement(text, spec, PATH_OF[spec.name] ?? "")).toThrow(error);
+  ])("refuses %s", (_label, text, region, error) => {
+    expect(() => assertRegionPlacement(text, region, PATH_OF[region.name] ?? "")).toThrow(error);
+  });
+
+  test("a refusal's line number counts down from the BEGIN marker's line, as its message says", () => {
+    // The message states the numbering and each parse computes it; a reader sent to the wrong line is what drifts
+    // if the two disagree.
+    const lines = PAGE.split("\n");
+    const begin = lines.findIndex((line) => line.startsWith("<!-- BEGIN GENERATED: table"));
+    expect(begin).toBeGreaterThan(0);
+    const edited = lines.with(begin + 3, "| `x` | one |").join("\n");
+    expect(() => assertRegionPlacement(edited, TABLE, "doc.md")).toThrow(
+      "move its marker back (line 3 has no number in its second cell; line N is N lines below the BEGIN marker)",
+    );
   });
 
   test.each<[label: string, before: string, block: string]>([
@@ -580,16 +663,10 @@ describe("relocatedRegion", () => {
 });
 
 describe("regenerateRegions", () => {
-  const render = (body: string) => () => body;
-
   test("checks every region's placement, then re-renders each body verbatim", () => {
     const out = regenerateRegions(
       PAGE,
-      [
-        { ...TABLE, render: render("\n| A | B |\n|---|---|\n| `y` | 2 |\n") },
-        { ...LIST, render: render("`c`") },
-        { ...LINK, render: render("\n[form]: https://example.org\n") },
-      ],
+      [tableRegion(UNDER_INPUTS, [["y", 2]]), listRegion(["c"]), linkRegion("https://example.org")],
       "doc.md",
     );
     expect(out).toBe(
@@ -598,32 +675,19 @@ describe("regenerateRegions", () => {
         .replace("https://example.com", "https://example.org"),
     );
     expect(() =>
-      regenerateRegions(
-        relocatedRegion(PAGE, "table", "html", "## Notes\n\n"),
-        [{ ...TABLE, render: render("\n") }],
-        "doc.md",
-      ),
+      regenerateRegions(relocatedRegion(PAGE, "table", "html", "## Notes\n\n"), [TABLE], "doc.md"),
     ).toThrow('the table region must sit under "## Inputs" in doc.md');
   });
 
-  test("refuses a rendering the region's own shape rejects, before splicing it", () => {
-    expect(() =>
-      regenerateRegions(PAGE, [{ ...LIST, render: render("prose, not a list") }], "doc.md"),
-    ).toThrow(
-      'the list region\'s renderer wrote a body its own shape rejects: "prose, not a list"',
+  test("refuses a rendering the region's own parse does not read back, before splicing it", () => {
+    expect(() => regenerateRegions(PAGE, [listRegion(["ab"])], "doc.md")).toThrow(
+      'the list region\'s renderer wrote a body its own parse does not read back: "`ab`"',
     );
   });
 
   test("refuses a region declared twice instead of letting the second renderer win", () => {
     expect(() =>
-      regenerateRegions(
-        PAGE,
-        [
-          { ...TABLE, render: render("\n") },
-          { ...TABLE, render: render("\n| A | B |\n|---|---|\n") },
-        ],
-        "doc.md",
-      ),
+      regenerateRegions(PAGE, [TABLE, tableRegion(UNDER_INPUTS, [["y", 2]])], "doc.md"),
     ).toThrow("the table region of doc.md is declared twice");
   });
 });

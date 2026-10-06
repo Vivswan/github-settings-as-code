@@ -4,7 +4,7 @@
  */
 
 import type { AnnotationLevel } from "../io.js";
-import { markdownCell } from "./markdown.js";
+import { markdownCell, renderTable } from "./markdown.js";
 
 interface TranscriptLine {
   level?: AnnotationLevel;
@@ -48,14 +48,14 @@ export function composeReport(input: ReportInput): string {
     "",
     "Full, unredacted report for this target. The public run redacts it; this document is its private mirror.",
     "",
-    "| | |",
-    "|---|---|",
-    `| Target | ${markdownCell(input.target)} |`,
-    `| Admin repository | ${markdownCell(input.adminRepo)} |`,
-    `| Run | ${markdownCell(input.runUrl)} |`,
-    `| Mode | ${markdownCell(input.mode)} |`,
-    `| Result | ${markdownCell(input.result)} |`,
-    `| Generated | ${markdownCell(input.timestamp)} |`,
+    renderTable("| | |\n|---|---|", [
+      ["Target", markdownCell(input.target)],
+      ["Admin repository", markdownCell(input.adminRepo)],
+      ["Run", markdownCell(input.runUrl)],
+      ["Mode", markdownCell(input.mode)],
+      ["Result", markdownCell(input.result)],
+      ["Generated", markdownCell(input.timestamp)],
+    ]),
     "",
     "## Sections",
     "",
@@ -63,11 +63,16 @@ export function composeReport(input: ReportInput): string {
   if (input.outcomes.length === 0) {
     lines.push("No sections ran for this target.");
   } else {
-    lines.push("| Section | Status | Detail |", "|---|---|---|");
-    for (const outcome of input.outcomes) {
-      const detail = outcome.detail.map(markdownCell).join("<br>");
-      lines.push(`| ${markdownCell(outcome.key)} | ${markdownCell(outcome.status)} | ${detail} |`);
-    }
+    lines.push(
+      renderTable(
+        "| Section | Status | Detail |\n|---|---|---|",
+        input.outcomes.map((outcome) => [
+          markdownCell(outcome.key),
+          markdownCell(outcome.status),
+          outcome.detail.map(markdownCell).join("<br>"),
+        ]),
+      ),
+    );
   }
   lines.push("", "## Transcript", "");
   if (input.transcript.length === 0) {

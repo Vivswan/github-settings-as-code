@@ -5,7 +5,7 @@
  * One renderer, two kinds of cell:
  *   step summary    -> free text the caller escapes with markdownCell(); never refused
  *   generated page  -> authored prose refused rather than escaped, since an escape would change the author's text:
- *                      tableFault() before rendering, tableRoundTrip() when the committed page is read back
+ *                      tableFault() before rendering, tableBody() when the committed page is read back
  */
 
 import { err, ok, type Result } from "neverthrow";
@@ -90,7 +90,7 @@ function rowFault(
 
 /**
  * The one statement of what a table under `header` may hold, naming the first faulty row: a generator throws it
- * before rendering and tableRoundTrip() refuses by the same rule, so a test can hold both sides to it.
+ * before rendering and tableBody() refuses by the same rule, so a test can hold both sides to it.
  */
 export function tableFault(
   header: string,
@@ -121,52 +121,20 @@ function rowKey(cells: readonly string[], rule: TableRule): string {
   return rule === "keyed" ? (KEY_SPAN.exec(first)?.[1] ?? "") : first;
 }
 
-/** A round-trip guard's verdict: undefined when `body` is `rendered` byte for byte, else the first differing line. */
-export function renderedMismatch(body: string, rendered: string): string | undefined {
-  if (rendered === body) {
-    return undefined;
-  }
-  const authored = body.split("\n");
-  const expected = rendered.split("\n");
-  const differing = authored.findIndex((line, i) => line !== expected[i]);
-  const at = differing === -1 ? authored.length : differing;
-  return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
-}
-
 /**
- * The body guard of a generated region: `parse` reads the body back into the data it renders from, and `render`
- * over that data must reproduce the body byte for byte, so an authored spelling the renderer never writes is
- * refused rather than erased. The verdict is the refusal, or undefined for a body the generator could have
- * written. A freshly placed region holds "\n" and renders next.
+ * The parse of a block region that is one table: the body splits into rows and cells, the rows pass `rule`,
+ * and `parseRow` turns each row's cells into the record it renders from (`key` as rowKey() reads it), each
+ * refusal naming the row's line below the BEGIN marker. A body not opening with `header` parses to no rows,
+ * so the region's byte compare names its first line.
  */
-export function roundTrip<Data>(
-  parse: (body: string) => Result<Data, string>,
-  render: (data: Data) => string,
-): (body: string) => string | undefined {
-  return (body) =>
-    body === "\n"
-      ? undefined
-      : parse(body).match(
-          (data) => renderedMismatch(body, `\n${render(data)}\n`),
-          (refusal) => refusal,
-        );
-}
-
-/**
- * roundTrip() for a region that is one table: the body splits into rows and cells, the rows pass `rule`,
- * `parseRow` turns each row's cells into the record it renders from (`key` as rowKey() reads it), and
- * `renderRows` re-renders the records. A body not opening with `header` parses to no rows, so the byte
- * compare names its first line.
- */
-export function tableRoundTrip<Row>(
+export function tableBody<Row>(
   header: string,
   rule: TableRule,
   parseRow: (cells: readonly string[], key: string) => Result<Row, string>,
-  renderRows: (rows: readonly Row[]) => string,
-): (body: string) => string | undefined {
+): (body: string) => Result<Row[], string> {
   const headerLines = header.split("\n").length;
   const line = (row: number): number => row + headerLines + 1;
-  return roundTrip((body): Result<Row[], string> => {
+  return (body) => {
     if (!(body.startsWith(`\n${header}\n`) && body.endsWith("\n"))) {
       return ok([]);
     }
@@ -183,5 +151,5 @@ export function tableRoundTrip<Row>(
         }
         return ok(parsed);
       });
-  }, renderRows);
+  };
 }

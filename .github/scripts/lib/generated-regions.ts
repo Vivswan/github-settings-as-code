@@ -1,8 +1,10 @@
 // The marker grammar every generator splices through: `BEGIN GENERATED: <name> (hint)` to
 // `END GENERATED: <name>`, each written in the comment syntax of the file's own language, and
-// the placement check each region passes before its splice (a RegionSpec says where it belongs).
+// the two checks each region passes before its splice: its placement, and the parse-render round
+// trip over its body that GeneratedRegion.of() is the one way to declare.
 
 import { extname } from "node:path";
+import { err, ok, type Result } from "neverthrow";
 import { Parser } from "yaml";
 
 /** Which comment syntax a file's markers use: a complete `<!-- -->` comment, or a whole-line YAML `#` comment. */
@@ -134,29 +136,111 @@ export function replaceRegion(
  * heading line above both markers, hashes included) or close the file; YAML regions sit directly
  * under a top-level mapping key and end its mapping.
  */
-type RegionPlacement =
+export type RegionPlacement =
   | { readonly kind: "under-heading"; readonly heading: string }
   | { readonly kind: "tail" }
   | { readonly kind: "under-key"; readonly key: string };
 
 /**
- * What a region's body may hold: every body its generator could have written (stale or fresh), and nothing
- * authored. A regex names a shape; a check returns why a body is refused, or undefined to admit it.
+ * What a generator declares for one region: its markers' name, where it belongs, and its body as the
+ * data it renders from. The body is every byte between the markers, so a block region's `render`
+ * usually wraps in block().
  */
-export type BodyShape = RegExp | ((body: string) => string | undefined);
-
-/** A generated region as its generator declares it: its markers' name, its home, and the shape of its body. */
-export interface RegionSpec {
+export interface RegionDeclaration<Data> {
   readonly name: string;
   readonly placement: RegionPlacement;
-  readonly body: BodyShape;
+  /** The data the committed file is regenerated from. */
+  readonly data: () => Data;
+  /** The body for `data`. */
+  readonly render: (data: Data) => string;
+  /**
+   * A body read back into the data it renders from, or why it is not one `render` wrote; a line it
+   * names counts from the BEGIN marker's line as line 0.
+   */
+  readonly parse: (body: string) => Result<Data, string>;
 }
 
-export function bodyRefusal(shape: BodyShape, body: string): string | undefined {
-  if (shape instanceof RegExp) {
-    return shape.test(body) ? undefined : "it does not match the body shape";
+/** The first line on which `body` differs from `rendered`, or undefined when they are the same bytes. */
+function renderedMismatch(body: string, rendered: string): string | undefined {
+  if (rendered === body) {
+    return undefined;
   }
-  return shape(body);
+  const authored = body.split("\n");
+  const expected = rendered.split("\n");
+  const differing = authored.findIndex((line, i) => line !== expected[i]);
+  const at = differing === -1 ? authored.length : differing;
+  return `line ${at} reads ${JSON.stringify(authored[at] ?? "")} where the generator writes ${JSON.stringify(expected[at] ?? "")}`;
+}
+
+/**
+ * The body check of a declaration: a body holding nothing (fresh markers, or an empty rendering) is
+ * admitted and renders next; any other must parse, and re-rendering what it parsed to must
+ * reproduce it byte for byte, so an authored spelling the renderer never writes is refused rather
+ * than erased.
+ */
+function roundTrip<Data>(decl: RegionDeclaration<Data>): (body: string) => string | undefined {
+  return (body) =>
+    body.trim() === ""
+      ? undefined
+      : decl.parse(body).match(
+          (data) => renderedMismatch(body, decl.render(data)),
+          (refusal) => refusal,
+        );
+}
+
+/**
+ * A region as the generators hand it to regenerateRegions(). Only of() mints one: the constructor is
+ * private and the class nominal, so a region's body check is always its own declaration's round trip
+ * and no region can carry a grammar written beside its renderer.
+ */
+export class GeneratedRegion {
+  private constructor(
+    readonly name: string,
+    readonly placement: RegionPlacement,
+    private readonly check: (body: string) => string | undefined,
+    private readonly body: () => string,
+  ) {}
+
+  static of<Data>(decl: RegionDeclaration<Data>): GeneratedRegion {
+    return new GeneratedRegion(decl.name, decl.placement, roundTrip(decl), () =>
+      decl.render(decl.data()),
+    );
+  }
+
+  /** Why `body` is not one the renderer wrote, or undefined for a body it could have written. */
+  bodyRefusal(body: string): string | undefined {
+    return this.check(body);
+  }
+
+  /** The body rendered from the declaration's data. */
+  render(): string {
+    return this.body();
+  }
+}
+
+/** The body of a block region: `render`'s text on the lines between the markers, each marker owning its line. */
+export function block<Data>(render: (data: Data) => string): (data: Data) => string {
+  return (data) => `\n${render(data)}\n`;
+}
+
+/** A block region's body as its lines, the first being line 1; or why the markers do not own their lines. */
+export function blockLines(body: string): Result<string[], string> {
+  if (!body.startsWith("\n")) {
+    return err("line 0 runs on past the BEGIN marker");
+  }
+  if (!body.endsWith("\n")) {
+    return err("the last line runs on into the END marker");
+  }
+  return ok(body.slice(1, -1).split("\n"));
+}
+
+/** The one line of a block region holding one line, or why the body is not that. */
+export function blockLine(body: string): Result<string, string> {
+  return blockLines(body).andThen((lines) =>
+    lines.length === 1
+      ? ok(lines[0] ?? "")
+      : err(`line ${lines.length} is a line past the one the generator writes`),
+  );
 }
 
 interface MarkdownScan {
@@ -259,7 +343,7 @@ function scanMarkdown(text: string): MarkdownScan {
 
 function assertMarkdownPlacement(
   text: string,
-  spec: RegionSpec,
+  name: string,
   placement: Exclude<RegionPlacement, { kind: "under-key" }>,
   begin: MarkerSpan,
   end: MarkerSpan,
@@ -277,22 +361,22 @@ function assertMarkdownPlacement(
     const indent = line.match(/^[ \t]*/)?.[0] ?? "";
     if (indent.includes("\t") || indent.length >= 4) {
       throw new Error(
-        `the ${spec.name} region's ${marker} marker sits on a line indented as code in ${path}`,
+        `the ${name} region's ${marker} marker sits on a line indented as code in ${path}`,
       );
     }
     if (inside(scan.fenced, at)) {
-      throw new Error(`the ${spec.name} region sits inside a fenced code block in ${path}`);
+      throw new Error(`the ${name} region sits inside a fenced code block in ${path}`);
     }
     if (inside(scan.raw, at)) {
-      throw new Error(`the ${spec.name} region sits inside a raw HTML block in ${path}`);
+      throw new Error(`the ${name} region sits inside a raw HTML block in ${path}`);
     }
     if (inside(scan.quoted, at)) {
-      throw new Error(`the ${spec.name} region sits inside a blockquote in ${path}`);
+      throw new Error(`the ${name} region sits inside a blockquote in ${path}`);
     }
   }
   if (placement.kind === "tail") {
     if (text.slice(end[1]).trim() !== "") {
-      throw new Error(`the ${spec.name} region must close ${path}`);
+      throw new Error(`the ${name} region must close ${path}`);
     }
     return;
   }
@@ -307,7 +391,7 @@ function assertMarkdownPlacement(
       const found =
         actual === undefined ? "no heading precedes" : `"${actual}" is the heading above`;
       throw new Error(
-        `the ${spec.name} region must sit under "${placement.heading}" in ${path}; ${found} its ${marker} marker`,
+        `the ${name} region must sit under "${placement.heading}" in ${path}; ${found} its ${marker} marker`,
       );
     }
   }
@@ -315,7 +399,7 @@ function assertMarkdownPlacement(
 
 function assertYamlPlacement(
   text: string,
-  spec: RegionSpec,
+  name: string,
   key: string,
   begin: MarkerSpan,
   end: MarkerSpan,
@@ -330,63 +414,53 @@ function assertYamlPlacement(
         ? "nothing precedes its BEGIN marker"
         : `"${above.trim()}" precedes its BEGIN marker`;
     throw new Error(
-      `the ${spec.name} region must sit directly under the "${key}:" mapping in ${path}; ${found}`,
+      `the ${name} region must sit directly under the "${key}:" mapping in ${path}; ${found}`,
     );
   }
   // The END marker's own line holds only trailing blanks past the span, so the search skips it.
   const below = text.slice(end[1]).split("\n").slice(1).find(content);
   if (below !== undefined && /^\s/.test(below)) {
     throw new Error(
-      `the ${spec.name} region must end the "${key}:" mapping in ${path}; "${below.trim()}" follows its END marker`,
+      `the ${name} region must end the "${key}:" mapping in ${path}; "${below.trim()}" follows its END marker`,
     );
   }
 }
 
 /**
- * Throw unless region `spec.name` sits where `spec.placement` says and encloses only a body
- * `spec.body` matches; a relocated marker would otherwise regenerate cleanly while the page
- * reads wrong, or erase the authored text it came to enclose. `path` picks the marker syntax.
+ * Throw unless `region` sits where its placement says and encloses only a body its round trip
+ * admits; a relocated marker would otherwise regenerate cleanly while the page reads wrong, or
+ * erase the authored text it came to enclose. `path` picks the marker syntax.
  */
-export function assertRegionPlacement(text: string, spec: RegionSpec, path: string): void {
-  if (spec.body instanceof RegExp && /[gy]/.test(spec.body.flags)) {
-    throw new Error(
-      `the ${spec.name} region's body shape carries the stateful "${spec.body.flags}" flags; test() would alternate between calls`,
-    );
-  }
+export function assertRegionPlacement(text: string, region: GeneratedRegion, path: string): void {
   const syntax = markerSyntaxFor(path);
-  const { begin, end } = regionBounds(text, spec.name, syntax);
-  if (spec.placement.kind === "under-key") {
+  const { begin, end } = regionBounds(text, region.name, syntax);
+  if (region.placement.kind === "under-key") {
     if (syntax !== "yaml") {
       throw new Error(
-        `the ${spec.name} region declares a YAML parent key, but ${path} uses ${syntax} markers`,
+        `the ${region.name} region declares a YAML parent key, but ${path} uses ${syntax} markers`,
       );
     }
-    assertYamlPlacement(text, spec, spec.placement.key, begin, end, path);
+    assertYamlPlacement(text, region.name, region.placement.key, begin, end, path);
   } else {
     if (syntax !== "html") {
       throw new Error(
-        `the ${spec.name} region declares a markdown placement, but ${path} uses ${syntax} markers`,
+        `the ${region.name} region declares a markdown placement, but ${path} uses ${syntax} markers`,
       );
     }
-    assertMarkdownPlacement(text, spec, spec.placement, begin, end, path);
+    assertMarkdownPlacement(text, region.name, region.placement, begin, end, path);
   }
-  const refusal = bodyRefusal(spec.body, text.slice(begin[1], end[0]));
+  const refusal = region.bodyRefusal(text.slice(begin[1], end[0]));
   if (refusal !== undefined) {
     throw new Error(
-      `the ${spec.name} region in ${path} encloses content the generator would not write; move its marker back (${refusal})`,
+      `the ${region.name} region in ${path} encloses content the generator would not write; move its marker back (${refusal}; line N is N lines below the BEGIN marker)`,
     );
   }
-}
-
-/** A generated region with the renderer that writes its body: the exact text between the markers. */
-export interface GeneratedRegion extends RegionSpec {
-  readonly render: () => string;
 }
 
 /**
  * `text` with every region in `regions` checked for placement first, then its body re-rendered;
- * a rendering its own shape rejects fails here rather than on the next run. `path` picks the
- * marker syntax.
+ * a rendering its own parse does not read back fails here rather than on the next run. `path`
+ * picks the marker syntax.
  */
 export function regenerateRegions(
   text: string,
@@ -404,10 +478,10 @@ export function regenerateRegions(
   const syntax = markerSyntaxFor(path);
   return regions.reduce((current, region) => {
     const body = region.render();
-    const refusal = bodyRefusal(region.body, body);
+    const refusal = region.bodyRefusal(body);
     if (refusal !== undefined) {
       throw new Error(
-        `the ${region.name} region's renderer wrote a body its own shape rejects: ${JSON.stringify(body)} (${refusal})`,
+        `the ${region.name} region's renderer wrote a body its own parse does not read back: ${JSON.stringify(body)} (${refusal})`,
       );
     }
     return replaceRegion(current, region.name, body, syntax);
