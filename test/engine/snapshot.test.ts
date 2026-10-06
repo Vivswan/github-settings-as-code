@@ -299,7 +299,7 @@ describe("snapshotRepository", () => {
   test.each(DENIABLE)(
     "%s: a 403 on any of its reads fails it under fail and is reported under warn",
     async (key) => {
-      const { row } = (await import(`../sections/snapshot-rows/${key}.ts`)) as { row: Row };
+      const { row } = (await import(`../sections/${key}/snapshot-row.ts`)) as { row: Row };
       const only = SectionSelection.of({ only: [key] })._unsafeUnwrap();
       const run = (api: GitHubClient, policy: "fail" | "warn") => {
         const { io, annotations } = captureIo();

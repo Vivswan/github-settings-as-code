@@ -16,7 +16,7 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import { completeRule, type LiveState, ruleWireNode } from "../e2e/mock/state.js";
 import { type FragmentFake, registryFake } from "./fragment-fake.js";
 import { failureOf, REPO, unwrap } from "./section-run.js";
-import { STAMPS } from "./snapshot-rows/families.js";
+import { STAMPS } from "./snapshot-row-families.js";
 import { validatedInput } from "./validated-input.js";
 
 /** One live list seeded with a pair under one identity. */

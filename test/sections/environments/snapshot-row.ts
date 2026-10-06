@@ -1,6 +1,6 @@
 import { environmentsSection } from "../../../src/sections/environments/index.js";
 import type { Row } from "../snapshot-roundtrip.js";
-import { STAMPS } from "./families.js";
+import { STAMPS } from "../snapshot-row-families.js";
 
 // staging is the one pinned environment, so it LEADS the snapshot with pinned: true (the planner
 // reads declaration order as pin order) and production follows without the key. staging has no
