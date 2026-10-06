@@ -28,6 +28,8 @@ v3   repository.has_downloads: has_downloads is reported by GitHub but cannot be
 | A topic outside `^[a-z0-9][a-z0-9-]{0,49}$` after lowercasing, or more than 20 | 422 from the topics PUT | Refused naming the topic |
 | An empty topic (`topics: [""]`, `topics: ""`, `ci,,tooling`) | Dropped silently, so `[""]` cleared every topic | Refused by index |
 
+For `@vivswan/github-settings-as-code` consumers, the commit-message keys under `SectionInput<"repository">` (and so `SettingsFile`) are enums and `security_and_analysis` is a closed shape, once `unknown`; a `string` or an unknown sub-key stops compiling.
+
 Fix: delete the GET-only key, declare the title beside the message, and spell topics in GitHub's alphabet. A key in neither the GET nor the PATCH still passes through, so a field GitHub adds later works on day one.
 
 ## 38. Pages: GET-only fields and the source path
@@ -44,6 +46,8 @@ v3   pages.custom_404: GitHub reports this field on the Pages site and the updat
 ```
 
 `url`, `html_url`, `status`, `custom_404`, `protected_domain_state`, `pending_domain_unverified_at`, and `https_certificate` are refused. `public: false` stays declarable: Enterprise Cloud shares the same host, so the check run's note beside the drift says why it cannot converge elsewhere.
+
+For `@vivswan/github-settings-as-code` consumers, `source.path` under `SectionInput<"pages">` (and so `SettingsFile`) is `"/" | "/docs"`, where the pre-release v3 builds typed `string`; another path there stops compiling.
 
 Fix: delete the reported field from the file, and publish from `/` or `/docs`.
 
@@ -69,6 +73,8 @@ v3   actions.artifact_and_log_retention.maximum_allowed_days: maximum_allowed_da
 | An `approval_policy` outside GitHub's three; a malformed or repeated OIDC claim key; `include_claim_keys` beside `use_default: true` | Refused naming the key |
 | A fractional or non-positive retention or cache limit | Refused: positive integers |
 
+For `@vivswan/github-settings-as-code` consumers, in `SectionInput<"actions">` (and so `SettingsFile`) `approval_policy` is an enum, once `string`, and `selected_actions` is closed, once an open mapping; a `string` or an unknown key there stops compiling.
+
 Fix: delete the reported-only field, fix the `selected_actions` spelling, and write booleans and integers unquoted. `fork_pr_workflows_private_repos` now requires only `run_workflows_from_fork_pull_requests`, as the request body does.
 
 ## 40. Setup sections: GET-only keys, languages, and the runner pair
@@ -88,6 +94,8 @@ v3   code_scanning_default_setup.schedule: "schedule" is reported by GitHub but 
      code_scanning_default_setup.languages[0]: "javascript" is the spelling GitHub reports, not one the PATCH accepts; write "javascript-typescript"
      code_quality_setup.runner_label: runner_label "gpu" is declared under runner_type: "standard", where GitHub ignores it; set runner_type: "labeled", or remove runner_label
 ```
+
+For `@vivswan/github-settings-as-code` consumers, `languages` under `SectionInput<"code_scanning_default_setup" | "code_quality_setup">` (and so `SettingsFile`) is an array whose items are the PATCH's enum, once `string`; `javascript` stops compiling.
 
 Fix: drop `schedule` and `updated_at`, spell languages as the PATCH takes them (`javascript-typescript`; code quality's GET-only `rust` has no declarable name), and pair a string `runner_label` with `runner_type: labeled`. A declared key outside the slice that the GET never echoes now earns the never-converges note in check and apply.
 
@@ -121,5 +129,7 @@ v3   interaction_limits.limit: limit is one of existing_users, contributors_only
      interaction_limits.pull_request_creation_cap.max_open_pull_requests: max_open_pull_requests is a whole number from 1 to 1000 (GitHub's range)
      interaction_limits: Unrecognized key: "expires_at"; interaction_limits takes limit, expiry, pull_request_creation_cap, and pull_request_creation_bypass (origin and expires_at are what GitHub reports, not what it accepts); remove the key, or fix its spelling
 ```
+
+For `@vivswan/github-settings-as-code` consumers, `limit` and `expiry` under `SectionInput<"interaction_limits">` (and so `SettingsFile`) are the enums above, where the pre-release v3 builds typed `string`; another value there stops compiling.
 
 Fix: spell the enum values as listed, keep the cap in range, and delete `origin` and `expires_at`, which GitHub reports but never accepts.
