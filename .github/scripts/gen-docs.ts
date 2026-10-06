@@ -1,13 +1,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, Result, safeTry } from "neverthrow";
-import { RUN_RESULTS, type RunOutcome } from "../../src/engine/outcome.js";
+import { RUN_RESULTS } from "../../src/engine/outcome.js";
 import {
   cellFault,
   renderTable,
-  roundTrip,
+  tableBody,
   tableFault,
-  tableRoundTrip,
   tableRows,
 } from "../../src/report/markdown.js";
 import type { CoverageRow, SectionDocs } from "../../src/sections/contract/docs.js";
@@ -21,10 +20,17 @@ import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
+import { type Architecture, readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
-import { type GeneratedRegion, regenerateRegions, regionBounds } from "./lib/generated-regions.js";
+import {
+  block,
+  blockLine,
+  blockLines,
+  GeneratedRegion,
+  regenerateRegions,
+  regionBounds,
+} from "./lib/generated-regions.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 export const COVERAGE_PATH = "docs/reference/coverage.md";
@@ -121,16 +127,19 @@ export function sectionsCells(
 }
 
 // The generator's boundary: the table rule is the author's to meet, so a faulty row stops the build naming it.
-export function renderSectionsTable(
-  sections: readonly SectionsTableRow[],
-  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
-): string {
-  const cells = sectionsCells(sections, docs);
+export function renderSectionsRows(cells: ReadonlyArray<readonly string[]>): string {
   const fault = tableFault(SECTIONS_TABLE_HEADER, cells, "keyed");
   if (fault !== undefined) {
     throw new Error(fault);
   }
   return renderTable(SECTIONS_TABLE_HEADER, cells);
+}
+
+export function renderSectionsTable(
+  sections: readonly SectionsTableRow[],
+  docs: Readonly<Record<string, Pick<SectionDocs, "sections_table">>>,
+): string {
+  return renderSectionsRows(sectionsCells(sections, docs));
 }
 
 /**
@@ -622,12 +631,24 @@ function parseCoveragePage(body: string): Result<CoveragePage, string> {
   });
 }
 
-/** The prose after the enumeration; the region's body regex admits exactly this tail. */
+/** The prose after the enumeration, read back as the one tail the guard admits. */
 const RESULT_TAIL =
   ", worst first across the run's targets; the exit code is 1 exactly when it is `failed`, or `drift` in mode: check";
 
-export function renderOutputsList(results: readonly RunOutcome[]): string {
+export function renderOutputsList(results: readonly string[]): string {
   return `${results.map((value) => `\`${value}\``).join(" / ")}${RESULT_TAIL}`;
+}
+
+const OUTPUTS_LIST = new RegExp(
+  String.raw`^(\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*)${RegExp.escape(RESULT_TAIL)}$`,
+);
+
+/** The outcome words of an inline outputs list, which sits on the BEGIN marker's own line. */
+function parseOutputsList(body: string): Result<readonly string[], string> {
+  const list = OUTPUTS_LIST.exec(body)?.[1];
+  return list === undefined
+    ? err("line 0 is not the outcome words in code spans followed by the tail")
+    : ok(list.split(" / ").map((span) => span.slice(1, -1)));
 }
 
 export type TaggedOperation = Pick<SectionOperation, "role" | "grade" | "permission"> & {
@@ -700,46 +721,99 @@ function sectionsRow(cells: readonly string[]): Result<readonly string[], string
 }
 
 function sectionsTableRegion(name: string, heading: string): GeneratedRegion {
-  return {
+  return GeneratedRegion.of({
     name,
     placement: { kind: "under-heading", heading },
-    body: tableRoundTrip(SECTIONS_TABLE_HEADER, "keyed", sectionsRow, (rows) =>
-      renderTable(SECTIONS_TABLE_HEADER, rows),
-    ),
-    render: () => `\n${renderSectionsTable(SECTIONS, DOCS)}\n`,
-  };
+    data: () => sectionsCells(SECTIONS, DOCS),
+    render: block(renderSectionsRows),
+    parse: tableBody(SECTIONS_TABLE_HEADER, "keyed", sectionsRow),
+  });
 }
 
 function outputsListRegion(name: string, heading: string): GeneratedRegion {
-  return {
+  return GeneratedRegion.of<readonly string[]>({
     name,
     placement: { kind: "under-heading", heading },
-    body: new RegExp(
-      String.raw`^(?:\x60[a-z]+\x60(?: / \x60[a-z]+\x60)*${RegExp.escape(RESULT_TAIL)})?$`,
-    ),
-    render: () => renderOutputsList(RUN_RESULTS),
-  };
+    data: () => RUN_RESULTS,
+    render: renderOutputsList,
+    parse: parseOutputsList,
+  });
 }
+
+const PAT_FORM_DEFINITION = new RegExp(String.raw`^\[${RegExp.escape(PAT_FORM_LABEL)}\]: (\S+)$`);
 
 /** The page's `[...][pat-form]` reference resolves through this tail definition. */
 function patUrlRegion(name: string): GeneratedRegion {
-  return {
+  return GeneratedRegion.of({
     name,
     placement: { kind: "tail" },
-    body: new RegExp(String.raw`^\n(?:\[${RegExp.escape(PAT_FORM_LABEL)}\]: \S+\n)?$`),
-    render: () => `\n[${PAT_FORM_LABEL}]: ${patFormUrl()}\n`,
-  };
+    data: patFormUrl,
+    render: block((url: string) => `[${PAT_FORM_LABEL}]: ${url}`),
+    parse: (body) =>
+      blockLine(body).andThen((line) => {
+        const url = PAT_FORM_DEFINITION.exec(line)?.[1];
+        return url === undefined
+          ? err(`line 1 is not the [${PAT_FORM_LABEL}] definition`)
+          : ok(url);
+      }),
+  });
+}
+
+const MERMAID_OPEN = "```mermaid";
+const FENCE = "```";
+const GRAPH_LINE = "graph TD";
+// A node id is whatever the renderer makes of a layer name (only "-" is rewritten), so the byte compare judges it.
+const NODE_LINE = /^ {2}(\S+)\["([^"]*)"\]$/;
+const EDGE_LINE = /^ {2}(\S+) --> (\S+)$/;
+
+/** What the module map draws: the layers with their paths and the import edges; the lint's exclusions are not drawn. */
+type ArchitectureMap = Pick<Architecture, "layers" | "edges">;
+
+/**
+ * The diagram read back into the layers and edges it draws, under the node ids the renderer writes; a line that is
+ * neither a node nor an edge is authored. Entries are collected before the records are built, so an id such as
+ * `__proto__` is a key and not a prototype write.
+ */
+function parseArchitectureMap(body: string): Result<ArchitectureMap, string> {
+  return blockLines(body).andThen((lines) => {
+    if (lines[0] !== MERMAID_OPEN) {
+      return err("line 1 does not open the mermaid fence");
+    }
+    if (lines[1] !== GRAPH_LINE) {
+      return err(`line 2 is not the "${GRAPH_LINE}" line`);
+    }
+    if (lines.length < 3 || lines.at(-1) !== FENCE) {
+      return err(`line ${lines.length} does not close the mermaid fence`);
+    }
+    const layers: Array<[string, readonly string[]]> = [];
+    const edges = new Map<string, string[]>();
+    for (const [index, line] of lines.slice(2, -1).entries()) {
+      const node = NODE_LINE.exec(line);
+      const edge = EDGE_LINE.exec(line);
+      if (node !== null) {
+        layers.push([node[1] ?? "", (node[2] ?? "").split("<br>")]);
+      } else if (edge !== null) {
+        const from = edge[1] ?? "";
+        edges.set(from, [...(edges.get(from) ?? []), edge[2] ?? ""]);
+      } else {
+        return err(`line ${index + 3} is neither a layer node nor an import edge`);
+      }
+    }
+    return ok({ layers: Object.fromEntries(layers), edges: Object.fromEntries(edges) });
+  });
 }
 
 // Rendered from architecture.yml, which the lint keeps equal to the tree.
 function architectureMapRegion(name: string, heading: string): GeneratedRegion {
-  return {
+  return GeneratedRegion.of<ArchitectureMap>({
     name,
     placement: { kind: "under-heading", heading },
-    body: /^\n(?:\x60{3}mermaid\n(?:[^\x60\n][^\n]*\n)*\x60{3}\n)?$/,
-    render: () =>
-      `\n\x60\x60\x60mermaid\n${renderArchitectureMermaid(readArchitecture(ROOT))}\n\x60\x60\x60\n`,
-  };
+    data: () => readArchitecture(ROOT),
+    render: block(
+      (map) => `${MERMAID_OPEN}\n${renderArchitectureMermaid({ ...map, exclude: [] })}\n${FENCE}`,
+    ),
+    parse: parseArchitectureMap,
+  });
 }
 
 export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
@@ -779,12 +853,13 @@ export function renderPage(path: string, text: string): string {
 // The one region closes the file and holds everything below the title (or an empty body between fresh markers), so
 // a marker moved over authored prose fails instead of erasing it.
 const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
-  {
+  GeneratedRegion.of({
     name: "coverage",
     placement: { kind: "tail" },
-    body: roundTrip(parseCoveragePage, renderCoveragePage),
-    render: () => `\n${renderCoverage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS)}\n`,
-  },
+    data: () => coveragePage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS),
+    render: block(renderCoveragePage),
+    parse: parseCoveragePage,
+  }),
 ];
 
 /** The page's frontmatter and title; the sidebar reads `order`, and 115 sits the page right after the Sections table (110). */
