@@ -3,11 +3,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { ok } from "neverthrow";
 import { stringify as stringifyYaml } from "yaml";
-import { parseRecipient } from "../../src/report/artifact-report.js";
-import { withTempDir } from "../temp-dir.js";
+import { parseRecipient } from "../../../src/report/artifact-report.js";
+import { withTempDir } from "../../temp-dir.js";
+import { ARTIFACT_TEST_RECIPIENT } from "../generators/settings.js";
+import type { LoggedRequest } from "../mock/contract.js";
+import type { Scenario } from "../scenario.js";
 import type { RerunCapture } from "./apply-idempotence-proof.js";
-import { ARTIFACT_TEST_RECIPIENT } from "./generators/settings.js";
-import type { LoggedRequest } from "./mock/contract.js";
 import {
   bundleBuildParityFailure,
   checkLeaks,
@@ -31,7 +32,6 @@ import {
   writtenSnapshotPaths,
   yamlStrings,
 } from "./runner.js";
-import type { Scenario } from "./schema.js";
 
 describe("writtenSnapshotPaths (the documents a snapshot run left behind)", () => {
   test("the dir form lists every .yml under the directory, relative to the temp dir, sorted", () =>
@@ -232,7 +232,7 @@ describe("bundle build parity (harness vs production)", () => {
 
   // The failure is the line that aborts the whole e2e run, so it names both the script it saw and the fix.
   const HARNESS_TAIL =
-    'but the e2e harness builds with "bun build src/main.ts --target=node --outfile lib/index.js"; mirror the change in the harness\'s Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner.ts) to keep production parity';
+    'but the e2e harness builds with "bun build src/main.ts --target=node --outfile lib/index.js"; mirror the change in the harness\'s Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner/runner.ts) to keep production parity';
   test.each<[label: string, script: string | undefined, saw: string]>([
     [
       "a drifted script",

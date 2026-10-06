@@ -10,7 +10,7 @@ import {
   silentIo,
 } from "../../src/index.js";
 import { layerFile, RUNNER_ROOT_FILES } from "../e2e/constants.js";
-import { loadScenarios, scenarioRoots, settingsYamlFor } from "../e2e/schema.js";
+import { loadScenarios, scenarioRoots, settingsYamlFor } from "../e2e/scenario.js";
 import { withTempDir } from "../temp-dir.js";
 
 /** Every layer file's text, lowest first, as the e2e runner writes a scenario's stack. */

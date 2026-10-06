@@ -12,8 +12,8 @@ import {
   type LiveWitnessKind,
   lensWitness,
   uniqueBy,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 const HEX_COLORS = ["d73a4a", "a2eeef", "ededed", "0e8a16", "ffffff", "000000"] as const;
 

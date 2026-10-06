@@ -3,8 +3,8 @@
  */
 
 import { CODE_QUALITY_LANGUAGES } from "../../../src/sections/code_quality_setup/schema.js";
-import type { Json } from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+import type { Json } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 export function genCodeQuality(rng: Rng): Json {
   const cfg: Json = { state: rng.pick(["configured", "not-configured"]) };

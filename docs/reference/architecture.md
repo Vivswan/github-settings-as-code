@@ -230,7 +230,7 @@ flowchart LR
   validate["validate"]
   grant["the PAT grant prose<br>src/sections/contract/permissions.ts grantFor()"]
   gate["the mock's permission gate<br>test/e2e/mock/handlers.ts"]
-  oracle["the fuzz oracle<br>test/e2e/oracle.ts"]
+  oracle["the fuzz oracle<br>test/e2e/generators/oracle.ts"]
   routes["the mock routes<br>test/e2e/mock/routes.ts"]
   paths["test/e2e/openapi/paths.ts<br>USED_PATHS"]
   calls["the request helpers<br>src/sections/contract/requests.ts call() listAll()"]

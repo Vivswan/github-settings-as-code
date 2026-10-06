@@ -10,8 +10,8 @@ import {
   type Json,
   maybeWrapUndeclared,
   uniqueBy,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 const genCollaborator = generatorFromSlice(CollaboratorConfig, {
   fields: {

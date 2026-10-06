@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG, ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
-import { parseScenario, type Scenario } from "../schema.js";
+import { parseScenario, type Scenario } from "../scenario.js";
 import { type LoggedRequest, newPipelineRunState, type PipelineOptions } from "./contract.js";
 import { isWriteRequest, sectionForRequest } from "./dispatch.js";
 import { graphqlDenialErrors } from "./grading.js";

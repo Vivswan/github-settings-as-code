@@ -31,7 +31,7 @@ import { WEBHOOKS_MOCK } from "../../sections/webhooks/mock.js";
 import { ADMIN_OWNER } from "../constants.js";
 import orgFixture from "../fixtures/org.json" with { type: "json" };
 import repoFixture from "../fixtures/repo.json" with { type: "json" };
-import type { OwnerKind, PermissionMask } from "../schema.js";
+import type { OwnerKind, PermissionMask } from "../scenario.js";
 import type { ListMockSpec } from "./list-fragment.js";
 import { decodeNodeId, mintNodeId } from "./node-id.js";
 
@@ -196,7 +196,7 @@ export interface LiveState {
 }
 
 /**
- * The runtime enum the scenario schema keys `live_state` off (test/e2e/schema.ts), so a typo'd family
+ * The runtime enum the scenario schema keys `live_state` off (test/e2e/scenario.ts), so a typo'd family
  * fails scenario LOAD instead of being accepted and silently unseeded. The `satisfies` and the
  * MustBeNever pin keep it in lockstep with the interface in both directions.
  */

@@ -24,7 +24,7 @@ import { GRAPHQL_HANDLERS, HANDLERS } from "../e2e/mock/handlers.js";
 import { acceptedBody } from "../e2e/mock/request-body.js";
 import { buildStateForSlug, type LiveState, type MockState } from "../e2e/mock/state.js";
 import type { Handler, Json, MockResponse } from "../e2e/mock/support.js";
-import type { DenialStyle, PermissionMask } from "../e2e/schema.js";
+import type { DenialStyle, PermissionMask } from "../e2e/scenario.js";
 import { REPO } from "./section-run.js";
 
 export interface FragmentFake extends GitHubClient {

@@ -4,14 +4,14 @@
  */
 
 import type { z } from "zod";
-import { undeclaredPolicy } from "../../src/sections/contract/module.js";
+import { undeclaredPolicy } from "../../../src/sections/contract/module.js";
 import type {
   ListEndpoints,
   ListSectionKey,
   ListSectionModule,
-} from "../../src/sections/shared/list/decl.js";
-import { schemaNode } from "../../src/sections/shared/schema-node.js";
-import type { LiveState } from "./mock/state.js";
+} from "../../../src/sections/shared/list/decl.js";
+import { schemaNode } from "../../../src/sections/shared/schema-node.js";
+import type { LiveState } from "../mock/state.js";
 import type { Rng } from "./prng.js";
 
 export type Json = Record<string, unknown>;

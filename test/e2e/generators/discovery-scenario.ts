@@ -1,5 +1,5 @@
-import type { Rng } from "../prng.js";
-import type { MultiRepo, Scenario } from "../schema.js";
+import type { MultiRepo, Scenario } from "../scenario.js";
+import type { Rng } from "./prng.js";
 
 export interface DiscoveryScenarioMeta {
   pool: Array<{

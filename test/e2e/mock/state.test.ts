@@ -15,8 +15,8 @@ import { flattenEnvironment } from "../../../src/sections/environments/index.js"
 import { SECTIONS } from "../../../src/sections/registry.js";
 import { DEFAULT_ROLE, roleForPermission } from "../../../src/sections/shared/roles.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "../../sections/teams/mock.js";
+import { Rng } from "../generators/prng.js";
 import { genScenario } from "../generators/single-scenario.js";
-import { Rng } from "../prng.js";
 import { handlerTestContext } from "./handler-test-ctx.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
 import {

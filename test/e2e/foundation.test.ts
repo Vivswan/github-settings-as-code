@@ -16,7 +16,7 @@ import {
   TOKEN_USER_LOGIN,
   VIOLATION_PREFIX,
 } from "./constants.js";
-import { mulberry32, Rng } from "./prng.js";
+import { mulberry32, Rng } from "./generators/prng.js";
 import {
   collectYmlFiles,
   loadScenarios,
@@ -24,7 +24,7 @@ import {
   parseScenario,
   type Scenario,
   scenarioRoots,
-} from "./schema.js";
+} from "./scenario.js";
 
 describe("prng", () => {
   test("mulberry32 is deterministic for a seed", () => {

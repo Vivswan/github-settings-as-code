@@ -4,11 +4,11 @@
  * would reimplement the engine, and a bug the two shared would hide.
  */
 
-import type { RemovalNotice } from "../../src/engine/layers.js";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
-import { silentIo } from "../../src/io.js";
-import { describeProblem } from "../../src/problem.js";
+import type { RemovalNotice } from "../../../src/engine/layers.js";
+import { validateSettingsDoc } from "../../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../../src/engine/section-selection.js";
+import { silentIo } from "../../../src/io.js";
+import { describeProblem } from "../../../src/problem.js";
 import {
   LIST_SECTIONS,
   type ListSection,
@@ -16,16 +16,17 @@ import {
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
   type UndeclaredPolicySection,
-} from "../../src/schema.js";
+} from "../../../src/schema.js";
 import {
   type DenialPosture,
   denialPosture,
   planningReads,
   type ReadGating,
   readGating,
-} from "../../src/sections/contract/module.js";
-import type { SectionPermission } from "../../src/sections/contract/permissions.js";
-import { SECTIONS } from "../../src/sections/registry.js";
+} from "../../../src/sections/contract/module.js";
+import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
+import { SECTIONS } from "../../../src/sections/registry.js";
+import { GRADE_RANK, type MaskGrade, type MaskKey } from "../scenario.js";
 import {
   type Json,
   LAYERING_DIRECTIVES,
@@ -36,14 +37,9 @@ import {
   UNDECLARED_POLICIES,
   type UndeclaredPolicyWord,
 } from "./gen-support.js";
-import {
-  type MergeLayer,
-  type MergeScenarioMeta,
-  standaloneViewOf,
-} from "./generators/merge-scenario.js";
-import { displayKeyOf, type MultiScenarioMeta } from "./generators/multi-scenario.js";
-import type { ScenarioMeta } from "./generators/single-scenario.js";
-import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
+import { type MergeLayer, type MergeScenarioMeta, standaloneViewOf } from "./merge-scenario.js";
+import { displayKeyOf, type MultiScenarioMeta } from "./multi-scenario.js";
+import type { ScenarioMeta } from "./single-scenario.js";
 
 /** A section outcome the step summary can report. */
 type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";

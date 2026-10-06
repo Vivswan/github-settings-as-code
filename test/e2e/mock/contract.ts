@@ -1,7 +1,7 @@
 /** The request pipeline's shared vocabulary; routes.ts, chaos.ts, core-paths.ts, and server.ts consume it. */
 
 import { VIOLATION_PREFIX } from "../constants.js";
-import type { Scenario } from "../schema.js";
+import type { Scenario } from "../scenario.js";
 import type { MockState, MultiMockState } from "./state.js";
 import type { MockResponse } from "./support.js";
 

@@ -22,7 +22,7 @@ import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import { UNDECLARED_POLICY_SECTIONS } from "../../src/schema.js";
 import { planningReads, type SectionModule } from "../../src/sections/contract/module.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { parseScenario } from "../e2e/schema.js";
+import { parseScenario } from "../e2e/scenario.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 

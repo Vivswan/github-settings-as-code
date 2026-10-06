@@ -2,8 +2,8 @@
  * The check_suite_preferences fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import type { Json } from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+import type { Json } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 // A prefix of this list, so the ids are positive and distinct by construction: schema.ts refuses 0, fractions, and a repeat.
 const AUTO_TRIGGER_APP_IDS = [15368, 29310, 62410] as const;

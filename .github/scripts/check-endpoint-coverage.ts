@@ -15,8 +15,8 @@ import {
 } from "../../src/sections/contract/endpoints.js";
 import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
 import type { LoggedRequest } from "../../test/e2e/mock/contract.js";
-import { runScenario } from "../../test/e2e/runner.js";
-import { loadScenarios, scenarioRoots } from "../../test/e2e/schema.js";
+import { runScenario } from "../../test/e2e/runner/runner.js";
+import { loadScenarios, scenarioRoots } from "../../test/e2e/scenario.js";
 
 type Route =
   | { kind: "rest"; key: string; method: string; path: string }

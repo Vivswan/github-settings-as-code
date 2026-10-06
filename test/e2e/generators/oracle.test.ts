@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { describeRemoval, mergeLayers, type RemovalNotice } from "../../src/engine/layers.js";
-import { foldLayers } from "../../src/flows/layers.js";
-import { silentIo } from "../../src/io.js";
-import { describeProblem } from "../../src/problem.js";
-import { LIST_SECTIONS, type SectionKey } from "../../src/schema.js";
-import { listLayering } from "../../src/sections/registry.js";
-import { ADMIN_SLUG } from "./constants.js";
+import { describeRemoval, mergeLayers, type RemovalNotice } from "../../../src/engine/layers.js";
+import { foldLayers } from "../../../src/flows/layers.js";
+import { silentIo } from "../../../src/io.js";
+import { describeProblem } from "../../../src/problem.js";
+import { LIST_SECTIONS, type SectionKey } from "../../../src/schema.js";
+import { listLayering } from "../../../src/sections/registry.js";
+import { ADMIN_SLUG } from "../constants.js";
+import type { MaskGrade, MaskKey } from "../scenario.js";
 import {
   type Json,
   LAYERING_KEY,
@@ -13,9 +14,8 @@ import {
   REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
-import type { MergeLayer } from "./generators/merge-scenario.js";
-import type { MultiRepoTarget, MultiScenarioMeta } from "./generators/multi-scenario.js";
-import type { ScenarioMeta } from "./generators/single-scenario.js";
+import type { MergeLayer } from "./merge-scenario.js";
+import type { MultiRepoTarget, MultiScenarioMeta } from "./multi-scenario.js";
 import {
   type AbortVerdict,
   effectiveGrades,
@@ -40,7 +40,7 @@ import {
   type SectionPrediction,
   sectionGrade,
 } from "./oracle.js";
-import type { MaskGrade, MaskKey } from "./schema.js";
+import type { ScenarioMeta } from "./single-scenario.js";
 
 describe("NO_READ_SECTIONS derivation", () => {
   test("counts GraphQL reads: only the write-only section remains, exactly as before", () => {

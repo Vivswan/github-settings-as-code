@@ -11,7 +11,7 @@ import {
   type MaskGrade,
   type MaskKey,
   type PermissionMask,
-} from "../schema.js";
+} from "../scenario.js";
 import type { GraphqlErrorReply, MockResponse } from "./support.js";
 
 export const SECTION_BY_KEY = new Map<SectionKey, (typeof SECTIONS)[number]>(

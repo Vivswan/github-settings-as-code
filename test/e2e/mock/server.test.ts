@@ -5,7 +5,7 @@ import { endpointPermission } from "../../../src/sections/contract/module.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../sections/teams/mock.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
-import type { Scenario } from "../schema.js";
+import type { Scenario } from "../scenario.js";
 import { assertFaultKeys } from "./chaos.js";
 import { RAW_CONTENTS_ACCEPT } from "./core-paths.js";
 import { declaredStatuses, statusAllowed } from "./dispatch.js";

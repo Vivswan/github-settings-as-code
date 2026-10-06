@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { SECTION_KEYS } from "../src/schema.js";
-import { SECTIONS_TEST_ROOT } from "./e2e/schema.js";
+import { SECTIONS_TEST_ROOT } from "./e2e/scenario.js";
 import { ROOT } from "./root.js";
 
 /** The mirror root as the messages name it, e.g. test/sections. */

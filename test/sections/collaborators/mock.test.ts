@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { handlerTestContext } from "../../e2e/mock/handler-test-ctx.js";
 import { buildStateForSlug, type MockState } from "../../e2e/mock/state.js";
-import type { OwnerKind } from "../../e2e/schema.js";
+import type { OwnerKind } from "../../e2e/scenario.js";
 import { collaboratorsMockHandlers } from "./mock.js";
 
 const PARAMS = { owner: "acme", repo: "widgets" };

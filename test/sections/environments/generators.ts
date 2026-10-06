@@ -2,9 +2,9 @@
  * The environments fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import { E2E_SECRET_ENV, type Json } from "../../e2e/gen-support.js";
+import { E2E_SECRET_ENV, type Json } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 import { PROTECTION_RULE_APPS } from "../../e2e/mock/state.js";
-import type { Rng } from "../../e2e/prng.js";
 
 export function genEnvironments(rng: Rng): Json[] {
   // Each family's draws fork their own stream, so adding one never disturbs the main stream and

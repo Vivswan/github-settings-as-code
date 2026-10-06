@@ -8,7 +8,7 @@ import {
   decodeBase64,
   sealForGithub,
 } from "../../../src/sections/shared/secrets-and-variables/sealed-box.js";
-import { parseScenario, type Scenario } from "../schema.js";
+import { parseScenario, type Scenario } from "../scenario.js";
 import { newPipelineRunState } from "./contract.js";
 import { runPipeline } from "./routes.js";
 import {

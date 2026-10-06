@@ -4,13 +4,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { MARKER_LABEL } from "../../src/report/issue-report.js";
+import { MARKER_LABEL } from "../../../src/report/issue-report.js";
+import type { LoggedRequest } from "../mock/contract.js";
 import {
   assertIssueReport,
   checkReportLeaks,
   transmittedReportBodies,
 } from "./issue-report-assert.js";
-import type { LoggedRequest } from "./mock/contract.js";
 
 function write(method: string, pathname: string, body: unknown, status?: number): LoggedRequest {
   return { method, pathname, query: "", status: status ?? (method === "POST" ? 201 : 200), body };

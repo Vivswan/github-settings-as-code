@@ -11,9 +11,9 @@
  *                        trace of it
  */
 
-import { corpusUnwitnessedExemptEndpoints } from "./apply-idempotence-proof.js";
-import { indentedStdout, runScenario } from "./runner.js";
-import { loadScenarios, type Scenario, scenarioRoots } from "./schema.js";
+import { corpusUnwitnessedExemptEndpoints } from "./runner/apply-idempotence-proof.js";
+import { indentedStdout, runScenario } from "./runner/runner.js";
+import { loadScenarios, type Scenario, scenarioRoots } from "./scenario.js";
 
 interface Flags {
   sections?: string[];

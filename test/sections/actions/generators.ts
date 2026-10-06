@@ -2,8 +2,8 @@
  * The actions fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import type { Json } from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+import type { Json } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 export function genActions(rng: Rng): Json {
   // oidc_customization_sub is NEVER generated here: its endpoints carry a per-endpoint permission

@@ -7,7 +7,7 @@
 import { afterEach } from "bun:test";
 import { DEFAULT_API_VERSION } from "../../../src/github/api.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";
-import { parseScenario, type Scenario } from "../schema.js";
+import { parseScenario, type Scenario } from "../scenario.js";
 import { type MockHandle, type ServerOptions, startMockServer } from "./server.js";
 import type { MockState, MultiMockState } from "./state.js";
 
