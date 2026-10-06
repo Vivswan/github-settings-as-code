@@ -1,25 +1,20 @@
 /**
  * The mapped and section-prefixed key types make a missing, misplaced, or colliding fragment a compile error, so the
  * runtime asserts in handlers.ts are only backstops. A section's mock.ts imports the test-tree seams beside this file
- * (support.ts, state.ts, and their siblings), never routes.ts.
+ * (support.ts, state.ts, and their siblings), never routes.ts. A fragment that is one family-factory call is
+ * written here as that call: a mock.ts holding only the call would be a pass-through file.
  */
 
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
+import { actionsVariablesSection } from "../../../src/sections/actions_variables/index.js";
+import { agentsVariablesSection } from "../../../src/sections/agents_variables/index.js";
 import type { SectionGraphqlKey } from "../../../src/sections/registry.js";
 import { actionsMockHandlers } from "../../sections/actions/mock.js";
-import { actionsSecretsMockHandlers } from "../../sections/actions_secrets/mock.js";
-import { actionsVariablesMockHandlers } from "../../sections/actions_variables/mock.js";
-import { agentsSecretsMockHandlers } from "../../sections/agents_secrets/mock.js";
-import { agentsVariablesMockHandlers } from "../../sections/agents_variables/mock.js";
 import { autolinksMockHandlers } from "../../sections/autolinks/mock.js";
 import { branchesMockGraphqlHandlers, branchesMockHandlers } from "../../sections/branches/mock.js";
 import { checkSuitePreferencesMockHandlers } from "../../sections/check_suite_preferences/mock.js";
-import { codeQualitySetupMockHandlers } from "../../sections/code_quality_setup/mock.js";
-import { codeScanningDefaultSetupMockHandlers } from "../../sections/code_scanning_default_setup/mock.js";
-import { codespacesSecretsMockHandlers } from "../../sections/codespaces_secrets/mock.js";
 import { collaboratorsMockHandlers } from "../../sections/collaborators/mock.js";
 import { customPropertiesMockHandlers } from "../../sections/custom_properties/mock.js";
-import { dependabotSecretsMockHandlers } from "../../sections/dependabot_secrets/mock.js";
 import { deployKeysMockHandlers } from "../../sections/deploy_keys/mock.js";
 import {
   environmentsMockGraphqlHandlers,
@@ -38,11 +33,14 @@ import { secretScanningCustomPatternsMockHandlers } from "../../sections/secret_
 import { teamsMockHandlers } from "../../sections/teams/mock.js";
 import { webhooksMockHandlers } from "../../sections/webhooks/mock.js";
 import { workflowsMockHandlers } from "../../sections/workflows/mock.js";
-import type {
-  GraphqlHandler,
-  Handler,
-  SectionGraphqlHandlers,
-  SectionRestHandlers,
+import {
+  type GraphqlHandler,
+  type Handler,
+  repoSecretsRestHandlers,
+  repoVariablesRestHandlers,
+  type SectionGraphqlHandlers,
+  type SectionRestHandlers,
+  setupRestHandlers,
 } from "./support.js";
 
 type SectionMockFragment<K extends SectionKey> = [SectionGraphqlKey<K>] extends [never]
@@ -58,21 +56,21 @@ const FRAGMENTS: { readonly [K in SectionKey]: SectionMockFragment<K> } = {
   branches: { rest: branchesMockHandlers, graphql: branchesMockGraphqlHandlers },
   autolinks: { rest: autolinksMockHandlers },
   actions: { rest: actionsMockHandlers },
-  actions_secrets: { rest: actionsSecretsMockHandlers },
-  dependabot_secrets: { rest: dependabotSecretsMockHandlers },
-  codespaces_secrets: { rest: codespacesSecretsMockHandlers },
-  agents_secrets: { rest: agentsSecretsMockHandlers },
+  actions_secrets: { rest: repoSecretsRestHandlers("actions_secrets") },
+  dependabot_secrets: { rest: repoSecretsRestHandlers("dependabot_secrets") },
+  codespaces_secrets: { rest: repoSecretsRestHandlers("codespaces_secrets") },
+  agents_secrets: { rest: repoSecretsRestHandlers("agents_secrets") },
   workflows: { rest: workflowsMockHandlers },
   check_suite_preferences: { rest: checkSuitePreferencesMockHandlers },
   pages: { rest: pagesMockHandlers },
-  code_scanning_default_setup: { rest: codeScanningDefaultSetupMockHandlers },
-  code_quality_setup: { rest: codeQualitySetupMockHandlers },
+  code_scanning_default_setup: { rest: setupRestHandlers("code_scanning_default_setup") },
+  code_quality_setup: { rest: setupRestHandlers("code_quality_setup") },
   collaborators: { rest: collaboratorsMockHandlers },
   teams: { rest: teamsMockHandlers },
   milestones: { rest: milestonesMockHandlers },
   interaction_limits: { rest: interactionLimitsMockHandlers },
-  actions_variables: { rest: actionsVariablesMockHandlers },
-  agents_variables: { rest: agentsVariablesMockHandlers },
+  actions_variables: { rest: repoVariablesRestHandlers(actionsVariablesSection) },
+  agents_variables: { rest: repoVariablesRestHandlers(agentsVariablesSection) },
   webhooks: { rest: webhooksMockHandlers },
   custom_properties: { rest: customPropertiesMockHandlers },
   deploy_keys: { rest: deployKeysMockHandlers },
@@ -110,7 +108,8 @@ function fragmentFor<K extends SectionKey>(key: K): SectionMockFragment<K> {
   const fragment: SectionMockFragment<K> | undefined = FRAGMENTS[key];
   if (fragment === undefined) {
     throw new Error(
-      `E2E MOCK: section "${key}" is registered without a mock fragment; add \`${key}: { rest: <its mock.ts handlers> }\` to FRAGMENTS in test/e2e/mock/sections.ts`,
+      `E2E MOCK: section "${key}" is registered without a mock fragment; add ` +
+        `\`${key}: { rest: <its mock.ts handlers or family-factory call> }\` to FRAGMENTS in test/e2e/mock/sections.ts`,
     );
   }
   return fragment;

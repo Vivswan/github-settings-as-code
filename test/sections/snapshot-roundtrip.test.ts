@@ -1,9 +1,9 @@
 /**
  * Every section with a snapshot(), enrolled in the round-trip proof over the e2e mock's own
  * handlers: the seeded live state reads back as exactly the expected value and notes, and
- * planning that value against the same state converges. One row file per section at
- * ./<key>/snapshot-row.ts, loaded by section key off the registry, so a section that gains
- * snapshot() without a row fails by name and a row for a section without one fails too.
+ * planning that value against the same state converges. One row per section, a FAMILY_ROWS
+ * entry or ./<key>/snapshot-row.ts, loaded by section key off the registry, so a section that
+ * gains snapshot() without a row fails by name and a row for a section without one fails too.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -21,26 +21,22 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import { webhooksSection } from "../../src/sections/webhooks/index.js";
 import { registryFake } from "./fragment-fake.js";
 import { failureOf, REPO, unwrap } from "./section-run.js";
-import { proveSnapshotRoundTrip, type Row, type SnapshotSection } from "./snapshot-roundtrip.js";
-import { STAMPS } from "./snapshot-row-families.js";
-
-/** The row file of one section; a missing file rejects naming the key. */
-async function loadRow(key: string): Promise<{ row: Row }> {
-  return import(`./${key}/snapshot-row.ts`) as Promise<{ row: Row }>;
-}
+import { proveSnapshotRoundTrip, type SnapshotSection } from "./snapshot-roundtrip.js";
+import { FAMILY_ROWS, loadRow, STAMPS } from "./snapshot-row-families.js";
 
 describe("snapshot round trip", () => {
   const declaring = SECTIONS.filter((section) => section.snapshot !== undefined).map(
     (section) => section.key,
   );
 
-  test("the directories holding a snapshot-row.ts are exactly the sections declaring snapshot()", () => {
-    // Walks the mirror's directories rather than the registry, so a row in a directory no section owns fails too.
-    const withRow = readdirSync(import.meta.dir, { withFileTypes: true })
+  test("the FAMILY_ROWS keys plus the directories holding a snapshot-row.ts are exactly the sections declaring snapshot()", () => {
+    // Walks the mirror's directories rather than the registry, so a row in a directory no section owns fails too,
+    // and a section rowed both ways shows up twice.
+    const withFile = readdirSync(import.meta.dir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .filter((name) => existsSync(join(import.meta.dir, name, "snapshot-row.ts")));
-    expect(withRow.sort()).toEqual([...declaring].sort());
+    expect([...Object.keys(FAMILY_ROWS), ...withFile].sort()).toEqual([...declaring].sort());
   });
 
   test.each(declaring)(

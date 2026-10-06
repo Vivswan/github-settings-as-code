@@ -19,7 +19,10 @@ export const GRAPHQL_HANDLERS: Record<string, GraphqlHandler> = sectionGraphqlHa
 
 function missingHandlerPointer(missing: Array<[string, { section: string }]>): string {
   return missing
-    .map(([key, { section }]) => `${key} (add it in test/sections/${section}/mock.ts)`)
+    .map(
+      ([key, { section }]) =>
+        `${key} (add it in test/sections/${section}/mock.ts or its family row in test/e2e/mock/sections.ts)`,
+    )
     .sort()
     .join(", ");
 }

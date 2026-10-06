@@ -53,7 +53,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 ### Decisions a reader would otherwise reverse
 
 - A flat `src/sections/<key>/` directory means repository scope, permanently; org/user scopes arrive as sibling scope directories with their own document, keys, and registry (the ":" reservation in `src/sections/registry.ts`).
-- The section directory is the unit of work; its prose is `docs/sections/<key>.docs.yml`.
+- The section directory is the unit of work; its prose is `docs/sections/<key>.docs.yml`. A section whose mock fragment or snapshot row is one family-factory call keeps it in the family table (FRAGMENTS in test/e2e/mock/sections.ts, FAMILY_ROWS in test/sections/snapshot-row-families.ts), not in a one-call file in its directory.
 - `src/upstream-gaps/` holds one file per GitHub feature an upstream artifact lags; `gap.ts` states how each kind graduates.
 - The layered fold is a CSS-like cascade in which `null` is a value: GitHub's EMPTY or OFF state, not CSS `unset`. docs/operate/layering.md owns the rules, including the two CSS has no analogue for.
 
