@@ -7,16 +7,11 @@ import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { subsetDiff } from "../../engine/diff.js";
 import type { UndeclaredPolicy } from "../../types.js";
+import { type DeclaredIssue, duplicateFieldIssues } from "../contract/declared.js";
+import { missingDrift, undeclaredDrift, undeclaredNote } from "../contract/drift.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import {
-  type DeclaredIssue,
-  duplicateFieldIssues,
-  missingDrift,
-  type SectionMeta,
-  undeclaredDrift,
-  undeclaredNote,
-} from "../contract/module.js";
+import type { SectionMeta } from "../contract/module.js";
 import { hasDrift, type Read } from "../contract/plan.js";
 import {
   type EnvironmentRestOp,

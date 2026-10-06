@@ -4,7 +4,7 @@
  */
 
 import type { z } from "zod";
-import { undeclaredPolicy } from "../../../src/sections/contract/module.js";
+import { undeclaredPolicy } from "../../../src/sections/contract/drift.js";
 import type {
   ListEndpoints,
   ListSectionKey,

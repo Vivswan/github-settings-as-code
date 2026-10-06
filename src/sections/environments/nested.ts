@@ -1,14 +1,10 @@
 import { ok, okAsync, type Result } from "neverthrow";
 import { z } from "zod";
 import type { MustBeNever, UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
+import { type DeclaredIssue, declaredEntries, type EntryOf } from "../contract/declared.js";
+import { undeclaredPolicy } from "../contract/drift.js";
 import type { SectionFailure } from "../contract/errors.js";
-import {
-  type DeclaredIssue,
-  declaredEntries,
-  type EntryOf,
-  type SectionMeta,
-  undeclaredPolicy,
-} from "../contract/module.js";
+import type { SectionMeta } from "../contract/module.js";
 import type { Read } from "../contract/plan.js";
 import { duplicateNameIssues } from "../shared/secrets-and-variables/named-scope.js";
 import {

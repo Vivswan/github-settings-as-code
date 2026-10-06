@@ -1,13 +1,13 @@
 import { type ApiError, classifyApiError } from "../../github/api-error.js";
 import { definitiveRejection, type HintableStatus } from "./endpoints.js";
 import { toleratedGraphqlErrors } from "./graphql.js";
+import type { SectionMeta } from "./module.js";
 import {
   endpointPermission,
   type FailingOp,
-  type SectionMeta,
   sectionGrant,
   sectionOperations,
-} from "./module.js";
+} from "./operations.js";
 import { grantFor, type SectionPermission, samePermission } from "./permissions.js";
 
 /**

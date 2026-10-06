@@ -12,7 +12,8 @@ import {
   type SectionKey,
   type SettingsFile,
 } from "../../../src/schema.js";
-import type { EntryOf, SectionModule } from "../../../src/sections/contract/module.js";
+import type { EntryOf } from "../../../src/sections/contract/declared.js";
+import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
 import { repositorySection } from "../../../src/sections/repository/index.js";
 

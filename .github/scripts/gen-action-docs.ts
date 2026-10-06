@@ -22,7 +22,7 @@ import {
   readGating,
   sectionOperations,
   writeGatedReads,
-} from "../../src/sections/contract/module.js";
+} from "../../src/sections/contract/operations.js";
 import {
   RESOURCE_LABEL,
   RESOURCE_LABEL_ORG,

@@ -11,7 +11,7 @@
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
-import { denialPosture, endpointPermission } from "../../../src/sections/contract/module.js";
+import { denialPosture, endpointPermission } from "../../../src/sections/contract/operations.js";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
 import type { PermissionMask } from "../scenario.js";
 import { applyFault, type CoreFaultKey, takeCorruption, takeFault } from "./chaos.js";

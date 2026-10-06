@@ -12,20 +12,22 @@ import { isDeepStrictEqual } from "node:util";
 import { ok, type Result } from "neverthrow";
 import { z } from "zod";
 import { agree } from "../../text.js";
-import type { EndpointDecl } from "../contract/endpoints.js";
-import type { SectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  defaultUndeclaredPolicy,
-  identifiedBy,
   missingDrift,
-  type SectionMeta,
-  type SectionModule,
-  type SectionSnapshot,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
   valueDrift,
+} from "../contract/drift.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import type { SectionFailure } from "../contract/errors.js";
+import { identifiedBy } from "../contract/keyed-list.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
+import {
+  defaultUndeclaredPolicy,
+  type SectionMeta,
+  type SectionModule,
+  type SectionSnapshot,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift, type PlannedOp, type SectionPlan } from "../contract/plan.js";

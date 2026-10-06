@@ -14,15 +14,10 @@ import type { MustBeNever } from "../../../types.js";
 import { ActionsSecretConfig } from "../../actions_secrets/schema.js";
 import { AgentsSecretConfig } from "../../agents_secrets/schema.js";
 import { CodespacesSecretConfig } from "../../codespaces_secrets/schema.js";
+import type { DeclaredIssue } from "../../contract/declared.js";
 import type { SectionFailure } from "../../contract/errors.js";
-import {
-  type DeclaredIssue,
-  type GraphqlDict,
-  type KeyedListLayering,
-  keyedBy,
-  type SectionModule,
-  type SectionSnapshot,
-} from "../../contract/module.js";
+import { type KeyedListLayering, keyedBy } from "../../contract/keyed-list.js";
+import type { GraphqlDict, SectionModule, SectionSnapshot } from "../../contract/module.js";
 import type { PatResource } from "../../contract/permissions.js";
 import type {
   KeyedPlan,

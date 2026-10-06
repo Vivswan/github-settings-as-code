@@ -8,19 +8,12 @@ import {
   renderDelta,
   subsetDiff,
 } from "../../engine/diff.js";
+import { declaredEntries, listEntries, secretValuesOf } from "../contract/declared.js";
+import { missingDrift } from "../contract/drift.js";
 import type { SectionFailure } from "../contract/errors.js";
-
+import { identifiedBy, type KeyedListLayering, keyedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import {
-  declaredEntries,
-  identifiedBy,
-  type KeyedListLayering,
-  keyedBy,
-  listEntries,
-  missingDrift,
-  type SectionModule,
-  secretValuesOf,
-} from "../contract/module.js";
+import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift } from "../contract/plan.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";

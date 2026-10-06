@@ -9,7 +9,7 @@ import {
   type DeclaredIssue,
   type DeclaredSecretValue,
   declaredEntries,
-} from "../sections/contract/module.js";
+} from "../sections/contract/declared.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
 import { valueAt } from "../sections/shared/list/write.js";
 import { agree, countNoun } from "../text.js";

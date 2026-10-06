@@ -6,12 +6,9 @@
  */
 
 import type { Result } from "neverthrow";
+import { type DeclaredSecretValue, secretValuesOf } from "../../contract/declared.js";
 import type { SectionFailure } from "../../contract/errors.js";
-import {
-  type DeclaredSecretValue,
-  type SectionSnapshot,
-  secretValuesOf,
-} from "../../contract/module.js";
+import type { SectionSnapshot } from "../../contract/module.js";
 import type { PlanContext, PlannedOp, SectionPlan } from "../../contract/plan.js";
 import { knobbed, routed } from "../schema-helpers.js";
 import type {

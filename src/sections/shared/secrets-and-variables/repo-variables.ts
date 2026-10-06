@@ -11,14 +11,10 @@ import type { z } from "zod";
 import type { MustBeNever } from "../../../types.js";
 import { ActionsVariableConfig } from "../../actions_variables/schema.js";
 import { AgentsVariableConfig } from "../../agents_variables/schema.js";
+import type { DeclaredIssue } from "../../contract/declared.js";
 import type { SectionFailure } from "../../contract/errors.js";
-import {
-  type DeclaredIssue,
-  type GraphqlDict,
-  type KeyedListLayering,
-  keyedBy,
-  type SectionSnapshot,
-} from "../../contract/module.js";
+import { type KeyedListLayering, keyedBy } from "../../contract/keyed-list.js";
+import type { GraphqlDict, SectionSnapshot } from "../../contract/module.js";
 import type { PatResource } from "../../contract/permissions.js";
 import type {
   KeyedPlan,

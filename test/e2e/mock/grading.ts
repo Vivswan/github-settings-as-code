@@ -2,7 +2,7 @@
 
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointKind } from "../../../src/sections/contract/endpoints.js";
-import { endpointPermission } from "../../../src/sections/contract/module.js";
+import { endpointPermission } from "../../../src/sections/contract/operations.js";
 import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
 import { SECTIONS, type TaggedEndpoint } from "../../../src/sections/registry.js";
 import {

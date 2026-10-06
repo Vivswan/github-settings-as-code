@@ -23,7 +23,7 @@ import {
   planningReads,
   type ReadGating,
   readGating,
-} from "../../../src/sections/contract/module.js";
+} from "../../../src/sections/contract/operations.js";
 import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
 import { GRADE_RANK, type MaskGrade, type MaskKey } from "../scenario.js";

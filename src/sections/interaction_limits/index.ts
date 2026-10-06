@@ -12,8 +12,10 @@ import { ok, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { agree } from "../../text.js";
+import { requirePlainMapping } from "../contract/declared.js";
+import { cannotVerifyNote } from "../contract/drift.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { cannotVerifyNote, requirePlainMapping, type SectionModule } from "../contract/module.js";
+import type { SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,

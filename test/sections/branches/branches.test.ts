@@ -17,6 +17,7 @@ import {
 } from "../../../src/sections/branches/index.js";
 import { NULLABLE_CONTROLS } from "../../../src/sections/branches/keys.js";
 import type { BranchProtectionConfig } from "../../../src/sections/branches/schema.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import {
   endpointMethod,
   endpointPath,
@@ -24,7 +25,6 @@ import {
   pathSegments,
 } from "../../../src/sections/contract/endpoints.js";
 import type { SectionFailure } from "../../../src/sections/contract/errors.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
 import {
   type PlannedOp,
   planContext,

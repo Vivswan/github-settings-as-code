@@ -4,7 +4,7 @@ import { SectionSelection } from "../../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../../src/engine/snapshot.js";
 import { silentIo } from "../../../src/io.js";
 import { describeProblem } from "../../../src/problem.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import {
   type PlainData,
   planContext,

@@ -115,6 +115,12 @@ export {
   UNDECLARED_POLICY_SECTIONS,
   type UndeclaredPolicySection,
 } from "./schema.js";
+export type {
+  PlainTyped,
+  SectionInput,
+  ValidatedBrand,
+  ValidatedInput,
+} from "./sections/contract/declared.js";
 export {
   type EndpointDecl,
   endpointMethod,
@@ -123,15 +129,11 @@ export {
 } from "./sections/contract/endpoints.js";
 export type { SectionFailure } from "./sections/contract/errors.js";
 export type { GraphqlOpDecl } from "./sections/contract/graphql.js";
-export {
-  type PlainTyped,
-  type SectionInput,
-  type SectionModule,
-  type SectionSnapshot,
-  sectionGrant,
-  type ValidatedBrand,
-  type ValidatedInput,
+export type {
+  SectionModule,
+  SectionSnapshot,
 } from "./sections/contract/module.js";
+export { sectionGrant } from "./sections/contract/operations.js";
 export {
   type DenialPolicy,
   type OnMissingPermission,

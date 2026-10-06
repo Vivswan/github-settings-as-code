@@ -11,6 +11,7 @@ import type { GitHubClient } from "../../github/api.js";
 import type { ApiError } from "../../github/api-error.js";
 import { nonPlainReason } from "../../plain-data.js";
 import type { SectionKey } from "../../schema.js";
+import type { ValidatedInput } from "./declared.js";
 import {
   type DeclaredErrorStatus,
   type EndpointDecl,
@@ -25,13 +26,7 @@ import type {
   GraphqlVariablesOf,
 } from "./graphql.js";
 import { parseLive } from "./live.js";
-import type {
-  EndpointDict,
-  GraphqlDict,
-  SectionContext,
-  SectionMeta,
-  ValidatedInput,
-} from "./module.js";
+import type { EndpointDict, GraphqlDict, SectionContext, SectionMeta } from "./module.js";
 import {
   call,
   callGraphql,
@@ -58,7 +53,7 @@ export type PlainData =
 
 /**
  * The runtime proof for a body the types cannot vouch for. A body built from declared values and literals is
- * PlainData by type alone (PlainTyped in ./module.ts reads the validated document's `unknown` leaves as the walk
+ * PlainData by type alone (PlainTyped in ./declared.ts reads the validated document's `unknown` leaves as the walk
  * proved them), so it skips this walk; a body that erased its typing on the way to the wire comes through here.
  * What can still reach a refusal, none of it a settings file:
  *

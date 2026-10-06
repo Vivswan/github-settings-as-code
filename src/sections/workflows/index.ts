@@ -5,17 +5,13 @@
 
 import type { Result } from "neverthrow";
 import { z } from "zod";
+import { listEntries } from "../contract/declared.js";
+import { valueDrift } from "../contract/drift.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
+import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import {
-  identifiedBy,
-  listEntries,
-  type SectionMeta,
-  type SectionModule,
-  type SectionSnapshot,
-  valueDrift,
-} from "../contract/module.js";
+import type { SectionMeta, SectionModule, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";

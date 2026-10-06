@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { deployKeysSection } from "../../../src/sections/deploy_keys/index.js";
 import {

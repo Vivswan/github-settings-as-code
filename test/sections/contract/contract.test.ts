@@ -17,16 +17,18 @@ import { failureFor, type SectionFailure } from "../../../src/sections/contract/
 import { type GraphqlOpDecl, graphqlOp } from "../../../src/sections/contract/graphql.js";
 import { parseLive } from "../../../src/sections/contract/live.js";
 import {
-  denialPosture,
   freezeDeclarations,
-  planningReads,
-  readGating,
   type SectionMeta,
   type SectionModule,
+} from "../../../src/sections/contract/module.js";
+import {
+  denialPosture,
+  planningReads,
+  readGating,
   sectionGrant,
   sectionOperations,
   writeGatedReads,
-} from "../../../src/sections/contract/module.js";
+} from "../../../src/sections/contract/operations.js";
 import {
   type SectionPermission,
   samePermission,

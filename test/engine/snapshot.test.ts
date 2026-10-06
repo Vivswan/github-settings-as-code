@@ -16,11 +16,8 @@ import {
   snapshotRepository,
 } from "../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../src/github/api.js";
-import {
-  endpointPermission,
-  type SectionMeta,
-  sectionOperations,
-} from "../../src/sections/contract/module.js";
+import type { SectionMeta } from "../../src/sections/contract/module.js";
+import { endpointPermission, sectionOperations } from "../../src/sections/contract/operations.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
 import { pagesSection } from "../../src/sections/pages/index.js";
 import { allGraphqlOps, SECTIONS } from "../../src/sections/registry.js";

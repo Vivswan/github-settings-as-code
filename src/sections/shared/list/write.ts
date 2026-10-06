@@ -1,8 +1,8 @@
 import { ok, type Result } from "neverthrow";
 import { type Delta, renderDelta } from "../../../engine/diff.js";
 import { isPlainObject } from "../../../plain-data.js";
+import { cannotVerifyNote, valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
-import { cannotVerifyNote, valueDrift } from "../../contract/module.js";
 import {
   type ExecTools,
   type PlainData,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { autolinksSection } from "../../../src/sections/autolinks/index.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";

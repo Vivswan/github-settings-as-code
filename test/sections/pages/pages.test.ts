@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { pagesSection } from "../../../src/sections/pages/index.js";
 import { MockApi, withListing } from "../../mock-api.js";

@@ -87,14 +87,14 @@ export {
 } from "./report/delivery.js";
 export { ISSUE_TITLE, MARKER_LABEL, MARKER_LABEL_CONFIG } from "./report/issue-report.js";
 export { DOCUMENT_DIRECTIVE_KEYS, PROBOT_PARITY_KEYS } from "./schema.js";
+export type { KeyedListLayering } from "./sections/contract/keyed-list.js";
+export type { SectionMeta } from "./sections/contract/module.js";
 export {
   denialPosture,
-  type KeyedListLayering,
   readGating,
-  type SectionMeta,
   sectionOperations,
   writeGatedReads,
-} from "./sections/contract/module.js";
+} from "./sections/contract/operations.js";
 export {
   grantFor,
   type PatResource,

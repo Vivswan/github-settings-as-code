@@ -10,11 +10,8 @@ import { describe, expect, test } from "bun:test";
 import { SectionSelection } from "../../src/engine/section-selection.js";
 import { snapshotRepository } from "../../src/engine/snapshot.js";
 import type { GitHubClient } from "../../src/github/api.js";
-import {
-  denialPosture,
-  planningReads,
-  type SectionModule,
-} from "../../src/sections/contract/module.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
+import { denialPosture, planningReads } from "../../src/sections/contract/operations.js";
 import { SECTIONS } from "../../src/sections/registry.js";
 import { MASK_KEYS, type PermissionMask } from "../e2e/scenario.js";
 import { captureIo } from "../io/capture.js";

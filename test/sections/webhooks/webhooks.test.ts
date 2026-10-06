@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { describeProblem } from "../../../src/problem.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import {
   driftOf,
   type ExecTools,

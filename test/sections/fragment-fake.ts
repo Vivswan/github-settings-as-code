@@ -10,7 +10,8 @@
 import { type ClientAnswer, type GitHubClient, PAGE_SIZE } from "../../src/github/api.js";
 import type { ApiError } from "../../src/github/api-error.js";
 import type { SectionKey } from "../../src/schema.js";
-import { endpointPermission, type SectionMeta } from "../../src/sections/contract/module.js";
+import type { SectionMeta } from "../../src/sections/contract/module.js";
+import { endpointPermission } from "../../src/sections/contract/operations.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
 import { graphqlOpForBody, matchEndpoint, requestHeaders } from "../e2e/mock/dispatch.js";
 import {

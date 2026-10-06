@@ -15,12 +15,12 @@ import {
   matchesTemplate,
 } from "../sections/contract/endpoints.js";
 import { thrown } from "../sections/contract/errors.js";
+import type { SectionSnapshot } from "../sections/contract/module.js";
 import {
   concealedAbsenceNote,
   gatedAbsentRead,
-  type SectionSnapshot,
   snapshotUnsupportedNote,
-} from "../sections/contract/module.js";
+} from "../sections/contract/operations.js";
 import { type OnMissingPermission, snapshotContext } from "../sections/contract/plan.js";
 import { SECTIONS } from "../sections/registry.js";
 import type { MustBeNever } from "../types.js";

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { checkSuitePreferencesSection } from "../../../src/sections/check_suite_preferences/index.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
 import { MockApi } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";

@@ -14,10 +14,11 @@ import {
   CODE_SCANNING_LANGUAGES,
   CodeScanningDefaultSetupConfig,
 } from "../code_scanning_default_setup/schema.js";
+import { requirePlainMapping } from "../contract/declared.js";
 import { expand } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
 import { parseLive } from "../contract/live.js";
-import { type GraphqlDict, requirePlainMapping, type SectionSnapshot } from "../contract/module.js";
+import type { GraphqlDict, SectionSnapshot } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,

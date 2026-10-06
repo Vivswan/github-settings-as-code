@@ -4,8 +4,9 @@ import { executePlan } from "../../../src/engine/execute.js";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import { describeProblem } from "../../../src/problem.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import type { SectionFailure } from "../../../src/sections/contract/errors.js";
-import { type SectionInput, sectionGrant } from "../../../src/sections/contract/module.js";
+import { sectionGrant } from "../../../src/sections/contract/operations.js";
 import {
   type OnMissingPermission,
   planContext,

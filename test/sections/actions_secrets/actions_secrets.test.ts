@@ -3,7 +3,7 @@ import { executePlan } from "../../../src/engine/execute.js";
 import type { GitHubClient } from "../../../src/github/api.js";
 import { SECRET_RESPONSE_WITHHELD } from "../../../src/github/api-error.js";
 import { actionsSecretsSection } from "../../../src/sections/actions_secrets/index.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { driftOf, type ExecTools, planContext } from "../../../src/sections/contract/plan.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,

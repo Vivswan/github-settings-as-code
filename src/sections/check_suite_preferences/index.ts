@@ -6,7 +6,8 @@
 import { ok } from "neverthrow";
 import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { type SectionModule, writeOnlyCheckNote } from "../contract/module.js";
+import type { SectionModule } from "../contract/module.js";
+import { writeOnlyCheckNote } from "../contract/operations.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlannedOp, SectionPlan } from "../contract/plan.js";
 import { CheckSuitePreferencesConfig } from "./schema.js";

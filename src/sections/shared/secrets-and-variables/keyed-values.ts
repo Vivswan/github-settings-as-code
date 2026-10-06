@@ -9,12 +9,12 @@
 import type { Result } from "neverthrow";
 import type { SectionKey, UndeclaredPolicySection } from "../../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../../types.js";
+import { undeclaredPolicy } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import {
   defaultUndeclaredPolicy,
   type EndpointDict,
   type SectionMeta,
-  undeclaredPolicy,
 } from "../../contract/module.js";
 import type { PatResource } from "../../contract/permissions.js";
 import type { Read, SnapshotContext } from "../../contract/plan.js";

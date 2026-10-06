@@ -1,16 +1,11 @@
 import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import type { UndeclaredPolicy } from "../../types.js";
+import { type DeclaredIssue, duplicateFieldIssues } from "../contract/declared.js";
+import { missingDrift, undeclaredDrift, undeclaredNote } from "../contract/drift.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import {
-  type DeclaredIssue,
-  duplicateFieldIssues,
-  missingDrift,
-  type SectionMeta,
-  undeclaredDrift,
-  undeclaredNote,
-} from "../contract/module.js";
+import type { SectionMeta } from "../contract/module.js";
 import type { Read } from "../contract/plan.js";
 import { type EnvironmentsRestContext, unreconcilable } from "./endpoints.js";
 import type { NestedPlan } from "./nested.js";
