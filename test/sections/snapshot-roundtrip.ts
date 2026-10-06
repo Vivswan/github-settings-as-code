@@ -17,7 +17,7 @@ import { validatedInput } from "./validated-input.js";
 /** A section module that declares snapshot(). */
 export type SnapshotSection = SectionModule & Required<Pick<SectionModule, "snapshot">>;
 
-/** One section's enrolment in the proof: test/sections/snapshot-rows/<key>.ts exports it as `row`. */
+/** One section's enrolment in the proof: test/sections/<key>/snapshot-row.ts exports it as `row`. */
 export interface Row {
   readonly section: SnapshotSection;
   /** The live state seeded into the mock; must hold at least one resource of the section's. */

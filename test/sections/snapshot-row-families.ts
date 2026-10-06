@@ -3,8 +3,8 @@
  * parametrized on the facts the families differ in.
  */
 
-import type { LiveState } from "../../e2e/mock/state.js";
-import type { Row, SnapshotSection } from "../snapshot-roundtrip.js";
+import type { LiveState } from "../e2e/mock/state.js";
+import type { Row, SnapshotSection } from "./snapshot-roundtrip.js";
 
 export const STAMPS = { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 
