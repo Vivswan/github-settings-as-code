@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 # The checks job needs only the checkout; the report job scopes its own
-# issue and dispatch permissions below.
+# issue permission below.
 permissions:
   contents: read
 
@@ -87,14 +87,11 @@ jobs:
     # A few gh calls behind a bun setup; a hung reporter is the residual
     # silence window, so keep this tight.
     timeout-minutes: 5
-    # issues: write lets the fuzz-issue action file/close the tracking issue;
-    # actions: write lets the red path dispatch auto-assign at it.
+    # issues: write lets the fuzz-issue action file/close the tracking issue.
     permissions:
       issues: write
-      actions: write
     steps:
       - name: File or update the nightly issue
-        id: file-issue
         if: needs.checks.result != 'success' || needs.float-canary.result != 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         # This job checks nothing out (kept tight), so gh has no git
@@ -114,15 +111,6 @@ jobs:
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
           stream: generic
-
-      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
-      - name: Trigger auto-assign for the filed issue
-        if: steps.file-issue.outputs.issue-number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
-        run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
       - name: Close the nightly issue on a green night
         if: needs.checks.result == 'success' && needs.float-canary.result == 'success'

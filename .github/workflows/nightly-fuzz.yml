@@ -34,12 +34,10 @@ concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('nightly-fuzz-{0}', github.run_id) || 'nightly-fuzz' }}
   cancel-in-progress: false
 
-# issues: write lets the fuzz-issue action file/close the tracking issue;
-# actions: write lets the failure path dispatch auto-assign at it.
+# issues: write lets the fuzz-issue action file/close the tracking issue.
 permissions:
   contents: read
   issues: write
-  actions: write
 
 jobs:
   fuzz:
@@ -78,7 +76,6 @@ jobs:
           if-no-files-found: ignore
 
       - name: File or update the fuzz issue
-        id: file-issue
         if: failure()
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         with:
@@ -90,14 +87,6 @@ jobs:
           label-color: "B60205"
           label-description: Automated nightly fuzz failure
           stream: fuzz
-
-      # A GITHUB_TOKEN-created issue fires no triggers, so dispatch auto-assign.
-      - name: Trigger auto-assign for the filed issue
-        if: failure() && steps.file-issue.outputs.issue-number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
-        run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
       - name: Close the fuzz issue on a green night
         if: success()
