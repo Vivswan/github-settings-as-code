@@ -52,34 +52,84 @@ import type { MustBeNever } from "./types.js";
 
 // --- The settings document ----------------------------------------------------
 
+/**
+ * How a section's slice (src/sections/<key>/schema.ts) becomes its document property, before .optional():
+ *
+ *   slice    -> the slice verbatim
+ *   knob     -> knobbed(entry): the `_undeclared` wrapper over the entry slice
+ *   layered  -> layeredList(list): the `_layering` wrapper over the list slice
+ */
+type SectionSlice =
+  | { readonly key: string; readonly kind: "slice" | "knob"; readonly slice: z.ZodType }
+  | { readonly key: string; readonly kind: "layered"; readonly slice: z.ZodArray<z.ZodType> };
+
+/**
+ * The ONE table of sections and their slices: SettingsFile's shape is built from it, so a property is its section's
+ * slice by construction. Its order is the published schema's property order; execution order is SECTION_KEYS.
+ */
+const SECTION_SLICES = [
+  { key: "repository", kind: "slice", slice: RepositoryConfig },
+  { key: "labels", kind: "knob", slice: LabelConfig },
+  { key: "rulesets", kind: "knob", slice: RulesetConfig },
+  { key: "branches", kind: "layered", slice: BranchesConfig },
+  { key: "environments", kind: "layered", slice: EnvironmentsConfig },
+  { key: "autolinks", kind: "knob", slice: AutolinkConfig },
+  { key: "actions", kind: "slice", slice: ActionsConfig },
+  { key: "actions_secrets", kind: "knob", slice: ActionsSecretConfig },
+  { key: "dependabot_secrets", kind: "knob", slice: DependabotSecretConfig },
+  { key: "codespaces_secrets", kind: "knob", slice: CodespacesSecretConfig },
+  { key: "agents_secrets", kind: "knob", slice: AgentsSecretConfig },
+  { key: "workflows", kind: "layered", slice: WorkflowsConfig },
+  { key: "check_suite_preferences", kind: "slice", slice: CheckSuitePreferencesConfig },
+  { key: "pages", kind: "slice", slice: PagesConfig },
+  { key: "code_scanning_default_setup", kind: "slice", slice: CodeScanningDefaultSetupConfig },
+  { key: "code_quality_setup", kind: "slice", slice: CodeQualitySetupConfig },
+  { key: "collaborators", kind: "knob", slice: CollaboratorConfig },
+  { key: "teams", kind: "knob", slice: TeamConfig },
+  { key: "milestones", kind: "knob", slice: MilestoneConfig },
+  { key: "interaction_limits", kind: "slice", slice: InteractionLimitsConfig },
+  { key: "actions_variables", kind: "knob", slice: ActionsVariableConfig },
+  { key: "agents_variables", kind: "knob", slice: AgentsVariableConfig },
+  { key: "webhooks", kind: "knob", slice: WebhookConfig },
+  { key: "custom_properties", kind: "knob", slice: CustomPropertyConfig },
+  { key: "deploy_keys", kind: "knob", slice: DeployKeyConfig },
+  { key: "secret_scanning_custom_patterns", kind: "knob", slice: SecretScanningPatternConfig },
+] as const satisfies readonly SectionSlice[];
+
+type Composed<E extends SectionSlice> = E extends {
+  kind: "slice";
+  slice: infer S extends z.ZodType;
+}
+  ? z.ZodOptional<S>
+  : E extends { kind: "knob"; slice: infer S extends z.ZodType }
+    ? z.ZodOptional<ReturnType<typeof knobbed<S>>>
+    : E extends { kind: "layered"; slice: infer S extends z.ZodArray<z.ZodType> }
+      ? z.ZodOptional<ReturnType<typeof layeredList<S>>>
+      : never;
+
+type SectionShape = {
+  [E in (typeof SECTION_SLICES)[number] as E["key"]]: Composed<E>;
+};
+
+function composed(section: SectionSlice): z.ZodType {
+  switch (section.kind) {
+    case "slice":
+      return section.slice.optional();
+    case "knob":
+      return knobbed(section.slice).optional();
+    case "layered":
+      return layeredList(section.slice).optional();
+  }
+}
+
+// The one cast: SectionShape is Composed over the same table the entries come from.
+const sectionShape = Object.fromEntries(
+  SECTION_SLICES.map((section) => [section.key, composed(section)]),
+) as SectionShape;
+
 export const SettingsFile = z
   .object({
-    repository: RepositoryConfig.optional(),
-    labels: knobbed(LabelConfig).optional(),
-    rulesets: knobbed(RulesetConfig).optional(),
-    branches: layeredList(BranchesConfig).optional(),
-    environments: layeredList(EnvironmentsConfig).optional(),
-    autolinks: knobbed(AutolinkConfig).optional(),
-    actions: ActionsConfig.optional(),
-    actions_secrets: knobbed(ActionsSecretConfig).optional(),
-    dependabot_secrets: knobbed(DependabotSecretConfig).optional(),
-    codespaces_secrets: knobbed(CodespacesSecretConfig).optional(),
-    agents_secrets: knobbed(AgentsSecretConfig).optional(),
-    workflows: layeredList(WorkflowsConfig).optional(),
-    check_suite_preferences: CheckSuitePreferencesConfig.optional(),
-    pages: PagesConfig.optional(),
-    code_scanning_default_setup: CodeScanningDefaultSetupConfig.optional(),
-    code_quality_setup: CodeQualitySetupConfig.optional(),
-    collaborators: knobbed(CollaboratorConfig).optional(),
-    teams: knobbed(TeamConfig).optional(),
-    milestones: knobbed(MilestoneConfig).optional(),
-    interaction_limits: InteractionLimitsConfig.optional(),
-    actions_variables: knobbed(ActionsVariableConfig).optional(),
-    agents_variables: knobbed(AgentsVariableConfig).optional(),
-    webhooks: knobbed(WebhookConfig).optional(),
-    custom_properties: knobbed(CustomPropertyConfig).optional(),
-    deploy_keys: knobbed(DeployKeyConfig).optional(),
-    secret_scanning_custom_patterns: knobbed(SecretScanningPatternConfig).optional(),
+    ...sectionShape,
     // The non-section keys, the document's directives (engine/directives.ts): `_layering` steers the fold and never reaches
     // the apply path; `_undeclared` is resolved into every list's wrapper, after the fold or by the validator.
     _layering: LayeringSchema.optional(),
@@ -238,54 +288,3 @@ type DocumentDirectiveKey = (typeof DOCUMENT_DIRECTIVE_KEYS)[number];
 
 type _UnlistedSection = MustBeNever<Exclude<keyof SettingsFile, SectionKey | DocumentDirectiveKey>>;
 type _DirectiveNotASection = MustBeNever<Extract<DocumentDirectiveKey, SectionKey>>;
-
-// --- Slice-composition pins -----------------------------------------------------
-
-/**
- * Each property's schema before .optional(): the slice verbatim, the undeclared knob over the entry slice, or the
- * layered wrapper over the list slice. A
- * whole-section slice export is named <Key>Config, matching the <Entry>Config entry schemas; a new section fails to
- * compile until its derivation is declared here.
- */
-type SliceDerivation = {
-  repository: typeof RepositoryConfig;
-  labels: ReturnType<typeof knobbed<typeof LabelConfig>>;
-  rulesets: ReturnType<typeof knobbed<typeof RulesetConfig>>;
-  environments: ReturnType<typeof layeredList<typeof EnvironmentsConfig>>;
-  branches: ReturnType<typeof layeredList<typeof BranchesConfig>>;
-  autolinks: ReturnType<typeof knobbed<typeof AutolinkConfig>>;
-  actions: typeof ActionsConfig;
-  actions_secrets: ReturnType<typeof knobbed<typeof ActionsSecretConfig>>;
-  dependabot_secrets: ReturnType<typeof knobbed<typeof DependabotSecretConfig>>;
-  codespaces_secrets: ReturnType<typeof knobbed<typeof CodespacesSecretConfig>>;
-  agents_secrets: ReturnType<typeof knobbed<typeof AgentsSecretConfig>>;
-  workflows: ReturnType<typeof layeredList<typeof WorkflowsConfig>>;
-  check_suite_preferences: typeof CheckSuitePreferencesConfig;
-  pages: typeof PagesConfig;
-  code_scanning_default_setup: typeof CodeScanningDefaultSetupConfig;
-  code_quality_setup: typeof CodeQualitySetupConfig;
-  collaborators: ReturnType<typeof knobbed<typeof CollaboratorConfig>>;
-  teams: ReturnType<typeof knobbed<typeof TeamConfig>>;
-  milestones: ReturnType<typeof knobbed<typeof MilestoneConfig>>;
-  interaction_limits: typeof InteractionLimitsConfig;
-  actions_variables: ReturnType<typeof knobbed<typeof ActionsVariableConfig>>;
-  agents_variables: ReturnType<typeof knobbed<typeof AgentsVariableConfig>>;
-  webhooks: ReturnType<typeof knobbed<typeof WebhookConfig>>;
-  custom_properties: ReturnType<typeof knobbed<typeof CustomPropertyConfig>>;
-  deploy_keys: ReturnType<typeof knobbed<typeof DeployKeyConfig>>;
-  secret_scanning_custom_patterns: ReturnType<typeof knobbed<typeof SecretScanningPatternConfig>>;
-};
-
-type SectionNotComposedFromItsSlice = {
-  [K in SectionKey]: (typeof SettingsFile.shape)[K] extends z.ZodOptional<SliceDerivation[K]>
-    ? never
-    : K;
-}[SectionKey];
-
-/**
- * Compile-time lockstep, STRUCTURAL only: zod types refinements as `this`, so a lookalike rebuilt without a slice's
- * superRefine still matches. test/schema-slices.test.ts closes that hole by asserting object identity per key.
- */
-type _EverySectionComposedFromItsSlice = MustBeNever<SectionNotComposedFromItsSlice>;
-
-type _SliceDerivationKeysReal = MustBeNever<Exclude<keyof SliceDerivation, SectionKey>>;
