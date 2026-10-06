@@ -32,11 +32,12 @@ describe("checks.yml release PR branch spelling", () => {
     expectReleasePrefixes(parseYaml(text) as Workflow);
   });
 
-  test.each<[string, (text: string) => Workflow]>([
+  test.each<[string, (text: string) => Workflow, RegExp]>([
     [
       "a drifted spelling",
       (text) =>
         parseYaml(text.replaceAll(`'${RELEASE_PR_BRANCH_PREFIX}'`, "'release-pls--'")) as Workflow,
+      /toEqual[\s\S]*"release-pls--"/,
     ],
     [
       "a missing anchor-check step",
@@ -47,10 +48,14 @@ describe("checks.yml release PR branch spelling", () => {
         }
         return wf;
       },
+      /must run anchor-check in exactly one step/,
     ],
-  ])("%s fails the guard (negative control)", (_case, mutate) => {
-    expect(() => expectReleasePrefixes(mutate(text))).toThrow();
-  });
+  ])(
+    "%s fails the guard on the assertion that names it (negative control)",
+    (_case, mutate, failure) => {
+      expect(() => expectReleasePrefixes(mutate(text))).toThrow(failure);
+    },
+  );
 });
 
 describe("headRefPrefixes", () => {
