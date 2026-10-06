@@ -152,6 +152,15 @@ describe("parseArchitecture", () => {
         "Flow sequence in block collection must be sufficiently indented and end with a ] at line 4, column 1",
       ],
     ],
+    [
+      // Mermaid reads a hyphen as edge syntax, so the renderer swaps it for an underscore; two names one id would
+      // merge into a single node of the module map, silently, unless the declaration refuses them first.
+      "two layers the mermaid map would draw as one node",
+      "layers: {plain-data: [src/plain-data.ts], plain_data: [src/plain_data.ts]}\nexclude: []\nedges: {}",
+      [
+        'layers "plain-data" and "plain_data" share the mermaid id plain_data, which would draw them as one node of the module map; rename all but one',
+      ],
+    ],
   ])("%s fails naming the key", (_case, document, problems) =>
     withTempDir("arch-lint-parse-", (dir) => {
       expect(parse(dir, document)).toEqual(err(problems.map((p) => `${ARCHITECTURE_PATH}: ${p}`)));
