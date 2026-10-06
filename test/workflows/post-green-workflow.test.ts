@@ -156,7 +156,9 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   ) {
     grants.push(["contents", `"${label}" pushes or touches a release`]);
   }
-  if (/\bnpm\s+publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)) {
+  if (
+    /\bnpm\s+publish\b|release-pipeline\.ts npm-publish\b|ACTIONS_ID_TOKEN_REQUEST_URL/.test(run)
+  ) {
     grants.push(["id-token", `"${label}" publishes through OIDC`]);
   }
   return grants;
@@ -294,9 +296,9 @@ function claimProblems(page: string): string[] {
   for (const [, tag = "", publishesOn = ""] of rows) {
     const channel = tag === "latest" ? "stable" : tag;
     const { file, workflow } = hookFor(publishesOn);
-    if (!runsSubcommand(workflow, `npm-verdict ${channel}`)) {
+    if (!runsSubcommand(workflow, `npm-publish ${channel}`)) {
       problems.push(
-        `the page says ${tag} publishes on "${publishesOn.trim()}", but ${file} runs no npm-verdict ${channel}`,
+        `the page says ${tag} publishes on "${publishesOn.trim()}", but ${file} runs no npm-publish ${channel}`,
       );
     }
   }
@@ -335,25 +337,25 @@ describe("the library page's publishing claims", () => {
     const build = must(workflow.jobs.build, "build job");
     build.steps = build.steps?.filter((step) => !/package-commit/.test(step.run ?? ""));
     expect(runsSubcommand(workflow, "package-commit")).toBe(false);
-    // The pre-release guard runs in the release-PR hook alone: the green-push hook publishes nothing to npm.
-    expect(runsSubcommand(workflow, "npm-verdict next")).toBe(false);
-    expect(runsSubcommand(hookFor("the release PR").workflow, "npm-verdict next")).toBe(true);
-    expect(runsSubcommand(workflow, "npm-verdict stable")).toBe(false);
+    // The pre-release publish runs in the release-PR hook alone: the green-push hook publishes nothing to npm.
+    expect(runsSubcommand(workflow, "npm-publish next")).toBe(false);
+    expect(runsSubcommand(hookFor("the release PR").workflow, "npm-publish next")).toBe(true);
+    expect(runsSubcommand(workflow, "npm-publish stable")).toBe(false);
     expect(
       claimProblems(
         page.replace(/^\| `next` \| [^|]+ \|/m, "| `next` | Every green push to `main` |"),
       ),
     ).toEqual([
-      'the page says next publishes on "Every green push to `main`", but post-green.yml runs no npm-verdict next',
+      'the page says next publishes on "Every green push to `main`", but post-green.yml runs no npm-publish next',
     ]);
     // A publish step conditioned on the caller's event skips on the push that calls it, so the channel's claim fails.
     const conditioned = readWorkflow("update-release.yml");
     for (const job of Object.values(conditioned.jobs)) {
       for (const step of job.steps ?? []) {
-        if (/npm-verdict stable/.test(step.run ?? "")) step.if = "github.event_name == 'release'";
+        if (/npm-publish stable/.test(step.run ?? "")) step.if = "github.event_name == 'release'";
       }
     }
-    expect(runsSubcommand(conditioned, "npm-verdict stable")).toBe(false);
+    expect(runsSubcommand(conditioned, "npm-publish stable")).toBe(false);
     expect(
       claimProblems(
         page.replace(
@@ -362,7 +364,7 @@ describe("the library page's publishing claims", () => {
         ),
       ),
     ).toEqual([
-      'the page says latest publishes on "Every green push to `main`", but post-green.yml runs no npm-verdict stable',
+      'the page says latest publishes on "Every green push to `main`", but post-green.yml runs no npm-publish stable',
     ]);
   });
 });
@@ -448,9 +450,10 @@ function wiringProblems(workflow: Workflow): string[] {
   });
 }
 
-/** The post-green hook and the release-PR hook, whose publish job the post-green one used to hold. */
+/** The post-green hook, the release-PR hook (whose publish job the post-green one used to hold), and the release hook. */
 const RELEASE_PR = "update-release-pr.yml";
 const POST_GREEN = "post-green.yml";
+const RELEASE = "update-release.yml";
 
 describe("the probed hooks' wiring", () => {
   const workflow = readWorkflow(POST_GREEN);
@@ -481,11 +484,11 @@ describe("the probed hooks' wiring", () => {
       /runs whatever the probe found/,
     ],
     [
-      "the confirmation gated on a step that is not gated itself",
+      "the publish gated on a step that is not gated itself",
       RELEASE_PR,
       (w) => {
         const steps = must(publishJob(w).steps, "steps");
-        must(steps.at(-1), "confirm").if = "steps.oidc-copy.outputs.proceed == 'true'";
+        must(steps.at(-1), "publish").if = "steps.oidc-copy.outputs.proceed == 'true'";
         steps.splice(1, 0, { id: "oidc-copy", run: 'echo "proceed=true" >> "$GITHUB_OUTPUT"' });
       },
       /runs whatever the probe found/,
@@ -509,10 +512,10 @@ describe("the probed hooks' wiring", () => {
       /reads steps\.token\.outputs\.published, which no earlier step writes/,
     ],
     [
-      "the confirmation step gone, leaving the publish output unread",
-      RELEASE_PR,
-      (w) => publishJob(w).steps?.pop(),
-      /writes published, which no later step reads/,
+      "the source step's readers gone, leaving the resolved sha unread",
+      RELEASE,
+      (w) => must(w.jobs["package-release"], "package-release").steps?.splice(1),
+      /writes sha, which no later step reads/,
     ],
     [
       "the checkout ahead of the probe under a condition of its own",
@@ -532,13 +535,13 @@ describe("the probed hooks' wiring", () => {
       /the probe "Check the token can push" runs under a condition of its own/,
     ],
     [
-      "the publish output no longer written",
-      RELEASE_PR,
+      "the resolved sha no longer written",
+      RELEASE,
       (w) => {
-        const step = must(publishJob(w).steps?.at(-2), "publish");
-        step.run = step.run?.replace(/\n\s*echo "published=true" >> "\$GITHUB_OUTPUT"/, "");
+        const step = must(must(w.jobs["package-release"], "package-release").steps?.[0], "source");
+        step.run = step.run?.replace(/\n\s*echo "sha=\$sha" >> "\$GITHUB_OUTPUT"/, "");
       },
-      /reads steps\.publish\.outputs\.published, which no earlier step writes/,
+      /reads steps\.source\.outputs\.sha, which no earlier step writes/,
     ],
   ])("%s fails the wiring relation (negative control)", (_case, file, mutate, message) => {
     const drifted = readWorkflow(file);
@@ -562,7 +565,7 @@ describe("the probed hooks' wiring", () => {
     ],
     [
       "a verdict gate copied onto a hook without that probe",
-      (w) => gateSteps(w, /npm-verdict stable/, "steps.oidc.outputs.proceed == 'true'"),
+      (w) => gateSteps(w, /npm-publish stable/, "steps.oidc.outputs.proceed == 'true'"),
       /reads steps\.oidc\.outputs\.proceed, which no earlier step writes/,
     ],
   ])("%s fails the wiring there (negative control)", (_case, mutate, message) => {
@@ -610,10 +613,10 @@ describe("the probed hooks' wiring", () => {
     expectSource(POST_GREEN, `inputs.${input}`, { checkouts: 1, sources: 1 });
   });
 
-  test("the release-PR hook publishes the caller's sha: the push release-please judged is what its checkout takes and its publish and confirmation name", () => {
+  test("the release-PR hook publishes the caller's sha: the push release-please judged is what its checkout takes and its publish names", () => {
     // Inside a called workflow github.sha is the caller's, the head the refresh was built on, so the version, the provenance,
     // and the guard all speak of one commit.
-    expectSource(RELEASE_PR, "github.sha", { checkouts: 1, sources: 2 });
+    expectSource(RELEASE_PR, "github.sha", { checkouts: 1, sources: 1 });
   });
 
   test("the push probe tells a rejected PAT from a read ceiling by the same secret the checkout falls back from", () => {
