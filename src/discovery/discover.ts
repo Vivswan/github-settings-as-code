@@ -89,15 +89,14 @@ export interface ExcludePattern {
 }
 
 /**
- * `nocase`: repository names compare case-insensitively on GitHub. `dot`: a leading "." is an ordinary character
- * in a repository name (".github"), not the hidden-file marker picomatch skips by default. `posix`: "[!ab]" is a
- * negated class, as in a shell, instead of a class holding "!". `fastpaths: false`: the shortcut regexes picomatch
- * mints for star-led patterns demand a character after a literal dot, so "*.*" would miss "archive."; the full
- * parser keeps "*" any run of characters. `debug`: an invalid class like "[z-a]" throws instead of compiling to a
- * never-matching regex. `windows: false`: the main entry otherwise follows the host OS, and a slug is a GitHub
- * identifier, not a path, so the matcher is the same on every runner. `literalBrackets: false`: a class compiles
- * to the class alone, not an alternation with its literal text, which no name holds; thousands of classes then
- * compile in milliseconds instead of reaching the engine's size limit.
+ * picomatch is built for file paths and a slug is a GitHub identifier, so each option is set for a name, none left to its default:
+ *   nocase          -> GitHub compares repository names case-insensitively
+ *   dot             -> a leading "." is an ordinary name character (".github"), not the hidden-file marker
+ *   posix           -> "[!ab]" is a negated class, as in a shell, not a class holding "!"
+ *   fastpaths       -> the star-led shortcut regexes demand a character after a literal dot, so "*.*" would miss "archive."
+ *   debug           -> an invalid class like "[z-a]" throws instead of compiling to a never-matching regex
+ *   windows         -> pinned: only picomatch's main callable reads the host OS; makeRe never does
+ *   literalBrackets -> no alternation with the class's literal text (no name holds it); thousands compile in milliseconds, under the engine's limit
  */
 const EXCLUDE_GLOB_OPTIONS = {
   nocase: true,

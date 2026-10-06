@@ -51,17 +51,8 @@ const row = lineOf([
   backticked,
 ]);
 
-/** What action-docs writes between its markers, by position after the opening marker's own line ends:
- *
- * ""                                          the rest of the marker line
- * "## Inputs"
- * ""
- * "| name | description | required | default |"
- * "| --- | --- | --- | --- |"
- * one row per input                           a description never holds a "|" (test/docs/inputs.test.ts)
- * ""                                          before the closing marker
- *
- * A region of blank lines alone (a fresh marker pair) is also a rendering's shape. */
+/** The first entry is the rest of the opening marker's own line. A "|" in a description would split its rendered row
+ * past `row`'s four cells and refuse it as authored, so test/docs/inputs.test.ts pins every description free of one. */
 const LEADING: ((line: string) => boolean)[] = [
   (line) => line === "",
   (line) => line === "## Inputs",

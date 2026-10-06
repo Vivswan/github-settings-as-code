@@ -10,27 +10,14 @@
  *   refs/tags/vX                   -> the same commit, moved on each release in the line
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
- * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone:
- * forward along main, under a compare-and-set on the value origin advertised, never back.
+ * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
+ * Every subcommand but prerelease-version runs under a workflow step, bare or in the step's shell; no step runs two.
  *
- * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off); one subcommand runs
- * per workflow step:
+ * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off) and creates or
+ * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
+ * off); that refresh is what publishes the `next` pre-release.
  *
- *   package-commit                 post-green.yml          GITHUB_SHA, RUN_URL (optional)
- *   anchor                         update-release-pr.yml   GITHUB_SHA
- *   npm-verdict next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional)
- *   npm-confirm next               update-release-pr.yml   GITHUB_SHA, NPM_REGISTRY_URL (optional), NPM_CONFIRM_PAUSE_MS (optional)
- *   npm-verdict stable             update-release.yml      TAG, GITHUB_SHA, NPM_REGISTRY_URL (optional)
- *   npm-floor                      both publish jobs       (nothing; npm on PATH)
- *   package, retag-major           update-release.yml      TAG, GITHUB_SHA, RUN_URL (optional, package only)
- *   boundary-check, anchor-check   checks.yml              (the checkout alone)
- *   prerelease-version             by hand                 GITHUB_SHA (the version a commit's next publish carries)
- *
- * The `next` pre-release publishes when release-please creates or refreshes the release PR, which it does only when a
- * releasable commit lands (release-please-config.json leaves always-update off); npm-verdict next is the guard on
- * npm state that follows, never the decision to publish.
- *
- * Node builtins only: bun runs this before `bun install`. Tests: test/scripts/release-pipeline*.test.ts over release-pipeline-fixture.ts.
+ * Node builtins only: bun runs this before `bun install`.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -454,15 +441,9 @@ export interface PointerMove {
  * The one way a pointer (latest, vX) moves: forward along main, never back. A pointer's source is its commit's
  * parent when that parent is on main; the candidate's source is on main by its caller's check.
  *
- *   pointer's source is the candidate's or descends from it  -> left: the same package, or a rerun of an older commit's run
- *   same source, another tree                                -> refused: two builds of one main commit
- *   pointer's source unknown (off main, a root)              -> moved: a value this pipeline did not mint
- *   otherwise                                                -> moved, under a lease on the value observed
- *
  * A value left in place must be a package of the commit it is read as packaging, or a hand-pushed bare child of a
  * newer commit would stand as "already past". Main's head is read AFTER the pointer on every pass: a pointer a rival
- * moved to a newer commit's package has that commit on main by then. A lease lost to a rival re-observes and
- * decides again; a push refused with the ref unmoved is thrown.
+ * moved to a newer commit's package has that commit on main by then.
  */
 export function movePointer(cwd: string, ref: string, candidate: Packaged): PointerMove {
   for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {

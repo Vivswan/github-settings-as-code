@@ -45,13 +45,7 @@ const STANDARD_PERMISSIONS = ["pull", "triage", "push", "maintain", "admin"] as 
  * The two wrong spellings hide until apply: "write" on an existing Write collaborator converges with zero drift
  * (the live role_name IS "write") while the same entry on a new one PUTs {"permission":"write"} and 422s.
  *
- *   read, write (any case)            -> the vocabulary GET reports a role in; the grant takes pull, push
- *   Push, ADMIN (a mis-cased standard) -> the lowercase form
- *   "", " push", "push\n" (block scalar) -> nothing to grant, or whitespace GitHub would not match
- *
- * One regex, so the published schema carries the same rule as a `pattern` (a pattern has no flags, hence the
- * case classes): an exact standard permission, or one line with no whitespace at either end that folds to none
- * of the seven words.
+ * One regex, so the published schema carries the same rule as a `pattern`; a pattern has no flags, hence the case classes.
  */
 const REFUSED_FOLDED = [...STANDARD_PERMISSIONS, ...PERMISSION_FOR_ROLE.keys()];
 const caseless = (word: string) => [...word].map((c) => `[${c.toUpperCase()}${c}]`).join("");

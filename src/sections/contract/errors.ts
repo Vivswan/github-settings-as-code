@@ -14,15 +14,11 @@ import { grantFor, type SectionPermission, samePermission } from "./permissions.
  * What ends a section's work, as a value. `message` is the whole line the loops report; `kind` is read for policy
  * alone (a denial's partial-success handling in engine/orchestrate.ts), never to rebuild prose.
  *
- *   request kinds (failureFor and the request helpers): rate-limit, rejected, server-error, unauthorized,
- *                  validation, transport, malformed
- *   duplicate kinds (the identity checks): declared-duplicate, live-duplicate
- *   live-shape     -> GitHub's answer parsed but cannot be reconciled (an item without an id, a repeated rule type)
- *   refused        -> the section declines to proceed: the settings file conflicts with live state, an actor cannot
- *                     be resolved, a write would drop live values the file omits
- *   unverified     -> a write landed but its echo disagrees with what was set
- *   thrown         -> an exception escaped a section: the client's own throw on an unmarked request, or a BUG
- *                     invariant; the loops report its message like any other failure
+ *   live-shape  -> GitHub's answer parsed but cannot be reconciled (an item without an id, a repeated rule type)
+ *   refused     -> the section declines to proceed: the settings file conflicts with live state, an actor cannot be
+ *                  resolved, a write would drop live values the file omits
+ *   unverified  -> a write landed but its echo disagrees with what was set
+ *   thrown      -> an exception escaped a section: the client's own throw on an unmarked request, or a BUG invariant
  */
 export type SectionFailure =
   | {

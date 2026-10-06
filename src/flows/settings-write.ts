@@ -1,13 +1,13 @@
 /**
- * The one place a run writes a settings document (a snapshot, the merged file, init's starting file): staged beside
- * the destination and renamed into place, so a write that fails partway (disk full, an interrupted run) leaves the
- * previous file intact instead of a truncated one. The rename is atomic on POSIX and a single replace call on
- * Windows. The staging name is unique to the write (pid and random bytes), so no file of the user's is ever unlinked
- * or written through: an existing path there fails the write instead. A destination that is a symlink is replaced by
- * the rename, the link itself, never its referent, so the written document is always a regular file at `path`. The
- * guards over the writer hold one promise: an input layer is never the destination, under any name the read follows
- * or the rename reaches; deliberate evasion (hardlinks, mounts, races) is out of scope. A hard crash mid-write leaves
- * the staging file for the user to remove (.gitignore hides it); no run sweeps a file another process may be writing.
+ * The one place a run writes a settings document (a snapshot, the merged file, init's starting file). The guards
+ * over the writer hold one promise: an input layer is never the destination, under any name the read follows or the
+ * rename reaches. Deliberate evasion (hardlinks, mounts, races) is out of scope.
+ *
+ *   staged beside the destination, renamed in -> a write that fails partway leaves the previous file intact
+ *   the rename                                 -> atomic on POSIX, a single replace call on Windows
+ *   a symlink at the destination               -> the link itself is replaced, never its referent: `path` is always a regular file after
+ *   a hard crash mid-write                     -> the staging file is left for the user to remove (.gitignore hides it); no run
+ *                                                 sweeps a file another process may be writing
  */
 
 import { randomBytes } from "node:crypto";
