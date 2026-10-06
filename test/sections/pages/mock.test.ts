@@ -4,9 +4,19 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../../e2e/constants.js";
 import { handlerTestContext } from "../../e2e/mock/handler-test-ctx.js";
+import {
+  call,
+  json,
+  mockServerLifecycle,
+  scenario,
+  singleState,
+} from "../../e2e/mock/server-test-support.js";
 import { buildStateForSlug, type MockState } from "../../e2e/mock/state.js";
 import { pagesMockHandlers } from "./mock.js";
+
+const start = mockServerLifecycle();
 
 // The fragment's exact key union makes a typo'd key a compile error, so no runtime not-found guard is needed.
 function handler<K extends keyof typeof pagesMockHandlers>(key: K): (typeof pagesMockHandlers)[K] {
@@ -63,5 +73,21 @@ describe("pages mock handlers", () => {
       custom_404: false,
       cname: "docs.example.com",
     });
+  });
+});
+
+describe("pages create on empty state", () => {
+  test("POST /pages creates the site (201) when none exists", async () => {
+    const h = await start(scenario({ live_state: { pages: null } }));
+    const res = await call(h, "POST", `/repos/${OWNER}/${REPO}/pages`, {
+      body: { source: { branch: "main", path: "/" } },
+    });
+    expect(res.status).toBe(201);
+    const site = {
+      url: `https://api.github.com/repos/${OWNER}/${REPO}/pages`,
+      source: { branch: "main", path: "/" },
+    };
+    expect(await json(res)).toEqual(site);
+    expect(singleState(h).pages).toEqual(site);
   });
 });
