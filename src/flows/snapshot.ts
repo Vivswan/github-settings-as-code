@@ -188,7 +188,6 @@ async function snapshotTarget(ctx: {
  * inputs are disjoint (overlap), yet the written path, followed by the filesystem, can still reach authored ground.
  * A refusal names an earlier target through `display`, so a redacted one stays sealed.
  *
- * owner or name "." or ".."             -> not a GitHub owner/name, though SLUG_RE admits them; an owner ".." would leave the directory
  * landing is an authored file           -> a link under either directory into the other, or an owner spelled ".github"
  * landing inside the repos-dir          -> read back as a central file on the next run
  * landing claimed by an earlier target  -> a link folding two owners: out/bob -> out/alice with alice/r and bob/r
@@ -200,11 +199,6 @@ function snapshotFilePath(
   claimed: Map<string, string>,
   display: (slug: string) => string,
 ): { path: string } | { error: string } {
-  if ([repo.owner, repo.name].some((part) => part === "." || part === "..")) {
-    return {
-      error: `the repository name "${repo.slug}" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
-    };
-  }
   const path = join(cfg.snapshotDir, repo.owner, `${repo.name}.yml`);
   const landing = canonicalPath(path);
   if (authored.has(landing)) {

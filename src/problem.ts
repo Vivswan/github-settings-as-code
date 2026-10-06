@@ -339,7 +339,11 @@ const PASSTHROUGH_ADVICE =
 function describeCentralFile(file: CentralFileProblem): string {
   switch (file.kind) {
     case "not-a-slug":
-      return `${file.filePath} resolves to the target "${file.slug}", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes`;
+      return (
+        `${file.filePath} resolves to the target "${file.slug}", which is not a valid owner/name slug. ` +
+        "Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and " +
+        'dashes, and neither is "." or ".."'
+      );
     case "duplicate":
       return `duplicate target ${file.slug}: defined by both ${file.first} and ${file.second}. Keep exactly one settings file per repository`;
     case "ownerless":
