@@ -15,7 +15,7 @@ import { err, ok, Result } from "neverthrow";
 import { type Node, parseSync } from "oxc-parser";
 import { parseDocument } from "yaml";
 import { z } from "zod";
-import { countNoun } from "../../src/text.js";
+import { countNoun, quote } from "../../src/text.js";
 
 export const ARCHITECTURE_PATH = "architecture.yml";
 
@@ -83,13 +83,31 @@ export function parseArchitecture(root: string): Result<Architecture, string[]> 
     return err(doc.error);
   }
   const parsed = ARCHITECTURE.safeParse(doc.value);
-  return parsed.success
-    ? ok(parsed.data)
-    : err(located(parsed.error.issues.flatMap((issue) => describeIssue(doc.value, issue))));
+  if (!parsed.success) {
+    return err(located(parsed.error.issues.flatMap((issue) => describeIssue(doc.value, issue))));
+  }
+  const merged = mergedMermaidNodes(parsed.data);
+  return merged.length > 0 ? err(located(merged)) : ok(parsed.data);
 }
 
 function located(problems: readonly string[]): string[] {
   return problems.map((problem) => `${ARCHITECTURE_PATH}: ${problem}`);
+}
+
+/** A hyphen in a layer name is edge syntax to mermaid, so ids swap it for an underscore. */
+function mermaidId(layer: string): string {
+  return layer.replace(/-/g, "_");
+}
+
+/** The id mapping is not injective, so two layer names can share a node; the declaration refuses that pair. */
+function mergedMermaidNodes(arch: Architecture): string[] {
+  return [...Map.groupBy(Object.keys(arch.layers), mermaidId)].flatMap(([id, layers]) =>
+    layers.length > 1
+      ? [
+          `layers ${layers.map(quote).join(" and ")} share the mermaid id ${id}, which would draw them as one node of the module map; rename all but one`,
+        ]
+      : [],
+  );
 }
 
 /** For callers that render rather than lint (docs, tests): a malformed declaration is fatal to them. */
@@ -279,14 +297,14 @@ export function lintArchitecture(root: string, arch = readArchitecture(root)): s
   return problems;
 }
 
-/** A hyphen in a layer name is edge syntax to mermaid, so ids swap it for an underscore. */
 export function renderArchitectureMermaid(arch: Architecture): string {
-  const id = (layer: string): string => layer.replace(/-/g, "_");
   return [
     "graph TD",
-    ...Object.entries(arch.layers).map(([name, paths]) => `  ${id(name)}["${paths.join("<br>")}"]`),
+    ...Object.entries(arch.layers).map(
+      ([name, paths]) => `  ${mermaidId(name)}["${paths.join("<br>")}"]`,
+    ),
     ...Object.entries(arch.edges).flatMap(([from, targets]) =>
-      targets.map((to) => `  ${id(from)} --> ${id(to)}`),
+      targets.map((to) => `  ${mermaidId(from)} --> ${mermaidId(to)}`),
     ),
   ].join("\n");
 }
