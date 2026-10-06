@@ -630,6 +630,50 @@ export function retagMajor(options: RetagMajorOptions): RetaggedMajor {
 export const RELEASE_PR_BRANCH_PREFIX = "release-please--";
 const RELEASE_PR_BRANCH = `${RELEASE_PR_BRANCH_PREFIX}branches--main`;
 
+/** release-please's config with the one key this pipeline reads and writes; the rest is release-please's. */
+type ReleaseConfig = Record<string, unknown> & { "last-release-sha"?: string };
+
+/** The config as the checkout holds it. The file is the user's and release-please's, so nothing here is repaired: a
+ * missing or malformed one, or a boundary that is no commit sha, is refused naming the file (an absent boundary is
+ * the pre-first-release state and passes). */
+function readReleaseConfig(cwd: string): ReleaseConfig {
+  let text: string;
+  try {
+    text = readFileSync(join(cwd, CONFIG_FILE), "utf8");
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== "ENOENT") {
+      throw error;
+    }
+    throw new Error(
+      `${CONFIG_FILE} is missing from ${cwd}; the release pipeline reads release-please's boundary (last-release-sha) from it. Restore it by PR.`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(
+      `${CONFIG_FILE} is not valid JSON (${error instanceof Error ? error.message : String(error)}); fix it by PR.`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    const kind = Array.isArray(parsed)
+      ? "an array"
+      : parsed === null
+        ? "null"
+        : `a ${typeof parsed}`;
+    throw new Error(`${CONFIG_FILE} holds ${kind}, not a JSON object; fix it by PR.`);
+  }
+  const config = parsed as Record<string, unknown>;
+  const boundary = config["last-release-sha"];
+  if (boundary !== undefined && (typeof boundary !== "string" || !FULL_SHA.test(boundary))) {
+    throw new Error(
+      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(boundary)}, not a 40-hex commit sha; fix it by PR.`,
+    );
+  }
+  return config as ReleaseConfig;
+}
+
 export interface AnchorOptions {
   cwd: string;
   /** Main's head this run tested; the merge parent the boundary records. */
@@ -670,9 +714,7 @@ export function anchorReleasePr(options: AnchorOptions): AnchorResult {
         reason: "the release PR branch is not built on this head; its own refresh anchors",
       };
     }
-    const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
-      "last-release-sha"?: unknown;
-    };
+    const config = readReleaseConfig(cwd);
     if (config["last-release-sha"] === sourceSha) {
       return { changed: false, reason: "already anchored" };
     }
@@ -720,9 +762,7 @@ export function boundaryCheck(cwd: string): { boundary: string } {
     "boundary-check",
     "a release merge or the recorded boundary can sit beyond its depth, and no verdict on a truncated history holds.",
   );
-  const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
-    "last-release-sha"?: unknown;
-  };
+  const recorded = readReleaseConfig(cwd)["last-release-sha"];
   // The grep only narrows (it matches any message line with the prefix); RELEASE_SUBJECT decides, so
   // "chore(main): release pipeline documentation" can neither become the boundary nor hide the real newest merge.
   const listed = git(cwd, "log", "--grep", "^chore(main): release ", "--format=%H%x09%s");
@@ -734,12 +774,11 @@ export function boundaryCheck(cwd: string): { boundary: string } {
       break;
     }
   }
-  const recorded = config["last-release-sha"];
   if (latest === "") {
     if (recorded === undefined) {
       return { boundary: "none (no release merge on this history yet)" };
     }
-    const cause = isAncestor(cwd, String(recorded), "HEAD")
+    const cause = isAncestor(cwd, recorded, "HEAD")
       ? `this history holds it, so release-please's merge subject no longer matches ${RELEASE_SUBJECT} (investigate RELEASE_SUBJECT)`
       : "it is not on this history at all (not main, or a boundary that never landed)";
     throw new Error(
@@ -747,16 +786,18 @@ export function boundaryCheck(cwd: string): { boundary: string } {
     );
   }
   const parent = tryGit(cwd, "rev-parse", `${latest}^`);
-  if (recorded === latest || (parent !== null && recorded === parent)) {
-    return { boundary: String(recorded) };
-  }
-  if (isAncestor(cwd, latest, String(recorded)) && isAncestor(cwd, String(recorded), "HEAD")) {
-    throw new Error(
-      `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, NEWER than ` +
-        `${latest}, the newest release merge whose subject matches ${RELEASE_SUBJECT}: either a ` +
-        `newer release merge's subject stopped matching (investigate RELEASE_SUBJECT) or the ` +
-        `boundary was edited by hand. It must not be rolled back to ${parent ?? latest}.`,
-    );
+  if (recorded !== undefined) {
+    if (recorded === latest || (parent !== null && recorded === parent)) {
+      return { boundary: recorded };
+    }
+    if (isAncestor(cwd, latest, recorded) && isAncestor(cwd, recorded, "HEAD")) {
+      throw new Error(
+        `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, NEWER than ` +
+          `${latest}, the newest release merge whose subject matches ${RELEASE_SUBJECT}: either a ` +
+          `newer release merge's subject stopped matching (investigate RELEASE_SUBJECT) or the ` +
+          `boundary was edited by hand. It must not be rolled back to ${parent ?? latest}.`,
+      );
+    }
   }
   throw new Error(
     `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but the newest release ` +
@@ -769,22 +810,19 @@ export function boundaryCheck(cwd: string): { boundary: string } {
  * that the anchor commit survived a release-please force-push, so requiring last-release-sha to equal origin's
  * CURRENT main tip makes an unanchored release PR unmergeable instead of parking the pipeline after its merge. */
 export function anchorCheck(cwd: string): { boundary: string } {
-  const config = JSON.parse(readFileSync(join(cwd, CONFIG_FILE), "utf8")) as {
-    "last-release-sha"?: unknown;
-  };
-  const recorded = config["last-release-sha"];
-  const tip = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0];
+  const recorded = readReleaseConfig(cwd)["last-release-sha"];
+  const tip = git(cwd, "ls-remote", "origin", "refs/heads/main").split("\t")[0] ?? "";
   if (recorded !== tip) {
     throw new Error(
       `last-release-sha in ${CONFIG_FILE} is ${JSON.stringify(recorded)}, but main's tip is ` +
-        `${tip ?? "?"}; the anchor is missing or stale, so merging would land a wrong boundary. ` +
+        `${tip}; the anchor is missing or stale, so merging would land a wrong boundary. ` +
         `The release pipeline's update-release-pr hook re-applies it on every release-PR refresh ` +
         `- wait for (or dispatch) the next green main run, then close/reopen the PR so its ` +
         `checks run on the anchored head (the anchor is pushed with the default token, which ` +
         `triggers no new checks).`,
     );
   }
-  return { boundary: String(recorded) };
+  return { boundary: recorded };
 }
 
 /** The manifest's version at a commit: what release-please last released, or is about to. */
