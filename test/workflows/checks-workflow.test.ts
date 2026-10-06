@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
-import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline.js";
+import { RELEASE_PR_BRANCH_PREFIX } from "../../.github/scripts/release-pipeline/anchor.js";
 import { headRefPrefixes, headRefPrefixesIn } from "./head-ref.js";
 import { type Workflow, workflowText } from "./workflow-loader.js";
 

@@ -14,7 +14,7 @@ import {
   packageRelease,
   pruneBuildTags,
   retagMajor,
-} from "../../.github/scripts/release-pipeline.js";
+} from "../../.github/scripts/release-pipeline/tags.js";
 import {
   buildTagOf,
   buildTags,
