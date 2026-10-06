@@ -14,19 +14,16 @@ import {
   phantomPaths,
   refuseOmitted,
 } from "../../../engine/diff.js";
-import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
-import { liveByIdentity, liveIdentity, plural } from "../../contract/live.js";
+import { type DeclaredIssue, declaredEntries, duplicateIssues } from "../../contract/declared.js";
 import {
-  type DeclaredIssue,
-  declaredEntries,
-  defaultUndeclaredPolicy,
-  duplicateIssues,
   missingDrift,
-  type SectionMeta,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../../contract/module.js";
+} from "../../contract/drift.js";
+import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
+import { liveByIdentity, liveIdentity, plural } from "../../contract/live.js";
+import { defaultUndeclaredPolicy, type SectionMeta } from "../../contract/module.js";
 import {
   type ExecTools,
   hasDrift,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { SectionInput, SectionModule } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
+import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
 import { sectionModule } from "../../../src/sections/registry.js";
 import { teamsSection } from "../../../src/sections/teams/index.js";

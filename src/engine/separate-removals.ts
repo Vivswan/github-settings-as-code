@@ -6,7 +6,7 @@
 
 import { isPlainObject } from "../plain-data.js";
 import { LIST_SECTIONS } from "../schema.js";
-import type { KeyedListLayering } from "../sections/contract/module.js";
+import type { KeyedListLayering } from "../sections/contract/keyed-list.js";
 import { listLayering } from "../sections/registry.js";
 import { nestedForm, REMOVE_KEY } from "./directives.js";
 

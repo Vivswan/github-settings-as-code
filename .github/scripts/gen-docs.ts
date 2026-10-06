@@ -9,12 +9,12 @@ import {
   tableRows,
 } from "../../src/report/markdown.js";
 import type { CoverageRow, SectionDocs } from "../../src/sections/contract/docs.js";
+import type { SectionMeta } from "../../src/sections/contract/module.js";
 import {
-  type SectionMeta,
   type SectionOperation,
   sectionGrant,
   sectionOperations,
-} from "../../src/sections/contract/module.js";
+} from "../../src/sections/contract/operations.js";
 import { RESOURCE_SLUGS } from "../../src/sections/contract/permissions.js";
 import { DOCS } from "../../src/sections/docs-registry.js";
 import { SECTIONS } from "../../src/sections/registry.js";

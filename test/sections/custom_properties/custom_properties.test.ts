@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { GitHubClient } from "../../../src/github/api.js";
-import type { SectionInput, SectionModule } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
+import type { SectionModule } from "../../../src/sections/contract/module.js";
 import { planContext, type SectionPlan } from "../../../src/sections/contract/plan.js";
 import {
   customPropertiesSection,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { GitHubApi } from "../../../src/github/api.js";
 import { maskRegistry } from "../../../src/io.js";
-import { endpointPermission } from "../../../src/sections/contract/module.js";
+import { endpointPermission } from "../../../src/sections/contract/operations.js";
 import { allEndpoints, SECTIONS } from "../../../src/sections/registry.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../sections/teams/mock.js";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../constants.js";

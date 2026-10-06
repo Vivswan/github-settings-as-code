@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { z } from "zod";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
 import {

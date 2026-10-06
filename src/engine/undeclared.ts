@@ -10,7 +10,8 @@ import {
   UNDECLARED_POLICY_SECTIONS,
   type UndeclaredPolicySection,
 } from "../schema.js";
-import { defaultUndeclaredPolicy, type KeyedListLayering } from "../sections/contract/module.js";
+import type { KeyedListLayering } from "../sections/contract/keyed-list.js";
+import { defaultUndeclaredPolicy } from "../sections/contract/module.js";
 import { listLayering, sectionModule } from "../sections/registry.js";
 import type { UndeclaredPolicy } from "../types.js";
 import { nestedForm, UNDECLARED_KEY } from "./directives.js";

@@ -12,16 +12,12 @@ import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { type Delta, deltas, phantomNote, renderPath, subsetDiff } from "../../engine/diff.js";
 import { isPlainObject } from "../../plain-data.js";
+import { listEntries, type PlainTyped } from "../contract/declared.js";
 import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
+import { identifiedBy } from "../contract/keyed-list.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import {
-  identifiedBy,
-  listEntries,
-  type PlainTyped,
-  type SectionMeta,
-  type SectionModule,
-} from "../contract/module.js";
+import type { SectionMeta, SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { Read } from "../contract/plan.js";
 import { layeredList, routed, rule } from "../shared/schema-helpers.js";

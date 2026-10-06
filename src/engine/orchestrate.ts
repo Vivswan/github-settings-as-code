@@ -22,8 +22,8 @@ import {
   type SectionKey,
   type SettingsFile,
 } from "../schema.js";
+import type { ValidatedInput } from "../sections/contract/declared.js";
 import { type SectionFailure, thrown } from "../sections/contract/errors.js";
-import type { ValidatedInput } from "../sections/contract/module.js";
 import {
   type ExecTools,
   type OnMissingPermission,

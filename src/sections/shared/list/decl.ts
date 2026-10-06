@@ -8,19 +8,17 @@ import type { z } from "zod";
 import type { MatchKey } from "../../../engine/diff.js";
 import type { SettingsFile, UndeclaredPolicySection } from "../../../schema.js";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../../types.js";
-import type { EndpointDecl, PathParams, Route } from "../../contract/endpoints.js";
-import type { SectionFailure } from "../../contract/errors.js";
 import type {
   DeclaredIssue,
   DeclaredSecretValue,
   EntryOf,
-  GraphqlDict,
-  KeyedListLayering,
-  SectionSnapshot,
-  undeclaredDrift,
-  undeclaredNote,
   ValidatedInput,
-} from "../../contract/module.js";
+} from "../../contract/declared.js";
+import type { undeclaredDrift, undeclaredNote } from "../../contract/drift.js";
+import type { EndpointDecl, PathParams, Route } from "../../contract/endpoints.js";
+import type { SectionFailure } from "../../contract/errors.js";
+import type { KeyedListLayering } from "../../contract/keyed-list.js";
+import type { GraphqlDict, SectionSnapshot } from "../../contract/module.js";
 import type { SectionPermission } from "../../contract/permissions.js";
 import type {
   PlainData,

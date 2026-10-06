@@ -9,7 +9,8 @@ import { z } from "zod";
 import { countNoun } from "../../text.js";
 import { endpointMethod, endpointPath } from "./endpoints.js";
 import type { SectionFailure } from "./errors.js";
-import type { FailingOp, SectionMeta } from "./module.js";
+import type { SectionMeta } from "./module.js";
+import type { FailingOp } from "./operations.js";
 import { collidingPairs } from "./requests.js";
 
 /** The plural of a section noun for a message ("custom property" -> "custom properties", "protected branch" -> "protected branches"). */

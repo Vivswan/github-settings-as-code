@@ -2,17 +2,13 @@ import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { isPlainObject } from "../../plain-data.js";
+import { requirePlainMapping } from "../contract/declared.js";
+import { cannotVerifyNote, valueDrift } from "../contract/drift.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
-import {
-  cannotVerifyNote,
-  requirePlainMapping,
-  type SectionMeta,
-  type SectionModule,
-  sectionGrant,
-  valueDrift,
-} from "../contract/module.js";
+import type { SectionMeta, SectionModule } from "../contract/module.js";
+import { sectionGrant } from "../contract/operations.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   type ChangeLines,

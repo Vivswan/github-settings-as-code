@@ -6,18 +6,20 @@
 
 import { err, ok, safeTry } from "neverthrow";
 import { z } from "zod";
-import type { EndpointDecl } from "../contract/endpoints.js";
-import { sectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  defaultUndeclaredPolicy,
-  identifiedBy,
-  type SectionMeta,
-  type SectionModule,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
   valueDrift,
+} from "../contract/drift.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import { sectionFailure } from "../contract/errors.js";
+import { identifiedBy } from "../contract/keyed-list.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
+import {
+  defaultUndeclaredPolicy,
+  type SectionMeta,
+  type SectionModule,
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";

@@ -8,7 +8,7 @@ import { err, ok, type Result } from "neverthrow";
 import { isPlainObject } from "../plain-data.js";
 import type { LayerProblem } from "../problem.js";
 import { LIST_SECTIONS, type ListSection } from "../schema.js";
-import type { KeyedListLayering } from "../sections/contract/module.js";
+import type { KeyedListLayering } from "../sections/contract/keyed-list.js";
 import { listLayering } from "../sections/registry.js";
 import {
   LAYERINGS,

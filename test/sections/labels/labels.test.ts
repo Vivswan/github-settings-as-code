@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
-import type { SectionInput } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
 import { labelsSection } from "../../../src/sections/labels/index.js";
 import { MockApi } from "../../mock-api.js";

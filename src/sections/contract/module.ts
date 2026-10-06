@@ -28,50 +28,6 @@ import type { KeyedListLayering } from "./keyed-list.js";
 import type { SectionPermission } from "./permissions.js";
 import type { PlanContext, PlannedOp, SectionPlan, SnapshotContext } from "./plan.js";
 
-// Staging for the importer sweep: it repoints every file importing from this module at the
-// sibling that declares each name, then deletes this block.
-export {
-  type DeclaredIssue,
-  type DeclaredSecretValue,
-  declaredEntries,
-  duplicateFieldIssues,
-  duplicateIssues,
-  type EntryOf,
-  listEntries,
-  type PlainTyped,
-  requirePlainMapping,
-  type SectionInput,
-  secretValuesOf,
-  type ValidatedBrand,
-  type ValidatedInput,
-} from "./declared.js";
-export {
-  cannotVerifyNote,
-  missingDrift,
-  undeclaredDrift,
-  undeclaredNote,
-  undeclaredPolicy,
-  valueDrift,
-} from "./drift.js";
-export { identifiedBy, type KeyedListLayering, keyedBy } from "./keyed-list.js";
-export {
-  concealedAbsenceNote,
-  type DenialPosture,
-  denialPosture,
-  endpointPermission,
-  type FailingOp,
-  gatedAbsentRead,
-  planningReads,
-  type ReadGating,
-  readGating,
-  type SectionOperation,
-  sectionGrant,
-  sectionOperations,
-  snapshotUnsupportedNote,
-  writeGatedReads,
-  writeOnlyCheckNote,
-} from "./operations.js";
-
 interface SectionContextBase {
   api: GitHubClient;
   /** The target repository, parsed once at the boundary (see RepoRef). */

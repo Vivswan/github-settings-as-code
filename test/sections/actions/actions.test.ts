@@ -7,7 +7,8 @@ import { actionsSection, endpointRouted } from "../../../src/sections/actions/in
 // The `as ActionsConfig` casts below simulate keys GitHub adds: the shape passes unknown keys through verbatim, which the static config type cannot
 // spell without giving up typo-checking on the known keys.
 import type { ActionsConfig } from "../../../src/sections/actions/schema.js";
-import { type SectionInput, sectionGrant } from "../../../src/sections/contract/module.js";
+import type { SectionInput } from "../../../src/sections/contract/declared.js";
+import { sectionGrant } from "../../../src/sections/contract/operations.js";
 import { grantFor } from "../../../src/sections/contract/permissions.js";
 import {
   driftOf,

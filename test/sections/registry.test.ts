@@ -20,14 +20,13 @@ import type {
   GraphqlOpDecl,
   GraphqlPaginatedReadDecl,
 } from "../../src/sections/contract/graphql.js";
-import {
-  denialPosture,
-  type GraphqlDict,
-  planningReads,
-  type SectionContext,
-  type SectionMeta,
-  type SectionModule,
+import type {
+  GraphqlDict,
+  SectionContext,
+  SectionMeta,
+  SectionModule,
 } from "../../src/sections/contract/module.js";
+import { denialPosture, planningReads } from "../../src/sections/contract/operations.js";
 import { grantFor, type SectionPermission } from "../../src/sections/contract/permissions.js";
 import type {
   PlanContext,

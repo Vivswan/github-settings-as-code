@@ -3,9 +3,10 @@ import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
 import { agree } from "../../text.js";
 import type { MustBeNever } from "../../types.js";
+import { valueDrift } from "../contract/drift.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import type { SectionFailure } from "../contract/errors.js";
-import { type SectionMeta, type SectionModule, valueDrift } from "../contract/module.js";
+import type { SectionMeta, SectionModule } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import {
   hasDrift,

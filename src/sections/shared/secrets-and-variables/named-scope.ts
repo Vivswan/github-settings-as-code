@@ -8,16 +8,11 @@
 
 import { err, ok, type Result } from "neverthrow";
 import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../../types.js";
+import { type DeclaredIssue, duplicateFieldIssues } from "../../contract/declared.js";
+import { missingDrift, undeclaredDrift, undeclaredNote } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../../contract/live.js";
-import {
-  type DeclaredIssue,
-  duplicateFieldIssues,
-  missingDrift,
-  type SectionMeta,
-  undeclaredDrift,
-  undeclaredNote,
-} from "../../contract/module.js";
+import type { SectionMeta } from "../../contract/module.js";
 import { paramsWith, type SectionPlan } from "../../contract/plan.js";
 
 export type AnyPlannedOp = SectionPlan["ops"][number];

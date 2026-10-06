@@ -11,7 +11,8 @@ import { SectionSelection } from "../../src/engine/section-selection.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey } from "../../src/schema.js";
-import { deepFreeze, type ValidatedInput } from "../../src/sections/contract/module.js";
+import type { ValidatedInput } from "../../src/sections/contract/declared.js";
+import { deepFreeze } from "../../src/sections/contract/module.js";
 
 /**
  * The overload is the typed door: the implementation reads the section back off the validated document, whose value

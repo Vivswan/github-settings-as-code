@@ -21,18 +21,18 @@ import { codeQualitySetupSection } from "./code_quality_setup/index.js";
 import { codeScanningDefaultSetupSection } from "./code_scanning_default_setup/index.js";
 import { codespacesSecretsSection } from "./codespaces_secrets/index.js";
 import { collaboratorsSection } from "./collaborators/index.js";
+import type { ValidatedInput } from "./contract/declared.js";
 import type { EndpointDecl } from "./contract/endpoints.js";
 import type { GraphqlOpDecl } from "./contract/graphql.js";
+import type { KeyedListLayering } from "./contract/keyed-list.js";
 import {
   type DeclaresRead,
   deepFreeze,
   type EndpointDict,
   freezeDeclarations,
   type GraphqlDict,
-  type KeyedListLayering,
   type ORG_PROBE,
   type SectionModule,
-  type ValidatedInput,
 } from "./contract/module.js";
 import { gatedByOwner } from "./contract/owner.js";
 import type { PlanContext, SnapshotContext } from "./contract/plan.js";

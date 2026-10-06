@@ -7,21 +7,23 @@
 
 import { ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
-import type { EndpointDecl } from "../contract/endpoints.js";
-import type { SectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity } from "../contract/live.js";
 import {
-  defaultUndeclaredPolicy,
-  identifiedBy,
-  ORG_PROBE,
-  type SectionMeta,
-  type SectionModule,
-  sectionGrant,
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
   valueDrift,
+} from "../contract/drift.js";
+import type { EndpointDecl } from "../contract/endpoints.js";
+import type { SectionFailure } from "../contract/errors.js";
+import { identifiedBy } from "../contract/keyed-list.js";
+import { liveByIdentity, liveIdentity } from "../contract/live.js";
+import {
+  defaultUndeclaredPolicy,
+  ORG_PROBE,
+  type SectionMeta,
+  type SectionModule,
 } from "../contract/module.js";
+import { sectionGrant } from "../contract/operations.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";

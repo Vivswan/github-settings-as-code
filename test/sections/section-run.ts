@@ -2,8 +2,9 @@ import { expect } from "bun:test";
 import type { Result } from "neverthrow";
 import { executePlan } from "../../src/engine/execute.js";
 import type { GitHubClient } from "../../src/github/api.js";
+import type { SectionInput } from "../../src/sections/contract/declared.js";
 import type { SectionFailure } from "../../src/sections/contract/errors.js";
-import type { SectionInput, SectionModule } from "../../src/sections/contract/module.js";
+import type { SectionModule } from "../../src/sections/contract/module.js";
 import {
   type ExecTools,
   planContext,

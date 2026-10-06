@@ -7,8 +7,9 @@
 import type { Result } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../../engine/diff.js";
+import { valueDrift } from "../../contract/drift.js";
 import type { SectionFailure } from "../../contract/errors.js";
-import { type SectionMeta, valueDrift } from "../../contract/module.js";
+import type { SectionMeta } from "../../contract/module.js";
 import { type PlainData, paramsWith, type SectionPlan } from "../../contract/plan.js";
 import {
   type AnyPlannedOp,

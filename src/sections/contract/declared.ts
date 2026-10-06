@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { isPlainObject } from "../../plain-data.js";
 import type { SectionKey, SettingsFile } from "../../schema.js";
 import type { UndeclaredPolicyList } from "../../types.js";
 import { rule } from "../shared/schema-helpers.js";
@@ -186,15 +187,13 @@ export function requirePlainMapping(shape: z.ZodType): z.ZodType {
     .unknown()
     .check(
       rule((value, ctx) => {
-        if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-          const proto = Object.getPrototypeOf(value);
-          if (proto !== Object.prototype && proto !== null) {
-            ctx.addIssue({
-              code: "custom",
-              message:
-                "Invalid input: expected a plain mapping (a YAML-tagged value like !!timestamp parses to another type)",
-            });
-          }
+        const isMapping = value !== null && typeof value === "object" && !Array.isArray(value);
+        if (isMapping && !isPlainObject(value)) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "Invalid input: expected a plain mapping (a YAML-tagged value like !!timestamp parses to another type)",
+          });
         }
       }),
     )
