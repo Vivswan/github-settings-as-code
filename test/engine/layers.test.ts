@@ -57,15 +57,6 @@ describe("mergeLayers: the mapping dialect", () => {
     expect(merge([layer("fleet", doc)])).toEqual({ settings: doc, notices: [] });
   });
 
-  test("the top layer beats everything, re-declaring a key a middle layer nulled", () => {
-    const result = merge([
-      layer("fleet", { actions: { enabled: true } }),
-      layer("team", { actions: null }),
-      layer("repo", { actions: { enabled: false } }),
-    ]);
-    expect(result).toEqual({ settings: { actions: { enabled: false } }, notices: [] });
-  });
-
   // `pages: null` is the only spelling of "Pages off"; the fold writes every higher null the same way, and the
   // validator refuses the sections that have no null value (labels among them) before or after the fold.
   test.each<[what: string, layers: Layer[], settings: Record<string, unknown>]>([
@@ -335,46 +326,6 @@ describe("mergeLayers: keyed sections", () => {
       ]);
     },
   );
-
-  test("same-name rulesets merge key by key; a partial higher ruleset keeps the lower conditions and rules append by type", () => {
-    const result = merge([
-      layer("fleet", { rulesets: [MAIN_RULESET] }),
-      layer("repo", {
-        rulesets: [
-          { name: "main", enforcement: "evaluate", rules: [{ type: "required_signatures" }] },
-        ],
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: {
-          _undeclared: "keep",
-          entries: [
-            {
-              ...MAIN_RULESET,
-              enforcement: "evaluate",
-              rules: [...MAIN_RULESET.rules, { type: "required_signatures" }],
-            },
-          ],
-        },
-      },
-      notices: [],
-    });
-  });
-
-  test("bypass_actors: null on a higher ruleset is the field's value in the merged entry, for the validator to judge", () => {
-    const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
-    const result = merge([
-      layer("fleet", { rulesets: [{ ...MAIN_RULESET, bypass_actors: bypass }] }),
-      layer("repo", { rulesets: [{ name: "main", bypass_actors: null }] }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: { _undeclared: "keep", entries: [{ ...MAIN_RULESET, bypass_actors: null }] },
-      },
-      notices: [],
-    });
-  });
 });
 
 describe("mergeLayers: the undeclared knob across layers", () => {

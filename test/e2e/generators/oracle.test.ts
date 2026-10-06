@@ -1683,7 +1683,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
     },
     {
-      name: "a null inside an entry is the field's value under deep, with no notice",
+      name: "a null inside an entry is the field's value under deep, over a scalar, a plain list, or a nested keyed list, with no notice",
       layering: "deep",
       layers: stack(
         {
@@ -1691,8 +1691,19 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
             { name: "a", color: "111111" },
             { name: "b", description: "x", color: "222222" },
           ],
+          rulesets: [
+            {
+              name: "main",
+              target: "branch",
+              bypass_actors: [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }],
+              rules: [{ type: "deletion" }],
+            },
+          ],
         },
-        { labels: [{ name: "b", description: null }] },
+        {
+          labels: [{ name: "b", description: null }],
+          rulesets: [{ name: "main", bypass_actors: null, rules: null }],
+        },
       ),
       expected: {
         merged: {
@@ -1702,6 +1713,10 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
               { name: "a", color: "111111" },
               { name: "b", description: null, color: "222222" },
             ],
+          },
+          rulesets: {
+            [UNDECLARED_KEY]: "keep",
+            entries: [{ name: "main", target: "branch", bypass_actors: null, rules: null }],
           },
         },
         notices: [],
