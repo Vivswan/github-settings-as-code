@@ -11,7 +11,7 @@
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
- * Every subcommand but prerelease-version runs as one workflow step; that one is run by hand.
+ * Every subcommand but prerelease-version runs under a workflow step, bare or in the step's shell; no step runs two.
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off) and creates or
  * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
