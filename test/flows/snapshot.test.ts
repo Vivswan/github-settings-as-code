@@ -1117,38 +1117,6 @@ describe("runSnapshot, dir form", () => {
       expect(publicText).not.toContain("o/p.yml");
     }));
 
-  // SLUG_RE admits a "." or ".." segment, so the refusal here is the only thing between such a slug and a file that
-  // leaves the directory (owner "..") or carries a name no GitHub repository has (the others).
-  test.each<[string, (cfg: DirConfig) => string]>([
-    ["../escape", (cfg) => join(dirname(cfg.snapshotDir), "escape.yml")],
-    ["./r", (cfg) => join(cfg.snapshotDir, "r.yml")],
-    ["o/.", (cfg) => join(cfg.snapshotDir, "o", "..yml")],
-    ["o/..", (cfg) => join(cfg.snapshotDir, "o", "...yml")],
-  ])(
-    "the slug %s has no file and fails its target alone; the rest of the fleet is written",
-    (slug, wouldBe) =>
-      withTempDir("snapshot-flow-", async (dir) => {
-        const api = new MockApi({ ...labelsRoute("o/a", [BUG]) });
-        const cfg = dirCfg(dir, { reposInput: `${slug},o/a`, privateRepos: "show" });
-        const collected = collectingIo();
-        expect(await run(api, cfg, collected.io)).toBe(1);
-        expect(existsSync(wouldBe(cfg))).toBe(false);
-        expect(existsSync(join(cfg.snapshotDir, "o", "a.yml"))).toBe(true);
-        expect(collected.lines[1]).toEqual({
-          level: "error",
-          line: `${slug}: the repository name "${slug}" is not a GitHub owner/name (a "." or ".." segment), so it has no file under ${cfg.snapshotDir}`,
-        });
-        expect(collected.outputs).toEqual({
-          result: "failed",
-          "skipped-sections": "",
-          "repos-result": JSON.stringify({
-            [slug]: { result: "failed", source: "remote", "skipped-sections": [] },
-            "o/a": { result: "snapshot", source: "remote", "skipped-sections": [] },
-          }),
-        });
-      }),
-  );
-
   test("a fleet whose every target fails writes nothing and the summary says so", () =>
     withTempDir("snapshot-flow-", async (dir) => {
       // No labels route: the read answers 404, the denial that fails the target under the fail policy.

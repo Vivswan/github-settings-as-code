@@ -1,9 +1,26 @@
 import { describe, expect, test } from "bun:test";
+import { err, ok } from "neverthrow";
 import {
   type CentralTarget,
   dedupeTargets,
+  parseRepoSlug,
   type RemoteTarget,
 } from "../../src/discovery/targets.js";
+
+describe("parseRepoSlug", () => {
+  // GitHub names no owner or repository "." or "..", and as path segments they resolve a request elsewhere:
+  // /repos/../x/labels is /x/labels once the URL is normalized. Nothing but this boundary keeps them out.
+  test.each<[string, ReturnType<typeof parseRepoSlug>]>([
+    ["a.b/c.d", ok({ owner: "a.b", name: "c.d", slug: "a.b/c.d" })],
+    [".a/b.", ok({ owner: ".a", name: "b.", slug: ".a/b." })],
+    ["../x", err({ code: "repo-slug-invalid", value: "../x" })],
+    ["./x", err({ code: "repo-slug-invalid", value: "./x" })],
+    ["x/..", err({ code: "repo-slug-invalid", value: "x/.." })],
+    ["x/.", err({ code: "repo-slug-invalid", value: "x/." })],
+  ])("%s -> %p", (raw, result) => {
+    expect(parseRepoSlug(raw)).toEqual(result);
+  });
+});
 
 describe("dedupeTargets", () => {
   const central: CentralTarget[] = [

@@ -23,7 +23,9 @@ export type RemoteTarget = TargetBase & { source: "remote" };
 
 export type Target = CentralTarget | RemoteTarget;
 
-export const SLUG_RE = /^[\w.-]+\/[\w.-]+$/;
+// A "." or ".." segment is refused here: GitHub names nothing that way, and as a path segment it resolves the request
+// elsewhere (/repos/../x/labels is /x/labels), so every consumer of a slug relies on this boundary keeping them out.
+export const SLUG_RE = /^(?!\.\.?\/)[\w.-]+\/(?!\.\.?$)[\w.-]+$/;
 
 /** PARSED ONCE at a validating boundary, so downstream code never re-splits a string; the only constructor derives all three from one value. */
 export interface RepoRef {

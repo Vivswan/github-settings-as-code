@@ -296,7 +296,9 @@ const SPECIMENS = {
       ],
     },
     'repos-dir "repos" has 4 invalid settings files:\n' +
-      '- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes\n' +
+      '- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. ' +
+      "Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and " +
+      'dashes, and neither is "." or ".."\n' +
       "- duplicate target o/x: defined by both repos/o/x.yml and repos/x.yml. Keep exactly one settings file per repository\n" +
       "- cannot resolve repos/api.yml, repos/web.yml: top-level repos-dir files use the current repository's owner, which is unknown outside GitHub Actions. Use the <owner>/<name>.yml layout instead",
   ],
@@ -373,7 +375,9 @@ describe("describeProblem", () => {
         reposDir: "repos",
         files: [{ kind: "not-a-slug", filePath: "repos/o/a b.yml", slug: "o/a b" }],
       },
-      'repos-dir "repos" has 1 invalid settings file:\n- repos/o/a b.yml resolves to the target "o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain only letters, digits, dots, underscores, and dashes',
+      'repos-dir "repos" has 1 invalid settings file:\n- repos/o/a b.yml resolves to the target ' +
+        '"o/a b", which is not a valid owner/name slug. Rename the file so <owner> and <name> contain ' +
+        'only letters, digits, dots, underscores, and dashes, and neither is "." or ".."',
     ],
     [
       "one render-only input reads in the singular",
