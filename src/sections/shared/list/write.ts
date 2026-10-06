@@ -1,5 +1,6 @@
 import { ok, type Result } from "neverthrow";
 import { type Delta, renderDelta } from "../../../engine/diff.js";
+import { isPlainObject } from "../../../plain-data.js";
 import type { SectionFailure } from "../../contract/errors.js";
 import { cannotVerifyNote, valueDrift } from "../../contract/module.js";
 import {
@@ -65,10 +66,10 @@ export function withValueAt<T extends Fields>(
     return (value === undefined ? others : { ...others, [step]: value }) as T;
   }
   const child = record[step];
-  if (typeof child !== "object" || child === null || Array.isArray(child)) {
+  if (!isPlainObject(child)) {
     return record;
   }
-  return { ...record, [step]: withValueAt(child as Fields, rest, value) };
+  return { ...record, [step]: withValueAt(child, rest, value) };
 }
 
 export function withoutPaths<T extends Fields>(record: T, paths: readonly string[]): T {

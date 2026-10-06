@@ -50,6 +50,49 @@ export function nonPlainKind(value: unknown): string {
 }
 
 /**
+ * What JSON cannot carry at ONE node, named for refusal prose, or null where the node is plain; the caller's walk
+ * visits the children. `at` tells an undefined list item (JSON turns it into null) from an undefined field (JSON
+ * drops it, as a declared optional the file omits). A non-finite number is not judged here: a typed field refuses
+ * it in its own shape, so each boundary adds that check where it applies.
+ */
+export function nonPlainReason(value: unknown, at: "item" | "field"): string | null {
+  if (value === undefined) {
+    return at === "item" ? "an undefined list item, which JSON would turn into null" : null;
+  }
+  if (value === null) {
+    return null;
+  }
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return null;
+    case "object":
+      break;
+    default:
+      return nonPlainKind(value);
+  }
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return "a symbol-keyed property, which JSON drops";
+  }
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+      return "a list of a subclass, which JSON serializes as a plain list";
+    }
+    // Indices from the length, not value.keys(): a named property may shadow the method.
+    const indices = new Set(Array.from({ length: value.length }, (_, index) => String(index)));
+    if (Object.getOwnPropertyNames(value).some((n) => n !== "length" && !indices.has(n))) {
+      return "a list carrying named properties, which JSON drops";
+    }
+    if (Object.keys(value).length !== value.length) {
+      return "a list with a hole (which JSON renders as null) or a non-enumerable item";
+    }
+    return null;
+  }
+  return isPlainObject(value) ? null : nonPlainKind(value);
+}
+
+/**
  * A value's kind for refusal prose, never its contents: problem.ts renders layer-fold refusals where a document value
  * (a label name, a private repository's setting) could land in a public log, so the fold's messages name kinds only.
  */

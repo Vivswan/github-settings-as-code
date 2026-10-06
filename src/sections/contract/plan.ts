@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { RepoRef } from "../../discovery/targets.js";
 import type { GitHubClient } from "../../github/api.js";
 import type { ApiError } from "../../github/api-error.js";
+import { nonPlainReason } from "../../plain-data.js";
 import type { SectionKey } from "../../schema.js";
 import {
   type DeclaredErrorStatus,
@@ -85,56 +86,29 @@ export function plainData(value: unknown): PlainData {
   };
   // A YAML alias to an ancestor parses to a cycle, which JSON cannot carry (a shared alias to a sibling is fine and is visited twice).
   const ancestors = new Set<object>();
-  const plain = (node: unknown, path: readonly (string | number)[]): void => {
-    if (node === undefined || node === null || typeof node === "string") {
-      return; // an undefined object field is dropped by JSON, as a declared optional the file omits
+  const plain = (node: unknown, path: readonly (string | number)[], at: "item" | "field"): void => {
+    const reason =
+      nonPlainReason(node, at) ??
+      (typeof node === "number" && !Number.isFinite(node)
+        ? "a non-finite number, which JSON would turn into null"
+        : null);
+    if (reason !== null) {
+      reject(path, reason);
     }
-    if (typeof node === "boolean") {
+    if (node === null || typeof node !== "object") {
       return;
-    }
-    if (typeof node === "number") {
-      if (!Number.isFinite(node)) {
-        reject(path, "a non-finite number, which JSON would turn into null");
-      }
-      return;
-    }
-    if (typeof node !== "object") {
-      reject(path, `a ${typeof node}`);
     }
     if (ancestors.has(node)) {
       reject(path, "a reference back to one of its own containers (a cycle)");
     }
-    if (Object.getOwnPropertySymbols(node).length > 0) {
-      reject(path, "a symbol-keyed property, which JSON drops");
-    }
     ancestors.add(node);
     if (Array.isArray(node)) {
-      if (Object.getPrototypeOf(node) !== Array.prototype) {
-        reject(path, "a list of a subclass, which JSON serializes as a plain list");
-      }
-      const indices = new Set(Array.from(node.keys(), String));
-      if (Object.getOwnPropertyNames(node).some((n) => n !== "length" && !indices.has(n))) {
-        reject(path, "a list carrying named properties, which JSON drops");
-      }
-      if (Object.keys(node).length !== node.length) {
-        reject(
-          path,
-          "a list whose enumerable keys fall short of its length: a hole, which JSON renders as null, or a non-enumerable item, which JSON keeps but Object.keys skips",
-        );
-      }
       for (const [index, item] of node.entries()) {
-        if (item === undefined) {
-          reject([...path, index], "an undefined list item, which JSON would turn into null");
-        }
-        plain(item, [...path, index]);
+        plain(item, [...path, index], "item");
       }
     } else {
-      const proto = Object.getPrototypeOf(node);
-      if (proto !== Object.prototype && proto !== null) {
-        reject(path, "a non-plain object");
-      }
       for (const [key, item] of Object.entries(node)) {
-        plain(item, [...path, key]);
+        plain(item, [...path, key], "field");
       }
     }
     ancestors.delete(node);
@@ -142,7 +116,7 @@ export function plainData(value: unknown): PlainData {
   if (value === undefined) {
     reject([], "undefined, which has no JSON form");
   }
-  plain(value, []);
+  plain(value, [], "field");
   return value as PlainData;
 }
 

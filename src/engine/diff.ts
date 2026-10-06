@@ -260,9 +260,7 @@ function walkList(
       return;
     }
   }
-  const objectList =
-    desired.length > 0 &&
-    desired.every((item) => typeof item === "object" && item !== null && !Array.isArray(item));
+  const objectList = desired.length > 0 && desired.every(isPlainObject);
   if (objectList) {
     // Order-insensitive; a live item nothing pairs with is undeclared because a full-payload write would remove it.
     // Items pair on the declared fields alone, so under `replace` a paired item's extra live fields read as omitted.
