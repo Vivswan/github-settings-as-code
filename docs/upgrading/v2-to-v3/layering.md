@@ -80,6 +80,8 @@ Every list section folds this way, by the key its planner matches on: labels, co
 
 The value `merge` is gone. `labels: {_layering: merge, entries: [...]}` fails with `labels._layering must be one of "replace", "shallow", "deep"; got a string that is none of them`, and the `layering` input refuses it too, naming the same three values.
 
+For `@vivswan/github-settings-as-code` consumers, the `Layering` type is `"replace" | "shallow" | "deep"`, so a `layering: "merge"` in `MergeOptions` stops compiling; write `"deep"`, the fold it meant.
+
 Fix: write `deep` where a layer said `merge`, and `_layering: replace` on any list section a higher layer meant to replace whole. Under `shallow` and `deep` an empty higher list adds nothing; clearing a list takes `replace` with an empty list. The [layering guide](../../operate/layering.md#four-knobs) owns the rules.
 
 ## 29. mode: merge is mode: render

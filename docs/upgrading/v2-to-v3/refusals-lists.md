@@ -205,8 +205,6 @@ GitHub answers `protection_rules: []` for an unprotected environment, and the fl
 | More than 6 `reviewers` | 422 | Refused: GitHub's cap |
 | `deployment_branch_policies[].type: wildcard` | Deleted the live policy, then the create 422ed; every run retried | Refused: `branch` or `tag` |
 
-For library consumers, `DeploymentBranchPolicyConfig.type` narrows from `string` to `"branch" | "tag"`.
-
 ## 52. Autolinks: charset, placeholder, and overlapping prefixes
 
 ```text

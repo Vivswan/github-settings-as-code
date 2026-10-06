@@ -119,6 +119,8 @@ The action and the command line print the same line for the same problem; the re
 | `gsac init --settings-file a,b` | `the --settings-file value "a,b" contains a comma or a newline, which check and apply read as a list separator ...` | | `the "settings-file" input is "a,b", which contains a list separator: init writes exactly one settings file ... Name one file` |
 | An unreadable `repos-dir` file | `cannot read settings from <path>: ... Fix the file, or delete it to stop managing this repository` | | `cannot read the central settings file <path>: ... Fix the file, or delete it to stop managing this repository` (a YAML syntax error in it reads the same way, where v2 said `cannot parse`) |
 
+For `@vivswan/github-settings-as-code` consumers: `parseConfig` takes a third argument, the face's `RunCapabilities`, and refuses `private-report: artifact` there (`input-artifact-unsupported`); a two-argument call stops compiling.
+
 ## 25. Every live read is parsed at the port
 
 Every GET and GraphQL query a section issues now passes through one parser before the section sees the body, so a response off the documented shape fails the section instead of flowing into a comparison.
@@ -135,6 +137,8 @@ Two smaller moves ride along:
 
 - A section that reads anything must declare `snapshot()`; only the write-only `check_suite_preferences` reports `unsupported`, and the `snapshot is not implemented for this section yet` note is gone.
 - The organization-only sections (`teams`, `custom_properties`) are probed for the owner kind by the registry, ahead of their own plan and snapshot. The personal-account note is unchanged. A settings-file mistake in those sections (two entries naming one team) is validation's, before any request ([section 34](#34-file-only-checks-run-before-the-first-write)).
+
+For `@vivswan/github-settings-as-code` consumers, `SectionModule` requires `snapshot()` on a module whose endpoints declare a read; a custom reading module without one stops compiling, so implement it.
 
 ## 26. The snapshot file is canonical and undated
 
