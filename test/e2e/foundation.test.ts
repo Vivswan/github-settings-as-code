@@ -24,7 +24,7 @@ import {
   parseScenario,
   type Scenario,
   scenarioRoots,
-} from "./schema.js";
+} from "./scenario.js";
 
 describe("prng", () => {
   test("mulberry32 is deterministic for a seed", () => {

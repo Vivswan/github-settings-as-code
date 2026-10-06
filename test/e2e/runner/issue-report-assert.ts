@@ -2,7 +2,7 @@
 
 import { MARKER_LABEL } from "../../../src/report/issue-report.js";
 import type { LoggedRequest } from "../mock/contract.js";
-import type { Expect } from "../schema.js";
+import type { Expect } from "../scenario.js";
 
 function stringBody(request: LoggedRequest | undefined): string | undefined {
   const body = (request?.body as { body?: unknown } | undefined)?.body;

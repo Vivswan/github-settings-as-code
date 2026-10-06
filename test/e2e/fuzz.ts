@@ -88,7 +88,7 @@ import {
   stripDebugLines,
   stripMaskLines,
 } from "./runner/runner.js";
-import type { Scenario } from "./schema.js";
+import type { Scenario } from "./scenario.js";
 
 const FAILURE_CAP = 5;
 

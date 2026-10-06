@@ -26,7 +26,7 @@ import {
 } from "../../../src/sections/contract/module.js";
 import type { SectionPermission } from "../../../src/sections/contract/permissions.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
-import { GRADE_RANK, type MaskGrade, type MaskKey } from "../schema.js";
+import { GRADE_RANK, type MaskGrade, type MaskKey } from "../scenario.js";
 import {
   type Json,
   LAYERING_DIRECTIVES,

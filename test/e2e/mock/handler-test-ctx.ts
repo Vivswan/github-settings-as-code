@@ -4,7 +4,7 @@
  */
 
 import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
-import { GRADE_RANK, type MaskGrade } from "../schema.js";
+import { GRADE_RANK, type MaskGrade } from "../scenario.js";
 import { requestHeaders } from "./dispatch.js";
 import { type MockState, named } from "./state.js";
 import type { Handler } from "./support.js";

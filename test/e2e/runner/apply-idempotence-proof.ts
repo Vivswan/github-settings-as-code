@@ -3,7 +3,7 @@ import { type LoggedRequest, renderRequest } from "../mock/contract.js";
 import { endpointForRequest, isWriteRequest, sectionForRequest } from "../mock/dispatch.js";
 import type { MockHandle } from "../mock/server.js";
 import type { MockState } from "../mock/state.js";
-import type { Scenario } from "../schema.js";
+import type { Scenario } from "../scenario.js";
 import {
   ALWAYS_REWRITE_STATE_FAMILIES,
   recurrence,

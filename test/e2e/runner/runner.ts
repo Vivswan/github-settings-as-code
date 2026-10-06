@@ -35,7 +35,7 @@ import { type LoggedRequest, renderRequest } from "../mock/contract.js";
 import { isWriteRequest } from "../mock/dispatch.js";
 import { type ServerOptions, startMockServer } from "../mock/server.js";
 import { sharedValidator } from "../openapi/validate.js";
-import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "../schema.js";
+import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "../scenario.js";
 import {
   assertApplyIdempotent,
   captureRerun,

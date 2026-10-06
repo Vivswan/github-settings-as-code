@@ -7,7 +7,7 @@ import { parseRecipient } from "../../../src/report/artifact-report.js";
 import { withTempDir } from "../../temp-dir.js";
 import { ARTIFACT_TEST_RECIPIENT } from "../generators/settings.js";
 import type { LoggedRequest } from "../mock/contract.js";
-import type { Scenario } from "../schema.js";
+import type { Scenario } from "../scenario.js";
 import type { RerunCapture } from "./apply-idempotence-proof.js";
 import {
   bundleBuildParityFailure,

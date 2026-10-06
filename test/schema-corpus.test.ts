@@ -8,7 +8,7 @@ import { validateSectionShapes } from "../src/engine/validate.js";
 import { SECTION_KEYS } from "../src/schema.js";
 import { Rng } from "./e2e/generators/prng.js";
 import { genSettings } from "./e2e/generators/settings.js";
-import { collectYmlFiles, scenarioRoots } from "./e2e/schema.js";
+import { collectYmlFiles, scenarioRoots } from "./e2e/scenario.js";
 import { ROOT } from "./root.js";
 import { readSettingsSchema } from "./settings-schema.js";
 
@@ -134,7 +134,7 @@ function scenarioDocs(): CorpusDoc[] {
     }
   }
   // Derived from the collected fragments rather than a pinned count, so adding a scenario never edits this
-  // file. The scenario schema requires `settings` unless the file carries `settings_raw` (test/e2e/schema.ts),
+  // file. The scenario schema requires `settings` unless the file carries `settings_raw` (test/e2e/scenario.ts),
   // so every walked file contributed a fragment or is a raw-text scenario, and every kind has a witness.
   const contributing = new Set(docs.map((fragment) => fragment.file));
   const dropped = files.filter((file) => !contributing.has(file) && !rawTextScenarios.has(file));

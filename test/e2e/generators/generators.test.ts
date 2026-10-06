@@ -10,7 +10,7 @@ import { describeProblem } from "../../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../../src/sections/registry.js";
 import { grantablePermission } from "../mock/state.js";
-import { collectYmlFiles, MASK_KEYS, parseScenario } from "../schema.js";
+import { collectYmlFiles, MASK_KEYS, parseScenario } from "../scenario.js";
 import { genDiscoveryScenario } from "./discovery-scenario.js";
 import { SECTION_PRIMARY_READ } from "./fault-targets.js";
 import {

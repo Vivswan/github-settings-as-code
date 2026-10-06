@@ -31,7 +31,7 @@ import { genWebhooks } from "../../sections/webhooks/generators.js";
 import { genWorkflows } from "../../sections/workflows/generators.js";
 import { readSettingsSchema } from "../../settings-schema.js";
 import type { LiveState } from "../mock/state.js";
-import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "../schema.js";
+import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "../scenario.js";
 import {
   E2E_SECRET_ENV,
   type EntriesForm,

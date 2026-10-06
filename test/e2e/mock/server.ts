@@ -9,7 +9,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { type Scenario, settingsYamlFor } from "../schema.js";
+import { type Scenario, settingsYamlFor } from "../scenario.js";
 import { assertFaultKeys } from "./chaos.js";
 import {
   type CorruptOption,

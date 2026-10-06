@@ -2,7 +2,7 @@ import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
 import { SECTIONS } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
 import type { LiveState } from "../mock/state.js";
-import type { DenialStyle, MaskGrade, MaskKey, MultiRepo, Scenario } from "../schema.js";
+import type { DenialStyle, MaskGrade, MaskKey, MultiRepo, Scenario } from "../scenario.js";
 import { entriesOf, type Json } from "./gen-support.js";
 import { NON_MAPPING_YAML, UNPARSEABLE_YAML } from "./invalid-settings.js";
 import type { Rng } from "./prng.js";

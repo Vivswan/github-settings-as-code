@@ -16,7 +16,7 @@ import {
 } from "../../../src/report/issue-report.js";
 import { matchesTemplate } from "../../../src/sections/contract/endpoints.js";
 import { ADMIN_SLUG, TOKEN_USER_LOGIN } from "../constants.js";
-import type { MaskKey, Scenario } from "../schema.js";
+import type { MaskKey, Scenario } from "../scenario.js";
 import type { CoreFaultKey } from "./chaos.js";
 import type { FaultOption, PipelineResult } from "./contract.js";
 import { violationResponse } from "./contract.js";

@@ -13,7 +13,7 @@ import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
 import { denialPosture, endpointPermission } from "../../../src/sections/contract/module.js";
 import { allGraphqlOps, type TaggedGraphqlOp } from "../../../src/sections/registry.js";
-import type { PermissionMask } from "../schema.js";
+import type { PermissionMask } from "../scenario.js";
 import { applyFault, type CoreFaultKey, takeCorruption, takeFault } from "./chaos.js";
 import {
   type LoggedRequest,

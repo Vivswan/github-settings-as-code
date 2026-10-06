@@ -6,7 +6,7 @@ import { describeProblem } from "../../../src/problem.js";
 import { LIST_SECTIONS, type SectionKey } from "../../../src/schema.js";
 import { listLayering } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
-import type { MaskGrade, MaskKey } from "../schema.js";
+import type { MaskGrade, MaskKey } from "../scenario.js";
 import {
   type Json,
   LAYERING_KEY,

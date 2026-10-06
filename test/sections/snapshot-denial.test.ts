@@ -16,7 +16,7 @@ import {
   type SectionModule,
 } from "../../src/sections/contract/module.js";
 import { SECTIONS } from "../../src/sections/registry.js";
-import { MASK_KEYS, type PermissionMask } from "../e2e/schema.js";
+import { MASK_KEYS, type PermissionMask } from "../e2e/scenario.js";
 import { captureIo } from "../io/capture.js";
 import { type FakeToken, type FragmentFake, registryFake } from "./fragment-fake.js";
 import { REPO } from "./section-run.js";

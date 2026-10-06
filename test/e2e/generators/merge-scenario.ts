@@ -8,7 +8,7 @@ import {
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../../src/schema.js";
-import type { Scenario } from "../schema.js";
+import type { Scenario } from "../scenario.js";
 import {
   DEFAULT_LAYERING_DIRECTIVE,
   entriesOf,
