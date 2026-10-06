@@ -30,39 +30,15 @@ jobs:
           # history; a shallow checkout can do neither.
           fetch-depth: 0
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-      # A dry-run push asks origin for its receive-pack advertisement over the channel the real push uses, which a
-      # token without write access is refused; nothing is created. The target is a ref that never exists, so the dry
-      # run judges the token alone: against an existing tag git would refuse the non-fast-forward locally whatever the token.
-      #
-      # git's refusal is remote-supplied text, so it is printed inside a stop-commands fence keyed by a per-run token
-      # and never inside a workflow command.
-      #   the runner acts on any line whose first non-blank text is "::"  -> the fence disarms every such line
-      #   only the fence's own token resumes command processing           -> the text can neither forge a command nor swallow the error after it
-      #   awk, not sed                                                     -> ends the last line even when git did not, so the fence stays alone
+      # bun alone: the probe runs before anything is installed for a commit the job may not publish.
+      - uses: ./.github/actions/setup
+        with:
+          install: "false"
       - name: Check the token can push
         id: token
         env:
           PAT_SET: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
-        run: |
-          if git push --dry-run --quiet origin HEAD:refs/dry-run/token-probe 2>probe.err; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$PAT_SET" = "true" ]; then
-            fence=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
-            echo "::stop-commands::$fence"
-            echo "probe stderr:"
-            awk '{ print "  " $0 }' probe.err
-            echo "::$fence::"
-            echo "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above."
-            rm -f probe.err
-            exit 1
-          else
-            echo "::warning::this run's token cannot push (the caller grants contents: read);" \
-              "this commit was not packaged and the latest tag was not moved here (the release hook packages each release and moves latest itself)." \
-              "Raise the caller's ceiling to contents: write, or add a REPO_PLATFORM_TOKEN PAT secret" \
-              "with Contents (read and write) on this repository, to publish every green push to @latest."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
-          rm -f probe.err
+        run: bun .github/scripts/post-green-steps.ts probe
       - uses: ./.github/actions/setup
         if: steps.token.outputs.proceed == 'true'
       - name: Build the bundle, the schema, and the library

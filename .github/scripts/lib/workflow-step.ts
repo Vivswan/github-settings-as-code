@@ -69,6 +69,23 @@ export function run(argv: readonly string[], options: RunOptions = {}): void {
   }
 }
 
+/** The command's exit status with its stderr as text, stdout staying on the step's log, as `cmd 2>file` and a read
+ * of that file would: for a command whose refusal is the answer and the refusal's words are wanted (a dry-run push).
+ * A command that cannot start is a failed attempt with the spawn error as its stderr, as the shell's 127 and
+ * "command not found" would be, so the caller's failure branch runs. */
+export function attempt(argv: readonly string[]): { status: number; stderr: string } {
+  const [command = "", ...args] = argv;
+  const result = spawnSync(command, args, {
+    stdio: ["inherit", "inherit", "pipe"],
+    encoding: "utf8",
+    maxBuffer: Number.MAX_SAFE_INTEGER,
+  });
+  if (result.error !== undefined) {
+    return { status: 127, stderr: `${command}: ${result.error.message}\n` };
+  }
+  return { status: statusOf(command, result), stderr: result.stderr };
+}
+
 /** The command's stdout with its trailing newlines removed, as `$(...)` yields it; stderr stays on the step's log,
  * and a failure ends the step with the command's status. Unbounded like `$(...)`: a staged-path listing or a diff
  * can pass spawnSync's 1 MiB default. */

@@ -4,7 +4,7 @@
  * reachable through workflow_call alone and its ci.yml caller sits downstream of all-green; a job's effective grant covers what its
  * steps consume; a hook job's own condition is the fork guard or nothing; post-green's judged sha, and the caller's sha in the
  * release-PR hook, reach every checkout and every step that names a source; every output a step writes is read by a later step, and
- * every gate reads an output an earlier step writes, back to the probe. The push probe also runs under bash against a stubbed git,
+ * every gate reads an output an earlier step writes, back to the probe. The push probe's script also runs against a stubbed git,
  * since no pin shows what a branch does.
  *
  * The static guards catch ACCIDENTAL drift: a trigger, grant, gate, or step added or dropped in plain YAML. Deliberately hiding one
@@ -12,10 +12,11 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { STEP_OUTPUTS } from "../../.github/scripts/post-green-steps.js";
 import { ROOT } from "../root.js";
+import { runStep } from "../scripts/step-fixture.js";
 import { withTempDir } from "../temp-dir.js";
 import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
 
@@ -369,11 +370,20 @@ describe("the library page's publishing claims", () => {
   });
 });
 
-/** Every `<name>` a step writes to GITHUB_OUTPUT. */
-const outputsWritten = (step: Step): string[] =>
-  [...(step.run ?? "").matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map(
-    (m) => m[1] ?? "",
-  );
+/** A step that is one bun invocation of a steps script's subcommand, as the probe is. */
+const SCRIPT_STEP = /^bun \.github\/scripts\/([\w-]+)\.ts ([\w-]+)$/;
+/** What each steps script's subcommands write, declared by the script beside the code that writes it. */
+const SCRIPT_OUTPUTS: Record<string, Record<string, readonly string[]>> = {
+  "post-green-steps": STEP_OUTPUTS,
+};
+
+/** Every `<name>` a step writes to GITHUB_OUTPUT: a shell step's echo lines, or a script subcommand's declared outputs. */
+const outputsWritten = (step: Step): string[] => {
+  const run = (step.run ?? "").trim();
+  const script = run.match(SCRIPT_STEP);
+  if (script) return [...(SCRIPT_OUTPUTS[script[1] ?? ""]?.[script[2] ?? ""] ?? [])];
+  return [...run.matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map((m) => m[1] ?? "");
+};
 
 /** Every `steps.<id>.outputs.<name>` a step reads, in its condition, env, with, or script. */
 const outputsRead = (step: Step): Array<[id: string, name: string]> =>
@@ -530,7 +540,8 @@ describe("the probed hooks' wiring", () => {
       "a probe under a condition of its own",
       POST_GREEN,
       (w) => {
-        must(must(w.jobs.build, "build").steps?.[1], "probe").if = "github.event_name == 'release'";
+        must(must(w.jobs.build, "build").steps?.find(isProbe), "probe").if =
+          "github.event_name == 'release'";
       },
       /the probe "Check the token can push" runs under a condition of its own/,
     ],
@@ -638,74 +649,71 @@ describe("the probed hooks' wiring", () => {
     expect(flag, `the probe's env does not read secrets.${secret}`).toBeDefined();
     expect(condition(flag?.[1])).toBe(`secrets.${secret} != ''`);
     // The script branches on that variable, so the env name and the script agree.
-    expect(probe.run).toContain(`"$${flag?.[0]}" = "true"`);
+    const [, script] = must(
+      (probe.run ?? "").trim().match(SCRIPT_STEP) ?? undefined,
+      "a steps-script probe",
+    );
+    expect(readFileSync(join(ROOT, ".github", "scripts", `${script}.ts`), "utf8")).toContain(
+      `requireEnv("${flag?.[0]}")`,
+    );
   });
 });
 
-/** The probe's stdout as the runner reads it: one entry per line. */
+/** The probe's step as the runner reads it: stdout one entry per line, its status, and the GITHUB_OUTPUT lines. */
 interface ProbeRun {
   lines: string[];
+  stderr: string;
   status: number;
-  /** What the step wrote to GITHUB_OUTPUT. */
-  output: string;
-  probeErrLeft: boolean;
+  outputs: string[];
+}
+
+/** The script and subcommand the workflow's probe step runs, so this runs what the yaml names. */
+function probeInvocation(): [script: string, command: string] {
+  const steps = must(readWorkflow(POST_GREEN).jobs.build, "build job").steps ?? [];
+  const run = must(must(steps.find(isProbe), "probe step").run, "probe run").trim();
+  const [, script, command] = must(run.match(SCRIPT_STEP) ?? undefined, "a steps-script probe");
+  return [script ?? "", command ?? ""];
 }
 
 /**
- * Run the probe under `bash -e` (what a `run:` step gets on a Linux runner) with git stubbed to write `stderr` and exit `gitStatus`; the
- * scratch directory is removed on every path.
+ * Run the probe as the workflow does with git stubbed to write `stderr` and exit `gitStatus`, or with no git on PATH at all
+ * (`gitStatus: null`); the scratch directory is removed on every path.
  */
-function runProbe(
-  run: string,
-  stderr: string,
-  gitStatus: number,
-  patSet: boolean,
-): Promise<ProbeRun> {
+function runProbe(stderr: string, gitStatus: number | null, patSet: boolean): Promise<ProbeRun> {
   return withTempDir("post-green-probe-", (dir) => {
     const bin = join(dir, "bin");
     mkdirSync(bin);
-    writeFileSync(
-      join(bin, "git"),
-      `#!/bin/sh\nprintf '%s' "$STUB_STDERR" >&2\nexit ${gitStatus}\n`,
-      { mode: 0o755 },
-    );
-    const output = join(dir, "output");
-    writeFileSync(output, "");
-    const env = {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      PAT_SET: patSet ? "true" : "false",
-      GITHUB_OUTPUT: output,
-      STUB_STDERR: stderr,
-    };
-    let status = 0;
-    let stdout = "";
-    try {
-      stdout = execFileSync("bash", ["-e", "-c", run], {
-        cwd: dir,
-        encoding: "utf8",
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      status = (error as { status?: number }).status ?? -1;
-      stdout = String((error as { stdout?: string }).stdout ?? "");
+    if (gitStatus !== null) {
+      writeFileSync(
+        join(bin, "git"),
+        `#!/bin/sh\nprintf '%s' "$STUB_STDERR" >&2\nexit ${gitStatus}\n`,
+        { mode: 0o755 },
+      );
     }
+    const [script, command] = probeInvocation();
+    const result = runStep(
+      script,
+      dir,
+      join(dir, "runner-temp"),
+      {
+        PATH: gitStatus === null ? bin : `${bin}:${process.env.PATH ?? ""}`,
+        PAT_SET: patSet ? "true" : "false",
+        STUB_STDERR: stderr,
+      },
+      command,
+    );
     return {
-      lines: stdout.split("\n"),
-      status,
-      output: readFileSync(output, "utf8"),
-      probeErrLeft: existsSync(join(dir, "probe.err")),
+      lines: result.stdout.split("\n"),
+      stderr: result.stderr,
+      status: result.status,
+      outputs: result.outputs,
     };
   });
 }
 
 const FENCE_OPEN = /^::stop-commands::([0-9a-f]{32})$/;
 
-describe("the push probe under bash", () => {
-  const steps = must(readWorkflow("post-green.yml").jobs.build, "build job").steps ?? [];
-  const run = must(must(steps.find(isProbe), "probe step").run, "probe run");
-
+describe("the push probe", () => {
   const REFUSED =
     "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.";
   /** The two ways to let the hook push: a wider caller ceiling, or the PAT the checkout falls back from. */
@@ -747,9 +755,9 @@ describe("the push probe under bash", () => {
             REFUSED,
             "",
           ],
+          stderr: "",
           status: 1,
-          output: "",
-          probeErrLeft: false,
+          outputs: [],
         },
       ],
       [
@@ -768,9 +776,9 @@ describe("the push probe under bash", () => {
             REFUSED,
             "",
           ],
+          stderr: "",
           status: 1,
-          output: "",
-          probeErrLeft: false,
+          outputs: [],
         },
       ],
       [
@@ -780,9 +788,9 @@ describe("the push probe under bash", () => {
         true,
         {
           lines: ["::stop-commands::<token>", "probe stderr:", "::<token>::", REFUSED, ""],
+          stderr: "",
           status: 1,
-          output: "",
-          probeErrLeft: false,
+          outputs: [],
         },
       ],
       [
@@ -790,24 +798,74 @@ describe("the push probe under bash", () => {
         "refused\n",
         1,
         false,
-        { lines: [NO_PAT, ""], status: 0, output: "proceed=false\n", probeErrLeft: false },
+        { lines: [NO_PAT, ""], stderr: "", status: 0, outputs: ["proceed=false"] },
       ],
       [
         "a probe the token passes proceeds and prints nothing (control)",
         "",
         0,
         true,
-        { lines: [""], status: 0, output: "proceed=true\n", probeErrLeft: false },
+        { lines: [""], stderr: "", status: 0, outputs: ["proceed=true"] },
       ],
     ],
   )("%s", async (_name, stderr, gitStatus, patSet, expected) => {
-    const probe = await runProbe(run, stderr, gitStatus, patSet);
+    const probe = await runProbe(stderr, gitStatus, patSet);
     expect(probe).toEqual(withToken(expected, probe));
   });
 
   test("the fence token is fresh per run: a fixed one is a token remote text could name to resume command processing", async () => {
-    const first = must(fenceToken(await runProbe(run, "refused", 1, true)), "a fence token");
-    const second = must(fenceToken(await runProbe(run, "refused", 1, true)), "a fence token");
+    const first = must(fenceToken(await runProbe("refused", 1, true)), "a fence token");
+    const second = must(fenceToken(await runProbe("refused", 1, true)), "a fence token");
     expect(first).not.toBe(second);
+  });
+
+  // The shell's `if git push ...` took the failure branch when git itself could not run; a probe that ends with the spawn
+  // error instead would write no verdict and no warning.
+  test.each<[name: string, patSet: boolean, expected: ProbeRun]>([
+    [
+      "with a PAT, a git that cannot be run is a fenced refusal naming the spawn error, exit 1",
+      true,
+      {
+        lines: [
+          "::stop-commands::<token>",
+          "probe stderr:",
+          "  git: <message>",
+          "::<token>::",
+          REFUSED,
+          "",
+        ],
+        stderr: "",
+        status: 1,
+        outputs: [],
+      },
+    ],
+    [
+      "without a PAT, a git that cannot be run warns and skips like a refusal",
+      false,
+      { lines: [NO_PAT, ""], stderr: "", status: 0, outputs: ["proceed=false"] },
+    ],
+  ])("%s", async (_name, patSet, expected) => {
+    const probe = await runProbe("", null, patSet);
+    // The spawn error's words are the runtime's; the line's shape (git's name, then a non-empty message) is the pin.
+    const message = probe.lines[2]?.match(/^ {2}git: (\S.*)$/)?.[1];
+    const lines = expected.lines.map((line) =>
+      line.replace("<message>", message ?? "<no spawn error line>"),
+    );
+    expect(probe).toEqual(withToken({ ...expected, lines }, probe));
+  });
+
+  test("the outputs the script declares for the probe are exactly the ones its branches write, so the wiring relation reads the truth", async () => {
+    const [, command] = probeInvocation();
+    const runs = await Promise.all([
+      runProbe("", 0, true),
+      runProbe("refused\n", 1, false),
+      runProbe("refused", 1, true),
+    ]);
+    const written = new Set(
+      runs.flatMap((probe) => probe.outputs.map((line) => line.split("=")[0] ?? "")),
+    );
+    expect([...written].sort()).toEqual(
+      [...(SCRIPT_OUTPUTS["post-green-steps"]?.[command] ?? [])].sort(),
+    );
   });
 });
