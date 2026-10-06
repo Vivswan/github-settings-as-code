@@ -4,7 +4,7 @@ order: 20
 
 # Upgrading from v2 to v3
 
-Sixty-one breaks. Sixteen are for library consumers (sections 9, 22, 23, 24, 25, 26, 27, 28, 29, 34, 35, 54, 56, 58, 60, and 61), and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
+Sixty-one breaks. Twenty-six are for library consumers (sections 9, 22 to 29, 34, 35, 37 to 41, 45, 47, 49, 51, 54 to 56, 58, 60, and 61), ten of those also refusals below, and two are for anyone pinning a sha or installing `@next` (sections 21 and 59).
 
 Eighteen are parse-time refusals (sections 36 to 52 and 55): a declaration GitHub would reject, or that could never converge, now fails before any request. Sections 53 and 57 are silent: YAML merge keys resolve, and one validation message is respelled.
 

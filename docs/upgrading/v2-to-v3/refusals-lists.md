@@ -52,6 +52,8 @@ v3   branches[0].protection.required_status_checks.enforcement_level: ... is Git
 | A scalar where `required_status_checks` or `required_pull_request_reviews` goes | Refused on a wildcard entry, passed through to the PUT on a literal one | Refused: a mapping or `null` on every entry |
 | An actor object copied from the GET (`restrictions.users: [{login: octocat}]`) | Sent to the PUT, which 422ed | Refused: write the `login` or `slug` string, `octocat` |
 
+For `@vivswan/github-settings-as-code` consumers, `required_status_checks` and `restrictions` under `SectionInput<"branches">` (and so `SettingsFile`) are typed shapes, once `unknown`; a check list without `strict`, or an actor object, stops compiling.
+
 Fix: declare the PUT's shape (bare booleans, `strict` beside the check list, actors as their login or slug strings) instead of pasting the GET. Also new: a live `restrictions` holder whose `users`, `teams`, and `apps` are all empty is a push restriction that lets nobody through, so a file that omits it now sees the omitted-live drift line and a loud PUT instead of a silent lift.
 
 ## 42. Collaborators and teams: permissions and slugs
@@ -121,6 +123,8 @@ v3   webhooks[0].config.url: "hooks.example.com/ci" is not an absolute URL (the 
      webhooks[0].events[1]: "pushes" is not an event GitHub delivers to repository webhooks ("*" means every event); the accepted names are GitHub's list at https://docs.github.com/webhooks/webhook-events-and-payloads, read from @octokit/openapi-webhooks, so an event GitHub added since arrives in the release that bumps that package
 ```
 
+For `@vivswan/github-settings-as-code` consumers, under `SectionInput<"webhooks">` (and so `SettingsFile`) `content_type`, `insecure_ssl`, and each `events` item are the unions above, once `string` or `number`; `JSON`, `2`, or `pushes` stops compiling.
+
 Fix: an absolute URL, `json` or `form`, `"0"` or `"1"`, and event names from GitHub's repository list. The list is pinned to `@octokit/openapi-webhooks`, so an event GitHub adds later is refused until the release that bumps that package.
 
 ## 48. Secret scanning patterns must compile
@@ -159,6 +163,8 @@ v3   rulesets[0].enforcement: Invalid option: expected one of "active"|"evaluate
 ```
 
 Bypass actors are typed from the spec: Integration, RepositoryRole, Team, and User need an `actor_id`; DeployKey takes none and never `pull_request`; `pull_request` applies to branch rulesets only. The 23 known rule types carry their parameters typed from the spec, in GitHub's casing; an unknown rule type still passes through, so a type GitHub ships tomorrow works the day it ships.
+
+For `@vivswan/github-settings-as-code` consumers, `enforcement` and `actor_type` under `SectionInput<"rulesets">` (and so `SettingsFile`) are the enums above, once `string` and `unknown`; `enabled` stops compiling; a rule's parameters still compile.
 
 Fix: spell the enums as GitHub does, give each actor its id, and write `~ALL` or `~DEFAULT_BRANCH`.
 
@@ -205,6 +211,8 @@ GitHub answers `protection_rules: []` for an unprotected environment, and the fl
 | More than 6 `reviewers` | 422 | Refused: GitHub's cap |
 | `deployment_branch_policies[].type: wildcard` | Deleted the live policy, then the create 422ed; every run retried | Refused: `branch` or `tag` |
 
+For `@vivswan/github-settings-as-code` consumers, a policy's `type` under `SectionInput<"environments">` (and so `SettingsFile`) is `"branch" | "tag"`, where the pre-release v3 builds typed `string`; a `string` there no longer compiles.
+
 ## 52. Autolinks: charset, placeholder, and overlapping prefixes
 
 ```text
@@ -246,6 +254,8 @@ v3   branches[0].protection.restrictions.users: protection.restrictions must car
 ```
 
 GitHub's protection PUT requires `users` and `teams` under `restrictions` and takes `apps` as optional, so each missing list is refused before any request. The two review-side holders are unchanged: `dismissal_restrictions: {}` and `bypass_pull_request_allowances: {}` stay legal, since GitHub documents the empty mapping there as "disabled".
+
+For `@vivswan/github-settings-as-code` consumers, `restrictions` under `SectionInput<"branches">` (and so `SettingsFile`) requires `users` and `teams`, where the pre-release v3 builds typed the block `unknown`; `restrictions: {}` stops compiling.
 
 Fix: declare both lists (`users: []` and `teams: []` when none), or write `restrictions: null` to lift the push restriction.
 
