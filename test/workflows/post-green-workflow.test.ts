@@ -12,9 +12,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STEP_OUTPUTS } from "../../.github/scripts/post-green-steps.js";
+import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
 import { runStep } from "../scripts/step-fixture.js";
 import { withTempDir } from "../temp-dir.js";
@@ -151,7 +152,8 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   const label = step.name ?? "unnamed step";
   const grants: Array<[string, string]> = [];
   if (
-    /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b|release-pipeline\.ts (?:package|package-commit|retag-major|anchor)\b/.test(
+    /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b/.test(run) ||
+    /release-pipeline\.ts (?:package|package-commit|retag-major|anchor|resolve-source|verify-assets)\b/.test(
       run,
     )
   ) {
@@ -213,24 +215,39 @@ describe("the hooks' grants", () => {
     );
   });
 
-  test.each<[string, string, Record<string, string>, RegExp]>([
+  test.each<[string, string, string, Record<string, string>, RegExp]>([
     [
       "an anchor job narrowed to read while its subcommand pushes",
+      "update-release-pr.yml",
       "anchor",
       { contents: "read" },
       /update-release-pr\.yml#anchor: .* needs contents: write/,
     ],
     [
       "a publish job without the OIDC grant its npm publish consumes",
+      "update-release-pr.yml",
       "publish-next",
       { contents: "read" },
       /update-release-pr\.yml#publish-next: .* needs id-token: write/,
     ],
-  ])("%s fails the grant relation (negative control)", (_case, id, permissions, message) => {
-    const narrowed = readWorkflow("update-release-pr.yml");
+    [
+      "a package job narrowed to read while its source step reads the draft",
+      "update-release.yml",
+      "package-release",
+      { contents: "read" },
+      /update-release\.yml#package-release: "Resolve the release's merge commit from the draft" pushes or touches a release/,
+    ],
+    [
+      "a verify job narrowed to read while its asset step reads the draft",
+      "update-release.yml",
+      "verify-release",
+      { contents: "read" },
+      /update-release\.yml#verify-release: "Confirm the release carries both packaged assets" pushes or touches a release/,
+    ],
+  ])("%s fails the grant relation (negative control)", (_case, file, id, permissions, message) => {
+    const narrowed = readWorkflow(file);
     must(narrowed.jobs[id], `${id} job`).permissions = permissions;
-    const read = (file: string) =>
-      file === "update-release-pr.yml" ? narrowed : readWorkflow(file);
+    const read = (candidate: string) => (candidate === file ? narrowed : readWorkflow(candidate));
     expect(grantProblems(HOOKS, read).join("\n")).toMatch(message);
   });
 });
@@ -375,6 +392,7 @@ const SCRIPT_STEP = /^bun \.github\/scripts\/([\w-]+)\.ts ([\w-]+)$/;
 /** What each steps script's subcommands write, declared by the script beside the code that writes it. */
 const SCRIPT_OUTPUTS: Record<string, Record<string, readonly string[]>> = {
   "post-green-steps": STEP_OUTPUTS,
+  "release-pipeline": RELEASE_PIPELINE_OUTPUTS,
 };
 
 /** Every `<name>` a step writes to GITHUB_OUTPUT: a shell step's echo lines, or a script subcommand's declared outputs. */
@@ -524,7 +542,10 @@ describe("the probed hooks' wiring", () => {
     [
       "the source step's readers gone, leaving the resolved sha unread",
       RELEASE,
-      (w) => must(w.jobs["package-release"], "package-release").steps?.splice(1),
+      (w) => {
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        steps.splice(steps.findIndex((step) => step.id === "source") + 1);
+      },
       /writes sha, which no later step reads/,
     ],
     [
@@ -549,8 +570,12 @@ describe("the probed hooks' wiring", () => {
       "the resolved sha no longer written",
       RELEASE,
       (w) => {
-        const step = must(must(w.jobs["package-release"], "package-release").steps?.[0], "source");
-        step.run = step.run?.replace(/\n\s*echo "sha=\$sha" >> "\$GITHUB_OUTPUT"/, "");
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        const step = must(
+          steps.find((candidate) => candidate.id === "source"),
+          "source",
+        );
+        step.run = step.run?.replace("resolve-source", "verify-assets");
       },
       /reads steps\.source\.outputs\.sha, which no earlier step writes/,
     ],
@@ -854,18 +879,95 @@ describe("the push probe", () => {
     expect(probe).toEqual(withToken({ ...expected, lines }, probe));
   });
 
-  test("the outputs the script declares for the probe are exactly the ones its branches write, so the wiring relation reads the truth", async () => {
-    const [, command] = probeInvocation();
-    const runs = await Promise.all([
-      runProbe("", 0, true),
-      runProbe("refused\n", 1, false),
-      runProbe("refused", 1, true),
-    ]);
-    const written = new Set(
-      runs.flatMap((probe) => probe.outputs.map((line) => line.split("=")[0] ?? "")),
-    );
-    expect([...written].sort()).toEqual(
-      [...(SCRIPT_OUTPUTS["post-green-steps"]?.[command] ?? [])].sort(),
-    );
+  /** release-pipeline's draft reads, run as the workflow does with gh stubbed to answer `stdout` or fail with `status`;
+   * the branch must have reached gh and ended with `ends`, or an empty output list could stand for a step that never ran. */
+  function runDraftRead(
+    subcommand: string,
+    gh: { stdout?: string; stderr?: string; status?: number },
+    ends: number,
+  ): Promise<string[]> {
+    return withTempDir("release-draft-read-", (dir) => {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(dir, "answer"), gh.stdout ?? "");
+      writeFileSync(join(dir, "answer.err"), gh.stderr ?? "");
+      writeFileSync(
+        join(bin, "gh"),
+        `#!/bin/sh\n: > "${dir}/gh-ran"\ncat "${dir}/answer"\ncat "${dir}/answer.err" >&2\nexit ${gh.status ?? 0}\n`,
+        { mode: 0o755 },
+      );
+      const result = runStep(
+        "release-pipeline",
+        ROOT,
+        join(dir, "runner-temp"),
+        { TAG: "v2.1.0", PATH: `${bin}:${process.env.PATH ?? ""}` },
+        subcommand,
+      );
+      expect(
+        existsSync(join(dir, "gh-ran")),
+        `${subcommand} never reached gh: ${result.stderr}`,
+      ).toBe(true);
+      expect(result.status, `${subcommand}: ${result.stderr}`).toBe(ends);
+      return result.outputs;
+    });
+  }
+
+  test("the outputs each script declares are exactly the ones its subcommands' branches write, so the wiring relation reads the truth", async () => {
+    const [, probe] = probeInvocation();
+    const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+    const assets = (...names: string[]) =>
+      JSON.stringify({ assets: names.map((name) => ({ name })) });
+    // Every branch of every subcommand a script dispatches from a workflow step, as runs; a declared subcommand this
+    // table does not run, or a script the table does not know, fails the pin instead of passing vacuously.
+    const branches: Record<string, Record<string, () => Promise<string[]>>> = {
+      "post-green-steps": {
+        [probe]: async () =>
+          (
+            await Promise.all([
+              runProbe("", 0, true),
+              runProbe("refused\n", 1, false),
+              runProbe("refused", 1, true),
+            ])
+          ).flatMap((run) => run.outputs),
+      },
+      "release-pipeline": {
+        "resolve-source": async () =>
+          (
+            await Promise.all([
+              runDraftRead("resolve-source", { stdout: `${sha}\n` }, 0),
+              runDraftRead("resolve-source", { stdout: "main\n" }, 1),
+              runDraftRead("resolve-source", { stderr: "release not found\n", status: 4 }, 4),
+            ])
+          ).flat(),
+        "verify-assets": async () =>
+          (
+            await Promise.all([
+              runDraftRead(
+                "verify-assets",
+                { stdout: assets("index.js", "settings.schema.json") },
+                0,
+              ),
+              runDraftRead("verify-assets", { stdout: assets("index.js") }, 1),
+              runDraftRead("verify-assets", { stderr: "release not found\n", status: 4 }, 4),
+            ])
+          ).flat(),
+      },
+    };
+    expect(Object.keys(SCRIPT_OUTPUTS).sort()).toEqual(Object.keys(branches).sort());
+    for (const [script, runs] of Object.entries(branches)) {
+      const declared = SCRIPT_OUTPUTS[script] ?? {};
+      for (const subcommand of Object.keys(declared)) {
+        expect(
+          Object.keys(runs),
+          `${script} declares ${subcommand}, which no run here exercises`,
+        ).toContain(subcommand);
+      }
+      for (const [subcommand, run] of Object.entries(runs)) {
+        const written = new Set((await run()).map((line) => line.split("=")[0] ?? ""));
+        expect([...written].sort(), `${script} ${subcommand}`).toEqual(
+          [...(declared[subcommand] ?? [])].sort(),
+        );
+      }
+    }
   });
 });

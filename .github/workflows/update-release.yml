@@ -46,6 +46,12 @@ jobs:
     outputs:
       source-sha: ${{ steps.source.outputs.sha }}
     steps:
+      # The run's own head, on main, supplies the script that resolves the release; the checkout below replaces it
+      # with the release's source.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          install: "false"
       # The release's identity is the draft's target commitish, never this run's GITHUB_SHA: the managed head-check
       # lets a newer push's run recover an older merge's pending release.
       - name: Resolve the release's merge commit from the draft
@@ -54,13 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
-        run: |
-          sha="$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)"
-          if ! grep -qxE '[0-9a-f]{40}' <<< "$sha"; then
-            echo "::error::draft $TAG's target commitish is '$sha', not a commit SHA; refusing to package an unidentified source."
-            exit 1
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        run: bun .github/scripts/release-pipeline.ts resolve-source
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.source.outputs.sha }}
@@ -96,6 +96,10 @@ jobs:
     permissions:
       contents: write # read-only in spirit; write is what makes drafts visible to gh
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          install: "false"
       # Publishing freezes the asset list, so an incomplete one must stop here while the release is still a draft
       # (v2.0.0 shipped assetless exactly this way). attestation.json is the managed publish stage's asset, attached
       # after this job, so the check ignores it.
@@ -104,14 +108,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
-        run: |
-          assets="$(gh release view "$TAG" --json assets \
-            --jq '[.assets[].name | select(. != "attestation.json")] | sort | join(" ")')"
-          expected="index.js settings.schema.json"
-          if [ "$assets" != "$expected" ]; then
-            echo "::error::release $TAG carries assets [$assets], expected [$expected]; re-run package-release before anything publishes."
-            exit 1
-          fi
+        run: bun .github/scripts/release-pipeline.ts verify-assets
 
   # Publishes the release's library build to npm as the stable version through trusted publishing: no registry
   # token, provenance attached by npm. Behind verify-release, so nothing reaches the registry before the draft's
