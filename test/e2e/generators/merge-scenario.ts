@@ -1,13 +1,13 @@
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
-import { silentIo } from "../../src/io.js";
+import { validateSettingsDoc } from "../../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../../src/engine/section-selection.js";
+import { silentIo } from "../../../src/io.js";
 import {
   LIST_SECTIONS,
   type ListSection,
   SECTION_KEYS,
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
-} from "../../src/schema.js";
+} from "../../../src/schema.js";
 import {
   DEFAULT_LAYERING_DIRECTIVE,
   entriesOf,
@@ -19,10 +19,10 @@ import {
   UNDECLARED_KEY,
   UNDECLARED_POLICIES,
   type UndeclaredPolicyWord,
-} from "./gen-support.js";
-import { genSettings, validateAgainstPublishedSchema } from "./generators.js";
-import type { Rng } from "./prng.js";
-import type { Scenario } from "./schema.js";
+} from "../gen-support.js";
+import type { Rng } from "../prng.js";
+import type { Scenario } from "../schema.js";
+import { genSettings, validateAgainstPublishedSchema } from "./settings.js";
 import type { GenScenarioOptions } from "./single-scenario.js";
 
 /** `name` is the file name the runner writes and the action's refusals and notices report. */

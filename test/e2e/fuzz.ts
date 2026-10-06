@@ -17,7 +17,13 @@ import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
-import { genDiscoveryScenario } from "./discovery-scenario.js";
+import {
+  LAYERING_DIRECTIVES,
+  type LayeringDirective,
+  type LiveWitness,
+  type LiveWitnessKind,
+} from "./gen-support.js";
+import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
 import {
   type FaultableSection,
   SECTION_FAULT_FIXTURE,
@@ -26,13 +32,27 @@ import {
   UNFAULTABLE_SECTIONS,
   type UnfaultableSection,
   unfaultableReadKeys,
-} from "./fault-targets.js";
+} from "./generators/fault-targets.js";
 import {
-  LAYERING_DIRECTIVES,
-  type LayeringDirective,
-  type LiveWitness,
-  type LiveWitnessKind,
-} from "./gen-support.js";
+  genInvalidSettings,
+  INVALID_SETTINGS_CASES,
+  NON_MAPPING_YAML,
+  UNPARSEABLE_YAML,
+} from "./generators/invalid-settings.js";
+import {
+  genMergeScenario,
+  MERGE_REFUSAL_KINDS,
+  type MergeForce,
+  type MergeScenarioMeta,
+} from "./generators/merge-scenario.js";
+import {
+  canariesOf,
+  displayKeyOf,
+  genMultiScenario,
+  type MultiRepoMeta,
+  type MultiScenarioMeta,
+  redactionPlaceholder,
+} from "./generators/multi-scenario.js";
 import {
   genLiveWitness,
   genSettings,
@@ -42,29 +62,10 @@ import {
   WITNESS_KINDS,
   WITNESS_SECTIONS,
   type WitnessSection,
-} from "./generators.js";
-import {
-  genInvalidSettings,
-  INVALID_SETTINGS_CASES,
-  NON_MAPPING_YAML,
-  UNPARSEABLE_YAML,
-} from "./invalid-settings.js";
+} from "./generators/settings.js";
+import { genScenario, type ScenarioMeta } from "./generators/single-scenario.js";
 import { deliveredIssueBody } from "./issue-report-assert.js";
-import {
-  genMergeScenario,
-  MERGE_REFUSAL_KINDS,
-  type MergeForce,
-  type MergeScenarioMeta,
-} from "./merge-scenario.js";
 import type { LoggedRequest } from "./mock/contract.js";
-import {
-  canariesOf,
-  displayKeyOf,
-  genMultiScenario,
-  type MultiRepoMeta,
-  type MultiScenarioMeta,
-  redactionPlaceholder,
-} from "./multi-scenario.js";
 import {
   foldRepoResults,
   foldSectionOutcomes,
@@ -88,7 +89,6 @@ import {
   stripMaskLines,
 } from "./runner.js";
 import type { Scenario } from "./schema.js";
-import { genScenario, type ScenarioMeta } from "./single-scenario.js";
 
 const FAILURE_CAP = 5;
 
@@ -1253,7 +1253,7 @@ async function unfaultableSectionRun(
   if (readKeys.length === 0 && !NO_READ_SECTIONS.has(section)) {
     problems.push(
       `no GET endpoints derived for "${section}" - the unfaultable battery run is vacuous; fix ` +
-        `the endpoint keying in unfaultableReadKeys (fault-targets.ts), or if the section genuinely ` +
+        `the endpoint keying in unfaultableReadKeys (generators/fault-targets.ts), or if the section genuinely ` +
         `declares no GET it should already appear in NO_READ_SECTIONS (oracle.ts)`,
     );
     return iterationResult(problems, { sections: [section] }, `[unfaultable ${section}] `);

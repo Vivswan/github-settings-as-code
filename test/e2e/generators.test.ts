@@ -9,8 +9,6 @@ import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
-import { genDiscoveryScenario } from "./discovery-scenario.js";
-import { SECTION_PRIMARY_READ } from "./fault-targets.js";
 import {
   entriesOf,
   type Json,
@@ -19,6 +17,22 @@ import {
   REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
+import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
+import { SECTION_PRIMARY_READ } from "./generators/fault-targets.js";
+import {
+  genInvalidSettings,
+  INVALID_SETTINGS_CASES,
+  NON_MAPPING_YAML,
+  UNPARSEABLE_YAML,
+} from "./generators/invalid-settings.js";
+import {
+  genMergeScenario,
+  MERGE_FEATURES,
+  MERGE_REFUSAL_KINDS,
+  mergeFeaturesOf,
+  standaloneViewOf,
+} from "./generators/merge-scenario.js";
+import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./generators/multi-scenario.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   genLiveWitness,
@@ -26,26 +40,12 @@ import {
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
-} from "./generators.js";
-import {
-  genInvalidSettings,
-  INVALID_SETTINGS_CASES,
-  NON_MAPPING_YAML,
-  UNPARSEABLE_YAML,
-} from "./invalid-settings.js";
-import {
-  genMergeScenario,
-  MERGE_FEATURES,
-  MERGE_REFUSAL_KINDS,
-  mergeFeaturesOf,
-  standaloneViewOf,
-} from "./merge-scenario.js";
+} from "./generators/settings.js";
+import { genScenario } from "./generators/single-scenario.js";
 import { grantablePermission } from "./mock/state.js";
-import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./multi-scenario.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
 import { collectYmlFiles, MASK_KEYS, parseScenario } from "./schema.js";
-import { genScenario } from "./single-scenario.js";
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {

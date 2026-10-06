@@ -1,5 +1,5 @@
 /**
- * The environments fuzz generator fragment, aggregated by test/e2e/generators.ts.
+ * The environments fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
 import { E2E_SECRET_ENV, type Json } from "../../e2e/gen-support.js";

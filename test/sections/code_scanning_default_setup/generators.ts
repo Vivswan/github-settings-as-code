@@ -1,5 +1,5 @@
 /**
- * The code_scanning_default_setup fuzz generator fragment, aggregated by test/e2e/generators.ts.
+ * The code_scanning_default_setup fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
 import { CODE_SCANNING_LANGUAGES } from "../../../src/sections/code_scanning_default_setup/schema.js";

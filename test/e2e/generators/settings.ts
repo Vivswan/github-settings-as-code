@@ -7,29 +7,29 @@
 
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
-import type { SectionKey } from "../../src/schema.js";
-import { isWildcardPattern } from "../../src/sections/branches/index.js";
-import { genActions } from "../sections/actions/generators.js";
-import { autolinksWitness, genAutolinks } from "../sections/autolinks/generators.js";
-import { FUZZ_DEPLOYMENT_ENVIRONMENTS, genBranches } from "../sections/branches/generators.js";
-import { genCheckSuitePreferences } from "../sections/check_suite_preferences/generators.js";
-import { genCodeQuality } from "../sections/code_quality_setup/generators.js";
-import { genCodeScanning } from "../sections/code_scanning_default_setup/generators.js";
-import { genCollaborators } from "../sections/collaborators/generators.js";
-import { genCustomProperties } from "../sections/custom_properties/generators.js";
-import { deployKeysWitness, genDeployKeys } from "../sections/deploy_keys/generators.js";
-import { genEnvironments } from "../sections/environments/generators.js";
-import { genInteractionLimits } from "../sections/interaction_limits/generators.js";
-import { genLabels, labelsWitness } from "../sections/labels/generators.js";
-import { genMilestones, milestonesWitness } from "../sections/milestones/generators.js";
-import { genPages } from "../sections/pages/generators.js";
-import { genRepository } from "../sections/repository/generators.js";
-import { genRulesets } from "../sections/rulesets/generators.js";
-import { genSecretScanningPatterns } from "../sections/secret_scanning_custom_patterns/generators.js";
-import { genTeams } from "../sections/teams/generators.js";
-import { genWebhooks } from "../sections/webhooks/generators.js";
-import { genWorkflows } from "../sections/workflows/generators.js";
-import { readSettingsSchema } from "../settings-schema.js";
+import type { SectionKey } from "../../../src/schema.js";
+import { isWildcardPattern } from "../../../src/sections/branches/index.js";
+import { genActions } from "../../sections/actions/generators.js";
+import { autolinksWitness, genAutolinks } from "../../sections/autolinks/generators.js";
+import { FUZZ_DEPLOYMENT_ENVIRONMENTS, genBranches } from "../../sections/branches/generators.js";
+import { genCheckSuitePreferences } from "../../sections/check_suite_preferences/generators.js";
+import { genCodeQuality } from "../../sections/code_quality_setup/generators.js";
+import { genCodeScanning } from "../../sections/code_scanning_default_setup/generators.js";
+import { genCollaborators } from "../../sections/collaborators/generators.js";
+import { genCustomProperties } from "../../sections/custom_properties/generators.js";
+import { deployKeysWitness, genDeployKeys } from "../../sections/deploy_keys/generators.js";
+import { genEnvironments } from "../../sections/environments/generators.js";
+import { genInteractionLimits } from "../../sections/interaction_limits/generators.js";
+import { genLabels, labelsWitness } from "../../sections/labels/generators.js";
+import { genMilestones, milestonesWitness } from "../../sections/milestones/generators.js";
+import { genPages } from "../../sections/pages/generators.js";
+import { genRepository } from "../../sections/repository/generators.js";
+import { genRulesets } from "../../sections/rulesets/generators.js";
+import { genSecretScanningPatterns } from "../../sections/secret_scanning_custom_patterns/generators.js";
+import { genTeams } from "../../sections/teams/generators.js";
+import { genWebhooks } from "../../sections/webhooks/generators.js";
+import { genWorkflows } from "../../sections/workflows/generators.js";
+import { readSettingsSchema } from "../../settings-schema.js";
 import {
   E2E_SECRET_ENV,
   type EntriesForm,
@@ -38,10 +38,10 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   maybeWrapUndeclared,
-} from "./gen-support.js";
-import type { LiveState } from "./mock/state.js";
-import type { Rng } from "./prng.js";
-import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "./schema.js";
+} from "../gen-support.js";
+import type { LiveState } from "../mock/state.js";
+import type { Rng } from "../prng.js";
+import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "../schema.js";
 
 /**
  * A fixed age recipient, so scenarios and the fuzzer share one hermetic key; runner.test.ts re-validates it against

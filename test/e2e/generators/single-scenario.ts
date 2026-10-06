@@ -1,6 +1,9 @@
-import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
-import { genInvitationsState } from "../sections/collaborators/generators.js";
-import { entriesOf, type Json, type LiveWitnessKind } from "./gen-support.js";
+import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
+import { genInvitationsState } from "../../sections/collaborators/generators.js";
+import { entriesOf, type Json, type LiveWitnessKind } from "../gen-support.js";
+import type { LiveState } from "../mock/state.js";
+import type { Rng } from "../prng.js";
+import type { DenialStyle, MaskGrade, MaskKey, OwnerKind, Scenario } from "../schema.js";
 import {
   genLiveWitness,
   genSettings,
@@ -12,10 +15,7 @@ import {
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
-} from "./generators.js";
-import type { LiveState } from "./mock/state.js";
-import type { Rng } from "./prng.js";
-import type { DenialStyle, MaskGrade, MaskKey, OwnerKind, Scenario } from "./schema.js";
+} from "./settings.js";
 
 /**
  * A personal account's repository takes pull, push, admin and 422s the rest (mock/state.ts, grantablePermission), and

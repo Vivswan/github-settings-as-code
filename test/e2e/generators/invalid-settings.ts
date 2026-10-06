@@ -3,14 +3,14 @@ import {
   type ListSection,
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
-} from "../../src/schema.js";
-import { compileFailure } from "../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
-import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
-import type { MustBeNever } from "../../src/types.js";
-import { PULL_REQUEST_PARAMETERS } from "../sections/rulesets/generators.js";
-import { type EntriesForm, entriesOf, type Json, UNDECLARED_KEY } from "./gen-support.js";
-import { genSettings, SECRET_LIST_SECTIONS } from "./generators.js";
-import type { Rng } from "./prng.js";
+} from "../../../src/schema.js";
+import { compileFailure } from "../../../src/sections/secret_scanning_custom_patterns/compilable-form.js";
+import { MAX_VARIABLE_VALUE_BYTES } from "../../../src/sections/shared/schema-helpers.js";
+import type { MustBeNever } from "../../../src/types.js";
+import { PULL_REQUEST_PARAMETERS } from "../../sections/rulesets/generators.js";
+import { type EntriesForm, entriesOf, type Json, UNDECLARED_KEY } from "../gen-support.js";
+import type { Rng } from "../prng.js";
+import { genSettings, SECRET_LIST_SECTIONS } from "./settings.js";
 
 /**
  * Only violations validateSettingsDoc GENUINELY rejects belong here; values the loose shapes accept by design would

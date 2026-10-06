@@ -36,10 +36,14 @@ import {
   UNDECLARED_POLICIES,
   type UndeclaredPolicyWord,
 } from "./gen-support.js";
-import { type MergeLayer, type MergeScenarioMeta, standaloneViewOf } from "./merge-scenario.js";
-import { displayKeyOf, type MultiScenarioMeta } from "./multi-scenario.js";
+import {
+  type MergeLayer,
+  type MergeScenarioMeta,
+  standaloneViewOf,
+} from "./generators/merge-scenario.js";
+import { displayKeyOf, type MultiScenarioMeta } from "./generators/multi-scenario.js";
+import type { ScenarioMeta } from "./generators/single-scenario.js";
 import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
-import type { ScenarioMeta } from "./single-scenario.js";
 
 /** A section outcome the step summary can report. */
 type Outcome = "applied" | "clean" | "drift" | "skipped" | "failed" | "excluded";

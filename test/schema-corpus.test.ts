@@ -6,7 +6,7 @@ import addFormats from "ajv-formats";
 import { parse } from "yaml";
 import { validateSectionShapes } from "../src/engine/validate.js";
 import { SECTION_KEYS } from "../src/schema.js";
-import { genSettings } from "./e2e/generators.js";
+import { genSettings } from "./e2e/generators/settings.js";
 import { Rng } from "./e2e/prng.js";
 import { collectYmlFiles, scenarioRoots } from "./e2e/schema.js";
 import { ROOT } from "./root.js";

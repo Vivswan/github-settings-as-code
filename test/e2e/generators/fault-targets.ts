@@ -1,7 +1,7 @@
-import type { SectionKey, SettingsFile } from "../../src/schema.js";
-import { endpointMethod } from "../../src/sections/contract/endpoints.js";
-import { allEndpoints, allGraphqlOps } from "../../src/sections/registry.js";
-import type { MustBeNever } from "../../src/types.js";
+import type { SectionKey, SettingsFile } from "../../../src/schema.js";
+import { endpointMethod } from "../../../src/sections/contract/endpoints.js";
+import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
+import type { MustBeNever } from "../../../src/types.js";
 
 /**
  * The one read each section issues in BOTH modes under the batteries' document (SECTION_FAULT_FIXTURE for the key-gated

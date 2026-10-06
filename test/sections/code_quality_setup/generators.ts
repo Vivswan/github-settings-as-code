@@ -1,5 +1,5 @@
 /**
- * The code_quality_setup fuzz generator fragment, aggregated by test/e2e/generators.ts.
+ * The code_quality_setup fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
 import { CODE_QUALITY_LANGUAGES } from "../../../src/sections/code_quality_setup/schema.js";
