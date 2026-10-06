@@ -4,6 +4,7 @@ import { foldLayers } from "../../../src/flows/layers.js";
 import { silentIo } from "../../../src/io.js";
 import { describeProblem } from "../../../src/problem.js";
 import { LIST_SECTIONS, type SectionKey } from "../../../src/schema.js";
+import { deepFreeze } from "../../../src/sections/contract/module.js";
 import { listLayering } from "../../../src/sections/registry.js";
 import { ADMIN_SLUG } from "../constants.js";
 import type { MaskGrade, MaskKey } from "../scenario.js";
@@ -1196,7 +1197,7 @@ describe("result folds (self-consistency mirrors)", () => {
 function stack(...docs: Record<string, unknown>[]): MergeLayer[] {
   return docs.map((doc, i) => ({
     name: i === docs.length - 1 ? "settings.yml" : `layer-${i}.yml`,
-    doc,
+    doc: deepFreeze(doc),
   }));
 }
 
@@ -1214,17 +1215,32 @@ function engineNotices(
 }
 
 describe("foldMergeLayers (the oracle's own dialect)", () => {
+  test("stack() freezes a document to its leaves, so a fold step writing into an input throws instead of passing", () => {
+    const entry = { name: "a" };
+    stack({ labels: [entry] });
+    expect(() => {
+      entry.name = "b";
+    }).toThrow(TypeError);
+  });
+
   test("keys named after Object.prototype members are ordinary document keys, inside a nested list too, as the engine reads them", () => {
     // The oracle reads own properties only: an inherited `constructor` is not a lower declaration to delete, and an own
     // `__proto__` is a key to carry, so the two folds agree on documents the generators never draw but a file can spell.
     const proto = "__proto__";
     // `constructor` beside the nested lists too: as a field it is data to union, never Object.prototype.constructor read as a keyed list.
     const higher = JSON.parse(
-      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "environments": [{"name": "prod", "constructor": [{"name": "B"}], "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
+      [
+        '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}},',
+        ' "actions": {"constructor": null},',
+        ' "environments": [{"name": "prod", "constructor": [{"name": "B"}],',
+        ' "variables": [{"name": "A", "value": "y", "constructor": null}]}]}',
+      ].join(""),
     ) as Json;
     const layers = stack(
       {
         repository: {},
+        actions: {},
+        custom_properties: [{ property_name: "a" }],
         environments: [
           { name: "prod", constructor: [{ name: "A" }], variables: [{ name: "A", value: "x" }] },
         ],
@@ -1240,6 +1256,8 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
     expect(oracle).toEqual({
       merged: {
         repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
+        actions: { constructor: null },
+        custom_properties: { [UNDECLARED_KEY]: "keep", entries: [{ property_name: "a" }] },
         environments: [
           {
             name: "prod",
@@ -1253,15 +1271,33 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
       notices: [],
     });
-    const repository = oracle.merged.repository as object;
-    expect([Object.hasOwn(repository, proto), Object.getPrototypeOf(repository)]).toEqual([
-      true,
-      Object.prototype,
-    ]);
+    for (const folded of [oracle.merged, engine._unsafeUnwrap().settings]) {
+      const repository = (folded as { repository: object }).repository;
+      expect([Object.hasOwn(repository, proto), Object.getPrototypeOf(repository)]).toEqual([
+        true,
+        Object.prototype,
+      ]);
+    }
   });
 
-  /** The lower layer under the three directive-precedence rows. */
   const DIRECTIVE_LOW = { labels: [{ name: "a" }], rulesets: [{ name: "r", target: "branch" }] };
+
+  const PROD = {
+    name: "prod",
+    wait_timer: 5,
+    variables: [
+      { name: "REGION", value: "eu" },
+      { name: "LOG_LEVEL", value: "info" },
+    ],
+    secrets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "TOKEN", value: "$A" }] },
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    deployment_branch_policies: [{ name: "release/*" }],
+    deployment_protection_rules: [{ app: "gate" }],
+    reviewers: [
+      { type: "User", id: 1 },
+      { type: "Team", id: 1 },
+    ],
+  };
 
   /**
    * One stack and directive, the whole {merged, notices} the oracle folds it to, and the engine's agreement on it:
@@ -1308,7 +1344,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       expected: { merged: { pages: { build_type: "legacy" } }, notices: [] },
     },
     {
-      name: "mappings merge key by key at any depth; lists outside the list sections and scalars replace",
+      name: "mappings merge key by key at any depth; lists outside the list sections and scalars replace; a higher-only section rides along",
       layering: "deep",
       layers: stack(
         {
@@ -1318,12 +1354,14 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         {
           repository: { description: "high", topics: ["c"] },
           check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
+          pages: { build_type: "workflow" },
         },
       ),
       expected: {
         merged: {
           repository: { description: "high", topics: ["c"], has_issues: true },
           check_suite_preferences: { auto_trigger_checks: [{ app_id: 2, setting: false }] },
+          pages: { build_type: "workflow" },
         },
         notices: [],
       },
@@ -1445,23 +1483,33 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         notices: [],
       },
     },
-    {
-      name: "a higher rename claiming two lower labels supersedes both at the first one's slot",
-      layering: "deep",
-      layers: stack(
-        { labels: [{ name: "a" }, { name: "docs" }, { name: "b" }] },
-        { labels: [{ name: "B", new_name: "A" }] },
-      ),
-      expected: {
-        merged: {
-          labels: {
-            [UNDECLARED_KEY]: "delete",
-            entries: [{ name: "B", new_name: "A" }, { name: "docs" }],
+    ...(["deep", "shallow"] as const).flatMap((layering) =>
+      (
+        [
+          [
+            "the rename's target first",
+            [{ name: "a", color: "111111" }, { name: "docs" }, { name: "b", description: "lower" }],
+          ],
+          [
+            "the rename's name first",
+            [{ name: "b", description: "lower" }, { name: "docs" }, { name: "a", color: "111111" }],
+          ],
+        ] as const
+      ).map(([order, lower]) => ({
+        name: `one higher rename claims two lower labels: both superseded at the first slot, no lower field rides along (${layering}, ${order})`,
+        layering,
+        layers: stack({ labels: [...lower] }, { labels: [{ name: "B", new_name: "A" }] }),
+        expected: {
+          merged: {
+            labels: {
+              [UNDECLARED_KEY]: "delete",
+              entries: [{ name: "B", new_name: "A" }, { name: "docs" }],
+            },
           },
+          notices: [],
         },
-        notices: [],
-      },
-    },
+      })),
+    ),
     {
       name: "two higher labels claiming one lower rename between them both take its slot, in their order",
       layering: "deep",
@@ -1490,7 +1538,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
     },
     {
-      name: "rulesets union by name merge key by key under deep, their rules pairing by type and merging field by field",
+      name: "rulesets union by name merge key by key under deep, their rules pairing by type and merging field by field, parameters included",
       layering: "deep",
       layers: stack(
         {
@@ -1499,7 +1547,10 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
               name: "main",
               target: "branch",
               enforcement: "active",
-              rules: [{ type: "deletion" }, { type: "non_fast_forward", parameters: { a: 1 } }],
+              rules: [
+                { type: "deletion" },
+                { type: "non_fast_forward", parameters: { a: 1, b: 1 } },
+              ],
             },
           ],
         },
@@ -1508,7 +1559,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
             {
               name: "main",
               enforcement: null,
-              rules: [{ type: "non_fast_forward" }, { type: "x" }],
+              rules: [{ type: "non_fast_forward", parameters: { b: 2 } }, { type: "x" }],
             },
             { name: "tags", target: "tag" },
           ],
@@ -1525,7 +1576,7 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
                 enforcement: null,
                 rules: [
                   { type: "deletion" },
-                  { type: "non_fast_forward", parameters: { a: 1 } },
+                  { type: "non_fast_forward", parameters: { a: 1, b: 2 } },
                   { type: "x" },
                 ],
               },
@@ -1656,6 +1707,194 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
         notices: [],
       },
     },
+    {
+      name: "under shallow the same-name ruleset is swapped whole: the lower conditions, rules, and same-type rule parameters are gone with it",
+      layering: "shallow",
+      layers: stack(
+        {
+          rulesets: [
+            {
+              name: "main",
+              target: "branch",
+              enforcement: "active",
+              conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+              rules: [
+                { type: "deletion" },
+                {
+                  type: "pull_request",
+                  parameters: {
+                    required_approving_review_count: 1,
+                    dismiss_stale_reviews_on_push: true,
+                    require_code_owner_review: false,
+                    require_last_push_approval: false,
+                    required_review_thread_resolution: false,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          rulesets: [
+            {
+              name: "main",
+              rules: [{ type: "pull_request", parameters: { required_approving_review_count: 2 } }],
+            },
+          ],
+        },
+      ),
+      expected: {
+        merged: {
+          rulesets: {
+            [UNDECLARED_KEY]: "keep",
+            entries: [
+              {
+                name: "main",
+                rules: [
+                  { type: "pull_request", parameters: { required_approving_review_count: 2 } },
+                ],
+              },
+            ],
+          },
+        },
+        notices: [],
+      },
+    },
+    {
+      name: "under deep an environment's nested lists union by their own keys in either form, lower policy inherited, the rest at their defaults",
+      layering: "deep",
+      layers: stack(
+        { environments: [PROD] },
+        {
+          environments: [
+            {
+              name: "Prod",
+              variables: [
+                { name: "region", value: "us" },
+                { name: "TIMEOUT", value: "30" },
+              ],
+              secrets: [{ name: "token", value: "$B" }],
+              deployment_branch_policies: [
+                { name: "release/*", type: "tag" },
+                { name: "hotfix/*" },
+              ],
+              deployment_protection_rules: { entries: [{ app: "gate" }, { app: "scan" }] },
+              reviewers: [
+                { type: "Team", id: 1 },
+                { type: "User", id: 2 },
+              ],
+            },
+          ],
+        },
+      ),
+      expected: {
+        merged: {
+          environments: [
+            {
+              name: "Prod",
+              wait_timer: 5,
+              variables: {
+                [UNDECLARED_KEY]: "delete",
+                entries: [
+                  { name: "region", value: "us" },
+                  { name: "LOG_LEVEL", value: "info" },
+                  { name: "TIMEOUT", value: "30" },
+                ],
+              },
+              secrets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "token", value: "$B" }] },
+              deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+              deployment_branch_policies: {
+                [UNDECLARED_KEY]: "delete",
+                entries: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
+              },
+              deployment_protection_rules: {
+                [UNDECLARED_KEY]: "keep",
+                entries: [{ app: "gate" }, { app: "scan" }],
+              },
+              reviewers: [
+                { type: "User", id: 1 },
+                { type: "Team", id: 1 },
+                { type: "User", id: 2 },
+              ],
+            },
+          ],
+        },
+        notices: [],
+      },
+    },
+    {
+      name: "under shallow the same-name environment is swapped whole, its nested lists with it",
+      layering: "shallow",
+      layers: stack(
+        { environments: [PROD] },
+        { environments: [{ name: "prod", variables: [{ name: "TIMEOUT", value: "30" }] }] },
+      ),
+      expected: {
+        merged: {
+          environments: [
+            {
+              name: "prod",
+              variables: {
+                [UNDECLARED_KEY]: "delete",
+                entries: [{ name: "TIMEOUT", value: "30" }],
+              },
+            },
+          ],
+        },
+        notices: [],
+      },
+    },
+    {
+      name: "a null inside a plain-list entry is the field's value under deep, at a nullable path or not",
+      layering: "deep",
+      layers: stack(
+        {
+          branches: [
+            {
+              name: "main",
+              protection: {
+                enforce_admins: true,
+                required_deployments: { environments: ["prod"] },
+              },
+            },
+            { name: "release/*", protection: { required_signatures: true } },
+          ],
+          environments: [PROD],
+        },
+        {
+          branches: [
+            { name: "main", protection: { required_deployments: null } },
+            { name: "release/*", protection: null },
+          ],
+          environments: [{ name: "prod", deployment_branch_policy: null, wait_timer: null }],
+        },
+      ),
+      expected: {
+        merged: {
+          branches: [
+            { name: "main", protection: { enforce_admins: true, required_deployments: null } },
+            { name: "release/*", protection: null },
+          ],
+          environments: [
+            {
+              ...PROD,
+              variables: { [UNDECLARED_KEY]: "delete", entries: PROD.variables },
+              deployment_branch_policies: {
+                [UNDECLARED_KEY]: "delete",
+                entries: PROD.deployment_branch_policies,
+              },
+              deployment_protection_rules: {
+                [UNDECLARED_KEY]: "keep",
+                entries: PROD.deployment_protection_rules,
+              },
+              deployment_branch_policy: null,
+              wait_timer: null,
+            },
+          ],
+        },
+        notices: [],
+      },
+    },
     ...(["shallow", "deep"] as const).map((layering) => ({
       name: `a removal under ${layering} drops a held label through its case fold or its rename target, and the next layer may declare the key anew`,
       layering,
@@ -1700,20 +1939,26 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
       },
     })),
     {
-      name: "an omitted policy inherits the lower one, an explicit one wins, and the default resolves after the fold",
+      name: "an omitted policy inherits the lower one, an explicit one wins over either lower form, and the default resolves after the fold",
       layering: "deep",
       layers: stack(
         {
           labels: { [UNDECLARED_KEY]: "keep", entries: [{ name: "a" }] },
           rulesets: { [UNDECLARED_KEY]: "delete", entries: [{ name: "r" }] },
+          milestones: [{ title: "v1" }],
           autolinks: [{ key_prefix: "J-", url_template: "https://j/<num>" }],
         },
-        { labels: [{ name: "b" }], rulesets: { [UNDECLARED_KEY]: "keep", entries: [] } },
+        {
+          labels: [{ name: "b" }],
+          rulesets: { [UNDECLARED_KEY]: "keep", entries: [] },
+          milestones: { [UNDECLARED_KEY]: "delete", entries: [{ title: "v2" }] },
+        },
       ),
       expected: {
         merged: {
           labels: { [UNDECLARED_KEY]: "keep", entries: [{ name: "a" }, { name: "b" }] },
           rulesets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "r" }] },
+          milestones: { [UNDECLARED_KEY]: "delete", entries: [{ title: "v1" }, { title: "v2" }] },
           autolinks: {
             [UNDECLARED_KEY]: "delete",
             entries: [{ key_prefix: "J-", url_template: "https://j/<num>" }],
@@ -1762,6 +2007,42 @@ describe("foldMergeLayers (the oracle's own dialect)", () => {
           labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "b" }] },
           rulesets: { [UNDECLARED_KEY]: "keep", entries: [{ name: "r", target: "branch" }] },
         },
+        notices: [],
+      },
+    },
+    ...(
+      [
+        ["deep", "replace", [{ name: "b" }], [{ name: "r", target: "branch" }, { name: "s" }]],
+        ["replace", "deep", [{ name: "a" }, { name: "b" }], [{ name: "s" }]],
+        ["replace", "shallow", [{ name: "a" }, { name: "b" }], [{ name: "s" }]],
+      ] as const
+    ).map(([layering, directive, labels, rulesets]) => ({
+      name: `under a ${layering} run, a wrapper's _layering: ${directive} overrides the run for its section alone`,
+      layering,
+      layers: stack(DIRECTIVE_LOW, {
+        labels: { [LAYERING_KEY]: directive, entries: [{ name: "b" }] },
+        rulesets: [{ name: "s" }],
+      }),
+      expected: {
+        merged: {
+          labels: { [UNDECLARED_KEY]: "delete", entries: [...labels] },
+          rulesets: { [UNDECLARED_KEY]: "keep", entries: [...rulesets] },
+        },
+        notices: [],
+      },
+    })),
+    {
+      name: "a lower layer's directive governs only its own step",
+      layering: "deep",
+      layers: stack(
+        {
+          [LAYERING_KEY]: "replace",
+          labels: { [LAYERING_KEY]: "replace", entries: [{ name: "a" }] },
+        },
+        { labels: [{ name: "b" }] },
+      ),
+      expected: {
+        merged: { labels: { [UNDECLARED_KEY]: "delete", entries: [{ name: "a" }, { name: "b" }] } },
         notices: [],
       },
     },

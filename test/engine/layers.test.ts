@@ -8,7 +8,8 @@ import { MockApi } from "../mock-api.js";
 import { REPO, unwrap } from "../sections/section-run.js";
 import { validatedInput } from "../sections/validated-input.js";
 
-/** Frozen to the leaves: a fold step that touched an input would throw, so every test also pins that inputs are never mutated. */
+/** Frozen to the leaves: a fold step that touched an input would throw, so every test also pins that inputs are never mutated.
+ * Its own copy, not the module's: the isFrozen guard ends the walk on the cyclic documents below. */
 function deepFreeze<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
     Object.freeze(value);
@@ -54,43 +55,6 @@ describe("mergeLayers: the mapping dialect", () => {
   test("a single layer passes through", () => {
     const doc = { repository: { has_wiki: false }, pages: { build_type: "workflow" } };
     expect(merge([layer("fleet", doc)])).toEqual({ settings: doc, notices: [] });
-  });
-
-  test("mappings merge key by key with the higher layer winning; higher-only sections ride along", () => {
-    const result = merge([
-      layer("fleet", { repository: { has_wiki: false, description: "fleet", topics: "a" } }),
-      layer("repo", {
-        repository: { description: "mine", has_issues: true },
-        pages: { build_type: "workflow" },
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        repository: { has_wiki: false, description: "mine", topics: "a", has_issues: true },
-        pages: { build_type: "workflow" },
-      },
-      notices: [],
-    });
-  });
-
-  test("a higher null wins at the top level and nested, written as the value with no notice: the fold reads no marker", () => {
-    // Whether `actions: null` or `description: null` is legal is the validator's question, asked of the layer and of the fold.
-    const result = merge([
-      layer("fleet", {
-        repository: { has_wiki: false, description: "fleet" },
-        pages: { build_type: "workflow" },
-        actions: { enabled: true },
-      }),
-      layer("repo", { actions: null, repository: { description: null } }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        repository: { has_wiki: false, description: null },
-        pages: { build_type: "workflow" },
-        actions: null,
-      },
-      notices: [],
-    });
   });
 
   test("the top layer beats everything, re-declaring a key a middle layer nulled", () => {
@@ -222,31 +186,6 @@ describe("mergeLayers: the mapping dialect", () => {
       notices: [],
     });
   });
-
-  test("keys named after Object.prototype members are ordinary document keys", () => {
-    const proto = "__proto__";
-    const below = { custom_properties: [{ property_name: "a" }], repository: {}, actions: {} };
-    const above = JSON.parse(
-      '{"repository": {"constructor": {"x": 1}, "__proto__": {"y": 2}}, "actions": {"constructor": null}}',
-    );
-    const result = merge([layer("fleet", below), layer("repo", above)]);
-    expect(result).toEqual({
-      settings: {
-        custom_properties: { _undeclared: "keep", entries: [{ property_name: "a" }] },
-        repository: { constructor: { x: 1 }, [proto]: { y: 2 } },
-        actions: { constructor: null },
-      },
-      notices: [],
-    });
-    if ("error" in result) {
-      throw new Error(result.error);
-    }
-    const repository = (result.settings as { repository: object }).repository;
-    expect([Object.hasOwn(repository, proto), Object.getPrototypeOf(repository)]).toEqual([
-      true,
-      Object.prototype,
-    ]);
-  });
 });
 
 describe("mergeLayers: keyed sections", () => {
@@ -328,6 +267,15 @@ describe("mergeLayers: keyed sections", () => {
       [{ name: "bug", new_name: "defect" }],
     ],
     [
+      "the rename above the plain label, swapped, created under the target's own spelling",
+      "shallow",
+      {
+        lower: [{ name: "defect", color: "ffffff" }],
+        higher: [{ name: "Bug", new_name: "Defect" }],
+      },
+      [{ name: "Bug", new_name: "Defect" }],
+    ],
+    [
       "the plain label above the rename, merged: the lower rename target rides along as a self-rename",
       "deep",
       {
@@ -356,33 +304,12 @@ describe("mergeLayers: keyed sections", () => {
         settings: { labels: { _undeclared: "delete", entries } },
         notices: [],
       });
-      expect(await planLabels(entries)).toEqual(['creating label "defect"']);
+      const [entry] = entries;
+      expect(await planLabels(entries)).toEqual([
+        `creating label "${entry?.new_name ?? entry?.name}"`,
+      ]);
     },
   );
-
-  test("a higher entry claiming two lower labels supersedes both as written, under deep too: neither lower field rides along, whichever came first", async () => {
-    const entries = [{ name: "Bug", new_name: "Defect" }];
-    for (const lower of [
-      [
-        { name: "defect", color: "111111" },
-        { name: "bug", description: "lower" },
-      ],
-      [
-        { name: "bug", description: "lower" },
-        { name: "defect", color: "111111" },
-      ],
-    ]) {
-      for (const layering of ["deep", "shallow"] as const) {
-        expect(
-          merge([layer("fleet", { labels: lower }), layer("repo", { labels: entries })], layering),
-        ).toEqual({
-          settings: { labels: { _undeclared: "delete", entries } },
-          notices: [],
-        });
-      }
-    }
-    expect(await planLabels(entries)).toEqual(['creating label "Defect"']);
-  });
 
   test.each([
     ["rename first", [{ name: "bug", new_name: "defect" }, { name: "docs" }]],
@@ -435,65 +362,6 @@ describe("mergeLayers: keyed sections", () => {
     });
   });
 
-  test("under deep a higher layer adds a rule type and merges a same-type rule field by field, its parameters included", () => {
-    const result = merge([
-      layer("fleet", { rulesets: [MAIN_RULESET] }),
-      layer("repo", {
-        rulesets: [
-          {
-            name: "main",
-            rules: [
-              { type: "pull_request", parameters: { required_approving_review_count: 2 } },
-              { type: "non_fast_forward" },
-            ],
-          },
-        ],
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: {
-          _undeclared: "keep",
-          entries: [
-            {
-              ...MAIN_RULESET,
-              rules: [
-                { type: "deletion" },
-                {
-                  type: "pull_request",
-                  parameters: {
-                    required_approving_review_count: 2,
-                    dismiss_stale_reviews_on_push: true,
-                    require_code_owner_review: false,
-                    require_last_push_approval: false,
-                    required_review_thread_resolution: false,
-                  },
-                },
-                { type: "non_fast_forward" },
-              ],
-            },
-          ],
-        },
-      },
-      notices: [],
-    });
-  });
-
-  test("under shallow the same-name ruleset is swapped whole: the lower conditions and rules are gone with it", () => {
-    const higher = {
-      name: "main",
-      rules: [{ type: "pull_request", parameters: { required_approving_review_count: 2 } }],
-    };
-    const result = merge(
-      [layer("fleet", { rulesets: [MAIN_RULESET] }), layer("repo", { rulesets: [higher] })],
-      "shallow",
-    );
-    expect(result).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [higher] } },
-      notices: [],
-    });
-  });
-
   test("bypass_actors: null on a higher ruleset is the field's value in the merged entry, for the validator to judge", () => {
     const bypass = [{ actor_id: 1, actor_type: "Team", bypass_mode: "always" }];
     const result = merge([
@@ -505,18 +373,6 @@ describe("mergeLayers: keyed sections", () => {
         rulesets: { _undeclared: "keep", entries: [{ ...MAIN_RULESET, bypass_actors: null }] },
       },
       notices: [],
-    });
-  });
-
-  test("a removal notice names the entry by its index in the layer it names, not by its name or its lower slot", () => {
-    const tags = { name: "tags", target: "tag" };
-    const result = merge([
-      layer("fleet", { rulesets: [tags, MAIN_RULESET] }),
-      layer("repo", { rulesets: [{ name: "main", _remove: true }] }),
-    ]);
-    expect(result).toEqual({
-      settings: { rulesets: { _undeclared: "keep", entries: [tags] } },
-      notices: [{ layer: "repo", path: "rulesets[0]" }],
     });
   });
 });
@@ -562,19 +418,6 @@ describe("mergeLayers: the undeclared knob across layers", () => {
       expect(merge(layers, layering)).toEqual({ settings, notices: [] });
     },
   );
-
-  test("an explicit higher policy wins", () => {
-    const result = merge([
-      layer("fleet", { rulesets: [{ name: "fleet" }] }),
-      layer("repo", { rulesets: { _undeclared: "delete", entries: [{ name: "mine" }] } }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        rulesets: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
-      },
-      notices: [],
-    });
-  });
 
   test("two plain arrays resolve to the section default, not each other's", () => {
     const result = merge([
@@ -635,62 +478,6 @@ describe("mergeLayers: the undeclared knob across layers", () => {
   ])("a higher _undeclared: null over %s stays as written", (_lower, fleet, settings) => {
     expect(merge([fleet, layer("repo", { labels: { _undeclared: null, entries: [] } })])).toEqual({
       settings,
-      notices: [],
-    });
-  });
-});
-
-describe("mergeLayers: the _layering directive", () => {
-  const fleet = layer("fleet", { labels: [{ name: "fleet" }], rulesets: [{ name: "fleet" }] });
-
-  test.each([
-    ["deep", "replace", [{ name: "mine" }]],
-    ["replace", "deep", [{ name: "fleet" }, { name: "mine" }]],
-    ["replace", "shallow", [{ name: "fleet" }, { name: "mine" }]],
-  ] as const)(
-    "under a %s run, a wrapper's _layering: %s overrides the run for its section alone",
-    (run, directive, entries) => {
-      const repo = layer("repo", { labels: { _layering: directive, entries: [{ name: "mine" }] } });
-      expect(merge([fleet, repo], run)).toEqual({
-        settings: {
-          labels: { _undeclared: "delete", entries },
-          rulesets: { _undeclared: "keep", entries: [{ name: "fleet" }] },
-        },
-        notices: [],
-      });
-    },
-  );
-
-  test("a lower layer's directive governs only its own step", () => {
-    const result = merge([
-      layer("fleet", {
-        _layering: "replace",
-        labels: { _layering: "replace", entries: [{ name: "fleet" }] },
-      }),
-      layer("repo", { labels: [{ name: "mine" }] }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        labels: { _undeclared: "delete", entries: [{ name: "fleet" }, { name: "mine" }] },
-      },
-      notices: [],
-    });
-  });
-
-  test("a file-level _layering: replace, with one section's wrapper back to deep; the result carries no directive", () => {
-    const result = merge([
-      fleet,
-      layer("repo", {
-        _layering: "replace",
-        labels: [{ name: "mine" }],
-        rulesets: { _layering: "deep", entries: [{ name: "mine" }] },
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        labels: { _undeclared: "delete", entries: [{ name: "mine" }] },
-        rulesets: { _undeclared: "keep", entries: [{ name: "fleet" }, { name: "mine" }] },
-      },
       notices: [],
     });
   });
@@ -863,23 +650,6 @@ describe("mergeLayers: every list section layers by the key its planner folds", 
 });
 
 describe("mergeLayers: the plain-list sections", () => {
-  const PROD = {
-    name: "prod",
-    wait_timer: 5,
-    variables: [
-      { name: "REGION", value: "eu" },
-      { name: "LOG_LEVEL", value: "info" },
-    ],
-    secrets: { _undeclared: "keep", entries: [{ name: "TOKEN", value: "$A" }] },
-    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-    deployment_branch_policies: [{ name: "release/*" }],
-    deployment_protection_rules: [{ app: "gate" }],
-    reviewers: [
-      { type: "User", id: 1 },
-      { type: "Team", id: 1 },
-    ],
-  };
-
   test.each<[Layering, unknown]>([
     ["replace", [{ name: "qa" }]],
     ["shallow", [{ name: "prod", wait_timer: 5 }, { name: "qa" }]],
@@ -909,64 +679,6 @@ describe("mergeLayers: the plain-list sections", () => {
     });
   });
 
-  test("under deep an environment's nested lists union by their own keys, in either form, with the lower wrapper's policy inherited and the rest resolved to their own defaults", () => {
-    const result = merge([
-      layer("fleet", { environments: [PROD] }),
-      layer("repo", {
-        environments: [
-          {
-            name: "Prod",
-            variables: [
-              { name: "region", value: "us" },
-              { name: "TIMEOUT", value: "30" },
-            ],
-            secrets: [{ name: "token", value: "$B" }],
-            deployment_branch_policies: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
-            deployment_protection_rules: { entries: [{ app: "gate" }, { app: "scan" }] },
-            reviewers: [
-              { type: "Team", id: 1 },
-              { type: "User", id: 2 },
-            ],
-          },
-        ],
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        environments: [
-          {
-            name: "Prod",
-            wait_timer: 5,
-            variables: {
-              _undeclared: "delete",
-              entries: [
-                { name: "region", value: "us" },
-                { name: "LOG_LEVEL", value: "info" },
-                { name: "TIMEOUT", value: "30" },
-              ],
-            },
-            secrets: { _undeclared: "keep", entries: [{ name: "token", value: "$B" }] },
-            deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-            deployment_branch_policies: {
-              _undeclared: "delete",
-              entries: [{ name: "release/*", type: "tag" }, { name: "hotfix/*" }],
-            },
-            deployment_protection_rules: {
-              _undeclared: "keep",
-              entries: [{ app: "gate" }, { app: "scan" }],
-            },
-            reviewers: [
-              { type: "User", id: 1 },
-              { type: "Team", id: 1 },
-              { type: "User", id: 2 },
-            ],
-          },
-        ],
-      },
-      notices: [],
-    });
-  });
-
   test("a higher nested wrapper's explicit _undeclared wins over a lower bare list, and the wrapper form is kept", () => {
     const result = merge([
       layer("fleet", { environments: [{ name: "prod", variables: [{ name: "A", value: "1" }] }] }),
@@ -991,69 +703,6 @@ describe("mergeLayers: the plain-list sections", () => {
                 { name: "B", value: "2" },
               ],
             },
-          },
-        ],
-      },
-      notices: [],
-    });
-  });
-
-  test("under shallow the same-name environment is swapped whole, its nested lists with it", () => {
-    const higher = { name: "prod", variables: [{ name: "TIMEOUT", value: "30" }] };
-    const result = merge(
-      [layer("fleet", { environments: [PROD] }), layer("repo", { environments: [higher] })],
-      "shallow",
-    );
-    expect(result).toEqual({
-      settings: {
-        environments: [
-          { name: "prod", variables: { _undeclared: "delete", entries: higher.variables } },
-        ],
-      },
-      notices: [],
-    });
-  });
-
-  test("a null inside a plain-list entry is the field's value under deep, at a nullable path or not", () => {
-    const result = merge([
-      layer("fleet", {
-        branches: [
-          {
-            name: "main",
-            protection: { enforce_admins: true, required_deployments: { environments: ["prod"] } },
-          },
-          { name: "release/*", protection: { required_signatures: true } },
-        ],
-        environments: [PROD],
-      }),
-      layer("repo", {
-        branches: [
-          { name: "main", protection: { required_deployments: null } },
-          { name: "release/*", protection: null },
-        ],
-        environments: [{ name: "prod", deployment_branch_policy: null, wait_timer: null }],
-      }),
-    ]);
-    expect(result).toEqual({
-      settings: {
-        branches: [
-          { name: "main", protection: { enforce_admins: true, required_deployments: null } },
-          { name: "release/*", protection: null },
-        ],
-        environments: [
-          {
-            ...PROD,
-            variables: { _undeclared: "delete", entries: PROD.variables },
-            deployment_branch_policies: {
-              _undeclared: "delete",
-              entries: PROD.deployment_branch_policies,
-            },
-            deployment_protection_rules: {
-              _undeclared: "keep",
-              entries: PROD.deployment_protection_rules,
-            },
-            deployment_branch_policy: null,
-            wait_timer: null,
           },
         ],
       },
