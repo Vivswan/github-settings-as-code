@@ -118,7 +118,9 @@ describe("snapshot under a token without grants", () => {
           : fake.tryRequest(method, path, payload, options),
       tryList: () => Promise.resolve(outage),
     };
-    await expect(proveClassified(section, DENIED_403, erroring)).rejects.toThrow();
+    await expect(proveClassified(section, DENIED_403, erroring)).rejects.toThrow(
+      new RegExp(`${section.key} under warn[\\s\\S]*not "failed"`),
+    );
   });
 
   test("the negative control: a denied-posture section reading a fine-grained 404 as an empty list fails the proof", async () => {
@@ -138,6 +140,8 @@ describe("snapshot under a token without grants", () => {
           : answer;
       },
     };
-    await expect(proveClassified(workflows, DENIED_404, swallowing)).rejects.toThrow();
+    await expect(proveClassified(workflows, DENIED_404, swallowing)).rejects.toThrow(
+      /workflows under warn[\s\S]*"skipped"/,
+    );
   });
 });

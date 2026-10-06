@@ -6,9 +6,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { ok } from "neverthrow";
+import { err, ok } from "neverthrow";
 import type { GitHubClient } from "../../src/github/api.js";
 import type { ListSection, SectionKey } from "../../src/schema.js";
+import { sectionFailure } from "../../src/sections/contract/errors.js";
 import type { SectionModule } from "../../src/sections/contract/module.js";
 import { planContext, snapshotContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
@@ -581,19 +582,19 @@ describe("duplicate live identities", () => {
   );
 
   test("the negative control: a snapshot that skips the guard fails the proof, and so does a refusal with extra text", async () => {
-    const [seed] = SEEDS.labels;
+    // The snapshot path alone: with plan() out of the proof, no plan-side failure can satisfy either anchor.
+    const seed: Seed = { ...SEEDS.labels[0], declared: undefined };
     const unguarded = {
       ...labelsSection,
       snapshot: async () => ok({ value: undefined, notes: [] }),
     } as SectionModule;
-    await expect(proveRefused(unguarded, seed)).rejects.toThrow();
+    await expect(proveRefused(unguarded, seed)).rejects.toThrow(/expected a failure, got a value/);
+    // The refusal arrives as a value, so only the message comparison can fail the proof.
     const padded = {
       ...labelsSection,
-      snapshot: async () => {
-        throw new Error(`${seed.refusal} (and more)`);
-      },
+      snapshot: async () => err(sectionFailure("live-duplicate", `${seed.refusal} (and more)`)),
     } as SectionModule;
-    await expect(proveRefused(padded, seed)).rejects.toThrow();
+    await expect(proveRefused(padded, seed)).rejects.toThrow(/toEqual[\s\S]*\(and more\)/);
   });
 });
 
