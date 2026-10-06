@@ -152,29 +152,13 @@ jobs:
       # The tarball's files list names the schema beside lib/pkg/.
       - name: Build the library
         run: bun run build:schema && bun run build:lib
-      # scripts.prepare is dropped from the published manifest, as in
-      # update-release-pr.yml's publish-next.
-      # The verdict holds the built package.json to the tag and reads the
-      # registry: a version already there (a rerun) or a latest that is a
-      # newer release (an older release's job rerun after a newer release)
-      # publishes nothing, so no release ever displaces a newer one from
-      # latest (the first publish's placeholder or pre-release there is taken over). GITHUB_SHA on the
-      # publish line sets only the SLSA predicate's source digest; the
-      # sigstore certificate still carries this run's own head, so a release
+      # The verdict holds the built package.json to the tag and reads the registry: a version already there (a rerun) or
+      # a latest that is a newer release (an older release's job rerun after it) publishes nothing, so no release displaces
+      # a newer one from latest (the first publish's placeholder or pre-release there is taken over). GITHUB_SHA sets only
+      # the SLSA predicate's source digest; the sigstore certificate still carries this run's own head, so a release
       # recovered by a newer push's run has provenance naming two commits.
       - name: Publish the release to npm
         env:
           TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ needs.package-release.outputs.source-sha }}
-        run: |
-          verdict="$(GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-verdict stable)"
-          case "$verdict" in
-            publish\ *)
-              npm pkg delete scripts.prepare
-              GITHUB_SHA="$SOURCE_SHA" npm publish ;;
-            skip\ *) echo "::warning::${verdict#skip }" ;;
-            *)
-              echo "unexpected npm-verdict output: $verdict"
-              echo "::error::npm-verdict printed neither publish nor skip; see the line above."
-              exit 1 ;;
-          esac
+        run: GITHUB_SHA="$SOURCE_SHA" bun .github/scripts/release-pipeline.ts npm-publish stable

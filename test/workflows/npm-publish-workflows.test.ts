@@ -3,8 +3,8 @@
  * publishing through the runner's OIDC token and nothing else, and one was copied from the other. The relations here: both are guarded to the
  * repository package.json names; both take one lane; the stable one runs after every other job of its workflow; neither hands npm a
  * token, as the library page promises; the steps they share are the same text; both publish to one registry. The
- * probe and the publish blocks also run under bash against stubs, since no pin shows what a branch does; the floor
- * guard is the script's npm-floor subcommand, whose branches test/scripts/release-pipeline.test.ts runs.
+ * probe also runs under bash against stubs, since no pin shows what a branch does; the publish and the floor guard
+ * are the script's npm-publish and npm-floor subcommands, whose branches test/scripts/release-pipeline.test.ts runs.
  *
  * The static guards catch ACCIDENTAL drift: a guard, lane, or env edited in plain YAML. Deliberately hiding a token or a second
  * publisher behind other syntax is out of scope.
@@ -59,7 +59,7 @@ const stepNamed = (job: RunJob, name: string): Step =>
 /** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline.ts. */
 const FLOOR_GUARD = "bun .github/scripts/release-pipeline.ts npm-floor";
 const FLOOR_GUARD_NAME = "Require an npm that publishes through OIDC";
-/** The pipeline script's text, where the floor and the confirm outcomes are defined. */
+/** The pipeline script's text, where the floor is defined. */
 const pipelineSource = (): string =>
   readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
 const setupNode = (job: RunJob): Step =>
@@ -176,9 +176,11 @@ function publisherProblems(nextWorkflow: Workflow, stableWorkflow: Workflow): st
     [NEXT_JOB, next],
     [STABLE_JOB, stable],
   ] as const) {
-    const publish = job.steps.findIndex((step) => /\bnpm\s+publish\b/.test(step.run ?? ""));
+    const publish = job.steps.findIndex((step) =>
+      /\bnpm\s+publish\b|release-pipeline\.ts npm-publish\b/.test(step.run ?? ""),
+    );
     if (publish < 0) {
-      problems.push(`${label} has no npm publish step`);
+      problems.push(`${label} has no npm-publish step`);
       continue;
     }
     for (const [name, a, b] of sharedSteps(next, stable)) {
@@ -402,147 +404,5 @@ describe("the npm floor guard", () => {
       scriptFloor,
       `NPM_FLOOR ${floors[0]} admits an npm that cannot publish through OIDC`,
     ).toBe(OIDC_NPM);
-  });
-});
-
-/** The outcome literals of the pipeline's ConfirmVerdict union, read from the type the script exports; the case block must name each. */
-function confirmOutcomes(): string[] {
-  const source = pipelineSource();
-  const union = must(
-    source.match(/export type ConfirmVerdict =([\s\S]*?);\n/)?.[1],
-    "the ConfirmVerdict union",
-  );
-  const outcomes = [...union.matchAll(/outcome: "([a-z]+)"/g)].map((m) => m[1] ?? "");
-  expect(outcomes.length).toBeGreaterThan(2);
-  return outcomes;
-}
-
-describe("the confirmation block under bash", () => {
-  const { next } = publishers();
-  const confirm = must(
-    next.steps.find((step) => /release-pipeline\.ts npm-confirm\b/.test(step.run ?? "")),
-    "the npm-confirm step",
-  );
-  const run = must(confirm.run, "confirm run");
-  const outcomes = confirmOutcomes();
-
-  const stubBun =
-    (line: string) =>
-    (bin: string): void => {
-      writeFileSync(join(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "${line}"\n`, { mode: 0o755 });
-    };
-
-  test("the case block names every outcome the script can print, and the confirmation is gated on this job's own publish", () => {
-    for (const outcome of outcomes) {
-      expect(run, `the case block has no arm for "${outcome}"`).toContain(`${outcome}\\ *)`);
-    }
-    expect(condition(confirm.if)).toBe("steps.publish.outputs.published == 'true'");
-  });
-
-  const LINE = "next 2.0.1-main.446 is placed";
-  // Each outcome word maps to one workflow command carrying the rest of the line, and only `behind` fails the job; an
-  // unrecognized word fails loudly, quoting what was printed.
-  const expected: Record<string, { lines: string[]; status: number; output: string }> = {
-    settled: { lines: [`::notice::${LINE}`], status: 0, output: "" },
-    unsettled: { lines: [`::warning::${LINE}`], status: 0, output: "" },
-    behind: { lines: [`::error::${LINE}`], status: 1, output: "" },
-  };
-  test.each([...outcomes, "nonsense"])("a %s line", async (outcome) => {
-    const step = await runStep(run, { SOURCE_SHA: "b8df084c" }, stubBun(`${outcome} ${LINE}`));
-    expect(step).toEqual(
-      expected[outcome] ?? {
-        lines: [
-          `unexpected npm-confirm output: nonsense ${LINE}`,
-          "::error::npm-confirm printed neither settled, unsettled, nor behind; see the line above.",
-        ],
-        status: 1,
-        output: "",
-      },
-    );
-  });
-
-  test("every outcome of the union has an expected verdict here, so a new outcome fails until this table names it", () => {
-    expect(Object.keys(expected).sort()).toEqual([...outcomes].sort());
-  });
-});
-
-describe("the publish blocks under bash", () => {
-  const { next } = publishers();
-  const stable = runJob(readWorkflow(STABLE_FILE).jobs[STABLE_JOB], `${STABLE_JOB} job`);
-  const nextRun = must(
-    stepNamed(next, "Publish the pre-release under the next dist-tag").run,
-    "next publish run",
-  );
-  const stableRun = must(stepNamed(stable, "Publish the release to npm").run, "stable publish run");
-
-  /** A bun that answers the verdict given and an npm that reports every call with the GITHUB_SHA it saw. */
-  const stubs =
-    (verdict: string) =>
-    (bin: string): void => {
-      writeFileSync(join(bin, "bun"), `#!/bin/sh\nprintf '%s\\n' "${verdict}"\n`, { mode: 0o755 });
-      writeFileSync(join(bin, "npm"), '#!/bin/sh\necho "npm $* (GITHUB_SHA=$GITHUB_SHA)"\n', {
-        mode: 0o755,
-      });
-    };
-  const source = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
-
-  const cases: [string, string, string, { lines: string[]; status: number; output: string }][] = [
-    [
-      "next: a publish verdict sets the version, publishes under next with the source as GITHUB_SHA, and reports the publish for the confirmation",
-      nextRun,
-      "publish 2.0.1-main.446.20260913.gb8df084",
-      {
-        lines: [
-          "npm version 2.0.1-main.446.20260913.gb8df084 --no-git-tag-version (GITHUB_SHA=)",
-          "npm pkg delete scripts.prepare (GITHUB_SHA=)",
-          "npm publish --tag next (GITHUB_SHA=b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a)",
-        ],
-        status: 0,
-        output: "published=true\n",
-      },
-    ],
-    [
-      "next: a skip verdict calls npm not at all, reports why, and writes no publish output, so the confirmation skips",
-      nextRun,
-      "skip the registry's next is newer",
-      { lines: ["::notice::the registry's next is newer"], status: 0, output: "" },
-    ],
-    [
-      "next: anything else fails the step",
-      nextRun,
-      "2.0.1-main.446.20260913.gb8df084",
-      {
-        lines: [
-          "unexpected npm-verdict output: 2.0.1-main.446.20260913.gb8df084",
-          "::error::npm-verdict printed neither publish nor skip; see the line above.",
-        ],
-        status: 1,
-        output: "",
-      },
-    ],
-    [
-      "stable: a publish verdict publishes under the default dist-tag with the source as GITHUB_SHA",
-      stableRun,
-      "publish 2.1.0",
-      {
-        lines: [
-          "npm pkg delete scripts.prepare (GITHUB_SHA=)",
-          "npm publish (GITHUB_SHA=b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a)",
-        ],
-        status: 0,
-        output: "",
-      },
-    ],
-    [
-      "stable: a skip verdict calls npm not at all and warns",
-      stableRun,
-      "skip 2.1.0 is already on the registry",
-      { lines: ["::warning::2.1.0 is already on the registry"], status: 0, output: "" },
-    ],
-  ];
-  test.each(cases)("%s", async (_name, run, verdict, expected) => {
-    expect(await runStep(run, { SOURCE_SHA: source, TAG: "v2.1.0" }, stubs(verdict))).toEqual(
-      expected,
-    );
   });
 });

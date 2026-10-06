@@ -11,7 +11,7 @@
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
- * Every subcommand but prerelease-version runs under a workflow step, bare or in the step's shell; no step runs two.
+ * Every subcommand but prerelease-version is the whole `run:` of one workflow step; no step runs two.
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off) and creates or
  * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
@@ -20,7 +20,7 @@
  * Node builtins only: bun runs this before `bun install`.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -1224,6 +1224,66 @@ export async function npmConfirm(options: NpmConfirmOptions): Promise<ConfirmVer
   }
 }
 
+function endedHow(result: SpawnSyncReturns<unknown>): string {
+  const how = result.status === null ? `died of ${result.signal}` : `exited ${result.status}`;
+  return result.error === undefined ? how : `${how} (${result.error.message})`;
+}
+
+function npm(cwd: string, env: Record<string, string>, ...args: string[]): void {
+  const result = spawnSync("npm", args, { cwd, env: { ...process.env, ...env }, stdio: "inherit" });
+  if (result.status !== 0) {
+    throw new Error(`npm ${args.join(" ")} ${endedHow(result)}; see npm's output above.`);
+  }
+}
+
+export type NpmPublishOptions = {
+  cwd: string;
+  /** The commit whose build is published; the checkout must be at it. */
+  sourceSha: string;
+  /** The registry's base URL, where the package's record is read. */
+  registry: string;
+} & (
+  | { channel: "next"; confirm: Pick<NpmConfirmOptions, "attempts" | "delayMs"> }
+  | { channel: "stable"; tag: string }
+);
+
+export type NpmPublishResult =
+  | { published: false; version: string; reason: string }
+  | { published: true; channel: "stable"; version: string }
+  | { published: true; channel: "next"; version: string; confirmed: ConfirmVerdict };
+
+/**
+ * The publish step as one call: the channel's verdict, the publish it allows, and for next the confirmation that
+ * holds the lane until the record shows the version. The verdict's notices reach `notice` before npm runs, so a
+ * publish that fails still leaves them on the log. scripts.prepare is dropped from the published manifest: it
+ * installs lefthook, a devDependency the tarball does not carry, and npm blocks install scripts from a
+ * provenance-attested package anyway. GITHUB_SHA on the publish is the commit npm's provenance names.
+ */
+export async function npmPublish(
+  options: NpmPublishOptions,
+  notice: (line: string) => void,
+): Promise<NpmPublishResult> {
+  const { cwd, sourceSha, registry } = options;
+  const verdict = await npmVerdict(options);
+  for (const line of "notices" in verdict ? verdict.notices : []) {
+    notice(line);
+  }
+  if (!verdict.publish) {
+    return { published: false, version: verdict.version, reason: verdict.reason };
+  }
+  const { version } = verdict;
+  if (options.channel === "stable") {
+    npm(cwd, {}, "pkg", "delete", "scripts.prepare");
+    npm(cwd, { GITHUB_SHA: sourceSha }, "publish");
+    return { published: true, channel: "stable", version };
+  }
+  npm(cwd, {}, "version", version, "--no-git-tag-version");
+  npm(cwd, {}, "pkg", "delete", "scripts.prepare");
+  npm(cwd, { GITHUB_SHA: sourceSha }, "publish", "--tag", "next");
+  const confirmed = await npmConfirm({ cwd, sourceSha, registry, ...options.confirm });
+  return { published: true, channel: "next", version, confirmed };
+}
+
 /** Trusted publishing (and its provenance) exists from npm 11.5.1 on. */
 export const NPM_FLOOR = "11.5.1";
 
@@ -1245,11 +1305,8 @@ export function npmFloor(floor = NPM_FLOOR): { version: string; atFloor: boolean
   if (belowFloor(version, floor)) {
     const install = spawnSync("npm", ["install", "-g", "npm@latest"], { stdio: "inherit" });
     if (install.status !== 0) {
-      const how =
-        install.status === null ? `died of ${install.signal}` : `exited ${install.status}`;
-      const detail = install.error === undefined ? "" : ` (${install.error.message})`;
       throw new Error(
-        `npm ${version} is below ${floor} and npm install -g npm@latest ${how}${detail}; the publish needs npm ${floor} or newer.`,
+        `npm ${version} is below ${floor} and npm install -g npm@latest ${endedHow(install)}; the publish needs npm ${floor} or newer.`,
       );
     }
     version = read();
@@ -1333,22 +1390,48 @@ async function main(): Promise<void> {
       console.log(prereleaseVersionOf({ cwd, sourceSha: env("GITHUB_SHA") }));
       break;
     }
-    case "npm-verdict": {
+    case "npm-publish": {
       if (argument !== "next" && argument !== "stable") {
         throw new Error(
-          `npm-verdict takes the channel, next or stable, not ${JSON.stringify(argument ?? null)}`,
+          `npm-publish takes the channel, next or stable, not ${JSON.stringify(argument ?? null)}`,
         );
       }
-      const verdict = await npmVerdict({
-        cwd,
-        sourceSha: env("GITHUB_SHA"),
-        registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
-        ...(argument === "next" ? { channel: argument } : { channel: argument, tag: env("TAG") }),
-      });
-      for (const notice of "notices" in verdict ? verdict.notices : []) {
-        console.error(notice);
+      const result = await npmPublish(
+        {
+          cwd,
+          sourceSha: env("GITHUB_SHA"),
+          registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
+          ...(argument === "next"
+            ? {
+                channel: argument,
+                confirm: {
+                  attempts: CONFIRM_READS,
+                  delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
+                },
+              }
+            : { channel: argument, tag: env("TAG") }),
+        },
+        (line) => console.error(line),
+      );
+      if (!result.published) {
+        // A skipped pre-release is routine (a stale retry); a skipped release is a rerun worth a look.
+        console.log(`::${argument === "next" ? "notice" : "warning"}::${result.reason}`);
+        break;
       }
-      console.log(verdict.publish ? `publish ${verdict.version}` : `skip ${verdict.reason}`);
+      if (result.channel === "next") {
+        const { confirmed } = result;
+        if (confirmed.outcome === "settled") {
+          console.log(
+            `::notice::${confirmed.version} is on the registry after ${confirmed.reads} ` +
+              `${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`,
+          );
+        } else if (confirmed.outcome === "unsettled") {
+          console.log(`::warning::${confirmed.reason}`);
+        } else {
+          console.log(`::error::${confirmed.reason}`);
+          process.exit(1);
+        }
+      }
       break;
     }
     case "npm-floor": {
@@ -1362,29 +1445,10 @@ async function main(): Promise<void> {
       }
       break;
     }
-    case "npm-confirm": {
-      if (argument !== "next") {
-        throw new Error(
-          `npm-confirm takes the channel, next, not ${JSON.stringify(argument ?? null)}`,
-        );
-      }
-      const confirmed = await npmConfirm({
-        cwd,
-        sourceSha: env("GITHUB_SHA"),
-        registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
-        attempts: CONFIRM_READS,
-        delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
-      });
-      console.log(
-        confirmed.outcome === "settled"
-          ? `settled ${confirmed.version} is on the registry after ${confirmed.reads} ${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`
-          : `${confirmed.outcome} ${confirmed.reason}`,
-      );
-      break;
-    }
     default:
       throw new Error(
-        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | boundary-check | anchor-check | package-commit | prerelease-version | npm-verdict | npm-floor | npm-confirm`,
+        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | ` +
+          "boundary-check | anchor-check | package-commit | prerelease-version | npm-publish | npm-floor",
       );
   }
 }

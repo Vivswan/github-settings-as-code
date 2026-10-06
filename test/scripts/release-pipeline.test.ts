@@ -1353,28 +1353,6 @@ describe("prereleaseVersion", () => {
     ).toThrow(
       /^git rev-parse --verify --quiet [0-9a-f]{7}\^\{commit\} failed: fatal: not a git repository/,
     );
-    // The subcommand prints the skip as one stdout line, the notice the workflow raises.
-    const judge = checkoutOf(fx, "stale-judge", fx.mergeSha, "packaged-bundle-bytes-4\n");
-    return withRegistry(
-      {
-        status: 200,
-        body: registry(["2.1.0", main.descendant], { latest: "2.1.0", next: main.descendant }),
-      },
-      async (url) => {
-        expect(
-          await subcommand(
-            judge,
-            { GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url },
-            "npm-verdict",
-            "next",
-          ),
-        ).toEqual({
-          stdout: `skip ${staleReason(main.descendant)}\n`,
-          stderr: "",
-          status: 0,
-        });
-      },
-    );
   });
 
   const stableVerdicts: [string, string, Packument | null, PublishVerdict][] = [
@@ -1581,86 +1559,24 @@ describe("prereleaseVersion", () => {
     });
   });
 
-  test("the npm-verdict subcommand prints publish or skip alone on stdout, its notices on stderr, and the channel is required", async () => {
-    const fx = seedFixture();
-    const own = versionOf(fx.work, fx.mergeSha, 2);
-    await withRegistry({ status: 404 }, async (registry) => {
-      expect(
-        await subcommand(
-          fx.work,
-          { GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: registry },
-          "npm-verdict",
-          "next",
-        ),
-      ).toEqual({ stdout: `publish ${own}\n`, stderr: "", status: 0 });
-      expect(
-        await subcommand(
-          fx.work,
-          { GITHUB_SHA: fx.mergeSha, TAG: "v2.1.0", NPM_REGISTRY_URL: registry },
-          "npm-verdict",
-          "stable",
-        ),
-      ).toEqual({ stdout: "publish 2.1.0\n", stderr: "", status: 0 });
-    });
-    const unresolved = "2.1.1-main.9.20260901.g0000000";
-    await withRegistry(
-      {
-        status: 200,
-        body: registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved }),
-      },
-      async (url) => {
-        expect(
-          await subcommand(
-            fx.work,
-            { GITHUB_SHA: fx.mergeSha, NPM_REGISTRY_URL: url },
-            "npm-verdict",
-            "next",
-          ),
-        ).toEqual({
-          stdout: `publish ${own}\n`,
-          stderr: `${unresolved} names 0000000, which is no commit in this checkout; ignored\n`,
-          status: 0,
-        });
-      },
-    );
-    await withRegistry(
-      { status: 200, body: { versions: { "2.1.0": {} }, "dist-tags": { latest: "2.1.0" } } },
-      async (registry) => {
-        expect(
-          await subcommand(
-            fx.work,
-            { GITHUB_SHA: fx.mergeSha, TAG: "v2.1.0", NPM_REGISTRY_URL: registry },
-            "npm-verdict",
-            "stable",
-          ),
-        ).toEqual({ stdout: "skip 2.1.0 is already on the registry\n", stderr: "", status: 0 });
-      },
-    );
-    expect(await subcommand(fx.work, { GITHUB_SHA: fx.mergeSha }, "npm-verdict")).toEqual({
-      stdout: "",
-      stderr:
-        "release-pipeline npm-verdict: npm-verdict takes the channel, next or stable, not null\n",
-      status: 1,
-    });
-  });
+  /** The fixture's published version, and an ancestor's pre-release next named before it. */
+  const published = (fx: Fixture) => versionOf(fx.work, fx.mergeSha, 2);
+  const older = (fx: Fixture) => versionOf(fx.work, fx.seedSha, 1);
+  /** A descendant's pre-release: main grew one commit past the source, fetched into the work clone. */
+  function newer(fx: Fixture): string {
+    const after = pushGreenCommit(fx, "after", "packaged-bundle-bytes-2\n");
+    git(fx.work, "fetch", "--quiet", "origin");
+    return versionOf(fx.work, after.sha, 3);
+  }
+  /** The drift the confirmation reports when next stayed on this run's version while a descendant's is on the record. */
+  const behind = (fx: Fixture, ahead: string): string =>
+    `the registry's next is ${published(fx)} while it holds ${ahead}, whose source ${ahead.slice(-7)} is a descendant ` +
+    `of ${fx.mergeSha.slice(0, 7)} on main; this stale run moved next back, and the next release-PR refresh moves it forward ` +
+    `(npm dist-tag add @scope/pkg@${ahead} next repairs it by hand)`;
 
   describe("npm-confirm after a next publish", () => {
-    /** The fixture's published version, and an ancestor's pre-release next named before it. */
-    const published = (fx: Fixture) => versionOf(fx.work, fx.mergeSha, 2);
-    const older = (fx: Fixture) => versionOf(fx.work, fx.seedSha, 1);
-    /** A descendant's pre-release: main grew one commit past the source, fetched into the work clone. */
-    function newer(fx: Fixture): string {
-      const after = pushGreenCommit(fx, "after", "packaged-bundle-bytes-2\n");
-      git(fx.work, "fetch", "--quiet", "origin");
-      return versionOf(fx.work, after.sha, 3);
-    }
     const confirm = (fx: Fixture, registry: string, attempts = 5) =>
       npmConfirm({ cwd: fx.work, sourceSha: fx.mergeSha, registry, attempts, delayMs: 0 });
-    /** The drift the confirmation reports when next stayed on this run's version while a descendant's is on the record. */
-    const behind = (fx: Fixture, ahead: string): string =>
-      `the registry's next is ${published(fx)} while it holds ${ahead}, whose source ${ahead.slice(-7)} is a descendant ` +
-      `of ${fx.mergeSha.slice(0, 7)} on main; this stale run moved next back, and the next release-PR refresh moves it forward ` +
-      `(npm dist-tag add @scope/pkg@${ahead} next repairs it by hand)`;
 
     test("a record that lags the publish is read again until it shows the version, each read past the CDN cache", async () => {
       const fx = seedFixture();
@@ -1781,73 +1697,246 @@ describe("prereleaseVersion", () => {
         }),
       ).rejects.toThrow("the read attempts must be a positive integer, not 0");
     });
+  });
 
-    test("the npm-confirm subcommand prints settled, unsettled, or behind on stdout, counts its reads, and takes the next channel alone", async () => {
+  describe("the npm-publish subcommand", () => {
+    /** An npm first on PATH that prints every call with the GITHUB_SHA it saw and, when told, fails one command. */
+    function withNpm<T>(
+      body: (path: string) => Promise<T>,
+      failing?: { command: string; status: number },
+    ): Promise<T> {
+      return withTempDir("npm-publish-stub-", (dir) => {
+        writeFileSync(
+          join(dir, "npm"),
+          [
+            "#!/bin/sh",
+            'echo "npm $* (GITHUB_SHA=$GITHUB_SHA)"',
+            ...(failing === undefined
+              ? []
+              : [`[ "$1" = "${failing.command}" ] && exit ${failing.status}`]),
+            "exit 0",
+            "",
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        return body(`${dir}:${process.env.PATH ?? ""}`);
+      });
+    }
+    /** The step's environment: the source, the local registry, the stub npm, no pause between the confirmation's reads. */
+    const env = (fx: Fixture, url: string, path: string) => ({
+      GITHUB_SHA: fx.mergeSha,
+      TAG: "v2.1.0",
+      NPM_REGISTRY_URL: url,
+      NPM_CONFIRM_PAUSE_MS: "0",
+      PATH: path,
+    });
+    /** The npm calls a publish makes, as the stub reports them: every call sees the source, the publish names it. */
+    const nextPublish = (fx: Fixture, own: string): string =>
+      [
+        `npm version ${own} --no-git-tag-version (GITHUB_SHA=${fx.mergeSha})`,
+        `npm pkg delete scripts.prepare (GITHUB_SHA=${fx.mergeSha})`,
+        `npm publish --tag next (GITHUB_SHA=${fx.mergeSha})`,
+        "",
+      ].join("\n");
+    const stablePublish = (fx: Fixture): string =>
+      [
+        `npm pkg delete scripts.prepare (GITHUB_SHA=${fx.mergeSha})`,
+        `npm publish (GITHUB_SHA=${fx.mergeSha})`,
+        "",
+      ].join("\n");
+    const run = (fx: Fixture, url: string, path: string, channel: string) =>
+      subcommand(fx.work, env(fx, url, path), "npm-publish", channel);
+
+    test(
+      "next: a publish verdict sets the version, drops scripts.prepare, publishes under next, then holds the lane " +
+        "until the record shows the version; the verdict's notices go to stderr",
+      async () => {
+        const fx = seedFixture();
+        const own = published(fx);
+        const unresolved = "2.1.1-main.9.20260901.g0000000";
+        const judged = registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved });
+        const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });
+        const converged = registry(["2.1.0", own], { latest: "2.1.0", next: own });
+        const started = performance.now();
+        const result = await withNpm((path) =>
+          withRegistry(
+            [
+              { status: 200, body: judged },
+              { status: 200, body: lagging },
+              { status: 200, body: converged },
+            ],
+            async (url, requests) => ({ step: await run(fx, url, path, "next"), requests }),
+          ),
+        );
+        expect(result.step).toEqual({
+          stdout:
+            `${nextPublish(fx, own)}::notice::${own} is on the registry after 2 reads; ` +
+            "next is not behind a descendant's pre-release\n",
+          stderr: `${unresolved} names 0000000, which is no commit in this checkout; ignored\n`,
+          status: 0,
+        });
+        // One read for the verdict, two for the confirmation; the bound is the control: a run that ignored
+        // NPM_CONFIRM_PAUSE_MS would pause 20 s between those two.
+        expect(result.requests).toHaveLength(3);
+        expect(performance.now() - started).toBeLessThan(10_000);
+      },
+    );
+
+    test.each<[string, (fx: Fixture) => { record: Packument; reason: string }]>([
+      [
+        "a rerun whose version the record holds",
+        (fx) => ({
+          record: registry(["2.1.0", published(fx)], { latest: "2.1.0", next: published(fx) }),
+          reason: `${published(fx)} is already on the registry`,
+        }),
+      ],
+      [
+        "a stale run behind a descendant's pre-release",
+        (fx) => {
+          const ahead = newer(fx);
+          return {
+            record: registry(["2.1.0", ahead], { latest: "2.1.0", next: ahead }),
+            reason:
+              `the registry already holds ${ahead}, whose source ${ahead.slice(-7)} is a descendant of ` +
+              `${fx.mergeSha.slice(0, 7)} on main, so this stale run publishes nothing (npm publish --tag next ` +
+              "would move next back)",
+          };
+        },
+      ],
+    ])("next: %s calls npm not at all and raises a notice", async (_name, state) => {
       const fx = seedFixture();
-      const ahead = newer(fx);
+      const { record, reason } = state(fx);
+      const step = await withNpm((path) =>
+        withRegistry({ status: 200, body: record }, (url) => run(fx, url, path, "next")),
+      );
+      expect(step).toEqual({ stdout: `::notice::${reason}\n`, stderr: "", status: 0 });
+    });
+
+    test("next: a record that never shows the version within the bound warns, and the step passes", async () => {
+      const fx = seedFixture();
+      const own = published(fx);
       const lagging = registry(["2.1.0", older(fx)], { latest: "2.1.0", next: older(fx) });
-      const converged = registry(["2.1.0", published(fx)], {
-        latest: "2.1.0",
-        next: published(fx),
-      });
-      const drifted = registry(["2.1.0", ahead, published(fx)], {
-        latest: "2.1.0",
-        next: published(fx),
-      });
-      const env = (url: string, pause?: string) => ({
-        GITHUB_SHA: fx.mergeSha,
-        NPM_REGISTRY_URL: url,
-        NPM_CONFIRM_PAUSE_MS: pause,
-      });
-      const settled = (reads: string) =>
-        `settled ${published(fx)} is on the registry after ${reads}; next is not behind a descendant's pre-release\n`;
-      await withRegistry({ status: 200, body: converged }, async (url) => {
-        expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: settled("1 read"),
-          stderr: "",
-          status: 0,
-        });
-      });
-      // The bound is the control: a run that ignored the variable would pause 20 s between its two reads.
-      await withRegistry(
-        [
-          { status: 200, body: lagging },
-          { status: 200, body: converged },
-        ],
-        async (url) => {
-          const started = performance.now();
-          expect(await subcommand(fx.work, env(url, "0"), "npm-confirm", "next")).toEqual({
-            stdout: settled("2 reads"),
-            stderr: "",
-            status: 0,
-          });
-          expect(performance.now() - started).toBeLessThan(10_000);
-        },
+      const result = await withNpm((path) =>
+        withRegistry([{ status: 404 }, { status: 200, body: lagging }], async (url, requests) => ({
+          step: await run(fx, url, path, "next"),
+          requests,
+        })),
       );
-      await withRegistry({ status: 200, body: drifted }, async (url) => {
-        expect(await subcommand(fx.work, env(url), "npm-confirm", "next")).toEqual({
-          stdout: `behind ${behind(fx, ahead)}\n`,
-          stderr: "",
-          status: 0,
-        });
+      expect(result.step).toEqual({
+        stdout:
+          `${nextPublish(fx, own)}::warning::the registry's record still lacks ${own} after 15 reads over 0 s; ` +
+          "a run judged before it shows may move next back, and the release-PR refresh after it moves next forward\n",
+        stderr: "",
+        status: 0,
       });
-      expect(await subcommand(fx.work, env("http://127.0.0.1:9"), "npm-confirm", "stable")).toEqual(
-        {
-          stdout: "",
-          stderr:
-            'release-pipeline npm-confirm: npm-confirm takes the channel, next, not "stable"\n',
-          status: 1,
-        },
+      expect(result.requests).toHaveLength(16);
+    });
+
+    test("next: next left behind a descendant's pre-release fails the step with the drift named, after the publish", async () => {
+      const fx = seedFixture();
+      const own = published(fx);
+      const ahead = newer(fx);
+      const drifted = registry(["2.1.0", ahead, own], { latest: "2.1.0", next: own });
+      const step = await withNpm((path) =>
+        withRegistry([{ status: 404 }, { status: 200, body: drifted }], (url) =>
+          run(fx, url, path, "next"),
+        ),
       );
-      expect(
-        await subcommand(fx.work, env("http://127.0.0.1:9", "soon"), "npm-confirm", "next"),
-      ).toEqual({
-        stdout: "",
-        stderr:
-          'release-pipeline npm-confirm: NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not "soon"\n',
+      expect(step).toEqual({
+        stdout: `${nextPublish(fx, own)}::error::${behind(fx, ahead)}\n`,
+        stderr: "",
         status: 1,
       });
     });
+
+    test("next: an npm publish that fails ends the step with its status named, after the verdict's notices, and nothing confirms", async () => {
+      const fx = seedFixture();
+      const unresolved = "2.1.1-main.9.20260901.g0000000";
+      const judged = registry(["2.1.0", unresolved], { latest: "2.1.0", next: unresolved });
+      const result = await withNpm(
+        (path) =>
+          withRegistry({ status: 200, body: judged }, async (url, requests) => ({
+            step: await run(fx, url, path, "next"),
+            requests,
+          })),
+        { command: "publish", status: 3 },
+      );
+      expect(result.step).toEqual({
+        stdout: nextPublish(fx, published(fx)),
+        stderr:
+          `${unresolved} names 0000000, which is no commit in this checkout; ignored\n` +
+          "release-pipeline npm-publish: npm publish --tag next exited 3; see npm's output above.\n",
+        status: 1,
+      });
+      expect(result.requests).toHaveLength(1);
+    });
+
+    test.each<[string, Packument | null, string]>([
+      [
+        "a publish verdict drops scripts.prepare and publishes under the default dist-tag",
+        null,
+        "",
+      ],
+      [
+        "a skip verdict calls npm not at all and warns",
+        { versions: { "2.1.0": {} }, "dist-tags": { latest: "2.1.0" } },
+        "::warning::2.1.0 is already on the registry\n",
+      ],
+    ])("stable: %s", async (_name, record, annotation) => {
+      const fx = seedFixture();
+      const result = await withNpm((path) =>
+        withRegistry(
+          record === null ? { status: 404 } : { status: 200, body: record },
+          async (url, requests) => ({ step: await run(fx, url, path, "stable"), requests }),
+        ),
+      );
+      expect(result.step).toEqual({
+        stdout: record === null ? stablePublish(fx) : annotation,
+        stderr: "",
+        status: 0,
+      });
+      // A release confirms nothing: one read, for the verdict.
+      expect(result.requests).toHaveLength(1);
+    });
+
+    test.each<[string, string[], Record<string, string | undefined>, string]>([
+      ["no channel", [], {}, "npm-publish takes the channel, next or stable, not null"],
+      [
+        "a release without its tag",
+        ["stable"],
+        { TAG: undefined },
+        'TAG is required for "npm-publish"',
+      ],
+      [
+        "a pause that is not a whole number of milliseconds",
+        ["next"],
+        { NPM_CONFIRM_PAUSE_MS: "soon" },
+        'NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not "soon"',
+      ],
+    ])(
+      "%s is refused before the registry is read or npm runs",
+      async (_name, args, override, message) => {
+        const fx = seedFixture();
+        const asked = await withNpm((path) =>
+          withRegistry({ status: 404 }, async (url, requests) => {
+            expect(
+              await subcommand(
+                fx.work,
+                { ...env(fx, url, path), ...override },
+                "npm-publish",
+                ...args,
+              ),
+            ).toEqual({
+              stdout: "",
+              stderr: `release-pipeline npm-publish: ${message}\n`,
+              status: 1,
+            });
+            return requests;
+          }),
+        );
+        expect(asked).toEqual([]);
+      },
+    );
   });
 });
 
