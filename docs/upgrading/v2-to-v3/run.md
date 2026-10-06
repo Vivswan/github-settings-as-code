@@ -212,7 +212,7 @@ v3   -> ::error::settings.yml has malformed section entries: labels[1].name: "Bu
         result: failed, zero requests
 ```
 
-Every section's file-only checks run at validation, selected or not: duplicate identities (a rename target and the pre-rename name included), malformed lists, an unreadable deploy key, a secret value that is not a whole-value `$NAME` reference the document's author may use, a non-plain value, a non-finite passthrough number, a passthrough alias cycle. The collected issues name their paths, and the run exits 1 before any request.
+Every section's file-only checks run at validation, selected or not: duplicate identities (a rename target and the pre-rename name included), malformed lists, an unreadable deploy key, a secret value that is not a whole-value `$NAME` reference the document's author may use, a non-plain value, a non-finite passthrough number. The collected issues name their paths, and the run exits 1 before any request.
 
 Fix the declaration, in the excluded section too. For `@vivswan/github-settings-as-code` consumers: `SectionModule` gains a required `validate(declared)` hook on list modules, so a custom list module without one stops compiling; the [library page](../../reference/library.md) documents its shape.
 

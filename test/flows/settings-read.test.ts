@@ -91,12 +91,79 @@ describe("parseSettingsDoc", () => {
     });
   });
 
-  test("a syntax error still fails through the error path, not a partial parse", async () => {
-    const captured = await captureOutput(() => parseSettingsDoc("labels: [oops, unclosed\n"));
-    expect(captured).toEqual({
-      result: err({
-        code: "yaml-invalid",
-        reason: expect.stringMatching(/^YAMLParseError: Flow sequence in block collection/),
+  test.each([
+    [
+      "a syntax error",
+      "labels: [oops, unclosed\n",
+      /^YAMLParseError: Flow sequence in block collection/,
+    ],
+    // The parser reports this one while building the object, not while reading the source.
+    ["an unresolved alias", "labels: *nowhere\n", /^ReferenceError: Unresolved alias .*: nowhere$/],
+  ])(
+    "%s fails through the error path, not a partial parse or a throw",
+    async (_what, raw, reason) => {
+      expect(await captureOutput(() => parseSettingsDoc(raw))).toEqual({
+        result: err({ code: "yaml-invalid", reason: expect.stringMatching(reason) }),
+        warnings: [],
+        stderr: "",
+      });
+    },
+  );
+
+  // The parser resolves an alias into the node its own anchor opens as a cyclic object; the refusal names that anchor.
+  test.each([
+    ["a mapping aliased inside itself", "repository: &loop {self: *loop}\n", "loop"],
+    [
+      "a list aliased from inside one of its entries",
+      "repository:\n  topics: &all\n    - name: a\n      nested: *all\n",
+      "all",
+    ],
+    [
+      "a merge key aliasing the mapping it sits in",
+      "repository: &base\n  <<: *base\n  x: 1\n",
+      "base",
+    ],
+    ["a cycle after an earlier legitimate alias", "a: &x {b: 1}\nc: &y {d: *x, e: *y}\n", "y"],
+  ])(
+    "%s is refused by anchor name, before the cyclic object exists",
+    async (_what, raw, anchor) => {
+      expect(await captureOutput(() => parseSettingsDoc(raw))).toEqual({
+        result: err({
+          code: "yaml-invalid",
+          reason:
+            `alias *${anchor} refers back into the node its anchor &${anchor} opens (a YAML alias cycle), ` +
+            "which no settings document can carry. An alias may only reference a completed node: write " +
+            "the value out again, or move the anchor to a sibling",
+        }),
+        warnings: [],
+        stderr: "",
+      });
+    },
+  );
+
+  test("an alias to a completed node still resolves: a scalar shared by siblings, an entry repeated, an anchor redefined", async () => {
+    const bug = { name: "bug", color: "ff0000" };
+    const docs = { name: "docs", color: "0075ca" };
+    expect(
+      await captureOutput(() =>
+        parseSettingsDoc(
+          [
+            "repository:",
+            "  description: &d hello",
+            "  homepage: *d",
+            "labels:",
+            "  - &base {name: bug, color: ff0000}",
+            "  - *base",
+            "  - &base {name: docs, color: 0075ca}",
+            "  - *base",
+            "",
+          ].join("\n"),
+        ),
+      ),
+    ).toEqual({
+      result: ok({
+        repository: { description: "hello", homepage: "hello" },
+        labels: [bug, bug, docs, docs],
       }),
       warnings: [],
       stderr: "",
