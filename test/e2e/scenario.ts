@@ -586,7 +586,8 @@ export function collectYmlFiles(dir: string): string[] {
   return out;
 }
 
-/** The section test mirror: <key>/ under it holds the section's tests, mock.ts, generators.ts, and scenarios/.
+/** The section test mirror: <key>/ under it holds the section's tests, generators.ts, scenarios/, and its mock.ts
+ * unless the fragment is one family-factory call in test/e2e/mock/sections.ts.
  * The layout census (test/layout.test.ts) reads the root from here, so a move edits this one line. */
 export const SECTIONS_TEST_ROOT = join(ROOT, "test", "sections");
 

@@ -29,7 +29,7 @@ import type { LiveState } from "../e2e/mock/state.js";
 import { captureIo } from "../io/capture.js";
 import { registryFake } from "../sections/fragment-fake.js";
 import { REPO, unwrap } from "../sections/section-run.js";
-import type { Row } from "../sections/snapshot-roundtrip.js";
+import { loadRow } from "../sections/snapshot-row-families.js";
 
 /** A failed snapshot fails the test here, on the discriminant; a cast would count as a second mint of the brand. */
 function renderable(result: SnapshotResult): RenderableSnapshot {
@@ -295,7 +295,7 @@ describe("snapshotRepository", () => {
   test.each(DENIABLE)(
     "%s: a 403 on any of its reads fails it under fail and is reported under warn",
     async (key) => {
-      const { row } = (await import(`../sections/${key}/snapshot-row.ts`)) as { row: Row };
+      const { row } = await loadRow(key);
       const only = SectionSelection.of({ only: [key] })._unsafeUnwrap();
       const run = (api: GitHubClient, policy: "fail" | "warn") => {
         const { io, annotations } = captureIo();

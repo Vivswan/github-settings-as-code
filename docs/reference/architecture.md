@@ -402,4 +402,4 @@ graph TD
 ```
 <!-- END GENERATED: architecture-map -->
 
-Each section's e2e harness fragments (`mock.ts`, `generators.ts`) are test code under `test/sections/<key>/`, outside the map.
+Each section's e2e harness fragments (`mock.ts`, `generators.ts`) are test code under `test/sections/<key>/`, or a row of the family table in `test/e2e/mock/sections.ts` when the fragment is one family-factory call, outside the map.

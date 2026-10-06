@@ -26,7 +26,7 @@ The fleet-wide conventions - Conventional Commit titles, squash merges, the `all
 - Line caps: code wraps at biome's `lineWidth` of 100. The fleet's check-file-size caps source, test, workflow, and shell lines at 256 characters; markdown prose has no width cap. A comment block is at most 10 lines.
 - Markdown keeps one source line per paragraph or list item, so a long item is split into items, never wrapped.
 - A source file under `src/` or `.github/scripts/` opens with a one-paragraph header comment saying what the file owns; test files need none.
-- Tests live under `test/`, mirroring `src/`: a section's unit tests, `mock.ts`, `generators.ts`, and `scenarios/` sit in `test/sections/<key>/`; `src/` holds code only.
+- Tests live under `test/`, mirroring `src/`: a section's unit tests, `mock.ts`, `generators.ts`, and `scenarios/` sit in `test/sections/<key>/`, except that a mock fragment or snapshot row that is one family-factory call lives in the family table instead; `src/` holds code only.
 
 ## Tests
 
