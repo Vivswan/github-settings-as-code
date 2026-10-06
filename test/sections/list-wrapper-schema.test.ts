@@ -2,7 +2,7 @@
  * The refusals every list section shares, pinned once as the problem lines a user reads: a wrapper carrying a key
  * that is not one of its directives (with the pre-v3 policy spelling naming its rename), a section value that is
  * neither a list nor a wrapper, and a YAML-tagged value where a mapping section expects a plain mapping. The
- * wording lives in src/sections/shared/schema-helpers.ts, renamed-key.ts, and contract/module.ts.
+ * wording lives in src/sections/shared/schema-helpers.ts, renamed-key.ts, and contract/declared.ts.
  */
 
 import { describe, expect, test } from "bun:test";

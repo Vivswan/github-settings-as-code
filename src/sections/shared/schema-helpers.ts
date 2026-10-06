@@ -177,7 +177,7 @@ export function nestedKnobbed<T extends z.ZodType>(entry: T) {
 /**
  * The wrapper of a list section that applies no undeclared policy (environments, branches, workflows): the bare list
  * beside `{_layering, entries}`. The directive is the only reason the wrapper exists, so the fold consumes it and
- * writes the bare list, and a planner reads either form through listEntries() (../contract/module.ts). The list's own
+ * writes the bare list, and a planner reads either form through listEntries() (../contract/declared.ts). The list's own
  * refinements (the pinned-environments cap) ride along as the wrapper's `entries`.
  */
 export function layeredList<L extends z.ZodArray<z.ZodType>>(list: L) {

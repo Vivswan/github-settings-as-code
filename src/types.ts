@@ -15,7 +15,7 @@ export interface UndeclaredPolicyList<E> {
   entries: E[];
   /**
    * Only a TOP-LEVEL section's wrapper takes it (see nestedKnobbed()); the values are LAYERINGS in
-   * src/sections/shared/schema-helpers.ts, pinned in src/sections/contract/module.ts.
+   * src/sections/shared/schema-helpers.ts, pinned in src/sections/contract/keyed-list.ts.
    */
   _layering?: "replace" | "shallow" | "deep";
 }
