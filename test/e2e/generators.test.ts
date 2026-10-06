@@ -9,6 +9,8 @@ import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
+import { genDiscoveryScenario } from "./discovery-scenario.js";
+import { SECTION_PRIMARY_READ } from "./fault-targets.js";
 import {
   entriesOf,
   type Json,
@@ -19,31 +21,31 @@ import {
 } from "./gen-support.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
-  canariesOf,
-  genDiscoveryScenario,
-  genInvalidSettings,
   genLiveWitness,
-  genMergeScenario,
-  genMultiScenario,
-  genScenario,
   genSettings,
-  INVALID_SETTINGS_CASES,
-  MERGE_FEATURES,
-  MERGE_REFUSAL_KINDS,
-  mergeFeaturesOf,
-  NON_MAPPING_YAML,
-  ORG_GATED_SECTIONS,
-  SECTION_PRIMARY_READ,
-  standaloneViewOf,
-  UNPARSEABLE_YAML,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
 } from "./generators.js";
+import {
+  genInvalidSettings,
+  INVALID_SETTINGS_CASES,
+  NON_MAPPING_YAML,
+  UNPARSEABLE_YAML,
+} from "./invalid-settings.js";
+import {
+  genMergeScenario,
+  MERGE_FEATURES,
+  MERGE_REFUSAL_KINDS,
+  mergeFeaturesOf,
+  standaloneViewOf,
+} from "./merge-scenario.js";
 import { grantablePermission } from "./mock/state.js";
+import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./multi-scenario.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";
 import { collectYmlFiles, MASK_KEYS, parseScenario } from "./schema.js";
+import { genScenario } from "./single-scenario.js";
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
