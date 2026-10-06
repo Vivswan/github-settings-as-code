@@ -1,10 +1,12 @@
 /**
- * auto-format.yml's push step against local fixture repositories: the branches the workflow text cannot show,
- * which checkout the patch is committed on, under whose identity, and what a moved branch does to the push.
+ * auto-format.yml's two steps against local fixture repositories: the branches the workflow text cannot show.
+ * For the format step, what the patch holds and when the step stops; for the push step, which checkout the patch
+ * is committed on, under whose identity, and what a moved branch does to the push.
  */
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clone,
@@ -21,6 +23,67 @@ setDefaultTimeout(60_000);
 installReleasePipelineFixture();
 
 const REMOTE_URL = "https://x-access-token:t0ken@github.com/o/r.git";
+
+/** The format job's checkout of a same-repo PR branch: its lint:fix runs whatever LINT_FIX says. */
+function formatFixture(): { pr: string; headSha: string; temp: string } {
+  const fx = seedFixture();
+  const pr = clone(fx.root, fx.origin, "pr");
+  write(
+    pr,
+    "package.json",
+    `${JSON.stringify(
+      { name: "fixture", version: "0.0.0", scripts: { "lint:fix": 'sh -c "$LINT_FIX"' } },
+      null,
+      2,
+    )}\n`,
+  );
+  const headSha = commitAll(pr, "feat: a pull request");
+  return { pr, headSha, temp: join(fx.root, "runner-temp") };
+}
+
+const format = (pr: string, temp: string, lintFix: string) =>
+  runStep("auto-format-steps", pr, temp, { LINT_FIX: lintFix }, "format");
+
+function patchPaths(temp: string): string[] {
+  return [...readFileSync(join(temp, "format.patch"), "utf8").matchAll(/^diff --git a\/(\S+)/gm)]
+    .map((match) => match[1] ?? "")
+    .sort();
+}
+
+describe("format", () => {
+  test("a formatter that changes nothing leaves an empty patch and changed=false, and an addition staged before it is not the fix", () => {
+    const { pr, headSha, temp } = formatFixture();
+    write(pr, "staged.ts", "export const staged = 1;\n");
+    git(pr, "add", "staged.ts");
+    const result = format(pr, temp, "true");
+    expect(result).toMatchObject({
+      status: 0,
+      stdout: "nothing to format\n",
+      outputs: [`head=${headSha}`, "changed=false"],
+    });
+    expect(readFileSync(join(temp, "format.patch"), "utf8")).toBe("");
+    expect(git(pr, "diff", "--cached", "--name-only")).toBe("");
+  });
+
+  test("the formatter's modifications and deletions of tracked files enter the patch; a file it adds does not", () => {
+    const { pr, headSha, temp } = formatFixture();
+    const result = format(
+      pr,
+      temp,
+      "echo 'export const marker=1' > src/marker.ts && rm .github/dependabot.yml && echo new > added.ts",
+    );
+    expect(result).toMatchObject({ status: 0, outputs: [`head=${headSha}`, "changed=true"] });
+    expect(result.stdout).toContain("2 files changed, 1 insertion(+), 3 deletions(-)");
+    expect(patchPaths(temp)).toEqual([".github/dependabot.yml", "src/marker.ts"]);
+  });
+
+  test("a failing formatter ends the step with its status after head= is written, with no patch cut", () => {
+    const { pr, headSha, temp } = formatFixture();
+    const result = format(pr, temp, "exit 3");
+    expect(result).toMatchObject({ status: 3, outputs: [`head=${headSha}`] });
+    expect(existsSync(join(temp, "format.patch"))).toBe(false);
+  });
+});
 
 /** The push job's checkout of a same-repo PR branch, with the format job's patch downloaded beside it. */
 function prFixture(): { fx: Fixture; pr: string; headSha: string; temp: string } {
