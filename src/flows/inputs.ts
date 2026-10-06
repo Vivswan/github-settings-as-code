@@ -27,9 +27,8 @@ export const DEFAULT_LAYERING = "deep" satisfies Layering;
  */
 export interface InputDecl {
   /**
-   * The action.yml description; the generator folds it to width. Plain prose: action-docs runs it through a
-   * markdown renderer for the docs table, so a paired "*" or "_" would italicize, "..." would become an
-   * ellipsis, a "|" would split the cell, and a "<" would open a tag (test/docs/inputs.test.ts pins the rendering).
+   * The action.yml description; the generator folds it to width. Plain prose: the inputs table renders it inside
+   * an HTML cell, so a "|" would split the row and a "<" would open a tag; gen-inputs-table.ts refuses both.
    */
   readonly description: string;
   /** The action.yml default, verbatim (an empty string means "unset"). */
@@ -43,9 +42,9 @@ export interface InputDecl {
 }
 
 /**
- * The single source action.yml is generated from (bun run build:action-docs), in its listing order; the inputs
- * reference page's table is action-docs's rendering of that action.yml (bun run build:inputs-table). Adding an
- * input here is the whole declaration. A new mode's inputs go beside their mode's.
+ * The single source action.yml (bun run build:action-docs) and the inputs reference page's table (bun run
+ * build:inputs-table) are generated from, in its listing order. Adding an input here is the whole declaration. A
+ * new mode's inputs go beside their mode's.
  */
 export const INPUT_DECLS = {
   token: {

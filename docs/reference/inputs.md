@@ -8,12 +8,12 @@ Every `with:` input the action accepts, and the outputs it sets for the steps af
 
 A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `affiliation`, and `settings-file` in `mode: render`) takes newline- or comma-separated values. `settings-file` is split the same way in every mode, so no settings file path can contain a comma.
 
-<!-- The table between the action-docs markers is action-docs's rendering of action.yml (bun run build:inputs-table); the descriptions live in src/flows/inputs.ts, and the markers stay around the table: the script refuses to regenerate over anything else. The v-pre div keeps the site's Vue renderer from evaluating the token default's expression. -->
+<!-- The inputs table is a generated region (bun run build:inputs-table) rendered from the declarations in src/flows/inputs.ts; the markers stay around the table, and the generator refuses to regenerate over anything else. The v-pre div keeps the site's Vue renderer from evaluating the token default's expression. -->
 <div v-pre>
 
-<!-- action-docs-inputs source="action.yml" -->
 ## Inputs
 
+<!-- BEGIN GENERATED: inputs-table (bun run build:inputs-table; derived from INPUT_DECLS in src/flows/inputs.ts) -->
 | name | description | required | default |
 | --- | --- | --- | --- |
 | `token` | <p>The token for the API calls: a fine-grained PAT, since the default GITHUB_TOKEN can never hold the Administration grant most sections need.</p> | `false` | `${{ github.token }}` |
@@ -41,7 +41,7 @@ A list input (`sections`, `required-sections`, `repos`, `exclude`, `topics`, `af
 | `exclude` | <p>Comma- or newline-separated glob patterns removing repositories from repos: "*" discovery, compared case-insensitively against owner/name when the pattern has a "/" and against the name alone otherwise. A star matches any run of characters, "?" one character, "[abc]" one of a set, "[!abc]" or "[^abc]" one outside it, and one leading "!" negates the pattern. Beyond those a pattern holds only letters, digits, ".", "-", and "_", with at most one "/", nothing empty around it, and no side that is just "." or ".."; anything else (a leading "./", a run of stars, a regex token such as "(a)+") fails the run naming the fix.</p> | `false` | `""` |
 | `topics` | <p>Comma- or newline-separated topics, of which repos: "*" discovery keeps the repositories carrying at least one.</p> | `false` | `""` |
 | `affiliation` | <p>Comma- or newline-separated affiliations for repos: "*" discovery: owner (default), collaborator, or organization_member.</p> | `false` | `""` |
-<!-- action-docs-inputs source="action.yml" -->
+<!-- END GENERATED: inputs-table -->
 
 </div>
 
