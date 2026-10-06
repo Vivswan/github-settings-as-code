@@ -9,6 +9,7 @@
  *   collaboratorFromPut  -> role_name via roleForPermission, the same map the section runs on its declaration
  */
 
+import { isPlainObject, own, put } from "../../../src/plain-data.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
@@ -380,10 +381,6 @@ export function normalizePinnedSeed(
   return pins.sort((a, b) => a.position - b.position);
 }
 
-function isPlainObject(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /**
  * Runs last in buildState, after the repo is re-slugged and `state.slug` is fixed: the slug is part of
  * every id, so an id minted earlier would name the fixture. Write handlers mint with the same codec
@@ -418,8 +415,8 @@ export function restRepoSurface(repo: Json): Json {
 function deepMerge(base: Json, overlay: Json): Json {
   const out: Json = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
-    const prev = out[key];
-    out[key] = isPlainObject(prev) && isPlainObject(value) ? deepMerge(prev, value) : value;
+    const prev = own(out, key);
+    put(out, key, isPlainObject(prev) && isPlainObject(value) ? deepMerge(prev, value) : value);
   }
   return out;
 }
@@ -1029,7 +1026,7 @@ export function protectionFromPut(payload: Json): Json {
         break;
       }
       default:
-        out[key] = value;
+        put(out, key, value);
     }
   }
   return out;

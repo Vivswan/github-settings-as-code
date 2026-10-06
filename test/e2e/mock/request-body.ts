@@ -5,9 +5,10 @@
  * handler that stored the body verbatim would hide both from every scenario.
  */
 
+import { isPlainObject } from "../../../src/plain-data.js";
 import type { Route } from "../../../src/sections/contract/endpoints.js";
 import { sharedValidator } from "../openapi/validate.js";
-import type { Json, MockResponse } from "./support.js";
+import type { MockResponse } from "./support.js";
 
 /**
  * Fields GitHub accepts (verified live) that its descriptor omits, so the spec-derived allowlist would
@@ -18,10 +19,6 @@ import type { Json, MockResponse } from "./support.js";
 export const UNDOCUMENTED_BODY_FIELDS: ReadonlyMap<Route, readonly string[]> = new Map([
   ["PATCH /repos/{owner}/{repo}", ["has_discussions"]],
 ]);
-
-function isPlainObject(value: unknown): value is Json {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * The body a handler receives for `route`: the documented top-level fields of an object body, every
