@@ -7,11 +7,12 @@
  * Each ends the night red instead of leaving a later PR to find the break.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { countNoun } from "../../src/text.js";
 import { planGraduation } from "./graduate-upstream-gaps.js";
+import { dispatch } from "./lib/entry.js";
 import { parseDiagnostics } from "./lib/tsc-diagnostics.js";
 import { capture, run, status } from "./lib/workflow-step.js";
 
@@ -28,7 +29,7 @@ function installedVersion(pkg: string): string {
   return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version;
 }
 
-function probeSchema(): void {
+function probeSchema(): number | undefined {
   // --no-save leaves package.json and the lockfile untouched; the upgraded node_modules stays ambient for the
   // rest of the job.
   run([
@@ -46,7 +47,7 @@ function probeSchema(): void {
       console.log(
         `::error::${pkg}@${installed} is installed but ${latest} is the latest; the probe is testing the pin`,
       );
-      process.exit(1);
+      return 1;
     }
     console.log(`${pkg}@${installed}`);
   }
@@ -69,7 +70,7 @@ function typecheck(): { clean: boolean; log: string } {
   }
 }
 
-function probeTypes(): void {
+function probeTypes(): number | undefined {
   run(["bun", "add", "--no-save", "--ignore-scripts", "@octokit/types@latest"]);
   const { clean, log } = typecheck();
   if (clean) {
@@ -98,22 +99,14 @@ function probeTypes(): void {
       "::error::typecheck against @octokit/types@latest failed without a diagnostic this probe can read (see log above)",
     );
   }
-  // One synchronous write: stdout is a pipe on the runner, and a buffered write process.exit cuts short would
-  // drop the tail of a large log and the annotation after it.
-  writeSync(1, `${log}${report.join("\n")}\n`);
-  process.exit(1);
+  process.stdout.write(`${log}${report.join("\n")}\n`);
+  return 1;
 }
 
 if (import.meta.main) {
-  const command = process.argv[2];
-  if (command === "probe-schema") {
-    probeSchema();
-  } else if (command === "probe-types") {
-    probeTypes();
-  } else {
-    console.error(
-      `nightly-steps: unknown command ${JSON.stringify(command ?? null)}; expected probe-schema | probe-types`,
-    );
-    process.exit(1);
-  }
+  await dispatch(
+    "nightly-steps",
+    { "probe-schema": probeSchema, "probe-types": probeTypes },
+    process.argv.slice(2),
+  );
 }

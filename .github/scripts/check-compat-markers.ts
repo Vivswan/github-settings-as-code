@@ -15,6 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runMain } from "./lib/entry.js";
 
 /** Built output, dependencies, release-please's changelog (it quotes PR titles, so a removal PR's title would
  * outlive the marker it deleted), and the two files that spell the syntax to define and test it.
@@ -233,18 +234,13 @@ function parseTargetMajor(argv: string[]): number | undefined {
 }
 
 if (import.meta.main) {
-  try {
+  await runMain("check-compat-markers", () => {
     const result = checkCompatMarkers({
       cwd: process.cwd(),
       targetMajor: parseTargetMajor(process.argv.slice(2)),
     });
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
-    process.exitCode = result.code;
-  } catch (error) {
-    console.error(
-      `check-compat-markers: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    process.exitCode = 1;
-  }
+    return result.code;
+  });
 }

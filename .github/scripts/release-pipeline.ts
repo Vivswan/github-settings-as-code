@@ -23,7 +23,8 @@
  * Node builtins only: bun runs this before `bun install`.
  */
 
-import { setOutput } from "./lib/workflow-step.js";
+import { dispatch, type Handler } from "./lib/entry.js";
+import { requireEnv, setOutput } from "./lib/workflow-step.js";
 import { anchorCheck, anchorReleasePr, boundaryCheck } from "./release-pipeline/anchor.js";
 import {
   RELEASE_ASSETS,
@@ -52,154 +53,125 @@ function confirmPauseMs(value: string | undefined): number {
   return Number(value);
 }
 
-async function main(): Promise<void> {
-  const cwd = process.cwd();
-  const [command, argument] = process.argv.slice(2);
-  const env = (name: string): string => {
-    const value = process.env[name];
-    if (value === undefined || value === "") {
-      throw new Error(`${name} is required for "${command}"`);
-    }
-    return value;
-  };
-  switch (command) {
-    case "package": {
-      const result = packageRelease({
-        cwd,
-        tag: env("TAG"),
-        sourceSha: env("GITHUB_SHA"),
-        runUrl: process.env.RUN_URL,
-      });
-      console.error(
-        `${result.created ? "created" : "verified"} ${env("TAG")} on packaged commit ${result.packagedSha}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
-      );
-      break;
-    }
-    case "retag-major": {
-      const result = retagMajor({ cwd, tag: env("TAG"), sourceSha: env("GITHUB_SHA") });
-      console.error(result.move.reason);
-      break;
-    }
-    case "anchor": {
-      const result = anchorReleasePr({ cwd, sourceSha: env("GITHUB_SHA") });
-      console.error(result.reason);
-      break;
-    }
-    case "boundary-check": {
-      const result = boundaryCheck(cwd);
-      console.error(`boundary is fresh: ${result.boundary}`);
-      break;
-    }
-    case "anchor-check": {
-      const result = anchorCheck(cwd);
-      console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
-      break;
-    }
-    case "package-commit": {
-      const result = packageCommit({
-        cwd,
-        sourceSha: env("GITHUB_SHA"),
-        runUrl: process.env.RUN_URL,
-      });
-      console.error(
-        `${result.ref}${result.created ? ": created at" : " already packages the commit at"} ${result.commit}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
-      );
-      break;
-    }
-    case "prerelease-version": {
-      console.log(prereleaseVersionOf({ cwd, sourceSha: env("GITHUB_SHA") }));
-      break;
-    }
-    case "npm-publish": {
-      if (argument !== "next" && argument !== "stable") {
-        throw new Error(
-          `npm-publish takes the channel, next or stable, not ${JSON.stringify(argument ?? null)}`,
-        );
-      }
-      const result = await npmPublish(
-        {
-          cwd,
-          sourceSha: env("GITHUB_SHA"),
-          registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
-          ...(argument === "next"
-            ? {
-                channel: argument,
-                confirm: {
-                  attempts: CONFIRM_READS,
-                  delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
-                },
-              }
-            : { channel: argument, tag: env("TAG") }),
-        },
-        (line) => console.error(line),
-      );
-      if (!result.published) {
-        // A skipped pre-release is routine (a stale retry); a skipped release is a rerun worth a look.
-        console.log(`::${argument === "next" ? "notice" : "warning"}::${result.reason}`);
-        break;
-      }
-      if (result.channel === "next") {
-        const { confirmed } = result;
-        if (confirmed.outcome === "settled") {
-          console.log(
-            `::notice::${confirmed.version} is on the registry after ${confirmed.reads} ` +
-              `${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`,
-          );
-        } else if (confirmed.outcome === "unsettled") {
-          console.log(`::warning::${confirmed.reason}`);
-        } else {
-          console.log(`::error::${confirmed.reason}`);
-          process.exit(1);
-        }
-      }
-      break;
-    }
-    case "npm-floor": {
-      // Silent when the floor holds, as the shell step was; the refusal is the annotation it printed.
-      const result = npmFloor();
-      if (!result.atFloor) {
-        console.log(
-          `::error::npm ${result.version} cannot publish through OIDC; trusted publishing needs npm ${NPM_FLOOR} or newer.`,
-        );
-        process.exit(1);
-      }
-      break;
-    }
-    case "resolve-source": {
-      const source = resolveSource(env("TAG"));
-      if ("refusal" in source) {
-        console.log(`::error::${source.refusal}`);
-        process.exit(1);
-      }
-      setOutput(STEP_OUTPUTS["resolve-source"][0], source.sha);
-      break;
-    }
-    case "verify-assets": {
-      const tag = env("TAG");
-      const assets = releaseAssets(tag);
-      if (assets.join(" ") !== RELEASE_ASSETS.join(" ")) {
-        console.log(
-          `::error::release ${tag} carries assets [${assets.join(" ")}], expected ` +
-            `[${RELEASE_ASSETS.join(" ")}]; re-run package-release before anything publishes.`,
-        );
-        process.exit(1);
-      }
-      break;
-    }
-    default:
+const cwd = process.cwd();
+
+/** The subcommands by name; test/workflows reads the keys as the set a step may run. */
+export const COMMANDS: Record<string, Handler> = {
+  package: () => {
+    const tag = requireEnv("TAG");
+    const result = packageRelease({
+      cwd,
+      tag,
+      sourceSha: requireEnv("GITHUB_SHA"),
+      runUrl: process.env.RUN_URL,
+    });
+    console.error(
+      `${result.created ? "created" : "verified"} ${tag} on packaged commit ${result.packagedSha}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
+    );
+  },
+  "retag-major": () => {
+    const result = retagMajor({ cwd, tag: requireEnv("TAG"), sourceSha: requireEnv("GITHUB_SHA") });
+    console.error(result.move.reason);
+  },
+  anchor: () => {
+    const result = anchorReleasePr({ cwd, sourceSha: requireEnv("GITHUB_SHA") });
+    console.error(result.reason);
+  },
+  "boundary-check": () => {
+    const result = boundaryCheck(cwd);
+    console.error(`boundary is fresh: ${result.boundary}`);
+  },
+  "anchor-check": () => {
+    const result = anchorCheck(cwd);
+    console.error(`the release PR carries this cycle's anchor: ${result.boundary}`);
+  },
+  "package-commit": () => {
+    const result = packageCommit({
+      cwd,
+      sourceSha: requireEnv("GITHUB_SHA"),
+      runUrl: process.env.RUN_URL,
+    });
+    console.error(
+      `${result.ref}${result.created ? ": created at" : " already packages the commit at"} ${result.commit}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
+    );
+  },
+  "prerelease-version": () => {
+    console.log(prereleaseVersionOf({ cwd, sourceSha: requireEnv("GITHUB_SHA") }));
+  },
+  "npm-publish": async ([channel]) => {
+    if (channel !== "next" && channel !== "stable") {
       throw new Error(
-        `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | ` +
-          "boundary-check | anchor-check | package-commit | prerelease-version | npm-publish | npm-floor | " +
-          "resolve-source | verify-assets",
+        `npm-publish takes the channel, next or stable, not ${JSON.stringify(channel ?? null)}`,
       );
-  }
-}
+    }
+    const result = await npmPublish(
+      {
+        cwd,
+        sourceSha: requireEnv("GITHUB_SHA"),
+        registry: process.env.NPM_REGISTRY_URL || DEFAULT_REGISTRY,
+        ...(channel === "next"
+          ? {
+              channel,
+              confirm: {
+                attempts: CONFIRM_READS,
+                delayMs: confirmPauseMs(process.env.NPM_CONFIRM_PAUSE_MS),
+              },
+            }
+          : { channel, tag: requireEnv("TAG") }),
+      },
+      (line) => console.error(line),
+    );
+    if (!result.published) {
+      // A skipped pre-release is routine (a stale retry); a skipped release is a rerun worth a look.
+      console.log(`::${channel === "next" ? "notice" : "warning"}::${result.reason}`);
+      return;
+    }
+    if (result.channel === "next") {
+      const { confirmed } = result;
+      if (confirmed.outcome === "settled") {
+        console.log(
+          `::notice::${confirmed.version} is on the registry after ${confirmed.reads} ` +
+            `${confirmed.reads === 1 ? "read" : "reads"}; next is not behind a descendant's pre-release`,
+        );
+      } else if (confirmed.outcome === "unsettled") {
+        console.log(`::warning::${confirmed.reason}`);
+      } else {
+        console.log(`::error::${confirmed.reason}`);
+        return 1;
+      }
+    }
+  },
+  "npm-floor": () => {
+    // Silent when the floor holds, as the shell step was; the refusal is the annotation it printed.
+    const result = npmFloor();
+    if (!result.atFloor) {
+      console.log(
+        `::error::npm ${result.version} cannot publish through OIDC; trusted publishing needs npm ${NPM_FLOOR} or newer.`,
+      );
+      return 1;
+    }
+  },
+  "resolve-source": () => {
+    const source = resolveSource(requireEnv("TAG"));
+    if ("refusal" in source) {
+      console.log(`::error::${source.refusal}`);
+      return 1;
+    }
+    setOutput(STEP_OUTPUTS["resolve-source"][0], source.sha);
+  },
+  "verify-assets": () => {
+    const tag = requireEnv("TAG");
+    const assets = releaseAssets(tag);
+    if (assets.join(" ") !== RELEASE_ASSETS.join(" ")) {
+      console.log(
+        `::error::release ${tag} carries assets [${assets.join(" ")}], expected ` +
+          `[${RELEASE_ASSETS.join(" ")}]; re-run package-release before anything publishes.`,
+      );
+      return 1;
+    }
+  },
+};
 
 if (import.meta.main) {
-  main().catch((error: unknown) => {
-    console.error(
-      `release-pipeline ${process.argv[2] ?? ""}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    process.exit(1);
-  });
+  await dispatch("release-pipeline", COMMANDS, process.argv.slice(2));
 }

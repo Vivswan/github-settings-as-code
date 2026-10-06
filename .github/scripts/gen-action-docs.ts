@@ -33,6 +33,7 @@ import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
 import { COUNT_WORD_MAX, countWord } from "./lib/count-word.js";
+import { runMain } from "./lib/entry.js";
 import { block, blockLine, blockLines, GeneratedRegion } from "./lib/generated-regions.js";
 import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
@@ -731,5 +732,5 @@ export const FILES: GeneratedFiles = {
 };
 
 if (import.meta.main) {
-  regenerateFiles("gen-action-docs", FILES, ROOT);
+  await runMain("gen-action-docs", () => regenerateFiles("gen-action-docs", FILES, ROOT));
 }

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 import { INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
 import { renderTable, tableBody, tableFault } from "../../src/report/markdown.js";
+import { runMain } from "./lib/entry.js";
 import { block, GeneratedRegion } from "./lib/generated-regions.js";
 import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
@@ -97,5 +98,5 @@ export const INPUTS_PAGES: GeneratedFiles = {
 };
 
 if (import.meta.main) {
-  regenerateFiles("gen-inputs-table", INPUTS_PAGES, ROOT);
+  await runMain("gen-inputs-table", () => regenerateFiles("gen-inputs-table", INPUTS_PAGES, ROOT));
 }

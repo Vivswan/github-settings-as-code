@@ -8,6 +8,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { dispatch } from "./lib/entry.js";
 import { attempt, requireEnv, setOutput } from "./lib/workflow-step.js";
 
 /** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the job's wiring
@@ -45,7 +46,7 @@ function printFenced(stderr: string): void {
   console.log(`::${fence}::`);
 }
 
-function probe(): void {
+function probe(): number | undefined {
   const push = attempt(DRY_RUN_PUSH);
   if (push.status === 0) {
     setOutput("proceed", "true");
@@ -56,7 +57,7 @@ function probe(): void {
     console.log(
       "::error::REPO_PLATFORM_TOKEN cannot push to this repository; git's refusal is in the probe stderr lines above.",
     );
-    process.exit(1);
+    return 1;
   }
   console.log(
     [
@@ -70,13 +71,5 @@ function probe(): void {
 }
 
 if (import.meta.main) {
-  const command = process.argv[2];
-  if (command === "probe") {
-    probe();
-  } else {
-    console.error(
-      `post-green-steps: unknown command ${JSON.stringify(command ?? null)}; expected probe`,
-    );
-    process.exit(1);
-  }
+  await dispatch("post-green-steps", { probe }, process.argv.slice(2));
 }

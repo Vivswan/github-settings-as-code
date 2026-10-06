@@ -163,8 +163,7 @@ describe("prereleaseVersion", () => {
     });
     expect(await subcommand(fx.work, { GITHUB_SHA: undefined }, "prerelease-version")).toEqual({
       stdout: "",
-      stderr:
-        'release-pipeline prerelease-version: GITHUB_SHA is required for "prerelease-version"\n',
+      stderr: "GITHUB_SHA must be set for this step\n",
       status: 1,
     });
   });
@@ -869,22 +868,27 @@ describe("prereleaseVersion", () => {
     });
 
     test.each<[string, string[], Record<string, string | undefined>, string]>([
-      ["no channel", [], {}, "npm-publish takes the channel, next or stable, not null"],
+      [
+        "no channel",
+        [],
+        {},
+        "release-pipeline npm-publish: npm-publish takes the channel, next or stable, not null",
+      ],
       [
         "a release without its tag",
         ["stable"],
         { TAG: undefined },
-        'TAG is required for "npm-publish"',
+        "TAG must be set for this step",
       ],
       [
         "a pause that is not a whole number of milliseconds",
         ["next"],
         { NPM_CONFIRM_PAUSE_MS: "soon" },
-        'NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not "soon"',
+        'release-pipeline npm-publish: NPM_CONFIRM_PAUSE_MS must be a whole number of milliseconds, not "soon"',
       ],
     ])(
       "%s is refused before the registry is read or npm runs",
-      async (_name, args, override, message) => {
+      async (_name, args, override, stderr) => {
         const fx = seedFixture();
         const asked = await withNpm((path) =>
           withRegistry({ status: 404 }, async (url, requests) => {
@@ -897,7 +901,7 @@ describe("prereleaseVersion", () => {
               ),
             ).toEqual({
               stdout: "",
-              stderr: `release-pipeline npm-publish: ${message}\n`,
+              stderr: `${stderr}\n`,
               status: 1,
             });
             return requests;

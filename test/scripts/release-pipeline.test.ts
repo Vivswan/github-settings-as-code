@@ -1183,7 +1183,7 @@ describe("the release hook's reads of the draft", () => {
     async (subcommand) => {
       expect(await runWithGh({ stdout: `${sha}\n` }, { TAG: undefined }, subcommand)).toEqual({
         stdout: "",
-        stderr: `release-pipeline ${subcommand}: TAG is required for "${subcommand}"\n`,
+        stderr: "TAG must be set for this step\n",
         status: 1,
         outputs: [],
         calls: [],

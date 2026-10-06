@@ -16,6 +16,7 @@ import { type Node, parseSync } from "oxc-parser";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 import { countNoun, quote } from "../../src/text.js";
+import { runMain } from "./lib/entry.js";
 
 export const ARCHITECTURE_PATH = "architecture.yml";
 
@@ -310,16 +311,18 @@ export function renderArchitectureMermaid(arch: Architecture): string {
 }
 
 if (import.meta.main) {
-  const root = join(import.meta.dir, "..", "..");
-  const problems = parseArchitecture(root).match(
-    (arch) => lintArchitecture(root, arch),
-    (problems) => problems,
-  );
-  if (problems.length > 0) {
-    console.error(
-      `lint:arch: ${countNoun(problems.length, "problem", "problems")}\n  ${problems.join("\n  ")}`,
+  await runMain("arch-lint", () => {
+    const root = join(import.meta.dir, "..", "..");
+    const problems = parseArchitecture(root).match(
+      (arch) => lintArchitecture(root, arch),
+      (problems) => problems,
     );
-    process.exit(1);
-  }
-  console.log(`lint:arch: src/ imports match ${ARCHITECTURE_PATH}`);
+    if (problems.length > 0) {
+      console.error(
+        `lint:arch: ${countNoun(problems.length, "problem", "problems")}\n  ${problems.join("\n  ")}`,
+      );
+      return 1;
+    }
+    console.log(`lint:arch: src/ imports match ${ARCHITECTURE_PATH}`);
+  });
 }
