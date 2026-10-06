@@ -11,12 +11,14 @@
  * render     -> a layered mode: render stack whose written document the oracle's fold predicts whole
  */
 
+import { parseArgs } from "node:util";
 import { canonicalDocument } from "../../src/engine/canonical.js";
 import { describeRemoval } from "../../src/engine/layers.js";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
+import { quote } from "../../src/text.js";
 import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
 import {
   type FaultableSection,
@@ -108,18 +110,63 @@ interface Flags {
   sections?: SectionKey[];
 }
 
-function parseFlags(argv: string[]): Flags {
+type ParsedFlags = { ok: true; flags: Flags } | { ok: false; error: string };
+
+const FLAGS = {
+  iterations: { type: "string" },
+  seed: { type: "string" },
+  sections: { type: "string" },
+} as const;
+const USAGE = "the flags are --iterations <count>, --seed <seed>, --sections <key,key>";
+const SEED_FIX = "pass the whole number from 0 to 4294967295 the fuzzer printed";
+const COUNT_FIX = "pass a whole number from 0 to 4294967295 (0 runs the directed battery alone)";
+
+/** A count or seed is a uint32: iterationSeed() derives in that range, and Number() rounds digits past 2^53 silently. */
+function uint32(raw: string): number | undefined {
+  const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  return value <= 0xffff_ffff ? value : undefined;
+}
+
+function refuse(error: string): ParsedFlags {
+  return { ok: false, error: `fuzz: ${error}` };
+}
+
+function parseFlags(argv: readonly string[], env: NodeJS.ProcessEnv): ParsedFlags {
+  const { tokens } = parseArgs({
+    args: [...argv],
+    options: FLAGS,
+    strict: false,
+    allowPositionals: true,
+    tokens: true,
+  });
   const flags: Flags = { iterations: 50 };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--iterations") {
-      flags.iterations = Number(argv[++i]);
-    } else if (arg === "--seed") {
-      flags.seed = Number(argv[++i]);
-    } else if (arg === "--sections") {
-      // Parse, don't cast: a typo'd section would otherwise crash deep inside
-      // the generator pool several green iterations later.
-      const parsed = (argv[++i] ?? "")
+  for (const token of tokens) {
+    if (token.kind !== "option") {
+      const argument = token.kind === "positional" ? token.value : "--";
+      return refuse(`unexpected argument ${quote(argument)}; ${USAGE}`);
+    }
+    if (!Object.hasOwn(FLAGS, token.name)) {
+      return refuse(`unknown flag ${token.rawName}; ${USAGE}`);
+    }
+    if (token.value === undefined) {
+      return refuse(`${token.rawName} needs a value; ${USAGE}`);
+    }
+    if (token.name === "iterations") {
+      const count = uint32(token.value);
+      if (count === undefined) {
+        return refuse(`--iterations ${quote(token.value)} is not a count; ${COUNT_FIX}`);
+      }
+      flags.iterations = count;
+    } else if (token.name === "seed") {
+      const seed = uint32(token.value);
+      if (seed === undefined) {
+        return refuse(`--seed ${quote(token.value)} is not a seed; ${SEED_FIX}`);
+      }
+      flags.seed = seed;
+    } else {
+      // Parse, don't cast: a typo'd section would otherwise crash deep inside the generator pool several green
+      // iterations later.
+      const parsed = token.value
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s !== "");
@@ -127,17 +174,25 @@ function parseFlags(argv: string[]): Flags {
         (SECTION_KEYS as readonly string[]).includes(s);
       const unknown = parsed.filter((s) => !isSection(s));
       if (unknown.length > 0) {
-        throw new Error(
+        return refuse(
           `--sections names unknown section(s) [${unknown.join(", ")}]; known sections: ${SECTION_KEYS.join(", ")}`,
         );
       }
       if (parsed.length === 0) {
-        throw new Error("--sections got an empty list; name at least one section or drop the flag");
+        return refuse("--sections got an empty list; name at least one section or drop the flag");
       }
       flags.sections = parsed.filter(isSection);
     }
   }
-  return flags;
+  const envSeed = env.FUZZ_SEED ?? "";
+  if (flags.seed === undefined && envSeed !== "") {
+    const seed = uint32(envSeed);
+    if (seed === undefined) {
+      return refuse(`FUZZ_SEED ${quote(envSeed)} is not a seed; ${SEED_FIX}`);
+    }
+    flags.seed = seed;
+  }
+  return { ok: true, flags };
 }
 
 /** The runner wrote the curated replay; a fuzz artifact replays by seed, never by name (a fuzz scenario is not a file). */
@@ -149,19 +204,6 @@ function reportArtifacts(result: IterationResult, replay: string): void {
     console.log(`    artifact: ${dir}`);
     setReplay(dir, replay);
   }
-}
-
-/** `explicit` covers both pinning styles, so `FUZZ_SEED=X --iterations 1` replays exactly like `--seed X --iterations 1`. */
-function masterSeed(flags: Flags): { seed: number; explicit: boolean } {
-  if (flags.seed !== undefined && Number.isFinite(flags.seed)) {
-    return { seed: flags.seed >>> 0, explicit: true };
-  }
-  const raw = (process.env.FUZZ_SEED ?? "").trim();
-  const env = Number(raw);
-  if (raw !== "" && Number.isFinite(env)) {
-    return { seed: env >>> 0, explicit: true };
-  }
-  return { seed: crypto.getRandomValues(new Uint32Array(1))[0] as number, explicit: false };
 }
 
 interface IterationBase {
@@ -1621,8 +1663,15 @@ async function faultFuzzIteration(seed: number): Promise<IterationResult> {
 }
 
 async function main(): Promise<number> {
-  const flags = parseFlags(process.argv.slice(2));
-  const { seed: master, explicit } = masterSeed(flags);
+  const parsed = parseFlags(process.argv.slice(2), process.env);
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    return 2;
+  }
+  const { flags } = parsed;
+  // `explicit` covers both pinning styles, so `FUZZ_SEED=X --iterations 1` replays exactly like `--seed X --iterations 1`.
+  const explicit = flags.seed !== undefined;
+  const master = flags.seed ?? (crypto.getRandomValues(new Uint32Array(1))[0] as number);
   // One iteration under an explicit seed runs THAT iteration seed, so a printed seed replays directly.
   const replayOne = flags.iterations === 1 && explicit;
   console.log(`fuzz master seed: ${master} (replay: --seed ${master})`);

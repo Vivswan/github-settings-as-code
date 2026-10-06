@@ -61,16 +61,12 @@ jobs:
       - name: Build the schema
         run: bun run build:schema
 
+      # A blank FUZZ_SEED is unset to the fuzzer, which draws a seed and prints it.
       - name: Fuzz
         env:
-          SEED: ${{ inputs.seed }}
+          FUZZ_SEED: ${{ inputs.seed }}
           ITERATIONS: ${{ inputs.iterations || '300' }}
-        run: |
-          if [ -z "$SEED" ]; then
-            SEED="$RANDOM$RANDOM"
-          fi
-          echo "fuzzing with seed $SEED, $ITERATIONS iterations"
-          timeout 50m bun test/e2e/fuzz.ts --seed "$SEED" --iterations "$ITERATIONS"
+        run: timeout 50m bun test/e2e/fuzz.ts --iterations "$ITERATIONS"
 
       - name: Upload failure artifacts
         if: failure()
