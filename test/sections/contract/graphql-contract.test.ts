@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { ApiError } from "../../src/github/api-error.js";
-import { overrideAdviceLevel } from "../../src/sections/contract/errors.js";
+import type { ApiError } from "../../../src/github/api-error.js";
+import { overrideAdviceLevel } from "../../../src/sections/contract/errors.js";
 import {
   type GraphqlOpDecl,
   type GraphqlPaginatedReadDecl,
   graphqlOp,
-} from "../../src/sections/contract/graphql.js";
-import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
+} from "../../../src/sections/contract/graphql.js";
+import type { SectionContext, SectionMeta } from "../../../src/sections/contract/module.js";
 import {
   callGraphql,
   listGraphqlConnection,
   tryCallGraphql,
-} from "../../src/sections/contract/requests.js";
-import { MockApi } from "../mock-api.js";
-import { deniedDetail, rejectsDenied, unwrap } from "./section-run.js";
+} from "../../../src/sections/contract/requests.js";
+import { MockApi } from "../../mock-api.js";
+import { deniedDetail, rejectsDenied, unwrap } from "../section-run.js";
 
 const section: SectionMeta = {
   key: "repository",

@@ -6,26 +6,26 @@
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { z } from "zod";
-import type { SectionInput } from "../../src/sections/contract/module.js";
-import { planContext } from "../../src/sections/contract/plan.js";
-import { labelsSection } from "../../src/sections/labels/index.js";
+import type { SectionInput } from "../../../src/sections/contract/module.js";
+import { planContext } from "../../../src/sections/contract/plan.js";
+import { labelsSection } from "../../../src/sections/labels/index.js";
 import {
   exactName,
   type ListEndpoints,
   type ListSectionModule,
   type ListWrite,
-} from "../../src/sections/shared/list/decl.js";
-import { listSection } from "../../src/sections/shared/list/section.js";
-import { webhooksSection } from "../../src/sections/webhooks/index.js";
-import { generatorFromSlice, uniqueBy } from "../e2e/gen-support.js";
-import { mockFragmentFor } from "../e2e/mock/list-fragment.js";
-import { Rng } from "../e2e/prng.js";
-import { MockApi } from "../mock-api.js";
-import { fragmentFake } from "./fragment-fake.js";
-import { LABELS_MOCK } from "./labels/mock.js";
-import { provePlanIdempotent } from "./plan-idempotence.js";
-import { failureOf, REPO, unwrap } from "./section-run.js";
-import { validatedInput } from "./validated-input.js";
+} from "../../../src/sections/shared/list/decl.js";
+import { listSection } from "../../../src/sections/shared/list/section.js";
+import { webhooksSection } from "../../../src/sections/webhooks/index.js";
+import { generatorFromSlice, uniqueBy } from "../../e2e/gen-support.js";
+import { mockFragmentFor } from "../../e2e/mock/list-fragment.js";
+import { Rng } from "../../e2e/prng.js";
+import { MockApi } from "../../mock-api.js";
+import { fragmentFake } from "../fragment-fake.js";
+import { LABELS_MOCK } from "../labels/mock.js";
+import { provePlanIdempotent } from "../plan-idempotence.js";
+import { failureOf, REPO, unwrap } from "../section-run.js";
+import { validatedInput } from "../validated-input.js";
 
 const base = labelsSection.decl;
 const LIST = "GET /repos/o/r/labels?per_page=100&page=1";

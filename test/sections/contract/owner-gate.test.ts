@@ -5,13 +5,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { RepoRef } from "../../src/discovery/targets.js";
-import type { GitHubClient } from "../../src/github/api.js";
-import { planContext, snapshotContext } from "../../src/sections/contract/plan.js";
-import { SECTIONS } from "../../src/sections/registry.js";
-import { MockApi } from "../mock-api.js";
-import { failureOf, REPO, unwrap } from "./section-run.js";
-import { validatedInput } from "./validated-input.js";
+import type { RepoRef } from "../../../src/discovery/targets.js";
+import type { GitHubClient } from "../../../src/github/api.js";
+import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
+import { SECTIONS } from "../../../src/sections/registry.js";
+import { MockApi } from "../../mock-api.js";
+import { failureOf, REPO, unwrap } from "../section-run.js";
+import { validatedInput } from "../validated-input.js";
 
 const gated = SECTIONS.filter((section) => section.ownerSensitivity === "org");
 

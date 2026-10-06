@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
-import { permissionForRole, roleForPermission } from "../../src/sections/shared/roles.js";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
+import { permissionForRole, roleForPermission } from "../../../src/sections/shared/roles.js";
 
 describe("permissionForRole", () => {
   // One row per branch: the PUT-vocabulary map hit, the custom-role pass-through, the prototype-member guard

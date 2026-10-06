@@ -1,18 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import type { GitHubClient } from "../../src/github/api.js";
-import { SECRET_RESPONSE_WITHHELD, SECRET_TRANSPORT_WITHHELD } from "../../src/github/api-error.js";
-import { actionsSection } from "../../src/sections/actions/index.js";
+import type { GitHubClient } from "../../../src/github/api.js";
+import {
+  SECRET_RESPONSE_WITHHELD,
+  SECRET_TRANSPORT_WITHHELD,
+} from "../../../src/github/api-error.js";
+import { actionsSection } from "../../../src/sections/actions/index.js";
 import {
   type EndpointDecl,
   endpointKind,
   endpointMethod,
   toleratedStatuses,
-} from "../../src/sections/contract/endpoints.js";
-import { failureFor, type SectionFailure } from "../../src/sections/contract/errors.js";
-import { type GraphqlOpDecl, graphqlOp } from "../../src/sections/contract/graphql.js";
-import { parseLive } from "../../src/sections/contract/live.js";
+} from "../../../src/sections/contract/endpoints.js";
+import { failureFor, type SectionFailure } from "../../../src/sections/contract/errors.js";
+import { type GraphqlOpDecl, graphqlOp } from "../../../src/sections/contract/graphql.js";
+import { parseLive } from "../../../src/sections/contract/live.js";
 import {
   denialPosture,
   freezeDeclarations,
@@ -23,14 +26,17 @@ import {
   sectionGrant,
   sectionOperations,
   writeGatedReads,
-} from "../../src/sections/contract/module.js";
-import { type SectionPermission, samePermission } from "../../src/sections/contract/permissions.js";
+} from "../../../src/sections/contract/module.js";
+import {
+  type SectionPermission,
+  samePermission,
+} from "../../../src/sections/contract/permissions.js";
 import {
   DenialPolicy,
   plainData,
   planContext,
   snapshotContext,
-} from "../../src/sections/contract/plan.js";
+} from "../../../src/sections/contract/plan.js";
 import {
   call,
   callDeclared,
@@ -39,14 +45,14 @@ import {
   probeAbsent,
   tryCall,
   tryCallDeclared,
-} from "../../src/sections/contract/requests.js";
-import { customPropertiesSection } from "../../src/sections/custom_properties/index.js";
-import { environmentsSection } from "../../src/sections/environments/index.js";
-import { SECTIONS } from "../../src/sections/registry.js";
-import { rulesetsSection } from "../../src/sections/rulesets/index.js";
-import type { readOrNote } from "../../src/sections/shared/snapshot-helpers.js";
-import { MockApi } from "../mock-api.js";
-import { deniedDetail, failureKind, SectionFailed, unwrap } from "./section-run.js";
+} from "../../../src/sections/contract/requests.js";
+import { customPropertiesSection } from "../../../src/sections/custom_properties/index.js";
+import { environmentsSection } from "../../../src/sections/environments/index.js";
+import { SECTIONS } from "../../../src/sections/registry.js";
+import { rulesetsSection } from "../../../src/sections/rulesets/index.js";
+import type { readOrNote } from "../../../src/sections/shared/snapshot-helpers.js";
+import { MockApi } from "../../mock-api.js";
+import { deniedDetail, failureKind, SectionFailed, unwrap } from "../section-run.js";
 
 const section: SectionMeta = rulesetsSection;
 
