@@ -3,7 +3,7 @@
 # release cut. Inside a called workflow github.sha is the caller's: the push to main that release-please judged, the
 # head the refresh was built on. Two independent jobs share that sha and nothing else:
 #
-#   anchor        -> the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline.ts) inside the PR branch
+#   anchor        -> the boundary anchor (anchorReleasePr in .github/scripts/release-pipeline/anchor.ts) inside the PR branch
 #   publish-next  -> the library pre-release to npm under the `next` dist-tag
 #
 # The publish lives here because release-please's refresh IS the releasable signal: release-please-config.json leaves
@@ -100,7 +100,7 @@ jobs:
         run: bun run build:schema && bun run build:lib
       # The verdict is a safety on npm state, not the decision to publish (the refresh that called this workflow made
       # that); the publish then holds the lane until the record shows the version, so the next holder's verdict sees it.
-      # GITHUB_SHA is the commit npm's provenance names. npmPublish in .github/scripts/release-pipeline.ts answers:
+      # GITHUB_SHA is the commit npm's provenance names. npmPublish in .github/scripts/release-pipeline/npm.ts answers:
       #   the version already on the record (a rerun)                 -> skip
       #   a pre-release of a descendant on the record (a stale retry)  -> skip, so next never moves back
       #   a source the checkout cannot place                           -> ignored with a notice

@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STEP_OUTPUTS } from "../../.github/scripts/post-green-steps.js";
-import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline.js";
+import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline/draft.js";
 import { ROOT } from "../root.js";
 import { runStep } from "../scripts/step-fixture.js";
 import { withTempDir } from "../temp-dir.js";

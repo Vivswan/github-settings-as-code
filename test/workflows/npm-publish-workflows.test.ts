@@ -4,7 +4,7 @@
  * repository package.json names; both take one lane; the stable one runs after every other job of its workflow; neither hands npm a
  * token, as the library page promises; the steps they share are the same text; both publish to one registry. The
  * probe also runs under bash against stubs, since no pin shows what a branch does; the publish and the floor guard
- * are the script's npm-publish and npm-floor subcommands, whose branches test/scripts/release-pipeline.test.ts runs.
+ * are the script's npm-publish and npm-floor subcommands, whose branches test/scripts/release-pipeline-npm.test.ts runs.
  *
  * The static guards catch ACCIDENTAL drift: a guard, lane, or env edited in plain YAML. Deliberately hiding a token or a second
  * publisher behind other syntax is out of scope.
@@ -56,12 +56,14 @@ const stepNamed = (job: RunJob, name: string): Step =>
     job.steps.find((step) => step.name === name),
     `step ${name}`,
   );
-/** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline.ts. */
+/** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline/npm.ts. */
 const FLOOR_GUARD = "bun .github/scripts/release-pipeline.ts npm-floor";
 const FLOOR_GUARD_NAME = "Require an npm that publishes through OIDC";
-/** The pipeline script's text, where the floor is defined. */
+/** The pipeline script's text, where the subcommands are dispatched, and its npm module's, where the floor is defined. */
 const pipelineSource = (): string =>
   readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
+const npmSource = (): string =>
+  readFileSync(join(ROOT, ".github", "scripts", "release-pipeline", "npm.ts"), "utf8");
 const setupNode = (job: RunJob): Step =>
   must(
     job.steps.find((step) => step.uses?.startsWith("actions/setup-node@")),
@@ -393,7 +395,7 @@ describe("the npm floor guard", () => {
     }
     const source = pipelineSource();
     expect(source).toContain('case "npm-floor":');
-    const floors = [...source.matchAll(/^export const NPM_FLOOR = "(\d+\.\d+\.\d+)";$/gm)].map(
+    const floors = [...npmSource().matchAll(/^export const NPM_FLOOR = "(\d+\.\d+\.\d+)";$/gm)].map(
       (m) => m[1] ?? "",
     );
     expect(floors).toHaveLength(1);
