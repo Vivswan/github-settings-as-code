@@ -467,7 +467,7 @@ describe("the per-mode flag split", () => {
       kept: (cfg) =>
         cfg.kind === "multi"
           ? parseReposInput(cfg.reposInput)
-              .map((r) => r.slugs)
+              .map((parsed) => parsed.repos.map((repo) => repo.slug))
               .unwrapOr([])
           : [],
       env: { GITHUB_REPOSITORY: "o/admin" },

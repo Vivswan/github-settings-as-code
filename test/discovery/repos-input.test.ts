@@ -7,9 +7,16 @@ describe("parseReposInput", () => {
     [
       "splits on commas and newlines",
       "o/a, o/b\no/c",
-      ok({ slugs: ["o/a", "o/b", "o/c"], discover: false }),
+      ok({
+        repos: [
+          { owner: "o", name: "a", slug: "o/a" },
+          { owner: "o", name: "b", slug: "o/b" },
+          { owner: "o", name: "c", slug: "o/c" },
+        ],
+        discover: false,
+      }),
     ],
-    ["* alone switches to discovery", "*", ok({ slugs: [], discover: true })],
+    ["* alone switches to discovery", "*", ok({ repos: [], discover: true })],
     ["* mixed with slugs is refused", "*, o/a", err({ code: "repos-input-wildcard-mixed" })],
     [
       "a bad slug is reported",

@@ -19,7 +19,6 @@ import {
   dedupeTargets,
   parseRepoSlug,
   type RemoteTarget,
-  type RepoRef,
   type Target,
 } from "../discovery/targets.js";
 import { runForRepo, type ValidatedSettings, validateSettingsDoc } from "../engine/orchestrate.js";
@@ -79,7 +78,6 @@ export interface MultiConfig extends RunFlowConfig, TargetsConfig {
 async function processTarget(ctx: {
   api: GitHubClient;
   target: Target;
-  repo: RepoRef;
   /** Validated once before any target ran; null when no `defaults-file` was given. */
   defaults: ValidatedSettings | null;
   cfg: MultiConfig;
@@ -98,7 +96,7 @@ async function processTarget(ctx: {
     const result = await runForRepo(
       api,
       {
-        repo: ctx.repo,
+        repo: target.repo,
         settings: injected.settings,
         mode: cfg.mode,
         onMissingPermission: cfg.onMissingPermission,
@@ -117,7 +115,8 @@ async function processTarget(ctx: {
     if (defaults === null) {
       channel.io.annotate(
         "notice",
-        `skipped - the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch. Add the file to manage it, or remove ${target.slug} from the "repos" input`,
+        `skipped - the repository has no ${DEFAULT_SETTINGS_FILE} on its default branch. ` +
+          `Add the file to manage it, or remove ${target.repo.slug} from the "repos" input`,
       );
       return {
         result: "skipped",
@@ -150,16 +149,15 @@ async function processTarget(ctx: {
 
 /**
  * Channel and exposure come from ONE redaction decision, so a redacted channel never travels with a shown exposure.
- * Discovery's full_name is API data, so parseRepoSlug is checked here; a slug that fails it becomes the target's failure.
+ * The caller attaches the repo it holds: a Target's parsed one, or null for a rejected discovery name.
  */
 export function openTarget(
   plan: RedactionPlan,
   io: Io,
   slug: string,
   visibilityOf: (slug: string) => RepoVisibility,
-): OpenedTarget {
+): Pick<OpenedTarget, "channel" | "exposure"> {
   return {
-    repo: parseRepoSlug(slug).unwrapOr(null),
     channel: openTargetChannel(plan, io, slug),
     exposure: plan.isRedacted(slug)
       ? { kind: "redacted", visibility: visibilityOf(slug) }
@@ -186,14 +184,14 @@ async function readTargetSettings(
       (problem) => ({ error: describeProblem(problem) }),
     );
   }
-  const sourceLabel = `${target.slug}:${DEFAULT_SETTINGS_FILE}`;
-  const file = await getRepoFile(api, target.slug, DEFAULT_SETTINGS_FILE);
+  const sourceLabel = `${target.repo.slug}:${DEFAULT_SETTINGS_FILE}`;
+  const file = await getRepoFile(api, target.repo.slug, DEFAULT_SETTINGS_FILE);
   if ("missing" in file) {
     return { missing: true };
   }
   if ("unproven" in file) {
     return {
-      error: `${file.unproven}. To stop managing it instead, remove ${target.slug} from the "repos" input`,
+      error: `${file.unproven}. To stop managing it instead, remove ${target.repo.slug} from the "repos" input`,
     };
   }
   if ("failed" in file) {
@@ -216,10 +214,27 @@ async function readTargetSettings(
   );
 }
 
+/**
+ * A discovered full_name that is not an owner/name slug. Decided once, where discovery's names become targets, so no
+ * Target carries an unparsed slug; each flow closes it as a failed target in its listing place, in its own words.
+ */
+export interface RejectedTarget {
+  source: "remote";
+  origin: string;
+  slug: string;
+}
+
+/** One place in the fleet: a target the run acts on, or a discovered name it can only fail. */
+export type FleetEntry = Target | RejectedTarget;
+
+export const isRejected = (entry: FleetEntry): entry is RejectedTarget => !("repo" in entry);
+
+const slugOf = (entry: FleetEntry): string => (isRejected(entry) ? entry.slug : entry.repo.slug);
+
 /** The fleet a run acts on, with the redaction decision every target reports under. */
 export interface ResolvedTargets {
   /** Deduped, central first, in the order the run processes them. */
-  targets: Target[];
+  targets: FleetEntry[];
   plan: RedactionPlan;
   /** A slug's resolved visibility; "unknown" for a slug never resolved. */
   visibilityOf: (slug: string) => RepoVisibility;
@@ -255,13 +270,20 @@ export function resolveTargets(
     for (const group of skipGroups) {
       io.annotate("notice", formatSkipNotice(group, redact));
     }
-    const targets = dedupeTargets(
-      central.targets,
-      remote,
-      (message) => io.annotate("notice", message),
-      (slug) => plan.display(slug),
-      (slug) => plan.isRedacted(slug),
+    // Deduping reads the parsed targets alone; a rejected name keeps its listing place among them.
+    const kept = new Set<FleetEntry>(
+      dedupeTargets(
+        central.targets,
+        remote.filter((entry): entry is RemoteTarget => !isRejected(entry)),
+        (message) => io.annotate("notice", message),
+        (slug) => plan.display(slug),
+        (slug) => plan.isRedacted(slug),
+      ),
     );
+    const targets = [
+      ...central.targets,
+      ...remote.filter((entry) => isRejected(entry) || kept.has(entry)),
+    ];
     if (targets.length === 0) {
       return fail({ code: "no-targets", filteredOut: filteredOutCount });
     }
@@ -271,7 +293,8 @@ export function resolveTargets(
 
 /** The fleet with every hidden slug registered; what resolveTargets lists and reports from. */
 interface MaskedFleet {
-  remote: RemoteTarget[];
+  /** In listing order: the repos input's, or discovery's. */
+  remote: Array<RemoteTarget | RejectedTarget>;
   plan: RedactionPlan;
   visibilityOf: (slug: string) => RepoVisibility;
   skipGroups: Array<{ reason: string; repos: Parameters<typeof formatSkipNotice>[0]["repos"] }>;
@@ -290,7 +313,7 @@ function maskFleet(
   central: CentralTarget[],
 ): ResultAsync<MaskedFleet, Problem> {
   return safeTry(async function* () {
-    let remote: RemoteTarget[] = [];
+    const remote: Array<RemoteTarget | RejectedTarget> = [];
     let filteredOutCount = 0;
     const skipGroups: MaskedFleet["skipGroups"] = [];
     // Visibility learned from discovery is authoritative for those repos, so their per-target probe is skipped.
@@ -299,9 +322,8 @@ function maskFleet(
     const filteredPrivateSlugs: Private<string>[] = [];
     if (cfg.reposInput) {
       const parsed = yield* parseReposInput(cfg.reposInput);
-      let slugs = parsed.slugs;
-      let origin = 'the "repos" input';
       if (parsed.discover) {
+        const origin = 'repos: "*" discovery';
         const discovered = yield* discoverRepos(api, cfg.discoveryFilters);
         for (const group of discovered.filtered) {
           skipGroups.push(group);
@@ -312,19 +334,25 @@ function maskFleet(
             }
           }
         }
-        for (const repo of discovered.repos) {
-          knownVisibility.set(slugKey(repo.slug), repo.visibility);
+        for (const found of discovered.repos) {
+          knownVisibility.set(slugKey(found.slug), found.visibility);
+          remote.push(
+            parseRepoSlug(found.slug).match(
+              (repo): RemoteTarget | RejectedTarget => ({ repo, source: "remote", origin }),
+              () => ({ source: "remote", origin, slug: found.slug }),
+            ),
+          );
         }
-        slugs = discovered.repos.map((repo) => repo.slug);
-        origin = 'repos: "*" discovery';
       } else if (cfg.discoveryFiltersSet.length > 0) {
         return fail({
           code: "discovery-filters-without-wildcard",
           filters: cfg.discoveryFiltersSet,
           targets: "explicit-repos",
         });
+      } else {
+        const origin = 'the "repos" input';
+        remote.push(...parsed.repos.map((repo) => ({ repo, source: "remote" as const, origin })));
       }
-      remote = slugs.map((slug) => ({ slug, source: "remote" as const, origin }));
     } else if (cfg.discoveryFiltersSet.length > 0) {
       return fail({
         code: "discovery-filters-without-wildcard",
@@ -344,7 +372,7 @@ function maskFleet(
     //   redaction                  -> hide unless proven public
     //   report delivery            -> deliver only when proven private or internal
     const resolveVisibility = createVisibilityResolver(api);
-    const orderedSlugs = [...central, ...remote].map((t) => t.slug);
+    const orderedSlugs = [...central.map((t) => t.repo.slug), ...remote.map(slugOf)];
     const visibilityBySlug = new Map<SlugKey, RepoVisibility>();
     if (redact) {
       for (const slug of orderedSlugs) {
@@ -410,21 +438,31 @@ export function runMulti(
     const results = await withDelivery({ api, cfg, io, uploader }, async (delivery) => {
       const delivered: TargetOutcome[] = [];
       for (const target of targets) {
+        if (isRejected(target)) {
+          // No RepoRef, so the report layer gets null: its issue channel has nowhere to post.
+          const opened = { ...openTarget(plan, io, target.slug, visibilityOf), repo: null };
+          const closed = await delivery.target(opened, async () =>
+            targetFailure(
+              opened.channel.io,
+              `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
+            ),
+          );
+          delivered.push({ source: target.source, ...closed });
+          continue;
+        }
         // The channel is opened BEFORE any processing so a read/parse/validation failure lands in a redacted target's transcript too.
-        const opened = openTarget(plan, io, target.slug, visibilityOf);
-        const { channel, repo } = opened;
+        const opened = {
+          ...openTarget(plan, io, target.repo.slug, visibilityOf),
+          repo: target.repo,
+        };
+        const { channel } = opened;
         // A crash mid-processing never stops the rest of the fleet; it becomes this target's failure and still closes through the same delivery.
-        const closed = await delivery.target(opened, async (injectMarker) =>
-          repo === null
-            ? targetFailure(
-                channel.io,
-                `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be targeted`,
-              )
-            : attempt(
-                channel,
-                () => processTarget({ api, target, repo, defaults, cfg, injectMarker, channel }),
-                failedTarget,
-              ),
+        const closed = await delivery.target(opened, (injectMarker) =>
+          attempt(
+            channel,
+            () => processTarget({ api, target, defaults, cfg, injectMarker, channel }),
+            failedTarget,
+          ),
         );
         delivered.push({ source: target.source, ...closed });
       }

@@ -23,12 +23,18 @@ describe("parseRepoSlug", () => {
 });
 
 describe("dedupeTargets", () => {
-  const central: CentralTarget[] = [
-    { slug: "o/x", source: "central", origin: "repos/x.yml", filePath: "repos/x.yml" },
-  ];
+  const ref = (slug: string) => parseRepoSlug(slug)._unsafeUnwrap();
+  const centralX: CentralTarget = {
+    repo: ref("o/x"),
+    source: "central",
+    origin: "repos/x.yml",
+    filePath: "repos/x.yml",
+  };
+  const remoteZ: RemoteTarget = { repo: ref("o/z"), source: "remote", origin: 'the "repos" input' };
+  const central = [centralX];
   const remote: RemoteTarget[] = [
-    { slug: "O/X", source: "remote", origin: 'the "repos" input' },
-    { slug: "o/z", source: "remote", origin: 'the "repos" input' },
+    { repo: ref("O/X"), source: "remote", origin: 'the "repos" input' },
+    remoteZ,
   ];
   const IGNORED = 'the entry for the same repository from the "repos" input is ignored';
 
@@ -56,10 +62,7 @@ describe("dedupeTargets", () => {
   ])("%s", (_case, display, isRedacted, expected) => {
     const notices: string[] = [];
     const merged = dedupeTargets(central, remote, (m) => notices.push(m), display, isRedacted);
-    expect(merged).toEqual([
-      { slug: "o/x", source: "central", origin: "repos/x.yml", filePath: "repos/x.yml" },
-      { slug: "o/z", source: "remote", origin: 'the "repos" input' },
-    ]);
+    expect(merged).toEqual([centralX, remoteZ]);
     expect(notices).toEqual([expected]);
   });
 });

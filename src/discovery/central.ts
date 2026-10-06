@@ -8,7 +8,7 @@ import { extname, join, parse } from "node:path";
 import { err, ok, type Result } from "neverthrow";
 import { type SlugKey, slugKey } from "../github/slug.js";
 import type { CentralFileProblem, ProblemOf } from "../problem.js";
-import { type CentralTarget, SLUG_RE } from "./targets.js";
+import { type CentralTarget, parseRepoSlug } from "./targets.js";
 
 const YAML_EXTENSIONS = new Set([".yml", ".yaml"]);
 
@@ -29,7 +29,8 @@ export function resolveCentralTargets(
   const errors: CentralFileProblem[] = [];
   const seen = new Map<SlugKey, string>();
   const addTarget = (slug: string, filePath: string): void => {
-    if (!SLUG_RE.test(slug)) {
+    const parsed = parseRepoSlug(slug);
+    if (parsed.isErr()) {
       errors.push({ kind: "not-a-slug", filePath, slug });
       return;
     }
@@ -40,7 +41,7 @@ export function resolveCentralTargets(
       return;
     }
     seen.set(key, filePath);
-    targets.push({ slug, source: "central", origin: filePath, filePath });
+    targets.push({ repo: parsed.value, source: "central", origin: filePath, filePath });
   };
 
   const scanOwnerDir = (dirPath: string, owner: string): void => {

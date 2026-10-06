@@ -13,7 +13,7 @@ import {
   VISIBILITY_FILTERS,
 } from "../discovery/discover.js";
 import { compileExcludePattern, type ExcludePattern } from "../discovery/exclude-pattern.js";
-import { LIST_SEPARATOR } from "../discovery/repos-input.js";
+import { splitList } from "../discovery/repos-input.js";
 import { parseRepoSlug, type RepoRef } from "../discovery/targets.js";
 import { UNDECLARED_POLICIES } from "../engine/layers.js";
 import { SectionSelection } from "../engine/section-selection.js";
@@ -78,12 +78,6 @@ export function readUndeclared(input: Inputs): Result<UndeclaredPolicy | undefin
   return readEnum(input, "undeclared", UNDECLARED_POLICIES, undefined, "undeclared policy");
 }
 
-function splitList(value: string): string[] {
-  return value
-    .split(LIST_SEPARATOR)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 function readSectionSelection(input: Inputs): Result<SectionSelection, Problem> {
   const sectionInputs = ["required-sections", "sections"] as const;
   const names = sectionInputs.map((name) => ({

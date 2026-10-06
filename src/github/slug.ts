@@ -4,6 +4,12 @@
  * identities (collaborator logins, environment names) fold through that section's branded key.
  */
 
+/**
+ * One owner or name, as regex source. Permissive on purpose: parseRepoSlug adds the "." and ".." refusal on top, while
+ * trace redaction must still recognize the path a buggy caller built from such a slug.
+ */
+export const SLUG_SEGMENT = String.raw`[\w.-]+`;
+
 declare const repoSlugKey: unique symbol;
 export type SlugKey = string & { readonly [repoSlugKey]: true };
 
