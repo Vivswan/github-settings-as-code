@@ -108,7 +108,7 @@ const InputsSchema = z
     private_report: z.enum(["none", "issue", "issue-on-failure", "artifact"]).optional(),
     /**
      * The age recipient the `artifact` channel encrypts the report to. A config-rejection scenario
-     * sets a malformed value on purpose; a delivery scenario sets ARTIFACT_TEST_RECIPIENT (generators.ts).
+     * sets a malformed value on purpose; a delivery scenario sets ARTIFACT_TEST_RECIPIENT (generators/settings.ts).
      */
     report_public_key: z.string().optional(),
   })

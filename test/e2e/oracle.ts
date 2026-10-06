@@ -37,13 +37,12 @@ import {
   type UndeclaredPolicyWord,
 } from "./gen-support.js";
 import {
-  displayKeyOf,
   type MergeLayer,
   type MergeScenarioMeta,
-  type MultiScenarioMeta,
-  type ScenarioMeta,
   standaloneViewOf,
-} from "./generators.js";
+} from "./generators/merge-scenario.js";
+import { displayKeyOf, type MultiScenarioMeta } from "./generators/multi-scenario.js";
+import type { ScenarioMeta } from "./generators/single-scenario.js";
 import { GRADE_RANK, type MaskGrade, type MaskKey } from "./schema.js";
 
 /** A section outcome the step summary can report. */

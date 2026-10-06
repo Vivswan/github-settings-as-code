@@ -23,40 +23,47 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
 } from "./gen-support.js";
+import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
 import {
-  canariesOf,
-  displayKeyOf,
   type FaultableSection,
-  genDiscoveryScenario,
+  SECTION_FAULT_FIXTURE,
+  SECTION_PRIMARY_READ,
+  UNFAULTABLE_APPLY_SETTINGS,
+  UNFAULTABLE_SECTIONS,
+  type UnfaultableSection,
+  unfaultableReadKeys,
+} from "./generators/fault-targets.js";
+import {
   genInvalidSettings,
-  genLiveWitness,
-  genMergeScenario,
-  genMultiScenario,
-  genScenario,
-  genSettings,
   INVALID_SETTINGS_CASES,
+  NON_MAPPING_YAML,
+  UNPARSEABLE_YAML,
+} from "./generators/invalid-settings.js";
+import {
+  genMergeScenario,
   MERGE_REFUSAL_KINDS,
   type MergeForce,
   type MergeScenarioMeta,
+} from "./generators/merge-scenario.js";
+import {
+  canariesOf,
+  displayKeyOf,
+  genMultiScenario,
   type MultiRepoMeta,
   type MultiScenarioMeta,
-  NON_MAPPING_YAML,
-  presenceLiveState,
   redactionPlaceholder,
-  type ScenarioMeta,
-  SECTION_FAULT_FIXTURE,
-  SECTION_PRIMARY_READ,
+} from "./generators/multi-scenario.js";
+import {
+  genLiveWitness,
+  genSettings,
+  presenceLiveState,
   scenarioSecretEnv,
-  UNFAULTABLE_APPLY_SETTINGS,
-  UNFAULTABLE_SECTIONS,
-  UNPARSEABLE_YAML,
-  type UnfaultableSection,
-  unfaultableReadKeys,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
   type WitnessSection,
-} from "./generators.js";
+} from "./generators/settings.js";
+import { genScenario, type ScenarioMeta } from "./generators/single-scenario.js";
 import { deliveredIssueBody } from "./issue-report-assert.js";
 import type { LoggedRequest } from "./mock/contract.js";
 import {
@@ -1246,7 +1253,7 @@ async function unfaultableSectionRun(
   if (readKeys.length === 0 && !NO_READ_SECTIONS.has(section)) {
     problems.push(
       `no GET endpoints derived for "${section}" - the unfaultable battery run is vacuous; fix ` +
-        `the endpoint keying in unfaultableReadKeys (generators.ts), or if the section genuinely ` +
+        `the endpoint keying in unfaultableReadKeys (generators/fault-targets.ts), or if the section genuinely ` +
         `declares no GET it should already appear in NO_READ_SECTIONS (oracle.ts)`,
     );
     return iterationResult(problems, { sections: [section] }, `[unfaultable ${section}] `);

@@ -13,7 +13,9 @@ import {
   REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
-import type { MergeLayer, MultiRepoTarget, MultiScenarioMeta, ScenarioMeta } from "./generators.js";
+import type { MergeLayer } from "./generators/merge-scenario.js";
+import type { MultiRepoTarget, MultiScenarioMeta } from "./generators/multi-scenario.js";
+import type { ScenarioMeta } from "./generators/single-scenario.js";
 import {
   type AbortVerdict,
   effectiveGrades,

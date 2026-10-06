@@ -17,29 +17,31 @@ import {
   REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
+import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
+import { SECTION_PRIMARY_READ } from "./generators/fault-targets.js";
 import {
-  ARTIFACT_TEST_RECIPIENT,
-  canariesOf,
-  genDiscoveryScenario,
   genInvalidSettings,
-  genLiveWitness,
-  genMergeScenario,
-  genMultiScenario,
-  genScenario,
-  genSettings,
   INVALID_SETTINGS_CASES,
+  NON_MAPPING_YAML,
+  UNPARSEABLE_YAML,
+} from "./generators/invalid-settings.js";
+import {
+  genMergeScenario,
   MERGE_FEATURES,
   MERGE_REFUSAL_KINDS,
   mergeFeaturesOf,
-  NON_MAPPING_YAML,
-  ORG_GATED_SECTIONS,
-  SECTION_PRIMARY_READ,
   standaloneViewOf,
-  UNPARSEABLE_YAML,
+} from "./generators/merge-scenario.js";
+import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./generators/multi-scenario.js";
+import {
+  ARTIFACT_TEST_RECIPIENT,
+  genLiveWitness,
+  genSettings,
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
-} from "./generators.js";
+} from "./generators/settings.js";
+import { genScenario } from "./generators/single-scenario.js";
 import { grantablePermission } from "./mock/state.js";
 import { predictDiscovery, predictMerge } from "./oracle.js";
 import { Rng } from "./prng.js";

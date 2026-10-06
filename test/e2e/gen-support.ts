@@ -1,6 +1,6 @@
 /**
  * The leaf seam shared by the per-section generator fragments (test/sections/<key>/generators.ts) and their aggregator
- * (test/e2e/generators.ts). Like mock/support.ts, it imports no fragment and no aggregator, so the fragments depend on it without a cycle.
+ * (test/e2e/generators/settings.ts). Like mock/support.ts, it imports no fragment and no aggregator, so the fragments depend on it without a cycle.
  */
 
 import type { z } from "zod";
@@ -49,7 +49,7 @@ export function entriesOf(value: unknown): Json[] {
 
 /**
  * Most draws stay plain: on the mock's empty live baselines an explicit policy changes no outcome, and the curated
- * *-undeclared-* scenarios pin delete/keep. WITNESS_SECTIONS (generators.ts) never call this: a `keep` over an
+ * *-undeclared-* scenarios pin delete/keep. WITNESS_SECTIONS (generators/settings.ts) never call this: a `keep` over an
  * extra-undeclared witness would flip the outcome the oracle predicts from the witness alone.
  */
 export function maybeWrapUndeclared(rng: Rng, entries: Json[]): EntriesForm {
@@ -113,7 +113,7 @@ export function uniqueBy(
 }
 
 /**
- * The ONE pool secret references draw from; scenarioSecretEnv() (test/e2e/generators.ts) builds the child env from the
+ * The ONE pool secret references draw from; scenarioSecretEnv() (test/e2e/generators/settings.ts) builds the child env from the
  * same map, so a reference never names a variable the env lacks. Distinctive values, so leak checks can hunt them.
  */
 export const E2E_SECRET_ENV = {

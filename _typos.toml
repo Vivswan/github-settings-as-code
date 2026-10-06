@@ -48,9 +48,10 @@ alikes = "alikes"
 # matches type globs against the file NAME, never the path, hence these shapes.
 [type.fixtures]
 extend-glob = [
-  "*.test.ts",       # unit tests under test/
-  "generators.ts",   # the fuzz generators (test/e2e and the per-section fragments)
-  "*-rejected.yml",  # e2e scenarios whose input is rejected on purpose
+  "*.test.ts",            # unit tests under test/
+  "generators.ts",        # the per-section fuzz fragments, test/sections/*/generators.ts
+  "invalid-settings.ts",  # the e2e catalog of settings files rejected on purpose
+  "*-rejected.yml",       # e2e scenarios whose input is rejected on purpose
 ]
 
 [type.fixtures.extend-words]

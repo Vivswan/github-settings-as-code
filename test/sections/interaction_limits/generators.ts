@@ -1,5 +1,5 @@
 /**
- * The interaction_limits fuzz generator fragment, aggregated by test/e2e/generators.ts.
+ * The interaction_limits fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
 import type { Json } from "../../e2e/gen-support.js";
