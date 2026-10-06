@@ -144,14 +144,11 @@ describe("probe-schema", () => {
 
 const TYPES_ADD = "add --no-save --ignore-scripts @octokit/types@latest";
 const TYPECHECK = "run typecheck --pretty false";
-const TRIPPED_LOG = [
-  "src/upstream-gaps/b.ts(12,3): error TS2344: Type 'X' does not satisfy the constraint 'never'.",
-  "src/upstream-gaps/a.ts(4,1): error TS2344: Type 'Y' does not satisfy the constraint 'never'.",
-  "src/upstream-gaps/a.ts(9,1): error TS2344: Type 'Z' does not satisfy the constraint 'never'.",
-  "src/sections/labels/plan.ts(3,3): error TS2344: Type 'W' does not satisfy the constraint 'never'.",
-  "src/upstream-gaps/c.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.",
-  "",
-].join("\n");
+const TRIPWIRE_HINT =
+  "::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:";
+const breakage = (count: string) =>
+  `::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires (${count}); ` +
+  "a types major may have broken the build (see log above)";
 
 describe("probe-types", () => {
   test("a clean typecheck passes, saying so", () =>
@@ -168,35 +165,56 @@ describe("probe-types", () => {
       });
     }));
 
-  test("TS2344 under src/upstream-gaps/ is the tripwire branch: the log is echoed, then the files, sorted and deduplicated", () =>
+  // The graduate script's own reading of the log: its gap files are the tripwires, and every other diagnostic is
+  // breakage it refuses to run over.
+  test.each<[label: string, stdout: string[], report: string[]]>([
+    [
+      "tripped gap files are listed sorted and deduplicated; a TS2344 elsewhere and another code inside a gap file are breakage",
+      [
+        "src/upstream-gaps/b.ts(12,3): error TS2344: Type 'X' does not satisfy the constraint 'never'.",
+        "src/upstream-gaps/a.ts(4,1): error TS2344: Type 'Y' does not satisfy the constraint 'never'.",
+        "src/upstream-gaps/a.ts(9,1): error TS2344: Type 'Z' does not satisfy the constraint 'never'.",
+        "src/sections/labels/plan.ts(3,3): error TS2344: Type 'W' does not satisfy the constraint 'never'.",
+        "src/upstream-gaps/c.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.",
+      ],
+      [
+        TRIPWIRE_HINT,
+        "src/upstream-gaps/a.ts",
+        "src/upstream-gaps/b.ts",
+        breakage("2 diagnostics"),
+      ],
+    ],
+    [
+      "a TS2344 in gap.ts is the machinery breaking, not a gap to graduate, and a chained error under node_modules is one diagnostic",
+      [
+        "src/upstream-gaps/gap.ts(40,5): error TS2344: Type 'string' does not satisfy the constraint 'never'.",
+        "node_modules/@octokit/types/dist-types/generated/Endpoints.d.ts(8,3): error TS2322: Type 'A' is not assignable to type 'B'.",
+        "  Types of property 'parameters' are incompatible.",
+      ],
+      [breakage("2 diagnostics")],
+    ],
+    [
+      "a failure outside src/upstream-gaps/ is breakage",
+      ["src/main.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'."],
+      [breakage("1 diagnostic")],
+    ],
+    [
+      "a failure that prints no located diagnostic is reported as unreadable, not as breakage",
+      ["error TS5112: Option 'project' cannot be mixed with source files on a command line."],
+      [
+        "::error::typecheck against @octokit/types@latest failed without a diagnostic this probe can read (see log above)",
+      ],
+    ],
+  ])("%s", (_label, stdout, report) =>
     withTempDir("nightly-steps-", (dir) => {
-      const result = probe(
-        dir,
-        {
-          typecheck: {
-            stdout: TRIPPED_LOG,
-            stderr: 'error: script "typecheck" exited with code 2\n',
-            status: 2,
-          },
-        },
-        "probe-types",
-      );
+      const log = `${stdout.join("\n")}\n`;
+      const stderr = 'error: script "typecheck" exited with code 2\n';
+      const result = probe(dir, { typecheck: { stdout: log, stderr, status: 2 } }, "probe-types");
       expect(result).toMatchObject({
         status: 1,
-        stdout: `${TRIPPED_LOG}error: script "typecheck" exited with code 2\n::error::@octokit/types@latest fires upstream-gap tripwires; run bun .github/scripts/graduate-upstream-gaps.ts for these files:\nsrc/upstream-gaps/a.ts\nsrc/upstream-gaps/b.ts\n`,
+        stdout: `${log}${stderr}${report.join("\n")}\n`,
         calls: [TYPES_ADD, TYPECHECK],
       });
-    }));
-
-  test("a typecheck failure with no tripwire is reported as breakage", () =>
-    withTempDir("nightly-steps-", (dir) => {
-      const log =
-        "src/main.ts(1,1): error TS2322: Type 'string' is not assignable to type 'number'.\n";
-      const result = probe(dir, { typecheck: { stdout: log, status: 2 } }, "probe-types");
-      expect(result).toMatchObject({
-        status: 1,
-        stdout: `${log}::error::typecheck against @octokit/types@latest failed outside the upstream-gap tripwires; a types major may have broken the build (see log above)\n`,
-        calls: [TYPES_ADD, TYPECHECK],
-      });
-    }));
+    }),
+  );
 });

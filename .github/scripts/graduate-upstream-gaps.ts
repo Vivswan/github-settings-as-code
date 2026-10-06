@@ -15,60 +15,16 @@ import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { countNoun } from "../../src/text.js";
 import { isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
+import { type Diagnostic, parseDiagnostics } from "./lib/tsc-diagnostics.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
-
-/** One parsed `file(line,col): error TSnnnn: message` compiler line. */
-export interface Diagnostic {
-  file: string;
-  line: number;
-  column: number;
-  code: number;
-  message: string;
-}
 
 export interface GraduationPlan {
   /** Gap-file paths (repo-relative, deduplicated, sorted) with a TS2344. */
   gapFiles: string[];
   /** Diagnostics the script must not fix: wrong code, or outside a gap file. */
   foreign: Diagnostic[];
-}
-
-/** Chained diagnostics continue on indented lines, which belong to the diagnostic above them. Lines that are neither
- * (a crash trace, a config error without a location) come back in `unparsed`, so the caller can refuse to act. */
-export function parseDiagnostics(output: string): {
-  diagnostics: Diagnostic[];
-  unparsed: string[];
-} {
-  const diagnostics: Diagnostic[] = [];
-  const unparsed: string[] = [];
-  let current: Diagnostic | undefined;
-  for (const raw of output.split("\n")) {
-    const line = raw.replace(/\r$/, "");
-    if (line.trim() === "") {
-      continue;
-    }
-    const match = /^(.+)\((\d+),(\d+)\): error TS(\d+): (.*)$/.exec(line);
-    if (match) {
-      current = {
-        file: match[1] as string,
-        line: Number(match[2]),
-        column: Number(match[3]),
-        code: Number(match[4]),
-        message: match[5] as string,
-      };
-      diagnostics.push(current);
-      continue;
-    }
-    if (/^\s/.test(line) && current) {
-      current.message += `\n${line}`;
-      continue;
-    }
-    current = undefined;
-    unparsed.push(line);
-  }
-  return { diagnostics, unparsed };
 }
 
 export function isGapFile(file: string): boolean {
