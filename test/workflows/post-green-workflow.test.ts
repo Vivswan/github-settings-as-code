@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SOURCE_OUTPUT } from "../../.github/scripts/release-pipeline.js";
+import { SOURCE_OUTPUT } from "../../.github/scripts/release-pipeline/draft.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";

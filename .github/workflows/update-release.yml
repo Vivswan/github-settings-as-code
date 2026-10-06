@@ -1,7 +1,7 @@
 # The update stage of the release pipeline: repo-owned, called by the managed ci.yml between release-please
 # cutting the DRAFT release and the attested publish. This hook, not release-please, mints the tag: main is
 # source-only, so every consumable ref must point at a packaged commit, the merge commit's child carrying its build
-# (the topology is in .github/scripts/release-pipeline.ts; release-please-config.json sets `draft` and pins
+# (the topology is in .github/scripts/release-pipeline/tags.ts; release-please-config.json sets `draft` and pins
 # `force-tag-creation` off).
 #
 #   resolve the merge commit from the draft's target commitish -> build the bundle, the schema, and the library
