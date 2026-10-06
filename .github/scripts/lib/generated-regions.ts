@@ -4,6 +4,9 @@
 // trip over its body that GeneratedRegion.of() is the one way to declare.
 
 import { extname } from "node:path";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { gfmTable } from "micromark-extension-gfm-table";
 import { err, ok, type Result } from "neverthrow";
 import { Parser } from "yaml";
 
@@ -132,9 +135,9 @@ export function replaceRegion(
 }
 
 /**
- * Where a region belongs in its file. Markdown regions sit under a heading (the nearest ATX
- * heading line above both markers, hashes included) or close the file; YAML regions sit directly
- * under a top-level mapping key and end its mapping.
+ * Where a region belongs in its file. Markdown regions sit under a heading (the nearest heading
+ * above both markers, as its source reads, hashes included) or close the file; YAML regions sit
+ * directly under a top-level mapping key and end its mapping.
  */
 export type RegionPlacement =
   | { readonly kind: "under-heading"; readonly heading: string }
@@ -243,102 +246,65 @@ export function blockLine(body: string): Result<string, string> {
   );
 }
 
+type MarkdownTree = ReturnType<typeof fromMarkdown>;
+type MarkdownNode = MarkdownTree | MarkdownTree["children"][number];
+
 interface MarkdownScan {
-  /** Fenced code blocks, an unclosed one running to the end of the text. */
-  readonly fenced: readonly MarkerSpan[];
-  /** Raw HTML blocks, from the opening tag's line to the end of the line closing it (or of the text). */
-  readonly raw: readonly MarkerSpan[];
-  /** Blockquoted lines, whole. */
+  /** Code blocks, fenced or indented, as CommonMark closes them: an unclosed fence runs to the end of its container. */
+  readonly code: readonly MarkerSpan[];
+  /** Inline code spans, backticks included. */
+  readonly codeSpans: readonly MarkerSpan[];
+  /** HTML nodes, block or inline; a block runs to the line its kind ends on, or the end of its container. */
+  readonly html: readonly MarkerSpan[];
+  /** Blockquotes, whole. */
   readonly quoted: readonly MarkerSpan[];
-  /** ATX headings outside all three, each as its trimmed line. */
+  /** Headings outside every blockquote, each as its trimmed source. */
   readonly headings: ReadonlyArray<{ readonly offset: number; readonly text: string }>;
 }
 
-/** The container a line sits in: up to `limit` blockquote markers stripped, and the content after them. */
-function unquoted(line: string, limit: number): { depth: number; body: string } {
-  let depth = 0;
-  let body = line;
-  for (
-    let marker = body.match(/^ {0,3}> ?/);
-    marker !== null && depth < limit;
-    marker = body.match(/^ {0,3}> ?/)
-  ) {
-    depth += 1;
-    body = body.slice(marker[0].length);
+function nodeSpan(node: MarkdownNode): MarkerSpan {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) {
+    throw new Error(`BUG: mdast-util-from-markdown left a ${node.type} node without a position`);
   }
-  return { depth, body };
+  return [start, end];
 }
 
-/** A fenced code block or raw HTML block still open, with the blockquote depth it opened at. */
-type OpenBlock =
-  | { kind: "fence"; start: number; depth: number; char: string; length: number }
-  | { kind: "raw"; start: number; depth: number };
-
-const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-const HEADING_LINE = /^ {0,3}#{1,6}(?:[ \t]|$)/;
-// A raw HTML block (CommonMark's first kind) opens only at block position, on one of four tags
-// followed by a delimiter, and ends on a line holding any of their closing tags.
-const RAW_OPEN = /^ {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)/i;
-const RAW_CLOSE = /<\/(?:pre|script|style|textarea)>/i;
-
-// One pass over CommonMark's fence, raw-block, and blockquote rules: a block opens and closes only
-// by its own rule at its own blockquote depth, and everything inside it (fence-, tag-, and
-// heading-shaped lines) is content. The test suite names each rule.
+// The parser applies CommonMark's container rules, so a fence-, tag-, or heading-shaped line inside a
+// code block, an HTML block, or a deeper blockquote is content, never a block of its own. Tables are
+// parsed as GitHub does: a table ends at the next block, so an indented line after one is code.
 function scanMarkdown(text: string): MarkdownScan {
-  const fenced: MarkerSpan[] = [];
-  const raw: MarkerSpan[] = [];
+  const code: MarkerSpan[] = [];
+  const codeSpans: MarkerSpan[] = [];
+  const html: MarkerSpan[] = [];
   const quoted: MarkerSpan[] = [];
   const headings: Array<{ offset: number; text: string }> = [];
-  let open: OpenBlock | undefined;
-  let offset = 0;
-  const close = (block: OpenBlock, stop: number): void => {
-    (block.kind === "fence" ? fenced : raw).push([block.start, stop]);
-    open = undefined;
+  const walk = (node: MarkdownNode, inQuote: boolean): void => {
+    if (node.type === "code") {
+      code.push(nodeSpan(node));
+    } else if (node.type === "inlineCode") {
+      codeSpans.push(nodeSpan(node));
+    } else if (node.type === "html") {
+      html.push(nodeSpan(node));
+    } else if (node.type === "blockquote") {
+      quoted.push(nodeSpan(node));
+    } else if (node.type === "heading" && !inQuote) {
+      const [start, end] = nodeSpan(node);
+      headings.push({ offset: start, text: text.slice(start, end).trim() });
+    }
+    if ("children" in node) {
+      for (const child of node.children) {
+        walk(child, inQuote || node.type === "blockquote");
+      }
+    }
   };
-  for (const line of text.split("\n")) {
-    const lineEnd = offset + line.length;
-    let { depth, body } = unquoted(line, open?.depth ?? Infinity);
-    if (open !== undefined && depth < open.depth) {
-      close(open, offset - 1);
-      ({ depth, body } = unquoted(line, Infinity));
-    }
-    if (depth > 0) {
-      quoted.push([offset, lineEnd]);
-    }
-    if (open?.kind === "raw") {
-      if (RAW_CLOSE.test(body)) {
-        close(open, lineEnd);
-      }
-    } else if (open?.kind === "fence") {
-      const run = body.match(FENCE_LINE);
-      const marks = run?.[1] ?? "";
-      if (
-        marks.charAt(0) === open.char &&
-        marks.length >= open.length &&
-        (run?.[2] ?? "").trim() === ""
-      ) {
-        close(open, lineEnd);
-      }
-    } else {
-      const run = body.match(FENCE_LINE);
-      const marks = run?.[1] ?? "";
-      if (run !== null && !(marks.startsWith("`") && (run[2] ?? "").includes("`"))) {
-        open = { kind: "fence", start: offset, depth, char: marks.charAt(0), length: marks.length };
-      } else if (depth === 0 && HEADING_LINE.test(body)) {
-        headings.push({ offset, text: body.trim() });
-      } else if (RAW_OPEN.test(body)) {
-        open = { kind: "raw", start: offset, depth };
-        if (RAW_CLOSE.test(body)) {
-          close(open, lineEnd);
-        }
-      }
-    }
-    offset = lineEnd + 1;
-  }
-  if (open !== undefined) {
-    close(open, text.length);
-  }
-  return { fenced, raw, quoted, headings };
+  const tree = fromMarkdown(text, {
+    extensions: [gfmTable()],
+    mdastExtensions: [gfmTableFromMarkdown()],
+  });
+  walk(tree, false);
+  return { code, codeSpans, html, quoted, headings };
 }
 
 function assertMarkdownPlacement(
@@ -350,27 +316,25 @@ function assertMarkdownPlacement(
   path: string,
 ): void {
   const scan = scanMarkdown(text);
-  const inside = (spans: readonly MarkerSpan[], at: number): boolean =>
-    spans.some(([start, stop]) => start <= at && at < stop);
-  for (const [marker, at] of [
-    ["BEGIN", begin[0]],
-    ["END", end[0]],
-  ] as const) {
-    // Four columns of indentation (a tab counts as four) open an indented code block.
-    const line = unquoted(text.slice(text.lastIndexOf("\n", at - 1) + 1, at), Infinity).body;
-    const indent = line.match(/^[ \t]*/)?.[0] ?? "";
-    if (indent.includes("\t") || indent.length >= 4) {
-      throw new Error(
-        `the ${name} region's ${marker} marker sits on a line indented as code in ${path}`,
-      );
+  const enclosing = (spans: readonly MarkerSpan[], at: number): MarkerSpan | undefined =>
+    spans.find(([start, stop]) => start <= at && at < stop);
+  /** Whether the marker at `at` opens `node`, nothing but indentation before it. */
+  const opens = (node: MarkerSpan, at: number): boolean =>
+    node[0] <= at && text.slice(node[0], at).trim() === "";
+  for (const at of [begin[0], end[0]]) {
+    if (enclosing(scan.code, at) !== undefined) {
+      throw new Error(`the ${name} region sits inside a code block in ${path}`);
     }
-    if (inside(scan.fenced, at)) {
-      throw new Error(`the ${name} region sits inside a fenced code block in ${path}`);
+    if (enclosing(scan.codeSpans, at) !== undefined) {
+      throw new Error(`the ${name} region sits inside a code span in ${path}`);
     }
-    if (inside(scan.raw, at)) {
+    // A marker is its own HTML node (a comment block, or inline HTML); inside any other node it is
+    // that node's content. Two markers on one line share the BEGIN marker's comment block.
+    const html = enclosing(scan.html, at);
+    if (html !== undefined && !opens(html, at) && !opens(html, begin[0])) {
       throw new Error(`the ${name} region sits inside a raw HTML block in ${path}`);
     }
-    if (inside(scan.quoted, at)) {
+    if (enclosing(scan.quoted, at) !== undefined) {
       throw new Error(`the ${name} region sits inside a blockquote in ${path}`);
     }
   }
