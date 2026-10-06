@@ -17,12 +17,6 @@ import { MAX_RETRIES } from "../../src/github/api.js";
 import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
 import { endpointPath } from "../../src/sections/contract/endpoints.js";
 import { sectionModule } from "../../src/sections/registry.js";
-import {
-  LAYERING_DIRECTIVES,
-  type LayeringDirective,
-  type LiveWitness,
-  type LiveWitnessKind,
-} from "./gen-support.js";
 import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
 import {
   type FaultableSection,
@@ -33,6 +27,12 @@ import {
   type UnfaultableSection,
   unfaultableReadKeys,
 } from "./generators/fault-targets.js";
+import {
+  LAYERING_DIRECTIVES,
+  type LayeringDirective,
+  type LiveWitness,
+  type LiveWitnessKind,
+} from "./generators/gen-support.js";
 import {
   genInvalidSettings,
   INVALID_SETTINGS_CASES,
@@ -54,6 +54,17 @@ import {
   redactionPlaceholder,
 } from "./generators/multi-scenario.js";
 import {
+  foldRepoResults,
+  foldSectionOutcomes,
+  judgePreflightAbort,
+  NO_READ_SECTIONS,
+  predictDiscovery,
+  predictMerge,
+  predictMulti,
+  predictOutcomes,
+} from "./generators/oracle.js";
+import { Rng } from "./generators/prng.js";
+import {
   genLiveWitness,
   genSettings,
   presenceLiveState,
@@ -64,19 +75,8 @@ import {
   type WitnessSection,
 } from "./generators/settings.js";
 import { genScenario, type ScenarioMeta } from "./generators/single-scenario.js";
-import { deliveredIssueBody } from "./issue-report-assert.js";
 import type { LoggedRequest } from "./mock/contract.js";
-import {
-  foldRepoResults,
-  foldSectionOutcomes,
-  judgePreflightAbort,
-  NO_READ_SECTIONS,
-  predictDiscovery,
-  predictMerge,
-  predictMulti,
-  predictOutcomes,
-} from "./oracle.js";
-import { Rng } from "./prng.js";
+import { deliveredIssueBody } from "./runner/issue-report-assert.js";
 import {
   checkLeaks,
   failureArtifacts,
@@ -87,7 +87,7 @@ import {
   setReplay,
   stripDebugLines,
   stripMaskLines,
-} from "./runner.js";
+} from "./runner/runner.js";
 import type { Scenario } from "./schema.js";
 
 const FAILURE_CAP = 5;

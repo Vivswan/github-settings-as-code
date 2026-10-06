@@ -11,8 +11,8 @@ import {
   type LiveWitnessKind,
   lensWitness,
   uniqueBy,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 /**
  * Each title owns one blob, DISTINCT from the others (GitHub rejects a reused public key with a 422, and the section

@@ -3,7 +3,7 @@
 # naming the hook's URL and the secret variable lands in the step summary and
 # the log, and the target is keyed by its slug. That is the needle the redacted
 # scenario proves absent, shown live on the surface its sweep watches; the
-# sweep's own detection of a planted leak is pinned in test/e2e/runner.test.ts.
+# sweep's own detection of a planted leak is pinned in test/e2e/runner/runner.test.ts.
 # The env value (the resolved secret) still reaches no surface: the
 # every-scenario sweep hunts it here too, so `show` reveals the target, never
 # a secret.

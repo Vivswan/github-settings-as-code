@@ -1,9 +1,9 @@
 import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
 import { genInvitationsState } from "../../sections/collaborators/generators.js";
-import { entriesOf, type Json, type LiveWitnessKind } from "../gen-support.js";
 import type { LiveState } from "../mock/state.js";
-import type { Rng } from "../prng.js";
 import type { DenialStyle, MaskGrade, MaskKey, OwnerKind, Scenario } from "../schema.js";
+import { entriesOf, type Json, type LiveWitnessKind } from "./gen-support.js";
+import type { Rng } from "./prng.js";
 import {
   genLiveWitness,
   genSettings,

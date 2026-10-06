@@ -10,8 +10,8 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   lensWitness,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 // No pool prefix begins another: a suffixed collision ("TICKET-" and "TICKET--1") would be the
 // pair the section refuses before its first create.

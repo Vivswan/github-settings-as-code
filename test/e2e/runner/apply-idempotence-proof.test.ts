@@ -1,8 +1,9 @@
 /** Each exported classifier is tested directly so the corresponding e2e assertion is provably able to fire. */
 
 import { describe, expect, test } from "bun:test";
-import { endpointMethod } from "../../src/sections/contract/endpoints.js";
-import { allEndpoints, type SectionEndpointKey } from "../../src/sections/registry.js";
+import { endpointMethod } from "../../../src/sections/contract/endpoints.js";
+import { allEndpoints, type SectionEndpointKey } from "../../../src/sections/registry.js";
+import type { LoggedRequest } from "../mock/contract.js";
 import { ALWAYS_REWRITE_ENDPOINT_FAMILIES, recurringEndpointKeys } from "./apply-idempotence.js";
 import {
   changedFamilies,
@@ -12,7 +13,6 @@ import {
   secondApplyWriteFailures,
   unwitnessedExemptEndpoints,
 } from "./apply-idempotence-proof.js";
-import type { LoggedRequest } from "./mock/contract.js";
 
 const write = (method: string, pathname: string): LoggedRequest => ({
   method,

@@ -2,9 +2,13 @@
  * The custom_properties fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import { type EntriesForm, type Json, maybeWrapUndeclared } from "../../e2e/gen-support.js";
+import {
+  type EntriesForm,
+  type Json,
+  maybeWrapUndeclared,
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 import { CUSTOM_PROPERTY_DEFINITIONS } from "../../e2e/mock/state.js";
-import type { Rng } from "../../e2e/prng.js";
 
 /**
  * Values are drawn ONLY from CUSTOM_PROPERTY_DEFINITIONS (the fixture the mock's PATCH handler

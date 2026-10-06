@@ -2,13 +2,13 @@
  * The branches fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import type { Json } from "../../e2e/gen-support.js";
+import type { Json } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 import {
   BYPASS_ACTOR_TEAMS,
   BYPASS_ACTOR_USERS,
   PROTECTION_RULE_APPS,
 } from "../../e2e/mock/state.js";
-import type { Rng } from "../../e2e/prng.js";
 
 const PROTECTION_CORE_KEYS = [
   "required_status_checks",

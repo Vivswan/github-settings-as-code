@@ -8,8 +8,8 @@ import { compileFailure } from "../../../src/sections/secret_scanning_custom_pat
 import { MAX_VARIABLE_VALUE_BYTES } from "../../../src/sections/shared/schema-helpers.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { PULL_REQUEST_PARAMETERS } from "../../sections/rulesets/generators.js";
-import { type EntriesForm, entriesOf, type Json, UNDECLARED_KEY } from "../gen-support.js";
-import type { Rng } from "../prng.js";
+import { type EntriesForm, entriesOf, type Json, UNDECLARED_KEY } from "./gen-support.js";
+import type { Rng } from "./prng.js";
 import { genSettings, SECRET_LIST_SECTIONS } from "./settings.js";
 
 /**

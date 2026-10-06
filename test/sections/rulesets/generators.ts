@@ -2,8 +2,8 @@
  * The rulesets fuzz generator fragment, aggregated by test/e2e/generators/settings.ts.
  */
 
-import { type EntriesForm, maybeWrapUndeclared } from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+import { type EntriesForm, maybeWrapUndeclared } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 /**
  * The five parameters the spec requires of a pull_request rule, so a drawn rule parses and passes the mock's

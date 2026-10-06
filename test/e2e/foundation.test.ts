@@ -16,7 +16,7 @@ import {
   TOKEN_USER_LOGIN,
   VIOLATION_PREFIX,
 } from "./constants.js";
-import { mulberry32, Rng } from "./prng.js";
+import { mulberry32, Rng } from "./generators/prng.js";
 import {
   collectYmlFiles,
   loadScenarios,

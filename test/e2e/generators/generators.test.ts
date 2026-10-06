@@ -2,13 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { describeRemoval, standaloneView } from "../../src/engine/layers.js";
-import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
-import { SectionSelection } from "../../src/engine/section-selection.js";
-import { silentIo } from "../../src/io.js";
-import { describeProblem } from "../../src/problem.js";
-import { SECTION_KEYS, type SectionKey } from "../../src/schema.js";
-import { allEndpoints, sectionShape } from "../../src/sections/registry.js";
+import { describeRemoval, standaloneView } from "../../../src/engine/layers.js";
+import { validateSettingsDoc } from "../../../src/engine/orchestrate.js";
+import { SectionSelection } from "../../../src/engine/section-selection.js";
+import { silentIo } from "../../../src/io.js";
+import { describeProblem } from "../../../src/problem.js";
+import { SECTION_KEYS, type SectionKey } from "../../../src/schema.js";
+import { allEndpoints, sectionShape } from "../../../src/sections/registry.js";
+import { grantablePermission } from "../mock/state.js";
+import { collectYmlFiles, MASK_KEYS, parseScenario } from "../schema.js";
+import { genDiscoveryScenario } from "./discovery-scenario.js";
+import { SECTION_PRIMARY_READ } from "./fault-targets.js";
 import {
   entriesOf,
   type Json,
@@ -17,22 +21,22 @@ import {
   REMOVE_KEY,
   UNDECLARED_KEY,
 } from "./gen-support.js";
-import { genDiscoveryScenario } from "./generators/discovery-scenario.js";
-import { SECTION_PRIMARY_READ } from "./generators/fault-targets.js";
 import {
   genInvalidSettings,
   INVALID_SETTINGS_CASES,
   NON_MAPPING_YAML,
   UNPARSEABLE_YAML,
-} from "./generators/invalid-settings.js";
+} from "./invalid-settings.js";
 import {
   genMergeScenario,
   MERGE_FEATURES,
   MERGE_REFUSAL_KINDS,
   mergeFeaturesOf,
   standaloneViewOf,
-} from "./generators/merge-scenario.js";
-import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./generators/multi-scenario.js";
+} from "./merge-scenario.js";
+import { canariesOf, genMultiScenario, ORG_GATED_SECTIONS } from "./multi-scenario.js";
+import { predictDiscovery, predictMerge } from "./oracle.js";
+import { Rng } from "./prng.js";
 import {
   ARTIFACT_TEST_RECIPIENT,
   genLiveWitness,
@@ -40,12 +44,8 @@ import {
   validateAgainstPublishedSchema,
   WITNESS_KINDS,
   WITNESS_SECTIONS,
-} from "./generators/settings.js";
-import { genScenario } from "./generators/single-scenario.js";
-import { grantablePermission } from "./mock/state.js";
-import { predictDiscovery, predictMerge } from "./oracle.js";
-import { Rng } from "./prng.js";
-import { collectYmlFiles, MASK_KEYS, parseScenario } from "./schema.js";
+} from "./settings.js";
+import { genScenario } from "./single-scenario.js";
 
 describe("three-way drift detection", () => {
   test("every generated section doc passes schema, validateSettingsDoc, and its zod shape", () => {
@@ -1328,7 +1328,7 @@ describe("mergeFeaturesOf (the axes read off a finished stack)", () => {
 describe("merge oracle against the curated merge scenarios", () => {
   // The hand-written scenarios pin what the dialect means; the oracle's own fold must reproduce every pinned document
   // exactly, or the fuzz would be checking the engine against a mirror of itself.
-  const files = collectYmlFiles(join(import.meta.dir, "scenarios")).filter((file) =>
+  const files = collectYmlFiles(join(import.meta.dir, "..", "scenarios")).filter((file) =>
     basename(file).startsWith("render-"),
   );
   // A test.each over an emptied corpus runs nothing; the guard fails the file by name instead.

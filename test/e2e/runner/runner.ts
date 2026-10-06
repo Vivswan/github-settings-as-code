@@ -21,28 +21,28 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { parseRepoSlug } from "../../src/discovery/targets.js";
-import { type OutputName, redactRanges } from "../../src/io.js";
-import { ROOT } from "../root.js";
-import {
-  assertApplyIdempotent,
-  captureRerun,
-  type Invocation,
-  type RerunCapture,
-} from "./apply-idempotence-proof.js";
+import { parseRepoSlug } from "../../../src/discovery/targets.js";
+import { type OutputName, redactRanges } from "../../../src/io.js";
+import { ROOT } from "../../root.js";
 import {
   ARTIFACTS_DIR,
   E2E_TOKEN,
   layerFile,
   ADMIN_SLUG as REPO_SLUG,
   RUNNER_ROOT_FILES,
-} from "./constants.js";
+} from "../constants.js";
+import { type LoggedRequest, renderRequest } from "../mock/contract.js";
+import { isWriteRequest } from "../mock/dispatch.js";
+import { type ServerOptions, startMockServer } from "../mock/server.js";
+import { sharedValidator } from "../openapi/validate.js";
+import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "../schema.js";
+import {
+  assertApplyIdempotent,
+  captureRerun,
+  type Invocation,
+  type RerunCapture,
+} from "./apply-idempotence-proof.js";
 import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
-import { type LoggedRequest, renderRequest } from "./mock/contract.js";
-import { isWriteRequest } from "./mock/dispatch.js";
-import { type ServerOptions, startMockServer } from "./mock/server.js";
-import { sharedValidator } from "./openapi/validate.js";
-import { collectYmlFiles, type Expect, type Scenario, settingsYamlFor } from "./schema.js";
 
 /**
  * The production bundle command, pinned verbatim so the Bun.build call below cannot drift from it: a
@@ -58,7 +58,7 @@ const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/i
 export function bundleBuildParityFailure(script: string | undefined): string | undefined {
   return script === BUILD_BUNDLE_SCRIPT
     ? undefined
-    : `package.json build:bundle is "${script}", but the e2e harness builds with "${BUILD_BUNDLE_SCRIPT}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner.ts) to keep production parity`;
+    : `package.json build:bundle is "${script}", but the e2e harness builds with "${BUILD_BUNDLE_SCRIPT}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner/runner.ts) to keep production parity`;
 }
 
 export function declaredBuildBundleScript(): string | undefined {

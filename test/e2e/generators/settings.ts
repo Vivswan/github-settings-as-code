@@ -30,6 +30,8 @@ import { genTeams } from "../../sections/teams/generators.js";
 import { genWebhooks } from "../../sections/webhooks/generators.js";
 import { genWorkflows } from "../../sections/workflows/generators.js";
 import { readSettingsSchema } from "../../settings-schema.js";
+import type { LiveState } from "../mock/state.js";
+import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "../schema.js";
 import {
   E2E_SECRET_ENV,
   type EntriesForm,
@@ -38,10 +40,8 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   maybeWrapUndeclared,
-} from "../gen-support.js";
-import type { LiveState } from "../mock/state.js";
-import type { Rng } from "../prng.js";
-import { type MaskGrade, type MaskKey, MASK_KEYS as SCHEMA_MASK_KEYS } from "../schema.js";
+} from "./gen-support.js";
+import type { Rng } from "./prng.js";
 
 /**
  * A fixed age recipient, so scenarios and the fuzzer share one hermetic key; runner.test.ts re-validates it against

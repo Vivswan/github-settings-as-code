@@ -3,8 +3,8 @@
  */
 
 import { TeamConfig } from "../../../src/sections/teams/schema.js";
-import { generatorFromSlice, type Json, uniqueBy } from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+import { generatorFromSlice, type Json, uniqueBy } from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 const genTeam = generatorFromSlice(TeamConfig, {
   fields: {

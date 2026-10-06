@@ -8,6 +8,7 @@ import {
   type SectionKey,
   UNDECLARED_POLICY_SECTIONS,
 } from "../../../src/schema.js";
+import type { Scenario } from "../schema.js";
 import {
   DEFAULT_LAYERING_DIRECTIVE,
   entriesOf,
@@ -19,9 +20,8 @@ import {
   UNDECLARED_KEY,
   UNDECLARED_POLICIES,
   type UndeclaredPolicyWord,
-} from "../gen-support.js";
-import type { Rng } from "../prng.js";
-import type { Scenario } from "../schema.js";
+} from "./gen-support.js";
+import type { Rng } from "./prng.js";
 import { genSettings, validateAgainstPublishedSchema } from "./settings.js";
 import type { GenScenarioOptions } from "./single-scenario.js";
 

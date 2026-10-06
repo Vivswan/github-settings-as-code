@@ -1,14 +1,14 @@
-import { isIssueChannel } from "../../src/report/delivery.js";
+import { isIssueChannel } from "../../../src/report/delivery.js";
+import { type LoggedRequest, renderRequest } from "../mock/contract.js";
+import { endpointForRequest, isWriteRequest, sectionForRequest } from "../mock/dispatch.js";
+import type { MockHandle } from "../mock/server.js";
+import type { MockState } from "../mock/state.js";
+import type { Scenario } from "../schema.js";
 import {
   ALWAYS_REWRITE_STATE_FAMILIES,
   recurrence,
   recurringEndpointKeys,
 } from "./apply-idempotence.js";
-import { type LoggedRequest, renderRequest } from "./mock/contract.js";
-import { endpointForRequest, isWriteRequest, sectionForRequest } from "./mock/dispatch.js";
-import type { MockHandle } from "./mock/server.js";
-import type { MockState } from "./mock/state.js";
-import type { Scenario } from "./schema.js";
 
 export interface Invocation {
   exitCode: number;

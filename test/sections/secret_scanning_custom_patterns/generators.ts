@@ -8,8 +8,8 @@ import {
   generatorFromSlice,
   type Json,
   maybeWrapUndeclared,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 
 const NAMES = ["internal-api-token", "staging-key", "vendor-secret", "license-key"] as const;
 // Every pool value passes the syntax check (generatorFromSlice validates each draw against the slice), and

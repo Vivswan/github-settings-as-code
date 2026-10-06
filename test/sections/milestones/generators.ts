@@ -13,8 +13,8 @@ import {
   type LiveWitness,
   type LiveWitnessKind,
   uniqueBy,
-} from "../../e2e/gen-support.js";
-import type { Rng } from "../../e2e/prng.js";
+} from "../../e2e/generators/gen-support.js";
+import type { Rng } from "../../e2e/generators/prng.js";
 import { githubStoresDueOn } from "./mock.js";
 
 /** A fixed pool, never Date.now, so generation stays deterministic; one day per DST state and one at the year's edge. */

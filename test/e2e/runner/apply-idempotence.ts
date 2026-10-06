@@ -1,5 +1,5 @@
-import { allEndpoints, type TaggedEndpoint } from "../../src/sections/registry.js";
-import type { MockState } from "./mock/state.js";
+import { allEndpoints, type TaggedEndpoint } from "../../../src/sections/registry.js";
+import type { MockState } from "../mock/state.js";
 
 export type Recurrence = "always" | "may" | "never";
 
