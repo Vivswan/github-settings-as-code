@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import pkg from "../package.json";
+import pkg from "../../package.json";
 
 // A from-scratch `bun install` (nightly's float-canary) honors every range in package.json, so a range specifier floats there untested against
 // main (zod ^4.4.3 floating to 4.5.4 broke every open Dependabot PR when a lockfile-regenerating workflow still existed). Exact pins leave only

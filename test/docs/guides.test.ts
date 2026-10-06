@@ -169,7 +169,7 @@ const SITE_ROOT = "/docs-root-7c1e/";
 /**
  * Relative links in the docs/ page at `page` that resolve outside docs/.
  * Resolution is the WHATWG URL parser's, as a browser does it; the published site is built from docs/ alone, so a link
- * to the README, COVERAGE.md, or lib/ has nothing to land on there.
+ * to the README, CONTRIBUTING.md, or lib/ has nothing to land on there.
  */
 async function linksLeavingDocs(markdown: string, page: string): Promise<string[]> {
   const base = new URL(`${SITE_ROOT}${page}`, SITE_ORIGIN);
@@ -338,7 +338,6 @@ describe("docs/ guide pages", () => {
   const linkScanFiles = () => [
     ...guidePages().map((page) => ({ label: `docs/${page}`, path: join(DOCS, page) })),
     { label: "README.md", path: join(ROOT, "README.md") },
-    { label: "COVERAGE.md", path: join(ROOT, "COVERAGE.md") },
     { label: "CONTRIBUTING.md", path: join(ROOT, "CONTRIBUTING.md") },
     { label: ".github/SECURITY.md", path: join(ROOT, ".github", "SECURITY.md") },
   ];
@@ -363,7 +362,7 @@ describe("docs/ guide pages", () => {
     expect(orphans, "no README, guide, or root page links these docs/ pages").toEqual([]);
   });
 
-  test("every relative link in the guides, README, and COVERAGE resolves to a real file", () => {
+  test("every relative link in the guides, README, and CONTRIBUTING resolves to a real file", () => {
     const broken: string[] = [];
     for (const file of linkScanFiles()) {
       const markdown = linesOutsideFences(readFileSync(file.path, "utf8"), file.label).join("\n");
@@ -880,16 +879,16 @@ describe("links-leaving-docs guard (mutation checks)", () => {
     "# not a link: [x](../../README.md)",
     "```",
     "",
-    "[COVERAGE](../../COVERAGE.md), [site](https://example.com/../x), [here](#title), `[code](../../README.md)`.",
+    "[ROADMAP](../../ROADMAP.md), [site](https://example.com/../x), [here](#title), `[code](../../README.md)`.",
     "",
-    "Reference-style: [the README][root], [semantics][sem], [schema][schema], [coverage][cov], and [two",
+    "Reference-style: [the README][root], [semantics][sem], [schema][schema], [roadmap][road], and [two",
     "lines][two lines].",
     "",
     "[root]: ../../README.md#sections",
     "[sem]: ../reference/semantics.md",
     "[schema]: <../../lib/settings.schema.json>",
-    "[cov]:",
-    "../../COVERAGE.md#supported 'Coverage'",
+    "[road]:",
+    "../../ROADMAP.md#supported 'Roadmap'",
     "[two",
     "lines]: ../../SECURITY.md",
     "",
@@ -920,10 +919,10 @@ describe("links-leaving-docs guard (mutation checks)", () => {
   test("names each escaping link by page and line", async () => {
     expect(await linksLeavingDocs(page, "start/getting-started.md")).toEqual([
       "docs/start/getting-started.md:3: (../../README.md#sections) leaves docs/",
-      "docs/start/getting-started.md:9: (../../COVERAGE.md) leaves docs/",
+      "docs/start/getting-started.md:9: (../../ROADMAP.md) leaves docs/",
       "docs/start/getting-started.md:3: (../../README.md#sections) leaves docs/",
       "docs/start/getting-started.md:16: (../../lib/settings.schema.json) leaves docs/",
-      "docs/start/getting-started.md:18: (../../COVERAGE.md#supported) leaves docs/",
+      "docs/start/getting-started.md:18: (../../ROADMAP.md#supported) leaves docs/",
       "docs/start/getting-started.md:20: (../../SECURITY.md) leaves docs/",
       "docs/start/getting-started.md:3: (../../README.md) leaves docs/",
       "docs/start/getting-started.md:23: (../../CONTRIBUTING.md) leaves docs/",
