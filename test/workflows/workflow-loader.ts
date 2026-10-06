@@ -1,5 +1,5 @@
 /**
- * One reader for the workflow YAML the docs tests pin, and the parsed shapes.
+ * One reader for the workflow YAML the workflow tests pin, and the parsed shapes.
  */
 
 import { readdirSync, readFileSync } from "node:fs";

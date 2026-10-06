@@ -8,11 +8,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseSync } from "oxc-parser";
 import { parse as parseYaml } from "yaml";
-import manifest from "../.release-please-manifest.json";
-import pkg from "../package.json";
-import tsdown from "../tsdown.config.js";
-import { ROOT } from "./root.js";
-import { readSettingsSchema } from "./settings-schema.js";
+import manifest from "../../.release-please-manifest.json";
+import pkg from "../../package.json";
+import tsdown from "../../tsdown.config.js";
+import { ROOT } from "../root.js";
+import { readSettingsSchema } from "../settings-schema.js";
 
 const schema = readSettingsSchema();
 

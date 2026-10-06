@@ -8,7 +8,7 @@ import { ROOT } from "../root.js";
 
 /**
  * Where the runner dumps a failing scenario's replay bundle. Workflow yaml cannot import this, so the upload steps
- * spell the path by hand; test/docs/nightly-workflows.test.ts holds them to it.
+ * spell the path by hand; test/workflows/nightly-workflows.test.ts holds them to it.
  */
 export const ARTIFACTS_DIR = join(ROOT, "test", "e2e", ".artifacts");
 

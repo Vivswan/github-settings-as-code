@@ -626,7 +626,7 @@ export function retagMajor(options: RetagMajorOptions): RetaggedMajor {
   return { major, packagedSha, move };
 }
 
-/** checks.yml's head_ref conditions spell this by hand; test/docs/checks-workflow.test.ts pins them to it. */
+/** checks.yml's head_ref conditions spell this by hand; test/workflows/checks-workflow.test.ts pins them to it. */
 export const RELEASE_PR_BRANCH_PREFIX = "release-please--";
 const RELEASE_PR_BRANCH = `${RELEASE_PR_BRANCH_PREFIX}branches--main`;
 
