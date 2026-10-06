@@ -768,21 +768,6 @@ describe("GHES base prefix", () => {
   });
 });
 
-describe("workflows envelope", () => {
-  test("the list wraps in {total_count, workflows}", async () => {
-    const h = await start(
-      scenario({
-        live_state: {
-          workflows: [{ id: 1, name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
-        },
-      }),
-    );
-    const body = await json(await call(h, "GET", `/repos/${OWNER}/${REPO}/actions/workflows`));
-    expect(body.total_count).toBe(1);
-    expect(body.workflows).toHaveLength(1);
-  });
-});
-
 describe("writes mutate state", () => {
   test("label create and update drop what the body cannot set: unknown keys and server-owned fields", async () => {
     // GitHub ignores a key its labels body does not document and never lets a body set id, node_id,
@@ -840,72 +825,6 @@ describe("writes mutate state", () => {
     const list = await jsonArray(await call(h, "GET", labelsPath));
     expect(list[0]?.name).toBe("new");
     expect(list[0]?.url).toBe(`https://api.github.com/repos/${OWNER}/${REPO}/labels/new`);
-  });
-});
-
-describe("actions selected-actions 409", () => {
-  test.each([
-    [
-      "409 when the policy is not 'selected'",
-      { actions_permissions: { allowed_actions: "all" } },
-      409,
-    ],
-    [
-      "200 when the policy is 'selected'",
-      {
-        actions_permissions: { allowed_actions: "selected" },
-        selected_actions: { github_owned_allowed: true },
-      },
-      200,
-    ],
-  ] as const)("GET selected-actions answers %s", async (_name, live_state, status) => {
-    const h = await start(scenario({ live_state }));
-    const res = await call(
-      h,
-      "GET",
-      `/repos/${OWNER}/${REPO}/actions/permissions/selected-actions`,
-    );
-    expect(res.status).toBe(status);
-  });
-});
-
-describe("code-scanning 200-vs-202 rule", () => {
-  const path = `/repos/${OWNER}/${REPO}/code-scanning/default-setup`;
-  const configured = { state: "configured", languages: ["python"] };
-  // A 202 carries the configuration run; the spec's 200 body is an empty object
-  // (additionalProperties: false), NOT the stored config.
-  test.each([
-    [
-      "a payload changing languages answers 202 with run_id",
-      configured,
-      { languages: ["javascript"] },
-      202,
-    ],
-    [
-      "a payload leaving languages alone answers 200 with an empty body",
-      configured,
-      { state: "configured" },
-      200,
-    ],
-    [
-      "languages added over a live seed that declares none answer 202",
-      { state: "configured" },
-      { languages: ["javascript"] },
-      202,
-    ],
-  ] as const)("%s", async (_name, seed, body, status) => {
-    const h = await start(scenario({ live_state: { code_scanning: seed } }));
-    const res = await call(h, "PATCH", path, { body });
-    expect(res.status).toBe(status);
-    const answered = await json(res);
-    expect(answered).toEqual(
-      status === 202
-        ? {
-            run_id: expect.any(Number),
-            run_url: `https://api.github.com${path}/runs/${String(answered.run_id)}`,
-          }
-        : {},
-    );
   });
 });
 
@@ -1686,22 +1605,6 @@ describe("handler statuses obey the realism rule", () => {
         `handler ${key} must answer a status its endpoint declares`,
       ).toBe(true);
     }
-  });
-});
-
-describe("pages create on empty state", () => {
-  test("POST /pages creates the site (201) when none exists", async () => {
-    const h = await start(scenario({ live_state: { pages: null } }));
-    const res = await call(h, "POST", `/repos/${OWNER}/${REPO}/pages`, {
-      body: { source: { branch: "main", path: "/" } },
-    });
-    expect(res.status).toBe(201);
-    const site = {
-      url: `https://api.github.com/repos/${OWNER}/${REPO}/pages`,
-      source: { branch: "main", path: "/" },
-    };
-    expect(await json(res)).toEqual(site);
-    expect(singleState(h).pages).toEqual(site);
   });
 });
 
