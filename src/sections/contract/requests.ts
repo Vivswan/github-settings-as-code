@@ -1,3 +1,4 @@
+import { paginateGraphQL } from "@octokit/plugin-paginate-graphql";
 import { err, ok, type Result } from "neverthrow";
 import type { ClientAnswer, RequestMark } from "../../github/api.js";
 import {
@@ -389,56 +390,98 @@ export async function tryCallGraphql<O extends GraphqlOpDecl>(
 }
 
 /**
- * The cursor loop lives here so paging cannot drift between sections. Declared error outcomes come back
- * as { error } only on the FIRST page: absence describes the whole resource, and a tolerated type
- * mid-walk means the connection vanished under the loop.
+ * The Result a page decided, carried out of the plugin's iterator: a page there is data or a rejection, so a failed,
+ * erroring, or malformed page travels as this and comes back as the walk's answer.
+ */
+class WalkEnded {
+  constructor(readonly result: Result<{ error: ApiError }, SectionFailure>) {}
+}
+
+/** The one shape the plugin is handed per page: the declared connection alone, so its pageInfo search finds nothing else. */
+interface ConnectionPage {
+  connection: { nodes: unknown[]; pageInfo: { hasNextPage: boolean; endCursor: unknown } };
+}
+
+/**
+ * The cursor walk is @octokit/plugin-paginate-graphql's, over the port's tryGraphql so every page meets the same
+ * client and every error the same classifiers. Each page is read and checked at the DECLARED path before the plugin
+ * sees it. Declared error outcomes come back as { error } only on the FIRST page: absence describes the whole
+ * resource, and a tolerated type mid-walk means the connection vanished under the walk.
  */
 export async function listGraphqlConnection<O extends GraphqlPaginatedReadDecl>(
   ctx: SectionContext,
   section: SectionMeta,
   op: O,
-  // The `cursor?: never` pin: the loop owns the variable, so a call site supplying its own does not compile.
+  // The `cursor?: never` pin: the walk owns the variable, so a call site supplying its own does not compile.
   variables: Readonly<GraphqlVariablesOf<O>> & { cursor?: never },
 ): Promise<Result<{ items: unknown[] } | { error: ApiError }, SectionFailure>> {
   const path = op.connection.path;
-  const items: unknown[] = [];
-  let cursor: string | null = null;
-  for (;;) {
-    const result = await ctx.api.tryGraphql(op, { ...variables, cursor }, ctx.repo.slug);
-    if ("failed" in result) {
-      return err(unanswered(result.failed));
+  const malformed = (message: string): Result<never, SectionFailure> =>
+    err({ kind: "malformed", message: `${section.key}: GRAPHQL ${op.name} ${message}` });
+  const noConnection =
+    `returned a response without a "${path.join(".")}" connection carrying nodes and ` +
+    "pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path";
+  const noCursor =
+    `reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. ` +
+    "The operation's query must select pageInfo{hasNextPage, endCursor}";
+  // The plugin's contract for a page is data or a rejection, so every answer but a well-formed page leaves as one.
+  const graphql = async (
+    _query: string,
+    pageVariables: Record<string, unknown>,
+  ): Promise<ConnectionPage> => {
+    const answer = await ctx.api.tryGraphql(op, pageVariables, ctx.repo.slug);
+    if ("failed" in answer) {
+      return Promise.reject(new WalkEnded(err(unanswered(answer.failed))));
     }
-    if ("error" in result) {
-      if (cursor === null && graphqlErrorTolerated(result.error, toleratedGraphqlErrors(op))) {
-        return ok(result);
-      }
-      return err(failureFor(section, "GRAPHQL", op.name, result.error, { op }));
+    if ("error" in answer) {
+      const tolerated =
+        pageVariables.cursor === null &&
+        graphqlErrorTolerated(answer.error, toleratedGraphqlErrors(op));
+      return Promise.reject(
+        new WalkEnded(
+          tolerated
+            ? ok({ error: answer.error })
+            : err(failureFor(section, "GRAPHQL", op.name, answer.error, { op })),
+        ),
+      );
     }
     const connection = path.reduce<unknown>(
       (node, key) => (node as Record<string, unknown> | null)?.[key],
-      result.data,
+      answer.data,
     ) as { nodes?: unknown; pageInfo?: { hasNextPage?: unknown; endCursor?: unknown } } | null;
     const nodes = connection?.nodes;
     const pageInfo = connection?.pageInfo;
     if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== "boolean") {
-      return err({
-        kind: "malformed",
-        message: `${section.key}: GRAPHQL ${op.name} returned a response without a "${path.join(".")}" connection carrying nodes and pageInfo{hasNextPage, endCursor}, so the list cannot be paginated. The operation's query must select both under that path`,
-      });
+      return Promise.reject(new WalkEnded(malformed(noConnection)));
     }
-    items.push(...nodes);
-    if (!pageInfo.hasNextPage) {
-      return ok({ items });
+    if (pageInfo.hasNextPage && typeof pageInfo.endCursor !== "string") {
+      return Promise.reject(new WalkEnded(malformed(noCursor)));
     }
-    const endCursor = pageInfo.endCursor;
-    if (typeof endCursor !== "string" || endCursor === cursor) {
-      // hasNextPage without a fresh endCursor would loop forever.
-      return err({
-        kind: "malformed",
-        message: `${section.key}: GRAPHQL ${op.name} reported hasNextPage without a new endCursor at "${path.join(".")}", so the pagination cannot advance. The operation's query must select pageInfo{hasNextPage, endCursor}`,
-      });
+    const { hasNextPage, endCursor } = pageInfo;
+    return { connection: { nodes, pageInfo: { hasNextPage, endCursor } } };
+  };
+  const client = { graphql } as unknown as Parameters<typeof paginateGraphQL>[0];
+  const items: unknown[] = [];
+  try {
+    // cursor: null on the first page keeps the wire shape every mock and trace expectation reads, and is how the
+    // page reader above knows the first page.
+    const walk = paginateGraphQL(client).graphql.paginate.iterator<ConnectionPage>(op.query, {
+      ...variables,
+      cursor: null,
+    });
+    for await (const page of walk) {
+      items.push(...page.connection.nodes);
     }
-    cursor = endCursor;
+    return ok({ items });
+  } catch (error) {
+    if (error instanceof WalkEnded) {
+      return error.result;
+    }
+    // The plugin's refusal of a cursor that did not advance, matched by name since it exports neither error class.
+    if (error instanceof Error && error.name === "MissingCursorChangeError") {
+      return malformed(noCursor);
+    }
+    throw error;
   }
 }
 

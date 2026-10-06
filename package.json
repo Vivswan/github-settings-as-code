@@ -66,6 +66,7 @@
     "@noble/hashes": "2.4.0",
     "@octokit/core": "7.0.8",
     "@octokit/openapi-types": "29.0.1",
+    "@octokit/plugin-paginate-graphql": "6.0.0",
     "@octokit/plugin-paginate-rest": "16.0.0",
     "@octokit/plugin-request-log": "6.0.0",
     "@octokit/plugin-retry": "8.1.1",

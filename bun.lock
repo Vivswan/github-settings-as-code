@@ -10,6 +10,7 @@
         "@noble/hashes": "2.4.0",
         "@octokit/core": "7.0.8",
         "@octokit/openapi-types": "29.0.1",
+        "@octokit/plugin-paginate-graphql": "6.0.0",
         "@octokit/plugin-paginate-rest": "16.0.0",
         "@octokit/plugin-request-log": "6.0.0",
         "@octokit/plugin-retry": "8.1.1",
@@ -160,6 +161,8 @@
     "@octokit/openapi-types": ["@octokit/openapi-types@29.0.1", "", {}, "sha512-9qWOMFNxxLokERcms42rU0PTLqQmVs7g5E41TI4mCOxmpFayD1rfC7XxOL55cG9MBZLFlC31BrR37myMKardwg=="],
 
     "@octokit/openapi-webhooks": ["@octokit/openapi-webhooks@12.1.0", "", {}, "sha512-Z5eDsLCUNbx1zHpZb1LNQirADqdMTvWJQ/deahi0ws+tWWnwHXB+Pr4jfmM9OrETS9Y5iW8ZRu1fdbudObhLrg=="],
+
+    "@octokit/plugin-paginate-graphql": ["@octokit/plugin-paginate-graphql@6.0.0", "", { "peerDependencies": { "@octokit/core": ">=6" } }, "sha512-crfpnIoFiBtRkvPqOyLOsw12XsveYuY2ieP6uYDosoUegBJpSVxGwut9sxUgFFcll3VTOTqpUf8yGd8x1OmAkQ=="],
 
     "@octokit/plugin-paginate-rest": ["@octokit/plugin-paginate-rest@16.0.0", "", { "dependencies": { "@octokit/types": "^18.0.0" }, "peerDependencies": { "@octokit/core": ">=6" } }, "sha512-7RtUeGZypAK4EA4LrjTCnsLALNOoUcYh5vOnCNXpdIQVTQCPh4OFu7324iPqAls3KGgVnZktKUnNKZCOKyHrlA=="],
 

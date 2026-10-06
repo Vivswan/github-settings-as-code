@@ -333,6 +333,23 @@ describe("listGraphqlConnection", () => {
     expect(api.calls.map((c) => (c.payload as { cursor: unknown }).cursor)).toEqual([null, "CUR1"]);
   });
 
+  test("a sibling connection answered before the declared one never steers the walk", async () => {
+    // The cursor and the stop come from the connection at the declared path only: a sibling whose pageInfo sits first
+    // in the response would otherwise end the walk early or advance it by the wrong cursor.
+    const withSibling = (ids: string[], endCursor: string | null, hasNextPage: boolean) => ({
+      repository: {
+        other: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+        ...page(ids, endCursor, hasNextPage).repository,
+      },
+    });
+    const api = pagedApi([withSibling(["a"], "CUR1", true), withSibling(["b"], null, false)]);
+    const listed = unwrap(
+      await listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }),
+    );
+    expect(listed).toEqual({ items: [{ id: "a" }, { id: "b" }] });
+    expect(api.calls.map((c) => (c.payload as { cursor: unknown }).cursor)).toEqual([null, "CUR1"]);
+  });
+
   test("a declared error outcome comes back as { error } instead of throwing", async () => {
     // The probeAbsent posture over a connection: a fine-grained denial comes back as a value the caller reads as "resource absent".
     const tolerantPaged = {
@@ -397,8 +414,12 @@ describe("listGraphqlConnection", () => {
     );
   });
 
-  test("a response without the connection shape fails loudly", async () => {
-    const api = pagedApi([{ repository: { rules: { nodes: "not-a-list" } } }]);
+  test.each<[label: string, rules: unknown]>([
+    ["nodes that are not a list", { nodes: "not-a-list" }],
+    ["a null pageInfo", { nodes: [], pageInfo: null }],
+  ])("a response without the connection shape fails loudly: %s", async (_label, rules) => {
+    // Every malformed page is the one malformed Result, never a thrown TypeError from reading into the shape.
+    const api = pagedApi([{ repository: { rules } }]);
     await expect(
       listGraphqlConnection(ctx(api), section, pagedOp, { owner: "o", repo: "r" }).then(unwrap),
     ).rejects.toThrow(

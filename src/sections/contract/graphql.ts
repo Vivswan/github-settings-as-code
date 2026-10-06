@@ -20,7 +20,7 @@ export type GraphqlTolerableError = (typeof GRAPHQL_TOLERABLE_ERRORS)[number];
 /**
  * `path` leads from the data root to the connection field (["repository", "branchProtectionRules"]),
  * which must select `nodes { ... }` and `pageInfo { hasNextPage endCursor }`; GraphqlPaginatedReadDecl's
- * query type enforces the `$cursor` variable.
+ * query type enforces the `$cursor` variable, the name @octokit/plugin-paginate-graphql advances.
  */
 interface GraphqlConnectionDecl {
   readonly path: readonly [string, ...string[]];
@@ -82,7 +82,7 @@ export type GraphqlOpDecl<V extends Record<string, unknown> = Record<string, unk
     });
 
 /**
- * A read declaring `connection` MUST take the $cursor variable listGraphqlConnection's loop owns (the
+ * A read declaring `connection` MUST take the $cursor variable listGraphqlConnection's walk owns (the
  * template type refuses a cursorless query) and callers must never supply `cursor` (the `?: never` pin).
  * Annotate connection ops with THIS type so the pairing is checked at the declaration.
  */
