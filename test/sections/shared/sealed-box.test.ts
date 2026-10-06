@@ -7,7 +7,7 @@ import {
   SEALED_BOX_PUBLIC_KEY_BYTES,
   sealBox,
   sealForGithub,
-} from "../../src/sections/shared/secrets-and-variables/sealed-box.js";
+} from "../../../src/sections/shared/secrets-and-variables/sealed-box.js";
 
 await sodium.ready;
 

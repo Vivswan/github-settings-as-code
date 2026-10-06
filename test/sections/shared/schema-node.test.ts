@@ -6,8 +6,8 @@
 
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { knobbed } from "../../src/sections/shared/schema-helpers.js";
-import { schemaNode } from "../../src/sections/shared/schema-node.js";
+import { knobbed } from "../../../src/sections/shared/schema-helpers.js";
+import { schemaNode } from "../../../src/sections/shared/schema-node.js";
 
 const entry = z.object({ name: z.string() }).meta({ id: "SchemaNodeTestEntry" });
 

@@ -1,21 +1,21 @@
 import { describe, expect, test } from "bun:test";
-import { executePlan } from "../../src/engine/execute.js";
-import type { GitHubClient } from "../../src/github/api.js";
-import type { SettingsFile } from "../../src/schema.js";
-import { codeQualitySetupSection } from "../../src/sections/code_quality_setup/index.js";
-import { codeScanningDefaultSetupSection } from "../../src/sections/code_scanning_default_setup/index.js";
-import type { SectionFailure } from "../../src/sections/contract/errors.js";
-import type { SectionInput, SectionModule } from "../../src/sections/contract/module.js";
-import { type PlanContext, planContext } from "../../src/sections/contract/plan.js";
-import type { SetupKey, SetupSectionModule } from "../../src/sections/shared/setup-section.js";
-import type { MustBeNever } from "../../src/types.js";
-import type { LiveState } from "../e2e/mock/state.js";
-import { MockApi, withListing } from "../mock-api.js";
-import { registryFake } from "./fragment-fake.js";
-import { provePlanIdempotent } from "./plan-idempotence.js";
-import { REPO, unwrap } from "./section-run.js";
-import { proveSnapshotRoundTrip, type SnapshotSection } from "./snapshot-roundtrip.js";
-import { validatedInput } from "./validated-input.js";
+import { executePlan } from "../../../src/engine/execute.js";
+import type { GitHubClient } from "../../../src/github/api.js";
+import type { SettingsFile } from "../../../src/schema.js";
+import { codeQualitySetupSection } from "../../../src/sections/code_quality_setup/index.js";
+import { codeScanningDefaultSetupSection } from "../../../src/sections/code_scanning_default_setup/index.js";
+import type { SectionFailure } from "../../../src/sections/contract/errors.js";
+import type { SectionInput, SectionModule } from "../../../src/sections/contract/module.js";
+import { type PlanContext, planContext } from "../../../src/sections/contract/plan.js";
+import type { SetupKey, SetupSectionModule } from "../../../src/sections/shared/setup-section.js";
+import type { MustBeNever } from "../../../src/types.js";
+import type { LiveState } from "../../e2e/mock/state.js";
+import { MockApi, withListing } from "../../mock-api.js";
+import { registryFake } from "../fragment-fake.js";
+import { provePlanIdempotent } from "../plan-idempotence.js";
+import { REPO, unwrap } from "../section-run.js";
+import { proveSnapshotRoundTrip, type SnapshotSection } from "../snapshot-roundtrip.js";
+import { validatedInput } from "../validated-input.js";
 
 /** One section's declared setup document. */
 type Declared<K extends SetupKey = SetupKey> = Exclude<SettingsFile[K], undefined>;

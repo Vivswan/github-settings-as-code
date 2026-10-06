@@ -5,9 +5,9 @@
 
 import { describe, expect, expectTypeOf, test } from "bun:test";
 import { z } from "zod";
-import { SettingsFile } from "../../src/index.js";
-import { knobbed, open, routed, rule } from "../../src/sections/shared/schema-helpers.js";
-import { schemaNode } from "../../src/sections/shared/schema-node.js";
+import { SettingsFile } from "../../../src/index.js";
+import { knobbed, open, routed, rule } from "../../../src/sections/shared/schema-helpers.js";
+import { schemaNode } from "../../../src/sections/shared/schema-node.js";
 
 const opennessOf = (schema: z.ZodType) => {
   const node = schemaNode(schema);

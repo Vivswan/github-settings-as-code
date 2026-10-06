@@ -7,9 +7,9 @@
  */
 
 import { describe, test } from "bun:test";
-import { graphqlOp } from "../../src/sections/contract/graphql.js";
-import type { SectionMeta } from "../../src/sections/contract/module.js";
-import type { PlannedOp } from "../../src/sections/contract/plan.js";
+import { graphqlOp } from "../../../src/sections/contract/graphql.js";
+import type { SectionMeta } from "../../../src/sections/contract/module.js";
+import type { PlannedOp } from "../../../src/sections/contract/plan.js";
 
 const DECL = {
   key: "labels",

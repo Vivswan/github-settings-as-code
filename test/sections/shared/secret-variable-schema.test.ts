@@ -5,8 +5,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
-import { MAX_VARIABLE_VALUE_BYTES } from "../../src/sections/shared/schema-helpers.js";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
+import { MAX_VARIABLE_VALUE_BYTES } from "../../../src/sections/shared/schema-helpers.js";
 
 type Noun = "secret" | "variable";
 

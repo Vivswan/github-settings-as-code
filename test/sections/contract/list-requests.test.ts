@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
-import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
-import { listAll, listAllEnveloped } from "../../src/sections/contract/requests.js";
-import { MockApi } from "../mock-api.js";
+import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";
+import type { SectionContext, SectionMeta } from "../../../src/sections/contract/module.js";
+import { listAll, listAllEnveloped } from "../../../src/sections/contract/requests.js";
+import { MockApi } from "../../mock-api.js";
 
 const section: SectionMeta = {
   key: "rulesets",

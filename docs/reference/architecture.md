@@ -265,7 +265,7 @@ One section declares each fact once and the rest of the system derives from it:
 
 Change the declaration and every consumer follows.
 
-Demonstrated by: [test/sections/registry.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/registry.test.ts), [test/sections/contract.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/contract.test.ts).
+Demonstrated by: [test/sections/registry.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/registry.test.ts), [test/sections/contract/contract.test.ts](https://github.com/Vivswan/github-settings-as-code/blob/main/test/sections/contract/contract.test.ts).
 
 ## The multi-repo flow
 

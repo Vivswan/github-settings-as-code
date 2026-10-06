@@ -5,16 +5,16 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { validateSectionShapes } from "../../src/engine/validate.js";
+import { validateSectionShapes } from "../../../src/engine/validate.js";
 import {
   LIST_SECTIONS,
   type ListSection,
   type SectionKey,
   type SettingsFile,
-} from "../../src/schema.js";
-import type { EntryOf, SectionModule } from "../../src/sections/contract/module.js";
-import { labelsSection } from "../../src/sections/labels/index.js";
-import { repositorySection } from "../../src/sections/repository/index.js";
+} from "../../../src/schema.js";
+import type { EntryOf, SectionModule } from "../../../src/sections/contract/module.js";
+import { labelsSection } from "../../../src/sections/labels/index.js";
+import { repositorySection } from "../../../src/sections/repository/index.js";
 
 /** The sections whose value has entries; the census runs over LIST_SECTIONS, so the two must agree. */
 type EntryBearing = {

@@ -12,7 +12,7 @@ import {
   minLength,
   routed,
   rule,
-} from "../../src/sections/shared/schema-helpers.js";
+} from "../../../src/sections/shared/schema-helpers.js";
 
 const needsModeA = (
   value: { mode?: "a" | "b"; list?: string[] },

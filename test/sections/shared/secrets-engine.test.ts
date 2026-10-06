@@ -1,26 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
-import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
-import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
-import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
-import { duplicateNameIssues } from "../../src/sections/shared/secrets-and-variables/named-scope.js";
+import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";
+import type { SectionContext, SectionMeta } from "../../../src/sections/contract/module.js";
+import type { ExecTools, SectionPlan } from "../../../src/sections/contract/plan.js";
+import { duplicateNameIssues } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import {
   decodeBase64,
   sealForGithub,
-} from "../../src/sections/shared/secrets-and-variables/sealed-box.js";
+} from "../../../src/sections/shared/secrets-and-variables/sealed-box.js";
 import {
   parseSealingKey,
   planSecrets,
   type SealedSecretPayload,
   type SecretsPlanScope,
-} from "../../src/sections/shared/secrets-and-variables/secrets-engine.js";
+} from "../../../src/sections/shared/secrets-and-variables/secrets-engine.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,
   unsealSecretValue,
-} from "../e2e/mock/secrets.js";
-import { MockApi } from "../mock-api.js";
-import { unwrap } from "./section-run.js";
+} from "../../e2e/mock/secrets.js";
+import { MockApi } from "../../mock-api.js";
+import { unwrap } from "../section-run.js";
 
 const section: SectionMeta = {
   key: "actions_secrets",

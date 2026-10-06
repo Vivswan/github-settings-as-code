@@ -1,7 +1,7 @@
 /**
  * libsodium's crypto_box_seal on the noble primitives: no WASM, no async init.
  * Wire format: ephemeral X25519 public key (32) || Poly1305 tag (16) || XSalsa20 ciphertext.
- * test/sections/sealed-box.test.ts holds the libsodium cross-check and the fixed vectors.
+ * test/sections/shared/sealed-box.test.ts holds the libsodium cross-check and the fixed vectors.
  */
 
 import { hsalsa, xsalsa20poly1305 } from "@noble/ciphers/salsa.js";
@@ -44,7 +44,7 @@ export function decodeBase64(text: string): Result<Uint8Array, "not canonical ba
  * libsodium's crypto_box_beforenm: the X25519 shared point through hsalsa20.
  * getSharedSecret throws on a low-order public key (an all-zero shared point),
  * like crypto_scalarmult's -1 that makes libsodium refuse the seal.
- * test/sections/sealed-box.test.ts opens every seal with libsodium, which pins the derivation.
+ * test/sections/shared/sealed-box.test.ts opens every seal with libsodium, which pins the derivation.
  */
 function boxSharedKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
   const shared = x25519.getSharedSecret(secretKey, publicKey);
