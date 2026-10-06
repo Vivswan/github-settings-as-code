@@ -1182,6 +1182,49 @@ describe("the release hook's reads of the draft", () => {
   );
 });
 
+describe("the release-please config", () => {
+  const malformed: [string, string, RegExp][] = [
+    ["not JSON", "{ not json\n", /^release-please-config\.json is not valid JSON \(/],
+    ["a JSON array", "[]\n", /^release-please-config\.json holds an array, not a JSON object;/],
+    [
+      "a boundary that is not a commit sha",
+      `${JSON.stringify({ "last-release-sha": 42, packages: {} })}\n`,
+      /^last-release-sha in release-please-config\.json is 42, not a 40-hex commit sha;/,
+    ],
+  ];
+  test.each(malformed)(
+    "a config that is %s is refused naming the file by every subcommand that reads it",
+    (_name, text, error) => {
+      const fx = seedFixture();
+      createReleasePrBranch(fx, fx.mergeSha, "2.2.0");
+      const checker = clone(fx.root, fx.origin, "config-boundary");
+      write(checker, "release-please-config.json", text);
+      expect(() => boundaryCheck(checker)).toThrow(error);
+      const pr = clone(fx.root, fx.origin, "config-anchor-check");
+      git(pr, "checkout", "--quiet", "release-please--branches--main");
+      write(pr, "release-please-config.json", text);
+      expect(() => anchorCheck(pr)).toThrow(error);
+      const branch = clone(fx.root, fx.origin, "config-branch");
+      git(branch, "checkout", "--quiet", "release-please--branches--main");
+      write(branch, "release-please-config.json", text);
+      commitAll(branch, "chore: a config release-please would not write");
+      git(branch, "push", "--quiet", "origin", "HEAD:refs/heads/release-please--branches--main");
+      const worker = clone(fx.root, fx.origin, "config-anchor");
+      expect(() => anchorReleasePr({ cwd: worker, sourceSha: fx.mergeSha })).toThrow(error);
+    },
+  );
+
+  test("a missing config is refused naming the file and where it was looked for", () => {
+    const fx = seedFixture();
+    const checker = clone(fx.root, fx.origin, "config-missing");
+    rmSync(join(checker, "release-please-config.json"));
+    expect(() => boundaryCheck(checker)).toThrow(
+      `release-please-config.json is missing from ${checker}; the release pipeline reads ` +
+        "release-please's boundary (last-release-sha) from it. Restore it by PR.",
+    );
+  });
+});
+
 describe("release configuration contract", () => {
   test("release-please cuts a tagless draft and leaves the release to the hook: no tag ever lands on main, and the release job runs from the hook", () => {
     // An external tool's knobs the platform does not enforce: a tag release-please created would sit on main, and
