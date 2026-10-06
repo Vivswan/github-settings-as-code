@@ -5,9 +5,9 @@
 
 import { ok, type Result } from "neverthrow";
 import { z } from "zod";
-import type { SectionFailure } from "../contract/errors.js";
-import type { PlanContext, Read } from "../contract/plan.js";
-import type { ErasedDecl, ListEndpoints } from "./list-section-decl.js";
+import type { SectionFailure } from "../../contract/errors.js";
+import type { PlanContext, Read } from "../../contract/plan.js";
+import type { ErasedDecl, ListEndpoints } from "./decl.js";
 
 function readList(decl: ErasedDecl<string>, ctx: PlanContext<ListEndpoints>): Read<object[]> {
   const query = decl.listing?.query;

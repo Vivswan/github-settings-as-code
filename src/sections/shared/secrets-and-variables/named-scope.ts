@@ -7,9 +7,9 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../types.js";
-import type { SectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity } from "../contract/live.js";
+import type { UndeclaredPolicy, UndeclaredPolicyList } from "../../../types.js";
+import type { SectionFailure } from "../../contract/errors.js";
+import { liveByIdentity, liveIdentity } from "../../contract/live.js";
 import {
   type DeclaredIssue,
   duplicateFieldIssues,
@@ -17,8 +17,8 @@ import {
   type SectionMeta,
   undeclaredDrift,
   undeclaredNote,
-} from "../contract/module.js";
-import { paramsWith, type SectionPlan } from "../contract/plan.js";
+} from "../../contract/module.js";
+import { paramsWith, type SectionPlan } from "../../contract/plan.js";
 
 export type AnyPlannedOp = SectionPlan["ops"][number];
 

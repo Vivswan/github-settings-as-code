@@ -9,13 +9,13 @@ import { z } from "zod";
 import type { SectionInput } from "../../src/sections/contract/module.js";
 import { planContext } from "../../src/sections/contract/plan.js";
 import { labelsSection } from "../../src/sections/labels/index.js";
-import { listSection } from "../../src/sections/shared/list-section.js";
 import {
   exactName,
   type ListEndpoints,
   type ListSectionModule,
   type ListWrite,
-} from "../../src/sections/shared/list-section-decl.js";
+} from "../../src/sections/shared/list/decl.js";
+import { listSection } from "../../src/sections/shared/list/section.js";
 import { webhooksSection } from "../../src/sections/webhooks/index.js";
 import { generatorFromSlice, uniqueBy } from "../e2e/gen-support.js";
 import { mockFragmentFor } from "../e2e/mock/list-fragment.js";

@@ -4,7 +4,10 @@
  */
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { decodeBase64, sealForGithub } from "../../../src/sections/shared/sealed-box.js";
+import {
+  decodeBase64,
+  sealForGithub,
+} from "../../../src/sections/shared/secrets-and-variables/sealed-box.js";
 import { parseScenario, type Scenario } from "../schema.js";
 import { newPipelineRunState } from "./contract.js";
 import { runPipeline } from "./routes.js";

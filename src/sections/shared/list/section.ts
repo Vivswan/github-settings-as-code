@@ -6,13 +6,14 @@
  */
 
 import type { Result } from "neverthrow";
-import type { SectionFailure } from "../contract/errors.js";
+import type { SectionFailure } from "../../contract/errors.js";
 import {
   type DeclaredSecretValue,
   type SectionSnapshot,
   secretValuesOf,
-} from "../contract/module.js";
-import type { PlanContext, PlannedOp, SectionPlan } from "../contract/plan.js";
+} from "../../contract/module.js";
+import type { PlanContext, PlannedOp, SectionPlan } from "../../contract/plan.js";
+import { knobbed, routed } from "../schema-helpers.js";
 import type {
   Declared,
   ErasedDecl,
@@ -21,11 +22,10 @@ import type {
   ListSectionDecl,
   ListSectionKey,
   ListSectionModule,
-} from "./list-section-decl.js";
-import { planList, validateList } from "./list-section-plan.js";
-import { snapshotList } from "./list-section-snapshot.js";
-import { identityClaims, pathOf, valueAt } from "./list-section-write.js";
-import { knobbed, routed } from "./schema-helpers.js";
+} from "./decl.js";
+import { planList, validateList } from "./plan.js";
+import { snapshotList } from "./snapshot.js";
+import { identityClaims, pathOf, valueAt } from "./write.js";
 
 /**
  * valueAt() walks the erased entry, so a declared secret field reads as `unknown`: absent on an entry that leaves

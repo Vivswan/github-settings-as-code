@@ -3,14 +3,17 @@ import { err, ok } from "neverthrow";
 import type { EndpointDecl } from "../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../src/sections/contract/module.js";
 import type { ExecTools, SectionPlan } from "../../src/sections/contract/plan.js";
-import { duplicateNameIssues } from "../../src/sections/shared/named-scope.js";
-import { decodeBase64, sealForGithub } from "../../src/sections/shared/sealed-box.js";
+import { duplicateNameIssues } from "../../src/sections/shared/secrets-and-variables/named-scope.js";
+import {
+  decodeBase64,
+  sealForGithub,
+} from "../../src/sections/shared/secrets-and-variables/sealed-box.js";
 import {
   parseSealingKey,
   planSecrets,
   type SealedSecretPayload,
   type SecretsPlanScope,
-} from "../../src/sections/shared/secrets-engine.js";
+} from "../../src/sections/shared/secrets-and-variables/secrets-engine.js";
 import {
   MOCK_SECRETS_PUBLIC_KEY,
   mockSodiumReady,

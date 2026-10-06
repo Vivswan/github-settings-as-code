@@ -15,7 +15,7 @@ import {
   GRAPHQL_STATUS_CHECK_TWINS,
 } from "../../../src/sections/branches/graphql-vocabulary.js";
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
-import type { ListSectionKey } from "../../../src/sections/shared/list-section-decl.js";
+import type { ListSectionKey } from "../../../src/sections/shared/list/decl.js";
 import {
   INVITATION_ROLES,
   permissionForRole,

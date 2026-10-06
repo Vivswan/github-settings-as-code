@@ -4,7 +4,7 @@ import type { GitHubClient } from "../../../src/github/api.js";
 import { actionsVariablesSection } from "../../../src/sections/actions_variables/index.js";
 import type { SectionInput } from "../../../src/sections/contract/module.js";
 import { planContext } from "../../../src/sections/contract/plan.js";
-import { upperKey } from "../../../src/sections/shared/named-scope.js";
+import { upperKey } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { REPO, unwrap } from "../section-run.js";

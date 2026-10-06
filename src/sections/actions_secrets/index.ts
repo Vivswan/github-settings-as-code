@@ -1,4 +1,4 @@
-import { repoSecretsSection } from "../shared/repo-secrets.js";
+import { repoSecretsSection } from "../shared/secrets-and-variables/repo-secrets.js";
 
 export const actionsSecretsSection = repoSecretsSection({
   key: "actions_secrets",

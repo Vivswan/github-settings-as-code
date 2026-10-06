@@ -1,26 +1,19 @@
 import { ok, Result, safeTry } from "neverthrow";
-import { snapshotSecretReference } from "../../engine/secrets.js";
-import type { UndeclaredPolicyList } from "../../types.js";
-import type { SectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity } from "../contract/live.js";
-import type { SectionMeta } from "../contract/module.js";
-import type { PlanContext } from "../contract/plan.js";
-import type { ErasedDecl, ListEndpoints, ListSectionKey } from "./list-section-decl.js";
-import { readItem, readLive } from "./list-section-reads.js";
-import {
-  declaredSecrets,
-  type Fields,
-  leafOf,
-  nameOf,
-  pathOf,
-  withValueAt,
-} from "./list-section-write.js";
+import { snapshotSecretReference } from "../../../engine/secrets.js";
+import type { UndeclaredPolicyList } from "../../../types.js";
+import type { SectionFailure } from "../../contract/errors.js";
+import { liveByIdentity, liveIdentity } from "../../contract/live.js";
+import type { SectionMeta } from "../../contract/module.js";
+import type { PlanContext } from "../../contract/plan.js";
 import {
   knobbedSnapshot,
   leftOutOfSnapshot,
   projectOntoSchema,
   unreadableSecretNote,
-} from "./snapshot-helpers.js";
+} from "../snapshot-helpers.js";
+import type { ErasedDecl, ListEndpoints, ListSectionKey } from "./decl.js";
+import { readItem, readLive } from "./reads.js";
+import { declaredSecrets, type Fields, leafOf, nameOf, pathOf, withValueAt } from "./write.js";
 
 /**
  * Items are normalized as GitHub stores them before the projection onto the entry slice, so the

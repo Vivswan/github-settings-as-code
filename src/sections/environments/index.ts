@@ -23,9 +23,9 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import { hasDrift } from "../contract/plan.js";
-import { upperKey } from "../shared/named-scope.js";
 import { layeredList, routed } from "../shared/schema-helpers.js";
-import { listSecretValues } from "../shared/secrets-engine.js";
+import { upperKey } from "../shared/secrets-and-variables/named-scope.js";
+import { listSecretValues } from "../shared/secrets-and-variables/secrets-engine.js";
 import { projectOntoSchema, replaceSweep } from "../shared/snapshot-helpers.js";
 import { ENDPOINTS } from "./endpoints.js";
 import {

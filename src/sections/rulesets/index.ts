@@ -11,8 +11,8 @@ import { agree } from "../../text.js";
 import type { EndpointDecl } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { keyedBy } from "../contract/module.js";
-import { listSection } from "../shared/list-section.js";
-import { exactName, type ListWrite } from "../shared/list-section-decl.js";
+import { exactName, type ListWrite } from "../shared/list/decl.js";
+import { listSection } from "../shared/list/section.js";
 import { RulesetConfig } from "./schema.js";
 
 /**

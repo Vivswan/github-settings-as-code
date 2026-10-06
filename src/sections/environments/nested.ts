@@ -10,19 +10,19 @@ import {
   undeclaredPolicy,
 } from "../contract/module.js";
 import type { Read } from "../contract/plan.js";
-import { duplicateNameIssues } from "../shared/named-scope.js";
+import { duplicateNameIssues } from "../shared/secrets-and-variables/named-scope.js";
 import {
   LiveSecretName,
   planSecrets,
   type SecretsPlanScope,
   secretOps,
-} from "../shared/secrets-engine.js";
+} from "../shared/secrets-and-variables/secrets-engine.js";
 import {
   LiveVariable,
   planVariables,
   type VariablesPlanScope,
   variableOps,
-} from "../shared/variables-engine.js";
+} from "../shared/secrets-and-variables/variables-engine.js";
 import {
   BRANCH_POLICIES_DEFAULT_POLICY,
   duplicateBranchPolicyIssues,

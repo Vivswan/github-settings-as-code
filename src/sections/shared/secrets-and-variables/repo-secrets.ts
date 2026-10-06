@@ -9,12 +9,12 @@
 
 import type { Result } from "neverthrow";
 import { z } from "zod";
-import { snapshotSecretReference } from "../../engine/secrets.js";
-import type { MustBeNever } from "../../types.js";
-import { ActionsSecretConfig } from "../actions_secrets/schema.js";
-import { AgentsSecretConfig } from "../agents_secrets/schema.js";
-import { CodespacesSecretConfig } from "../codespaces_secrets/schema.js";
-import type { SectionFailure } from "../contract/errors.js";
+import { snapshotSecretReference } from "../../../engine/secrets.js";
+import type { MustBeNever } from "../../../types.js";
+import { ActionsSecretConfig } from "../../actions_secrets/schema.js";
+import { AgentsSecretConfig } from "../../agents_secrets/schema.js";
+import { CodespacesSecretConfig } from "../../codespaces_secrets/schema.js";
+import type { SectionFailure } from "../../contract/errors.js";
 import {
   type DeclaredIssue,
   type GraphqlDict,
@@ -22,16 +22,18 @@ import {
   keyedBy,
   type SectionModule,
   type SectionSnapshot,
-} from "../contract/module.js";
-import type { PatResource } from "../contract/permissions.js";
+} from "../../contract/module.js";
+import type { PatResource } from "../../contract/permissions.js";
 import type {
   KeyedPlan,
   PlanMisfits,
   PlannedOp,
   SnapshotContext,
   WidePlan,
-} from "../contract/plan.js";
-import { DependabotSecretConfig } from "../dependabot_secrets/schema.js";
+} from "../../contract/plan.js";
+import { DependabotSecretConfig } from "../../dependabot_secrets/schema.js";
+import { knobbed, routed, type sealedSecretConfig } from "../schema-helpers.js";
+import { unreadableSecretNote } from "../snapshot-helpers.js";
 import {
   type Declared,
   type KeyedValuesFamily,
@@ -39,7 +41,6 @@ import {
   snapshotOf,
 } from "./keyed-values.js";
 import { duplicateNameIssues, liveByName, upperKey } from "./named-scope.js";
-import { knobbed, routed, type sealedSecretConfig } from "./schema-helpers.js";
 import {
   LiveSecretName,
   listSecretValues,
@@ -48,7 +49,6 @@ import {
   type SecretsPlanScope,
   secretOps,
 } from "./secrets-engine.js";
-import { unreadableSecretNote } from "./snapshot-helpers.js";
 
 export type RepoSecretsKey =
   | "actions_secrets"
@@ -126,7 +126,7 @@ type _WidePlanIsEveryFamilyPlan = MustBeNever<
 >;
 
 /**
- * Checked HERE as a fresh object literal, once per family key: the factory hands ../registry.ts a module
+ * Checked HERE as a fresh object literal, once per family key: the factory hands ../../registry.ts a module
  * IDENTIFIER, where excess-property checking no longer runs, so a `known` key no entry type carries any
  * more would otherwise compile silently. The intersection admits a key present in ANY constituent, but a
  * key only one family dropped breaks SecretEntry and the shared plan signature first.

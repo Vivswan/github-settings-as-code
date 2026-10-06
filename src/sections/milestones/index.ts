@@ -6,8 +6,8 @@
 import { ok } from "neverthrow";
 import { z } from "zod";
 import type { EndpointDecl } from "../contract/endpoints.js";
-import { listSection } from "../shared/list-section.js";
-import { exactName, type ListComparable, type ListWrite } from "../shared/list-section-decl.js";
+import { exactName, type ListComparable, type ListWrite } from "../shared/list/decl.js";
+import { listSection } from "../shared/list/section.js";
 import { MilestoneConfig } from "./schema.js";
 
 /**

@@ -13,9 +13,9 @@ import {
   phantomNote,
   phantomPaths,
   refuseOmitted,
-} from "../../engine/diff.js";
-import { type SectionFailure, sectionFailure } from "../contract/errors.js";
-import { liveByIdentity, liveIdentity, plural } from "../contract/live.js";
+} from "../../../engine/diff.js";
+import { type SectionFailure, sectionFailure } from "../../contract/errors.js";
+import { liveByIdentity, liveIdentity, plural } from "../../contract/live.js";
 import {
   type DeclaredIssue,
   declaredEntries,
@@ -26,14 +26,15 @@ import {
   undeclaredDrift,
   undeclaredNote,
   undeclaredPolicy,
-} from "../contract/module.js";
+} from "../../contract/module.js";
 import {
   type ExecTools,
   hasDrift,
   type PlanContext,
   plainData,
   type SectionPlan,
-} from "../contract/plan.js";
+} from "../../contract/plan.js";
+import { projectOntoSchema, replaceSweep } from "../snapshot-helpers.js";
 import {
   type ErasedDecl,
   type ErasedDeclared,
@@ -42,8 +43,8 @@ import {
   type ListSectionKey,
   type ListWrite,
   updateRole,
-} from "./list-section-decl.js";
-import { readItem, readLive } from "./list-section-reads.js";
+} from "./decl.js";
+import { readItem, readLive } from "./reads.js";
 import {
   declaredSecrets,
   type Fields,
@@ -61,8 +62,7 @@ import {
   updateBody,
   valueAt,
   withoutPaths,
-} from "./list-section-write.js";
-import { projectOntoSchema, replaceSweep } from "./snapshot-helpers.js";
+} from "./write.js";
 
 /** A live item with the comparison it takes part in, less what neither side can show. */
 interface Comparison {
