@@ -1,4 +1,3 @@
-import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { err, ok, Result, safeTry } from "neverthrow";
 import { RUN_RESULTS } from "../../src/engine/outcome.js";
@@ -28,12 +27,11 @@ import {
   blockLine,
   blockLines,
   GeneratedRegion,
-  regenerateRegions,
   regionBounds,
 } from "./lib/generated-regions.js";
+import { type GeneratedFile, type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
-export const COVERAGE_PATH = "docs/reference/coverage.md";
 
 /** The repository these pages document; the token form's name and description derive from it. */
 const REPO_SLUG = "Vivswan/github-settings-as-code";
@@ -816,79 +814,68 @@ function architectureMapRegion(name: string, heading: string): GeneratedRegion {
   });
 }
 
-export const PAGE_REGIONS: Readonly<Record<string, readonly GeneratedRegion[]>> = {
-  "README.md": [patUrlRegion("readme-pat-url")],
-  "docs/start/getting-started.md": [patUrlRegion("pat-url")],
-  "docs/reference/sections.md": [sectionsTableRegion("sections-table", "# Sections")],
-  "docs/reference/inputs.md": [outputsListRegion("outputs-list", "## Outputs")],
-  "docs/reference/architecture.md": [
-    architectureMapRegion("architecture-map", "## The module map"),
-  ],
-};
-
-// The result must reference the token-form label exactly as often as it defines it, at most once: a renamed
+// A rendered page must reference the token-form label exactly as often as it defines it, at most once: a renamed
 // reference, a second one, or a stale definition ahead of the generated one (it wins) would leave the page wrong
 // while regeneration stays a no-op.
-export function renderPage(path: string, text: string): string {
-  const regions = PAGE_REGIONS[path];
-  if (regions === undefined) {
-    throw new Error(`gen-docs: no generated regions are registered for ${path}`);
-  }
-  const out = regenerateRegions(text, regions, path);
+function patFormFault(page: string, path: string): string | undefined {
   // CommonMark trims and case-folds labels and lets the first definition win, so every spelling counts: a mention
   // opening a line and ending in ":" is a definition, any other bracketed mention is a reference.
-  const mentions = [...out.matchAll(/^ {0,3}\[([^\]]+)\]:|\[([^\]]+)\]/gm)].filter(
+  const mentions = [...page.matchAll(/^ {0,3}\[([^\]]+)\]:|\[([^\]]+)\]/gm)].filter(
     (match) => (match[1] ?? match[2] ?? "").trim().toLowerCase() === PAT_FORM_LABEL,
   );
   const definitions = mentions.filter((match) => match[1] !== undefined).length;
   const references = mentions.length - definitions;
   if (references !== definitions || definitions > 1) {
-    throw new Error(
-      `gen-docs: ${path} must reference [${PAT_FORM_LABEL}] exactly as often as it defines it, at most once; found ${references} and ${definitions}`,
+    return (
+      `gen-docs: ${path} must reference [${PAT_FORM_LABEL}] exactly as often as it defines it, ` +
+      `at most once; found ${references} and ${definitions}`
     );
   }
-  return out;
+  return undefined;
 }
 
-// The one region closes the file and holds everything below the title (or an empty body between fresh markers), so
-// a marker moved over authored prose fails instead of erasing it.
-const COVERAGE_REGIONS: readonly GeneratedRegion[] = [
-  GeneratedRegion.of({
-    name: "coverage",
-    placement: { kind: "tail" },
-    data: () => coveragePage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS),
-    render: block(renderCoveragePage),
-    parse: parseCoveragePage,
-  }),
-];
+/** A page with regions, held to the token-form rule once rendered. */
+function page(...regions: GeneratedRegion[]): GeneratedFile {
+  return { regions, rendered: patFormFault };
+}
 
 /** The page's frontmatter and title; the sidebar reads `order`, and 115 sits the page right after the Sections table (110). */
 const COVERAGE_TITLE = "---\norder: 115\n---\n\n# Coverage\n\n";
 
 // Beyond the shared placement checks, the page must be exactly the title, the region, and one final newline, or
 // prose left outside could drift from the generator's.
-export function renderCoverageFile(coverage: string): string {
+function coverageShapeFault(coverage: string, path: string): string | undefined {
   const { begin, end } = regionBounds(coverage, "coverage", "html");
   if (coverage.slice(0, begin[0]) !== COVERAGE_TITLE || coverage.slice(end[1]) !== "\n") {
-    throw new Error(
-      `gen-docs: ${COVERAGE_PATH} must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline`,
-    );
+    return `gen-docs: ${path} must be the frontmatter, the "# Coverage" title, the coverage region, and one final newline`;
   }
-  return regenerateRegions(coverage, COVERAGE_REGIONS, COVERAGE_PATH);
+  return undefined;
 }
 
+export const PAGES: GeneratedFiles = {
+  "docs/reference/coverage.md": {
+    // The one region closes the file and holds everything below the title (or an empty body between fresh
+    // markers), so a marker moved over authored prose fails instead of erasing it.
+    regions: [
+      GeneratedRegion.of({
+        name: "coverage",
+        placement: { kind: "tail" },
+        data: () => coveragePage(SECTIONS, DOCS, COVERAGE_DATA, ENDPOINT_ANCHORS),
+        render: block(renderCoveragePage),
+        parse: parseCoveragePage,
+      }),
+    ],
+    shape: coverageShapeFault,
+  },
+  "README.md": page(patUrlRegion("readme-pat-url")),
+  "docs/start/getting-started.md": page(patUrlRegion("pat-url")),
+  "docs/reference/sections.md": page(sectionsTableRegion("sections-table", "# Sections")),
+  "docs/reference/inputs.md": page(outputsListRegion("outputs-list", "## Outputs")),
+  "docs/reference/architecture.md": page(
+    architectureMapRegion("architecture-map", "## The module map"),
+  ),
+};
+
 if (import.meta.main) {
-  const pages: ReadonlyArray<readonly [string, (text: string) => string]> = [
-    [COVERAGE_PATH, renderCoverageFile],
-    ...Object.keys(PAGE_REGIONS).map(
-      (path) => [path, (text: string) => renderPage(path, text)] as const,
-    ),
-  ];
-  for (const [file, render] of pages) {
-    const path = join(ROOT, file);
-    const before = readFileSync(path, "utf8");
-    const after = render(before);
-    writeFileSync(path, after);
-    console.log(`gen-docs: wrote ${path}${after === before ? " (unchanged)" : ""}`);
-  }
+  regenerateFiles("gen-docs", PAGES, ROOT);
 }

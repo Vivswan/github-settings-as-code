@@ -4,13 +4,12 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   DEFAULTS_TABLE_HEADER,
-  GENERATED_REGIONS,
+  FILES,
   type KnobbedSection,
   type PolicyRow,
   type PolicyRowProse,
   policyCells,
   policyTableFault,
-  regenerateText,
   renderActionInputs,
   renderActionOutputs,
   renderCheckModeGatedReads,
@@ -24,6 +23,7 @@ import {
   markerSyntaxFor,
   regionBounds,
 } from "../../.github/scripts/lib/generated-regions.js";
+import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
 import { OUTPUT_DECLS } from "../../src/action/io.js";
 import { INPUT_DECLS } from "../../src/flows/inputs.js";
 import { tableRow } from "../../src/report/markdown.js";
@@ -278,8 +278,8 @@ describe("permissions renderers", () => {
 
 describe("generated files", () => {
   test.each(
-    Object.entries(GENERATED_REGIONS).flatMap(([path, regions]) =>
-      regions.map((region): [name: string, path: string, region: GeneratedRegion] => [
+    Object.entries(FILES).flatMap(([path, file]) =>
+      file.regions.map((region): [name: string, path: string, region: GeneratedRegion] => [
         region.name,
         path,
         region,
@@ -299,13 +299,13 @@ describe("generated files", () => {
           ? `must sit under "${placement.heading}" in ${path}`
           : `must close ${path}`;
     expect(() =>
-      regenerateText(path, relocatedRegion(text, name, markerSyntaxFor(path), anchor)),
+      regenerateFile(FILES, path, relocatedRegion(text, name, markerSyntaxFor(path), anchor)),
     ).toThrow(`the ${name} region ${home}`);
   });
 
   const regions = new Map(
-    Object.values(GENERATED_REGIONS)
-      .flat()
+    Object.values(FILES)
+      .flatMap((file) => file.regions)
       .map((region) => [region.name, region]),
   );
   const regionOf = (name: string): GeneratedRegion => {
@@ -382,8 +382,8 @@ describe("generated files", () => {
 
   test("each region refuses authored text and every other region's body", () => {
     // A parse loosened to read anything back would still pass the renderer test above.
-    const regions = Object.entries(GENERATED_REGIONS).flatMap(([path, list]) =>
-      list.map((region) => ({ path, region })),
+    const regions = Object.entries(FILES).flatMap(([path, file]) =>
+      file.regions.map((region) => ({ path, region })),
     );
     const bodies = new Map(
       regions.map(({ path, region }) => {
