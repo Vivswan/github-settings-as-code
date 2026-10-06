@@ -1,6 +1,7 @@
 import { err, ok, Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { phantomKeys, phantomNote, subsetDiff } from "../../engine/diff.js";
+import { isPlainObject } from "../../plain-data.js";
 import { type EndpointDecl, repoVariables } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { type GraphqlOpDecl, type GraphqlVariablesOf, graphqlOp } from "../contract/graphql.js";
@@ -133,12 +134,12 @@ const LiveRepository = z.looseObject({ topics: z.array(z.string()).nullish() });
 
 /** The live security_and_analysis object narrowed to its PATCHable sub-keys; undefined when none. */
 function snapshotSecurityAndAnalysis(live: unknown): Record<string, unknown> | undefined {
-  if (typeof live !== "object" || live === null || Array.isArray(live)) {
+  if (!isPlainObject(live)) {
     return undefined;
   }
   const out: Record<string, unknown> = {};
   for (const field of SECURITY_AND_ANALYSIS_PATCH_FIELDS) {
-    const value = (live as Record<string, unknown>)[field];
+    const value = live[field];
     if (value !== undefined && value !== null) {
       out[field] = value;
     }

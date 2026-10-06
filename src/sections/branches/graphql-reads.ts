@@ -4,6 +4,7 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
+import { isPlainObject } from "../../plain-data.js";
 import { repoVariables } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
 import { liveByIdentity, liveIdentity } from "../contract/live.js";
@@ -142,12 +143,9 @@ export function wildcardSnapshot(node: RuleNode): BranchProtectionConfig {
     if (value === false || value === null || (Array.isArray(value) && value.length === 0)) {
       continue;
     }
-    out[key] =
-      typeof value === "object" && !Array.isArray(value)
-        ? Object.fromEntries(
-            Object.entries(value as Record<string, unknown>).filter(([, inner]) => inner !== null),
-          )
-        : value;
+    out[key] = isPlainObject(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, inner]) => inner !== null))
+      : value;
   }
   // The engine validates the assembled document, so this cast is the projection boundary.
   return out as BranchProtectionConfig;

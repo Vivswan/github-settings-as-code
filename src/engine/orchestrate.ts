@@ -7,7 +7,7 @@ import { err, ok, type Result } from "neverthrow";
 import type { RepoRef } from "../discovery/targets.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
-import type { ProvedPlain } from "../plain-data.js";
+import { isPlainObject, type ProvedPlain } from "../plain-data.js";
 import {
   badDirectiveIssue,
   type SettingsProblem,
@@ -127,18 +127,15 @@ export function validateSettingsDoc(
   io: Io,
   options: ValidateOptions = {},
 ): Result<ValidatedSettings, SettingsProblem> {
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-    return err({
-      code: "settings-not-mapping",
-      source: sourceLabel,
-      shape: nonMappingShape(settings),
-    });
-  }
-  // A YAML tag (!!timestamp, !!set, !!binary) parses to a Date, Set, or Uint8Array: an object with no meaningful keys,
-  // which branded valid would turn the document into a silent green no-op.
-  const proto = Object.getPrototypeOf(settings);
-  if (proto !== Object.prototype && proto !== null) {
-    return err({ code: "settings-not-plain-mapping", source: sourceLabel });
+  if (!isPlainObject(settings)) {
+    const shape = nonMappingShape(settings);
+    // A YAML tag (!!timestamp, !!set, !!binary) parses to a Date, Set, or Uint8Array: an object with no meaningful
+    // keys, which branded valid would turn the document into a silent green no-op.
+    return err(
+      shape === null
+        ? { code: "settings-not-plain-mapping", source: sourceLabel }
+        : { code: "settings-not-mapping", source: sourceLabel, shape },
+    );
   }
   const knownSections = new Set<string>(SECTION_KEYS);
   const directives = new Set<string>(DOCUMENT_DIRECTIVE_KEYS);
@@ -208,13 +205,16 @@ function mintValidatedSettings(
   return resolved as ValidatedSettings;
 }
 
-/** A non-mapping document's top level in typeof terms; the only object left by the caller's guard is null. */
-function nonMappingShape(value: unknown): TopLevelShape {
+/** A non-mapping document's top level in typeof terms; null for a non-plain object, which has its own problem code. */
+function nonMappingShape(value: unknown): TopLevelShape | null {
   if (Array.isArray(value)) {
     return "list";
   }
+  if (value === null) {
+    return "null";
+  }
   const kind = typeof value;
-  return kind === "object" ? "null" : kind;
+  return kind === "object" ? null : kind;
 }
 
 /** A plan section has no write capability, so planning IS the read-only probe; `active` is injectable for tests. */

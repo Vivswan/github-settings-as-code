@@ -2,7 +2,7 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import { nonPlainKind, type ProvedPlain } from "../plain-data.js";
+import { nonPlainReason, type ProvedPlain } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
 import type { DeclaredIssue, DeclaredSecretValue } from "../sections/contract/module.js";
@@ -118,49 +118,15 @@ function findOffending(
 }
 
 /**
- * What the payload proof (contract/plan.ts plainData) would throw on mid-run, judged at one node: a YAML-tagged value
- * (a Date, Set, or Uint8Array from !!timestamp, !!set, !!binary, which a zod object schema accepts as an empty
- * mapping), and what only a library caller's document can hold. An undefined list item becomes null in JSON; an
- * undefined field is dropped, so it passes.
+ * What the payload proof (contract/plan.ts plainData) would throw on mid-run, refused at one node in the words of
+ * the fix: a YAML-tagged value (a Date, Set, or Uint8Array from !!timestamp, !!set, !!binary, which a zod object
+ * schema accepts as an empty mapping), and what only a library caller's document can hold.
  */
 function nonPlainOffence(value: unknown, at: "item" | "field"): string | null {
-  const refuse = (what: string): string =>
-    `is not plain YAML data (${what}); replace it with a plain value`;
-  if (value === undefined) {
-    return at === "item" ? refuse("an undefined list item, which JSON would turn into null") : null;
-  }
-  if (value === null) {
-    return null;
-  }
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return null;
-    case "object":
-      break;
-    default:
-      return refuse(nonPlainKind(value));
-  }
-  if (Object.getOwnPropertySymbols(value).length > 0) {
-    return refuse("a mapping with a symbol-keyed property, which JSON drops");
-  }
-  if (Array.isArray(value)) {
-    if (Object.getPrototypeOf(value) !== Array.prototype) {
-      return refuse("a list of a subclass, which JSON serializes as a plain list");
-    }
-    // Indices from the length, not value.keys(): a named property may shadow the method.
-    const indices = new Set(Array.from({ length: value.length }, (_, index) => String(index)));
-    if (Object.getOwnPropertyNames(value).some((n) => n !== "length" && !indices.has(n))) {
-      return refuse("a list carrying named properties, which JSON drops");
-    }
-    if (Object.keys(value).length !== value.length) {
-      return refuse("a list with a hole (which JSON renders as null) or a non-enumerable item");
-    }
-    return null;
-  }
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null ? null : refuse(nonPlainKind(value));
+  const reason = nonPlainReason(value, at);
+  return reason === null
+    ? null
+    : `is not plain YAML data (${reason}); replace it with a plain value`;
 }
 
 /**

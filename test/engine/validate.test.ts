@@ -236,7 +236,7 @@ describe("YAML-tagged values are rejected anywhere in a section", () => {
     [
       "a symbol-keyed mapping",
       { ok: true, [Symbol("hidden")]: 1 },
-      "a mapping with a symbol-keyed property, which JSON drops",
+      "a symbol-keyed property, which JSON drops",
     ],
     [
       "a list of a subclass",

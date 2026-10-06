@@ -1061,14 +1061,16 @@ describe("plainData", () => {
 
   const BUG = "BUG: a planned payload carries a value JSON cannot carry at ";
   const PLAIN = "; request data must be plain";
-  // One refusal covers two list shapes; it names both and what JSON does with each, so the reader can tell them apart.
-  const HOLE_OR_HIDDEN_ITEM = new RegExp(
-    `^${BUG}list: (?=.*\\ba hole, which JSON \\w+ as null\\b)(?=.*\\bnon-enumerable item, which JSON keeps\\b).*${PLAIN}$`,
-  );
+  // One refusal covers two list shapes, since both leave the enumerable keys short of the length.
+  const HOLE_OR_HIDDEN_ITEM = `${BUG}list: a list with a hole (which JSON renders as null) or a non-enumerable item${PLAIN}`;
   test.each<[what: string, value: unknown, message: string | RegExp]>([
     ["a function", { rules: [{ check: () => true }] }, `${BUG}rules[0].check: a function${PLAIN}`],
     ["a bigint", { limit: 10n }, `${BUG}limit: a bigint${PLAIN}`],
-    ["a class instance", { when: new Date(0) }, `${BUG}when: a non-plain object${PLAIN}`],
+    [
+      "a class instance",
+      { when: new Date(0) },
+      `${BUG}when: a Date, e.g. from a YAML !!timestamp tag${PLAIN}`,
+    ],
     ["a symbol", [Symbol("s")], `${BUG}[0]: a symbol${PLAIN}`],
     [
       "a non-finite number",

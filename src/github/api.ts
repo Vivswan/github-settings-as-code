@@ -13,6 +13,7 @@ import { throttling } from "@octokit/plugin-throttling";
 import type { EndpointOptions, RequestInterface } from "@octokit/types";
 import type Bottleneck from "bottleneck/light.js";
 import { maskRegistry } from "../io.js";
+import { isPlainObject } from "../plain-data.js";
 import {
   type ApiError,
   apiErrorFromGraphqlErrors,
@@ -504,12 +505,12 @@ export class GitHubApi implements GitHubClient {
       return { error: forRedacted(apiErrorFromGraphqlErrors(errors, withholdContent())) };
     }
     const data = body.data;
-    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    if (!isPlainObject(data)) {
       // A 200 with neither errors nor a data map is outside the GraphQL contract; the body is not quoted, since it could carry private live state.
       return {
         failed: `GRAPHQL ${op.name} returned a response carrying neither errors nor a data object; the GraphQL endpoint at ${this.baseUrl} is not answering the GraphQL wire contract. Re-run, and retry later if it persists`,
       };
     }
-    return { data: data as Record<string, unknown> };
+    return { data };
   }
 }
