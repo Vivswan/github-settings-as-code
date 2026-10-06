@@ -736,7 +736,7 @@ describe("docs/ guide pages", () => {
 
   test("the v2-to-v3 guide quotes the complete wrapper-key rename error the validator emits", () => {
     // The fence is the reader's search string, so it is held to the emitted error, not a source substring.
-    const guide = readFileSync(join(DOCS, "upgrading", "v2-to-v3.md"), "utf8");
+    const guide = readFileSync(join(DOCS, "upgrading", "v2-to-v3", "settings-file.md"), "utf8");
     const result = validateSettingsDoc(
       { labels: { undeclared: "keep", entries: [{ name: "bug", color: "d73a4a" }] } },
       ".github/settings.yml",
