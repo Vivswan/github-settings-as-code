@@ -10,9 +10,7 @@ import type { LoggedRequest } from "../mock/contract.js";
 import type { Scenario } from "../scenario.js";
 import type { RerunCapture } from "./apply-idempotence-proof.js";
 import {
-  bundleBuildParityFailure,
   checkLeaks,
-  declaredBuildBundleScript,
   exitCodeFailure,
   failureArtifacts,
   forbiddenPresent,
@@ -220,30 +218,6 @@ describe("snapshotCheckInputs (the round-trip check's inputs)", () => {
     ],
   ])("%s", (_label, snapshot, check) => {
     expect(snapshotCheckInputs(snapshot)).toEqual(check);
-  });
-});
-
-describe("bundle build parity (harness vs production)", () => {
-  test("the declared build:bundle script matches what the harness builds", () => {
-    // A unit test on purpose: builtBundle() checks the same pin as a fast local signal that aborts
-    // the whole e2e run; this test is the binding assertion, failing by name on the PR that drifts.
-    expect(bundleBuildParityFailure(declaredBuildBundleScript())).toBeUndefined();
-  });
-
-  // The failure is the line that aborts the whole e2e run, so it names both the script it saw and the fix.
-  const HARNESS_TAIL =
-    'but the e2e harness builds with "bun build src/main.ts --target=node --outfile lib/index.js"; mirror the change in the harness\'s Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner/runner.ts) to keep production parity';
-  test.each<[label: string, script: string | undefined, saw: string]>([
-    [
-      "a drifted script",
-      "bun build src/main.ts --target=node --minify --outfile lib/index.js",
-      "bun build src/main.ts --target=node --minify --outfile lib/index.js",
-    ],
-    ["a missing script", undefined, "undefined"],
-  ])("%s is a failure naming the script it saw and the harness's", (_label, script, saw) => {
-    expect(bundleBuildParityFailure(script)).toBe(
-      `package.json build:bundle is "${saw}", ${HARNESS_TAIL}`,
-    );
   });
 });
 

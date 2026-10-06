@@ -44,51 +44,32 @@ import {
 } from "./apply-idempotence-proof.js";
 import { assertIssueReport, checkReportLeaks } from "./issue-report-assert.js";
 
-/**
- * The production bundle command, pinned verbatim so the Bun.build call below cannot drift from it: a
- * flag added to build:bundle (minify, sourcemap, define) would make e2e exercise a different artifact
- * than a release ships. A build:bundle change updates this pin AND the Bun.build options together.
- */
-const BUILD_BUNDLE_SCRIPT = "bun build src/main.ts --target=node --outfile lib/index.js";
-
-/**
- * Exported so a UNIT test asserts the parity by name on every PR. builtBundle() checks it too, but
- * as a fast local signal that aborts the whole e2e run; the unit test is the binding assertion.
- */
-export function bundleBuildParityFailure(script: string | undefined): string | undefined {
-  return script === BUILD_BUNDLE_SCRIPT
-    ? undefined
-    : `package.json build:bundle is "${script}", but the e2e harness builds with "${BUILD_BUNDLE_SCRIPT}"; mirror the change in the harness's Bun.build options and update BUILD_BUNDLE_SCRIPT (test/e2e/runner/runner.ts) to keep production parity`;
-}
-
-export function declaredBuildBundleScript(): string | undefined {
-  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
-    scripts?: Record<string, string>;
-  };
-  return pkg.scripts?.["build:bundle"];
-}
-
 /** Memoized as a promise so concurrent scenarios share the one build instead of racing their own. */
 let bundleBuild: Promise<string> | undefined;
 function builtBundle(): Promise<string> {
   bundleBuild ??= (async () => {
-    // A fast local signal; the binding assertion is the unit test.
-    const parityFailure = bundleBuildParityFailure(declaredBuildBundleScript());
-    if (parityFailure !== undefined) {
-      throw new Error(parityFailure);
-    }
     const outdir = mkdtempSync(join(tmpdir(), "e2e-bundle-"));
     process.on("exit", () => rmSync(outdir, { recursive: true, force: true }));
-    const build = await Bun.build({
-      entrypoints: [join(ROOT, "src", "main.ts")],
-      target: "node",
-      outdir,
-      naming: "index.js",
+    const outfile = join(outdir, "index.js");
+    // package.json's own build:bundle, so the harness cannot build a different artifact than a release ships;
+    // bun appends run arguments to the script and the last --outfile wins, which keeps lib/ untouched.
+    const build = Bun.spawn([process.execPath, "run", "build:bundle", "--outfile", outfile], {
+      cwd: ROOT,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-    if (!build.success) {
-      throw new Error(`bundling src/main.ts failed:\n${build.logs.join("\n")}`);
+    const [stdout, stderr, status] = await Promise.all([
+      new Response(build.stdout).text(),
+      new Response(build.stderr).text(),
+      build.exited,
+    ]);
+    if (status !== 0 || !existsSync(outfile)) {
+      throw new Error(
+        `bun run build:bundle exited ${status} without ${outfile}:\n${stdout}${stderr}`,
+      );
     }
-    return join(outdir, "index.js");
+    return outfile;
   })();
   return bundleBuild;
 }

@@ -150,9 +150,6 @@ const opts = (policy: "fail" | "warn" = "fail") => ({
 
 const NOTHING = "nothing exists on the repository, so the section is omitted";
 
-/** The sections without a snapshot handler, read off the registry so the test cannot go stale. */
-const UNSUPPORTED = SECTIONS.filter((section) => section.snapshot === undefined).map((s) => s.key);
-
 describe("snapshotRepository", () => {
   test("an all-grades token reads every supported section back and lists the rest unsupported", async () => {
     const api = registryFake(LIVE);
@@ -181,7 +178,6 @@ describe("snapshotRepository", () => {
     });
     // Every registered section has exactly one outcome; the one write-only section is unsupported with its reason.
     expect(result.outcomes.map((o) => o.key)).toEqual(SECTIONS.map((s) => s.key));
-    expect(UNSUPPORTED).toEqual(["check_suite_preferences"]);
     expect(
       result.outcomes.filter((o) => o.status === "unsupported").map((o) => [o.key, o.detail]),
     ).toEqual([
