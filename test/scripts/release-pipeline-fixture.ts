@@ -30,7 +30,6 @@ const PLANS_ENV = "RELEASE_PIPELINE_PUSH_PLANS";
 
 const roots: string[] = [];
 
-/** The shim's refusal, as it prints it. */
 export function guardRefusal(cwd: string): string {
   return `release-pipeline fixture guard: refusing git push from ${cwd}, which is not inside ${FIXTURE_AREA}/${FIXTURE_PREFIX}*/`;
 }
@@ -73,7 +72,7 @@ export function installReleasePipelineFixture(): void {
       'here="$(pwd -P)"',
       'case "$here/" in',
       `  "${FIXTURE_AREA}"/${FIXTURE_PREFIX}*/*) ;;`,
-      `  *) echo "release-pipeline fixture guard: refusing git push from $here, which is not inside ${FIXTURE_AREA}/${FIXTURE_PREFIX}*/" >&2; exit 1 ;;`,
+      `  *) echo "${guardRefusal("$here")}" >&2; exit 1 ;;`,
       "esac",
       'if [ -n "$plans" ]; then',
       `  printf '%s\\n' "$*" >> "$plans/pushes.log"`,
@@ -106,13 +105,20 @@ export function installReleasePipelineFixture(): void {
   });
 }
 
+type Setting = [key: string, value: string];
+
 /** A fixture repository does nothing between the commands a test runs in it. Since git 2.54 every push and fetch
  * spawns a detached `git maintenance run --auto` whose geometric repack packs and deletes the loose objects as soon
  * as two of them share the objects/17 shard; a plain-path clone copying the origin's loose objects at that moment
  * dies with "failed to copy file ... No such file or directory". Origins take pushes and clones fetch, so all get it. */
+const NO_MAINTENANCE: Setting = ["maintenance.auto", "false"];
 function disableBackgroundMaintenance(dir: string): void {
-  git(dir, "config", "maintenance.auto", "false");
+  git(dir, "config", ...NO_MAINTENANCE);
 }
+
+/** `git clone -c` arguments: each setting is in the new repository's config before it fetches or checks out. */
+const configured = (settings: Setting[]): string[] =>
+  settings.flatMap(([key, value]) => ["-c", `${key}=${value}`]);
 
 /** Hermetic clone: the developer's global gitconfig (identity, signing, hooks) must not leak into the fixtures. */
 export function clone(
@@ -122,13 +128,21 @@ export function clone(
   options: { tags: boolean } = { tags: true },
 ): string {
   const dir = join(root, name);
-  execFileSync("git", ["clone", "--quiet", ...(options.tags ? [] : ["--no-tags"]), originDir, dir]);
-  disableBackgroundMaintenance(dir);
-  git(dir, "config", "user.name", "fixture");
-  git(dir, "config", "user.email", "fixture@example.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  git(dir, "config", "tag.gpgSign", "false");
-  git(dir, "config", "core.hooksPath", join(root, "no-hooks"));
+  execFileSync("git", [
+    "clone",
+    "--quiet",
+    ...(options.tags ? [] : ["--no-tags"]),
+    ...configured([
+      NO_MAINTENANCE,
+      ["user.name", "fixture"],
+      ["user.email", "fixture@example.invalid"],
+      ["commit.gpgsign", "false"],
+      ["tag.gpgSign", "false"],
+      ["core.hooksPath", join(root, "no-hooks")],
+    ]),
+    originDir,
+    dir,
+  ]);
   return dir;
 }
 
@@ -360,8 +374,15 @@ export function originHolds(fx: Fixture, sha: string): boolean {
 /** A depth-1 clone of origin's main: what a shallow checkout gives the pipeline. */
 export function shallowClone(fx: Fixture, name: string): string {
   const dir = join(fx.root, name);
-  execFileSync("git", ["clone", "--quiet", "--depth", "1", `file://${fx.origin}`, dir]);
-  disableBackgroundMaintenance(dir);
+  execFileSync("git", [
+    "clone",
+    "--quiet",
+    "--depth",
+    "1",
+    ...configured([NO_MAINTENANCE]),
+    `file://${fx.origin}`,
+    dir,
+  ]);
   return dir;
 }
 
