@@ -22,6 +22,7 @@ import type { UndeclaredPolicy } from "../../src/types.js";
 import { type Architecture, readArchitecture, renderArchitectureMermaid } from "./arch-lint.js";
 import { COVERAGE_DATA, type CoverageData } from "./coverage-data.js";
 import { ENDPOINT_ANCHORS, type EndpointAnchors } from "./endpoint-docs.js";
+import { runMain } from "./lib/entry.js";
 import {
   block,
   blockLine,
@@ -877,5 +878,5 @@ export const PAGES: GeneratedFiles = {
 };
 
 if (import.meta.main) {
-  regenerateFiles("gen-docs", PAGES, ROOT);
+  await runMain("gen-docs", () => regenerateFiles("gen-docs", PAGES, ROOT));
 }

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLI_COMMANDS } from "../../src/cli/program.js";
 import { SECTION_KEYS } from "../../src/schema.js";
+import { runMain } from "./lib/entry.js";
 import { SCHEMA_ID } from "./lib/schema-id.js";
 
 /** This script lives at .github/scripts/, two levels below the repository root. */
@@ -220,11 +221,6 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  try {
-    await main();
-  } catch (error) {
-    // The failing command already streamed its own output; one line names it.
-    console.error(`package smoke: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  }
+  // The failing command already streamed its own output; the runner's one line names it.
+  await runMain("package-smoke", main);
 }

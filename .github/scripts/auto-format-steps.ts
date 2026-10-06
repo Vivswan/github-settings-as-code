@@ -11,6 +11,7 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { capture, requireEnv, run, setOutput } from "./lib/workflow-step.js";
 
@@ -62,15 +63,5 @@ function push(): void {
 }
 
 if (import.meta.main) {
-  const command = process.argv[2];
-  if (command === "format") {
-    format();
-  } else if (command === "push") {
-    push();
-  } else {
-    console.error(
-      `auto-format-steps: unknown command ${JSON.stringify(command ?? null)}; expected format | push`,
-    );
-    process.exit(1);
-  }
+  await dispatch("auto-format-steps", { format, push }, process.argv.slice(2));
 }

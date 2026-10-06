@@ -18,6 +18,7 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { capture, requireEnv, run, setOutput, status } from "./lib/workflow-step.js";
 
@@ -93,7 +94,7 @@ function rebuild(): void {
   setOutput("pruned", String(stagedChange("--", GAPS_DIR, `:(exclude)${GAPS_INDEX}`)));
 }
 
-function push(): void {
+function push(): number | undefined {
   // bun has already read its bunfig.toml and .env from the trusted checkout it started in; only git runs in the
   // PR branch's tree from here on, with main's environment and no hook or config of that branch.
   process.chdir(requireEnv("PR_CHECKOUT"));
@@ -129,7 +130,7 @@ function push(): void {
   for (const path of staged) {
     if (!fixOwned(path)) {
       console.log(outsideFixOwned(path));
-      process.exit(1);
+      return 1;
     }
   }
   if (!stagedChange()) {
@@ -152,7 +153,7 @@ function push(): void {
       console.log("::notice::head moved during the push; skipping the stale fix push");
       return;
     }
-    process.exit(1);
+    return 1;
   }
   if (canRetrigger === "true") {
     return;
@@ -166,15 +167,5 @@ function push(): void {
 }
 
 if (import.meta.main) {
-  const command = process.argv[2];
-  if (command === "rebuild") {
-    rebuild();
-  } else if (command === "push") {
-    push();
-  } else {
-    console.error(
-      `auto-fix-steps: unknown command ${JSON.stringify(command ?? null)}; expected rebuild | push`,
-    );
-    process.exit(1);
-  }
+  await dispatch("auto-fix-steps", { rebuild, push }, process.argv.slice(2));
 }

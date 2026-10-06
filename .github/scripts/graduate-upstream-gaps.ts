@@ -15,6 +15,7 @@ import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { countNoun } from "../../src/text.js";
 import { isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
+import { runMain } from "./lib/entry.js";
 import { type Diagnostic, parseDiagnostics } from "./lib/tsc-diagnostics.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -224,10 +225,5 @@ function main(): number {
 }
 
 if (import.meta.main) {
-  try {
-    process.exit(main());
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
+  await runMain("graduate-upstream-gaps", main);
 }

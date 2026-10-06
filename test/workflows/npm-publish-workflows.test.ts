@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { COMMANDS } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
@@ -59,9 +60,7 @@ const stepNamed = (job: RunJob, name: string): Step =>
 /** The one floor guard both publishers run; the floor itself is NPM_FLOOR in release-pipeline/npm.ts. */
 const FLOOR_GUARD = "bun .github/scripts/release-pipeline.ts npm-floor";
 const FLOOR_GUARD_NAME = "Require an npm that publishes through OIDC";
-/** The pipeline script's text, where the subcommands are dispatched, and its npm module's, where the floor is defined. */
-const pipelineSource = (): string =>
-  readFileSync(join(ROOT, ".github", "scripts", "release-pipeline.ts"), "utf8");
+/** The pipeline's npm module's text, where the floor is defined. */
 const npmSource = (): string =>
   readFileSync(join(ROOT, ".github", "scripts", "release-pipeline", "npm.ts"), "utf8");
 const setupNode = (job: RunJob): Step =>
@@ -393,8 +392,7 @@ describe("the npm floor guard", () => {
     for (const job of [next, stable]) {
       expect(stepNamed(job, FLOOR_GUARD_NAME).run?.trim()).toBe(FLOOR_GUARD);
     }
-    const source = pipelineSource();
-    expect(source).toContain('case "npm-floor":');
+    expect(Object.keys(COMMANDS)).toContain("npm-floor");
     const floors = [...npmSource().matchAll(/^export const NPM_FLOOR = "(\d+\.\d+\.\d+)";$/gm)].map(
       (m) => m[1] ?? "",
     );

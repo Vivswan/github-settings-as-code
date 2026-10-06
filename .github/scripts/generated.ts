@@ -8,6 +8,7 @@ import { FILES } from "./gen-action-docs.js";
 import { PAGES } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
 import { INPUTS_PAGE_PATH } from "./gen-inputs-table.js";
+import { runMain } from "./lib/entry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
@@ -58,30 +59,32 @@ function run(argv: string[]): number {
 }
 
 if (import.meta.main) {
-  for (const generator of generatorScripts()) {
-    if (run([process.execPath, "run", generator]) !== 0) {
-      console.error(`build:check: bun run ${generator} failed`);
-      process.exit(1);
+  await runMain("generated", () => {
+    for (const generator of generatorScripts()) {
+      if (run([process.execPath, "run", generator]) !== 0) {
+        console.error(`build:check: bun run ${generator} failed`);
+        return 1;
+      }
     }
-  }
-  const paths = generatedPaths();
-  // Working tree against the index: a regenerated file already staged passes, a stale one fails. git lists the
-  // drifted paths itself; an untracked registered path is listed the same way.
-  const untracked = Bun.spawnSync(
-    ["git", "ls-files", "--others", "--exclude-standard", "--", ...paths],
-    { cwd: ROOT, stderr: "inherit" },
-  );
-  if (untracked.exitCode !== 0) {
-    console.error("build:check: git ls-files failed");
-    process.exit(1);
-  }
-  const drifted = run(["git", "diff", "--exit-code", "--stat", "--", ...paths]) !== 0;
-  if (drifted || untracked.stdout.length > 0) {
-    process.stdout.write(untracked.stdout);
-    console.error(
-      "build:check: the generated output listed above drifted from the committed tree; run bun run build and commit it",
+    const paths = generatedPaths();
+    // Working tree against the index: a regenerated file already staged passes, a stale one fails. git lists the
+    // drifted paths itself; an untracked registered path is listed the same way.
+    const untracked = Bun.spawnSync(
+      ["git", "ls-files", "--others", "--exclude-standard", "--", ...paths],
+      { cwd: ROOT, stderr: "inherit" },
     );
-    process.exit(1);
-  }
-  console.log(`build:check: ${paths.length} generated files match their generators`);
+    if (untracked.exitCode !== 0) {
+      console.error("build:check: git ls-files failed");
+      return 1;
+    }
+    const drifted = run(["git", "diff", "--exit-code", "--stat", "--", ...paths]) !== 0;
+    if (drifted || untracked.stdout.length > 0) {
+      process.stdout.write(untracked.stdout);
+      console.error(
+        "build:check: the generated output listed above drifted from the committed tree; run bun run build and commit it",
+      );
+      return 1;
+    }
+    console.log(`build:check: ${paths.length} generated files match their generators`);
+  });
 }
