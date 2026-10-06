@@ -49,9 +49,6 @@ function renderKeyPath(path: readonly string[]): string {
  * a property         -> read through its descriptor; an enumerable accessor is rejected UNREAD (a getter could sabotage globals)
  * an object's keys   -> only Object.keys are copied, so symbol and non-enumerable keys never reach the copy (array indices do)
  * a container again  -> rejected when it is one of its own ancestors (a YAML alias cycle); a sibling alias is copied twice
- * the wire           -> only the copy is sent
- *
- * A rejection is the NotPlainData the walk hands up, an instance no payload value can be.
  */
 function normalizePlainData(
   value: unknown,
