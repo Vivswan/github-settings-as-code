@@ -1,112 +1,101 @@
-/** Renders the inputs table on docs/reference/inputs.md with action-docs, after refusing a marker region holding anything
- * but the lines of a rendering in the renderer's order: action-docs rewrites the region blind, and auto-fix.yml pushes
- * regenerations unreviewed, so an authored line that merely looks like a table row would be erased and committed. */
+/**
+ * The inputs table of docs/reference/inputs.md: one row per input declaration, rendered as a generated region so a
+ * marker moved over authored text is refused instead of regenerated over. The page's outputs list is gen-docs.ts's
+ * region, so two generators write into the page.
+ */
 
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateActionMarkdownDocs } from "action-docs";
+import { err, ok, type Result } from "neverthrow";
+import { INPUT_DECLS, type InputDecl } from "../../src/flows/inputs.js";
+import { renderTable, tableBody, tableFault } from "../../src/report/markdown.js";
+import { block, GeneratedRegion } from "./lib/generated-regions.js";
+import { type GeneratedFiles, regenerateFiles } from "./lib/region-driver.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-/** The page action-docs renders the inputs table into, from the action.yml build:action-docs writes just before. */
 export const INPUTS_PAGE_PATH = "docs/reference/inputs.md";
 
-export const MARKER = '<!-- action-docs-inputs source="action.yml" -->';
+const INPUTS_TABLE_HEADER =
+  "| name | description | required | default |\n| --- | --- | --- | --- |";
 
-/** The header row action-docs emits; test/docs/inputs.test.ts pins the same cells on the committed page. */
-const HEADER_CELLS = ["name", "description", "required", "default"];
+/** The declarations the table renders from, by input name. */
+type Inputs = Readonly<Record<string, Pick<InputDecl, "description" | "default">>>;
 
-/** The trimmed cells of a table line `| a | b |`, or null for any other line. One split per line and no regex: the
- * earlier four-cell regex backtracked exponentially on a long row of repeated cells. */
-const cells = (line: string): string[] | null =>
-  line.startsWith("| ") && line.endsWith(" |")
-    ? line
-        .slice(1, -1)
-        .split("|")
-        .map((cell) => cell.trim())
-    : null;
-
-type CellCheck = (cell: string) => boolean;
-
-const lineOf =
-  (checks: CellCheck[]) =>
-  (line: string): boolean => {
-    const found = cells(line);
-    return (
-      found !== null &&
-      found.length === checks.length &&
-      checks.every((ok, i) => ok(found[i] ?? ""))
-    );
-  };
-
-const backticked: CellCheck = (cell) =>
-  cell.length > 2 && cell.startsWith("`") && cell.endsWith("`");
-
-/** A row action-docs renders: | `name` | <p>description</p> | `false` | `default` |. An authored four-cell row
- * with bare cells is refused on these, since a cell count alone let one through. */
-const row = lineOf([
-  backticked,
-  (cell) => cell.startsWith("<p>") && cell.endsWith("</p>"),
-  (cell) => cell === "`true`" || cell === "`false`",
-  backticked,
-]);
-
-/** The first entry is the rest of the opening marker's own line. A "|" in a description would split its rendered row
- * past `row`'s four cells and refuse it as authored, so test/docs/inputs.test.ts pins every description free of one. */
-const LEADING: ((line: string) => boolean)[] = [
-  (line) => line === "",
-  (line) => line === "## Inputs",
-  (line) => line === "",
-  lineOf(HEADER_CELLS.map((name) => (cell: string) => cell === name)),
-  lineOf(HEADER_CELLS.map(() => (cell: string) => cell === "---")),
-];
-
-/** Why `page` cannot be handed to action-docs, or null when its region holds only a rendering's lines in order. */
-export function regionProblem(page: string): string | null {
-  const parts = page.split(MARKER);
-  if (parts.length !== 3) {
-    return `${INPUTS_PAGE_PATH} must carry exactly two "${MARKER}" markers, found ${parts.length - 1}`;
-  }
-  const [intro, region] = parts as [string, string, string];
-  const openingLine = intro.split("\n").length;
-  const lines = region.split("\n");
-  const last = lines.length - 1;
-  if (last === 0) {
-    // action-docs then replaces the opening marker alone and leaves three on the page.
-    return `the closing "${MARKER}" marker on line ${openingLine} of ${INPUTS_PAGE_PATH} must start its own line`;
-  }
-  if (lines.every((line) => line === "")) {
-    return null;
-  }
-  const authored = lines.findIndex((line, index) => {
-    const leading = LEADING[index];
-    if (leading !== undefined) {
-      return !leading(line);
-    }
-    return index === last ? line !== "" : !row(line);
-  });
-  if (authored !== -1) {
-    return (
-      `line ${openingLine + authored} of ${INPUTS_PAGE_PATH} sits between the two "${MARKER}" markers ` +
-      "but is not a line of a rendered inputs table; move the markers back around the table before " +
-      "regenerating, or action-docs erases what sits between them"
-    );
-  }
-  return null;
+/** Why a description cannot sit in its cell: the cell is HTML, so a tag would be swallowed by the page's renderer. */
+function descriptionFault(text: string): string | undefined {
+  return text.includes("<") ? 'holds a "<", which the cell would read as an HTML tag' : undefined;
 }
 
-if (import.meta.main) {
-  // action-docs resolves both files from the working directory and matches the marker on the literal source name.
-  process.chdir(ROOT);
-  const problem = regionProblem(readFileSync(INPUTS_PAGE_PATH, "utf8"));
-  if (problem !== null) {
-    console.error(`gen-inputs-table: ${problem}`);
-    process.exit(1);
-  }
-  await generateActionMarkdownDocs({
-    sourceFile: "action.yml",
-    updateReadme: true,
-    readmeFile: INPUTS_PAGE_PATH,
+/** The default as the table shows it: in a code span, the empty string as `""`. */
+function defaultSpan(value: string): string {
+  return `\`${value === "" ? '""' : value}\``;
+}
+
+function inputsCells(inputs: Inputs): ReadonlyArray<readonly string[]> {
+  return Object.entries(inputs).map(([name, decl]) => {
+    const fault = descriptionFault(decl.description);
+    if (fault !== undefined) {
+      throw new Error(`gen-inputs-table: the "${name}" description ${fault}`);
+    }
+    return [`\`${name}\``, `<p>${decl.description}</p>`, "`false`", defaultSpan(decl.default)];
   });
-  console.log(`gen-inputs-table: rendered ${INPUTS_PAGE_PATH} from action.yml`);
+}
+
+/** The table rule is the author's to meet, so a description that would break its row stops the build naming it. */
+export function renderInputsTable(inputs: Inputs): string {
+  const cells = inputsCells(inputs);
+  const fault = tableFault(INPUTS_TABLE_HEADER, cells, "cells");
+  if (fault !== undefined) {
+    throw new Error(`gen-inputs-table: ${fault}`);
+  }
+  return renderTable(INPUTS_TABLE_HEADER, cells);
+}
+
+const NAME_SPAN = /^`([a-z][a-z0-9-]*)`$/;
+// The dotAll flag is for the two Unicode line separators cellFault() admits inside a cell.
+const DESCRIPTION_CELL = /^<p>(.*)<\/p>$/s;
+const DEFAULT_SPAN = /^`(.*)`$/s;
+
+/** A row read back to the declaration it renders from; every input is optional, so the required cell is fixed. */
+function inputRow(cells: readonly string[]): Result<readonly [string, Inputs[string]], string> {
+  const name = NAME_SPAN.exec(cells[0] ?? "")?.[1];
+  const description = DESCRIPTION_CELL.exec(cells[1] ?? "")?.[1];
+  const value = DEFAULT_SPAN.exec(cells[3] ?? "")?.[1];
+  if (name === undefined) {
+    return err("does not open with an input name in a code span");
+  }
+  if (description === undefined) {
+    return err("has no paragraph-wrapped description in its second cell");
+  }
+  const fault = descriptionFault(description);
+  if (fault !== undefined) {
+    return err(`${fault}, which the renderer refuses`);
+  }
+  if (cells[2] !== "`false`") {
+    return err("does not show `false` in its required cell");
+  }
+  if (value === undefined) {
+    return err("has no default in a code span in its fourth cell");
+  }
+  return ok([name, { description, default: value === '""' ? "" : value }]);
+}
+
+const parseInputsTable = tableBody(INPUTS_TABLE_HEADER, "cells", inputRow);
+
+export const INPUTS_PAGES: GeneratedFiles = {
+  [INPUTS_PAGE_PATH]: {
+    regions: [
+      GeneratedRegion.of<Inputs>({
+        name: "inputs-table",
+        placement: { kind: "under-heading", heading: "## Inputs" },
+        data: () => INPUT_DECLS,
+        render: block(renderInputsTable),
+        parse: (body) => parseInputsTable(body).map((rows) => Object.fromEntries(rows)),
+      }),
+    ],
+  },
+};
+
+if (import.meta.main) {
+  regenerateFiles("gen-inputs-table", INPUTS_PAGES, ROOT);
 }

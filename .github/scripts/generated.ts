@@ -16,7 +16,7 @@ export interface GeneratedOutput {
   readonly path: string;
   /** The package.json script that writes it; `bun run <generator>` regenerates it in place. */
   readonly generator: string;
-  /** Marker-delimited regions inside an authored file (lib/generated-regions.ts, or action-docs's own markers), or the whole file. */
+  /** Marker-delimited regions inside an authored file (lib/generated-regions.ts), or the whole file. */
   readonly kind: "regions" | "file";
 }
 
@@ -26,9 +26,8 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
 
 /**
  * A page two generators write into (docs/reference/inputs.md) has one row per generator. Rows stay in dependency
- * order, each artifact before its readers, or a new gap file or a bump would leave a run stale.
+ * order, each artifact before its readers, or a new gap file would leave a run stale.
  *   the gaps index -> imported through src/ by the docs and action.yml generators
- *   action.yml     -> feeds the inputs table
  */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
   { path: INDEX_PATH, generator: "build:gaps-index", kind: "file" },

@@ -92,7 +92,6 @@
     "@types/bun": "1.4.2",
     "@types/node": "26.6.4",
     "@types/picomatch": "4.0.3",
-    "action-docs": "2.5.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "entities": "8.1.0",
