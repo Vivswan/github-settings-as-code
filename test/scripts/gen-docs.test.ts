@@ -7,11 +7,9 @@ import type { EndpointAnchors } from "../../.github/scripts/endpoint-docs.js";
 import {
   type CoverageSection,
   FACT_WORD_CAP,
-  PAGE_REGIONS,
+  PAGES,
   patFormParameters,
   renderCoverage,
-  renderCoverageFile,
-  renderPage,
   renderPatCell,
   renderPatFormUrl,
   renderSectionsTable,
@@ -20,9 +18,13 @@ import {
   sectionsCells,
 } from "../../.github/scripts/gen-docs.js";
 import type { GeneratedRegion } from "../../.github/scripts/lib/generated-regions.js";
+import { regenerateFile } from "../../.github/scripts/lib/region-driver.js";
 import { tableFault, tableRow } from "../../src/report/markdown.js";
 import type { SectionDocs } from "../../src/sections/contract/docs.js";
 import { ROOT } from "../root.js";
+
+const renderPage = (path: string, text: string): string => regenerateFile(PAGES, path, text);
+const renderCoverageFile = (text: string): string => renderPage("docs/reference/coverage.md", text);
 
 /** The region `name` among `regions`; a page that lost it fails here, not on an undefined read. */
 function regionNamed(
@@ -94,7 +96,7 @@ describe("renderSectionsTable", () => {
 });
 
 describe("the Sections table guard", () => {
-  const region = regionNamed(PAGE_REGIONS["docs/reference/sections.md"], "sections-table");
+  const region = regionNamed(PAGES["docs/reference/sections.md"]?.regions, "sections-table");
   const sectionsRow =
     "| `labels` | labels CRUD | Issues: write | deleted (settable) | upsert by name |";
   const sectionsTable = (rows: string): string =>
@@ -647,7 +649,7 @@ describe("patFormParameters and renderPatFormUrl", () => {
 describe("the committed pages", () => {
   test("a page without registered regions is refused", () => {
     expect(() => renderPage("docs/README.md", "")).toThrow(
-      "gen-docs: no generated regions are registered for docs/README.md",
+      "no generated regions are registered for docs/README.md",
     );
   });
 
@@ -760,7 +762,10 @@ describe("the architecture map guard", () => {
   test("a layer id the renderer leaves as is (a dot, a digit) reads back, since only dashes are rewritten", () => {
     // The parse and renderArchitectureMermaid() must agree on what a node id may hold, or a renamed layer would
     // refuse its own freshly generated page.
-    const region = regionNamed(PAGE_REGIONS["docs/reference/architecture.md"], "architecture-map");
+    const region = regionNamed(
+      PAGES["docs/reference/architecture.md"]?.regions,
+      "architecture-map",
+    );
     const diagram = renderArchitectureMermaid({
       layers: { "plain.data": ["src/plain-data.ts"], v2: ["src/v2/", "src/v2.ts"] },
       edges: { "plain.data": ["v2"] },
