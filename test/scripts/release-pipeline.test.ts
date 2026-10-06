@@ -64,6 +64,7 @@ import {
   write,
   writeBuild,
 } from "./release-pipeline-fixture.js";
+import { runStep } from "./step-fixture.js";
 
 // Dozens of git spawns per test time out bun's 5s default under parallel machine load.
 setDefaultTimeout(60_000);
@@ -1047,6 +1048,138 @@ describe("anchorCheck", () => {
     git(pr, "checkout", "--quiet", "release-please--branches--main");
     expect(anchorCheck(pr).boundary).toBe(fx.mergeSha);
   });
+});
+
+describe("the release hook's reads of the draft", () => {
+  /** A gh first on PATH that logs its argv and answers with the planned stdout, or the planned stderr and status. */
+  type Gh = { stdout?: string; stderr?: string; status?: number };
+  function runWithGh(gh: Gh, env: Record<string, string | undefined>, subcommand: string) {
+    return withTempDir("release-draft-", (dir) => {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(dir, "answer"), gh.stdout ?? "");
+      writeFileSync(join(dir, "answer.err"), gh.stderr ?? "");
+      writeFileSync(
+        join(bin, "gh"),
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' "$*" >> "${dir}/calls.log"`,
+          `cat "${dir}/answer"`,
+          `cat "${dir}/answer.err" >&2`,
+          `exit ${gh.status ?? 0}`,
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const step = runStep(
+        "release-pipeline",
+        ROOT,
+        join(dir, "runner"),
+        { TAG: "v2.1.0", ...env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+        subcommand,
+      );
+      const log = join(dir, "calls.log");
+      const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+      return { ...step, calls };
+    });
+  }
+  const sha = "b8df084c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a";
+  const VIEW_SOURCE = "release view v2.1.0 --json targetCommitish --jq .targetCommitish";
+  const VIEW_ASSETS = "release view v2.1.0 --json assets";
+  const assets = (...names: string[]): string =>
+    `${JSON.stringify({ assets: names.map((name) => ({ name })) })}\n`;
+
+  // The whole step per case: what gh was asked, what the step printed and wrote, and how it ended. The draft is
+  // read by tag alone, and a refusal is the annotation the shell step printed.
+  test.each<
+    [
+      name: string,
+      subcommand: string,
+      gh: Gh,
+      expected: {
+        stdout: string;
+        stderr: string;
+        status: number;
+        outputs: string[];
+        calls: string[];
+      },
+    ]
+  >([
+    [
+      "resolve-source: a draft targeting the merge commit writes it as the step output",
+      "resolve-source",
+      { stdout: `${sha}\n` },
+      { stdout: "", stderr: "", status: 0, outputs: [`sha=${sha}`], calls: [VIEW_SOURCE] },
+    ],
+    [
+      "resolve-source: a draft targeting a branch name is refused before anything checks it out",
+      "resolve-source",
+      { stdout: "main\n" },
+      {
+        stdout:
+          "::error::draft v2.1.0's target commitish is 'main', not a commit SHA; refusing to package an unidentified source.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_SOURCE],
+      },
+    ],
+    [
+      "resolve-source: a gh that fails ends the step with its status and stderr, writing no output",
+      "resolve-source",
+      { stderr: "release not found\n", status: 4 },
+      { stdout: "", stderr: "release not found\n", status: 4, outputs: [], calls: [VIEW_SOURCE] },
+    ],
+    [
+      "verify-assets: both packaged assets beside the attestation pass silently",
+      "verify-assets",
+      { stdout: assets("settings.schema.json", "attestation.json", "index.js") },
+      { stdout: "", stderr: "", status: 0, outputs: [], calls: [VIEW_ASSETS] },
+    ],
+    [
+      "verify-assets: a draft missing an asset fails naming what it carries",
+      "verify-assets",
+      { stdout: assets("index.js") },
+      {
+        stdout:
+          "::error::release v2.1.0 carries assets [index.js], expected [index.js settings.schema.json]; " +
+          "re-run package-release before anything publishes.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_ASSETS],
+      },
+    ],
+    [
+      "verify-assets: an assetless draft fails the same way",
+      "verify-assets",
+      { stdout: assets() },
+      {
+        stdout:
+          "::error::release v2.1.0 carries assets [], expected [index.js settings.schema.json]; " +
+          "re-run package-release before anything publishes.\n",
+        stderr: "",
+        status: 1,
+        outputs: [],
+        calls: [VIEW_ASSETS],
+      },
+    ],
+  ])("%s", async (_name, subcommand, gh, expected) => {
+    expect(await runWithGh(gh, {}, subcommand)).toEqual(expected);
+  });
+
+  test.each(["resolve-source", "verify-assets"])(
+    "%s without TAG is refused before gh is asked",
+    async (subcommand) => {
+      expect(await runWithGh({ stdout: `${sha}\n` }, { TAG: undefined }, subcommand)).toEqual({
+        stdout: "",
+        stderr: `release-pipeline ${subcommand}: TAG is required for "${subcommand}"\n`,
+        status: 1,
+        outputs: [],
+        calls: [],
+      });
+    },
+  );
 });
 
 describe("release configuration contract", () => {

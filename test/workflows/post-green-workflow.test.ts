@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SOURCE_OUTPUT } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
 import { withTempDir } from "../temp-dir.js";
 import { type Job, readWorkflow, type Step, type Workflow } from "./workflow-loader.js";
@@ -150,7 +151,8 @@ function consumedGrants(step: Step): Array<[scope: string, why: string]> {
   const label = step.name ?? "unnamed step";
   const grants: Array<[string, string]> = [];
   if (
-    /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b|release-pipeline\.ts (?:package|package-commit|retag-major|anchor)\b/.test(
+    /\bgit\s+push\b|\bgh\s+release\s+(?:view|upload|edit|create)\b/.test(run) ||
+    /release-pipeline\.ts (?:package|package-commit|retag-major|anchor|resolve-source|verify-assets)\b/.test(
       run,
     )
   ) {
@@ -369,11 +371,13 @@ describe("the library page's publishing claims", () => {
   });
 });
 
-/** Every `<name>` a step writes to GITHUB_OUTPUT. */
-const outputsWritten = (step: Step): string[] =>
-  [...(step.run ?? "").matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map(
+/** Every `<name>` a step writes to GITHUB_OUTPUT: an echo in its shell, or the pipeline subcommand that writes one. */
+const outputsWritten = (step: Step): string[] => [
+  ...[...(step.run ?? "").matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map(
     (m) => m[1] ?? "",
-  );
+  ),
+  ...(/release-pipeline\.ts resolve-source\b/.test(step.run ?? "") ? [SOURCE_OUTPUT] : []),
+];
 
 /** Every `steps.<id>.outputs.<name>` a step reads, in its condition, env, with, or script. */
 const outputsRead = (step: Step): Array<[id: string, name: string]> =>
@@ -514,7 +518,10 @@ describe("the probed hooks' wiring", () => {
     [
       "the source step's readers gone, leaving the resolved sha unread",
       RELEASE,
-      (w) => must(w.jobs["package-release"], "package-release").steps?.splice(1),
+      (w) => {
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        steps.splice(steps.findIndex((step) => step.id === "source") + 1);
+      },
       /writes sha, which no later step reads/,
     ],
     [
@@ -538,8 +545,12 @@ describe("the probed hooks' wiring", () => {
       "the resolved sha no longer written",
       RELEASE,
       (w) => {
-        const step = must(must(w.jobs["package-release"], "package-release").steps?.[0], "source");
-        step.run = step.run?.replace(/\n\s*echo "sha=\$sha" >> "\$GITHUB_OUTPUT"/, "");
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        const step = must(
+          steps.find((candidate) => candidate.id === "source"),
+          "source",
+        );
+        step.run = step.run?.replace("resolve-source", "verify-assets");
       },
       /reads steps\.source\.outputs\.sha, which no earlier step writes/,
     ],
