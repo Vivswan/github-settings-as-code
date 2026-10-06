@@ -24,6 +24,7 @@ import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_proce
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { capture, setOutput } from "./lib/workflow-step.js";
 
 const MANIFEST_FILE = ".release-please-manifest.json";
 const CONFIG_FILE = "release-please-config.json";
@@ -1325,6 +1326,45 @@ export async function npmPublish(
 /** Trusted publishing (and its provenance) exists from npm 11.5.1 on. */
 export const NPM_FLOOR = "11.5.1";
 
+/** What each subcommand writes to GITHUB_OUTPUT: the release hook's later steps and jobs read the resolved merge
+ * commit from it, and test/workflows/post-green-workflow.test.ts judges those reads against this table. */
+export const STEP_OUTPUTS = { "resolve-source": ["sha"] } as const;
+/** What the package job uploads to the draft; the managed publish stage attaches attestation.json after the check. */
+const RELEASE_ASSETS = ["index.js", "settings.schema.json"];
+
+/** The draft's target commitish, where release-please records the merge commit. The release's identity is read from
+ * the draft and never from the run's own sha, so a newer push's run can recover an older merge's pending release;
+ * anything but a full sha (a branch name on a hand-made draft) is refused before a checkout or a tag could name it. */
+export function resolveSource(tag: string): { sha: string } | { refusal: string } {
+  const target = capture([
+    "gh",
+    "release",
+    "view",
+    tag,
+    "--json",
+    "targetCommitish",
+    "--jq",
+    ".targetCommitish",
+  ]);
+  return FULL_SHA.test(target)
+    ? { sha: target }
+    : {
+        refusal: `draft ${tag}'s target commitish is '${target}', not a commit SHA; refusing to package an unidentified source.`,
+      };
+}
+
+/** The draft's asset names beside attestation.json, sorted. Publishing freezes the asset list, so an incomplete one
+ * must stop while the release is still a draft (v2.0.0 shipped assetless exactly this way). */
+export function releaseAssets(tag: string): string[] {
+  const view = JSON.parse(capture(["gh", "release", "view", tag, "--json", "assets"])) as {
+    assets: { name: string }[];
+  };
+  return view.assets
+    .map((asset) => asset.name)
+    .filter((name) => name !== "attestation.json")
+    .sort();
+}
+
 /** Bun's own semver, so a two-digit minor orders numerically and a prerelease of the floor sits below it; a
  * string that is no version at all (nothing npm --version prints) counts as below it and reaches the refusal. */
 function belowFloor(version: string, floor: string): boolean {
@@ -1483,10 +1523,32 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "resolve-source": {
+      const source = resolveSource(env("TAG"));
+      if ("refusal" in source) {
+        console.log(`::error::${source.refusal}`);
+        process.exit(1);
+      }
+      setOutput(STEP_OUTPUTS["resolve-source"][0], source.sha);
+      break;
+    }
+    case "verify-assets": {
+      const tag = env("TAG");
+      const assets = releaseAssets(tag);
+      if (assets.join(" ") !== RELEASE_ASSETS.join(" ")) {
+        console.log(
+          `::error::release ${tag} carries assets [${assets.join(" ")}], expected ` +
+            `[${RELEASE_ASSETS.join(" ")}]; re-run package-release before anything publishes.`,
+        );
+        process.exit(1);
+      }
+      break;
+    }
     default:
       throw new Error(
         `unknown command ${JSON.stringify(command ?? null)}; expected package | retag-major | anchor | ` +
-          "boundary-check | anchor-check | package-commit | prerelease-version | npm-publish | npm-floor",
+          "boundary-check | anchor-check | package-commit | prerelease-version | npm-publish | npm-floor | " +
+          "resolve-source | verify-assets",
       );
   }
 }
