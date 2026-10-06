@@ -5,13 +5,13 @@
  */
 
 import type { Io } from "../io.js";
-import { type SlugKey, slugKey } from "./slug.js";
+import { SLUG_SEGMENT, type SlugKey, slugKey } from "./slug.js";
 
 export type TraceIo = Pick<Io, "debug" | "masked">;
 
-// The slug charset ([\w.-]) stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never
+// The segment charset stops at the segment boundary so an octokit line's trailing " - 204 with id ..." is never
 // folded into the name; the `i` flag keeps a mixed-case path from slipping the redaction.
-const REPO_SLUG = /\/repos\/([\w.-]+\/[\w.-]+)/i;
+const REPO_SLUG = new RegExp(`/repos/(${SLUG_SEGMENT}/${SLUG_SEGMENT})`, "i");
 
 export function repoSlugOf(path: string): string | undefined {
   return path.match(REPO_SLUG)?.[1];

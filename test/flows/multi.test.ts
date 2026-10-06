@@ -79,52 +79,62 @@ describe("runMulti", () => {
     });
   }
 
-  test("a remote target's own settings.yml is target-authored: its $NAME reference is refused", async () => {
-    const api = new MockApi({
-      "GET /repos/o/a": { data: {} },
-      "GET /repos/o/a/contents/.github/settings.yml": { data: HOOK_WITH_REF },
-    });
-    const { io, annotations } = captureIo();
-    const targets = await runTargets(api, cfg({ reposInput: "o/a", mode: "check" }), io);
-    expect(targets.map((t) => [t.display, t.result])).toEqual([["o/a", "failed"]]);
-    expect(api.calls.filter((c) => c.path.includes("/hooks"))).toEqual([]);
-    expect(annotations.some((a) => a.includes("target-fetched settings file"))).toBe(true);
-  });
-
-  test("the defaults document applied to a fileless target is operator-authored: its $NAME reference is admitted", async () => {
-    await withScratch({ "defaults.yml": HOOK_WITH_REF }, async (dir) => {
-      const api = new MockApi({
+  test.each<{
+    source: string;
+    layout: Record<string, string>;
+    routes: ConstructorParameters<typeof MockApi>[0];
+    config: (dir: string) => Partial<Parameters<typeof runMulti>[1]>;
+    outcome: Pick<TargetOutcome, "display" | "result" | "source">;
+    refused: boolean;
+  }>([
+    {
+      source:
+        "a remote target's own settings.yml is target-authored: its $NAME reference is refused",
+      layout: {},
+      routes: {
+        "GET /repos/o/a": { data: {} },
+        "GET /repos/o/a/contents/.github/settings.yml": { data: HOOK_WITH_REF },
+      },
+      config: () => ({ reposInput: "o/a" }),
+      outcome: { display: "o/a", result: "failed", source: "remote" },
+      refused: true,
+    },
+    {
+      source:
+        "the defaults document applied to a fileless target is operator-authored: its $NAME reference is admitted",
+      layout: { "defaults.yml": HOOK_WITH_REF },
+      routes: {
         "GET /repos/o/c": { data: { default_branch: "main" } },
         "GET /repos/o/c/git/ref/heads/main": { data: { ref: "refs/heads/main" } },
         "GET /repos/o/c/hooks?per_page=100&page=1": { data: [] },
-      });
-      const { io, annotations } = captureIo();
-      const targets = await runTargets(
-        api,
-        cfg({ reposInput: "o/c", defaultsFile: join(dir, "defaults.yml"), mode: "check" }),
-        io,
-      );
-      expect(targets.map((t) => [t.display, t.result])).toEqual([["o/c", "drift"]]);
-      expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
-    });
-  });
-
-  test("a central per-repo file is operator-authored: its $NAME reference is admitted", async () => {
-    await withScratch({ "repos/api.yml": HOOK_WITH_REF }, async (dir) => {
-      const api = new MockApi({
+      },
+      config: (dir) => ({ reposInput: "o/c", defaultsFile: join(dir, "defaults.yml") }),
+      outcome: { display: "o/c", result: "drift", source: "remote" },
+      refused: false,
+    },
+    {
+      source: "a central per-repo file is operator-authored: its $NAME reference is admitted",
+      layout: { "repos/api.yml": HOOK_WITH_REF },
+      routes: {
         "GET /repos/o/api": { data: {} },
         "GET /repos/o/api/hooks?per_page=100&page=1": { data: [] },
-      });
+      },
+      config: (dir) => ({ reposDir: join(dir, "repos"), adminOwner: "o" }),
+      outcome: { display: "o/api", result: "drift", source: "central" },
+      refused: false,
+    },
+  ])("$source", ({ layout, routes, config, outcome, refused }) =>
+    withScratch(layout, async (dir) => {
+      const api = new MockApi(routes);
       const { io, annotations } = captureIo();
-      const targets = await runTargets(
-        api,
-        cfg({ reposDir: join(dir, "repos"), adminOwner: "o", mode: "check" }),
-        io,
-      );
-      expect(targets.map((t) => [t.display, t.result])).toEqual([["o/api", "drift"]]);
-      expect(annotations.filter((a) => a.includes("target-fetched"))).toEqual([]);
-    });
-  });
+      const targets = await runTargets(api, cfg({ ...config(dir), mode: "check" }), io);
+      expect(
+        targets.map((t) => ({ display: t.display, result: t.result, source: t.source })),
+      ).toEqual([outcome]);
+      expect(api.calls.some((c) => c.path.includes("/hooks"))).toBe(!refused);
+      expect(annotations.filter((a) => a.includes("target-fetched"))).toHaveLength(refused ? 1 : 0);
+    }),
+  );
 
   test("one failing repo never stops the others; worst-of is failed", async () => {
     const api = new MockApi({

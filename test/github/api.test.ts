@@ -383,22 +383,32 @@ describe("debug-trace hardening for redacted slugs", () => {
     [
       "a slug masked through the Io port is redacted from the trace with no second registration",
       "o/priv",
+      "/repos/o/priv",
       ["PATCH <redacted> ->"],
       ["o/priv", "CANARY", "payload:"],
     ],
     [
       "an unregistered slug traces normally, with its payload",
       undefined,
+      "/repos/o/priv",
       ["PATCH /repos/o/priv ->", "payload:", "CANARY"],
       ["<redacted>"],
     ],
-  ])("%s", async (_name, mask, present, absent) => {
+    // Validation refuses a "." or ".." segment, but a path a buggy caller built from such a slug must still redact.
+    [
+      "a masked slug with a dot segment still collapses the path built from it",
+      "o/..",
+      "/repos/o/../labels",
+      ["PATCH <redacted> ->"],
+      ["o/..", "CANARY", "payload:"],
+    ],
+  ])("%s", async (_name, mask, path, present, absent) => {
     const dbg = traceIo();
     if (mask !== undefined) {
       dbg.io.mask(mask);
     }
     stubFetch([() => new Response(null, { status: 204 })]);
-    await api(dbg.io).tryRequest("PATCH", "/repos/o/priv", { description: "CANARY" });
+    await api(dbg.io).tryRequest("PATCH", path, { description: "CANARY" });
     const trace = dbg.lines.join("");
     for (const fragment of present) {
       expect(trace).toContain(fragment);

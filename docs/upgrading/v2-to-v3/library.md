@@ -194,3 +194,23 @@ v3            tryList("/repos/o/r/labels", { perPage: 100 })               // re
 ```
 
 Fix: add `tryList` to every `GitHubClient` double: answer the pages your `tryRequest` route table would (`per_page=N&page=K` from 1, until a page is short) and return their bodies as `{ data: [...] }`; a client over another transport returns each page's body as received, and honors `until` by stopping after the first page it accepts.
+
+## 62. Library: a target carries its parsed `RepoRef`
+
+For `@vivswan/github-settings-as-code` consumers. The old form is the pre-release v3 builds', as in section 56.
+
+- **`CentralTarget` and `RemoteTarget` carry `repo: RepoRef`** (`owner`, `name`, `slug`) in place of `slug: string`: the slug is parsed once, where the input is read, and never re-split downstream.
+- **`parseReposInput` resolves to `{ repos: RepoRef[], discover }`** in place of `{ slugs: string[], discover }`, so the targets you hand `dedupeTargets` are built from those refs.
+- **`parseRepoSlug` is the one constructor** of a `RepoRef`; a `"."` or `".."` owner or name is refused there.
+
+```text
+pre-release   const { slugs } = parseReposInput(input)._unsafeUnwrap();
+              const remote = slugs.map((slug) => ({ slug, source: "remote", origin }));
+              for (const target of dedupeTargets(central, remote, notice, display)) use(target.slug);
+
+v3            const { repos } = parseReposInput(input)._unsafeUnwrap();
+              const remote = repos.map((repo) => ({ repo, source: "remote", origin }));
+              for (const target of dedupeTargets(central, remote, notice, display)) use(target.repo.slug);
+```
+
+Fix: read `target.repo.slug` (or `owner` and `name`) where you read `target.slug`, and build a `RemoteTarget` from each `RepoRef` in `parsed.repos`.

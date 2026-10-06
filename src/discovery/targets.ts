@@ -4,11 +4,11 @@
  */
 
 import { err, ok, type Result } from "neverthrow";
-import { type SlugKey, slugKey } from "../github/slug.js";
+import { SLUG_SEGMENT, type SlugKey, slugKey } from "../github/slug.js";
 import type { ProblemOf } from "../problem.js";
 
 interface TargetBase {
-  slug: string; // owner/name, original casing
+  repo: RepoRef;
   /** Where this target came from, for messages: a file path or the input name. */
   origin: string;
 }
@@ -23,9 +23,9 @@ export type RemoteTarget = TargetBase & { source: "remote" };
 
 export type Target = CentralTarget | RemoteTarget;
 
-// A "." or ".." segment is refused here: GitHub names nothing that way, and as a path segment it resolves the request
-// elsewhere (/repos/../x/labels is /x/labels), so every consumer of a slug relies on this boundary keeping them out.
-export const SLUG_RE = /^(?!\.\.?\/)[\w.-]+\/(?!\.\.?$)[\w.-]+$/;
+// A "." or ".." owner or name is refused here: GitHub names nothing that way, and as a path segment either resolves
+// the request elsewhere (/repos/../x/labels is /x/labels), so no consumer of a RepoRef guards for them.
+const SLUG_RE = new RegExp(String.raw`^(?!\.\.?/)${SLUG_SEGMENT}/(?!\.\.?$)${SLUG_SEGMENT}$`);
 
 /** PARSED ONCE at a validating boundary, so downstream code never re-splits a string; the only constructor derives all three from one value. */
 export interface RepoRef {
@@ -35,8 +35,8 @@ export interface RepoRef {
 }
 
 /**
- * The smart constructor lives beside SLUG_RE so every boundary (the repository input, the repos list, discovery's
- * full_name) validates and splits through the same definition.
+ * The one constructor: every boundary (the repository input, the repos list, repos-dir filenames, discovery's
+ * full_name) validates and splits through it, so a Target never carries an unparsed slug.
  */
 export function parseRepoSlug(raw: string): Result<RepoRef, ProblemOf<"repo-slug-invalid">> {
   if (!SLUG_RE.test(raw)) {
@@ -60,18 +60,18 @@ export function dedupeTargets(
 ): Target[] {
   const centralBySlug = new Map<SlugKey, CentralTarget>();
   for (const target of central) {
-    const key = slugKey(target.slug);
+    const key = slugKey(target.repo.slug);
     if (!centralBySlug.has(key)) {
       centralBySlug.set(key, target);
     }
   }
   const out: Target[] = [...central];
   for (const target of remote) {
-    const winner = centralBySlug.get(slugKey(target.slug));
+    const winner = centralBySlug.get(slugKey(target.repo.slug));
     if (winner) {
-      const centralOrigin = isRedacted(target.slug) ? "a repos-dir file" : winner.origin;
+      const centralOrigin = isRedacted(target.repo.slug) ? "a repos-dir file" : winner.origin;
       notice(
-        `${display(target.slug)}: using the central file ${centralOrigin}; the entry for the same repository from ${target.origin} is ignored`,
+        `${display(target.repo.slug)}: using the central file ${centralOrigin}; the entry for the same repository from ${target.origin} is ignored`,
       );
       continue;
     }

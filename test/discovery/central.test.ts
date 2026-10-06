@@ -13,13 +13,13 @@ describe("resolveCentralTargets", () => {
       ok({
         targets: [
           {
-            slug: "example-org/api",
+            repo: { owner: "example-org", name: "api", slug: "example-org/api" },
             source: "central",
             origin: "test/fixtures/repos/api.yml",
             filePath: "test/fixtures/repos/api.yml",
           },
           {
-            slug: "octo/web",
+            repo: { owner: "octo", name: "web", slug: "octo/web" },
             source: "central",
             origin: "test/fixtures/repos/octo/web.yml",
             filePath: "test/fixtures/repos/octo/web.yml",

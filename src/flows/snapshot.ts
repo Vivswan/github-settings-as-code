@@ -17,9 +17,16 @@ import { renderSnapshotYaml, snapshotRepository } from "../engine/snapshot.js";
 import type { GitHubClient } from "../github/api.js";
 import type { Io } from "../io.js";
 import type { Problem } from "../problem.js";
-import { closeTarget, conclude, failedTarget, type TargetResult } from "./deliver.js";
+import {
+  closeTarget,
+  conclude,
+  failedTarget,
+  type TargetResult,
+  targetFailure,
+} from "./deliver.js";
 import {
   DEFAULT_SETTINGS_FILE,
+  isRejected,
   openTarget,
   type ResolvedTargets,
   resolveTargets,
@@ -299,42 +306,39 @@ async function snapshotDir(
   const claimed = new Map<string, string>();
   const targets: TargetOutcome[] = [];
   for (const target of resolved.targets) {
-    // The channel is opened BEFORE any processing so a failure lands in a
-    // redacted target's capture too; it is the only sink processing sees.
-    const opened = openTarget(resolved.plan, io, target.slug, resolved.visibilityOf);
-    const { channel, repo } = opened;
-    const fail = (message: string): TargetResult => {
-      channel.io.annotate("error", message);
-      return failedTarget(message);
-    };
-    let outcome: TargetResult;
-    if (repo === null) {
-      outcome = fail(
+    if (isRejected(target)) {
+      const { channel } = openTarget(resolved.plan, io, target.slug, resolved.visibilityOf);
+      const outcome = targetFailure(
+        channel.io,
         `the repository name "${target.slug}" from ${target.origin} is not an owner/name slug, so it cannot be snapshotted`,
       );
-    } else {
-      const located = snapshotFilePath(cfg, repo, authored, claimed, (slug) =>
-        resolved.plan.display(slug),
-      );
-      outcome =
-        "error" in located
-          ? fail(located.error)
-          : // A crash mid-target never stops the rest of the fleet; it becomes
-            // this target's failure, spoken only through its channel.
-            await attempt(
-              channel,
-              () =>
-                snapshotTarget({
-                  api,
-                  repo,
-                  cfg,
-                  path: located.path,
-                  pathInput: "snapshot-dir",
-                  channel,
-                }),
-              failedTarget,
-            );
+      targets.push({ source: target.source, ...(await closeTarget(io, channel, outcome)) });
+      continue;
     }
+    // The channel is opened BEFORE any processing so a failure lands in a
+    // redacted target's capture too; it is the only sink processing sees.
+    const { channel } = openTarget(resolved.plan, io, target.repo.slug, resolved.visibilityOf);
+    const located = snapshotFilePath(cfg, target.repo, authored, claimed, (slug) =>
+      resolved.plan.display(slug),
+    );
+    const outcome =
+      "error" in located
+        ? targetFailure(channel.io, located.error)
+        : // A crash mid-target never stops the rest of the fleet; it becomes
+          // this target's failure, spoken only through its channel.
+          await attempt(
+            channel,
+            () =>
+              snapshotTarget({
+                api,
+                repo: target.repo,
+                cfg,
+                path: located.path,
+                pathInput: "snapshot-dir",
+                channel,
+              }),
+            failedTarget,
+          );
     targets.push({ source: target.source, ...(await closeTarget(io, channel, outcome)) });
   }
   return { form: "dir", takenAt, snapshotDir: cfg.snapshotDir, targets };
