@@ -4,7 +4,7 @@
  *
  *   packaged commit                = parent: the main commit; tree: its tree + lib/index.js + lib/settings.schema.json + lib/pkg/,
  *                                     package.json minus its preparation scripts
- *   refs/tags/build/<pos>.<sha7>   -> the packaged commit of the main commit at first-parent position <pos>; created once, never moved; the ten newest kept
+ *   refs/tags/build/<pos>.<sha7>   -> the packaged commit of the main commit at first-parent position <pos>; never moved
  *   refs/tags/latest               -> the packaged commit of the newest main commit
  *   refs/tags/vX.Y.Z               -> the packaged commit of the release's merge commit; never moved
  *   refs/tags/vX                   -> the same commit, moved on each release in the line
@@ -454,7 +454,7 @@ export interface PointerMove {
  * The one way a pointer (latest, vX) moves: forward along main, never back. A pointer's source is its commit's
  * parent when that parent is on main; the candidate's source is on main by its caller's check.
  *
- *   pointer's source is the candidate's or descends from it  -> left: the same package (another commit of it too), or a rerun of an older commit's run
+ *   pointer's source is the candidate's or descends from it  -> left: the same package, or a rerun of an older commit's run
  *   same source, another tree                                -> refused: two builds of one main commit
  *   pointer's source unknown (off main, a root)              -> moved: a value this pipeline did not mint
  *   otherwise                                                -> moved, under a lease on the value observed
@@ -1281,7 +1281,7 @@ const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const CONFIRM_READS = 15;
 const CONFIRM_PAUSE_MS = 20_000;
 
-/** The pause between confirm reads: NPM_CONFIRM_PAUSE_MS when set (a test confirms against a local registry without the wait), else CONFIRM_PAUSE_MS. */
+/** NPM_CONFIRM_PAUSE_MS exists for the test that confirms against a local registry without the wait. */
 function confirmPauseMs(value: string | undefined): number {
   if (value === undefined || value === "") {
     return CONFIRM_PAUSE_MS;

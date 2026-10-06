@@ -139,7 +139,6 @@ function inPatchVocabulary(
   return { live: { ...live, languages: [...folded] }, undeclarable };
 }
 
-/** The verbatim-PATCH plan, the named 202 configuration run, and the 409 advice live here once; routes, shape, and read grade derive from the key. */
 export function setupSection<K extends SetupKey>(setup: {
   key: K;
   /** The fine-grained-PAT permission gating both endpoints. */
