@@ -2,7 +2,7 @@ import type { SectionOutcome } from "../engine/orchestrate.js";
 import type { RunOutcome } from "../engine/outcome.js";
 import type { SectionSnapshotOutcome } from "../engine/snapshot.js";
 import type { Io } from "../io.js";
-import { markdownCell } from "../report/markdown.js";
+import { markdownCell, renderTable } from "../report/markdown.js";
 import { countNoun } from "../text.js";
 import type { PublicDetail, PublicTargetView } from "./redact.js";
 
@@ -31,15 +31,37 @@ interface SectionRow {
   detail: string[];
 }
 
-function outcomeRows(outcomes: readonly SectionRow[]): string[] {
-  const rows = ["| Section | Status | Detail |", "|---|---|---|"];
-  for (const outcome of outcomes) {
-    const detail = outcome.detail.map(markdownCell).join("<br>") || "-";
-    rows.push(
-      `| ${outcome.key} | :${STATUS_ICON[outcome.status]}: ${outcome.status} | ${detail} |`,
-    );
-  }
-  return rows;
+function statusCell(status: keyof typeof STATUS_ICON): string {
+  return `:${STATUS_ICON[status]}: ${status}`;
+}
+
+// Every free-text cell passes through markdownCell(): the summary never refuses a value, so a pipe in a
+// repository name or a detail line is escaped, and the detail lines meet inside one cell.
+function outcomeTable(outcomes: readonly SectionRow[]): string {
+  return renderTable(
+    "| Section | Status | Detail |\n|---|---|---|",
+    outcomes.map((outcome) => [
+      outcome.key,
+      statusCell(outcome.status),
+      outcome.detail.map(markdownCell).join("<br>") || "-",
+    ]),
+  );
+}
+
+/** The fleet rollup's cells for one target: its name, its source, its result. */
+function targetCells(view: PublicTargetView): [string, string, string] {
+  return [markdownCell(view.display), view.source, statusCell(view.result)];
+}
+
+/** Each target's heading, its note, and its section table when it has sections. */
+function targetDetails(views: readonly PublicTargetView[]): string[] {
+  return views.flatMap((view) => [
+    "",
+    `### ${markdownCell(view.display)} (${view.result})`,
+    "",
+    ...(view.note ? [markdownCell(view.note), ""] : []),
+    ...(view.outcomes.length > 0 ? [outcomeTable(view.outcomes)] : []),
+  ]);
 }
 
 /** The moment a snapshot run read its repositories, as the summary and the run's notice state it. */
@@ -60,12 +82,12 @@ export function writeSummary(
 ): void {
   const lines = [`## github-settings-as-code (${mode})`, ""];
   if (view.note !== undefined) {
-    lines.push(`:${STATUS_ICON[result]}: ${result} - ${markdownCell(view.note)}`, "");
+    lines.push(`${statusCell(result)} - ${markdownCell(view.note)}`, "");
   }
   for (const fact of facts) {
     lines.push(fact, "");
   }
-  io.summary([...lines, ...outcomeRows(view.outcomes)].join("\n"));
+  io.summary([...lines, outcomeTable(view.outcomes)].join("\n"));
 }
 
 export function writeRenderSummary(
@@ -76,9 +98,10 @@ export function writeRenderSummary(
   const lines = [
     "## github-settings-as-code (render)",
     "",
-    "| Layer | Settings file |",
-    "|---|---|",
-    ...layers.map((path, index) => `| ${index + 1} | ${markdownCell(path)} |`),
+    renderTable(
+      "| Layer | Settings file |\n|---|---|",
+      layers.map((path, index) => [`${index + 1}`, markdownCell(path)]),
+    ),
     "",
     `Rendered document written to ${markdownCell(renderedFile)}.`,
   ];
@@ -89,23 +112,9 @@ export function writeMultiSummary(io: SummaryIo, views: PublicTargetView[], mode
   const lines = [
     `## github-settings-as-code (${mode}, ${countNoun(views.length, "repository", "repositories")})`,
     "",
-    "| Repository | Source | Result |",
-    "|---|---|---|",
+    renderTable("| Repository | Source | Result |\n|---|---|---|", views.map(targetCells)),
+    ...targetDetails(views),
   ];
-  for (const view of views) {
-    lines.push(
-      `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} |`,
-    );
-  }
-  for (const view of views) {
-    lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
-    if (view.note) {
-      lines.push(markdownCell(view.note), "");
-    }
-    if (view.outcomes.length > 0) {
-      lines.push(...outcomeRows(view.outcomes));
-    }
-  }
   io.summary(lines.join("\n"));
 }
 
@@ -128,22 +137,11 @@ export function writeSnapshotDirSummary(
     "",
     snapshotTakenLine(takenAt),
     "",
-    "| Repository | Source | Result | File |",
-    "|---|---|---|---|",
+    renderTable(
+      "| Repository | Source | Result | File |\n|---|---|---|---|",
+      views.map((view) => [...targetCells(view), markdownCell(view.file ?? "-")]),
+    ),
+    ...targetDetails(views),
   ];
-  for (const view of views) {
-    lines.push(
-      `| ${markdownCell(view.display)} | ${view.source} | :${STATUS_ICON[view.result]}: ${view.result} | ${markdownCell(view.file ?? "-")} |`,
-    );
-  }
-  for (const view of views) {
-    lines.push("", `### ${markdownCell(view.display)} (${view.result})`, "");
-    if (view.note) {
-      lines.push(markdownCell(view.note), "");
-    }
-    if (view.outcomes.length > 0) {
-      lines.push(...outcomeRows(view.outcomes));
-    }
-  }
   io.summary(lines.join("\n"));
 }
