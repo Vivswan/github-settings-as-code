@@ -1,0 +1,14 @@
+# A YAML alias inside the node its own anchor opens (`&loop ... *loop`) would
+# parse to a cyclic object that no later check could name by anchor. Served
+# raw, since a serialized object cannot spell a cycle; the single-repo file is
+# read locally before any API call, so the mock must see nothing.
+name: input-raw-alias-cycle
+settings_raw: "repository: &loop {self: *loop}"
+expect:
+  exit_code: 1
+  result: failed
+  stdout_contains:
+    - "cannot read settings from"
+    - "alias *loop refers back into the node its anchor &loop opens"
+    - "An alias may only reference a completed node"
+  zero_requests: true
