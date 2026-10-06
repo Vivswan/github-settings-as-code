@@ -2,13 +2,18 @@
 
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
-import { nonPlainReason, type ProvedPlain } from "../plain-data.js";
+import { isPlainObject, nonPlainReason, type ProvedPlain } from "../plain-data.js";
 import type { ProblemOf } from "../problem.js";
 import { LIST_SECTIONS, type ListSection, SECTION_KEYS, type SettingsFile } from "../schema.js";
-import type { DeclaredIssue, DeclaredSecretValue } from "../sections/contract/module.js";
+import {
+  type DeclaredIssue,
+  type DeclaredSecretValue,
+  declaredEntries,
+} from "../sections/contract/module.js";
 import { listLayering, sectionModule, sectionShape } from "../sections/registry.js";
 import { valueAt } from "../sections/shared/list/write.js";
 import { agree, countNoun } from "../text.js";
+import type { UndeclaredPolicyList } from "../types.js";
 import { type SettingsSource, validateSecretRef } from "./secret-refs.js";
 
 const LIST_KEYS: ReadonlySet<string> = new Set(LIST_SECTIONS);
@@ -206,7 +211,9 @@ export function validateSectionShapes(
       continue;
     }
     problems.push(
-      ...closedSurfaceProblems(key, parsed.data),
+      ...(isListSection(key)
+        ? closedSurfaceProblems(key, declaredEntries(parsed.data as ParsedList))
+        : []),
       ...fileOnlyProblems(key, parsed.data),
       ...secretReferenceProblems(key, parsed.data, secretSource),
     );
@@ -252,30 +259,24 @@ function secretReferenceProblems(
   return problems;
 }
 
+/** A list section's zod output: the shape admits the bare list and the `{entries}` wrapper, so the parse left one of them. */
+type ParsedList = readonly unknown[] | UndeclaredPolicyList<unknown>;
+
 /**
- * Only the entries are checked here, in either form; the wrapper's own keys are the section shape's strictObject to
- * judge. An entry is named by its path as every other issue spells one (`collaborators[2]`, `.entries[2]` under a
- * wrapper), a bracket always holding an index; its identity rides in the text (`(username "octocat")`), so an
- * all-digit identity is never read as an index.
+ * Only the entries are checked here; the wrapper's own keys are the section shape's strictObject to judge. An entry
+ * is named by its path as every other issue spells one (`collaborators[2]`, `.entries[2]` under a wrapper), a bracket
+ * always holding an index; its identity rides in the text (`(username "octocat")`), so an all-digit identity is never
+ * read as an index.
  */
-function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unknown): string[] {
+function closedSurfaceProblems(
+  key: ListSection,
+  { entries, path }: ReturnType<typeof declaredEntries<unknown>>,
+): string[] {
   // The registry's generic view erases the per-section entry typing, so the declaration is re-widened here.
   const closed = sectionModule(key).closedSurface as
     | { known: Readonly<Record<string, true>>; consequence: string }
     | undefined;
-  if (closed === undefined || !isListSection(key)) {
-    return [];
-  }
-  const wrapped =
-    typeof declared === "object" &&
-    declared !== null &&
-    Array.isArray((declared as Record<string, unknown>).entries);
-  const entries = Array.isArray(declared)
-    ? declared
-    : wrapped
-      ? ((declared as Record<string, unknown>).entries as unknown[])
-      : null;
-  if (entries === null) {
+  if (closed === undefined) {
     return [];
   }
   const { keyField } = listLayering(key);
@@ -283,19 +284,18 @@ function closedSurfaceProblems(key: (typeof SECTION_KEYS)[number], declared: unk
   const known = new Set<string>(knownKeys);
   const problems: string[] = [];
   entries.forEach((entry, index) => {
-    if (typeof entry !== "object" || entry === null) {
+    if (!isPlainObject(entry)) {
       return;
     }
-    const record = entry as Record<string, unknown>;
-    const unknown = Object.keys(record).filter((k) => !known.has(k));
+    const unknown = Object.keys(entry).filter((k) => !known.has(k));
     if (unknown.length === 0) {
       return;
     }
     const list = unknown.map((k) => `"${k}"`).join(", ");
     // The shape parse passed, so the entry carries its key field in the form the schema admits.
-    const named = `(${keyField} ${JSON.stringify(record[keyField])})`;
+    const named = `(${keyField} ${JSON.stringify(entry[keyField])})`;
     problems.push(
-      `${key}${wrapped ? ".entries" : ""}[${index}] ${named}: declares ${list}, which this section does not recognize (known keys: ${knownKeys.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
+      `${key}${path}[${index}] ${named}: declares ${list}, which this section does not recognize (known keys: ${knownKeys.join(", ")}) - ${closed.consequence}. Fix the key name, or remove it`,
     );
   });
   if (problems.length > 5) {
