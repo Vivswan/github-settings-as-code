@@ -183,10 +183,8 @@ export class GitHubApi implements GitHubClient {
   private readonly octokit: InstanceType<typeof ActionOctokit>;
   private readonly trace: TraceRedaction;
   private readonly baseUrl: string;
-  private readonly apiVersion: string;
   constructor(options: GitHubApiOptions) {
     this.baseUrl = options.baseUrl ?? process.env.GITHUB_API_URL ?? "https://api.github.com";
-    this.apiVersion = options.apiVersion ?? DEFAULT_API_VERSION;
     this.trace = new TraceRedaction(options.io ?? SILENT_TRACE);
     const envKnob = envRetryBaseMs();
     const retryBaseMs = options.retryBaseMs ?? envKnob ?? 1000;
@@ -218,6 +216,13 @@ export class GitHubApi implements GitHubClient {
         }) as Bottleneck.Group,
         onRateLimit: throttleCallback("rate limit", this.trace),
         onSecondaryRateLimit: throttleCallback("secondary rate limit", this.trace),
+      },
+    });
+    // A per-request accept (the raw media-type read) overrides the default; the hooks the plugins wrapped stay.
+    this.octokit.request = this.octokit.request.defaults({
+      headers: {
+        accept: "application/vnd.github+json",
+        "x-github-api-version": options.apiVersion ?? DEFAULT_API_VERSION,
       },
     });
   }
@@ -296,10 +301,6 @@ export class GitHubApi implements GitHubClient {
       url: path,
       per_page: options?.perPage ?? PAGE_SIZE,
       page: 1,
-      headers: {
-        accept: "application/vnd.github+json",
-        "x-github-api-version": this.apiVersion,
-      },
     } as unknown as Parameters<RequestInterface>[0];
     try {
       for await (const _page of this.octokit.paginate.iterator(request, firstPage)) {
@@ -358,10 +359,7 @@ export class GitHubApi implements GitHubClient {
       const response = await this.octokit.request({
         method,
         url: path,
-        headers: {
-          accept: options?.accept ?? "application/vnd.github+json",
-          "x-github-api-version": this.apiVersion,
-        },
+        ...(options?.accept === undefined ? {} : { headers: { accept: options.accept } }),
         // The body is the tree the scan inspected, so octokit never reshapes the payload and the wire carries exactly what was scanned.
         ...(payload === undefined ? {} : { data: secretScan.value.payload }),
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0]);
@@ -438,10 +436,6 @@ export class GitHubApi implements GitHubClient {
       response = (await this.octokit.request({
         method: "POST",
         url: "/graphql",
-        headers: {
-          accept: "application/vnd.github+json",
-          "x-github-api-version": this.apiVersion,
-        },
         // operationName makes the request self-describing on the wire (the mock dispatches on it).
         data: { query: op.query, operationName: op.name, variables: scan.value.payload },
       } as unknown as Parameters<InstanceType<typeof ActionOctokit>["request"]>[0])) as {
