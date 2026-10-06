@@ -33,7 +33,7 @@ import {
 import { SECTIONS } from "../../src/sections/registry.js";
 import { agree } from "../../src/text.js";
 import type { UndeclaredPolicy } from "../../src/types.js";
-import { countWord } from "./lib/count-word.js";
+import { COUNT_WORD_MAX, countWord } from "./lib/count-word.js";
 import {
   block,
   blockLine,
@@ -200,7 +200,10 @@ const COUNT_SENTENCE = new RegExp(
   String.raw`^[A-Z][a-z-]*${RegExp.escape(COUNT_SENTENCE_LEAD)}(.+)\.$`,
 );
 
-/** The keys a count sentence lists; the count word is the renderer's to re-derive, so the byte compare judges it. */
+/**
+ * The keys a count sentence lists; the count word is the renderer's to re-derive, so the byte compare judges it.
+ * A count past the word table is refused here, since the renderer throws on it instead of rendering.
+ */
 function parseCountSentence(body: string): Result<readonly string[], string> {
   return blockLine(body).andThen((line) => {
     const listed = COUNT_SENTENCE.exec(line)?.[1];
@@ -208,7 +211,15 @@ function parseCountSentence(body: string): Result<readonly string[], string> {
       return err("line 1 is not the count sentence");
     }
     const keys = [...listed.matchAll(/`([a-z_]+)`/g)].map((span) => span[1] ?? "");
-    return keys.length === 0 ? err("line 1 names no section key in a code span") : ok(keys);
+    if (keys.length === 0) {
+      return err("line 1 names no section key in a code span");
+    }
+    if (keys.length > COUNT_WORD_MAX) {
+      return err(
+        `line 1 lists ${keys.length} section keys, past the ${COUNT_WORD_MAX} the count words name`,
+      );
+    }
+    return ok(keys);
   });
 }
 

@@ -582,7 +582,13 @@ describe("generated files", () => {
     [
       'a route span holding the word "and"',
       "check-mode-gated-reads",
-      "\nThe read-only rule has exceptions, each a section to drop from the preview or grant at write:\n\n- GitHub gates the `GET /repos/{owner}/{repo}/labels and more` reads at write, so `labels` needs its Issues write grant in check mode to verify what they return.\n",
+      [
+        "",
+        "The read-only rule has exceptions, each a section to drop from the preview or grant at write:",
+        "",
+        "- GitHub gates the `GET /repos/{owner}/{repo}/labels and more` reads at write, so `labels` needs its Issues write grant in check mode to verify what they return.",
+        "",
+      ].join("\n"),
       /^line 3 lists "`GET \/repos\/\{owner\}\/\{repo\}\/labels and more`", which holds a comma or the word "and"$/,
     ],
   ])("a malformed prose list, %s, is refused naming its line", (_label, name, body, refusal) => {
@@ -590,11 +596,20 @@ describe("generated files", () => {
   });
 
   test("the renderer refuses a list item a reader could not tell from a joiner", () => {
-    // A key's code span is an item of the count sentence's prose list; one holding the word "and" would read back as two.
+    // A key's span is an item of the count sentence's prose list, so one holding "and" would read back as two.
     expect(() =>
       renderPolicyCountSentence([{ key: "labels and more", undeclaredDefault: "delete" }]),
     ).toThrow(
       '"`labels and more`" holds a comma or the word "and", which an item of a prose list cannot',
+    );
+  });
+
+  test("a count sentence past the word table is refused naming its line, never handed to the renderer's throw", () => {
+    const spans = Array.from({ length: 21 }, () => "`labels`");
+    const listed = `${spans.slice(0, -1).join(", ")}, and ${spans.at(-1)}`;
+    const body = `\nTwenty-one sections list the live resources sitting next to the declared ones: ${listed}.\n`;
+    expect(regionOf("policy-count-sentence").bodyRefusal(body)).toBe(
+      "line 1 lists 21 section keys, past the 20 the count words name",
     );
   });
 

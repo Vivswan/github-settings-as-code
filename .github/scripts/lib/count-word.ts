@@ -28,6 +28,9 @@ const COUNT_WORDS = [
   "twenty",
 ] as const;
 
+/** The largest count the table names: a parser reading a count from a page refuses one past it before rendering. */
+export const COUNT_WORD_MAX = COUNT_WORDS.length - 1;
+
 export function countWord(n: number): string {
   const word = COUNT_WORDS[n];
   if (word === undefined) {
