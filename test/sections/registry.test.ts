@@ -528,7 +528,8 @@ describe("allGraphqlOps", () => {
   });
 });
 
-describe("typed params (compile-time guards)", () => {
+// call()'s typed params are compile-time guards: tsc judges the @ts-expect-error lines, and nothing here runs.
+{
   const section = {} as SectionMeta;
   const ctx = {} as SectionContext;
   const withName = {
@@ -539,22 +540,18 @@ describe("typed params (compile-time guards)", () => {
     route: "GET /repos/{owner}/{repo}/labels",
     statuses: { 200: "x" },
   } satisfies EndpointDecl;
-
-  test("type guards hold", () => {
-    const neverRuns = false as boolean;
-    if (neverRuns) {
-      // @ts-expect-error - params argument is required for a {name} route
-      void call(ctx, section, withName);
-      // @ts-expect-error - params is required inside opts
-      void call(ctx, section, withName, {});
-      void call(ctx, section, withName, { params: { name: "bug" } });
-      void call(ctx, section, noParams);
-      // @ts-expect-error - a token-less route has no params
-      void call(ctx, section, noParams, { params: { name: "bug" } });
-    }
-    expect(true).toBe(true);
-  });
-});
+  const neverRuns = false as boolean;
+  if (neverRuns) {
+    // @ts-expect-error - params argument is required for a {name} route
+    void call(ctx, section, withName);
+    // @ts-expect-error - params is required inside opts
+    void call(ctx, section, withName, {});
+    void call(ctx, section, withName, { params: { name: "bug" } });
+    void call(ctx, section, noParams);
+    // @ts-expect-error - a token-less route has no params
+    void call(ctx, section, noParams, { params: { name: "bug" } });
+  }
+}
 
 describe("matchesTemplate", () => {
   test.each<[template: string, path: string, matches: boolean]>([

@@ -742,7 +742,7 @@ describe("repository snapshot", () => {
     const api = liveRepo({
       repo: {
         id: 500,
-        node_id: "R_kgDOHdPQ2A",
+        node_id: "R_kgDNAfQ",
         name: "r",
         full_name: "o/r",
         owner: { login: "o", id: 9 },

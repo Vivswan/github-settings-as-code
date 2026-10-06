@@ -15,6 +15,8 @@ import { flattenEnvironment } from "../../../src/sections/environments/index.js"
 import { SECTIONS } from "../../../src/sections/registry.js";
 import { DEFAULT_ROLE, roleForPermission } from "../../../src/sections/shared/roles.js";
 import { TEAM_REPOSITORY_MEDIA_TYPE, teamsMockHandlers } from "../../sections/teams/mock.js";
+import orgFixture from "../fixtures/org.json" with { type: "json" };
+import repoFixture from "../fixtures/repo.json" with { type: "json" };
 import { Rng } from "../generators/prng.js";
 import { genScenario } from "../generators/single-scenario.js";
 import { handlerTestContext } from "./handler-test-ctx.js";
@@ -40,15 +42,21 @@ import {
 } from "./state.js";
 
 describe("buildState overlay semantics", () => {
-  test("undefined LiveState uses fixture defaults and empty lists", () => {
+  test("an undefined LiveState is the fixture repo and org passed through whole, the repo id re-stamped, no labels or rulesets, no pages", () => {
     const state = buildState(undefined, "org");
-    expect(state.repo.name).toBe("e2e-repo");
-    expect(state.repo.full_name).toBe("e2e-owner/e2e-repo");
-    expect(state.labels).toEqual([]);
-    expect(state.rulesets).toEqual([]);
-    expect(state.pages).toBeNull();
-    expect(state.org).not.toBeNull();
-    expect((state.org as Record<string, unknown>).login).toBe("e2e-owner");
+    expect({
+      repo: state.repo,
+      org: state.org,
+      labels: state.labels,
+      rulesets: state.rulesets,
+      pages: state.pages,
+    }).toEqual({
+      repo: { ...repoFixture, node_id: mintNodeId("repo", repoFixture.full_name, "") },
+      org: orgFixture,
+      labels: [],
+      rulesets: [],
+      pages: null,
+    });
   });
 
   // GitHub stores a team slug lowercase, so the section addresses "core-team" whatever the seed spelled;
