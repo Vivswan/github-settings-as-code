@@ -14,8 +14,12 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { STEP_OUTPUTS } from "../../.github/scripts/post-green-steps.js";
+import {
+  COMMANDS as POST_GREEN_COMMANDS,
+  STEP_OUTPUTS,
+} from "../../.github/scripts/post-green-steps.js";
 import { STEP_OUTPUTS as RELEASE_PIPELINE_OUTPUTS } from "../../.github/scripts/release-pipeline/draft.js";
+import { COMMANDS as RELEASE_PIPELINE_COMMANDS } from "../../.github/scripts/release-pipeline.js";
 import { ROOT } from "../root.js";
 import { runStep } from "../scripts/step-fixture.js";
 import { withTempDir } from "../temp-dir.js";
@@ -387,19 +391,42 @@ describe("the library page's publishing claims", () => {
   });
 });
 
-/** A step that is one bun invocation of a steps script's subcommand, as the probe is. */
-const SCRIPT_STEP = /^bun \.github\/scripts\/([\w-]+)\.ts ([\w-]+)$/;
-/** What each steps script's subcommands write, declared by the script beside the code that writes it. */
-const SCRIPT_OUTPUTS: Record<string, Record<string, readonly string[]>> = {
-  "post-green-steps": STEP_OUTPUTS,
-  "release-pipeline": RELEASE_PIPELINE_OUTPUTS,
+/**
+ * A step that is one bun invocation of a steps script's subcommand, with any variable assignments ahead of bun and
+ * arguments after the subcommand, as the probe and the pipeline steps are: the script's name, then the subcommand.
+ * Tokens may sit apart by any run of spaces or tabs, as the shell reads them; a newline is not a separator, since bash
+ * ends the command there.
+ */
+const SCRIPT_STEP =
+  /^(?:[A-Za-z_]\w*="[^"]*"[ \t]+)*bun[ \t]+\.github\/scripts\/([\w-]+)\.ts[ \t]+([\w-]+)(?:[ \t]+[\w-]+)*$/;
+/** Any step whose run hands bun a steps script, however it is spelled (flags, `bun run`, other separators, a line
+ * continuation); one SCRIPT_STEP cannot read is a shape to extend it for, never one to pass unjudged. */
+const RUNS_SCRIPT = /\bbun\b[\s\S]*\.github\/scripts\//;
+/**
+ * The steps scripts a hook may run: the subcommands each dispatches and what those write to GITHUB_OUTPUT, declared by
+ * the script beside the code that does it. A step naming a script or subcommand outside this is a wiring fault.
+ */
+const SCRIPTS = new Map<
+  string,
+  { commands: Readonly<Record<string, unknown>>; outputs: Record<string, readonly string[]> }
+>([
+  ["post-green-steps", { commands: POST_GREEN_COMMANDS, outputs: STEP_OUTPUTS }],
+  ["release-pipeline", { commands: RELEASE_PIPELINE_COMMANDS, outputs: RELEASE_PIPELINE_OUTPUTS }],
+]);
+
+const scriptStep = (step: Step): [script: string, command: string] | undefined => {
+  const match = (step.run ?? "").trim().match(SCRIPT_STEP);
+  return match ? [match[1] ?? "", match[2] ?? ""] : undefined;
 };
 
 /** Every `<name>` a step writes to GITHUB_OUTPUT: a shell step's echo lines, or a script subcommand's declared outputs. */
 const outputsWritten = (step: Step): string[] => {
   const run = (step.run ?? "").trim();
-  const script = run.match(SCRIPT_STEP);
-  if (script) return [...(SCRIPT_OUTPUTS[script[1] ?? ""]?.[script[2] ?? ""] ?? [])];
+  const script = scriptStep(step);
+  if (script) {
+    const outputs = SCRIPTS.get(script[0])?.outputs ?? {};
+    return Object.hasOwn(outputs, script[1]) ? [...(outputs[script[1]] ?? [])] : [];
+  }
   return [...run.matchAll(/echo "([\w-]+)=[^"]*" >> "\$GITHUB_OUTPUT"/g)].map((m) => m[1] ?? "");
 };
 
@@ -433,7 +460,8 @@ function gatedOnProbe(steps: Step[], index: number, probe: number): boolean {
 
 /**
  * Every wiring fault in a job's steps: a step conditioned on anything but a verdict (it would skip on the caller's own event), a step
- * after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads.
+ * after the probe not gated on it, a read of an output no earlier step writes, a written output nobody reads, and a steps-script
+ * step naming a script or subcommand nothing dispatches (bun would end it red, but only once the hook runs on main).
  */
 function wiringProblems(workflow: Workflow): string[] {
   return Object.entries(workflow.jobs).flatMap(([id, job]) => {
@@ -448,6 +476,20 @@ function wiringProblems(workflow: Workflow): string[] {
       );
     }
     steps.forEach((step, index) => {
+      const script = scriptStep(step);
+      if (script) {
+        const [name, command] = script;
+        const known = SCRIPTS.get(name);
+        if (known === undefined) {
+          problems.push(
+            `${id}: ${label(step)} runs .github/scripts/${name}.ts, a script this relation does not know`,
+          );
+        } else if (!Object.hasOwn(known.commands, command)) {
+          problems.push(
+            `${id}: ${label(step)} runs ${name} ${command}, a subcommand .github/scripts/${name}.ts does not dispatch`,
+          );
+        }
+      }
       if (probe >= 0 && index > probe && !gatedOnProbe(steps, index, probe)) {
         problems.push(`${id}: ${label(step)} runs whatever the probe found`);
       }
@@ -497,6 +539,26 @@ describe("the probed hooks' wiring", () => {
     // and their output reads are judged the same way.
     expect(probed(POST_GREEN).length).toBe(Object.keys(workflow.jobs).length);
     expect(probed(RELEASE_PR)).toHaveLength(1);
+    // Every step that runs a steps script is one the relation reads: a run shape SCRIPT_STEP misses would pass unjudged.
+    const scriptSteps = HOOKS.flatMap(({ file }) =>
+      Object.values(readWorkflow(file).jobs).flatMap((job) =>
+        (job.steps ?? []).filter((step) => RUNS_SCRIPT.test(step.run ?? "")),
+      ),
+    );
+    expect(scriptSteps.length).toBeGreaterThan(5);
+    expect(scriptSteps.filter((step) => scriptStep(step) === undefined)).toEqual([]);
+    // The control's own control: a run bash would split at the newline, a bun flag, `bun run`, a line continuation, and
+    // a prefix bash reads as a command rather than an assignment are each detected and not read, so a hook step in any
+    // of those shapes fails here instead of passing unjudged.
+    for (const run of [
+      "bun .github/scripts/release-pipeline.ts\nanchor",
+      "bun --silent .github/scripts/release-pipeline.ts anchor",
+      "bun run .github/scripts/release-pipeline.ts anchor",
+      "bun \\\n  .github/scripts/release-pipeline.ts anchor",
+      '1PAT_SET="true" bun .github/scripts/post-green-steps.ts probe',
+    ]) {
+      expect([RUNS_SCRIPT.test(run), scriptStep({ run })], run).toEqual([true, undefined]);
+    }
     for (const { file } of HOOKS) {
       expect(wiringProblems(readWorkflow(file)), file).toEqual([]);
     }
@@ -578,6 +640,49 @@ describe("the probed hooks' wiring", () => {
         step.run = step.run?.replace("resolve-source", "verify-assets");
       },
       /reads steps\.source\.outputs\.sha, which no earlier step writes/,
+    ],
+    [
+      "a step running a script that does not exist, its tokens spaced as the shell allows",
+      POST_GREEN,
+      (w) => {
+        const probe = must(must(w.jobs.build, "build").steps?.find(isProbe), "probe");
+        probe.run = probe.run?.replace(
+          "bun .github/scripts/post-green-steps.ts",
+          "bun  .github/scripts/post-gren-steps.ts",
+        );
+      },
+      /"Check the token can push" runs \.github\/scripts\/post-gren-steps\.ts, a script this relation does not know/,
+    ],
+    [
+      "a step running a script named like a property every object inherits",
+      POST_GREEN,
+      (w) => {
+        const probe = must(must(w.jobs.build, "build").steps?.find(isProbe), "probe");
+        probe.run = probe.run?.replace("post-green-steps.ts", "constructor.ts");
+      },
+      /"Check the token can push" runs \.github\/scripts\/constructor\.ts, a script this relation does not know/,
+    ],
+    [
+      "a known script with a subcommand it does not dispatch",
+      POST_GREEN,
+      (w) => {
+        const step = must(must(w.jobs.build, "build").steps?.at(-1), "packaging step");
+        step.run = step.run?.replace("package-commit", "package-commits");
+      },
+      /runs release-pipeline package-commits, a subcommand \.github\/scripts\/release-pipeline\.ts does not dispatch/,
+    ],
+    [
+      "a known script with a subcommand named like a property every object inherits",
+      RELEASE,
+      (w) => {
+        const steps = must(w.jobs["package-release"], "package-release").steps ?? [];
+        const step = must(
+          steps.find((candidate) => /release-pipeline\.ts package$/.test(candidate.run ?? "")),
+          "package step",
+        );
+        step.run = step.run?.replace(/package$/, "constructor");
+      },
+      /runs release-pipeline constructor, a subcommand \.github\/scripts\/release-pipeline\.ts does not dispatch/,
     ],
   ])("%s fails the wiring relation (negative control)", (_case, file, mutate, message) => {
     const drifted = readWorkflow(file);
@@ -674,10 +779,7 @@ describe("the probed hooks' wiring", () => {
     expect(flag, `the probe's env does not read secrets.${secret}`).toBeDefined();
     expect(condition(flag?.[1])).toBe(`secrets.${secret} != ''`);
     // The script branches on that variable, so the env name and the script agree.
-    const [, script] = must(
-      (probe.run ?? "").trim().match(SCRIPT_STEP) ?? undefined,
-      "a steps-script probe",
-    );
+    const [script] = must(scriptStep(probe), "a steps-script probe");
     expect(readFileSync(join(ROOT, ".github", "scripts", `${script}.ts`), "utf8")).toContain(
       `requireEnv("${flag?.[0]}")`,
     );
@@ -695,9 +797,7 @@ interface ProbeRun {
 /** The script and subcommand the workflow's probe step runs, so this runs what the yaml names. */
 function probeInvocation(): [script: string, command: string] {
   const steps = must(readWorkflow(POST_GREEN).jobs.build, "build job").steps ?? [];
-  const run = must(must(steps.find(isProbe), "probe step").run, "probe run").trim();
-  const [, script, command] = must(run.match(SCRIPT_STEP) ?? undefined, "a steps-script probe");
-  return [script ?? "", command ?? ""];
+  return must(scriptStep(must(steps.find(isProbe), "probe step")), "a steps-script probe");
 }
 
 /**
@@ -953,10 +1053,14 @@ describe("the push probe", () => {
           ).flat(),
       },
     };
-    expect(Object.keys(SCRIPT_OUTPUTS).sort()).toEqual(Object.keys(branches).sort());
+    expect([...SCRIPTS.keys()].sort()).toEqual(Object.keys(branches).sort());
     for (const [script, runs] of Object.entries(branches)) {
-      const declared = SCRIPT_OUTPUTS[script] ?? {};
+      const { commands, outputs: declared } = must(SCRIPTS.get(script), script);
       for (const subcommand of Object.keys(declared)) {
+        expect(
+          Object.keys(commands),
+          `${script} declares outputs for ${subcommand}, which it does not dispatch`,
+        ).toContain(subcommand);
         expect(
           Object.keys(runs),
           `${script} declares ${subcommand}, which no run here exercises`,

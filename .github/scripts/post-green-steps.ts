@@ -8,7 +8,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { dispatch } from "./lib/entry.js";
+import { dispatch, type Handler } from "./lib/entry.js";
 import { attempt, requireEnv, setOutput } from "./lib/workflow-step.js";
 
 /** What each subcommand writes to GITHUB_OUTPUT; test/workflows/post-green-workflow.test.ts judges the job's wiring
@@ -70,6 +70,9 @@ function probe(): number | undefined {
   setOutput("proceed", "false");
 }
 
+/** The subcommands by name; test/workflows reads the keys as the set a step may run. */
+export const COMMANDS: Record<string, Handler> = { probe };
+
 if (import.meta.main) {
-  await dispatch("post-green-steps", { probe }, process.argv.slice(2));
+  await dispatch("post-green-steps", COMMANDS, process.argv.slice(2));
 }
