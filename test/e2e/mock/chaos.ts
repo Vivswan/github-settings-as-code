@@ -1,5 +1,6 @@
 /** Fault and chaos-corruption injection; a scenario addresses a section endpoint or an inline core route by the same key. */
 
+import { isPlainObject, put } from "../../../src/plain-data.js";
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
 import { allEndpoints, allGraphqlOps } from "../../../src/sections/registry.js";
 import type {
@@ -192,11 +193,11 @@ function applyCorruption(
     return { response: { status: response.status, body: 42 }, log, offSpecBody: true };
   }
   const body = response.body;
-  if (body && typeof body === "object" && !Array.isArray(body)) {
+  if (isPlainObject(body)) {
     const stripped: Json = {};
-    for (const [entryKey, value] of Object.entries(body as Json)) {
+    for (const [entryKey, value] of Object.entries(body)) {
       if (!Array.isArray(value)) {
-        stripped[entryKey] = value;
+        put(stripped, entryKey, value);
       }
     }
     return { response: { status: response.status, body: stripped }, log, offSpecBody: true };

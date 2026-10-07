@@ -33,6 +33,7 @@ import {
   environmentFromPut,
   invitationFromPut,
   LIST_MOCKS,
+  type LiveState,
   type MockState,
   normalizePinnedSeed,
   protectionFromPut,
@@ -208,6 +209,17 @@ describe("buildState overlay semantics", () => {
     const third = buildState(undefined, "org");
     expect((third.repo.owner as Record<string, unknown>).login).toBe("e2e-owner");
     expect(third.repo.full_name).toBe("e2e-owner/e2e-repo");
+  });
+
+  test("a seed key named __proto__ is data, as a YAML file can spell it: an own key after the merge, the owner still reslugged", () => {
+    // Parsed, not a literal: `__proto__` in an object literal sets the prototype.
+    const seed = JSON.parse('{"repo": {"owner": {"__proto__": {"example": true}}}}') as LiveState;
+    const owner = buildState(seed, "org", "other-owner/svc").repo.owner as Record<string, unknown>;
+    expect({
+      proto: Object.getPrototypeOf(owner),
+      ownKey: Object.getOwnPropertyDescriptor(owner, "__proto__")?.value,
+      login: owner.login,
+    }).toEqual({ proto: Object.prototype, ownKey: { example: true }, login: "other-owner" });
   });
 });
 

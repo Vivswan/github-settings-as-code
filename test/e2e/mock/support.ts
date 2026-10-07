@@ -5,6 +5,7 @@
  * of them, so a fragment can depend on it without pulling the whole pipeline in.
  */
 
+import { isPlainObject } from "../../../src/plain-data.js";
 import type { SectionKey } from "../../../src/schema.js";
 import {
   type DefinitiveRejection,
@@ -137,7 +138,7 @@ function clampInt(raw: string | undefined, fallback: number): number {
 // --- Handler helpers ------------------------------------------------------
 
 export function asObject(body: unknown): Json {
-  return body && typeof body === "object" && !Array.isArray(body) ? (body as Json) : {};
+  return isPlainObject(body) ? body : {};
 }
 
 export function ok(body: unknown): MockResponse {

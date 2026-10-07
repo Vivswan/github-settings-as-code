@@ -8,6 +8,7 @@
  *     -> denial barrier -> body allowlist -> handler -> response guard -> chaos hook
  */
 
+import { isPlainObject } from "../../../src/plain-data.js";
 import type { SectionKey } from "../../../src/schema.js";
 import { endpointPath, toleratedStatuses } from "../../../src/sections/contract/endpoints.js";
 import { toleratedGraphqlErrors } from "../../../src/sections/contract/graphql.js";
@@ -170,15 +171,13 @@ export function handleGraphqlRequest(
   if (
     typeof body.query !== "string" ||
     typeof body.operationName !== "string" ||
-    typeof body.variables !== "object" ||
-    body.variables === null ||
-    Array.isArray(body.variables)
+    !isPlainObject(body.variables)
   ) {
     return violation(
       "GraphQL request body must carry query (string), operationName (string), and variables (object)",
     );
   }
-  const variables = body.variables as Json;
+  const variables = body.variables;
 
   const dispatched = graphqlOpForBody(body, ops);
   if (!dispatched) {
