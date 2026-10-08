@@ -106,6 +106,10 @@ const integer = () => z.int({ abort: true });
 const bounded = (min: number, max: number) =>
   integer().min(min, { abort: true }).max(max, { abort: true });
 
+/** The spec's `type: number, format: float` with its documented bounds. */
+const boundedFloat = (min: number, max: number) =>
+  z.number().min(min, { abort: true }).max(max, { abort: true });
+
 /** The spec: "At least one option must be enabled"; omitting the key allows all three. */
 const atLeastOneMergeMethod = new z.core.$ZodCheckMinLength({
   check: "min_length",
@@ -249,6 +253,11 @@ const KNOWN_RULES = [
     workflows: z.array(WorkflowFileConfig),
   }),
   rule("code_scanning", { code_scanning_tools: z.array(CodeScanningToolConfig) }),
+  rule("code_quality", { severity: z.enum(["errors", "warnings", "notes", "all"]) }),
+  rule("code_coverage", {
+    max_coverage_drop: boundedFloat(0, 100).optional(),
+    minimum_coverage: boundedFloat(0, 100).optional(),
+  }),
   rule("copilot_code_review", {
     review_draft_pull_requests: z.boolean().optional(),
     review_on_push: z.boolean().optional(),

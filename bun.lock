@@ -31,7 +31,7 @@
         "@arethetypeswrong/cli": "0.18.5",
         "@biomejs/biome": "2.5.15",
         "@octokit/graphql-schema": "15.26.1",
-        "@octokit/openapi": "23.0.2",
+        "@octokit/openapi": "24.0.0",
         "@octokit/openapi-webhooks": "12.1.0",
         "@types/bun": "1.4.2",
         "@types/node": "26.6.4",
@@ -157,7 +157,7 @@
 
     "@octokit/graphql-schema": ["@octokit/graphql-schema@15.26.1", "", { "dependencies": { "graphql": "^16.0.0", "graphql-tag": "^2.10.3" } }, "sha512-RFDC2MpRBd4AxSRvUeBIVeBU7ojN/SxDfALUd7iVYOSeEK3gZaqR2MGOysj4Zh2xj2RY5fQAUT+Oqq7hWTraMA=="],
 
-    "@octokit/openapi": ["@octokit/openapi@23.0.2", "", {}, "sha512-pV8M7L9GY23AybNvTmo2nyjmpmnt6+2sRE/tqr0ZLQcPS4lnw7u5eZGNmwRNkBC3D7gZXbFx5AHzLUVRBXGDhg=="],
+    "@octokit/openapi": ["@octokit/openapi@24.0.0", "", {}, "sha512-KIpEIm6oND1tyTT3m/xyJZVJuduifs9BKLevaIjm+MBheg4ossTzLrx2leNgJoXccoIx5SjGGH/Esu/yecjirg=="],
 
     "@octokit/openapi-types": ["@octokit/openapi-types@29.0.1", "", {}, "sha512-9qWOMFNxxLokERcms42rU0PTLqQmVs7g5E41TI4mCOxmpFayD1rfC7XxOL55cG9MBZLFlC31BrR37myMKardwg=="],
 

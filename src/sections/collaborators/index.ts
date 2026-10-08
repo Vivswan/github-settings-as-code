@@ -190,32 +190,35 @@ export const collaboratorsSection = {
           }
           const invitation = inviteByLogin.get(login);
           if (invitation && invitation.expired !== true) {
+            if ((invitation.permissions ?? "") === wantRole) {
+              continue;
+            }
             if (!INVITATION_ROLES.has(wantRole)) {
-              // Invitations carry only the standard roles, so a declared custom role can neither be
-              // verified against nor PATCHed onto a pending one; it applies once the invitation is accepted.
+              // A custom role never appears on an invitation and the PATCH lags triage_plus (shared/roles.ts), so
+              // neither can be set on a pending one; the PUT applies it on the next apply once the invitation is accepted.
+              const settable = [...INVITATION_ROLES].join(", ");
               plan.notes.push(
-                `invitation for "${username}" is pending; invitations report only the standard roles, so it cannot be compared to the declared custom role "${wantPermission}" - left untouched, the declared role is applied once the invitation is accepted`,
+                `invitation for "${username}" is pending; the invitation PATCH accepts only ${settable}, ` +
+                  `so "${wantPermission}" cannot be set on it - left untouched, the next apply grants it once the invitation is accepted`,
               );
               continue;
             }
-            if ((invitation.permissions ?? "") !== wantRole) {
-              // The invitation PATCH speaks the READ vocabulary, so it takes the mapped role, not the declared permission.
-              plan.ops.push({
-                role: "updateInvitation",
-                params: { invitation_id: String(invitation.id) },
-                payload: { permissions: wantRole },
-                describe: `updating the pending invitation for "${username}"`,
-                drift: [
-                  valueDrift(
-                    `${label} (pending invitation)`,
-                    JSON.stringify(wantRole),
-                    JSON.stringify(invitation.permissions),
-                    { remedy: "apply will update the invitation" },
-                  ),
-                ],
-                change: `updated pending invitation for "${username}" (${wantPermission})`,
-              });
-            }
+            // The invitation PATCH speaks the READ vocabulary, so it takes the mapped role, not the declared permission.
+            plan.ops.push({
+              role: "updateInvitation",
+              params: { invitation_id: String(invitation.id) },
+              payload: { permissions: wantRole },
+              describe: `updating the pending invitation for "${username}"`,
+              drift: [
+                valueDrift(
+                  `${label} (pending invitation)`,
+                  JSON.stringify(wantRole),
+                  JSON.stringify(invitation.permissions),
+                  { remedy: "apply will update the invitation" },
+                ),
+              ],
+              change: `updated pending invitation for "${username}" (${wantPermission})`,
+            });
             continue;
           }
           if (invitation) {

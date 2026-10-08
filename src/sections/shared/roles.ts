@@ -84,9 +84,9 @@ export const PermissionSchema = z.string().regex(PERMISSION_PATTERN, {
 });
 
 /**
- * The GET reports this enum and the PATCH accepts nothing else, so a declared custom org role can never be
- * verified on (or set on) a pending invitation; the PUT applies it once accepted. The e2e mock's stored
- * invitations must stay inside it; a lockstep test pins it to GitHub's OpenAPI descriptor.
+ * The invitation PATCH accepts exactly this enum, so a declared role outside it (a custom org role, or triage_plus,
+ * which the PATCH lags) cannot be set on a pending invitation; the PUT applies it on the next apply once the
+ * invitation is accepted. A lockstep test pins it to GitHub's OpenAPI descriptor.
  */
 export const INVITATION_ROLES: ReadonlySet<string> = new Set([
   "read",
@@ -94,6 +94,16 @@ export const INVITATION_ROLES: ReadonlySet<string> = new Set([
   "maintain",
   "triage",
   "admin",
+]);
+
+/**
+ * What the GET reports: the PATCH enum plus triage_plus, which the descriptor documents on the collaborator PUT and
+ * the invitation GET but not on the invitation PATCH. The e2e mock's stored invitations stay inside it; the same
+ * lockstep test pins it to the descriptor.
+ */
+export const REPORTED_INVITATION_ROLES: ReadonlySet<string> = new Set([
+  ...INVITATION_ROLES,
+  "triage_plus",
 ]);
 
 /**

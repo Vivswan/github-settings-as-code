@@ -87,7 +87,7 @@
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.5.15",
     "@octokit/graphql-schema": "15.26.1",
-    "@octokit/openapi": "23.0.2",
+    "@octokit/openapi": "24.0.0",
     "@octokit/openapi-webhooks": "12.1.0",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.4",

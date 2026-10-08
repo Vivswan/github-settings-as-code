@@ -115,16 +115,22 @@ export function toJsonSchema(node: unknown, keepRequired = false): unknown {
       out.enum = [...out.enum, null];
     }
   } else if (input.nullable === true) {
-    // nullable beside a bare oneOf/anyOf (the custom property `value` schema): a null branch keeps
-    // oneOf's exactly-one semantics, since null matches only that branch.
+    // nullable beside a bare oneOf/anyOf (the custom property `value` schema): a null branch keeps oneOf's
+    // exactly-one semantics only while no branch takes null itself, as the string branch does since 24.0.0.
     for (const combinator of ["oneOf", "anyOf"] as const) {
       const branches = out[combinator];
-      if (Array.isArray(branches)) {
+      if (Array.isArray(branches) && !branches.some(acceptsNull)) {
         out[combinator] = [...branches, { type: "null" }];
       }
     }
   }
   return out;
+}
+
+/** Whether a rewritten branch already admits null through its type array. */
+function acceptsNull(branch: unknown): boolean {
+  const type = (branch as Json | null)?.type;
+  return Array.isArray(type) ? type.includes("null") : type === "null";
 }
 
 /** The subset of an OpenAPI operation the validator and the docs generator read. */
