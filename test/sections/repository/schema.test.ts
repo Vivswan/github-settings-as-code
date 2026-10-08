@@ -92,7 +92,8 @@ describe("a repository setting GitHub would 422 or never converge on is refused 
       "a squash message GitHub has no value for",
       { squash_merge_commit_title: "PR_TITLE", squash_merge_commit_message: "PR_DESCRIPTION" },
       [
-        `repository.squash_merge_commit_message: "PR_DESCRIPTION" is not a squash_merge_commit_message value; use "PR_BODY", "BLANK", "COMMIT_MESSAGES"${SQUASH_PAIRS}`,
+        'repository.squash_merge_commit_message: "PR_DESCRIPTION" is not a squash_merge_commit_message value; ' +
+          `use "PR_BODY", "COMMIT_MESSAGES", "BLANK"${SQUASH_PAIRS}`,
       ],
     ],
     [

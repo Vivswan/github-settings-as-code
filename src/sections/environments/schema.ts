@@ -17,6 +17,11 @@ export function environmentKey(name: string): EnvironmentKey {
   return name.toLowerCase() as EnvironmentKey;
 }
 
+import {
+  DEPLOYMENT_BRANCH_POLICY_TYPES,
+  DEPLOYMENT_REVIEWER_TYPES,
+  DeploymentBranchPolicyFlags,
+} from "../../generated/spec-enums.js";
 import { isPlainObject } from "../../plain-data.js";
 import {
   conditional,
@@ -39,7 +44,7 @@ export const MAX_PINNED_ENVIRONMENTS = 10;
 
 export const DeploymentBranchPolicyConfig = open({
   name: z.string(),
-  type: z.enum(["branch", "tag"]).optional(),
+  type: z.enum(DEPLOYMENT_BRANCH_POLICY_TYPES).optional(),
 }).meta({ id: "DeploymentBranchPolicyConfig" });
 export type DeploymentBranchPolicyConfig = z.infer<typeof DeploymentBranchPolicyConfig>;
 
@@ -63,12 +68,11 @@ export type EnvironmentSecretConfig = z.infer<typeof EnvironmentSecretConfig>;
 
 /**
  * GitHub accepts exactly one flag on: both true is a 422, and both false is a 422 too because "any
- * branch may deploy" is spelled `deployment_branch_policy: null`.
+ * branch may deploy" is spelled `deployment_branch_policy: null`. open() over the generated body, which only the
+ * section can mint (shared/schema-marks.ts); the descriptor's prose sits on the generated nullable and comes back
+ * through the meta.
  */
-const DeploymentBranchPolicyFlags = open({
-  protected_branches: z.boolean(),
-  custom_branch_policies: z.boolean(),
-})
+const DeploymentBranchPolicy = open(DeploymentBranchPolicyFlags.unwrap().shape)
   .check(
     rule((flags, refineCtx) => {
       // A raw flag beside its own shape issue is neither setting: two equal raw values (0 and 0, a YAML alias
@@ -88,13 +92,14 @@ const DeploymentBranchPolicyFlags = open({
       });
     }),
   )
-  .meta(
-    conditional(
+  .meta({
+    ...DeploymentBranchPolicyFlags.meta(),
+    ...conditional(
       { properties: { protected_branches: { const: true } } },
       { properties: { custom_branch_policies: { const: false } } },
       { properties: { custom_branch_policies: { const: true } } },
     ),
-  );
+  });
 
 export const EnvironmentConfig = open({
   name: z.string(),
@@ -111,7 +116,7 @@ export const EnvironmentConfig = open({
     .optional(),
   prevent_self_review: z.boolean().optional(),
   reviewers: z
-    .array(open({ type: z.enum(["User", "Team"]), id: z.number() }))
+    .array(open({ type: z.enum(DEPLOYMENT_REVIEWER_TYPES), id: z.number() }))
     .check(
       maxLength(
         MAX_REVIEWERS,
@@ -119,7 +124,7 @@ export const EnvironmentConfig = open({
       ),
     )
     .optional(),
-  deployment_branch_policy: DeploymentBranchPolicyFlags.nullable().optional(),
+  deployment_branch_policy: DeploymentBranchPolicy.nullable().optional(),
   deployment_branch_policies: nestedKnobbed(DeploymentBranchPolicyConfig).optional(),
   deployment_protection_rules: nestedKnobbed(DeploymentProtectionRuleConfig).optional(),
   variables: nestedKnobbed(EnvironmentVariableConfig).optional(),

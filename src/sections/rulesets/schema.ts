@@ -4,6 +4,12 @@
  */
 
 import { z } from "zod";
+import {
+  BypassActorConfig,
+  RULESET_ENFORCEMENTS,
+  RULESET_TARGETS,
+  RulesetConditions,
+} from "../../generated/spec-enums.js";
 import { SPEC_RULES } from "../../generated/spec-rules.js";
 import { isPlainObject } from "../../plain-data.js";
 import { rule as gatedRule, open } from "../shared/schema-helpers.js";
@@ -40,16 +46,28 @@ const RefNamePattern = z.string().regex(REF_NAME_PATTERN, {
   },
 });
 
-// --- Bypass actors --------------------------------------------------------------
+/** The generated list with the ref-name grammar on its items; the descriptor's prose stays on the list. */
+function refNamePatterns(field: z.ZodOptional<z.ZodArray<z.ZodString>>) {
+  return z
+    .array(RefNamePattern)
+    .meta(field.unwrap().meta() ?? {})
+    .optional();
+}
 
-const BYPASS_ACTOR_TYPES = [
-  "Integration",
-  "OrganizationAdmin",
-  "RepositoryRole",
-  "Team",
-  "DeployKey",
-  "User",
-] as const;
+const refName = RulesetConditions.shape.ref_name.unwrap();
+
+// open() over the generated body at both levels, which only the section can mint (shared/schema-marks.ts): the
+// published form keeps saying nothing about undeclared keys, and the parsed type carries no index signature.
+const Conditions = open({
+  ...RulesetConditions.shape,
+  ref_name: open({
+    ...refName.shape,
+    include: refNamePatterns(refName.shape.include),
+    exclude: refNamePatterns(refName.shape.exclude),
+  }).optional(),
+}).meta(RulesetConditions.meta() ?? {});
+
+// --- Bypass actors --------------------------------------------------------------
 
 /** The actor types whose actor_id GitHub requires; OrganizationAdmin ignores it and DeployKey documents it as null. */
 const IDENTIFIED_ACTOR_TYPES: ReadonlySet<string> = new Set([
@@ -59,13 +77,13 @@ const IDENTIFIED_ACTOR_TYPES: ReadonlySet<string> = new Set([
   "User",
 ]);
 
-const BypassActorConfig = z
-  .looseObject({
-    // The spec's order, which is also the code-point order a bare mapping rendered in, so canonical documents keep their bytes.
-    actor_id: z.int().nullable().optional(),
-    actor_type: z.enum(BYPASS_ACTOR_TYPES),
-    bypass_mode: z.enum(["always", "pull_request", "exempt"]).optional(),
-  })
+/**
+ * The three refusals the descriptor states in prose alone. Rebuilt from the generated shape, not checked in place:
+ * a check clone keeps its parent, and the published schema would then meet the id twice. The id and prose come
+ * back through the meta.
+ */
+const BypassActor = z
+  .looseObject(BypassActorConfig.shape)
   .check(
     gatedRule((actor, refineCtx) => {
       if (IDENTIFIED_ACTOR_TYPES.has(actor.actor_type) && typeof actor.actor_id !== "number") {
@@ -93,7 +111,7 @@ const BypassActorConfig = z
       }
     }),
   )
-  .meta({ id: "BypassActorConfig" });
+  .meta(BypassActorConfig.meta() ?? {});
 
 // --- Rules ------------------------------------------------------------------------
 
@@ -151,16 +169,11 @@ export const RulesetConfig = open({
   // The file may omit both: target takes the default GitHub documents for a create, enforcement the value chosen
   // here (the create requires one). The parsed entry carries both, so the PUT sends them and the comparison never
   // reads a live value under either key as omitted.
-  target: z.enum(["branch", "tag", "push"]).default("branch"),
-  enforcement: z.enum(["active", "evaluate", "disabled"]).default("active"),
-  conditions: open({
-    ref_name: open({
-      include: z.array(RefNamePattern).optional(),
-      exclude: z.array(RefNamePattern).optional(),
-    }).optional(),
-  }).optional(),
+  target: z.enum(RULESET_TARGETS).default("branch"),
+  enforcement: z.enum(RULESET_ENFORCEMENTS).default("active"),
+  conditions: Conditions.optional(),
   rules: z.array(RuleConfig).optional(),
-  bypass_actors: z.array(BypassActorConfig).optional(),
+  bypass_actors: z.array(BypassActor).optional(),
 })
   .check(
     gatedRule((ruleset, refineCtx) => {

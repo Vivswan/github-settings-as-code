@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  boundsAt,
   type Descriptor,
   descriptionLiteral,
   enumAt,
@@ -113,6 +114,11 @@ describe("the generator refuses what it cannot render, naming it", () => {
       { $ref: "#/components/responses/role" },
       "#/components/responses/role names no component schema",
     ],
+    [
+      "a keyword beside the enum, which would narrow what the tuple admits without a word",
+      { type: "string", enum: ["read"], pattern: "^read$" },
+      `${PERMISSIONS.join(".")}: the emitter does not know keyword "pattern" on a string`,
+    ],
   ])("%s", (_what, schema, refusal) => {
     expect(() => enumAt(withPermissions(schema), PERMISSIONS)).toThrow(refusal);
   });
@@ -121,6 +127,26 @@ describe("the generator refuses what it cannot render, naming it", () => {
     expect(() => enumAt(withPermissions({}), [...PERMISSIONS.slice(0, 3), "put"])).toThrow(
       "paths./x.patch.put is missing from the descriptor",
     );
+  });
+
+  test.each<[what: string, schema: Record<string, unknown>, refusal: string]>([
+    [
+      "a bound read off a string",
+      { type: "string", minimum: 1, maximum: 2 },
+      `${PERMISSIONS.join(".")} is not an integer`,
+    ],
+    [
+      "an integer with one bound, which a section's refusal would then spell with undefined",
+      { type: "integer", minimum: 1 },
+      `${PERMISSIONS.join(".")} carries no minimum and maximum`,
+    ],
+    [
+      "a keyword beside the bounds, which would narrow what the pair admits without a word",
+      { type: "integer", minimum: 1, maximum: 1000, multipleOf: 2 },
+      `${PERMISSIONS.join(".")}: the emitter does not know keyword "multipleOf" on a integer`,
+    ],
+  ])("%s", (_what, schema, refusal) => {
+    expect(() => boundsAt(withPermissions(schema), PERMISSIONS)).toThrow(refusal);
   });
 });
 
@@ -280,6 +306,16 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
       'rules[0]: the emitter does not know keyword "minProperties" on a object',
     ],
     [
+      "a nullable that is not a boolean, which OpenAPI 3.0 would read as false",
+      withRules([
+        withParameters("odd", {
+          type: "object",
+          properties: { n: { type: "integer", nullable: "yes" } },
+        }),
+      ]),
+      'rules[0].parameters.n: nullable "yes" is not a boolean',
+    ],
+    [
       "parameters that are not an object",
       withRules([withParameters("odd", { type: "array", items: { type: "string" } })]),
       "rules[0].parameters: an object was expected, not a array",
@@ -365,6 +401,28 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
     ],
   ])("%s", (_what, descriptor, refusal) => {
     expect(() => renderRules(descriptor)).toThrow(refusal);
+  });
+
+  // The keyword is read for every type, so a position that forgot to render it would accept the descriptor and
+  // emit a shape refusing the null GitHub takes, with nothing in the drift check to say so.
+  test("a nullable parameters object and a nullable field both render .nullable(), prose after it", () => {
+    const rendered = renderRules(
+      withRules([
+        withParameters("odd", {
+          type: "object",
+          nullable: true,
+          description: "The parameters, or null.",
+          properties: { n: { type: "integer", nullable: true, description: "A count, or null." } },
+        }),
+      ]),
+    );
+    expect(rendered).toContain(
+      [
+        "parameters: z.looseObject({",
+        ' n: z.int({ abort: true }).nullable().describe("A count, or null.").optional()',
+        ' }).nullable().describe("The parameters, or null.").optional()',
+      ].join(""),
+    );
   });
 });
 

@@ -181,22 +181,14 @@ const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   "BASE64_BLOB",
   "FIELD_SEPARATOR",
   "PRIVATE_KEY_FRAMING",
-  // interaction_limits/schema.ts
-  "INTERACTION_GROUPS",
-  "INTERACTION_EXPIRIES",
   // repository/schema.ts
   "GET_ONLY_KEYS",
   "SECTION_OWNED_KEYS",
-  "REVIEWER_TYPES",
-  "REVIEWER_MODES",
-  "COMMIT_MESSAGE_VOCABULARIES",
   "SQUASH_COMMIT_PAIRS",
   "TOPIC_GRAMMAR",
-  "CREATION_POLICIES",
   // rulesets/schema.ts
   "REF_NAME_TOKENS",
   "REF_NAME_ILLEGAL",
-  "BYPASS_ACTOR_TYPES",
   "IDENTIFIED_ACTOR_TYPES",
   // actions/schema.ts
   "REPORTED_ONLY",

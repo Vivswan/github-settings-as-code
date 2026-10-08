@@ -214,7 +214,6 @@ schema:
   EnvironmentConfig.deployment_branch_policy: >-
     Which branches may deploy; null lets any branch deploy. As an object, exactly one of the two
     flags is true: both true is rejected by GitHub, and both false is spelled null.
-  EnvironmentConfig.deployment_branch_policy|0.protected_branches: Restrict to branches with protection rules.
   EnvironmentConfig.deployment_branch_policy|0.custom_branch_policies: Restrict to name patterns, declared under `deployment_branch_policies`.
   EnvironmentConfig.deployment_branch_policies: >-
     Custom deployment branch-policy patterns for this environment, reconciled only when this key is

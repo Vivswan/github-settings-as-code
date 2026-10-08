@@ -64,10 +64,9 @@ schema:
     What the ruleset applies to. Omitted, it is "branch", the default GitHub documents, so a live branch
     ruleset is not drift under an entry without the key.
   RulesetConfig.enforcement: >-
-    "active", "evaluate", or "disabled", in that spelling ("enabled" and "Active" are refused at
+    "disabled", "active", or "evaluate", in that spelling ("enabled" and "Active" are refused at
     parse). Omitted, it is "active" (GitHub requires a value on create; this is the one chosen), so a
     live active ruleset is not drift under an entry without the key.
-  RulesetConfig.conditions: Which refs the ruleset covers.
   RulesetConfig.conditions.ref_name: Short ref names are auto-prefixed (staging -> refs/heads/staging).
   RulesetConfig.conditions.ref_name.include: >-
     Ref patterns the ruleset targets (fnmatch). The tokens ~DEFAULT_BRANCH and ~ALL are accepted as

@@ -2,6 +2,12 @@
 
 import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
+import {
+  CODE_SCANNING_QUERY_SUITES,
+  CODE_SCANNING_RUNNER_TYPES,
+  CODE_SCANNING_STATES,
+  CODE_SCANNING_THREAT_MODELS,
+} from "../../generated/spec-enums.js";
 import type { MustBeNever } from "../../types.js";
 import { open, rule } from "../shared/schema-helpers.js";
 import {
@@ -35,12 +41,12 @@ type _VocabularyIsTheVendoredSpec = MustBeNever<
 >;
 
 export const CodeScanningDefaultSetupConfig = open({
-  state: z.enum(["configured", "not-configured"]).optional(),
-  query_suite: z.enum(["default", "extended"]).optional(),
+  state: z.enum(CODE_SCANNING_STATES).optional(),
+  query_suite: z.enum(CODE_SCANNING_QUERY_SUITES).optional(),
   languages: languagesSchema(CODE_SCANNING_LANGUAGES).optional(),
-  runner_type: z.enum(["standard", "labeled"]).optional(),
+  runner_type: z.enum(CODE_SCANNING_RUNNER_TYPES).optional(),
   runner_label: z.string().nullable().optional(),
-  threat_model: z.enum(["remote", "remote_and_local"]).optional(),
+  threat_model: z.enum(CODE_SCANNING_THREAT_MODELS).optional(),
 })
   .check(rule(refineSetup))
   .meta({ id: "CodeScanningDefaultSetupConfig" });

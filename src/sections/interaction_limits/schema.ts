@@ -1,22 +1,19 @@
 /** The `interaction_limits:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
+import {
+  INTERACTION_EXPIRIES,
+  INTERACTION_GROUPS,
+  MAX_OPEN_PULL_REQUESTS,
+} from "../../generated/spec-enums.js";
 import { agree } from "../../text.js";
 import { stringItems } from "../shared/raw-values.js";
 import { open, rule } from "../shared/schema-helpers.js";
 
-const INTERACTION_GROUPS = ["existing_users", "contributors_only", "collaborators_only"] as const;
-const INTERACTION_EXPIRIES = [
-  "one_day",
-  "three_days",
-  "one_week",
-  "one_month",
-  "six_months",
-] as const;
-
 const LIMIT_RULE = `limit is one of ${INTERACTION_GROUPS.join(", ")} (GitHub's interaction groups)`;
 const EXPIRY_RULE = `expiry is one of ${INTERACTION_EXPIRIES.join(", ")} (GitHub's interaction durations)`;
-const CAP_RULE = "max_open_pull_requests is a whole number from 1 to 1000 (GitHub's range)";
+const { minimum: CAP_MIN, maximum: CAP_MAX } = MAX_OPEN_PULL_REQUESTS;
+const CAP_RULE = `max_open_pull_requests is a whole number from ${CAP_MIN} to ${CAP_MAX} (GitHub's range)`;
 /** GitHub caps the list itself, and the cap is what makes single-request reconciliation valid: one write takes it whole. */
 export const BYPASS_MAX = 100;
 
@@ -50,8 +47,8 @@ const InteractionLimits = z
         }),
         max_open_pull_requests: z
           .int({ error: CAP_RULE })
-          .min(1, CAP_RULE)
-          .max(1000, CAP_RULE)
+          .min(CAP_MIN, CAP_RULE)
+          .max(CAP_MAX, CAP_RULE)
           .optional(),
       }).optional(),
       pull_request_creation_bypass: z.array(z.string()).optional(),

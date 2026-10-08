@@ -2,6 +2,7 @@
 
 import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
+import { PAGES_BUILD_TYPES, PAGES_SOURCE_PATHS } from "../../generated/spec-enums.js";
 import { open, rule } from "../shared/schema-helpers.js";
 
 type PagesPutBody = NonNullable<
@@ -35,8 +36,8 @@ const READ_ONLY_SITE_FIELDS = {
 // Not exported: consumers spell it NonNullable<PagesConfig>. The definition id stays "PagesConfig";
 // moving it onto the nullable wrapper would change the published schema.
 const PagesSite = open({
-  build_type: z.enum(["workflow", "legacy"]).optional(),
-  source: open({ branch: z.string(), path: z.enum(["/", "/docs"]).optional() }).optional(),
+  build_type: z.enum(PAGES_BUILD_TYPES).optional(),
+  source: open({ branch: z.string(), path: z.enum(PAGES_SOURCE_PATHS).optional() }).optional(),
   cname: z.string().nullable().optional(),
   https_enforced: z.boolean().optional(),
   public: z.boolean().optional(),
