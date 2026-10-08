@@ -1045,7 +1045,7 @@ describe("repository parse refusals", () => {
     [
       "a merge message outside the vocabulary",
       { merge_commit_title: "PR_TITLE", merge_commit_message: "COMMIT_MESSAGES" },
-      'repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "BLANK", "PR_TITLE"',
+      'repository.merge_commit_message: "COMMIT_MESSAGES" is not a merge_commit_message value; use "PR_BODY", "PR_TITLE", "BLANK"',
     ],
   ])(
     "commit message defaults: %s is refused at parse instead of as GitHub's 422 at apply",

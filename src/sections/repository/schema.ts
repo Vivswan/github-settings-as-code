@@ -2,6 +2,16 @@
 
 import type { components, operations } from "@octokit/openapi-types";
 import { z } from "zod";
+import {
+  FEATURE_STATUSES,
+  MERGE_COMMIT_MESSAGES,
+  MERGE_COMMIT_TITLES,
+  PULL_REQUEST_CREATION_POLICIES,
+  REVIEWER_MODES,
+  REVIEWER_TYPES,
+  SQUASH_MERGE_COMMIT_MESSAGES,
+  SQUASH_MERGE_COMMIT_TITLES,
+} from "../../generated/spec-enums.js";
 import { describeValue } from "../../plain-data.js";
 import type { MustBeNever } from "../../types.js";
 import { conditional, rule } from "../shared/schema-helpers.js";
@@ -158,23 +168,22 @@ type BypassReviewer = NonNullable<
   NonNullable<SecurityAndAnalysisPatch["secret_scanning_delegated_bypass_options"]>["reviewers"]
 >[number];
 
-const REVIEWER_TYPES = [
-  "TEAM",
-  "ROLE",
-] as const satisfies readonly BypassReviewer["reviewer_type"][];
+/**
+ * The descriptor and @octokit/openapi-types are bumped apart, so a value only one of them knows is a compile
+ * failure here, on purpose, rather than a refusal of a value GitHub takes or a 422 for one it does not.
+ */
 type _ReviewerTypesComplete = MustBeNever<
-  Exclude<BypassReviewer["reviewer_type"], (typeof REVIEWER_TYPES)[number]>
+  | Exclude<BypassReviewer["reviewer_type"], (typeof REVIEWER_TYPES)[number]>
+  | Exclude<(typeof REVIEWER_TYPES)[number], BypassReviewer["reviewer_type"]>
 >;
-
-const REVIEWER_MODES = ["ALWAYS", "EXEMPT"] as const satisfies readonly NonNullable<
-  BypassReviewer["mode"]
->[];
 type _ReviewerModesComplete = MustBeNever<
-  Exclude<NonNullable<BypassReviewer["mode"]>, (typeof REVIEWER_MODES)[number]>
+  | Exclude<NonNullable<BypassReviewer["mode"]>, (typeof REVIEWER_MODES)[number]>
+  | Exclude<(typeof REVIEWER_MODES)[number], NonNullable<BypassReviewer["mode"]>>
 >;
 
-/** The `status` vocabulary the GET reports; the PATCH descriptor types it as a bare string. */
-const FeatureStatus = z.enum(["enabled", "disabled"], {
+/** The `status` vocabulary the GET reports; the PATCH descriptor types the field as a bare string, so the GET's
+ * enum is the one GitHub publishes for it. */
+const FeatureStatus = z.enum(FEATURE_STATUSES, {
   error: (issue) =>
     `${describeValue(issue.input)} is not a feature status; use "enabled" or "disabled"`,
 });
@@ -276,12 +285,12 @@ type CommitMessageKey =
 
 type CommitMessageValue<K extends CommitMessageKey> = NonNullable<RepoPatchBody[K]>;
 
-/** Each field's vocabulary, pinned both ways to the vendored spec: no extras by satisfies, no gaps by the pin. */
+/** Each field's vocabulary, pinned both ways to the vendored types as the reviewer vocabularies are. */
 const COMMIT_MESSAGE_VOCABULARIES = {
-  squash_merge_commit_title: ["PR_TITLE", "COMMIT_OR_PR_TITLE"],
-  squash_merge_commit_message: ["PR_BODY", "BLANK", "COMMIT_MESSAGES"],
-  merge_commit_title: ["PR_TITLE", "MERGE_MESSAGE"],
-  merge_commit_message: ["PR_BODY", "BLANK", "PR_TITLE"],
+  squash_merge_commit_title: SQUASH_MERGE_COMMIT_TITLES,
+  squash_merge_commit_message: SQUASH_MERGE_COMMIT_MESSAGES,
+  merge_commit_title: MERGE_COMMIT_TITLES,
+  merge_commit_message: MERGE_COMMIT_MESSAGES,
 } as const satisfies { [K in CommitMessageKey]: readonly CommitMessageValue<K>[] };
 type _CommitMessageVocabulariesComplete = MustBeNever<
   {
@@ -476,18 +485,15 @@ function refineTopicCount(raw: string | readonly string[], ctx: z.RefinementCtx)
 
 type PullRequestCreationPolicy = NonNullable<RepoPatchBody["pull_request_creation_policy"]>;
 
-/** The two-value vocabulary both creation policies share; pinned both ways to the PATCH's enum. */
-const CREATION_POLICIES = [
-  "all",
-  "collaborators_only",
-] as const satisfies readonly PullRequestCreationPolicy[];
+/** The two-value vocabulary both creation policies share, pinned as the reviewer vocabularies are. */
 type _CreationPoliciesComplete = MustBeNever<
-  Exclude<PullRequestCreationPolicy, (typeof CREATION_POLICIES)[number]>
+  | Exclude<PullRequestCreationPolicy, (typeof PULL_REQUEST_CREATION_POLICIES)[number]>
+  | Exclude<(typeof PULL_REQUEST_CREATION_POLICIES)[number], PullRequestCreationPolicy>
 >;
 
 function creationPolicy() {
   return z
-    .enum(CREATION_POLICIES, {
+    .enum(PULL_REQUEST_CREATION_POLICIES, {
       error: (issue) =>
         `${describeValue(issue.input)} is not a recognized policy. Use "all" (everyone) or "collaborators_only"`,
     })

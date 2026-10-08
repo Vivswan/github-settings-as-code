@@ -34,6 +34,7 @@ export const GENERATORS = [
 
 /** The whole files the src/ generators write, spelled out: a directory entry would admit a file no generator registers. */
 const GENERATED_FILES = [
+  "src/generated/spec-enums.ts",
   "src/generated/spec-roles.ts",
   "src/generated/spec-rules.ts",
   "src/generated/upstream-gaps.ts",

@@ -7,7 +7,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ROLES_PATH, RULES_PATH } from "../../.github/scripts/gen-openapi.js";
+import { OUTPUTS, RULES_PATH } from "../../.github/scripts/gen-openapi.js";
 import { withTempDir } from "../temp-dir.js";
 import {
   clone,
@@ -322,14 +322,13 @@ const REMOTE_URL = "https://x-access-token:t0ken@github.com/o/r.git";
 const PR_LIST =
   "gh pr list --head nightly/openapi-25.0.0 --state open --json isCrossRepository --jq [.[] | select(.isCrossRepository | not)] | length";
 /** What the regeneration writes; the checkout starts with each at an older spelling. */
-const GENERATED = {
-  [ROLES_PATH]: "export const INVITATION_ROLES = new Set(['read']);\n",
-  [RULES_PATH]: "export const SPEC_RULES = ['creation', 'update'];\n",
-};
-const OLDER = {
-  [ROLES_PATH]: "export const INVITATION_ROLES = new Set(['read', 'write']);\n",
-  [RULES_PATH]: "export const SPEC_RULES = ['creation'];\n",
-};
+/** One line per descriptor-derived file the generator registers, so a new output is seeded here without an edit. */
+const rendered = (version: string) =>
+  Object.fromEntries(
+    OUTPUTS.map(({ path }) => [path, `export const RENDERED = "${path} from ${version}";\n`]),
+  );
+const GENERATED = rendered("25.0.0");
+const OLDER = rendered("24.0.0");
 
 /** The nightly's checkout: main at a package.json pinning @octokit/openapi, with the generated files committed, and
  * the lease push's github.com URL answered by the fixture origin. */
@@ -475,7 +474,7 @@ describe("refresh-openapi", () => {
       expect(git(fx.origin, "diff", "--name-only", main, tip).split("\n").sort()).toEqual([
         "bun.lock",
         "package.json",
-        ...[ROLES_PATH, RULES_PATH].sort(),
+        ...OUTPUTS.map(({ path }) => path).sort(),
       ]);
       expect(git(fx.origin, "show", `${tip}:package.json`)).toBe(
         '{"devDependencies":{"@octokit/openapi":"25.0.0"}}',

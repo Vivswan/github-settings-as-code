@@ -199,7 +199,7 @@ schema:
     squash_merge_commit_message; legal pairs are PR_TITLE with PR_BODY, BLANK, or COMMIT_MESSAGES,
     and COMMIT_OR_PR_TITLE with COMMIT_MESSAGES.
   RepositoryConfig.squash_merge_commit_message: >-
-    The default message of a squash merge commit: PR_BODY, BLANK, or COMMIT_MESSAGES. Needs
+    The default message of a squash merge commit: PR_BODY, COMMIT_MESSAGES, or BLANK. Needs
     squash_merge_commit_title declared beside it, in one of the legal pairs.
   RepositoryConfig.merge_commit_title: >-
     The default title of a merge commit: PR_TITLE or MERGE_MESSAGE. Required beside

@@ -12,6 +12,9 @@ import { withTempDir } from "./temp-dir.js";
 
 const SCANNED_DIRS = ["src", ".github/scripts"];
 
+/** GitHub's own prose, rendered verbatim from its descriptor; the rule is for the strings this repository authors. */
+const UNSCANNED_DIR = "src/generated/";
+
 /**
  * A word then "(s)", read in the source text. A lambda parameter `(s) =>` has no word before its paren, and the `n` of a `\n` escape is
  * not a word either, so neither matches.
@@ -90,7 +93,7 @@ function treeParentheticals(root: string): string[] {
     SCANNED_DIRS.flatMap((dir) =>
       readdirSync(join(root, dir), { recursive: true })
         .map(String)
-        .filter((name) => name.endsWith(".ts"))
+        .filter((name) => name.endsWith(".ts") && !join(dir, name).startsWith(UNSCANNED_DIR))
         .sort()
         .map((name): [string, string] => [
           join(dir, name),
@@ -101,7 +104,7 @@ function treeParentheticals(root: string): string[] {
 }
 
 describe("count parentheticals", () => {
-  test("no string under src/ or .github/scripts/ spells a count as (s)", () => {
+  test("no string under src/ or .github/scripts/, the generated files aside, spells a count as (s)", () => {
     expect(treeParentheticals(ROOT)).toEqual([]);
   });
 

@@ -1,7 +1,7 @@
 sections_table:
   endpoints: POST/PUT/DELETE pages
   notes: >-
-    `build_type: workflow` or `legacy` + source, `cname`, `https_enforced`, `public` (GHEC site
+    `build_type: legacy` or `workflow` + source, `cname`, `https_enforced`, `public` (GHEC site
     visibility); `pages: null` disables the site
 coverage:
   - area: "[GitHub Pages](https://docs.github.com/en/rest/pages/pages)"
@@ -53,7 +53,7 @@ coverage:
 schema:
   SettingsFile.pages: GitHub Pages configuration; null disables Pages on the repository.
   PagesConfig: "GitHub Pages site configuration; use `pages: null` to disable the site."
-  PagesConfig.build_type: '"workflow" (GitHub Actions) or "legacy" (branch).'
+  PagesConfig.build_type: '"legacy" (branch) or "workflow" (GitHub Actions).'
   PagesConfig.source: The update PUT requires both branch and path when source is sent.
   PagesConfig.source.branch: The branch Pages publishes from.
   PagesConfig.source.path: "The directory within the branch Pages publishes: / or /docs."

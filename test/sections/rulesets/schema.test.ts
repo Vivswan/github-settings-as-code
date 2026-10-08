@@ -129,12 +129,12 @@ describe("a ruleset the API would reject never reaches it", () => {
     [
       "an enforcement level spelled the way branch protection spells it",
       { name: "main", enforcement: "enabled" },
-      [/^rulesets\[0\]\.enforcement: .*"active"\|"evaluate"\|"disabled"/],
+      [/^rulesets\[0\]\.enforcement: .*"disabled"\|"active"\|"evaluate"/],
     ],
     [
       "an enforcement level in the wrong case",
       { name: "main", enforcement: "Active" },
-      [/^rulesets\[0\]\.enforcement: .*"active"\|"evaluate"\|"disabled"/],
+      [/^rulesets\[0\]\.enforcement: .*"disabled"\|"active"\|"evaluate"/],
     ],
     [
       "a Team bypass actor without the actor_id GitHub requires, and a null one",

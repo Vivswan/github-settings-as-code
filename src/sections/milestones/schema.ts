@@ -1,6 +1,7 @@
 /** The `milestones:` section's entry-config declaration (see src/schema.ts). */
 
 import { z } from "zod";
+import { MILESTONE_STATES } from "../../generated/spec-enums.js";
 import { open } from "../shared/schema-helpers.js";
 
 /**
@@ -15,7 +16,7 @@ const DueOn = z.union([z.iso.date(), z.iso.datetime()], {
 export const MilestoneConfig = open({
   title: z.string(),
   description: z.string().optional(),
-  state: z.enum(["open", "closed"]).optional(),
+  state: z.enum(MILESTONE_STATES).optional(),
   due_on: DueOn.optional(),
 }).meta({ id: "MilestoneConfig" });
 export type MilestoneConfig = z.infer<typeof MilestoneConfig>;

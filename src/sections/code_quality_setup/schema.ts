@@ -2,6 +2,11 @@
 
 import type { components } from "@octokit/openapi-types";
 import { z } from "zod";
+import {
+  CODE_QUALITY_AI_FINDINGS_OPTIONS,
+  CODE_QUALITY_RUNNER_TYPES,
+  CODE_QUALITY_STATES,
+} from "../../generated/spec-enums.js";
 import type { MustBeNever } from "../../types.js";
 import { open, rule } from "../shared/schema-helpers.js";
 import {
@@ -25,11 +30,11 @@ type _VocabularyIsTheVendoredSpec = MustBeNever<
 >;
 
 export const CodeQualitySetupConfig = open({
-  state: z.enum(["configured", "not-configured"]).optional(),
+  state: z.enum(CODE_QUALITY_STATES).optional(),
   languages: languagesSchema(CODE_QUALITY_LANGUAGES).optional(),
-  runner_type: z.enum(["standard", "labeled"]).optional(),
+  runner_type: z.enum(CODE_QUALITY_RUNNER_TYPES).optional(),
   runner_label: z.string().nullable().optional(),
-  ai_findings_option: z.enum(["disabled", "on_push"]).optional(),
+  ai_findings_option: z.enum(CODE_QUALITY_AI_FINDINGS_OPTIONS).optional(),
 })
   .check(rule(refineSetup))
   .meta({ id: "CodeQualitySetupConfig" });

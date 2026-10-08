@@ -1,6 +1,14 @@
 /** The `actions:` section's schema slice; root src/schema.ts composes the SettingsFile property from it. */
 
 import { z } from "zod";
+import {
+  ACCESS_LEVELS,
+  ALLOWED_ACTIONS,
+  APPROVAL_POLICIES,
+  DEFAULT_WORKFLOW_PERMISSIONS,
+  ForkPrWorkflowsPrivateRepos,
+  SelectedActions,
+} from "../../generated/spec-enums.js";
 import { describeValue } from "../../plain-data.js";
 import { open, rule } from "../shared/schema-helpers.js";
 
@@ -99,20 +107,14 @@ export const OidcTemplate = z
 
 export const ActionsConfig = open({
   enabled: z.boolean().optional(),
-  allowed_actions: z.enum(["all", "local_only", "selected"]).optional(),
+  allowed_actions: z.enum(ALLOWED_ACTIONS).optional(),
   sha_pinning_required: z.boolean().optional(),
-  // STRICT: the spec documents the complete allowlist body, and this PUT has no unrecognized-key
+  // Rendered STRICT: the spec documents the complete allowlist body, and this PUT has no unrecognized-key
   // note, so a misspelled key would otherwise re-PUT on every run without a word.
-  selected_actions: z
-    .strictObject({
-      github_owned_allowed: z.boolean().optional(),
-      verified_allowed: z.boolean().optional(),
-      patterns_allowed: z.array(z.string()).optional(),
-    })
-    .optional(),
-  default_workflow_permissions: z.enum(["read", "write"]).optional(),
+  selected_actions: SelectedActions.optional(),
+  default_workflow_permissions: z.enum(DEFAULT_WORKFLOW_PERMISSIONS).optional(),
   can_approve_pull_request_reviews: z.boolean().optional(),
-  access_level: z.enum(["none", "user", "organization"]).optional(),
+  access_level: z.enum(ACCESS_LEVELS).optional(),
   // The upper bounds of the retention and cache limits are plan-dependent, so only the integer rule is checked here.
   artifact_and_log_retention: open({ days: z.int().positive() }).optional(),
   // STRICT, unlike its siblings: each cache limit is the entire body of its own endpoint, so an
@@ -124,20 +126,10 @@ export const ActionsConfig = open({
     })
     .optional(),
   oidc_customization_sub: OidcTemplate.optional(),
-  fork_pr_contributor_approval: open({
-    approval_policy: z.enum([
-      "first_time_contributors_new_to_github",
-      "first_time_contributors",
-      "all_external_contributors",
-    ]),
-  }).optional(),
-  // Only the first toggle is required, as in the request body; the docs advise declaring all four.
-  fork_pr_workflows_private_repos: open({
-    run_workflows_from_fork_pull_requests: z.boolean(),
-    send_write_tokens_to_workflows: z.boolean().optional(),
-    send_secrets_and_variables: z.boolean().optional(),
-    require_approval_for_fork_pr_workflows: z.boolean().optional(),
-  }).optional(),
+  fork_pr_contributor_approval: open({ approval_policy: z.enum(APPROVAL_POLICIES) }).optional(),
+  // open() over the generated body, which only the section can mint (shared/schema-marks.ts): a passthrough
+  // mapping whose published form says nothing about undeclared keys. The docs advise declaring all four toggles.
+  fork_pr_workflows_private_repos: open(ForkPrWorkflowsPrivateRepos.shape).optional(),
 })
   .check(
     rule((declared, refineCtx) => {

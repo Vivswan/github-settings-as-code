@@ -156,7 +156,7 @@ v2   rulesets:
              parameters: {merge_method: squash, grouping_strategy: allgreen}
      -> POST /repos/{owner}/{repo}/rulesets -> 422, after the sections before rulesets wrote
 
-v3   rulesets[0].enforcement: Invalid option: expected one of "active"|"evaluate"|"disabled"
+v3   rulesets[0].enforcement: Invalid option: expected one of "disabled"|"active"|"evaluate"
      rulesets[0].conditions.ref_name.include[0]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"
      rulesets[0].rules[0]: parameters.grouping_strategy: Invalid option: expected one of "ALLGREEN"|"HEADGREEN"; parameters.merge_method: Invalid option: expected one of "MERGE"|"SQUASH"|"REBASE"; parameters.check_response_timeout_minutes: Invalid input: expected number, received undefined; ... (the four other numeric merge_queue parameters the file left out, the same way)
      rulesets[0].bypass_actors[0].actor_id: a Team bypass actor needs its numeric actor_id (the id GitHub assigns the app, role, team, or user); GitHub rejects the ruleset without it

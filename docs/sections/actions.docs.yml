@@ -116,8 +116,6 @@ schema:
     PUT /repos/{r}/actions/permissions/selected-actions (allowed_actions: selected): the allowlist,
     e.g. { github_owned_allowed: true, patterns_allowed: [octocat/*] }. Only the three documented
     keys are accepted, so a misspelled one is refused instead of re-sent on every run.
-  ActionsConfig.selected_actions.github_owned_allowed: Whether actions in GitHub's own organizations (such as actions/*) may run.
-  ActionsConfig.selected_actions.verified_allowed: Whether actions by GitHub Marketplace verified creators may run.
   ActionsConfig.selected_actions.patterns_allowed: >-
     Patterns naming the actions and reusable workflows allowed to run, e.g. octocat/hello-world@v2
     or octocat/*; GitHub applies them to public repositories only.
@@ -174,7 +172,4 @@ schema:
     run_workflows_from_fork_pull_requests is required; GitHub does not document whether the PUT
     preserves an omitted toggle, so declare all four. Other keys pass through verbatim, and one the
     GET never echoes is noted at check time as never converging.
-  ActionsConfig.fork_pr_workflows_private_repos.run_workflows_from_fork_pull_requests: Whether pull requests from forks may run workflows at all.
   ActionsConfig.fork_pr_workflows_private_repos.send_write_tokens_to_workflows: Whether those workflows receive a GITHUB_TOKEN with write permissions.
-  ActionsConfig.fork_pr_workflows_private_repos.send_secrets_and_variables: Whether those workflows receive the repository's secrets and variables.
-  ActionsConfig.fork_pr_workflows_private_repos.require_approval_for_fork_pr_workflows: Whether a repository administrator must approve each fork workflow run before it starts.

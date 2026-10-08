@@ -30,7 +30,7 @@ expect:
   result: failed
   zero_requests: true
   stdout_contains:
-    - 'rulesets[0].enforcement: Invalid option: expected one of "active"|"evaluate"|"disabled"'
+    - 'rulesets[0].enforcement: Invalid option: expected one of "disabled"|"active"|"evaluate"'
     - 'rulesets[0].conditions.ref_name.include[0]: "~all" is not a ref-name token: the tokens are ~ALL and ~DEFAULT_BRANCH (case-sensitive), and no ref name contains "~"'
     - "rulesets[0].bypass_actors[0].actor_id: a Team bypass actor needs its numeric actor_id"
     - "rulesets[0].bypass_actors[1].actor_id: a DeployKey bypass actor takes no actor_id (GitHub documents it as null); remove the key or write null"
