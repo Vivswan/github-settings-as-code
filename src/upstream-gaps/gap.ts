@@ -1,4 +1,4 @@
-/** Each gap lives in its own sibling file; the generated index.ts aggregates them (bun .github/scripts/gen-gaps-index.ts). */
+/** Each gap lives in its own sibling file; the generated src/generated/upstream-gaps.ts aggregates them (bun run build:gaps-index). */
 
 import type { Endpoints } from "@octokit/types";
 
@@ -43,7 +43,7 @@ export type UpstreamGap<R extends string = string> =
   | SpecOnlyGap<R>
   | GraphqlSchemaGap;
 
-/** `const G` preserves the routes tuple's literals, so index.ts derives SupplementalRoute as a literal union. */
+/** `const G` preserves the routes tuple's literals, so the generated index derives SupplementalRoute as a literal union. */
 export function defineGap<const G extends Omit<OctokitGap, "kind">>(
   gap: G,
 ): G & { readonly kind: "octokit" } {

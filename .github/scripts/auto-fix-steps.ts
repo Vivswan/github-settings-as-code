@@ -32,6 +32,15 @@ export const GENERATORS = [
   "build:inputs-table",
 ] as const;
 
+/** The whole files the src/ generators write, spelled out: a directory entry would admit a file no generator registers. */
+const GENERATED_FILES = [
+  "src/generated/spec-roles.ts",
+  "src/generated/spec-rules.ts",
+  "src/generated/upstream-gaps.ts",
+] as const;
+
+export const GAPS_DIR = "src/upstream-gaps/";
+
 /** A `dir/` entry covers everything under it, deletions included (a graduated gap file is a deletion). */
 export const FIX_OWNED_PATHS = [
   "README.md",
@@ -44,13 +53,9 @@ export const FIX_OWNED_PATHS = [
   "docs/reference/inputs.md",
   "docs/reference/architecture.md",
   "docs/start/getting-started.md",
-  "src/sections/shared/spec-roles.ts",
-  "src/sections/rulesets/spec-rules.ts",
-  "src/upstream-gaps/",
+  ...GENERATED_FILES,
+  GAPS_DIR,
 ] as const;
-
-const GAPS_DIR = "src/upstream-gaps/";
-const GAPS_INDEX = "src/upstream-gaps/index.ts";
 
 export function fixOwned(path: string): boolean {
   return FIX_OWNED_PATHS.some((entry) =>
@@ -94,7 +99,7 @@ function rebuild(): void {
   setOutput("changed", "true");
   // A patch touching a gap file means gap files graduated (the index alone is a regeneration); the push job picks
   // the commit subject from this.
-  setOutput("pruned", String(stagedChange("--", GAPS_DIR, `:(exclude)${GAPS_INDEX}`)));
+  setOutput("pruned", String(stagedChange("--", GAPS_DIR)));
 }
 
 function push(): number | undefined {
@@ -142,7 +147,7 @@ function push(): number | undefined {
   }
   configureBotIdentity();
   let subject = "build: regenerate generated files";
-  if (!stagedChange("--", GAPS_DIR)) {
+  if (!stagedChange("--", GAPS_DIR, ...GENERATED_FILES)) {
     subject = "docs: regenerate generated docs";
   }
   if (pruned === "true") {

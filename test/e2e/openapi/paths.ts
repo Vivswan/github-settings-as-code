@@ -4,10 +4,10 @@
  * so this file stays dependency-light and re-derives nothing.
  */
 
+import { UNDOCUMENTED_ROUTES } from "../../../src/generated/upstream-gaps.js";
 import { ISSUE_REPORT_ENDPOINTS } from "../../../src/report/issue-report.js";
 import { endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";
-import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 
 /**
  * Paths the action calls outside the section handlers (the repo probe is also repository.get and

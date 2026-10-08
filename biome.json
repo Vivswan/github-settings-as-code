@@ -10,7 +10,7 @@
   },
   "formatter": {
     "enabled": true,
-    "includes": ["**", "!src/upstream-gaps/index.ts"],
+    "includes": ["**", "!src/generated/upstream-gaps.ts"],
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100
@@ -49,7 +49,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/upstream-gaps/index.ts"],
+      "includes": ["src/generated/upstream-gaps.ts"],
       "assist": {
         "actions": {
           "source": {

@@ -6,6 +6,7 @@
 
 import { err, ok, safeTry } from "neverthrow";
 import { z } from "zod";
+import { INVITATION_ROLES } from "../../generated/spec-roles.js";
 import {
   undeclaredDrift,
   undeclaredNote,
@@ -26,7 +27,6 @@ import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan
 import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
-import { INVITATION_ROLES } from "../shared/spec-roles.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -190,7 +190,7 @@ export const collaboratorsSection = {
               continue;
             }
             if (!INVITATION_ROLES.has(wantRole)) {
-              // A custom role never appears on an invitation, and the PATCH's enum (shared/spec-roles.ts) can lag
+              // A custom role never appears on an invitation, and the PATCH's enum (src/generated/spec-roles.ts) can lag
               // the GET's, so neither can be set on a pending one; the PUT applies it once the invitation is accepted.
               const settable = [...INVITATION_ROLES].join(", ");
               plan.notes.push(

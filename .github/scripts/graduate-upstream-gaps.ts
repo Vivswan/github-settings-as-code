@@ -8,13 +8,13 @@
  *   a diagnostic that is not a TS2344 inside a gap file -> abort untouched; a half-fix would bury whatever else broke
  *   the re-compile still red                            -> abort for a human; a partially shipped file must be split by hand
  *
- * Run: `bun .github/scripts/graduate-upstream-gaps.ts`; `git checkout -- src/upstream-gaps` restores the tree.
+ * Run: `bun .github/scripts/graduate-upstream-gaps.ts`; `git checkout -- src/upstream-gaps src/generated/upstream-gaps.ts` restores the tree.
  */
 
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { countNoun } from "../../src/text.js";
-import { isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
+import { INDEX_PATH, isGapFileName, regenerateIndex } from "./gen-gaps-index.js";
 import { runMain } from "./lib/entry.js";
 import { type Diagnostic, parseDiagnostics } from "./lib/tsc-diagnostics.js";
 
@@ -208,7 +208,7 @@ function main(): number {
     abort(
       `graduating ${plan.gapFiles.join(", ")} did not turn the build green - likely a partial graduation ` +
         `(octokit shipped only some of a file's routes). Split the gap file by hand; ` +
-        `\`git checkout -- ${GAPS_DIR}\` restores the tree`,
+        `\`git checkout -- ${GAPS_DIR} ${INDEX_PATH}\` restores the tree`,
       second.stdout,
       second.stderr,
     );

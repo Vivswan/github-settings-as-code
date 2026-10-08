@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
+import { UNDOCUMENTED_ROUTES } from "../../../src/generated/upstream-gaps.js";
 import {
   endpointMethod,
   endpointPath,
@@ -18,7 +19,6 @@ import {
 } from "../../../src/sections/contract/endpoints.js";
 import { GRAPHQL_ERROR_TYPES } from "../../../src/sections/contract/graphql.js";
 import { allGraphqlOps } from "../../../src/sections/registry.js";
-import { UNDOCUMENTED_ROUTES } from "../../../src/upstream-gaps/index.js";
 import { VIOLATION_PREFIX } from "../constants.js";
 import type { LoggedRequest } from "../mock/contract.js";
 import { UNDOCUMENTED_PATHS, USED_PATHS } from "./paths.js";

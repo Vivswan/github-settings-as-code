@@ -163,7 +163,7 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
     properties: { type: RULE_TYPE(type), parameters },
   });
 
-  test("a rule with no parameters, one with every known keyword, and a shared shape render; the overrides table is the one it is handed", () => {
+  test("a rule with no parameters, one with every known keyword, and a shared shape render", () => {
     const pattern = {
       type: "object",
       required: ["operator", "pattern"],
@@ -202,7 +202,6 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
         withParameters("b_pattern", { ...pattern, description: "spelled apart" }),
         withParameters("c_pattern", described),
       ]),
-      { sized: { names: "any check" } },
     );
     expect(text).toContain(
       'z.looseObject({ type: z.literal("creation") }).meta({\n  id: "Rule<creation>",\n})',
@@ -218,12 +217,8 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
       ].join(""),
     );
     expect(text).toContain(
-      "names: z.array(z.string()).check(RULE_OVERRIDES.sized.names).optional()",
+      'names: z.array(z.string()).optional(), mode: z.enum(["A", "B"]).optional(), one: z.literal("only").optional()',
     );
-    expect(text).toContain(
-      'mode: z.enum(["A", "B"]).optional(), one: z.literal("only").optional()',
-    );
-    expect(text).toContain('import { RULE_OVERRIDES } from "./rule-overrides.js";');
     expect(text).toContain(
       [
         "const PatternRuleParameters = z.looseObject({ name: z.string().optional(), ",
@@ -369,18 +364,7 @@ describe("the rule emitter refuses what the hand-written rows could not have sai
       "rules[0]: a rule variant's type is one enum value",
     ],
   ])("%s", (_what, descriptor, refusal) => {
-    expect(() => renderRules(descriptor, {})).toThrow(refusal);
-  });
-
-  test("an override naming a field the descriptor does not carry is refused by name", () => {
-    expect(() =>
-      renderRules(withRules([creation]), {
-        creation: { gone: "check" },
-        pull_request: { allowed_merge_methods: "check" },
-      }),
-    ).toThrow(
-      "RULE_OVERRIDES names creation.gone, pull_request.allowed_merge_methods, which the descriptor's rules do not carry",
-    );
+    expect(() => renderRules(descriptor)).toThrow(refusal);
   });
 });
 

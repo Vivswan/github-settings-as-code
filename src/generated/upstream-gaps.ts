@@ -6,9 +6,9 @@
  * empty gaps set, so this file survives an empty directory.
  */
 
-import { undocumentedRoutes, type UnshippedGraphqlSdl, unshippedGraphqlSdl } from "./gap.js";
-import { GAP as issueCreationPolicy } from "./issue-creation-policy.js";
-import { GAP as lfs } from "./lfs.js";
+import { undocumentedRoutes, type UnshippedGraphqlSdl, unshippedGraphqlSdl } from "../upstream-gaps/gap.js";
+import { GAP as issueCreationPolicy } from "../upstream-gaps/issue-creation-policy.js";
+import { GAP as lfs } from "../upstream-gaps/lfs.js";
 
 const GAPS = {
   "issue-creation-policy": issueCreationPolicy,

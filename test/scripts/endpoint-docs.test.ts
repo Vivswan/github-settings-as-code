@@ -8,7 +8,7 @@ import {
   resolveAnchors,
   type SpecOperations,
 } from "../../.github/scripts/endpoint-docs.js";
-import { UNDOCUMENTED_ROUTES } from "../../src/upstream-gaps/index.js";
+import { UNDOCUMENTED_ROUTES } from "../../src/generated/upstream-gaps.js";
 
 describe("resolveAnchors", () => {
   const spec: SpecOperations = {

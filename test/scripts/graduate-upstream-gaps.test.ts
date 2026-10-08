@@ -27,14 +27,15 @@ const TRIPWIRE_MESSAGE =
   "Type '\"GET /repos/{owner}/{repo}/merge-queue\"' does not satisfy the constraint 'never'.";
 
 describe("isGapFile", () => {
-  // Only a .ts file directly under src/upstream-gaps/ is a gap. index.ts and gap.ts carry no tripwire; a TS2344 in
-  // either means the machinery broke, and deleting it could never be the fix. Declaration and test strays are not gaps.
+  // Only a .ts file directly under src/upstream-gaps/ is a gap. gap.ts and the generated index carry no tripwire;
+  // a TS2344 in either means the machinery broke, and deleting it could never be the fix. Declaration and test
+  // strays are not gaps.
   test.each<[path: string, gap: boolean]>([
     ["src/upstream-gaps/merge-queue.ts", true],
     ["src/upstream-gaps/nested/deep.ts", false],
     ["src/sections/labels.ts", false],
     ["src/upstream-gaps.ts", false],
-    ["src/upstream-gaps/index.ts", false],
+    ["src/generated/upstream-gaps.ts", false],
     ["src/upstream-gaps/gap.ts", false],
     ["src/upstream-gaps/notes.d.ts", false],
     ["src/upstream-gaps/scratch.test.ts", false],
@@ -77,13 +78,13 @@ describe("planGraduation", () => {
       [MERGE_QUEUE],
       [tripwire("src/engine/diff.ts")],
     ],
-    // index.ts and gap.ts carry no tripwire; a TS2344 in either means the machinery broke, and deleting it could
-    // never be the fix.
+    // The generated index and gap.ts carry no tripwire; a TS2344 in either means the machinery broke, and deleting
+    // it could never be the fix.
     [
-      "a tripwire-shaped error in index.ts is foreign",
-      [noiseIn("src/upstream-gaps/index.ts")],
+      "a tripwire-shaped error in the generated index is foreign",
+      [noiseIn("src/generated/upstream-gaps.ts")],
       [],
-      [noiseIn("src/upstream-gaps/index.ts")],
+      [noiseIn("src/generated/upstream-gaps.ts")],
     ],
     [
       "a tripwire-shaped error in gap.ts is foreign",
@@ -100,7 +101,7 @@ describe("gapFileBases", () => {
   test.each<[label: string, listing: string[], bases: string[]]>([
     [
       "only gap .ts files, stripped and sorted",
-      ["pages-https.ts", "index.ts", "gap.ts", "merge-queue.ts", "README.md"],
+      ["pages-https.ts", "gap.ts", "merge-queue.ts", "README.md"],
       ["merge-queue", "pages-https"],
     ],
     [
@@ -124,28 +125,30 @@ describe("generateIndex", () => {
     "the index generated for %s type-checks beside its gap files, loads, and its SDL entries name them",
     (_label, bases) =>
       withTempDir("gaps-index-", async (dir) => {
-        // A src/ mirror: every sibling of upstream-gaps/ symlinked (a gap may import ../types.js), the gap files
-        // copied beside the generated index. The empty row matters on its own: the committed index compiles under
-        // the project typecheck only while a gap file exists, so a derivation written for a populated GAPS (say
-        // `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
+        // A src/ mirror: every sibling of upstream-gaps/ and generated/ symlinked (a gap may import ../types.js),
+        // the gap files copied, the generated index written at its own path. The empty row matters on its own: the
+        // committed index compiles under the project typecheck only while a gap file exists, so a derivation written
+        // for a populated GAPS (say `(typeof GAPS)["lfs"]`) would first break the day the last gap graduates.
         const gapsDir = join(dir, "src", "upstream-gaps");
+        const index = join(dir, "src", "generated", "upstream-gaps.ts");
         mkdirSync(gapsDir, { recursive: true });
+        mkdirSync(join(dir, "src", "generated"));
         symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
         for (const entry of readdirSync(join(ROOT, "src"))) {
-          if (entry !== "upstream-gaps") {
+          if (entry !== "upstream-gaps" && entry !== "generated") {
             symlinkSync(join(ROOT, "src", entry), join(dir, "src", entry));
           }
         }
         for (const file of ["gap", ...bases]) {
           copyFileSync(join(GAPS_DIR, `${file}.ts`), join(gapsDir, `${file}.ts`));
         }
-        writeFileSync(join(gapsDir, "index.ts"), generateIndex(bases));
+        writeFileSync(index, generateIndex(bases));
         writeFileSync(
           join(dir, "tsconfig.json"),
           JSON.stringify({
             extends: join(ROOT, "tsconfig.json"),
             include: [],
-            files: ["src/upstream-gaps/index.ts"],
+            files: ["src/generated/upstream-gaps.ts"],
           }),
         );
         const tsc = spawnSync(
@@ -161,7 +164,7 @@ describe("generateIndex", () => {
         // Loading resolves every import. The GAPS key, not the import, is what names a gap file downstream:
         // unshippedGraphqlSdl() renders it as the file to retire, and a camelCase key would compile yet name a
         // file that does not exist.
-        const { UNSHIPPED_GRAPHQL_SDL } = (await import(join(gapsDir, "index.ts"))) as {
+        const { UNSHIPPED_GRAPHQL_SDL } = (await import(index)) as {
           UNSHIPPED_GRAPHQL_SDL: readonly UnshippedGraphqlSdl[];
         };
         const unresolved = UNSHIPPED_GRAPHQL_SDL.map((entry) => entry.file).filter(

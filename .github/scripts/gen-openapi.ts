@@ -2,8 +2,8 @@
  * Regenerates WHOLESALE the TypeScript GitHub's OpenAPI descriptor dictates, from the installed @octokit/openapi
  * (the non-dereferenced api.github.com.json, so component names survive). Build time only: neither the descriptor
  * nor this script is bundled.
- *   src/sections/shared/spec-roles.ts   -> the invitation role enums (the PATCH body's, the GET listing's)
- *   src/sections/rulesets/spec-rules.ts -> one zod row per ruleset rule type, parameters typed as the spec types them
+ *   src/generated/spec-roles.ts -> the invitation role enums (the PATCH body's, the GET listing's)
+ *   src/generated/spec-rules.ts -> one zod row per ruleset rule type, parameters typed as the spec types them
  *
  * A path the descriptor no longer carries, or a shape the emitter does not know, ends the run naming it: a
  * descriptor that outgrows the emitter fails the build instead of rendering less than the spec says. The rows call
@@ -18,7 +18,6 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { RULE_OVERRIDES } from "../../src/sections/rulesets/rule-overrides.js";
 import { runMain } from "./lib/entry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -156,7 +155,7 @@ function published(id: string, node: SchemaNode): string {
 
 // --- Roles ----------------------------------------------------------------------------------------------------
 
-export const ROLES_PATH = "src/sections/shared/spec-roles.ts";
+export const ROLES_PATH = "src/generated/spec-roles.ts";
 
 const INVITATION_PATH = "/repos/{owner}/{repo}/invitations/{invitation_id}";
 const INVITATIONS_PATH = "/repos/{owner}/{repo}/invitations";
@@ -194,7 +193,7 @@ export const REPORTED_INVITATION_ROLES: ReadonlySet<string> = new Set([${stringL
 
 // --- Rules ----------------------------------------------------------------------------------------------------
 
-export const RULES_PATH = "src/sections/rulesets/spec-rules.ts";
+export const RULES_PATH = "src/generated/spec-rules.ts";
 
 const RULESETS_PATH = "/repos/{owner}/{repo}/rulesets";
 const RULESET_PATH = "/repos/{owner}/{repo}/rulesets/{ruleset_id}";
@@ -236,7 +235,6 @@ const UNION_KEYWORDS: ReadonlySet<string> = new Set(["type", "oneOf"]);
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const key = (name: string) => (IDENTIFIER.test(name) ? name : JSON.stringify(name));
-const member = (name: string) => (IDENTIFIER.test(name) ? `.${name}` : `[${JSON.stringify(name)}]`);
 
 /** The node without its prose at any depth: what two rule types must share for one published shape. A key under
  * `properties` is a field name, never a keyword, so a field called description stays. */
@@ -254,17 +252,11 @@ function shape(node: unknown, properties = false): unknown {
   );
 }
 
-type Overrides = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-
-/** One render's state: the components and shared shapes met, in dependency order, and the overrides consumed. */
+/** One render's state: the components and shared shapes met, in dependency order. */
 class RuleEmitter {
   readonly consts = new Map<string, string>();
-  readonly usedOverrides = new Set<string>();
 
-  constructor(
-    private readonly descriptor: Descriptor,
-    private readonly overrides: Overrides,
-  ) {}
+  constructor(private readonly descriptor: Descriptor) {}
 
   private refuse(path: string, what: string): never {
     throw new Error(`${path}: ${what}`);
@@ -295,7 +287,7 @@ class RuleEmitter {
     return `.${keyword === "minimum" ? "min" : "max"}(${value}, { abort: true })`;
   }
 
-  /** The zod expression for a node, every check aborting (rule-overrides.ts says why). */
+  /** The zod expression for a node, every check aborting (src/sections/rulesets/rule-overrides.ts says why). */
   node(node: SchemaNode, path: string): string {
     if (typeof node.$ref === "string") {
       return this.component(node.$ref, path);
@@ -396,24 +388,6 @@ class RuleEmitter {
     }
     return constName;
   }
-
-  ownParameters(type: string, node: SchemaNode, path: string): string {
-    const overrides = this.overrides[type] ?? {};
-    return this.object(node, path, (name, child, childPath) => {
-      if (!Object.hasOwn(overrides, name)) {
-        return undefined;
-      }
-      this.usedOverrides.add(`${type}.${name}`);
-      const check = `.check(RULE_OVERRIDES${member(type)}${member(name)})`;
-      return `${this.node(child, childPath)}${check}${described(child)}`;
-    });
-  }
-
-  unusedOverrides(): string[] {
-    return Object.entries(this.overrides)
-      .flatMap(([type, fields]) => Object.keys(fields).map((field) => `${type}.${field}`))
-      .filter((entry) => !this.usedOverrides.has(entry));
-  }
 }
 
 interface RuleVariant {
@@ -476,9 +450,9 @@ function ruleVariants(descriptor: Descriptor): RuleVariant[] {
   });
 }
 
-export function renderRules(descriptor: Descriptor, overrides: Overrides = RULE_OVERRIDES): string {
+export function renderRules(descriptor: Descriptor): string {
   const variants = ruleVariants(descriptor);
-  const emitter = new RuleEmitter(descriptor, overrides);
+  const emitter = new RuleEmitter(descriptor);
   const inline = variants.filter(
     ({ node }) =>
       node.properties?.parameters !== undefined && node.properties.parameters.$ref === undefined,
@@ -529,27 +503,14 @@ export function renderRules(descriptor: Descriptor, overrides: Overrides = RULE_
   const rows = variants.map(({ type, node, path }) => {
     const row = emitter.object(node, path, (name, child, childPath) =>
       name === "parameters" && child.$ref === undefined
-        ? (shared.get(type) ??
-          `${emitter.ownParameters(type, child, childPath)}${described(child)}`)
+        ? (shared.get(type) ?? `${emitter.object(child, childPath)}${described(child)}`)
         : undefined,
     );
     return `${row}${published(`Rule<${type}>`, node)}`;
   });
-  const unused = emitter.unusedOverrides();
-  if (unused.length > 0) {
-    throw new Error(
-      `RULE_OVERRIDES names ${unused.join(", ")}, which the descriptor's rules do not carry`,
-    );
-  }
-  const imports = [
-    'import { z } from "zod";',
-    ...(emitter.usedOverrides.size > 0
-      ? ['import { RULE_OVERRIDES } from "./rule-overrides.js";']
-      : []),
-  ];
   const consts = [...emitter.consts].map(([name, body]) => `const ${name} = ${body};`);
   return `${header("The ruleset rule rows of GitHub's OpenAPI")}
-${imports.join("\n")}
+import { z } from "zod";
 
 ${consts.join("\n\n")}
 
