@@ -2,6 +2,7 @@
  * Every definition and property must end up with exactly one description and every key must describe something, so
  * a renamed field, a forgotten sentence, and a double entry all fail the build. The one exception is an
  * additionalProperties schema (`.*`): it stands for "any other key", which the parent's own description covers.
+ * Precedence: a docs entry over a description the schema already carries (zod's .describe()) over nothing.
  *
  *   LabelConfig.color                                                -> a property
  *   EnvironmentConfig.deployment_branch_policy|0.protected_branches  -> arm 0 of an anyOf/oneOf
@@ -115,7 +116,7 @@ export function attachDescriptions(
   for (const [site, { node, required }] of sites) {
     const claimed = claims.get(site) ?? [];
     if (claimed.length === 0) {
-      if (required) {
+      if (required && !node.description) {
         problems.push(`${site} has no description in any docs file`);
       }
     } else if (claimed.length > 1) {
