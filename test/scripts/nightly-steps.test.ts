@@ -142,8 +142,13 @@ function probe(
 
 const SCHEMA_ADD =
   "add --no-save --ignore-scripts @octokit/openapi@latest @octokit/graphql-schema@latest";
-const LOCKSTEP_TESTS =
-  "test test/e2e/openapi/validate.test.ts test/scripts/gen-openapi.test.ts test/sections/graphql-queries.test.ts";
+const LOCKSTEP_TESTS = [
+  "test",
+  "test/e2e/openapi/validate.test.ts",
+  "test/e2e/openapi/vocabulary-lockstep.test.ts",
+  "test/scripts/gen-openapi.test.ts",
+  "test/sections/graphql-queries.test.ts",
+].join(" ");
 
 describe("probe-schema", () => {
   test("both packages at their latest: each is reported and the lockstep tests run", () =>

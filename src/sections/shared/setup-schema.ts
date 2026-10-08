@@ -73,7 +73,7 @@ export function languagesSchema<const Declarable extends Names>(
 }
 
 /** Both GETs report these and neither PATCH accepts them, so a declared value could only drift. */
-const GET_ONLY_KEYS = ["schedule", "updated_at"] as const;
+export const GET_ONLY_KEYS = ["schedule", "updated_at"] as const;
 
 interface RunnerFields {
   readonly runner_type?: "standard" | "labeled";

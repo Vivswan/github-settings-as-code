@@ -29,7 +29,7 @@ export function permissionForRole(role: string): string | undefined {
 
 // Maps, not records: a declared permission named like a prototype member ("constructor") must
 // pass through, not resolve to Object.prototype's.
-const ROLE_FOR_PERMISSION: ReadonlyMap<string, string> = new Map([
+export const ROLE_FOR_PERMISSION: ReadonlyMap<string, string> = new Map([
   ["push", "write"],
   ["pull", "read"],
 ]);

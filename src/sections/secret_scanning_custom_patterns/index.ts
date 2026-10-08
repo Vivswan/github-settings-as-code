@@ -42,7 +42,7 @@ import { SecretScanningPatternConfig, unverifiableRegexFields } from "./schema.j
 const permission: SectionPermission = { repo: ["secret_scanning_alerts"] };
 
 /** The known entry keys the update PATCH accepts: everything but the immutable name. */
-const UPDATABLE_KEYS = [
+export const UPDATABLE_KEYS = [
   "pattern",
   "start_delimiter",
   "end_delimiter",

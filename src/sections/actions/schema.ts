@@ -73,7 +73,7 @@ const ClaimKeys = z
  * variant is open(), so a list declared beside use_default: true is refused by name here rather
  * than riding through.
  */
-const OidcTemplate = z
+export const OidcTemplate = z
   .discriminatedUnion("use_default", [
     open({ use_default: z.literal(true), use_immutable_subject: z.boolean().optional() }),
     open({
