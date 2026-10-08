@@ -8,6 +8,7 @@ import { FILES } from "./gen-action-docs.js";
 import { PAGES } from "./gen-docs.js";
 import { INDEX_PATH } from "./gen-gaps-index.js";
 import { INPUTS_PAGE_PATH } from "./gen-inputs-table.js";
+import { OUTPUTS as OPENAPI_OUTPUTS } from "./gen-openapi.js";
 import { runMain } from "./lib/entry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -28,9 +29,13 @@ function regions(generator: string, paths: readonly string[]): GeneratedOutput[]
 /**
  * A page two generators write into (docs/reference/inputs.md) has one row per generator. Rows stay in dependency
  * order, each artifact before its readers, or a new gap file would leave a run stale.
- *   the gaps index -> imported through src/ by the docs and action.yml generators
+ *   the descriptor-derived files -> imported through src/ by everything below
+ *   the gaps index               -> imported through src/ by the docs and action.yml generators
  */
 export const GENERATED_OUTPUTS: readonly GeneratedOutput[] = [
+  ...OPENAPI_OUTPUTS.map(
+    ({ path }): GeneratedOutput => ({ path, generator: "build:openapi", kind: "file" }),
+  ),
   { path: INDEX_PATH, generator: "build:gaps-index", kind: "file" },
   ...regions("build:docs", Object.keys(PAGES)),
   ...regions("build:action-docs", Object.keys(FILES)),

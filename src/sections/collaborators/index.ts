@@ -23,14 +23,10 @@ import {
 } from "../contract/module.js";
 import type { SectionPermission } from "../contract/permissions.js";
 import type { PlanContext, PlannedOp, Read, SectionPlan } from "../contract/plan.js";
-import {
-  DEFAULT_ROLE,
-  INVITATION_ROLES,
-  readBackPermission,
-  roleForPermission,
-} from "../shared/roles.js";
+import { DEFAULT_ROLE, readBackPermission, roleForPermission } from "../shared/roles.js";
 import { knobbed, routed } from "../shared/schema-helpers.js";
 import { knobbedSnapshot, leftOutOfSnapshot } from "../shared/snapshot-helpers.js";
+import { INVITATION_ROLES } from "../shared/spec-roles.js";
 import { CollaboratorConfig } from "./schema.js";
 
 const LiveCollaborator = z.looseObject({
@@ -194,8 +190,8 @@ export const collaboratorsSection = {
               continue;
             }
             if (!INVITATION_ROLES.has(wantRole)) {
-              // A custom role never appears on an invitation and the PATCH lags triage_plus (shared/roles.ts), so
-              // neither can be set on a pending one; the PUT applies it on the next apply once the invitation is accepted.
+              // A custom role never appears on an invitation, and the PATCH's enum (shared/spec-roles.ts) can lag
+              // the GET's, so neither can be set on a pending one; the PUT applies it once the invitation is accepted.
               const settable = [...INVITATION_ROLES].join(", ");
               plan.notes.push(
                 `invitation for "${username}" is pending; the invitation PATCH accepts only ${settable}, ` +
