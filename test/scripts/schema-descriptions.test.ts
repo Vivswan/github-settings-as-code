@@ -134,6 +134,32 @@ describe("attachDescriptions", () => {
     expect(definitions.RepositoryConfig?.additionalProperties).toEqual({ type: "string" });
   });
 
+  test("a site described at the schema stays described without a docs entry, and a docs entry replaces that text", () => {
+    const described = (): Record<string, JsonSchemaNode> => {
+      const definitions = fixture();
+      const color = definitions.LabelConfig?.properties?.color;
+      if (color !== undefined) {
+        color.description = "Six hex digits, from the schema.";
+      }
+      return definitions;
+    };
+    const fallback = described();
+    attachDescriptions(
+      fallback,
+      COMPLETE.filter((d) => d.key !== "LabelConfig.color"),
+    );
+    expect(fallback.LabelConfig?.properties?.color).toEqual({
+      type: "string",
+      description: "Six hex digits, from the schema.",
+    });
+    const overridden = described();
+    attachDescriptions(overridden, COMPLETE);
+    expect(Object.entries(overridden.LabelConfig?.properties?.color ?? {})).toEqual([
+      ["description", "The color."],
+      ["type", "string"],
+    ]);
+  });
+
   test("a brace key describes each listed definition and its field once, overlapping alternatives claiming a site once", () => {
     const definitions = fixture();
     const braced = COMPLETE.filter((d) => !d.key.startsWith("UndeclaredPolicyList<*>"));
