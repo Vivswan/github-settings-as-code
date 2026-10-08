@@ -29,6 +29,7 @@ const TYPES_PACKAGES = ["@octokit/types", "@octokit/openapi-types"] as const;
 const TYPES_LATEST = TYPES_PACKAGES.map((pkg) => `${pkg}@latest`).join(" and ");
 const LOCKSTEP_TESTS = [
   "test/e2e/openapi/validate.test.ts",
+  "test/e2e/openapi/vocabulary-lockstep.test.ts",
   "test/scripts/gen-openapi.test.ts",
   "test/sections/graphql-queries.test.ts",
 ] as const;

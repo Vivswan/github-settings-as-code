@@ -58,7 +58,7 @@ import {
   PROTECTION_MAPPING_KEYS,
 } from "./schema.js";
 
-const REQUIRED_PROTECTION_KEYS = [
+export const REQUIRED_PROTECTION_KEYS = [
   "required_status_checks",
   "enforce_admins",
   "required_pull_request_reviews",

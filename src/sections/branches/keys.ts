@@ -4,7 +4,7 @@
  * would otherwise never read back equal and drift forever, or 422 where the PUT expects a boolean.
  */
 
-const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled", "enforcement_level"]);
+export const GET_ONLY_KEYS: ReadonlySet<string> = new Set(["name", "enabled", "enforcement_level"]);
 
 export const isUrlKey = (key: string): boolean => key === "url" || key.endsWith("_url");
 
