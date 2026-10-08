@@ -136,10 +136,7 @@ const DATA_FUNCTIONS: ReadonlySet<string> = new Set(["render", "codePointEscape"
 const DATA_ARGUMENTS: Readonly<Record<string, readonly number[]>> = {
   actorList: [0, 1],
   reviewActorHolder: [0],
-  bareRule: [0],
   rule: [0],
-  patternRule: [0],
-  ruleId: [0],
   sectionFailure: [0],
   boundedString: [1],
   sealedSecretConfig: [0],
@@ -201,7 +198,6 @@ const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   "REF_NAME_ILLEGAL",
   "BYPASS_ACTOR_TYPES",
   "IDENTIFIED_ACTOR_TYPES",
-  "PATTERN_OPERATORS",
   // actions/schema.ts
   "REPORTED_ONLY",
   // code_quality_setup, code_scanning_default_setup
@@ -863,6 +859,8 @@ export function refusalSources(root: string): Source[] {
   }
   // The regex check's own reasons render inside the pattern refusal; the RegExp engine's messages pass through unread.
   add("src/sections/secret_scanning_custom_patterns/compilable-form.ts", "every-literal");
+  // The one rule check the descriptor cannot express lives beside the generated rows.
+  add("src/sections/rulesets/rule-overrides.ts", "every-literal");
   // The environments section's nested lists validate in their own files.
   for (const nested of ["nested", "branch-policies", "protection-rules"]) {
     add(`src/sections/environments/${nested}.ts`, "message-positions");

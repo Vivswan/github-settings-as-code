@@ -107,13 +107,6 @@ schema:
   Rule<*>.type: The rule type, as the rulesets API names it.
   Rule<*>.parameters: >-
     The rule's parameters, typed as the spec types them; a field GitHub adds later passes through.
-  Rule<creation>: Only actors with bypass permission may create matching refs.
-  Rule<update>: Only actors with bypass permission may update matching refs.
-  Rule<update>.parameters.update_allows_fetch_and_merge: >-
-    Whether the branch may still pull changes from its upstream repository.
-  Rule<deletion>: Only actors with bypass permission may delete matching refs.
-  Rule<required_linear_history>: No merge commits may be pushed to matching refs.
-  Rule<merge_queue>: Merges into matching branches go through a merge queue.
   Rule<merge_queue>.parameters.check_response_timeout_minutes: >-
     Minutes a required status check may take before it counts as failed (1 to 360).
   Rule<merge_queue>.parameters.grouping_strategy: >-
@@ -128,101 +121,35 @@ schema:
   Rule<merge_queue>.parameters.min_entries_to_merge: Minimum pull requests merged as one group (0 to 100).
   Rule<merge_queue>.parameters.min_entries_to_merge_wait_minutes: >-
     Minutes the queue waits for the minimum group size before merging a smaller group (0 to 360).
-  Rule<required_deployments>: Named environments must deploy successfully before a push lands.
-  Rule<required_deployments>.parameters.required_deployment_environments: >-
-    The environment names that must be deployed to first.
-  Rule<required_signatures>: Commits pushed to matching refs must carry verified signatures.
-  Rule<pull_request>: Changes reach matching branches through a pull request only.
   Rule<pull_request>.parameters.allowed_merge_methods: >-
     The merge methods allowed, lower-case merge, squash, rebase (the upper-case merge_queue spelling
     is refused here); at least one.
-  Rule<pull_request>.parameters.dismiss_stale_reviews_on_push: >-
-    Whether a new reviewable push dismisses earlier approvals.
-  Rule<pull_request>.parameters.dismissal_restriction: Who may dismiss pull request reviews.
-  Rule<pull_request>.parameters.dismissal_restriction.allowed_actors: >-
-    The people, teams, or apps allowed to dismiss reviews.
-  Rule<pull_request>.parameters.dismissal_restriction.enabled: >-
-    Whether review dismissal is restricted to the listed actors.
-  Rule<pull_request>.parameters.require_code_owner_review: >-
-    Whether files with a code owner need that owner's approving review.
-  Rule<pull_request>.parameters.require_last_push_approval: >-
-    Whether the most recent reviewable push must be approved by someone other than its pusher.
   Rule<pull_request>.parameters.required_approving_review_count: Approving reviews required (0 to 10).
-  Rule<pull_request>.parameters.required_review_thread_resolution: >-
-    Whether every review conversation must be resolved before merging.
   Rule<pull_request>.parameters.required_reviewers: >-
     Teams that must review changes to given file patterns (GitHub marks this beta).
-  Rule<required_status_checks>: Named status checks must pass before the ref is updated.
-  Rule<required_status_checks>.parameters.do_not_enforce_on_create: >-
-    Whether a new ref may be created even when a check would otherwise block it.
-  Rule<required_status_checks>.parameters.required_status_checks: The checks that must pass.
-  Rule<required_status_checks>.parameters.strict_required_status_checks_policy: >-
-    Whether a pull request must be tested against the latest target commit.
-  Rule<non_fast_forward>: No force pushes to matching refs.
   Rule<commit_message_pattern>: Commit messages must match (or not match) a pattern.
   Rule<commit_author_email_pattern>: Commit author emails must match (or not match) a pattern.
   Rule<committer_email_pattern>: Committer emails must match (or not match) a pattern.
   Rule<branch_name_pattern>: Branch names must match (or not match) a pattern.
   Rule<tag_name_pattern>: Tag names must match (or not match) a pattern.
   PatternRuleParameters: The pattern and operator the five *_pattern rule types share.
-  PatternRuleParameters.name: How the rule appears when configuring it.
-  PatternRuleParameters.negate: Whether the rule fails when the pattern matches.
   PatternRuleParameters.operator: >-
     starts_with, ends_with, contains, or regex, in that spelling.
-  PatternRuleParameters.pattern: The pattern to match.
-  Rule<workflows>: Named workflows must pass before changes merge into matching branches.
-  Rule<workflows>.parameters.do_not_enforce_on_create: >-
-    Whether a new ref may be created even when a workflow would otherwise block it.
-  Rule<workflows>.parameters.workflows: The workflow files that must pass.
-  Rule<code_scanning>: Named code scanning tools must report before the ref is updated.
-  Rule<code_scanning>.parameters.code_scanning_tools: The tools that must provide results.
-  Rule<code_quality>: >-
-    Code quality findings at or above a severity must be resolved before a pull request merges.
   Rule<code_quality>.parameters.severity: >-
     errors, warnings, notes, or all: the lowest severity a finding must have to block the merge.
-  Rule<code_coverage>: Pull requests must keep line coverage within the declared thresholds to merge.
   Rule<code_coverage>.parameters.max_coverage_drop: >-
     The most percentage points line coverage may fall below the default branch's (0 to 100).
   Rule<code_coverage>.parameters.minimum_coverage: >-
     The lowest line coverage percentage a pull request may have (0 to 100).
-  Rule<copilot_code_review>: Copilot code review is requested on new pull requests automatically.
-  Rule<copilot_code_review>.parameters.review_draft_pull_requests: >-
-    Whether drafts are reviewed before they are marked ready.
-  Rule<copilot_code_review>.parameters.review_on_push: Whether each new push is reviewed.
-  Rule<license_compliance_scanning>: >-
-    Added or changed dependencies must comply with the organization's license policy.
-  Rule<file_path_restriction>: Commits touching the listed paths are refused.
-  Rule<file_path_restriction>.parameters.restricted_file_paths: The file and folder paths refused.
-  Rule<max_file_path_length>: Commits with file paths over the length cap are refused.
   Rule<max_file_path_length>.parameters.max_file_path_length: >-
     The most characters a file path may have (1 to 32767).
-  Rule<file_extension_restriction>: Commits adding files with the listed extensions are refused.
-  Rule<file_extension_restriction>.parameters.restricted_file_extensions: The file extensions refused.
-  Rule<max_file_size>: Commits with a file over the size cap are refused.
   Rule<max_file_size>.parameters.max_file_size: >-
     The largest file allowed, in megabytes (1 to 100); Git LFS objects are exempt.
-  ReviewDismissalActorConfig: One actor allowed to dismiss pull request reviews.
-  ReviewDismissalActorConfig.id: The actor's id.
   ReviewDismissalActorConfig.type: User, Team, IntegrationInstallation, or RepositoryRole.
-  RequiredReviewerConfig: A team and the file patterns whose changes it must approve.
-  RequiredReviewerConfig.file_patterns: fnmatch patterns of the files the team must review.
-  RequiredReviewerConfig.minimum_approvals: >-
-    Approvals required from the team; zero adds the team as a reviewer without requiring approval.
-  RequiredReviewerConfig.reviewer: The reviewing team.
-  RequiredReviewerConfig.reviewer.id: The team's id.
   RequiredReviewerConfig.reviewer.type: Always "Team".
-  StatusCheckConfig: One required status check.
-  StatusCheckConfig.context: The status check context name that must be present on the commit.
   StatusCheckConfig.integration_id: The GitHub App the check must come from, when pinned.
-  WorkflowFileConfig: One workflow that must run for the rule to pass.
-  WorkflowFileConfig.path: The path to the workflow file.
-  WorkflowFileConfig.ref: The branch or tag of the workflow file to use.
-  WorkflowFileConfig.repository_id: The id of the repository that holds the workflow.
-  WorkflowFileConfig.sha: The commit of the workflow file to use.
-  CodeScanningToolConfig: One tool that must provide code scanning results.
   CodeScanningToolConfig.alerts_threshold: >-
     The alert severity that blocks the update: none, errors, errors_and_warnings, or all.
   CodeScanningToolConfig.security_alerts_threshold: >-
     The security severity that blocks the update: none, critical, high_or_higher,
     medium_or_higher, or all.
-  CodeScanningToolConfig.tool: The code scanning tool's name.

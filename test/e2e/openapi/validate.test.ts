@@ -18,15 +18,6 @@ function req(overrides: Partial<LoggedRequest>): LoggedRequest {
   return { method: "GET", pathname: "/", query: "", status: 200, ...overrides };
 }
 
-/** The descriptor node at `keys`, for the lockstep tests, which walk into schemas the validator does not type. */
-function at(root: unknown, ...keys: string[]): Record<string, unknown> {
-  let node: unknown = root;
-  for (const key of keys) {
-    node = (node as Record<string, unknown>)[key];
-  }
-  return node as Record<string, unknown>;
-}
-
 const line = (violation: OpenApiViolation): string => `${violation.kind}: ${violation.detail}`;
 
 /** An empty `expected` pins a clean exchange; otherwise every pattern must match one finding line. */
@@ -699,40 +690,6 @@ describe("validateExchange adapter", () => {
       null,
     );
     expect(errors).toEqual([]);
-  });
-});
-
-describe("mock rule-type catalog lockstep", () => {
-  test("RULESET_RULE_TYPES matches the spec's rules[].type values exactly", async () => {
-    // The mock catalog answers GitHub's real 422 for a typo'd rules[].type while the validator checks
-    // accepted bodies against the SPEC's enums. Drift either falsely 422s a real new type or lets
-    // the mock accept a type the validator flags; pinned equal, a spec refresh is the one update point.
-    const { RULESET_RULE_TYPES } = await import("../mock/support.js");
-    const { paths } = loadSpec();
-    const operations = [
-      at(paths, "/repos/{owner}/{repo}/rulesets", "post"),
-      at(paths, "/repos/{owner}/{repo}/rulesets/{ruleset_id}", "put"),
-    ];
-    for (const operation of operations) {
-      const body = at(operation, "requestBody", "content", "application/json", "schema");
-      const items = at(body, "properties", "rules", "items");
-      // Only TOP-LEVEL variants count: rule parameters nest their own `type` enums (actor kinds and
-      // the like) that a deep walk would wrongly collect.
-      const variants = (items.oneOf ?? items.anyOf ?? []) as Array<Record<string, unknown>>;
-      const specTypes = new Set<string>();
-      for (const variant of variants) {
-        const type = (variant.properties as Record<string, unknown> | undefined)?.type as
-          | { enum?: unknown[]; const?: unknown }
-          | undefined;
-        for (const value of type?.enum ?? (type?.const !== undefined ? [type.const] : [])) {
-          if (typeof value === "string") {
-            specTypes.add(value);
-          }
-        }
-      }
-      expect(specTypes.size).toBeGreaterThan(0);
-      expect([...RULESET_RULE_TYPES].sort()).toEqual([...specTypes].sort());
-    }
   });
 });
 
