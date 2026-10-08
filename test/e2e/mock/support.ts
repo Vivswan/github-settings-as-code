@@ -19,6 +19,7 @@ import type {
   TaggedEndpoint,
   TaggedGraphqlOp,
 } from "../../../src/sections/registry.js";
+import { KNOWN_RULE_TYPES } from "../../../src/sections/rulesets/schema.js";
 import { upperKey } from "../../../src/sections/shared/secrets-and-variables/named-scope.js";
 import type { SetupKey, SetupSectionModule } from "../../../src/sections/shared/setup-section.js";
 import { decodeNodeId, mintAppNodeId, mintNodeId } from "./node-id.js";
@@ -584,38 +585,11 @@ export function storedKeyMaterial(key: string): string {
 }
 
 /**
- * Mock-only realism: the runtime never consults this list (an unknown rules[].type passes through verbatim);
- * it exists so a typo'd type answers GitHub's real 422 shape instead of being stored silently. A lockstep test
- * (openapi/validate.test.ts) pins it to the descriptor's rules[].type enums, and rulesets-schema.test.ts
- * pins the schema's KNOWN_RULE_TYPES to it.
+ * Mock-only realism: the runtime never refuses a rules[].type (an unknown one passes through verbatim); this set
+ * exists so a typo'd type answers GitHub's real 422 shape instead of being stored silently. The schema's list is
+ * generated from the descriptor, so the mock knows exactly the types the descriptor does.
  */
-export const RULESET_RULE_TYPES = new Set([
-  "creation",
-  "update",
-  "deletion",
-  "required_linear_history",
-  "merge_queue",
-  "required_deployments",
-  "required_signatures",
-  "pull_request",
-  "required_status_checks",
-  "non_fast_forward",
-  "commit_message_pattern",
-  "commit_author_email_pattern",
-  "committer_email_pattern",
-  "branch_name_pattern",
-  "tag_name_pattern",
-  "workflows",
-  "code_scanning",
-  "code_quality",
-  "code_coverage",
-  "copilot_code_review",
-  "license_compliance_scanning",
-  "file_path_restriction",
-  "max_file_path_length",
-  "file_extension_restriction",
-  "max_file_size",
-]);
+const RULESET_RULE_TYPES: ReadonlySet<string> = new Set(KNOWN_RULE_TYPES);
 
 /** GitHub's 422 for an unrecognized rules[].type, or null when all types are real. */
 export function invalidRuleTypeResponse(body: unknown, docAnchor: string): MockResponse | null {

@@ -8,8 +8,6 @@
 
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
-import { KNOWN_RULE_TYPES } from "../../../src/sections/rulesets/schema.js";
-import { RULESET_RULE_TYPES } from "../../e2e/mock/support.js";
 import { PULL_REQUEST_PARAMETERS } from "./generators.js";
 
 type Verdict = { ok: true; parsed: unknown } | { issues: readonly string[] };
@@ -125,10 +123,6 @@ describe("a ruleset the API would reject never reaches it", () => {
     };
     // A rule type GitHub ships tomorrow and a field it adds to a known rule must both survive the parse untouched.
     expect(verdict(ruleset)).toEqual({ ok: true, parsed: [ruleset] });
-  });
-
-  test("the schema knows exactly the rule types the vendored spec does, through the mock catalog the spec pins", () => {
-    expect([...KNOWN_RULE_TYPES].sort()).toEqual([...RULESET_RULE_TYPES].sort());
   });
 
   test.each<[what: string, ruleset: Record<string, unknown>, issues: (string | RegExp)[]]>([

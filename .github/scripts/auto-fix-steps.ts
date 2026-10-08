@@ -45,6 +45,7 @@ export const FIX_OWNED_PATHS = [
   "docs/reference/architecture.md",
   "docs/start/getting-started.md",
   "src/sections/shared/spec-roles.ts",
+  "src/sections/rulesets/spec-rules.ts",
   "src/upstream-gaps/",
 ] as const;
 

@@ -261,8 +261,8 @@ describe("push", () => {
           `::error::the fix patch staged '${named}', outside the generated docs (README.md, action.yml,`,
           "docs/reference/coverage.md, docs/reference/undeclared-policy.md, docs/reference/permissions.md,",
           "docs/operate/check-mode.md, docs/reference/sections.md, docs/reference/inputs.md,",
-          "docs/reference/architecture.md, docs/start/getting-started.md, src/sections/shared/spec-roles.ts), and",
-          "src/upstream-gaps/; refusing to push\n",
+          "docs/reference/architecture.md, docs/start/getting-started.md, src/sections/shared/spec-roles.ts,",
+          "src/sections/rulesets/spec-rules.ts), and src/upstream-gaps/; refusing to push\n",
         ].join(" "),
       );
       expect(originTip(fx)).toBe(headSha);

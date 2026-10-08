@@ -2,10 +2,13 @@
  * Regenerates WHOLESALE the TypeScript GitHub's OpenAPI descriptor dictates, from the installed @octokit/openapi
  * (the non-dereferenced api.github.com.json, so component names survive). Build time only: neither the descriptor
  * nor this script is bundled.
- *   src/sections/shared/spec-roles.ts  -> the invitation role enums (the PATCH body's, the GET listing's)
+ *   src/sections/shared/spec-roles.ts   -> the invitation role enums (the PATCH body's, the GET listing's)
+ *   src/sections/rulesets/spec-rules.ts -> one zod row per ruleset rule type, parameters typed as the spec types them
  *
  * A path the descriptor no longer carries, or a shape the emitter does not know, ends the run naming it: a
- * descriptor that outgrows the emitter fails the build instead of rendering less than the spec says.
+ * descriptor that outgrows the emitter fails the build instead of rendering less than the spec says. The rows call
+ * zod the way the hand-written rows did (every check aborting), so the refusal messages the tests pin hold;
+ * z.fromJSONSchema would judge the same shapes at runtime, with non-aborting checks and zod's own union report.
  *   bun run build:openapi             -> writes every output, formatted by biome as the lint expects
  *   test/scripts/gen-openapi.test.ts  -> pins each committed output to a fresh render, and runs under the nightly's
  *                                        @latest install so a descriptor release that moves an enum fails the night
@@ -14,6 +17,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { RULE_OVERRIDES } from "../../src/sections/rulesets/rule-overrides.js";
 import { runMain } from "./lib/entry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
@@ -25,9 +30,13 @@ const DESCRIPTOR_PATH = fileURLToPath(
 export interface SchemaNode {
   readonly [key: string]: unknown;
   readonly $ref?: string;
+  readonly type?: unknown;
   readonly enum?: readonly unknown[];
   readonly items?: SchemaNode;
   readonly properties?: Readonly<Record<string, SchemaNode>>;
+  readonly required?: readonly unknown[];
+  readonly oneOf?: readonly SchemaNode[];
+  readonly title?: unknown;
 }
 
 export interface Descriptor {
@@ -104,6 +113,47 @@ const header = (what: string) => `/**
 
 const stringList = (values: readonly string[]) => values.map((v) => JSON.stringify(v)).join(", ");
 
+/** The platform caps a source line and biome never breaks a string, so a long description is spelled in word
+ * pieces joined back with the one space they were split at; a word longer than a piece (a URL) stands alone, whole,
+ * since a word cut in two reads as a misspelling to the spelling gate. */
+const DESCRIPTION_PIECE = 80;
+export function descriptionLiteral(text: string): string {
+  if (text.length <= DESCRIPTION_PIECE) {
+    return JSON.stringify(text);
+  }
+  const pieces: string[] = [];
+  // Undefined, not "": a run of spaces splits into empty words, and each of them is a word the join restores.
+  let piece: string | undefined;
+  for (const word of text.split(" ")) {
+    if (piece !== undefined && piece.length + 1 + word.length > DESCRIPTION_PIECE) {
+      pieces.push(piece);
+      piece = word;
+    } else {
+      piece = piece === undefined ? word : `${piece} ${word}`;
+    }
+  }
+  pieces.push(piece ?? "");
+  return `[${stringList(pieces)}].join(" ")`;
+}
+
+/** A node's own prose as `.describe()`, or nothing: a `$ref` node's prose belongs to the component it names. */
+function described(node: SchemaNode): string {
+  return typeof node.description === "string" && node.$ref === undefined
+    ? `.describe(${descriptionLiteral(node.description)})`
+    : "";
+}
+
+/** The `.meta()` of a published definition: its id, and the descriptor's prose where it has some. Spelled one
+ * property per line: biome keeps an object a line break opened expanded, and its first pass over the member chain
+ * is then its last, so the committed render is what the lint expects. */
+function published(id: string, node: SchemaNode): string {
+  const description =
+    typeof node.description === "string"
+      ? `\n  description: ${descriptionLiteral(node.description)},`
+      : "";
+  return `.meta({\n  id: ${JSON.stringify(id)},${description}\n})`;
+}
+
 // --- Roles ----------------------------------------------------------------------------------------------------
 
 export const ROLES_PATH = "src/sections/shared/spec-roles.ts";
@@ -142,12 +192,385 @@ export const REPORTED_INVITATION_ROLES: ReadonlySet<string> = new Set([${stringL
 `;
 }
 
+// --- Rules ----------------------------------------------------------------------------------------------------
+
+export const RULES_PATH = "src/sections/rulesets/spec-rules.ts";
+
+const RULESETS_PATH = "/repos/{owner}/{repo}/rulesets";
+const RULESET_PATH = "/repos/{owner}/{repo}/rulesets/{ruleset_id}";
+
+/**
+ * The parameter components the rows reference, by the definition id published for each (docs/sections/rulesets.docs.yml
+ * describes them); null for a shape the published schema inlines, whose const takes the component's title. A
+ * component outside this table ends the run naming it.
+ */
+const COMPONENT_IDS: Readonly<Record<string, string | null>> = {
+  "repository-rule-params-status-check-configuration": "StatusCheckConfig",
+  "repository-rule-params-workflow-file-reference": "WorkflowFileConfig",
+  "repository-rule-params-code-scanning-tool": "CodeScanningToolConfig",
+  "repository-rule-params-actor": "ReviewDismissalActorConfig",
+  "repository-rule-params-required-reviewer-configuration": "RequiredReviewerConfig",
+  "repository-rule-params-dismissal-restriction": null,
+  "repository-rule-params-reviewer": null,
+};
+
+/** An inline parameter shape several rule types spell alike, by its sorted field names, and the one definition
+ * published for it; such a shape outside this table ends the run naming the rule types. */
+const SHARED_PARAMETER_IDS: Readonly<Record<string, string>> = {
+  "name,negate,operator,pattern": "PatternRuleParameters",
+};
+
+/** Prose, not shape: `description` reaches the published schema through `.describe()`, the rest is dropped. */
+const METADATA_KEYWORDS: ReadonlySet<string> = new Set(["title", "description", "x-github"]);
+
+const KEYWORDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  object: new Set(["type", "properties", "required"]),
+  string: new Set(["type", "enum"]),
+  boolean: new Set(["type"]),
+  integer: new Set(["type", "minimum", "maximum"]),
+  number: new Set(["type", "format", "minimum", "maximum"]),
+  array: new Set(["type", "items"]),
+};
+
+const UNION_KEYWORDS: ReadonlySet<string> = new Set(["type", "oneOf"]);
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+const key = (name: string) => (IDENTIFIER.test(name) ? name : JSON.stringify(name));
+const member = (name: string) => (IDENTIFIER.test(name) ? `.${name}` : `[${JSON.stringify(name)}]`);
+
+/** The node without its prose at any depth: what two rule types must share for one published shape. A key under
+ * `properties` is a field name, never a keyword, so a field called description stays. */
+function shape(node: unknown, properties = false): unknown {
+  if (Array.isArray(node)) {
+    return node.map((item) => shape(item));
+  }
+  if (typeof node !== "object" || node === null) {
+    return node;
+  }
+  return Object.fromEntries(
+    Object.entries(node)
+      .filter(([name]) => properties || !METADATA_KEYWORDS.has(name))
+      .map(([name, child]) => [name, shape(child, !properties && name === "properties")]),
+  );
+}
+
+type Overrides = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+
+/** One render's state: the components and shared shapes met, in dependency order, and the overrides consumed. */
+class RuleEmitter {
+  readonly consts = new Map<string, string>();
+  readonly usedOverrides = new Set<string>();
+
+  constructor(
+    private readonly descriptor: Descriptor,
+    private readonly overrides: Overrides,
+  ) {}
+
+  private refuse(path: string, what: string): never {
+    throw new Error(`${path}: ${what}`);
+  }
+
+  private typed(node: SchemaNode, path: string): string {
+    const { type } = node;
+    const allowed = typeof type === "string" ? KEYWORDS[type] : undefined;
+    if (allowed === undefined) {
+      return this.refuse(path, `the emitter does not know type ${JSON.stringify(type)}`);
+    }
+    for (const name of Object.keys(node)) {
+      if (!allowed.has(name) && !METADATA_KEYWORDS.has(name)) {
+        this.refuse(path, `the emitter does not know keyword "${name}" on a ${type}`);
+      }
+    }
+    return type as string;
+  }
+
+  private bound(node: SchemaNode, path: string, keyword: "minimum" | "maximum"): string {
+    const value = node[keyword];
+    if (value === undefined) {
+      return "";
+    }
+    if (typeof value !== "number") {
+      return this.refuse(path, `${keyword} ${JSON.stringify(value)} is not a number`);
+    }
+    return `.${keyword === "minimum" ? "min" : "max"}(${value}, { abort: true })`;
+  }
+
+  /** The zod expression for a node, every check aborting (rule-overrides.ts says why). */
+  node(node: SchemaNode, path: string): string {
+    if (typeof node.$ref === "string") {
+      return this.component(node.$ref, path);
+    }
+    switch (this.typed(node, path)) {
+      case "object":
+        return this.object(node, path);
+      case "string": {
+        if (node.enum === undefined) {
+          return "z.string()";
+        }
+        const values = enumAt({ ...this.descriptor, paths: { [path]: node } }, ["paths", path]);
+        return values.length === 1
+          ? `z.literal(${JSON.stringify(values[0])})`
+          : `z.enum([${stringList(values)}])`;
+      }
+      case "boolean":
+        return "z.boolean()";
+      case "integer":
+        return `z.int({ abort: true })${this.bound(node, path, "minimum")}${this.bound(node, path, "maximum")}`;
+      case "number":
+        if (node.format !== undefined && node.format !== "float") {
+          this.refuse(
+            path,
+            `the emitter does not know number format ${JSON.stringify(node.format)}`,
+          );
+        }
+        return `z.number()${this.bound(node, path, "minimum")}${this.bound(node, path, "maximum")}`;
+      default:
+        if (node.items === undefined) {
+          return this.refuse(path, "an array without items");
+        }
+        return `z.array(${this.node(node.items, `${path}[]`)})`;
+    }
+  }
+
+  /**
+   * Loose, not plain: the snapshot projection (shared/snapshot-helpers.ts) keeps a live field the shape does not
+   * name only behind an explicit catchall, and a field GitHub adds to a rule must survive a snapshot. `field`
+   * supplies a property's whole expression in place of the emitter's own (prose included, or left off a reference
+   * to a published definition, which draft-7 would drop); `.optional()` is still appended outside `required`.
+   */
+  object(
+    node: SchemaNode,
+    path: string,
+    field: (name: string, child: SchemaNode, path: string) => string | undefined = () => undefined,
+  ): string {
+    const type = this.typed(node, path);
+    if (type !== "object") {
+      this.refuse(path, `an object was expected, not a ${type}`);
+    }
+    const properties = node.properties ?? {};
+    if (node.required !== undefined && !Array.isArray(node.required)) {
+      this.refuse(path, `required is ${JSON.stringify(node.required)}, not a list of field names`);
+    }
+    const required = new Set(
+      (node.required ?? []).map((name) => {
+        if (typeof name !== "string" || !Object.hasOwn(properties, name)) {
+          this.refuse(
+            path,
+            `required names ${JSON.stringify(name)}, which properties does not declare`,
+          );
+        }
+        return name;
+      }),
+    );
+    const fields = Object.entries(properties).map(([name, child]) => {
+      const optional = required.has(name) ? "" : ".optional()";
+      const childPath = `${path}.${name}`;
+      const expression =
+        field(name, child, childPath) ?? `${this.node(child, childPath)}${described(child)}`;
+      return `${key(name)}: ${expression}${optional}`;
+    });
+    return `z.looseObject({ ${fields.join(", ")} })`;
+  }
+
+  /** The const a component renders to, declared once after the components it references. */
+  component(ref: string, path: string): string {
+    const name = ref.slice(COMPONENT_REF.length);
+    const id = COMPONENT_IDS[name];
+    if (id === undefined) {
+      return this.refuse(
+        path,
+        `${ref} is not in COMPONENT_IDS; name its published definition, or null to inline it`,
+      );
+    }
+    const schema = component(this.descriptor, ref);
+    const constName = id ?? (typeof schema.title === "string" ? schema.title : "");
+    if (!IDENTIFIER.test(constName)) {
+      return this.refuse(path, `${ref} has no title to name an inlined const by`);
+    }
+    if (!this.consts.has(constName)) {
+      const body = this.object(schema, name);
+      this.consts.set(
+        constName,
+        `${body}${id === null ? described(schema) : published(id, schema)}`,
+      );
+    }
+    return constName;
+  }
+
+  ownParameters(type: string, node: SchemaNode, path: string): string {
+    const overrides = this.overrides[type] ?? {};
+    return this.object(node, path, (name, child, childPath) => {
+      if (!Object.hasOwn(overrides, name)) {
+        return undefined;
+      }
+      this.usedOverrides.add(`${type}.${name}`);
+      const check = `.check(RULE_OVERRIDES${member(type)}${member(name)})`;
+      return `${this.node(child, childPath)}${check}${described(child)}`;
+    });
+  }
+
+  unusedOverrides(): string[] {
+    return Object.entries(this.overrides)
+      .flatMap(([type, fields]) => Object.keys(fields).map((field) => `${type}.${field}`))
+      .filter((entry) => !this.usedOverrides.has(entry));
+  }
+}
+
+interface RuleVariant {
+  readonly type: string;
+  readonly node: SchemaNode;
+  readonly path: string;
+}
+
+/** The rule variants the POST and PUT bodies share; two bodies that disagree would need two sets of rows. */
+function ruleVariants(descriptor: Descriptor): RuleVariant[] {
+  const rules = (method: string, route: string) =>
+    nodeAt(descriptor, [
+      "paths",
+      route,
+      method,
+      "requestBody",
+      ...JSON_BODY,
+      "properties",
+      "rules",
+    ]);
+  const post = rules("post", RULESETS_PATH);
+  if (!isDeepStrictEqual(post, rules("put", RULESET_PATH))) {
+    throw new Error(
+      `the rules of POST ${RULESETS_PATH} and PUT ${RULESET_PATH} differ; the rows render one shape`,
+    );
+  }
+  // The list and the union node may say nothing beyond their items: a constraint there would bind every row.
+  const list = { path: "rules", node: post, type: "array", allowed: KEYWORDS.array ?? new Set() };
+  const items = post.items === undefined ? undefined : resolved(descriptor, post.items);
+  const union = {
+    path: "rules[]",
+    node: items as SchemaNode,
+    type: "object",
+    allowed: UNION_KEYWORDS,
+  };
+  for (const { path, node, type, allowed } of [list, union]) {
+    for (const name of Object.keys(node ?? {})) {
+      if (!allowed.has(name) && !METADATA_KEYWORDS.has(name)) {
+        throw new Error(`${path}: the emitter does not know keyword "${name}" on a ${type}`);
+      }
+    }
+    if (node?.type !== type) {
+      throw new Error(`${path}: an ${type} was expected, not a ${String(node?.type)}`);
+    }
+  }
+  const variants = union.node.oneOf;
+  if (!Array.isArray(variants) || variants.length === 0) {
+    throw new Error(`the rules of POST ${RULESETS_PATH} are not a oneOf of rule variants`);
+  }
+  return variants.map((variant, index) => {
+    const ref = typeof variant.$ref === "string" ? variant.$ref : `rules[${index}]`;
+    const node = resolved(descriptor, variant) as SchemaNode;
+    const [type, ...more] = node.properties?.type?.enum ?? [];
+    if (typeof type !== "string" || more.length > 0) {
+      throw new Error(
+        `${ref}: a rule variant's type is one enum value, not ${JSON.stringify(node.properties?.type)}`,
+      );
+    }
+    return { type, node, path: ref };
+  });
+}
+
+export function renderRules(descriptor: Descriptor, overrides: Overrides = RULE_OVERRIDES): string {
+  const variants = ruleVariants(descriptor);
+  const emitter = new RuleEmitter(descriptor, overrides);
+  const inline = variants.filter(
+    ({ node }) =>
+      node.properties?.parameters !== undefined && node.properties.parameters.$ref === undefined,
+  );
+  const shared = new Map<string, string>();
+  const spelled = new Map<string, string[]>();
+  const groups: { shape: unknown; members: RuleVariant[] }[] = [];
+  for (const variant of inline) {
+    const own = shape(variant.node.properties?.parameters);
+    const found = groups.find((group) => isDeepStrictEqual(group.shape, own));
+    if (found === undefined) {
+      groups.push({ shape: own, members: [variant] });
+    } else {
+      found.members.push(variant);
+    }
+  }
+  for (const { members: group } of groups) {
+    if (group.length < 2) {
+      continue;
+    }
+    const [first] = group;
+    const parameters = first?.node.properties?.parameters ?? {};
+    const fields = Object.keys(parameters.properties ?? {})
+      .sort()
+      .join(",");
+    const id = SHARED_PARAMETER_IDS[fields];
+    const types = group.map(({ type }) => type);
+    if (id === undefined) {
+      throw new Error(
+        `${types.join(", ")} share one parameters shape with no published definition; add "${fields}" to SHARED_PARAMETER_IDS`,
+      );
+    }
+    const earlier = spelled.get(id);
+    if (earlier !== undefined) {
+      throw new Error(
+        `${id} is spelled two ways: by ${earlier.join(", ")} and by ${types.join(", ")}; one published definition cannot carry both`,
+      );
+    }
+    spelled.set(id, types);
+    for (const type of types) {
+      shared.set(type, id);
+    }
+    emitter.consts.set(
+      id,
+      `${emitter.object(parameters, `${first?.path}.parameters`)}${published(id, parameters)}`,
+    );
+  }
+  const rows = variants.map(({ type, node, path }) => {
+    const row = emitter.object(node, path, (name, child, childPath) =>
+      name === "parameters" && child.$ref === undefined
+        ? (shared.get(type) ??
+          `${emitter.ownParameters(type, child, childPath)}${described(child)}`)
+        : undefined,
+    );
+    return `${row}${published(`Rule<${type}>`, node)}`;
+  });
+  const unused = emitter.unusedOverrides();
+  if (unused.length > 0) {
+    throw new Error(
+      `RULE_OVERRIDES names ${unused.join(", ")}, which the descriptor's rules do not carry`,
+    );
+  }
+  const imports = [
+    'import { z } from "zod";',
+    ...(emitter.usedOverrides.size > 0
+      ? ['import { RULE_OVERRIDES } from "./rule-overrides.js";']
+      : []),
+  ];
+  const consts = [...emitter.consts].map(([name, body]) => `const ${name} = ${body};`);
+  return `${header("The ruleset rule rows of GitHub's OpenAPI")}
+${imports.join("\n")}
+
+${consts.join("\n\n")}
+
+/** One row per rule type the descriptor's rulesets POST and PUT take, in the descriptor's order; parameters are
+ * typed and described as it types and describes them, so a wrong casing or bound is refused at parse instead of
+ * coming back as a 422, and the published schema carries GitHub's own words where the docs file adds none. */
+export const SPEC_RULES = [
+${rows.map((row) => `  ${row},`).join("\n")}
+] as const;
+`;
+}
+
 // --- Outputs ------------------------------------------------------------------------------------------------------
 
 export const OUTPUTS: ReadonlyArray<{
   readonly path: string;
   readonly render: (descriptor: Descriptor) => string;
-}> = [{ path: ROLES_PATH, render: renderRoles }];
+}> = [
+  { path: ROLES_PATH, render: renderRoles },
+  { path: RULES_PATH, render: renderRules },
+];
 
 /** The lint judges the committed output like hand-written code, so it is formatted as biome formats a file at `path`. */
 export function formatted(path: string, text: string): string {

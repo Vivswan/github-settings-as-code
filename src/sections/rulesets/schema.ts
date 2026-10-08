@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { isPlainObject } from "../../plain-data.js";
 import { rule as gatedRule, open } from "../shared/schema-helpers.js";
+import { SPEC_RULES } from "./spec-rules.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -95,181 +96,7 @@ const BypassActorConfig = z
 
 // --- Rules ------------------------------------------------------------------------
 
-/**
- * Every check inside a rule aborts, the way a type or enum failure does: zod hands a union branch's own issues
- * back only when it is the single branch that failed on non-aborting checks, and ruleUnionError below must be the
- * one report. zod's safe-integer range check and its bound checks continue unless told otherwise.
- */
-const integer = () => z.int({ abort: true });
-
-/** The spec's `type: integer` with its documented bounds. */
-const bounded = (min: number, max: number) =>
-  integer().min(min, { abort: true }).max(max, { abort: true });
-
-/** The spec's `type: number, format: float` with its documented bounds. */
-const boundedFloat = (min: number, max: number) =>
-  z.number().min(min, { abort: true }).max(max, { abort: true });
-
-/** The spec: "At least one option must be enabled"; omitting the key allows all three. */
-const atLeastOneMergeMethod = new z.core.$ZodCheckMinLength({
-  check: "min_length",
-  minimum: 1,
-  abort: true,
-  when: (payload) => Array.isArray(payload.value),
-  error: () =>
-    'allowed_merge_methods needs at least one of "merge", "squash", "rebase"; omit the key to allow all three',
-});
-
-const PATTERN_OPERATORS = ["starts_with", "ends_with", "contains", "regex"] as const;
-
-/** Shared by the five *_pattern rule types. */
-const PatternRuleParameters = z
-  .looseObject({
-    name: z.string().optional(),
-    negate: z.boolean().optional(),
-    operator: z.enum(PATTERN_OPERATORS),
-    pattern: z.string(),
-  })
-  .meta({ id: "PatternRuleParameters" });
-
-const ReviewDismissalActorConfig = z
-  .looseObject({
-    id: integer(),
-    type: z.enum(["User", "Team", "IntegrationInstallation", "RepositoryRole"]),
-  })
-  .meta({ id: "ReviewDismissalActorConfig" });
-
-const RequiredReviewerConfig = z
-  .looseObject({
-    file_patterns: z.array(z.string()),
-    minimum_approvals: integer(),
-    reviewer: z.looseObject({ id: integer(), type: z.literal("Team") }),
-  })
-  .meta({ id: "RequiredReviewerConfig" });
-
-const StatusCheckConfig = z
-  .looseObject({
-    context: z.string(),
-    integration_id: integer().optional(),
-  })
-  .meta({ id: "StatusCheckConfig" });
-
-const WorkflowFileConfig = z
-  .looseObject({
-    path: z.string(),
-    ref: z.string().optional(),
-    repository_id: integer(),
-    sha: z.string().optional(),
-  })
-  .meta({ id: "WorkflowFileConfig" });
-
-const CodeScanningToolConfig = z
-  .looseObject({
-    alerts_threshold: z.enum(["none", "errors", "errors_and_warnings", "all"]),
-    security_alerts_threshold: z.enum([
-      "none",
-      "critical",
-      "high_or_higher",
-      "medium_or_higher",
-      "all",
-    ]),
-    tool: z.string(),
-  })
-  .meta({ id: "CodeScanningToolConfig" });
-
-/** One published definition per rule type, keyed by the type GitHub names (`Rule<merge_queue>`). */
-const ruleId = (type: string) => ({ id: `Rule<${type}>` });
-
-// Loose, not plain: the snapshot projection (shared/snapshot-helpers.ts) keeps a live field the shape does not
-// name only behind an explicit catchall, and a field GitHub adds to a rule or an actor must survive a snapshot.
-
-/** A rule type the spec gives no parameters. */
-const bareRule = <T extends string>(type: T) =>
-  z.looseObject({ type: z.literal(type) }).meta(ruleId(type));
-
-/** A rule type whose parameters the spec shapes. */
-const rule = <T extends string, P extends z.core.$ZodShape>(type: T, parameters: P) =>
-  z
-    .looseObject({ type: z.literal(type), parameters: z.looseObject(parameters).optional() })
-    .meta(ruleId(type));
-
-const patternRule = <T extends string>(type: T) =>
-  z
-    .looseObject({ type: z.literal(type), parameters: PatternRuleParameters.optional() })
-    .meta(ruleId(type));
-
-/**
- * The rule types the vendored OpenAPI spec knows, parameters typed as it types them: the casing GitHub sets is
- * refused at parse instead of coming back as a 422 (merge_queue spells MERGE|SQUASH|REBASE, pull_request's
- * allowed_merge_methods spell merge|squash|rebase). The mock's RULESET_RULE_TYPES pins this list to the spec.
- */
-const KNOWN_RULES = [
-  bareRule("creation"),
-  rule("update", { update_allows_fetch_and_merge: z.boolean() }),
-  bareRule("deletion"),
-  bareRule("required_linear_history"),
-  rule("merge_queue", {
-    check_response_timeout_minutes: bounded(1, 360),
-    grouping_strategy: z.enum(["ALLGREEN", "HEADGREEN"]),
-    max_entries_to_build: bounded(0, 100),
-    max_entries_to_merge: bounded(0, 100),
-    merge_method: z.enum(["MERGE", "SQUASH", "REBASE"]),
-    min_entries_to_merge: bounded(0, 100),
-    min_entries_to_merge_wait_minutes: bounded(0, 360),
-  }),
-  rule("required_deployments", { required_deployment_environments: z.array(z.string()) }),
-  bareRule("required_signatures"),
-  rule("pull_request", {
-    allowed_merge_methods: z
-      .array(z.enum(["merge", "squash", "rebase"]))
-      .check(atLeastOneMergeMethod)
-      .optional(),
-    dismiss_stale_reviews_on_push: z.boolean(),
-    dismissal_restriction: z
-      .looseObject({
-        allowed_actors: z.array(ReviewDismissalActorConfig).optional(),
-        enabled: z.boolean(),
-      })
-      .optional(),
-    require_code_owner_review: z.boolean(),
-    require_last_push_approval: z.boolean(),
-    required_approving_review_count: bounded(0, 10),
-    required_review_thread_resolution: z.boolean(),
-    required_reviewers: z.array(RequiredReviewerConfig).optional(),
-  }),
-  rule("required_status_checks", {
-    do_not_enforce_on_create: z.boolean().optional(),
-    required_status_checks: z.array(StatusCheckConfig),
-    strict_required_status_checks_policy: z.boolean(),
-  }),
-  bareRule("non_fast_forward"),
-  patternRule("commit_message_pattern"),
-  patternRule("commit_author_email_pattern"),
-  patternRule("committer_email_pattern"),
-  patternRule("branch_name_pattern"),
-  patternRule("tag_name_pattern"),
-  rule("workflows", {
-    do_not_enforce_on_create: z.boolean().optional(),
-    workflows: z.array(WorkflowFileConfig),
-  }),
-  rule("code_scanning", { code_scanning_tools: z.array(CodeScanningToolConfig) }),
-  rule("code_quality", { severity: z.enum(["errors", "warnings", "notes", "all"]) }),
-  rule("code_coverage", {
-    max_coverage_drop: boundedFloat(0, 100).optional(),
-    minimum_coverage: boundedFloat(0, 100).optional(),
-  }),
-  rule("copilot_code_review", {
-    review_draft_pull_requests: z.boolean().optional(),
-    review_on_push: z.boolean().optional(),
-  }),
-  bareRule("license_compliance_scanning"),
-  rule("file_path_restriction", { restricted_file_paths: z.array(z.string()) }),
-  rule("max_file_path_length", { max_file_path_length: bounded(1, 32767) }),
-  rule("file_extension_restriction", { restricted_file_extensions: z.array(z.string()) }),
-  rule("max_file_size", { max_file_size: bounded(1, 100) }),
-] as const;
-
-export const KNOWN_RULE_TYPES: readonly string[] = KNOWN_RULES.map(
+export const KNOWN_RULE_TYPES: readonly string[] = SPEC_RULES.map(
   (known) => known.shape.type.value,
 );
 
@@ -313,7 +140,7 @@ function ruleUnionError(issue: z.core.$ZodRawIssue): string | undefined {
 }
 
 const RuleConfig = z
-  .union([z.discriminatedUnion("type", [...KNOWN_RULES]), UnknownRule], { error: ruleUnionError })
+  .union([z.discriminatedUnion("type", [...SPEC_RULES]), UnknownRule], { error: ruleUnionError })
   .meta({ id: "RuleConfig" });
 
 // --- The ruleset --------------------------------------------------------------------
