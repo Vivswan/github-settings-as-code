@@ -2,10 +2,12 @@
 # starter and never overwritten by a later sync.
 #
 # Each job fails a night instead of surprising a later PR: checks runs the
-# schema lockstep tests and the typecheck against the latest Octokit
-# packages, and float-canary deletes bun.lock and re-resolves from scratch so
+# schema lockstep tests, the typecheck, and then the whole gate against the
+# latest Octokit packages, and float-canary deletes bun.lock and re-resolves from scratch so
 # a breaking transitive release fails a night instead of the next
-# from-scratch install.
+# from-scratch install. refresh-openapi opens the @octokit/openapi bump PR
+# once the committed bump passes the whole gate (bun run check), so
+# a red schema probe comes with the PR that turns it green.
 # The report job files one tracking issue on a red night and closes it on a
 # green one (the platform's docs/nightly.md).
 name: Nightly
@@ -47,9 +49,17 @@ jobs:
       # always() so a red schema probe cannot mask this one (the job still
       # fails if either step failed); gated on the setup step because there
       # is nothing to probe when setup itself broke.
-      - name: Probe the latest @octokit/types
+      - name: Probe the latest @octokit/types and @octokit/openapi-types
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bun .github/scripts/nightly-steps.ts probe-types
+
+      # The whole gate against the packages the probes left at @latest: their
+      # installs are --no-save, so the manifest and lockfile are the pinned
+      # ones. On a new-descriptor night this goes red beside the refresh
+      # job's bump PR, for the one cause.
+      - name: Run the gate against the latest upstream packages
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bun run check
 
   # The only from-scratch resolve in this repository: package.json is pinned
   # exactly (the package-pins test guards that), so only transitive ranges
@@ -77,11 +87,39 @@ jobs:
       - name: Run the gate on the floated resolution
         run: bun run check
 
+  # The bump PR for a newer @octokit/openapi release
+  # (.github/scripts/nightly-steps.ts refresh-openapi). Its own job so the
+  # write token never reaches the probes. The checkout is the default
+  # branch's TIP, not the run's commit: a re-run of an old night after its
+  # bump merged would otherwise read the old pin and open the bump again.
+  # That tip is main's own manifest, with --ignore-scripts keeping lifecycle
+  # scripts out of the install. The push and gh use REPO_PLATFORM_TOKEN;
+  # without it github.token pushes but starts no workflows, and the step
+  # says so.
+  refresh-openapi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Bump @octokit/openapi and open the PR when green
+        env:
+          TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          CAN_RETRIGGER: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
+        run: bun .github/scripts/nightly-steps.ts refresh-openapi
+
   # Runs whatever happened to the probe jobs, and treats a CANCELLED probe
   # as red: a job that hits its timeout is cancelled, not failed, and a
   # hang is exactly what a nightly run exists to catch.
   report:
-    needs: [checks, float-canary]
+    needs: [checks, float-canary, refresh-openapi]
     if: always()
     runs-on: ubuntu-latest
     # A few gh calls behind a bun setup; a hung reporter is the residual
@@ -92,7 +130,7 @@ jobs:
       issues: write
     steps:
       - name: File or update the nightly issue
-        if: needs.checks.result != 'success' || needs.float-canary.result != 'success'
+        if: needs.checks.result != 'success' || needs.float-canary.result != 'success' || needs.refresh-openapi.result != 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         # This job checks nothing out (kept tight), so gh has no git
         # context; GH_REPO points it at this repository (run 31563375394
@@ -113,7 +151,7 @@ jobs:
           stream: generic
 
       - name: Close the nightly issue on a green night
-        if: needs.checks.result == 'success' && needs.float-canary.result == 'success'
+        if: needs.checks.result == 'success' && needs.float-canary.result == 'success' && needs.refresh-openapi.result == 'success'
         uses: Vivswan/repo-platform/actions/fuzz-issue@stable
         env:
           GH_REPO: ${{ github.repository }}
