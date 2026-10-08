@@ -10,7 +10,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { FIX_OWNED_PATHS, fixOwned, GENERATORS } from "../../.github/scripts/auto-fix-steps.js";
+import {
+  FIX_OWNED_PATHS,
+  fixOwned,
+  GAPS_DIR,
+  GENERATORS,
+} from "../../.github/scripts/auto-fix-steps.js";
 import {
   generatedPaths,
   generatorEntryPoint,
@@ -47,7 +52,8 @@ describe("the fix-owned paths and generators track the generated-output table", 
     for (const path of paths) {
       expect(fixOwned(path), path).toBe(true);
     }
-    for (const entry of FIX_OWNED_PATHS) {
+    // The gaps directory is owned for the graduation's deletions, which the generated-output table cannot list.
+    for (const entry of FIX_OWNED_PATHS.filter((entry) => entry !== GAPS_DIR)) {
       expect(
         paths.some((path) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry)),
         entry,
@@ -78,7 +84,7 @@ const GENERATOR_ENV: Record<(typeof GENERATORS)[number], string> = {
   "build:inputs-table": "GEN_INPUTS_TABLE",
 };
 const GAP_FILE = "src/upstream-gaps/one.ts";
-const GAPS_INDEX = "src/upstream-gaps/index.ts";
+const GAPS_INDEX = "src/generated/upstream-gaps.ts";
 const REMOTE_URL = "https://x-access-token:t0ken@github.com/o/r.git";
 
 /** A same-repo PR branch as both jobs check it out: every fix-owned path tracked, one gap file beside the index,
@@ -261,8 +267,8 @@ describe("push", () => {
           `::error::the fix patch staged '${named}', outside the generated docs (README.md, action.yml,`,
           "docs/reference/coverage.md, docs/reference/undeclared-policy.md, docs/reference/permissions.md,",
           "docs/operate/check-mode.md, docs/reference/sections.md, docs/reference/inputs.md,",
-          "docs/reference/architecture.md, docs/start/getting-started.md, src/sections/shared/spec-roles.ts,",
-          "src/sections/rulesets/spec-rules.ts), and src/upstream-gaps/; refusing to push\n",
+          "docs/reference/architecture.md, docs/start/getting-started.md, src/generated/spec-roles.ts,",
+          "src/generated/spec-rules.ts, src/generated/upstream-gaps.ts), and src/upstream-gaps/; refusing to push\n",
         ].join(" "),
       );
       expect(originTip(fx)).toBe(headSha);

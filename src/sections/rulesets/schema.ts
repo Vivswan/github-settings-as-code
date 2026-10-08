@@ -4,9 +4,10 @@
  */
 
 import { z } from "zod";
+import { SPEC_RULES } from "../../generated/spec-rules.js";
 import { isPlainObject } from "../../plain-data.js";
 import { rule as gatedRule, open } from "../shared/schema-helpers.js";
-import { SPEC_RULES } from "./spec-rules.js";
+import { RULE_OVERRIDES, withOverrides } from "./rule-overrides.js";
 
 // --- Ref-name conditions ------------------------------------------------------
 
@@ -96,9 +97,9 @@ const BypassActorConfig = z
 
 // --- Rules ------------------------------------------------------------------------
 
-export const KNOWN_RULE_TYPES: readonly string[] = SPEC_RULES.map(
-  (known) => known.shape.type.value,
-);
+const RULES = withOverrides(SPEC_RULES, RULE_OVERRIDES);
+
+export const KNOWN_RULE_TYPES: readonly string[] = RULES.map((known) => known.shape.type.value);
 
 /**
  * A rule type the spec does not know passes through untouched, so a type GitHub ships tomorrow reaches it the
@@ -140,7 +141,7 @@ function ruleUnionError(issue: z.core.$ZodRawIssue): string | undefined {
 }
 
 const RuleConfig = z
-  .union([z.discriminatedUnion("type", [...SPEC_RULES]), UnknownRule], { error: ruleUnionError })
+  .union([z.discriminatedUnion("type", [...RULES]), UnknownRule], { error: ruleUnionError })
   .meta({ id: "RuleConfig" });
 
 // --- The ruleset --------------------------------------------------------------------

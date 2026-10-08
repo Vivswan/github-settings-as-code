@@ -2,7 +2,7 @@
 # with unrelated type errors fails the build job by design: the graduation script refuses to half-fix a red build.
 #   README, action.yml, docs/ regions           -> build:docs, build:action-docs, build:inputs-table
 #   src/upstream-gaps/                           -> graduate-upstream-gaps.ts retires the gap files @octokit/types caught up with;
-#                                                   gen-gaps-index.ts re-renders index.ts
+#                                                   gen-gaps-index.ts re-renders src/generated/upstream-gaps.ts
 #   lib/                                         -> never: main carries no bundle, library, or schema
 #
 # Regenerating the generated files executes PR-controlled code, so the fix is computed in an unprivileged job and crosses to

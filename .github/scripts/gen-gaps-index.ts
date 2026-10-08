@@ -1,5 +1,5 @@
 /**
- * Regenerates src/upstream-gaps/index.ts WHOLESALE from the directory listing: the derivations split the gap
+ * Regenerates src/generated/upstream-gaps.ts WHOLESALE from the directory listing: the derivations split the gap
  * kinds by their `kind` field, so nothing but the file names is needed.
  *   a gap file added by hand                     -> `bun .github/scripts/gen-gaps-index.ts`
  *   graduate-upstream-gaps.ts                    -> calls regenerateIndex() itself
@@ -13,9 +13,9 @@ import { runMain } from "./lib/entry.js";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const GAPS_DIR = "src/upstream-gaps";
-export const INDEX_PATH = `${GAPS_DIR}/index.ts`;
+export const INDEX_PATH = "src/generated/upstream-gaps.ts";
 
-export const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["index.ts", "gap.ts"]);
+export const NON_GAP_FILE_NAMES: ReadonlySet<string> = new Set(["gap.ts"]);
 
 /** A stray notes.d.ts or a test must not regenerate into a phantom import. */
 export function isGapFileName(name: string): boolean {
@@ -51,12 +51,12 @@ export function generateIndex(bases: readonly string[]): string {
   const sorted = [...bases].sort();
   const imports = [
     {
-      specifier: "./gap.js",
-      line: `import { undocumentedRoutes, type UnshippedGraphqlSdl, unshippedGraphqlSdl } from "./gap.js";`,
+      specifier: "../upstream-gaps/gap.js",
+      line: `import { undocumentedRoutes, type UnshippedGraphqlSdl, unshippedGraphqlSdl } from "../upstream-gaps/gap.js";`,
     },
     ...sorted.map((base) => ({
-      specifier: `./${base}.js`,
-      line: `import { GAP as ${camelCaseGapName(base)} } from "./${base}.js";`,
+      specifier: `../upstream-gaps/${base}.js`,
+      line: `import { GAP as ${camelCaseGapName(base)} } from "../upstream-gaps/${base}.js";`,
     })),
   ]
     .sort((a, b) => (a.specifier < b.specifier ? -1 : 1))

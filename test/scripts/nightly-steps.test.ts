@@ -7,6 +7,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ROLES_PATH, RULES_PATH } from "../../.github/scripts/gen-openapi.js";
 import { withTempDir } from "../temp-dir.js";
 import {
   clone,
@@ -317,13 +318,12 @@ const PR_LIST =
   "gh pr list --head nightly/openapi-25.0.0 --state open --json isCrossRepository --jq [.[] | select(.isCrossRepository | not)] | length";
 /** What the regeneration writes; the checkout starts with each at an older spelling. */
 const GENERATED = {
-  "src/sections/shared/spec-roles.ts": "export const INVITATION_ROLES = new Set(['read']);\n",
-  "src/sections/rulesets/spec-rules.ts": "export const SPEC_RULES = ['creation', 'update'];\n",
+  [ROLES_PATH]: "export const INVITATION_ROLES = new Set(['read']);\n",
+  [RULES_PATH]: "export const SPEC_RULES = ['creation', 'update'];\n",
 };
 const OLDER = {
-  "src/sections/shared/spec-roles.ts":
-    "export const INVITATION_ROLES = new Set(['read', 'write']);\n",
-  "src/sections/rulesets/spec-rules.ts": "export const SPEC_RULES = ['creation'];\n",
+  [ROLES_PATH]: "export const INVITATION_ROLES = new Set(['read', 'write']);\n",
+  [RULES_PATH]: "export const SPEC_RULES = ['creation'];\n",
 };
 
 /** The nightly's checkout: main at a package.json pinning @octokit/openapi, with the generated files committed, and
@@ -470,21 +470,19 @@ describe("refresh-openapi", () => {
       expect(git(fx.origin, "diff", "--name-only", main, tip).split("\n").sort()).toEqual([
         "bun.lock",
         "package.json",
-        "src/sections/rulesets/spec-rules.ts",
-        "src/sections/shared/spec-roles.ts",
+        ...[ROLES_PATH, RULES_PATH].sort(),
       ]);
       expect(git(fx.origin, "show", `${tip}:package.json`)).toBe(
         '{"devDependencies":{"@octokit/openapi":"25.0.0"}}',
       );
-      for (const [path, content] of Object.entries(GENERATED)) {
+      for (const [path, content] of Object.entries(GENERATED))
         expect(git(fx.origin, "show", `${tip}:${path}`)).toBe(content.trimEnd());
-      }
       // The body rides in the gh call's last argument, newlines and all, so the log reads as one text.
       const log = result.calls.join("\n");
       expect(log).toContain(
         "gh pr create --draft --head nightly/openapi-25.0.0 --title build(deps): bump @octokit/openapi to 25.0.0 --body ## What this adds",
       );
       expect(log).toContain("before: @octokit/openapi 24.0.0 pinned, 25.0.0 released");
-      expect(log).toContain("src/sections/rulesets/spec-rules.ts | 2 +-");
+      expect(log).toContain(`${RULES_PATH} | 2 +-`);
     }));
 });

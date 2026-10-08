@@ -66,7 +66,7 @@ describe("the generated-output table", () => {
     }
     const built = [...(scripts.build ?? "").matchAll(/bun run (\S+)/g)].map(([, name]) => name);
     expect(built.filter((name) => generators.includes(name ?? ""))).toEqual(generators);
-    // The bundle and the library compile src/upstream-gaps/index.ts, so a gap file added by hand must reach the
+    // The bundle and the library compile src/generated/upstream-gaps.ts, so a gap file added by hand must reach the
     // index before either builds, or one bun run build ships a bundle without it.
     for (const consumer of ["build:bundle", "build:lib"]) {
       expect(built.indexOf("build:gaps-index"), `build:gaps-index before ${consumer}`).toBeLessThan(
@@ -146,7 +146,7 @@ describe("the build:check runner", () => {
         const yml = readFileSync(manifest, "utf8");
         expect(yml).toContain('    default: ""\n');
         writeFileSync(manifest, yml.replace('    default: ""\n', '    default: "stale"\n'));
-        const index = join(dir, "src/upstream-gaps/index.ts");
+        const index = join(dir, "src/generated/upstream-gaps.ts");
         writeFileSync(index, `${readFileSync(index, "utf8")}\n`);
         git(
           dir,
@@ -154,7 +154,7 @@ describe("the build:check runner", () => {
           "docs/reference/sections.md",
           "docs/reference/inputs.md",
           "action.yml",
-          "src/upstream-gaps/index.ts",
+          "src/generated/upstream-gaps.ts",
         );
 
         const stale = runner(dir);
@@ -163,7 +163,7 @@ describe("the build:check runner", () => {
         expect(stale.printed).toContain("docs/reference/sections.md");
         expect(stale.printed).toContain("docs/reference/inputs.md");
         expect(stale.printed).toContain("action.yml");
-        expect(stale.printed).toContain("src/upstream-gaps/index.ts");
+        expect(stale.printed).toContain("src/generated/upstream-gaps.ts");
         // The generators repaired the working tree; only the staged stale copies differ.
         expect(
           git(dir, "diff", "--name-only", "--", ...untouched)
@@ -174,7 +174,7 @@ describe("the build:check runner", () => {
           "action.yml",
           "docs/reference/inputs.md",
           "docs/reference/sections.md",
-          "src/upstream-gaps/index.ts",
+          "src/generated/upstream-gaps.ts",
         ]);
       }),
     120_000,

@@ -9,6 +9,7 @@
  *   collaboratorFromPut  -> role_name via roleForPermission, the same map the section runs on its declaration
  */
 
+import { INVITATION_ROLES, REPORTED_INVITATION_ROLES } from "../../../src/generated/spec-roles.js";
 import { isPlainObject, own, put } from "../../../src/plain-data.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
@@ -18,10 +19,6 @@ import {
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
 import type { ListSectionKey } from "../../../src/sections/shared/list/decl.js";
 import { permissionForRole, roleForPermission } from "../../../src/sections/shared/roles.js";
-import {
-  INVITATION_ROLES,
-  REPORTED_INVITATION_ROLES,
-} from "../../../src/sections/shared/spec-roles.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { AUTOLINKS_MOCK } from "../../sections/autolinks/mock.js";
 import { DEPLOY_KEYS_MOCK } from "../../sections/deploy_keys/mock.js";

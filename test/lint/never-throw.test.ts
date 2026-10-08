@@ -315,14 +315,14 @@ describe("the never-throw plugin", () => {
           [CONTRACT_FILE]: OUTSIDE_THE_RULE,
           "src/cli/beside-the-contract.ts": OUTSIDE_THE_RULE,
           // The generated index is exempt from the formatter only, so the rule still reaches it.
-          "src/upstream-gaps/index.ts": OUTSIDE_THE_RULE,
+          "src/generated/upstream-gaps.ts": OUTSIDE_THE_RULE,
           "test/src/fixture.ts": OUTSIDE_THE_RULE,
           ".github/scripts/beside-the-tree.ts": OUTSIDE_THE_RULE,
         }),
       ).toEqual({
         ...expected,
         "src/cli/beside-the-contract.ts:2": `plugin: ${MESSAGE}`,
-        "src/upstream-gaps/index.ts:2": `plugin: ${MESSAGE}`,
+        "src/generated/upstream-gaps.ts:2": `plugin: ${MESSAGE}`,
       });
     }));
 

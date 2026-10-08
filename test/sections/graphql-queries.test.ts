@@ -16,6 +16,7 @@ import {
   validate,
   visit,
 } from "graphql";
+import { UNSHIPPED_GRAPHQL_SDL } from "../../src/generated/upstream-gaps.js";
 import {
   GRAPHQL_BOOLEAN_TWINS,
   GRAPHQL_REVIEW_TWINS,
@@ -23,7 +24,6 @@ import {
 } from "../../src/sections/branches/graphql-vocabulary.js";
 import { allGraphqlOps } from "../../src/sections/registry.js";
 import type { UnshippedGraphqlSdl } from "../../src/upstream-gaps/gap.js";
-import { UNSHIPPED_GRAPHQL_SDL } from "../../src/upstream-gaps/index.js";
 
 /**
  * The published schema plus every graphql-schema gap's SDL. assumeValid skips graphql-js's schema-level validation,

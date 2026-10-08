@@ -317,6 +317,7 @@ graph TD
   flows["src/flows/"]
   engine["src/engine/"]
   sections["src/sections/"]
+  generated["src/generated/"]
   github["src/github/"]
   discovery["src/discovery/"]
   report["src/report/"]
@@ -372,12 +373,13 @@ graph TD
   engine --> types
   sections --> discovery
   sections --> engine
+  sections --> generated
   sections --> github
   sections --> plain_data
   sections --> schema
   sections --> text
   sections --> types
-  sections --> upstream_gaps
+  generated --> upstream_gaps
   github --> io
   github --> plain_data
   discovery --> github

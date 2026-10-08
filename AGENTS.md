@@ -36,7 +36,7 @@ Code is the source of truth: this section holds only the rules and the decisions
 
 ### Hard rules
 
-- Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them.
+- Generated artifacts are regenerated, never hand-edited; `.github/scripts/generated.ts` is the one list of them, and whole-file generated TypeScript lives under `src/generated/`.
 - `lib/index.js`, `lib/settings.schema.json`, and `lib/pkg/` are built, never committed on main.
 - Every GitHub list call goes through `listAll()` or `listAllEnveloped()`, and every API error through `call()`/`failureFor()`, so the permission policy holds (`src/sections/contract/requests.ts`).
 - What can be known wrong from the settings file or the run inputs alone is refused when the file is parsed, naming the key and the fix, never discovered at apply time:

@@ -4,7 +4,6 @@
  */
 
 import { z } from "zod";
-import { RULE_OVERRIDES } from "./rule-overrides.js";
 
 const PatternRuleParameters = z
   .looseObject({
@@ -268,7 +267,6 @@ export const SPEC_RULES = [
         .looseObject({
           allowed_merge_methods: z
             .array(z.enum(["merge", "squash", "rebase"]))
-            .check(RULE_OVERRIDES.pull_request.allowed_merge_methods)
             .describe(
               [
                 "Array of allowed merge methods. Allowed values include `merge`, `squash`, and",

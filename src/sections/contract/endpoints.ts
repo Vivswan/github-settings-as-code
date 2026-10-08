@@ -1,6 +1,6 @@
 import type { Endpoints } from "@octokit/types";
 import type { RepoRef } from "../../discovery/targets.js";
-import type { SupplementalRoute } from "../../upstream-gaps/index.js";
+import type { SupplementalRoute } from "../../generated/upstream-gaps.js";
 import type { SectionPermission } from "./permissions.js";
 
 /** `keyof Endpoints` makes a typo'd path or wrong method a compile error; SupplementalRoute covers routes octokit lags (src/upstream-gaps). */
