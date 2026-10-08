@@ -109,6 +109,23 @@ describe("toJsonSchema", () => {
       },
     ],
     [
+      // Since 24.0.0 the string branch is itself nullable; a second null branch would fail exactly-one.
+      "a nullable oneOf whose branch already takes null gains no second null branch (the 24.0.0 value shape)",
+      [
+        {
+          nullable: true,
+          oneOf: [
+            { type: "string", nullable: true },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        true,
+      ],
+      {
+        oneOf: [{ type: ["string", "null"] }, { type: "array", items: { type: "string" } }],
+      },
+    ],
+    [
       "strips required from a response schema (presence relaxed) by default",
       [{ type: "object", required: ["id"], properties: { id: { type: "integer" } } }],
       { type: "object", properties: { id: { type: "integer" } } },
@@ -720,10 +737,12 @@ describe("mock rule-type catalog lockstep", () => {
 });
 
 describe("invitation role vocabulary lockstep", () => {
-  test("INVITATION_ROLES matches the spec's repository-invitation permissions enum exactly", async () => {
-    // The collaborators handler gates PATCH-vs-note on this set and the mock clamps stored invitation
-    // permissions into it, so a spec refresh that moves the enum must land here too.
-    const { INVITATION_ROLES } = await import("../../../src/sections/shared/roles.js");
+  test("INVITATION_ROLES and REPORTED_INVITATION_ROLES match the spec's invitation PATCH and GET enums exactly", async () => {
+    // The collaborators handler gates PATCH-vs-note on the PATCH set and the mock clamps stored invitation
+    // permissions into the GET set, so a spec refresh that moves either enum must land here too.
+    const { INVITATION_ROLES, REPORTED_INVITATION_ROLES } = await import(
+      "../../../src/sections/shared/roles.js"
+    );
     const { paths } = loadSpec();
     const listed = at(paths, "/repos/{owner}/{repo}/invitations", "get", "responses", "200");
     const getEnum = at(listed, "content", "application/json", "schema", "items", "properties")
@@ -737,9 +756,12 @@ describe("invitation role vocabulary lockstep", () => {
       "schema",
       "properties",
     ).permissions as { enum: string[] };
-    for (const specEnum of [getEnum.enum, patchEnum.enum]) {
+    for (const [roles, specEnum] of [
+      [REPORTED_INVITATION_ROLES, getEnum.enum],
+      [INVITATION_ROLES, patchEnum.enum],
+    ] as const) {
       expect(specEnum.length).toBeGreaterThan(0);
-      expect([...INVITATION_ROLES].sort()).toEqual([...specEnum].sort());
+      expect([...roles].sort()).toEqual([...specEnum].sort());
     }
   });
 });

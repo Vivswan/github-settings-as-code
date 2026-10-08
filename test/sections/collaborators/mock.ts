@@ -4,7 +4,7 @@
 
 import {
   collaboratorFromPut,
-  grantablePermission,
+  grantableCollaboratorPermission,
   invitationFromPut,
   invitationPermissionFromPut,
   settableInvitationRole,
@@ -24,7 +24,7 @@ export const collaboratorsMockHandlers: SectionRestHandlers<"collaborators"> = {
   "collaborators.update": ({ state, param, body }) => {
     const username = param("username");
     // Before any lookup, like GitHub: a permission it cannot grant here is refused whether or not the user has access.
-    if (!grantablePermission(state.ownerKind, asObject(body))) {
+    if (!grantableCollaboratorPermission(state.ownerKind, asObject(body))) {
       return PERMISSION_NOT_GRANTABLE;
     }
     const existing = state.collaborators.find(

@@ -607,6 +607,8 @@ export const RULESET_RULE_TYPES = new Set([
   "tag_name_pattern",
   "workflows",
   "code_scanning",
+  "code_quality",
+  "code_coverage",
   "copilot_code_review",
   "license_compliance_scanning",
   "file_path_restriction",

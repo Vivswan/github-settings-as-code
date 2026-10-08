@@ -20,6 +20,7 @@ import type { ListSectionKey } from "../../../src/sections/shared/list/decl.js";
 import {
   INVITATION_ROLES,
   permissionForRole,
+  REPORTED_INVITATION_ROLES,
   roleForPermission,
 } from "../../../src/sections/shared/roles.js";
 import type { MustBeNever } from "../../../src/types.js";
@@ -1357,8 +1358,8 @@ export function environmentFromPut(payload: Json): Json {
 }
 
 /**
- * The grant PUT's own vocabulary (collaborators and teams alike), which the team listing's `permission` also
- * spells; the invitation PATCH speaks the GET's instead.
+ * The team grant PUT's own vocabulary, which the team listing's `permission` also spells; the invitation PATCH
+ * speaks the GET's instead.
  */
 export const GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
   "pull",
@@ -1366,6 +1367,12 @@ export const GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
   "push",
   "maintain",
   "admin",
+]);
+
+/** The collaborator grant PUT's: the team vocabulary plus triage_plus, which the descriptor documents for collaborators alone. */
+const COLLABORATOR_GRANT_PERMISSIONS: ReadonlySet<string> = new Set([
+  ...GRANT_PERMISSIONS,
+  "triage_plus",
 ]);
 
 /**
@@ -1387,7 +1394,7 @@ const PERSONAL_GRANT_PERMISSIONS: ReadonlySet<string> = new Set(["pull", "push",
  * is the default grant. "write", "read", or a mis-cased "Admin" is the 422 the runtime's parse rules exist to avoid
  * (src/sections/shared/roles.ts); triage or maintain on a personal repository is the 422 they cannot.
  */
-export function grantablePermission(ownerKind: OwnerKind, payload: Json): boolean {
+function grantable(ownerKind: OwnerKind, payload: Json, vocabulary: ReadonlySet<string>): boolean {
   const permission = payload.permission;
   if (permission === undefined) {
     return true;
@@ -1397,7 +1404,15 @@ export function grantablePermission(ownerKind: OwnerKind, payload: Json): boolea
   }
   return ownerKind === "user"
     ? PERSONAL_GRANT_PERMISSIONS.has(permission)
-    : GRANT_PERMISSIONS.has(permission) || CUSTOM_REPOSITORY_ROLES.has(permission);
+    : vocabulary.has(permission) || CUSTOM_REPOSITORY_ROLES.has(permission);
+}
+
+export function grantablePermission(ownerKind: OwnerKind, payload: Json): boolean {
+  return grantable(ownerKind, payload, GRANT_PERMISSIONS);
+}
+
+export function grantableCollaboratorPermission(ownerKind: OwnerKind, payload: Json): boolean {
+  return grantable(ownerKind, payload, COLLABORATOR_GRANT_PERMISSIONS);
 }
 
 /** Whether the invitation PATCH takes `permissions`: the spec's enum, and on a personal account only the roles its grants read back as. */
@@ -1425,12 +1440,12 @@ export function collaboratorFromPut(username: string, payload: Json): Json {
 }
 
 /**
- * Clamped into INVITATION_ROLES: GitHub never reports a custom role name on an invitation, only its base
+ * Clamped into REPORTED_INVITATION_ROLES: GitHub never reports a custom role name on an invitation, only its base
  * grant, modeled here as "write".
  */
 export function invitationPermissionFromPut(payload: Json): string {
   const role = roleForPermission(String(payload.permission ?? "push"));
-  return INVITATION_ROLES.has(role) ? role : "write";
+  return REPORTED_INVITATION_ROLES.has(role) ? role : "write";
 }
 
 /** For a NON-collaborator: the stored invitation reads back exactly what the section compares pending invitations with. */

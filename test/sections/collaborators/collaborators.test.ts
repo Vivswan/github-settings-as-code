@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { collaboratorsSection } from "../../../src/sections/collaborators/index.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
+import { INVITATION_ROLES } from "../../../src/sections/shared/roles.js";
 import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
@@ -22,6 +23,10 @@ const snapshot = async (api: MockApi) =>
   unwrap(
     await collaboratorsSection.snapshot(snapshotContext(collaboratorsSection, api, REPO, "fail")),
   );
+
+const blockedInvitationNote = (username: string, declared: string) =>
+  `invitation for "${username}" is pending; the invitation PATCH accepts only ${[...INVITATION_ROLES].join(", ")}, ` +
+  `so "${declared}" cannot be set on it - left untouched, the next apply grants it once the invitation is accepted`;
 
 describe("collaborators", () => {
   test("plans an update per drifted collaborator, an invitation per missing user, and a removal per undeclared one, reading only", async () => {
@@ -171,53 +176,68 @@ describe("collaborators", () => {
     });
   });
 
-  test("a declared custom role is noted against a pending invitation, never PATCHed; once expired it is still cancelled and re-sent", async () => {
-    const pending = new MockApi({
-      [LIST]: { data: [] },
-      [INVITATIONS]: {
-        data: [{ id: 11, invitee: { login: "alice" }, permissions: "write", expired: false }],
-      },
-    });
-    expect(await plan(pending, [{ username: "alice", permission: "security-team" }])).toEqual({
-      ops: [],
-      notes: [
-        'invitation for "alice" is pending; invitations report only the standard roles, so it cannot be compared to the declared custom role "security-team" - left untouched, the declared role is applied once the invitation is accepted',
-      ],
-      drift: [],
-    });
-    const expired = new MockApi({
-      [LIST]: { data: [] },
-      [INVITATIONS]: {
-        data: [{ id: 12, invitee: { login: "alice" }, permissions: "write", expired: true }],
-      },
-    });
-    expect(await plan(expired, [{ username: "alice", permission: "security-team" }])).toEqual({
-      ops: [
-        {
-          role: "cancelInvitation",
-          params: { invitation_id: "12" },
-          describe: 'cancelling the expired invitation for "alice"',
-          drift: [
-            'collaborators[alice]: pending invitation expired; apply will cancel it and send a fresh invitation with "security-team"',
+  test(
+    "a pending invitation at the declared triage_plus converges; one the PATCH cannot set is noted, never PATCHed; " +
+      "an expired one is still cancelled and re-sent",
+    async () => {
+      const pending = new MockApi({
+        [LIST]: { data: [] },
+        [INVITATIONS]: {
+          data: [
+            { id: 11, invitee: { login: "alice" }, permissions: "write", expired: false },
+            { id: 13, invitee: { login: "dave" }, permissions: "write", expired: false },
+            { id: 14, invitee: { login: "erin" }, permissions: "triage_plus", expired: false },
           ],
-          change: 'cancelled the expired invitation for "alice"',
         },
-        {
-          role: "update",
-          params: { username: "alice" },
-          payload: { permission: "security-team" },
-          describe: 'inviting collaborator "alice"',
-          drift: [
-            'collaborators[alice]: missing - not a collaborator on the repo; apply will send an invitation with "security-team"',
-          ],
-          change:
-            're-invited collaborator "alice" (security-team) - the pending invitation had expired',
+      });
+      expect(
+        await plan(pending, [
+          { username: "alice", permission: "security-team" },
+          { username: "dave", permission: "triage_plus" },
+          { username: "erin", permission: "triage_plus" },
+        ]),
+      ).toEqual({
+        ops: [],
+        notes: [
+          blockedInvitationNote("alice", "security-team"),
+          blockedInvitationNote("dave", "triage_plus"),
+        ],
+        drift: [],
+      });
+      const expired = new MockApi({
+        [LIST]: { data: [] },
+        [INVITATIONS]: {
+          data: [{ id: 12, invitee: { login: "alice" }, permissions: "write", expired: true }],
         },
-      ],
-      notes: [],
-      drift: [],
-    });
-  });
+      });
+      expect(await plan(expired, [{ username: "alice", permission: "security-team" }])).toEqual({
+        ops: [
+          {
+            role: "cancelInvitation",
+            params: { invitation_id: "12" },
+            describe: 'cancelling the expired invitation for "alice"',
+            drift: [
+              'collaborators[alice]: pending invitation expired; apply will cancel it and send a fresh invitation with "security-team"',
+            ],
+            change: 'cancelled the expired invitation for "alice"',
+          },
+          {
+            role: "update",
+            params: { username: "alice" },
+            payload: { permission: "security-team" },
+            describe: 'inviting collaborator "alice"',
+            drift: [
+              'collaborators[alice]: missing - not a collaborator on the repo; apply will send an invitation with "security-team"',
+            ],
+            change:
+              're-invited collaborator "alice" (security-team) - the pending invitation had expired',
+          },
+        ],
+        notes: [],
+        drift: [],
+      });
+    },
+  );
 
   test("a 404 on the collaborator list is a denial that stops the section before the invitation read", async () => {
     const api = new MockApi({ [INVITATIONS]: { data: [] } });

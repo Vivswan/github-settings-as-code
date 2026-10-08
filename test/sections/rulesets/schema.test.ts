@@ -84,6 +84,8 @@ const EVERY_RULE = [
       ],
     },
   },
+  { type: "code_quality", parameters: { severity: "all" } },
+  { type: "code_coverage", parameters: { max_coverage_drop: 2.5, minimum_coverage: 80 } },
   { type: "copilot_code_review", parameters: { review_on_push: true } },
   { type: "license_compliance_scanning" },
   { type: "file_path_restriction", parameters: { restricted_file_paths: ["secrets/**"] } },
@@ -358,6 +360,22 @@ describe("a ruleset the API would reject never reaches it", () => {
       [
         /^rulesets\[0\]\.rules\[0\]: parameters\.max_file_size: .*<=100$/,
         /^rulesets\[0\]\.rules\[1\]: parameters\.max_file_path_length: .*>=1$/,
+      ],
+    ],
+    [
+      "a coverage drop over 100 percent, a code quality severity in the wrong case, and one left out",
+      {
+        name: "main",
+        rules: [
+          { type: "code_coverage", parameters: { max_coverage_drop: 100.5 } },
+          { type: "code_quality", parameters: { severity: "Errors" } },
+          { type: "code_quality", parameters: {} },
+        ],
+      },
+      [
+        /^rulesets\[0\]\.rules\[0\]: parameters\.max_coverage_drop: .*<=100$/,
+        'rulesets[0].rules[1]: parameters.severity: Invalid option: expected one of "errors"|"warnings"|"notes"|"all"',
+        'rulesets[0].rules[2]: parameters.severity: Invalid option: expected one of "errors"|"warnings"|"notes"|"all"',
       ],
     ],
     [

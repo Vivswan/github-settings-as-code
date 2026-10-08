@@ -3,7 +3,11 @@
  */
 
 import { CollaboratorConfig } from "../../../src/sections/collaborators/schema.js";
-import { DEFAULT_ROLE, roleForPermission } from "../../../src/sections/shared/roles.js";
+import {
+  DEFAULT_ROLE,
+  INVITATION_ROLES,
+  roleForPermission,
+} from "../../../src/sections/shared/roles.js";
 import {
   type EntriesForm,
   generatorFromSlice,
@@ -46,9 +50,7 @@ export function genInvitationsState(rng: Rng, declared: Json[]): Json[] {
     const kind = rng.pick(["matching", "mismatched", "expired"] as const);
     const invitation: Json = { invitee: { login: entry.username }, permissions: wantRole };
     if (kind === "mismatched") {
-      invitation.permissions = rng.pick(
-        ["read", "write", "maintain", "triage", "admin"].filter((role) => role !== wantRole),
-      );
+      invitation.permissions = rng.pick([...INVITATION_ROLES].filter((role) => role !== wantRole));
     } else if (kind === "expired") {
       invitation.expired = true;
     }

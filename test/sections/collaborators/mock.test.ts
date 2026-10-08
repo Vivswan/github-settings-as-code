@@ -1,7 +1,7 @@
 /**
  * The grant PUT's vocabulary, pinned against the handler: parse refuses the wrong spellings before any
  * scenario can send one, and no curated scenario declares triage or maintain on a personal account. GitHub
- * takes the five standard permissions or a defined custom role on an organization's repository, pull, push,
+ * takes the six collaborator permissions or a defined custom role on an organization's repository, pull, push,
  * admin on a personal account's, and 422s anything else instead of storing it as a role.
  */
 
@@ -43,10 +43,12 @@ describe("collaborators.update grants what GitHub would grant on this owner's re
     ["org", "alice", { permission: "push " }, 422, "read"],
     ["org", "alice", { permission: "triage" }, 204, "triage"],
     ["org", "alice", { permission: "maintain" }, 204, "maintain"],
+    ["org", "alice", { permission: "triage_plus" }, 204, "triage_plus"],
     ["org", "alice", { permission: "security-team" }, 204, "security-team"],
     ["org", "carol", {}, 201, "read"],
     ["user", "alice", { permission: "triage" }, 422, "read"],
     ["user", "alice", { permission: "maintain" }, 422, "read"],
+    ["user", "alice", { permission: "triage_plus" }, 422, "read"],
     ["user", "alice", { permission: "security-team" }, 422, "read"],
     ["user", "alice", { permission: "pull" }, 204, "read"],
     ["user", "alice", { permission: "push" }, 204, "write"],

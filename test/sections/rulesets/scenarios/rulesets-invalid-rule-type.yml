@@ -9,9 +9,9 @@ settings:
   rulesets:
     - name: quality
       rules:
-        - type: code_quality
+        - type: quality_gate
           parameters:
-            severity: warning
+            severity: warnings
 token_permissions:
   administration: write
 expect:
