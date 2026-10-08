@@ -17,12 +17,11 @@ import {
 } from "../../../src/sections/branches/graphql-vocabulary.js";
 import { parseBypassActor } from "../../../src/sections/branches/schema.js";
 import type { ListSectionKey } from "../../../src/sections/shared/list/decl.js";
+import { permissionForRole, roleForPermission } from "../../../src/sections/shared/roles.js";
 import {
   INVITATION_ROLES,
-  permissionForRole,
   REPORTED_INVITATION_ROLES,
-  roleForPermission,
-} from "../../../src/sections/shared/roles.js";
+} from "../../../src/sections/shared/spec-roles.js";
 import type { MustBeNever } from "../../../src/types.js";
 import { AUTOLINKS_MOCK } from "../../sections/autolinks/mock.js";
 import { DEPLOY_KEYS_MOCK } from "../../sections/deploy_keys/mock.js";

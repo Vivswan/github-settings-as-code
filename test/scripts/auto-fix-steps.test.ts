@@ -71,6 +71,7 @@ describe("the fix-owned paths and generators track the generated-output table", 
 });
 
 const GENERATOR_ENV: Record<(typeof GENERATORS)[number], string> = {
+  "build:openapi": "GEN_OPENAPI",
   "build:gaps-index": "GEN_GAPS_INDEX",
   "build:docs": "GEN_DOCS",
   "build:action-docs": "GEN_ACTION_DOCS",
@@ -151,7 +152,7 @@ describe("rebuild", () => {
     );
     expect(result.status).toBe(0);
     expect(result.outputs).toEqual(["changed=true", "pruned=false"]);
-    expect(result.stdout).toContain("1 file changed, 4 insertions(+)");
+    expect(result.stdout).toContain("1 file changed, 5 insertions(+)");
     expect(patchPaths(temp)).toEqual(["README.md"]);
     expect(
       git(pr, "diff", "--cached", "README.md")
@@ -260,7 +261,8 @@ describe("push", () => {
           `::error::the fix patch staged '${named}', outside the generated docs (README.md, action.yml,`,
           "docs/reference/coverage.md, docs/reference/undeclared-policy.md, docs/reference/permissions.md,",
           "docs/operate/check-mode.md, docs/reference/sections.md, docs/reference/inputs.md,",
-          "docs/reference/architecture.md, docs/start/getting-started.md), and src/upstream-gaps/; refusing to push\n",
+          "docs/reference/architecture.md, docs/start/getting-started.md, src/sections/shared/spec-roles.ts), and",
+          "src/upstream-gaps/; refusing to push\n",
         ].join(" "),
       );
       expect(originTip(fx)).toBe(headSha);

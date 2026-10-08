@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { collaboratorsSection } from "../../../src/sections/collaborators/index.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import { planContext, snapshotContext } from "../../../src/sections/contract/plan.js";
-import { INVITATION_ROLES } from "../../../src/sections/shared/roles.js";
+import { INVITATION_ROLES } from "../../../src/sections/shared/spec-roles.js";
 import { MockApi } from "../../mock-api.js";
 import { fragmentFake } from "../fragment-fake.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";

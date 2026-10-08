@@ -3,11 +3,8 @@
  */
 
 import { CollaboratorConfig } from "../../../src/sections/collaborators/schema.js";
-import {
-  DEFAULT_ROLE,
-  INVITATION_ROLES,
-  roleForPermission,
-} from "../../../src/sections/shared/roles.js";
+import { DEFAULT_ROLE, roleForPermission } from "../../../src/sections/shared/roles.js";
+import { INVITATION_ROLES } from "../../../src/sections/shared/spec-roles.js";
 import {
   type EntriesForm,
   generatorFromSlice,

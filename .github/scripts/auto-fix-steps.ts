@@ -22,9 +22,10 @@ import { dispatch } from "./lib/entry.js";
 import { configureBotIdentity, leasePush } from "./lib/pr-branch.js";
 import { capture, requireEnv, run, setOutput, status } from "./lib/workflow-step.js";
 
-/** In generated.ts table order: the later generators import the gaps index through src/, and the inputs table
- * reads action.yml, so each source renders first. */
+/** In generated.ts table order: the later generators import the descriptor-derived files and the gaps index
+ * through src/, and the inputs table reads action.yml, so each source renders first. */
 export const GENERATORS = [
+  "build:openapi",
   "build:gaps-index",
   "build:docs",
   "build:action-docs",
@@ -43,6 +44,7 @@ export const FIX_OWNED_PATHS = [
   "docs/reference/inputs.md",
   "docs/reference/architecture.md",
   "docs/start/getting-started.md",
+  "src/sections/shared/spec-roles.ts",
   "src/upstream-gaps/",
 ] as const;
 

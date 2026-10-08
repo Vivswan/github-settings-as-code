@@ -174,7 +174,6 @@ const DATA_CONSTANTS: ReadonlySet<string> = new Set([
   // shared/roles.ts
   "ROLE_FOR_PERMISSION",
   "STANDARD_PERMISSIONS",
-  "INVITATION_ROLES",
   "DEFAULT_ROLE",
   // branches/schema.ts
   "ACTOR_LIST_EXAMPLE",

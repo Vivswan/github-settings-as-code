@@ -19,6 +19,7 @@ import { capture, run, status } from "./lib/workflow-step.js";
 const SCHEMA_PACKAGES = ["@octokit/openapi", "@octokit/graphql-schema"] as const;
 const LOCKSTEP_TESTS = [
   "test/e2e/openapi/validate.test.ts",
+  "test/scripts/gen-openapi.test.ts",
   "test/sections/graphql-queries.test.ts",
 ] as const;
 
