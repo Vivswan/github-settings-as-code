@@ -45,7 +45,7 @@ jobs:
         repo: ${{ fromJSON(needs.plan.outputs.repos) }}
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           mode: render
           settings-file: |
@@ -67,7 +67,7 @@ jobs:
           pattern: merged-*
           merge-multiple: true
           path: merged
-      - uses: Vivswan/github-settings-as-code@v2 # x-release-please-major
+      - uses: Vivswan/github-settings-as-code@v3 # x-release-please-major
         with:
           token: ${{ secrets.FLEET_WRITE_TOKEN }}
           repos-dir: merged
