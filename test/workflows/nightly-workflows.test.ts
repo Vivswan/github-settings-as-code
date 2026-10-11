@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, normalize } from "node:path";
+import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
 import { ARTIFACTS_DIR } from "../e2e/constants.js";
 import { ROOT } from "../root.js";
 import { readWorkflow, type Step, type Workflow, workflowFiles } from "./workflow-loader.js";
@@ -64,22 +65,61 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
   });
 });
 
+/** The `needs` context that remembers every job it was asked for and lacks: the evaluator resolves each access,
+ * whatever its spelling, through get(), so this is the one place a missing job is seen. */
+class RecordingNeeds extends data.Dictionary {
+  readonly missing = new Set<string>();
+  override get(key: string): data.ExpressionData | undefined {
+    const value = super.get(key);
+    if (value === undefined) this.missing.add(key);
+    return value;
+  }
+}
+
 /**
- * A job condition over `needs.<job>.result` evaluated the way the runner does, with each job's result substituted; the remaining text is
- * checked to be nothing but string literals and the ==, !=, &&, ||, ! and parenthesis operators before it runs.
+ * GitHub's own evaluator, so `==` is case-insensitive and the operators bind as the runner binds them. A job the
+ * condition reads but the night does not carry is refused here: the library reads it as null, and `null != 'success'`
+ * would pass the filing condition silently.
  */
 function evaluate(raw: unknown, results: Record<string, string>): boolean {
-  const expression = condition(raw).replace(/\bneeds\.([\w-]+)\.result\b/g, (_, job: string) => {
-    const result = results[job];
-    if (result === undefined)
-      throw new Error(`the condition reads needs.${job}, which is not in needs`);
-    return JSON.stringify(result);
-  });
-  if (!/^(?:"[a-z]*"|'[a-z]*'|==|!=|&&|\|\||!|[()\s])+$/.test(expression)) {
-    throw new Error(`the condition uses more than the evaluator knows: ${expression}`);
+  const expression = condition(raw);
+  const parsed = new Parser(new Lexer(expression).lex().tokens, ["needs"], []).parse();
+  const needs = new RecordingNeeds(
+    ...Object.entries(results).map(([job, result]) => ({
+      key: job,
+      value: new data.Dictionary({ key: "result", value: new data.StringData(result) }),
+    })),
+  );
+  const verdict = new Evaluator(
+    parsed,
+    new data.Dictionary({ key: "needs", value: needs }),
+  ).evaluate();
+  for (const job of needs.missing) {
+    throw new Error(`the condition reads needs.${job}, which is not in needs`);
   }
-  return Boolean(new Function(`return (${expression});`)());
+  if (verdict.kind !== data.Kind.Boolean) {
+    throw new Error(`the condition is not boolean: ${expression}`);
+  }
+  return (verdict as data.BooleanData).value;
 }
+
+describe("the condition evaluator's needs guard", () => {
+  // The library answers null for a job the dictionary lacks, and `null != 'success'` is true: a typo in a job name
+  // would read as a red night that files, so the guard must fire on every spelling the evaluator resolves.
+  test.each<[string, string, Record<string, string>]>([
+    ["dot access", "needs.typo.result != 'success'", { checks: "success" }],
+    ["bracket access", "needs['typo'].result != 'success'", { checks: "success" }],
+    ["inside a function call", "!contains(needs.typo.result, 'x')", { checks: "success" }],
+    ["the context in another casing", "NEEDS.typo.result != 'success'", { checks: "success" }],
+    ["a parenthesized context", "(needs).typo.result != 'success'", { checks: "success" }],
+  ])("%s to a job the night does not carry is refused", (_case, expression, results) => {
+    expect(() => evaluate(expression, results)).toThrow("needs.typo, which is not in needs");
+  });
+
+  test("a job name in another casing is the same job, as the runner reads it", () => {
+    expect(evaluate("needs.CHECKS.result == 'success'", { checks: "success" })).toBe(true);
+  });
+});
 
 describe("nightly.yml report job", () => {
   const workflow = readWorkflow("nightly.yml");
