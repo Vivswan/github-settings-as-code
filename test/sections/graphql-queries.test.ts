@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Structural checks need only the query TEXT; full validation runs against GitHub's published schema as the
  * @octokit/graphql-schema package ships it, extended by the SDL of the upstream gaps the package lags. A

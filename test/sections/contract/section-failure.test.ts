@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";

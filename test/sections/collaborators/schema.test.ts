@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The collaborators section's own parse refusal, pinned as the problem line a user reads: a key outside the grant
  * PUT's two fields. The permission vocabulary is shared with teams and pinned once in ../shared/roles.test.ts.

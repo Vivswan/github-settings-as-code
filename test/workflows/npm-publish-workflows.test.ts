@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The two npm publishers (update-release-pr.yml's publish-next, update-release.yml's publish-npm) share one contract, trusted
  * publishing through the runner's OIDC token and nothing else, and one was copied from the other. The relations here: both are guarded to the

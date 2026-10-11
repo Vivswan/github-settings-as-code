@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * package.json is the npm manifest of @vivswan/github-settings-as-code; each test here relates one of its publishable values to the artifact that
  * consumes it, so a value that drifts fails at commit time instead of at the release's npm publish or on a consumer's machine.

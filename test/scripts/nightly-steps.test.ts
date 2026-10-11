@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * nightly.yml's steps with a scripted bun and gh in place of the real ones (an install from the registry or a PR
  * on GitHub has no place in a unit test): what each probe does with the versions it finds and with tsc's output,

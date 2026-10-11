@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { TEAM_REPOSITORY_MEDIA_TYPE } from "../../sections/teams/mock.js";
 import { RAW_CONTENTS_ACCEPT } from "./core-paths.js";

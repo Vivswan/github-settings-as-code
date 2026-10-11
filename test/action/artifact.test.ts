@@ -1,4 +1,3 @@
-// tier: pr
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DefaultArtifactClient } from "@actions/artifact";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";

@@ -1,4 +1,3 @@
-// tier: pr
 /** This repository's issue forms name only labels its own .github/settings.yml roster declares; no claim is made about users' repositories. */
 
 import { describe, expect, test } from "bun:test";

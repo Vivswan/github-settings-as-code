@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";

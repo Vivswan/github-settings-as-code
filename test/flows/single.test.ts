@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { REDACTED_NOTE } from "../../src/flows/redact.js";

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The shared entry (.github/scripts/lib/entry.ts) as a workflow step sees it: a mistyped or missing subcommand ends
  * the step red before any handler runs, naming the script and its commands, and a handler's thrown refusal ends it

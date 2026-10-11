@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The CLI under a GitHub Actions runner: the same Io calls the action's Io
  * makes produce the same workflow commands and the same runner files, so a

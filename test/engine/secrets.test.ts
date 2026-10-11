@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { type ValidatedSettings, validateSettingsDoc } from "../../src/engine/orchestrate.js";

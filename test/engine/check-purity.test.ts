@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * A check-mode run issues only GETs and read queries, and the preflight barrier (apply mode under on-missing-permission: fail) plans every section
  * as its permission probe before applying, so the phase must stay read-only.

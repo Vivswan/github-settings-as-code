@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import {
   REPOSITORY_WEBHOOK_EVENTS,

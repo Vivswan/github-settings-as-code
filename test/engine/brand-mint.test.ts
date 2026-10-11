@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Each proof brand is minted at ONE site, the validator's success return, and every other value carrying it is read
  * off that document: the validated brand (ValidatedInput, ValidatedBrand, ValidatedSettings) at validateSettingsDoc's

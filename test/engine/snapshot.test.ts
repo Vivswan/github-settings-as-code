@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The snapshot pipeline over the e2e mock's merged handlers: which sections it reads back and
  * which it reports unsupported, how a denial classifies under each policy, the guard against a

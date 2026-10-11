@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import sodium from "libsodium-wrappers";
 import { err, ok, Result } from "neverthrow";

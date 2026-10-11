@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The hand-written GitHub vocabularies (the keys a PUT takes, the values a filter sends, the fields a GET alone
  * reports) pinned to the operation of GitHub's OpenAPI descriptor that defines each. The nightly's probe-schema

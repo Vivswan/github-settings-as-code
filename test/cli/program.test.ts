@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The command tree through main(): what only the program decides, beside the
  * equivalence pins (test/cli/execution.test.ts runs every arm on both faces,

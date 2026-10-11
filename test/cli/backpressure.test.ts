@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The redacting stream honors the target's backpressure: a chunk the target
  * cannot take yet is acknowledged only once it drains, and nothing is lost

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The custom_properties section's parse refusals, each pinned as the problem line a user reads: a multi_select value
  * that is an empty list (GitHub does not document whether [] stores or unsets), a repeated option (a set comparison

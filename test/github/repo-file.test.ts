@@ -1,4 +1,3 @@
-// tier: pr
 import { afterEach, describe, expect, test } from "bun:test";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { getRepoFile } from "../../src/github/repo-file.js";

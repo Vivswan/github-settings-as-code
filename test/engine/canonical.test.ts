@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The canonical order is a relation, not a picture: the same content in any key or list order renders to one set of
  * bytes, and every mapping list the schema declares is either sorted by a declared identity or deliberately left as

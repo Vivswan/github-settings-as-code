@@ -1,6 +1,5 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { SECTION_KEYS } from "../src/schema.js";
 import { SECTIONS_TEST_ROOT } from "./e2e/scenario.js";
@@ -67,53 +66,5 @@ describe("repository layout", () => {
     ["labelsx.test.ts", false],
   ])("%s is named after a section: %p", (name, named) => {
     expect(isSectionNamedFile(name)).toBe(named);
-  });
-});
-
-const TIER_LINE = /^\/\/ tier: (pr|release-gate|nightly)$/;
-
-/**
- * The fleet's tier census (the code-standards tests section): every test file's first line names when it runs.
- * Here the runner fixes the answer: checks.yml's `bun run test` is bun test over the whole tree on every PR, so a
- * `.test.ts` file is `pr` by construction, and one claiming another tier would still run on every merge. The
- * release-gate tier is script-driven (release-gate.yml runs fuzz.ts and the probe), not a test file; a release-gate
- * test file needs the pr run narrowed first, and this census rewritten for the new layout.
- */
-function tierProblems(files: ReadonlyArray<[path: string, firstLine: string]>): string[] {
-  return files.flatMap(([path, firstLine]) => {
-    const tier = TIER_LINE.exec(firstLine)?.[1];
-    if (tier === undefined) return [`${path}: first line is not "// tier: pr"`];
-    if (tier !== "pr") {
-      return [
-        `${path}: tier ${tier}, but bun test runs it on every PR; narrow the pr run before naming another tier`,
-      ];
-    }
-    return [];
-  });
-}
-
-describe("test tiers", () => {
-  const testFiles = readdirSync(join(ROOT, "test"), { recursive: true, encoding: "utf8" })
-    .filter((entry) => entry.endsWith(".test.ts"))
-    .sort()
-    .map((entry): [string, string] => [
-      `test/${entry}`,
-      readFileSync(join(ROOT, "test", entry), "utf8").split("\n", 1)[0] ?? "",
-    ]);
-
-  test("every test file's first line names its tier, and the tier is the one the workflows run it under", () => {
-    expect(testFiles.length).toBeGreaterThan(100);
-    expect(tierProblems(testFiles)).toEqual([]);
-  });
-
-  test.each<[string, string, RegExp]>([
-    ["no marker", 'import { test } from "bun:test";', /first line is not/],
-    ["a misspelled tier", "// tier: PR", /first line is not/],
-    ["the marker on the second line", "\n// tier: pr", /first line is not/],
-    ["a tier the pr run would still carry", "// tier: release-gate", /runs it on every PR/],
-  ])("%s fails the census (negative control)", (_case, firstLine, failure) => {
-    expect(
-      tierProblems([["test/x.test.ts", firstLine.split("\n", 1)[0] ?? ""]]).join("\n"),
-    ).toMatch(failure);
   });
 });

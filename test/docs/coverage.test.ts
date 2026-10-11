@@ -1,4 +1,3 @@
-// tier: pr
 // The Supported rows are pinned against the declarations in test/sections/docs-registry.test.ts, the rendered page in test/scripts/gen-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";

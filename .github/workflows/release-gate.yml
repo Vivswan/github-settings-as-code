@@ -1,8 +1,8 @@
-# Repo-owned, never overwritten by sync. The release-gate tier: what qualifies a release but is too slow or too
+# Repo-owned, never overwritten by sync. The release gate: what qualifies a release but is too slow or too
 # network-bound to run on every merge. One definition, two callers, so the schedule cannot pass what the release
 # PR would fail:
 #   managed ci.yml  -> the release-please PR and a workflow_dispatch, required under all-green there
-#   nightly.yml     -> every scheduled night, folded into its report job (a red tier files the nightly issue)
+#   nightly.yml     -> every scheduled night, folded into its report job (a red gate files the nightly issue)
 # The caller's contract: no inputs, no secrets, permissions capped at contents: read, every job bounded.
 # A job past its timeout is CANCELLED, not failed; both callers count cancelled as red.
 
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  # The deep fuzz the PR tier only samples (checks.yml runs 25 iterations). Same depth as a night of
+  # The deep fuzz PR CI only samples (checks.yml runs 25 iterations). Same depth as a night of
   # nightly-fuzz.yml, which stays the seeded-replay stream; this run qualifies the release candidate itself.
   fuzz:
     runs-on: ubuntu-latest

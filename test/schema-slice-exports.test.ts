@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Every SettingsFile property is composed from an export of its own section's slice module
  * (src/sections/<key>/schema.ts). A lookalike expression written into a SECTION_SLICES row (the same type with a

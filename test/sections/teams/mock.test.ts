@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The probe's reply shape is decided by the request's Accept media type, which no scenario can assert on, so
  * it is pinned here against the handler and, through the fragment fake, against the section's own probe.

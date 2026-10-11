@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result } from "neverthrow";
 import {

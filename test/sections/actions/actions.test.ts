@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { validateSectionShapes } from "../../../src/engine/validate.js";

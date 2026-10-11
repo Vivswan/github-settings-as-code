@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The milestones section's parse refusal, pinned as the problem line a user reads: a due date that is neither a
  * calendar day nor the timestamp GitHub keeps on one.

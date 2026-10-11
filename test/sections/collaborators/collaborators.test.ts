@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { INVITATION_ROLES } from "../../../src/generated/spec-roles.js";
 import { collaboratorsSection } from "../../../src/sections/collaborators/index.js";

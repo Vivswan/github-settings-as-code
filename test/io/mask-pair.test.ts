@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { type Io, type MaskPair, maskRegistry } from "../../src/io.js";
 import { captureIo } from "./capture.js";

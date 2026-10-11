@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Every section with a snapshot(), enrolled in the round-trip proof over the e2e mock's own
  * handlers: the seeded live state reads back as exactly the expected value and notes, and

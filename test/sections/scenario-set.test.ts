@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The standard scenario set, over SECTIONS: each section ships the e2e scenarios its contract implies,
  * under one naming rule, so a section cannot register without its convergence proof, a reading section

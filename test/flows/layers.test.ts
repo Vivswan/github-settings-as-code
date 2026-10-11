@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, spyOn, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

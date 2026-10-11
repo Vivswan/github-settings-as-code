@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * GitHub's rules for secret and variable names and for a variable value's size are enforced by the API alone, as a
  * 422 in the middle of an apply; these pin that every family refuses them when the file is parsed, on the rendered

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Refusal messages are user experience: every sentence a user can read when the settings file is refused at parse
  * time is pinned by a test that spells it, so a wording change is a deliberate test change and a new refusal cannot

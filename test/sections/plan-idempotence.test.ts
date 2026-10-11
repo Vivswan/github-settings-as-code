@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The idempotence helper's own controls over synthetic plan sections workflows cannot exercise: it must accept an alwaysRewrite write with a payload
  * THUNK (a fresh closure per pass) and reject a conditional write whose live read never reflects it.

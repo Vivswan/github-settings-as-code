@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The list-section factory's own controls over variants of the labels declaration; the labels suite pins the pilot's prose, this file pins the
  * factory's rules once.

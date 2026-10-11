@@ -1,4 +1,3 @@
-// tier: pr
 /** Each exported classifier is tested directly so the corresponding e2e assertion is provably able to fire. */
 
 import { describe, expect, test } from "bun:test";

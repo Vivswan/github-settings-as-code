@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The release pipeline against local fixture repositories (a bare origin plus clones playing the CI checkouts), so the tag topology is a unit test
  * rather than what the first real release discovers.

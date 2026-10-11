@@ -1,4 +1,3 @@
-// tier: pr
 // The factory and engine behavior is pinned by the actions_variables suite over the same repoVariablesSection() factory; this file pins only this
 // section's routes, noun, and delete-by-default posture.
 

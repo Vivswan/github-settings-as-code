@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * A property of the repo-owned commit-back workflows a later edit breaks with no other check noticing: under the
  * write token, the push jobs execute code from the default branch alone (bun starts there, imports from there, and

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The hooks ci.yml calls after the all-green gate (post-green.yml, update-release.yml, update-release-pr.yml) push refs and publish
  * packages, so what they can do follows from where they are reachable and what each job is granted. The relations here: every hook is

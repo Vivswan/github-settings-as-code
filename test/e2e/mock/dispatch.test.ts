@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { matchEndpoint, paramAccessor } from "./dispatch.js";
 import { handlerTestContext } from "./handler-test-ctx.js";

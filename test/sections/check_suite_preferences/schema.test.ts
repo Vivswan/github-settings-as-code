@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * GitHub's check-suite preference rules, enforced before the PATCH. An app_id is a positive integer: no app 0 exists
  * and GitHub rejects fractions. One app gets one entry: GitHub keeps whichever it reads last. Without the bound the

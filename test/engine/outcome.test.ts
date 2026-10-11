@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The one ranking every mode folds through: worst first, over the words of every mode at once.
  */

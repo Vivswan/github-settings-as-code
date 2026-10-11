@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * GitHub matches an environment name case-insensitively and echoes the stored spelling, so a request
  * spelled "prod" over a seeded "Prod" reaches the environment AND everything keyed under it. The fold

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * zod skips a node's own checks once a nested value failed; rule() (src/sections/shared/schema-helpers.ts) runs them
  * through zod's public `when` and filters their findings. These pin that contract, which every section rule relies on

@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The actions section's parse refusals, each pinned as the problem line a user reads: GitHub's GET-only fields
  * (declared, they would re-PUT forever), the OIDC claim-key rules, and an allowlist declared under a policy that

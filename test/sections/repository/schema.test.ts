@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The repository section's parse refusals, each pinned as the problem line a user reads: a quoted boolean or a bare
  * number where the PATCH takes a toggle or a string, the vocabularies GitHub 422s (feature status, creation

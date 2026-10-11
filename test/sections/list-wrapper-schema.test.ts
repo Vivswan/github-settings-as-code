@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The refusals every list section shares, pinned once as the problem lines a user reads: a wrapper carrying a key
  * that is not one of its directives (with the pre-v3 policy spelling naming its rename), a section value that is

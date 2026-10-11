@@ -1,4 +1,3 @@
-// tier: pr
 import { afterEach, describe, expect, test } from "bun:test";
 import { ok } from "neverthrow";
 import { parseActionConfig } from "../../src/action/inputs.js";

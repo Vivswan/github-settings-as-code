@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * collectingIo and silentIo, and the redaction the collecting one applies:
  * captured text is masked like the action's log, so a library caller that

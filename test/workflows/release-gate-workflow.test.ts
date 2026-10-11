@@ -1,10 +1,9 @@
-// tier: pr
 /**
  * release-gate.yml against the contract its managed caller holds it to: ci.yml (the platform's file, synced, not
  * edited here) calls it on the release PR with nothing passed and a contents: read ceiling, and GitHub rejects a
  * mismatch only there, on the first run the caller makes. The convention's other half is ours: nightly.yml is the
  * one repository-side caller (one definition, two callers), and no other repo-owned workflow calls it, since a
- * second call runs the tier twice beside ci.yml's.
+ * second call runs the gate twice beside ci.yml's.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -41,7 +40,7 @@ function contractProblems(wf: Workflow): string[] {
   return problems;
 }
 
-/** Every calling job, as file#job: a second call in the same file runs the tier twice as surely as one in checks.yml. */
+/** Every calling job, as file#job: a second call in the same file runs the gate twice as surely as one in checks.yml. */
 const callingJobs = (files: ReadonlyArray<[string, Workflow]>): string[] =>
   files.flatMap(([file, wf]) =>
     Object.entries(wf.jobs)

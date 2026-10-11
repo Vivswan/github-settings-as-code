@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The private-report delivery assertions: which recorded writes count as a delivered report, and the secret sweep the
  * runner applies to every one of them, the surface the redacted transcript reaches unmasked.

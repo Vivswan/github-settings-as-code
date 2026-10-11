@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The validate hook is the ONE place a file-only check lives: the compiler demands it on every list section, and the
  * engine runs it inside document validation. Without these, a new list section could keep its duplicate check in

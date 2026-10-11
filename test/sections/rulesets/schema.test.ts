@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * GitHub's ruleset rules the platform does not enforce for us before the wire, so a wrong value would otherwise
  * ride every other section's writes and come back as a 422: the enforcement spelling, the bypass actor id and

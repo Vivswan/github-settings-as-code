@@ -1,4 +1,3 @@
-// tier: pr
 // The generated regions (permissions.md, check-mode.md) are covered by gen-action-docs.test.ts.
 
 import { describe, expect, test } from "bun:test";

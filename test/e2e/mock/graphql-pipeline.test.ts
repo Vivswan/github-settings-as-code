@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The mock's GraphQL pipeline at three levels. The fixture operations below are declared by no
  * section, so at the wire they stay unknown and only the rules needing no declared op are tested.

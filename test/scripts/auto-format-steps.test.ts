@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * auto-format.yml's two steps against local fixture repositories: the branches the workflow text cannot show.
  * For the format step, what the patch holds and when the step stops; for the push step, which checkout the patch

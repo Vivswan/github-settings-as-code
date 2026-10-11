@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * schemaNode() names a union a knob only when knobbed(), nestedKnobbed(), or layeredList() minted its forms: the
  * engine routes a section's two forms by that reading, so a list-beside-wrapper union built by hand stays a plain

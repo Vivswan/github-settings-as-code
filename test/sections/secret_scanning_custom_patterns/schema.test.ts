@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The parse-time refusal of a regex field, at the field level: every field is covered and named
  * with its index, and GitHub's own default delimiters and the PCRE-only forms Hyperscan accepts

@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { branchesSection, protectionSnapshot } from "../../../src/sections/branches/index.js";
 

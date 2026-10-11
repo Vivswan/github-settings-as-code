@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The denial spine, over every section with a snapshot(): a token holding no grant meets one rule
  * everywhere the engine classifies a snapshot, the same rule plan() gets from the engine's section

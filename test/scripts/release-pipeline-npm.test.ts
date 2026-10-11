@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * The npm side of the release pipeline against the fixture repositories and a registry served from the test process:
  * the pre-release version a main commit mints, the publish verdicts and the confirmation, the npm-publish step, and

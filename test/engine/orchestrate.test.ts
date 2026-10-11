@@ -1,4 +1,3 @@
-// tier: pr
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { err, ok } from "neverthrow";
 

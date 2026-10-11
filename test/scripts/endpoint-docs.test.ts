@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { schema as published } from "@octokit/graphql-schema";
 import { buildSchema, type GraphQLObjectType, isObjectType } from "graphql";

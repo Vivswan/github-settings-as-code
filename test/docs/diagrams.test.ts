@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Every mermaid fence in docs/ names real code; the pins prove existence only, never the claim a diagram makes.
  * A quoted node label reads per `<br>` segment, so a mistyped path or symbol cannot hide as prose:

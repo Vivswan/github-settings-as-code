@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * packageCommit against the fixture repositories: every green main commit gets its own packaged commit under its
  * build tag, latest moves forward alone, the window is pruned, and every interleaving with a rival run lands where

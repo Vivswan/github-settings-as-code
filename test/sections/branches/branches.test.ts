@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import type { Result } from "neverthrow";
 import { executePlan } from "../../../src/engine/execute.js";

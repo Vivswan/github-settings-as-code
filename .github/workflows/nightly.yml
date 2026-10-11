@@ -115,7 +115,7 @@ jobs:
           CAN_RETRIGGER: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
         run: bun .github/scripts/nightly-steps.ts refresh-openapi
 
-  # The release-gate tier on the schedule: the same definition the managed
+  # The release gate on the schedule: the same definition the managed
   # ci.yml requires on the release PR, so a night cannot pass what the
   # release PR would fail. Its jobs fold into the report below.
   release-gate:

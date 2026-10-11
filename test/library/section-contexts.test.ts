@@ -1,4 +1,3 @@
-// tier: pr
 /**
  * Imported through src/index.ts on purpose: this is the consumer's path, so a name the entry does not
  * export fails here and not on a consumer's machine.

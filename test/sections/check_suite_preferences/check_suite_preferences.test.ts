@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { executePlan } from "../../../src/engine/execute.js";
 import { checkSuitePreferencesSection } from "../../../src/sections/check_suite_preferences/index.js";

@@ -1,4 +1,3 @@
-// tier: pr
 import { describe, expect, test } from "bun:test";
 import { createVisibilityResolver, type RepoVisibility } from "../../src/github/repo-visibility.js";
 import { MockApi, type Route } from "../mock-api.js";
