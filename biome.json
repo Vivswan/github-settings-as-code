@@ -59,7 +59,7 @@
       }
     },
     {
-      "includes": ["src/**", "!src/cli/inputs.ts"],
+      "includes": ["src/**"],
       "plugins": ["./lint/never-throw.grit"]
     },
     {

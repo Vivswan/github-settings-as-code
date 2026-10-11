@@ -11,7 +11,7 @@ import { withTempDir } from "../temp-dir.js";
 import { lint } from "./fixture-lint.js";
 
 const MESSAGE =
-  "throw outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead";
+  "throw or Promise.reject outside the never-throw rule: not a BUG: invariant (an Error whose message starts with BUG:) and not a bare rethrow of the catch binding; return a Result instead";
 
 /** A line ending in `// outside` is one the plugin must flag; every other throw here is inside the rule. */
 const OUTSIDE = /\/\/ outside$/;
@@ -296,13 +296,31 @@ export function rethrowInsideACallbackCatch(run: (cause?: unknown) => void): () 
 export function hidden(): never {
   throw new Error('prefix "BUG: hidden'); // outside
 }
+export function rejections(ok: boolean, error: unknown): Promise<void> {
+  if (ok) return Promise.reject(new Error("BUG: rejections() was handed ok"));
+  if (error === null) return Promise.reject(new Error("x")); // outside
+  if (error === 0) return Promise.reject(); // outside
+  if (error === 1) return Promise.reject<void>(); // outside
+  if (error === 2) return Promise.reject<void>(new Error("x")); // outside
+  if (error === 3) return Promise.reject<void>(new Error("BUG: rejections() was handed 3"));
+  return Promise.reject(error); // outside
+}
+export function rejectsTheCatchBinding(run: () => Promise<void>): Promise<void> {
+  try {
+    return run();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 `.trimStart();
 
 const OUTSIDE_THE_RULE = 'export function outside(): never {\n  throw new Error("x");\n}\n';
+/** The one throw the rule admits by suppression: commander's argParser can only refuse a value by throwing. */
 const CONTRACT_FILE = "src/cli/inputs.ts";
+const SUPPRESSION = /^\s*\/\/ biome-ignore lint\/plugin: .*\n/m;
 
 describe("the never-throw plugin", () => {
-  test("flags exactly the throws outside the rule, and nothing outside src/ or in the contract file", () =>
+  test("flags exactly the throws and rejections outside the rule, and nothing outside src/", () =>
     withTempDir("never-throw-", (dir) => {
       const expected = Object.fromEntries(
         THROWS.split("\n").flatMap((line, index) =>
@@ -313,7 +331,6 @@ describe("the never-throw plugin", () => {
         lint(dir, {
           "src/throws.ts": THROWS,
           [CONTRACT_FILE]: OUTSIDE_THE_RULE,
-          "src/cli/beside-the-contract.ts": OUTSIDE_THE_RULE,
           // The generated index is exempt from the formatter only, so the rule still reaches it.
           "src/generated/upstream-gaps.ts": OUTSIDE_THE_RULE,
           "test/src/fixture.ts": OUTSIDE_THE_RULE,
@@ -321,17 +338,17 @@ describe("the never-throw plugin", () => {
         }),
       ).toEqual({
         ...expected,
-        "src/cli/beside-the-contract.ts:2": `plugin: ${MESSAGE}`,
+        [`${CONTRACT_FILE}:2`]: `plugin: ${MESSAGE}`,
         "src/generated/upstream-gaps.ts:2": `plugin: ${MESSAGE}`,
       });
     }));
 
-  test("the contract file still throws outside the rule, so its exemption is not stale", () =>
+  test("the contract file's one suppression covers a throw the rule would flag, so it is not stale", () =>
     withTempDir("never-throw-", (dir) => {
-      const flagged = lint(dir, {
-        "src/cli/under-the-rule.ts": readFileSync(join(ROOT, CONTRACT_FILE), "utf8"),
-      });
-      expect(Object.keys(flagged)).not.toEqual([]);
-      expect(new Set(Object.values(flagged))).toEqual(new Set([`plugin: ${MESSAGE}`]));
+      const contract = readFileSync(join(ROOT, CONTRACT_FILE), "utf8");
+      expect(contract.match(new RegExp(SUPPRESSION.source, "gm"))).toHaveLength(1);
+      expect(lint(dir, { [CONTRACT_FILE]: contract })).toEqual({});
+      const flagged = lint(dir, { [CONTRACT_FILE]: contract.replace(SUPPRESSION, "") });
+      expect(Object.values(flagged)).toEqual([`plugin: ${MESSAGE}`]);
     }));
 });
