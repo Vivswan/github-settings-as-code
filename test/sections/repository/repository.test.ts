@@ -3,7 +3,6 @@ import { z } from "zod";
 import { executePlan } from "../../../src/engine/execute.js";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import type { GitHubClient } from "../../../src/github/api.js";
-import { describeProblem } from "../../../src/problem.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";
 import type { SectionFailure } from "../../../src/sections/contract/errors.js";
 import { sectionGrant } from "../../../src/sections/contract/operations.js";
@@ -21,11 +20,7 @@ import {
 import { MockApi, withListing } from "../../mock-api.js";
 import { provePlanIdempotent } from "../plan-idempotence.js";
 import { deniedDetail, REPO, SectionFailed, unwrap } from "../section-run.js";
-import { validatedInput } from "../validated-input.js";
-
-function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
-  return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
-}
+import { shapeError, validatedInput } from "../validated-input.js";
 
 const GET = "GET /repos/o/r";
 const TOOLS = { resolveSecret: () => "" };

@@ -8,6 +8,7 @@
 
 import { validateSettingsDoc } from "../../src/engine/orchestrate.js";
 import { SectionSelection } from "../../src/engine/section-selection.js";
+import { validateSectionShapes } from "../../src/engine/validate.js";
 import { silentIo } from "../../src/io.js";
 import { describeProblem } from "../../src/problem.js";
 import type { SectionKey } from "../../src/schema.js";
@@ -38,4 +39,9 @@ export function validatedInput(key: SectionKey, declared: unknown): ValidatedInp
   }
   deepFreeze(value);
   return value;
+}
+
+/** For the assertions that pin a shape refusal's wording. */
+export function shapeError(doc: Record<string, unknown>, sourceLabel: string): string | null {
+  return validateSectionShapes(doc, sourceLabel).match(() => null, describeProblem);
 }
