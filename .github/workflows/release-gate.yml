@@ -1,19 +1,56 @@
-# Runs this repository's release acceptance tests: the tier that is critical for a release but need not run on every
-# merge (slow, environment-heavy, or network-bound). The managed ci.yml calls it on the release PR and on a dispatch,
-# where all-green blocks on it; the nightly starter calls it on the schedule (docs/all-green.md, "The release-gate hook").
-#
-# This file is repo-owned, seeded once by the fleet sync and never overwritten by a later sync.
-#
-# Replace the no-op job with this repository's tiers; the caller grants no secrets and caps at contents: read.
+# Repo-owned, never overwritten by sync. The release gate: what qualifies a release but is too slow or too
+# network-bound to run on every merge. One definition, two callers, so the schedule cannot pass what the release
+# PR would fail:
+#   managed ci.yml  -> the release-please PR and a workflow_dispatch, required under all-green there
+#   nightly.yml     -> every scheduled night, folded into its report job (a red gate files the nightly issue)
+# The caller's contract: no inputs, no secrets, permissions capped at contents: read, every job bounded.
+# A job past its timeout is CANCELLED, not failed; both callers count cancelled as red.
 
-name: Release Gate
+name: Release gate
 
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
-  noop:
+  # The deep fuzz PR CI only samples (checks.yml runs 25 iterations). Same depth as a night of
+  # nightly-fuzz.yml, which stays the seeded-replay stream; this run qualifies the release candidate itself.
+  fuzz:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The fuzz run is bounded below this value, so a hang surfaces as a failure with its artifacts, not a cancel.
+    timeout-minutes: 60
     steps:
-      - run: echo "release-gate hook - nothing configured"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # The fuzzer validates every drawn document against the built, gitignored schema.
+      - name: Build the schema
+        run: bun run build:schema
+      - name: Fuzz
+        run: timeout 50m bun test/e2e/fuzz.ts --iterations 300
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-gate-fuzz-${{ github.run_attempt }}
+          path: test/e2e/.artifacts/
+          # upload-artifact skips hidden paths by default, and .artifacts is one: without this the step uploads nothing.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The release talks to GitHub's API as it is today, not as the pinned descriptor remembers it: the lockstep tests
+  # against the latest @octokit/openapi and @octokit/graphql-schema releases fail here when a path the action
+  # uses is gone or a selected field retired (.github/scripts/nightly-steps.ts probe-schema).
+  upstream-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Probe the latest OpenAPI descriptor and GraphQL schema
+        run: bun .github/scripts/nightly-steps.ts probe-schema

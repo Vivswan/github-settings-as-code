@@ -1,5 +1,6 @@
 /**
- * The nightly.yml steps against the latest upstream releases, one subcommand each:
+ * The nightly.yml steps against the latest upstream releases, one subcommand each (probe-schema is also the
+ * release-gate.yml upstream-drift job, so the release PR sees the drift a night would):
  *
  *   probe-schema     checks job     @octokit/openapi and @octokit/graphql-schema at latest, then the lockstep tests
  *   probe-types      checks job     @octokit/types and @octokit/openapi-types at latest, then the typecheck, its
