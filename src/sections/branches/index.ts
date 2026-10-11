@@ -11,7 +11,7 @@
 import { err, ok, type Result, safeTry } from "neverthrow";
 import { z } from "zod";
 import { type Delta, deltas, phantomNote, renderPath, subsetDiff } from "../../engine/diff.js";
-import { isPlainObject } from "../../plain-data.js";
+import { isPlainObject, isZeroValue } from "../../plain-data.js";
 import { listEntries, type PlainTyped } from "../contract/declared.js";
 import { matchesRejection } from "../contract/endpoints.js";
 import { type SectionFailure, sectionFailure } from "../contract/errors.js";
@@ -164,11 +164,8 @@ const STATUS_CHECK_ALIASES: Readonly<Record<string, string>> = {
  * an all-empty one restricts pushes to nobody, and the GET omits the key only when unrestricted.
  */
 function isEmptySetting(key: string, value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === "" || value === 0) {
+  if (isZeroValue(value)) {
     return true;
-  }
-  if (Array.isArray(value)) {
-    return value.length === 0;
   }
   if (isPlainObject(value) && REVIEW_ACTOR_HOLDER_SET.has(key)) {
     const keys = Object.keys(value);
