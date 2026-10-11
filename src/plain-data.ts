@@ -28,6 +28,15 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return proto === Object.prototype || proto === null;
 }
 
+/** GitHub's zero values and an empty list: what a replacing write never needs to preserve. A mapping is judged by
+ * the caller, since which nested objects count as empty is a section's own rule. */
+export function isZeroValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === false || value === "" || value === 0) {
+    return true;
+  }
+  return Array.isArray(value) && value.length === 0;
+}
+
 /**
  * The kind of a value isPlainObject refused, naming the YAML tag that produces it. Prototype comparison only, the
  * same reflective read the callers already perform; no payload method is ever dispatched.

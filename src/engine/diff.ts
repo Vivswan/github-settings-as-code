@@ -10,7 +10,7 @@
  */
 
 import { err, type Result } from "neverthrow";
-import { isPlainObject } from "../plain-data.js";
+import { isPlainObject, isZeroValue } from "../plain-data.js";
 import { type SectionFailure, sectionFailure } from "../sections/contract/errors.js";
 import { agree } from "../text.js";
 
@@ -90,16 +90,10 @@ function isScalar(value: unknown): boolean {
  * whose every value is empty by the same rule (an actor holder with empty lists).
  */
 function isEmptySetting(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === "" || value === 0) {
+  if (isZeroValue(value)) {
     return true;
   }
-  if (Array.isArray(value)) {
-    return value.length === 0;
-  }
-  if (isPlainObject(value)) {
-    return Object.values(value).every(isEmptySetting);
-  }
-  return false;
+  return isPlainObject(value) && Object.values(value).every(isEmptySetting);
 }
 
 /** Marks a live field the object has no own key for, as opposed to one holding undefined. */
