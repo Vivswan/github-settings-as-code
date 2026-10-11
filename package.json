@@ -85,6 +85,7 @@
   "devDependencies": {
     "@actions/artifact": "6.2.1",
     "@actions/core": "3.0.1",
+    "@actions/expressions": "0.3.61",
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.5.15",
     "@octokit/graphql-schema": "15.26.1",

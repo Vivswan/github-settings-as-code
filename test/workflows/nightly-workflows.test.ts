@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, normalize } from "node:path";
+import { data, Evaluator, Lexer, Parser } from "@actions/expressions";
 import { ARTIFACTS_DIR } from "../e2e/constants.js";
 import { ROOT } from "../root.js";
 import { readWorkflow, type Step, type Workflow, workflowFiles } from "./workflow-loader.js";
@@ -65,20 +66,32 @@ describe.each(NIGHTLIES)("%s failure path", (file, job) => {
 });
 
 /**
- * A job condition over `needs.<job>.result` evaluated the way the runner does, with each job's result substituted; the remaining text is
- * checked to be nothing but string literals and the ==, !=, &&, ||, ! and parenthesis operators before it runs.
+ * GitHub's own evaluator, so `==` is case-insensitive and the operators bind as the runner binds them. A job the
+ * condition reads but the night does not carry is refused here: the library reads it as null, and `null != 'success'`
+ * would pass the filing condition silently.
  */
 function evaluate(raw: unknown, results: Record<string, string>): boolean {
-  const expression = condition(raw).replace(/\bneeds\.([\w-]+)\.result\b/g, (_, job: string) => {
-    const result = results[job];
-    if (result === undefined)
+  const expression = condition(raw);
+  for (const [, job] of expression.matchAll(/\bneeds\.([\w-]+)\.result\b/g)) {
+    if (job !== undefined && results[job] === undefined) {
       throw new Error(`the condition reads needs.${job}, which is not in needs`);
-    return JSON.stringify(result);
-  });
-  if (!/^(?:"[a-z]*"|'[a-z]*'|==|!=|&&|\|\||!|[()\s])+$/.test(expression)) {
-    throw new Error(`the condition uses more than the evaluator knows: ${expression}`);
+    }
   }
-  return Boolean(new Function(`return (${expression});`)());
+  const needs = new data.Dictionary(
+    ...Object.entries(results).map(([job, result]) => ({
+      key: job,
+      value: new data.Dictionary({ key: "result", value: new data.StringData(result) }),
+    })),
+  );
+  const parsed = new Parser(new Lexer(expression).lex().tokens, ["needs"], []).parse();
+  const verdict = new Evaluator(
+    parsed,
+    new data.Dictionary({ key: "needs", value: needs }),
+  ).evaluate();
+  if (verdict.kind !== data.Kind.Boolean) {
+    throw new Error(`the condition is not boolean: ${expression}`);
+  }
+  return (verdict as data.BooleanData).value;
 }
 
 describe("nightly.yml report job", () => {
