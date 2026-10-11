@@ -11,7 +11,7 @@
  *
  * Every artifact is a function of its main commit alone, so runs for different commits never wait on each other
  * and a rerun mints the same name and verifies instead of appending. latest and vX move through movePointer alone.
- * Every subcommand but prerelease-version is the whole `run:` of one workflow step; no step runs two.
+ * Every subcommand is the whole `run:` of a workflow step; no step runs two.
  *
  * release-please cuts the DRAFT release without a tag (`draft` on, `force-tag-creation` off) and creates or
  * refreshes the release PR only when a releasable commit lands (release-please-config.json leaves always-update
@@ -32,7 +32,7 @@ import {
   resolveSource,
   STEP_OUTPUTS,
 } from "./release-pipeline/draft.js";
-import { NPM_FLOOR, npmFloor, npmPublish, prereleaseVersionOf } from "./release-pipeline/npm.js";
+import { NPM_FLOOR, npmFloor, npmPublish } from "./release-pipeline/npm.js";
 import { packageCommit, packageRelease, retagMajor } from "./release-pipeline/tags.js";
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
@@ -94,9 +94,6 @@ export const COMMANDS: Record<string, Handler> = {
     console.error(
       `${result.ref}${result.created ? ": created at" : " already packages the commit at"} ${result.commit}; ${result.pruned.length === 0 ? "no build tag beyond the window" : `pruned ${result.pruned.join(", ")}`}; ${result.latest.reason}`,
     );
-  },
-  "prerelease-version": () => {
-    console.log(prereleaseVersionOf({ cwd, sourceSha: requireEnv("GITHUB_SHA") }));
   },
   "npm-publish": async ([channel]) => {
     if (channel !== "next" && channel !== "stable") {

@@ -154,20 +154,6 @@ describe("prereleaseVersion", () => {
     );
   });
 
-  test("the subcommand prints the version alone on stdout from GITHUB_SHA alone, and nothing there when it fails", async () => {
-    const fx = seedFixture();
-    expect(await subcommand(fx.work, { GITHUB_SHA: fx.mergeSha }, "prerelease-version")).toEqual({
-      stdout: `${versionOf(fx.work, fx.mergeSha, 2)}\n`,
-      stderr: "",
-      status: 0,
-    });
-    expect(await subcommand(fx.work, { GITHUB_SHA: undefined }, "prerelease-version")).toEqual({
-      stdout: "",
-      stderr: "GITHUB_SHA must be set for this step\n",
-      status: 1,
-    });
-  });
-
   test("a latest this pipeline never minted stops the stable verdict, not ordered", () => {
     expect(() =>
       stablePublishVerdict("2.1.0", { versions: {}, "dist-tags": { latest: "2.0.1-beta.1" } }),
