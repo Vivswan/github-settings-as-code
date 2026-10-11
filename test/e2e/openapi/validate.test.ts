@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { endpointMethod, endpointPath } from "../../../src/sections/contract/endpoints.js";
 import { allEndpoints } from "../../../src/sections/registry.js";

@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The duplicate-live spine, over every section: two live items resolving to one identity fail plan()
  * and snapshot() with the one liveByIdentity refusal naming both, and nothing is written. The table

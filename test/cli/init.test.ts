@@ -1,3 +1,4 @@
+// tier: pr
 /** `init` end to end through main() against a stub client, the argv port and the written file alike. */
 
 import { describe, expect, test } from "bun:test";

@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import type { PublicDetail, PublicTargetView } from "../../src/flows/redact.js";
 import {

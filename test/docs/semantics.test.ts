@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * docs/reference/semantics.md restates the retry model the GitHub client
  * implements; pin its numbers to the client's own constants so the prose

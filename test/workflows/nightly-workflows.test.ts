@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { join, normalize } from "node:path";
 import { ARTIFACTS_DIR } from "../e2e/constants.js";

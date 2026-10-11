@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { composeReport, type ReportInput } from "../../src/report/composer.js";
 

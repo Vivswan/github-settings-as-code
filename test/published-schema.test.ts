@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * lib/settings.schema.json is what editors and CI linters validate settings.yml against, so where the runtime is strict the schema must be too.
  * schema-corpus.test.ts compares the two over every scenario and generated document; the documents here are the edge shapes that corpus never

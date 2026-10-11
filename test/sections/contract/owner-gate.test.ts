@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The owner gate's memo (src/sections/contract/owner.ts): one run probes an owner once, whichever gated
  * section asks first, and every gated section reads the answer; a failed probe is not kept, so the next

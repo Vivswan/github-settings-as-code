@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { validateSectionShapes } from "../../../src/engine/validate.js";
 import { permissionForRole, roleForPermission } from "../../../src/sections/shared/roles.js";

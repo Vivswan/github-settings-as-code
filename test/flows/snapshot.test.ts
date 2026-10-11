@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The mode: snapshot flow over a routed client: the file form writes one
  * document and reports through the outputs and the summary, the dir form

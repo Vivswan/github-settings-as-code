@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import type { ApiError } from "../../../src/github/api-error.js";
 import { overrideAdviceLevel } from "../../../src/sections/contract/errors.js";

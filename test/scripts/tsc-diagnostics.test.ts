@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { type Diagnostic, parseDiagnostics } from "../../.github/scripts/lib/tsc-diagnostics.js";
 

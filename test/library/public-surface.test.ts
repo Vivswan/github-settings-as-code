@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The public entry's pin is docs/reference/library.md: the names in the API tables under "## The API by group" are
  * exactly what src/index.ts exports, in both directions, so a name is public only once the page says what it is.

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The rule-gate plugin's verdict on each refinement form, and its biome.json wiring, pinned by linting a fixture tree
  * with the repository's own configuration; a snippet that silently stopped matching would let a bare refinement

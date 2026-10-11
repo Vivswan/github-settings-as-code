@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { ADMIN_OWNER as OWNER, ADMIN_REPO as REPO } from "../../e2e/constants.js";
 import { call, mockServerLifecycle, scenario } from "../../e2e/mock/server-test-support.js";

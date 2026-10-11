@@ -1,3 +1,4 @@
+// tier: pr
 import { afterEach, describe, expect, test } from "bun:test";
 import { MAX_RETRIES } from "../../src/github/api.js";
 import { api, restoreFetch, stubFetch, traceIo } from "./stub.js";

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * tryGraphql's load-bearing differences from REST: errors[] inside a 200, and the slug riding in the BODY, invisible to URL-based redaction.
  */

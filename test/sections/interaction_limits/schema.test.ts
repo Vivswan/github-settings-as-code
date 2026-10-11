@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * GitHub's interaction-limit rules the platform does not enforce for us before the wire: limit and expiry are closed
  * enums (a typo 422s the PUT, and since the PUT re-arms on every apply the typo can never surface earlier), the PUT

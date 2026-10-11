@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { err } from "neverthrow";
 import { SectionSelection } from "../../src/engine/section-selection.js";

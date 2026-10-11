@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * GitHub's label rules the platform does not enforce for us before the wire: a color must be six hex digits (a name or
  * three-digit shorthand 422s on create, and on an existing label drifts and re-PATCHes every run) and a description is

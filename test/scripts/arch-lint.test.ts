@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The verdict `bun run lint:arch` prints, so CI's test job carries the gate; every import form the scanner must read
  * has a control, since a missed form would let a forbidden import pass.

@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { autolinksSection } from "../../../src/sections/autolinks/index.js";
 import type { SectionInput } from "../../../src/sections/contract/declared.js";

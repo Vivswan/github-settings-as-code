@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The descriptor-derived files against the installed @octokit/openapi: a bump that moves an enum, adds a rule type,
  * or reshapes a rule's parameters changes the fresh render while the committed copy stays, and nothing else reads

@@ -1,3 +1,4 @@
+// tier: pr
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {

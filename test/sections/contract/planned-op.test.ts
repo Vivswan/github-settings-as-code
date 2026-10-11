@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The PlannedOp contract against one literal declaration, so no section test has to restate it: a plan
  * names a declared write role and nothing else, justifies a write with drift unless the declaration says

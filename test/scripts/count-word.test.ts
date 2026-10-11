@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The written-out counts (.github/scripts/lib/count-word.ts): the tripwire past the range is a BUG: invariant,
  * never a numeral fallback, so a derived list outgrowing the words fails the build as a programming error.

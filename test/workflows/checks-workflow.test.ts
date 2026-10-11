@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * checks.yml against the code it runs: head_ref conditions that spell the release PR branch prefix the pipeline
  * script owns (a drifted spelling skips the anchor-check on every release PR instead of failing there).

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * What zod does not promise for open() and routed() (src/sections/shared/schema-helpers.ts), which every section's
  * runtime shape is built from.

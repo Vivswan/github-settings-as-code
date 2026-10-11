@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * No scenario asserts on a served milestone number, so its minting is pinned here against the handler:
  * GitHub numbers milestones per repository from 1, never from the global id pool.

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * No scenario asserts on a served node_id or url, so the labels fragment's identity minting is pinned here against the handler.
  */

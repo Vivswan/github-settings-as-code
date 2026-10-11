@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The executor's own seams: what a face hands in through RunDeps reaches the flows, and the arms end at the flows'
  * conclusions. The two faces running the same arms to the same result is pinned in test/cli/execution.test.ts.

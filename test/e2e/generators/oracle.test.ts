@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { describeRemoval, mergeLayers, type RemovalNotice } from "../../../src/engine/layers.js";
 import { foldLayers } from "../../../src/flows/layers.js";

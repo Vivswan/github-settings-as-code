@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * buildState overlay semantics and the write-to-read round trips. The round trips import the SECTIONS' real
  * flatteners (src/sections/branches, src/sections/environments), not local copies, so a transformer that drifts from its flattener fails here.

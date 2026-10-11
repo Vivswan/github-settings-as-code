@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { type Layer, type Layering, mergeLayers, standaloneView } from "../../src/engine/layers.js";
 import { describeProblem, type LayerProblem } from "../../src/problem.js";

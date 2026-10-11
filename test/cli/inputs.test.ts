@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The argv port is the action's env port under another spelling: for a table
  * of input sets covering every RunConfig arm, parseConfig over the CLI's

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * No scenario observes the list's bypass_actors omission or the write-grade `[]` fill off the wire, so both are pinned here against the handler.
  */

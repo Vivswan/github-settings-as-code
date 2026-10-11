@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The deploy_keys section's parse refusals, each pinned as the problem line a user reads: the forms of key
  * material GitHub's create would reject (a private key, a PEM block, a broken one-liner, a retired algorithm), and

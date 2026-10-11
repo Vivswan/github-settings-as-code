@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The mock's secrets crypto proof at the pipeline level. A same-value re-write keeps the digest and
  * created_at while updated_at MOVES, exactly like GitHub; the idempotence snapshot excludes only that field.

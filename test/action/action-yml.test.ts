@@ -1,3 +1,4 @@
+// tier: pr
 /** The generated regions of action.yml are covered by test/scripts/gen-action-docs.test.ts. */
 
 import { describe, expect, test } from "bun:test";

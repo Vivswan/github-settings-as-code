@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { parseRepoSlug, type RepoRef } from "../../src/discovery/targets.js";
 import type { RepoResult, SectionOutcome } from "../../src/engine/orchestrate.js";

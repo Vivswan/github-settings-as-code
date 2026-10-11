@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The action never PUTs the Pages config after a delete (an absent site takes the POST create path), so the update-after-delete contract is pinned
  * here, directly against the handler.

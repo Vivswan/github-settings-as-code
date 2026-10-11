@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "neverthrow";
 import { parse as parseYamlDoc, stringify as stringifyYaml } from "yaml";

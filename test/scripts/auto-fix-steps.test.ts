@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * auto-fix.yml's two steps against local fixture repositories: the fix-owned paths pinned to the generated-output
  * table (a security boundary the script keeps literal, so a newly registered output would otherwise slip past it),

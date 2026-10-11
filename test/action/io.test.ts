@@ -1,3 +1,4 @@
+// tier: pr
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

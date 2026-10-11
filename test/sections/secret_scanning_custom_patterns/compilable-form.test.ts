@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The translation of compilable-form.ts against PCRE's grammar, row by row: a PCRE-only form's raw
  * spelling fails a flagless RegExp (or compiles as another pattern, noted per row) and its

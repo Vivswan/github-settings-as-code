@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The bypass PUT's set semantics: the section never sends a repeated login (its schema rejects one), so no
  * scenario reaches this; it is pinned here so the mock keeps GitHub's store-once answer for a client that does.

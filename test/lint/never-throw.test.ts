@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The plugin's verdict on every throw class, and its biome.json wiring, pinned by linting a fixture tree with the
  * repository's own configuration; a pattern that silently stops matching would otherwise let a throw pass unseen.

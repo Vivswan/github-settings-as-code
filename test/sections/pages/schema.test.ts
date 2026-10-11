@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The pages section's parse refusals, each pinned as the problem line a user reads: a field the GET reports that the
  * update PUT has no parameter for, so a declared value would ride the PUT ignored and diff on every run. One row per

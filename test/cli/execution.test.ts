@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The action's env port and the CLI's argv port run the same RunConfig arms to the same exit code, outputs, log
  * lines, and annotations: one executor behind both faces. The table is the runner's input sets; the argv is the

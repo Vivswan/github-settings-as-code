@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { GitHubApi } from "../../../src/github/api.js";
 import { maskRegistry } from "../../../src/io.js";

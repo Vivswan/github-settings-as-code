@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The environments section's parse refusals, each pinned as the problem line a user reads: the PUT body rules
  * GitHub 422s on (the wait timer, the reviewer cap, the two branch-policy flags) and the combinations GitHub accepts

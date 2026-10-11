@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * A count written "N thing(s)" ships when its author forgot src/text.ts, so every string literal under src/ and .github/scripts/ is read
  * for the parenthetical. SCOPE: accidental omissions only; a spelling chosen to evade the pattern is out of scope.

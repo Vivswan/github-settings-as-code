@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The CLI's Io on a terminal: where each channel lands, the `level: message`
  * shape, the json routing, the summary file, and the debug gate. The

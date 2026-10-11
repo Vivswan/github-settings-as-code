@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { executePlan } from "../../../src/engine/execute.js";

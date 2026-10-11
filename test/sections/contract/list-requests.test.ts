@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import type { EndpointDecl } from "../../../src/sections/contract/endpoints.js";
 import type { SectionContext, SectionMeta } from "../../../src/sections/contract/module.js";

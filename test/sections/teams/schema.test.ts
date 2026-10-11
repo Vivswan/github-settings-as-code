@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The team name is the team_slug in every API path, and GitHub answers a wrong one with the same 404 as a team
  * without access: check would report "no access; apply will grant" for a team that has it under its slug, and the

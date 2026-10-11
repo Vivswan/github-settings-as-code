@@ -1,3 +1,4 @@
+// tier: pr
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { cpSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";

@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The library page's `ts` fences are one program: compiled in page order
  * against src/index.ts under the repository's tsconfig, so an example that

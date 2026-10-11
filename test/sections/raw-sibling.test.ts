@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * A rule of a registered shape meets the raw value of a sibling that failed its type (rule() in
  * src/sections/shared/schema-helpers.ts), and a throw there is a bug that ends the parse. The walk takes the

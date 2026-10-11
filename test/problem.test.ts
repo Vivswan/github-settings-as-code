@@ -1,3 +1,4 @@
+// tier: pr
 /**
  * The problem union's renderer: one specimen per member that carries fields, each pinned to the exact line the action prints for it, so a
  * dropped or swapped interpolation and a wrong plural show up as the line a user would read. A member whose only field is its code renders
